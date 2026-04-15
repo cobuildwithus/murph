@@ -44,7 +44,10 @@ const tempDirectories = new Set<string>()
 afterEach(async () => {
   vi.restoreAllMocks()
   vi.resetModules()
+  vi.doUnmock('node:module')
   vi.doUnmock('node:child_process')
+  vi.doUnmock('node:fs')
+  vi.doUnmock('node:fs/promises')
 
   for (const directory of tempDirectories) {
     await rm(directory, { force: true, recursive: true })
@@ -62,13 +65,61 @@ async function createTempVault(prefix: string): Promise<string> {
 function createFileDependencies() {
   return {
     chmod: async (filePath: string, mode: number) => await chmod(filePath, mode),
-    mkdir: async (directoryPath: string) =>
-      await mkdir(directoryPath, { recursive: true }),
+    mkdir: async (directoryPath: string) => {
+      await mkdir(directoryPath, { recursive: true })
+    },
     readFile: async (filePath: string) => await readFile(filePath, 'utf8'),
     removeFile: async (filePath: string) => await rm(filePath, { force: true }),
     writeFile: async (filePath: string, text: string) =>
       await writeFile(filePath, text, 'utf8'),
   }
+}
+
+async function importDeviceDaemonProcessWithMocks(setupMocks: () => void) {
+  vi.resetModules()
+  setupMocks()
+  return await import('../src/device-daemon/process.ts')
+}
+
+async function importDeviceDaemonPathsWithMockedRequire(
+  setupMock: (
+    callCount: number,
+    actualModule: typeof import('node:module'),
+  ) => NodeJS.Require,
+): Promise<typeof import('../src/device-daemon/paths.ts')> {
+  vi.resetModules()
+  vi.doMock('node:module', async () => {
+    const actual = await vi.importActual<typeof import('node:module')>('node:module')
+    let callCount = 0
+
+    return {
+      ...actual,
+      createRequire() {
+        callCount += 1
+        return setupMock(callCount, actual)
+      },
+    }
+  })
+
+  return await import('../src/device-daemon/paths.ts')
+}
+
+function createMockRequire(
+  actualModule: typeof import('node:module'),
+  resolveImpl: () => string,
+): NodeJS.Require {
+  const mockRequire = actualModule.createRequire(import.meta.url)
+  mockRequire.resolve = createMockResolve(resolveImpl)
+  return mockRequire
+}
+
+function createMockResolve(resolveImpl: () => string): NodeJS.RequireResolve {
+  function resolve(_request: string): string {
+    return resolveImpl()
+  }
+
+  resolve.paths = (_request: string) => []
+  return resolve
 }
 
 const deviceDaemonChildFixtureArgs = [
@@ -450,6 +501,93 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
   )
 })
 
+test('resolveInstalledDeviceSyncPackageEntry falls back only when the bare package request is missing', async () => {
+  const fallbackModule = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      return createMockRequire(actual, () => {
+        const error = new Error('missing local package') as NodeJS.ErrnoException
+        error.code = 'MODULE_NOT_FOUND'
+        error.message = "Cannot find module '@murphai/device-syncd'"
+        throw error
+      })
+    }
+
+    return createMockRequire(actual, () => '/repo-root/node_modules/@murphai/device-syncd/dist/index.js')
+  })
+
+  assert.equal(
+    fallbackModule.resolveInstalledDeviceSyncPackageEntry(),
+    '/repo-root/node_modules/@murphai/device-syncd/dist/index.js',
+  )
+
+  const rethrowModule = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      return createMockRequire(actual, () => {
+        const error = new Error('permission denied') as NodeJS.ErrnoException
+        error.code = 'EACCES'
+        throw error
+      })
+    }
+
+    return createMockRequire(actual, () => '/repo-root/node_modules/@murphai/device-syncd/dist/index.js')
+  })
+
+  assert.throws(
+    () => rethrowModule.resolveInstalledDeviceSyncPackageEntry(),
+    (error: unknown) => {
+      assert.equal(typeof error, 'object')
+      assert.notEqual(error, null)
+      assert.equal((error as NodeJS.ErrnoException).code, 'EACCES')
+      return true
+    },
+  )
+
+  const brokenEntrypointModule = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      return createMockRequire(actual, () => {
+        const error = new Error(
+          "Cannot find module '/tmp/node_modules/@murphai/device-syncd/dist/index.js'. Please verify that the package.json has a valid \"main\" entry",
+        ) as NodeJS.ErrnoException
+        error.code = 'MODULE_NOT_FOUND'
+        throw error
+      })
+    }
+
+    return createMockRequire(actual, () => '/repo-root/node_modules/@murphai/device-syncd/dist/index.js')
+  })
+
+  assert.throws(
+    () => brokenEntrypointModule.resolveInstalledDeviceSyncPackageEntry(),
+    (error: unknown) => {
+      assert.equal(typeof error, 'object')
+      assert.notEqual(error, null)
+      assert.equal((error as NodeJS.ErrnoException).code, 'MODULE_NOT_FOUND')
+      assert.match(String((error as Error).message), /valid "main" entry/u)
+      return true
+    },
+  )
+})
+
+test('resolveInstalledDeviceSyncPackageEntry does not require a valid file-url base at module load', async () => {
+  const module = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      throw new TypeError(
+        "The argument 'path' The argument must be a file URL object, a file URL string, or an absolute path string.. Received 'undefined'",
+      )
+    }
+
+    return createMockRequire(
+      actual,
+      () => '/workspace/node_modules/@murphai/device-syncd/dist/index.js',
+    )
+  })
+
+  assert.equal(
+    module.resolveInstalledDeviceSyncPackageEntry(),
+    '/workspace/node_modules/@murphai/device-syncd/dist/index.js',
+  )
+})
+
 test('managed device-daemon lifecycle helpers cover explicit, status, start, and stop branches', async () => {
   const explicit = await ensureManagedDeviceSyncControlPlane({
     baseUrl: 'http://127.0.0.1:4318',
@@ -576,7 +714,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
   const managedPid = 9001
   const livePids = new Set<number>()
   let healthAttempt = 0
-  let spawnedEnv: NodeJS.ProcessEnv | null = null
+  let spawnedVaultRoot: string | undefined
 
   const started = await startManagedDeviceSyncDaemon({
     vault: managedVault,
@@ -594,7 +732,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
         livePids.delete(pid)
       },
       spawnProcess: async (input) => {
-        spawnedEnv = input.env
+        spawnedVaultRoot = input.env.DEVICE_SYNC_VAULT_ROOT
         livePids.add(managedPid)
         return { pid: managedPid }
       },
@@ -606,10 +744,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
   assert.equal(started.managed, true)
   assert.equal(started.pid, managedPid)
   assert.match(resolveManagedControlToken(resolveDeviceDaemonPaths(managedVault)) ?? '', /^[a-f0-9]{48}$/u)
-  assert.equal(
-    spawnedEnv?.DEVICE_SYNC_VAULT_ROOT,
-    managedVault,
-  )
+  assert.equal(spawnedVaultRoot, managedVault)
 
   const ensuredManaged = await ensureManagedDeviceSyncControlPlane({
     vault: managedVault,
@@ -898,15 +1033,15 @@ test('default spawn helper covers pid-less and synchronous child-process failure
     unref(): void {}
   }
 
-  vi.doMock('node:child_process', () => ({
-    spawn() {
-      const child = new MockChild()
-      process.nextTick(() => child.emit('spawn'))
-      return child
-    },
-  }))
-
-  const pidlessModule = await import('../src/device-daemon/process.ts')
+  const pidlessModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:child_process', () => ({
+      spawn() {
+        const child = new MockChild()
+        process.nextTick(() => child.emit('spawn'))
+        return child
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       pidlessModule.defaultSpawnDeviceDaemonProcess({
@@ -921,17 +1056,16 @@ test('default spawn helper covers pid-less and synchronous child-process failure
       error.message === 'Device sync daemon spawn did not yield a PID.',
   )
 
-  vi.resetModules()
-  vi.doMock('node:child_process', () => ({
-    spawn() {
-      const child = new MockChild()
-      child.pid = 9500
-      process.nextTick(() => child.emit('error', new Error('spawn child failed')))
-      return child
-    },
-  }))
-
-  const errorModule = await import('../src/device-daemon/process.ts')
+  const errorModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:child_process', () => ({
+      spawn() {
+        const child = new MockChild()
+        child.pid = 9500
+        process.nextTick(() => child.emit('error', new Error('spawn child failed')))
+        return child
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       errorModule.defaultSpawnDeviceDaemonProcess({
@@ -946,14 +1080,13 @@ test('default spawn helper covers pid-less and synchronous child-process failure
       error.message === 'spawn child failed',
   )
 
-  vi.resetModules()
-  vi.doMock('node:child_process', () => ({
-    spawn() {
-      throw new Error('spawn exploded')
-    },
-  }))
-
-  const throwingModule = await import('../src/device-daemon/process.ts')
+  const throwingModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:child_process', () => ({
+      spawn() {
+        throw new Error('spawn exploded')
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       throwingModule.defaultSpawnDeviceDaemonProcess({
@@ -973,25 +1106,25 @@ test('default spawn helper closes the first log descriptor when opening the seco
   const closedDescriptors: number[] = []
   let openCalls = 0
 
-  vi.doMock('node:fs/promises', () => ({
-    mkdir: async () => undefined,
-  }))
-  vi.doMock('node:fs', () => ({
-    chmodSync: () => undefined,
-    closeSync: (fd: number) => {
-      closedDescriptors.push(fd)
-    },
-    openSync: () => {
-      openCalls += 1
-      if (openCalls === 1) {
-        return 11
-      }
+  const processModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:fs/promises', () => ({
+      mkdir: async () => undefined,
+    }))
+    vi.doMock('node:fs', () => ({
+      chmodSync: () => undefined,
+      closeSync: (fd: number) => {
+        closedDescriptors.push(fd)
+      },
+      openSync: () => {
+        openCalls += 1
+        if (openCalls === 1) {
+          return 11
+        }
 
-      throw new Error('second log open failed')
-    },
-  }))
-
-  const processModule = await import('../src/device-daemon/process.ts')
+        throw new Error('second log open failed')
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       processModule.defaultSpawnDeviceDaemonProcess({

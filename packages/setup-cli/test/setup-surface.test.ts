@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdtemp } from 'node:fs/promises'
@@ -133,10 +133,11 @@ test('detectSetupProgramName prefers the shim program name when set to murph', (
   assert.equal(detectSetupProgramName('/tmp/anything-else', undefined), 'vault-cli')
 })
 
-test('isSetupInvocation treats onboard and murph root help as setup entrypoints', () => {
+test('isSetupInvocation treats murph onboarding and active-vault selection as setup entrypoints', () => {
   assert.equal(isSetupInvocation(['onboard']), true)
   assert.equal(isSetupInvocation([], 'murph'), true)
   assert.equal(isSetupInvocation(['help'], 'murph'), true)
+  assert.equal(isSetupInvocation(['use', './vault'], 'murph'), true)
   assert.equal(isSetupInvocation(['status'], 'murph'), false)
   assert.equal(isSetupInvocation([], 'vault-cli'), false)
 })
@@ -278,7 +279,6 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
       'murph automation list',
       'murph assistant chat',
       'murph inbox doctor',
-      'murph inbox source add imessage --id imessage:self --account self --includeOwn',
       'murph inbox source add telegram --id telegram:bot --account bot',
       'murph inbox source add linq --id linq:default --account default --linqWebhookPort 8789 --linqWebhookPath /linq-webhook',
       'murph device connect oura --open',
@@ -359,6 +359,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
               deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
               initialChannels: [...input.initialChannels],
               initialScheduledUpdates: [...input.initialScheduledUpdates],
+              initialWearables: [...input.initialWearables],
               linqLocalWebhookUrl: input.linqLocalWebhookUrl,
               platform: input.platform,
               publicBaseUrl: input.publicBaseUrl,
@@ -388,6 +389,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
         'environment-health-watch',
         'weekly-health-snapshot',
       ],
+      initialWearables: [],
       linqLocalWebhookUrl: 'http://127.0.0.1:8789/linq-webhook',
       platform: 'linux',
       publicBaseUrl: 'https://public.example',
@@ -420,6 +422,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
           model: null,
           oss: null,
           preset: 'skip',
+          presetId: null,
           profile: null,
           provider: null,
           providerName: null,
@@ -441,6 +444,72 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
     } else {
       process.env.OURA_CLIENT_ID = previousOuraClientId
     }
+  }
+})
+
+test('interactive onboard restores canonical wearable preferences into the wizard', async () => {
+  const wizardCalls: Array<{
+    initialWearables: string[]
+  }> = []
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-surface-wearables-'))
+
+  try {
+    await mkdir(path.join(vaultRoot, 'bank'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'bank', 'preferences.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: '2026-04-10T00:00:00.000Z',
+        workoutUnitPreferences: {},
+        wearablePreferences: {
+          desiredProviders: ['whoop', 'garmin'],
+        },
+      }),
+      'utf8',
+    )
+
+    await runSetupCli(
+      ['onboard', '--vault', vaultRoot],
+      {
+        platform: () => 'linux',
+        services: {
+          async setupHost(input) {
+            return makeSetupResult(input.vault, {
+              platform: 'linux',
+            })
+          },
+          async setupMacos(input) {
+            return makeSetupResult(input.vault)
+          },
+        } satisfies NonNullable<SetupCliOptions['services']>,
+        terminal: {
+          stdinIsTTY: true,
+          stderrIsTTY: true,
+        },
+        wizard: {
+          async run(input) {
+            wizardCalls.push({
+              initialWearables: [...input.initialWearables],
+            })
+
+            return {
+              assistantPreset: 'skip',
+              channels: [],
+              scheduledUpdates: [],
+              wearables: [],
+            }
+          },
+        },
+      },
+    )
+
+    assert.deepEqual(wizardCalls, [
+      {
+        initialWearables: ['garmin', 'whoop'],
+      },
+    ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
@@ -755,20 +824,28 @@ test('setup CLI helper exports keep interactive and post-launch decisions stable
   assert.equal(formatSetupWearableLabel('whoop'), 'WHOOP')
 })
 
-test('setup CLI initial wizard channels reuse saved automation channels and rethrow invalid state', async () => {
+test('setup CLI initial wizard channels reuse saved state, fall back to inbox config, and rethrow invalid state', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-automation-state-'))
   const automationPath = resolveAssistantStatePaths(vaultRoot).automationStatePath
+  const inboxConfigPath = path.join(
+    vaultRoot,
+    '.runtime',
+    'operations',
+    'inbox',
+    'config.json',
+  )
 
   await mkdir(path.dirname(automationPath), { recursive: true })
   await writeFile(
     automationPath,
     JSON.stringify({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['telegram', 'linq', 'unknown-channel'],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: false,
+      autoReply: [
+        { channel: 'telegram', cursor: null },
+        { channel: 'linq', cursor: null },
+        { channel: 'unknown-channel', cursor: null },
+      ],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
     'utf8',
@@ -779,7 +856,95 @@ test('setup CLI initial wizard channels reuse saved automation channels and reth
     ['telegram', 'linq'],
   )
 
+  await writeFile(
+    automationPath,
+    JSON.stringify({
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [],
+      updatedAt: '2026-04-08T00:00:00.000Z',
+    }),
+    'utf8',
+  )
+
+  assert.deepEqual(
+    await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+    [],
+  )
+
+  await writeFile(
+    automationPath,
+    JSON.stringify({
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [
+        { channel: 'telegram', cursor: null },
+        { channel: 'linq', cursor: null },
+        { channel: 'unknown-channel', cursor: null },
+      ],
+      updatedAt: '2026-04-08T00:00:00.000Z',
+    }),
+    'utf8',
+  )
+
+  await mkdir(path.dirname(inboxConfigPath), { recursive: true })
+  await writeFile(
+    inboxConfigPath,
+    JSON.stringify({
+      schema: 'murph.inbox-runtime-config.v1',
+      schemaVersion: 1,
+      value: {
+        connectors: [
+          {
+            id: 'email:primary',
+            source: 'email',
+            enabled: true,
+            accountId: 'primary',
+            options: {},
+          },
+        ],
+      },
+    }),
+    'utf8',
+  )
+
+  await rm(automationPath, { force: true })
+
+  assert.deepEqual(
+    await resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+    ['email'],
+  )
+
   await writeFile(automationPath, '{not json', 'utf8')
+
+  await assert.rejects(
+    resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+    /Expected property name|JSON/u,
+  )
+
+  await rm(automationPath, { force: true })
+  await writeFile(
+    inboxConfigPath,
+    JSON.stringify({
+      connectors: [
+        {
+          id: 'email:primary',
+          source: 'email',
+          enabled: true,
+          accountId: 'primary',
+          options: {},
+        },
+      ],
+    }),
+    'utf8',
+  )
+
+  await assert.rejects(
+    resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+    /schema|schemaVersion|value/u,
+  )
+
+  await writeFile(inboxConfigPath, '{not json', 'utf8')
 
   await assert.rejects(
     resolveInitialSetupWizardChannels(vaultRoot, 'linux'),

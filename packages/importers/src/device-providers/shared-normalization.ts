@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { normalizeTimestamp, stripUndefined } from "../shared.ts";
 
 import type {
@@ -68,7 +69,6 @@ export interface PlainObject {
 export interface DeletionObservationOptions {
   provider: string;
   providerDisplayName: string;
-  deletion: unknown;
   resourceType: string;
   resourceId: string;
   occurredAt: string;
@@ -84,6 +84,84 @@ export interface DeletionObservationOptions {
 export type NormalizedDeviceBatchOptions = Omit<NormalizedDeviceBatch, "source">;
 
 const INTEGER_SAMPLE_STREAMS = new Set(["heart_rate", "steps"]);
+const DELETION_ARTIFACT_IDENTITY_PREFIX = "device-deletion-observation";
+
+export interface SyntheticDeletionResourceIdOptions {
+  provider: string;
+  resourceType: string;
+  occurredAt: string;
+  sourceEventType?: string;
+  deletion: PlainObject;
+}
+
+function stableSortValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableSortValue(entry));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .reduce<Record<string, unknown>>((result, [key, entry]) => {
+        result[key] = stableSortValue(entry);
+        return result;
+      }, {});
+  }
+
+  return value;
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(stableSortValue(value));
+}
+
+const SYNTHETIC_DELETION_NORMALIZED_KEYS = new Set([
+  "dataType",
+  "data_type",
+  "eventTime",
+  "event_type",
+  "event_time",
+  "objectId",
+  "object_id",
+  "occurredAt",
+  "occurred_at",
+  "resourceId",
+  "resourceType",
+  "resource_id",
+  "resource_type",
+  "sourceEventType",
+  "source_event_type",
+]);
+
+export function buildSyntheticDeletionResourceId(
+  options: SyntheticDeletionResourceIdOptions,
+): string {
+  const identity = createHash("sha256")
+    .update(stableStringify({
+      provider: options.provider,
+      resourceType: options.resourceType,
+      occurredAt: options.occurredAt,
+      sourceEventType: options.sourceEventType ?? null,
+      deletion: stripNormalizedDeletionIdentityFields(options.deletion),
+    }))
+    .digest("hex");
+
+  return `deleted-${identity.slice(0, 16)}`;
+}
+
+function stripNormalizedDeletionIdentityFields(
+  deletion: unknown,
+): unknown {
+  if (!deletion || typeof deletion !== "object" || Array.isArray(deletion)) {
+    return deletion;
+  }
+
+  return Object.fromEntries(
+    Object.entries(deletion as Record<string, unknown>).filter(
+      ([key]) => !SYNTHETIC_DELETION_NORMALIZED_KEYS.has(key),
+    ),
+  );
+}
 
 export function asPlainObject(value: unknown): PlainObject | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -225,6 +303,51 @@ export function pushRawArtifact(
   rawArtifacts.push(artifact);
 }
 
+function buildDeletionArtifactIdentity(options: DeletionObservationOptions): string {
+  return createHash("sha256")
+    .update(JSON.stringify([
+      DELETION_ARTIFACT_IDENTITY_PREFIX,
+      options.provider,
+      options.resourceType,
+      options.resourceId,
+      options.occurredAt,
+      options.sourceEventType ?? null,
+    ]))
+    .digest("hex")
+}
+
+interface DeletionArtifactDescriptor {
+  content: Record<string, unknown>;
+  fileName: string;
+  role: string;
+}
+
+function buildDeletionArtifactDescriptor(
+  options: DeletionObservationOptions,
+): DeletionArtifactDescriptor {
+  const identity = buildDeletionArtifactIdentity(options);
+  const artifactParts = [
+    options.resourceType,
+    options.resourceId,
+    options.occurredAt,
+    options.sourceEventType,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  return {
+    content: stripUndefined({
+      provider: options.provider,
+      resourceType: options.resourceType,
+      resourceId: options.resourceId,
+      occurredAt: options.occurredAt,
+      sourceEventType: options.sourceEventType,
+    }),
+    fileName: `deletion-${artifactParts
+      .map((value) => value.replace(/[^A-Za-z0-9._-]+/gu, "-"))
+      .join("-")}-${identity}.json`,
+    role: ["deletion", ...artifactParts, identity].join(":"),
+  };
+}
+
 export function pushObservationEvent(
   events: DeviceEventPayload[],
   options: ObservationEventOptions,
@@ -357,14 +480,18 @@ export function pushDeletionObservation(
   rawArtifacts: DeviceRawArtifactPayload[],
   options: DeletionObservationOptions,
 ): void {
-  const deletionRole = `deletion:${options.resourceType}:${options.resourceId}`;
+  const deletionArtifact = buildDeletionArtifactDescriptor(options);
+
+  if (rawArtifacts.some((artifact) => artifact.role === deletionArtifact.role)) {
+    return;
+  }
 
   pushRawArtifact(
     rawArtifacts,
     createRawArtifact(
-      deletionRole,
-      `deletion-${options.resourceType}-${options.resourceId}.json`,
-      options.deletion,
+      deletionArtifact.role,
+      deletionArtifact.fileName,
+      deletionArtifact.content,
     ),
   );
 
@@ -378,7 +505,7 @@ export function pushDeletionObservation(
       note: options.sourceEventType
         ? trimToLength(`Webhook event: ${options.sourceEventType}`, 4000)
         : undefined,
-      rawArtifactRoles: [deletionRole],
+      rawArtifactRoles: [deletionArtifact.role],
       externalRef: options.makeExternalRef(
         options.resourceType,
         options.resourceId,

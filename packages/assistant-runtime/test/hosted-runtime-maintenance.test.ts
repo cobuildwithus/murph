@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createAssistantFoodAutoLogHooks: vi.fn(),
-  createConfiguredDeviceSyncProviders: vi.fn(),
+  createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
   createConfiguredParserRegistry: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
   createDeviceSyncService: vi.fn(),
@@ -12,17 +12,17 @@ const mocks = vi.hoisted(() => ({
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
-  getAssistantCronStatus: vi.fn(),
   openInboxRuntime: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   rebuildRuntimeFromVault: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
-  runAssistantAutomation: vi.fn(),
+  runAssistantAutomationPass: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
 vi.mock("@murphai/device-syncd/config", () => ({
-  createConfiguredDeviceSyncProviders: mocks.createConfiguredDeviceSyncProviders,
+  createConfiguredDeviceSyncProvidersFromConfigs:
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs,
 }));
 
 vi.mock("@murphai/device-syncd/registry", () => ({
@@ -45,15 +45,14 @@ vi.mock("@murphai/parsers", () => ({
 
 vi.mock("@murphai/assistant-engine", () => ({
   createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
-  getAssistantCronStatus: mocks.getAssistantCronStatus,
-  runAssistantAutomation: mocks.runAssistantAutomation,
+  runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
 
 vi.mock("@murphai/inbox-services", () => ({
   createIntegratedInboxServices: mocks.createIntegratedInboxServices,
 }));
 
-vi.mock("@murphai/vault-usecases", () => ({
+vi.mock("@murphai/vault-usecases/vault-services", () => ({
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
 }));
 
@@ -84,6 +83,17 @@ import {
   runHostedMaintenanceLoop,
 } from "../src/hosted-runtime/maintenance.ts";
 
+const DEVICE_SYNC_CONFIG = {
+  providerConfigs: {
+    oura: {
+      clientId: "oura-client",
+      clientSecret: "oura-secret",
+    },
+  },
+  publicBaseUrl: "https://device-sync.example.test",
+  secret: "secret_123",
+} as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createConfiguredParserRegistry.mockResolvedValue({
@@ -101,10 +111,11 @@ beforeEach(() => {
     assistantConfigured: true,
     assistantProvider: "openai-compatible",
   });
-  mocks.getAssistantCronStatus.mockResolvedValue({
-    nextRunAt: "2026-04-08T01:00:00.000Z",
+  mocks.runAssistantAutomationPass.mockResolvedValue({
+    nextWakeAt: "2026-04-08T01:00:00.000Z",
+    progressed: false,
   });
-  mocks.createConfiguredDeviceSyncProviders.mockReturnValue(["oura"]);
+  mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["oura"]);
   mocks.createDeviceSyncRegistry.mockReturnValue({
     list: () => ["oura"],
   });
@@ -175,7 +186,8 @@ describe("drainHostedParserQueue", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    assert.deepEqual(result, {
+    expect(result).toEqual({
+      nextWakeAt: null,
       processedJobs: 2,
     });
     expect(mocks.rebuildRuntimeFromVault).toHaveBeenCalledWith({
@@ -195,7 +207,7 @@ describe("drainHostedParserQueue", () => {
 
 describe("runHostedAssistantAutomation", () => {
   it("treats missing inbox runtime state as a non-fatal bootstrap gap", async () => {
-    mocks.runAssistantAutomation.mockRejectedValue({
+    mocks.runAssistantAutomationPass.mockRejectedValueOnce({
       code: "INBOX_NOT_INITIALIZED",
     });
 
@@ -211,7 +223,28 @@ describe("runHostedAssistantAutomation", () => {
           },
         },
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({
+      nextWakeAt: null,
+      progressed: false,
+    });
+  });
+
+  it("rethrows unexpected automation failures", async () => {
+    mocks.runAssistantAutomationPass.mockRejectedValueOnce(new Error("automation failed"));
+
+    await expect(
+      runHostedAssistantAutomation(
+        "/tmp/vault-root",
+        "req_123",
+        {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+      ),
+    ).rejects.toThrow("automation failed");
   });
 });
 
@@ -232,7 +265,32 @@ describe("runHostedDeviceSyncPass", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       "/tmp/vault-root",
-      {},
+      null,
+      null,
+      45_000,
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: null,
+      processedJobs: 0,
+      skipped: true,
+    });
+    expect(mocks.createDeviceSyncService).not.toHaveBeenCalled();
+  });
+
+  it("skips device sync when the hosted runtime resolved config disables device sync", async () => {
+    const result = await runHostedDeviceSyncPass(
+      {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_missing_env",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      "/tmp/vault-root",
+      null,
       null,
       45_000,
     );
@@ -271,10 +329,7 @@ describe("runHostedDeviceSyncPass", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       "/tmp/vault-root",
-      {
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-        DEVICE_SYNC_SECRET: "secret_123",
-      },
+      DEVICE_SYNC_CONFIG,
       {
         applyUpdates: vi.fn(),
         createConnectLink: vi.fn(),
@@ -293,6 +348,55 @@ describe("runHostedDeviceSyncPass", () => {
       expect.objectContaining({
         level: "warn",
         message: "Hosted device-sync control-plane sync failed; continuing hosted job.",
+      }),
+    );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs non-fatal control-plane reconcile failures for non-device-sync wake events and keeps processing jobs", async () => {
+    const close = vi.fn();
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 3);
+
+    mocks.createDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      runSchedulerOnce,
+    });
+    mocks.reconcileHostedDeviceSyncControlPlaneState.mockRejectedValue(
+      new Error("reconcile failed"),
+    );
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_reconcile_continue",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      {
+        applyUpdates: vi.fn(),
+        createConnectLink: vi.fn(),
+        fetchSnapshot: vi.fn(),
+      },
+      45_000,
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T02:00:00.000Z",
+      processedJobs: 3,
+      skipped: false,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message: "Hosted device-sync control-plane reconcile failed; continuing hosted job.",
       }),
     );
     expect(close).toHaveBeenCalledTimes(1);
@@ -317,7 +421,7 @@ describe("runHostedDeviceSyncPass", () => {
           event: {
             hint: null,
             kind: "device-sync.wake",
-            reason: "manual",
+            reason: "webhook_hint",
             runtimeSnapshot: null,
             userId: "member_123",
           },
@@ -325,10 +429,7 @@ describe("runHostedDeviceSyncPass", () => {
           occurredAt: "2026-04-08T00:00:00.000Z",
         },
         "/tmp/vault-root",
-        {
-          DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-          DEVICE_SYNC_SECRET: "secret_123",
-        },
+        DEVICE_SYNC_CONFIG,
         {
           applyUpdates: vi.fn(),
           createConnectLink: vi.fn(),
@@ -340,10 +441,127 @@ describe("runHostedDeviceSyncPass", () => {
 
     expect(close).toHaveBeenCalledTimes(1);
   });
+
+  it("fails closed on control-plane reconcile errors during device-sync wake handling", async () => {
+    const close = vi.fn();
+
+    mocks.createDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker: vi.fn(async () => 1),
+      getNextWakeAt: () => null,
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+    mocks.reconcileHostedDeviceSyncControlPlaneState.mockRejectedValue(
+      new Error("reconcile failed"),
+    );
+
+    await expect(
+      runHostedDeviceSyncPass(
+        {
+          event: {
+            hint: null,
+            kind: "device-sync.wake",
+            reason: "webhook_hint",
+            runtimeSnapshot: null,
+            userId: "member_123",
+          },
+          eventId: "evt_wake_reconcile",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        {
+          applyUpdates: vi.fn(),
+          createConnectLink: vi.fn(),
+          fetchSnapshot: vi.fn(),
+        },
+        45_000,
+      ),
+    ).rejects.toThrow("reconcile failed");
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("runHostedMaintenanceLoop", () => {
   it("runs assistant automation when the hosted assistant is ready and picks the earliest wake time", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      const close = vi.fn();
+
+      mocks.openInboxRuntime.mockResolvedValue({
+        close,
+        getCapture: () => null,
+        listAttachmentParseJobs: () => [],
+      });
+      mocks.createInboxParserService.mockReturnValue({
+        drain: vi.fn(async () => []),
+      });
+      mocks.createDeviceSyncService.mockReturnValue({
+        close: vi.fn(),
+        drainWorker: vi.fn(async () => 1),
+        getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
+        runSchedulerOnce: vi.fn(async () => undefined),
+      });
+
+      const result = await runHostedMaintenanceLoop({
+        deviceSyncPort: {
+          applyUpdates: vi.fn(),
+          createConnectLink: vi.fn(),
+          fetchSnapshot: vi.fn(),
+        },
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_maintenance",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        requestId: "req_123",
+        resolvedConfig: {
+          deviceSync: DEVICE_SYNC_CONFIG,
+        },
+        timeoutMs: 45_000,
+        vaultRoot: "/tmp/vault-root",
+      });
+
+      assert.deepEqual(result, {
+        deviceSyncProcessed: 1,
+        deviceSyncSkipped: false,
+        nextWakeAt: "2026-04-08T00:30:00.000Z",
+        parserProcessed: 0,
+      });
+      expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
+        deliveryDispatchMode: "queue-only",
+        drainOutbox: false,
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: expect.any(Function),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        inboxServices: expect.any(Symbol),
+        requestId: "req_123",
+        vault: "/tmp/vault-root",
+        vaultServices: expect.any(Symbol),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("continues draining hosted maintenance passes when assistant automation progressed without a future wake", async () => {
     const close = vi.fn();
 
     mocks.openInboxRuntime.mockResolvedValue({
@@ -354,26 +572,27 @@ describe("runHostedMaintenanceLoop", () => {
     mocks.createInboxParserService.mockReturnValue({
       drain: vi.fn(async () => []),
     });
-    mocks.createDeviceSyncService.mockReturnValue({
-      close: vi.fn(),
-      drainWorker: vi.fn(async () => 1),
-      getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
-      runSchedulerOnce: vi.fn(async () => undefined),
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => [],
     });
+    mocks.runAssistantAutomationPass
+      .mockResolvedValueOnce({
+        nextWakeAt: null,
+        progressed: true,
+      })
+      .mockResolvedValueOnce({
+        nextWakeAt: null,
+        progressed: false,
+      });
 
     const result = await runHostedMaintenanceLoop({
-      deviceSyncPort: {
-        applyUpdates: vi.fn(),
-        createConnectLink: vi.fn(),
-        fetchSnapshot: vi.fn(),
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
           reason: "manual",
           userId: "member_123",
         },
-        eventId: "evt_maintenance",
+        eventId: "evt_assistant_progress",
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       executionContext: {
@@ -384,38 +603,71 @@ describe("runHostedMaintenanceLoop", () => {
         },
       },
       requestId: "req_123",
-      runtimeEnv: {
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-        DEVICE_SYNC_SECRET: "secret_123",
+      resolvedConfig: {
+        deviceSync: null,
       },
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
     });
 
     assert.deepEqual(result, {
-      deviceSyncProcessed: 1,
-      deviceSyncSkipped: false,
-      nextWakeAt: "2026-04-08T00:30:00.000Z",
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
       parserProcessed: 0,
     });
-    expect(mocks.runAssistantAutomation).toHaveBeenCalledWith({
-      deliveryDispatchMode: "queue-only",
-      drainOutbox: false,
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips assistant automation without warning when the caller explicitly disables it", async () => {
+    const close = vi.fn();
+
+    mocks.openInboxRuntime.mockResolvedValue({
+      close,
+      getCapture: () => null,
+      listAttachmentParseJobs: () => [],
+    });
+    mocks.createInboxParserService.mockReturnValue({
+      drain: vi.fn(async () => []),
+    });
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => [],
+    });
+
+    const result = await runHostedMaintenanceLoop({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_skip_requested",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: expect.any(Function),
+          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
       },
-      inboxServices: expect.any(Symbol),
-      once: true,
       requestId: "req_123",
-      startDaemon: false,
-      vault: "/tmp/vault-root",
-      vaultServices: expect.any(Symbol),
+      resolvedConfig: {
+        deviceSync: null,
+      },
+      skipAssistantAutomation: true,
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
     });
-    expect(mocks.getAssistantCronStatus).toHaveBeenCalledWith("/tmp/vault-root");
+
+    assert.deepEqual(result, {
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+    });
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
   it("logs skipped automation when the hosted assistant is not configured", async () => {
@@ -456,7 +708,9 @@ describe("runHostedMaintenanceLoop", () => {
         },
       },
       requestId: "req_123",
-      runtimeEnv: {},
+      resolvedConfig: {
+        deviceSync: null,
+      },
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
     });
@@ -467,12 +721,66 @@ describe("runHostedMaintenanceLoop", () => {
       nextWakeAt: null,
       parserProcessed: 0,
     });
-    expect(mocks.runAssistantAutomation).not.toHaveBeenCalled();
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
         message:
           "Hosted assistant automation skipped because no explicit hosted assistant profile is configured.",
+      }),
+    );
+  });
+
+  it("reports invalid hosted assistant configs when automation is skipped", async () => {
+    const close = vi.fn();
+
+    mocks.readHostedAssistantRuntimeState.mockResolvedValue({
+      assistantConfigStatus: "invalid",
+      assistantConfigured: false,
+      assistantProvider: null,
+    });
+    mocks.openInboxRuntime.mockResolvedValue({
+      close,
+      getCapture: () => null,
+      listAttachmentParseJobs: () => [],
+    });
+    mocks.createInboxParserService.mockReturnValue({
+      drain: vi.fn(async () => []),
+    });
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => [],
+    });
+
+    await runHostedMaintenanceLoop({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_invalid_automation",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_123",
+      resolvedConfig: {
+        deviceSync: null,
+      },
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted assistant automation skipped because the saved hosted assistant config is invalid.",
       }),
     );
   });

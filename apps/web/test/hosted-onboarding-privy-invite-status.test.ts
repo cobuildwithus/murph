@@ -1,6 +1,8 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
+
 const mocks = vi.hoisted(() => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
 }));
@@ -61,6 +63,7 @@ describe("getHostedInviteStatus", () => {
         member: {
           include: {
             identity: true,
+            routing: true,
           },
         },
       },
@@ -97,12 +100,13 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("surfaces an activating stage while hosted execution is still queued after payment", async () => {
+  it("keeps the invite active while exposing queued background activation after transport handoff", async () => {
     const prisma = {
       executionOutbox: {
         findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "queued",
           eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-          status: "queued",
+          status: "dispatched",
         }),
       },
       hostedInvite: {
@@ -123,11 +127,194 @@ describe("getHostedInviteStatus", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
+      activationPending: true,
+      murphPhoneNumber: null,
       session: {
         authenticated: true,
         matchesInvite: true,
       },
-      stage: "activating",
+      stage: "active",
+    });
+  });
+
+  it("returns the assigned Murph phone number only for matched active sessions", async () => {
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+            routing: createRouting({
+              linqChatId: "chat_123",
+              linqRecipientPhone: "+1 (555) 010-0001",
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      murphPhoneNumber: "+15550100001",
+      stage: "active",
+    });
+  });
+
+  it("redacts the assigned Murph phone number for unmatched sessions", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+            routing: createRouting({
+              linqChatId: "chat_123",
+              linqRecipientPhone: "+15550100001",
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: {
+          ...createAuthenticatedMember(),
+          id: "member_other",
+        },
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      murphPhoneNumber: null,
+      session: {
+        authenticated: true,
+        matchesInvite: false,
+      },
+    });
+  });
+
+  it("resolves back to active when live Cloudflare status shows the activation event poisoned", async () => {
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      getEventStatus: vi.fn().mockResolvedValue({
+        eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+        lastError: "poisoned by runner",
+        state: "poisoned",
+        userId: "member_123",
+      }),
+    });
+
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "queued",
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+          status: "dispatched",
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      activationPending: false,
+      stage: "active",
+    });
+  });
+
+  it("resolves back to active when the specific activation event is already completed", async () => {
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      getEventStatus: vi.fn().mockResolvedValue({
+        eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+        lastError: null,
+        state: "completed",
+        userId: "member_123",
+      }),
+    });
+
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "queued",
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+          status: "dispatched",
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      activationPending: false,
+      stage: "active",
+    });
+  });
+
+  it("treats persisted poisoned activation outcomes as terminal even without a live Cloudflare status read", async () => {
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "poisoned",
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+          status: "dispatched",
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      activationPending: false,
+      stage: "active",
     });
   });
 });
@@ -166,6 +353,29 @@ function createIdentity(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createRouting(input?: {
+  linqChatId?: string | null;
+  linqRecipientPhone?: string | null;
+  pendingLinqChatId?: string | null;
+  pendingLinqRecipientPhone?: string | null;
+  telegramUserLookupKey?: string | null;
+}) {
+  return {
+    createdAt: NOW,
+    memberId: "member_123",
+    telegramUserLookupKey: input?.telegramUserLookupKey ?? null,
+    updatedAt: NOW,
+    ...buildHostedMemberRoutingPrivateColumns({
+      linqChatId: input?.linqChatId ?? null,
+      linqRecipientPhone: input?.linqRecipientPhone ?? null,
+      memberId: "member_123",
+      pendingLinqChatId: input?.pendingLinqChatId ?? null,
+      pendingLinqRecipientPhone: input?.pendingLinqRecipientPhone ?? null,
+      telegramUserId: null,
+    }),
+  };
+}
+
 function createMember(overrides: Record<string, unknown> = {}) {
   return {
     billingStatus: HostedBillingStatus.not_started,
@@ -177,6 +387,7 @@ function createMember(overrides: Record<string, unknown> = {}) {
     phoneLookupKey: "hbidx:phone:v1:legacy",
     phoneNumberVerifiedAt: null,
     privyUserId: null,
+    routing: null,
     suspendedAt: null,
     stripeCustomerId: null,
     stripeSubscriptionId: null,

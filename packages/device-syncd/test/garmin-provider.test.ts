@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
-import { createJsonResponse, readUrl } from "./helpers.ts";
+import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.ts";
 
@@ -19,6 +19,7 @@ function createAccount(scopes: string[], overrides: Partial<DeviceSyncAccount> =
     id: "acct-garmin-1",
     provider: "garmin",
     externalAccountId: "garmin-user-1",
+    disconnectGeneration: 0,
     displayName: "Garmin garmin-user-1",
     status: "active",
     scopes,
@@ -226,8 +227,9 @@ test("Garmin provider schedules reconcile polling and imports requested collecti
       throw new Error(`Unexpected request: ${url}`);
     },
   });
+  const createScheduledJobs = requireValue(provider.createScheduledJobs);
 
-  const scheduled = provider.createScheduledJobs(
+  const scheduled = createScheduledJobs(
     createStoredAccount(["HEALTH_EXPORT"], {
       nextReconcileAt: "2026-03-16T11:00:00.000Z",
     }),
@@ -558,11 +560,12 @@ test("Garmin provider revokes access tolerantly and surfaces revoke failures", a
       throw new Error(`Unexpected request: ${url}`);
     },
   });
+  const revokeAccess = requireValue(provider.revokeAccess);
 
-  await provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"]));
+  await revokeAccess(createAccount(["HEALTH_EXPORT"]));
 
   await assert.rejects(
-    () => provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"])),
+    () => revokeAccess(createAccount(["HEALTH_EXPORT"])),
     (error: unknown) =>
       typeof error === "object"
       && error !== null
@@ -634,12 +637,13 @@ test("Garmin provider normalizes structured permissions and tolerates already-mi
     },
     "auth-code-4",
   );
+  const revokeAccess = requireValue(provider.revokeAccess);
 
   assert.equal(connection.externalAccountId, "garmin-user-structured");
   assert.deepEqual(connection.scopes, ["HEALTH_EXPORT", "ACTIVITY_EXPORT"]);
 
-  await provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"]));
-  await provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"]));
+  await revokeAccess(createAccount(["HEALTH_EXPORT"]));
+  await revokeAccess(createAccount(["HEALTH_EXPORT"]));
 });
 
 test("Garmin provider rejects unsupported job kinds", async () => {

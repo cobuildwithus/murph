@@ -2,10 +2,22 @@ import assert from 'node:assert/strict'
 
 import { afterEach, test, vi } from 'vitest'
 
+const readlineMock = vi.hoisted(() => ({
+  createInterface: vi.fn(),
+}))
+
+vi.mock('node:readline', () => ({
+  createInterface: readlineMock.createInterface,
+}))
+
+import {
+  createSetupRuntimeEnvResolver,
+} from '../src/setup-runtime-env.ts'
+import { VaultCliError } from '../src/vault-cli-errors.ts'
+
 afterEach(() => {
   vi.restoreAllMocks()
-  vi.resetModules()
-  vi.doUnmock('node:readline')
+  readlineMock.createInterface.mockReset()
 })
 
 test('setup runtime resolver prompts for missing keys in deterministic order and skips blank answers', async () => {
@@ -19,26 +31,20 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
     ' openai-key ',
   ]
 
-  vi.doMock('node:readline', () => ({
-    createInterface() {
-      return {
-        close() {},
-        once() {},
-        question(question: string, callback: (answer: string) => void) {
-          prompts.push(question)
-          callback(answers.shift() ?? '')
-        },
-        removeListener() {},
-      }
-    },
-  }))
-
   vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array) => {
     stderrWrites.push(String(chunk))
     return true
   }) as typeof process.stderr.write)
 
-  const { createSetupRuntimeEnvResolver } = await import('../src/setup-runtime-env.ts')
+  readlineMock.createInterface.mockImplementation(() => ({
+    close() {},
+    once() {},
+    question(question: string, callback: (answer: string) => void) {
+      prompts.push(question)
+      callback(answers.shift() ?? '')
+    },
+    removeListener() {},
+  }))
   const resolver = createSetupRuntimeEnvResolver()
 
   const overrides = await resolver.promptForMissing({
@@ -70,25 +76,18 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
 test('setup runtime resolver turns SIGINT prompt cancellation into a setup_cancelled error', async () => {
   let cancelPrompt: (() => void) | null = null
 
-  vi.doMock('node:readline', () => ({
-    createInterface() {
-      return {
-        close() {},
-        once(event: string, handler: () => void) {
-          if (event === 'SIGINT') {
-            cancelPrompt = handler
-          }
-        },
-        question() {
-          cancelPrompt?.()
-        },
-        removeListener() {},
+  readlineMock.createInterface.mockImplementation(() => ({
+    close() {},
+    once(event: string, handler: () => void) {
+      if (event === 'SIGINT') {
+        cancelPrompt = handler
       }
     },
+    question() {
+      cancelPrompt?.()
+    },
+    removeListener() {},
   }))
-
-  const { createSetupRuntimeEnvResolver } = await import('../src/setup-runtime-env.ts')
-  const { VaultCliError } = await import('../src/vault-cli-errors.ts')
   const resolver = createSetupRuntimeEnvResolver()
 
   await assert.rejects(

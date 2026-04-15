@@ -61,6 +61,28 @@ export interface DeviceSyncAccountRecord {
   updatedAt: string;
 }
 
+export interface DeviceSyncJobRecord {
+  id: string;
+  provider: string;
+  accountId: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  priority: number;
+  availableAt: string;
+  attempts: number;
+  maxAttempts: number;
+  dedupeKey: string | null;
+  status: "queued" | "running" | "succeeded" | "dead";
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 export interface DeviceSyncErrorPayload {
   code?: string;
   message?: string;

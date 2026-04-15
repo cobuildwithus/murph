@@ -31,7 +31,7 @@ vi.mock('@murphai/assistant-engine/assistant-runtime', async () => {
 import { inspectAndRepairAssistantStateSecrecy } from '../src/assistant/doctor-security.ts'
 
 const BASE_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-security-demo',
   target: {
     adapter: 'openai-compatible',
@@ -42,12 +42,15 @@ const BASE_SESSION: AssistantSession = {
       'X-Workspace': 'murph',
     },
     model: null,
+    presetId: null,
     providerName: 'ollama',
     reasoningEffort: null,
+    webSearch: null,
   },
   resumeState: null,
   provider: 'openai-compatible',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-doctor-security',
     model: null,
     reasoningEffort: null,
     sandbox: null,
@@ -56,7 +59,9 @@ const BASE_SESSION: AssistantSession = {
     oss: false,
     baseUrl: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    executionDriver: 'openai-compatible',
     providerName: 'ollama',
+    resumeKind: null,
     headers: {
       Authorization: 'Bearer secret-token-12345678',
       'X-Workspace': 'murph',
@@ -138,7 +143,6 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   await writeFile(
     path.join(paths.sessionSecretsDirectory, `${BASE_SESSION.sessionId}.json`),
     JSON.stringify({
-      providerBindingHeaders: null,
       providerHeaders: {
         Authorization: 'Bearer sidecar-token-12345678',
       },
@@ -151,7 +155,6 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   await writeFile(
     path.join(paths.sessionSecretsDirectory, 'session-orphan.json'),
     JSON.stringify({
-      providerBindingHeaders: null,
       providerHeaders: {
         Authorization: 'Bearer orphan-token-12345678',
       },
@@ -164,10 +167,22 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   await writeFile(
     path.join(paths.sessionSecretsDirectory, 'session-mismatch.json'),
     JSON.stringify({
-      providerBindingHeaders: null,
       providerHeaders: null,
       schema: 'murph.assistant-session-secrets.v1',
       sessionId: 'different-session',
+      updatedAt: BASE_SESSION.updatedAt,
+    }),
+    'utf8',
+  )
+  await writeFile(
+    path.join(paths.sessionSecretsDirectory, 'session-legacy.json'),
+    JSON.stringify({
+      providerBindingHeaders: null,
+      providerHeaders: {
+        Authorization: 'Bearer legacy-token-12345678',
+      },
+      schema: 'murph.assistant-session-secrets.v1',
+      sessionId: 'session-legacy',
       updatedAt: BASE_SESSION.updatedAt,
     }),
     'utf8',
@@ -183,7 +198,7 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   })
 
   assert.deepEqual(result, {
-    malformedSessionSecretSidecars: 2,
+    malformedSessionSecretSidecars: 3,
     orphanSessionSecretSidecars: 1,
     permissionAudit: {
       incorrectEntries: 2,
@@ -196,7 +211,7 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
     sessionFilesScanned: 1,
     sessionInlineSecretFiles: 1,
     sessionInlineSecretHeaders: 1,
-    sessionSecretSidecarFiles: 4,
+    sessionSecretSidecarFiles: 5,
   })
 
   assert.deepEqual(runtimeMocks.auditAssistantStatePermissions.mock.calls[0]?.[0], {

@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { test } from "vitest";
 
+import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.ts";
+
 const execFileAsync = promisify(execFile);
 
 test("source query root import stays free of sqlite warnings", async () => {
@@ -17,16 +19,7 @@ test("source query root import stays free of sqlite warnings", async () => {
     "--input-type=module",
     "-e",
     `import(${JSON.stringify(modulePath)})`,
-  ], {
-    cwd: packageDir,
-    env: {
-      HOME: process.env.HOME,
-      PATH: process.env.PATH,
-      TEMP: process.env.TEMP,
-      TMP: process.env.TMP,
-      TMPDIR: process.env.TMPDIR,
-    },
-  });
+  ], createWorkspaceSourceImportExecOptions(packageDir));
 
   assert.equal(result.stdout.trim(), "");
   assert.doesNotMatch(result.stderr, /SQLite is an experimental feature/u);

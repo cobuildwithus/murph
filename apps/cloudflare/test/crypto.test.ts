@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHostedAssistantDeliveryPreparedRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 import {
   createHostedArtifactStore,
   createHostedBundleStore,
@@ -10,13 +10,13 @@ import {
 } from "../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
-import { createHostedExecutionSideEffectJournalStore } from "../src/side-effect-journal.js";
+import { createHostedAssistantDeliveryJournalStore } from "../src/side-effect-journal.js";
 import {
   encryptHostedBundle,
   readEncryptedR2Payload,
 } from "../src/crypto.js";
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
-import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
+import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions.js";
 
 describe("readEncryptedR2Payload", () => {
   it("reads older envelopes without rewriting them on read", async () => {
@@ -194,6 +194,7 @@ describe("hosted storage object keys", () => {
       keyId,
     });
     await journalStore.writeCommittedResult("user_journal_123", "evt_journal_1", {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-04-03T00:00:00.000Z",
       eventId: "evt_journal_1",
@@ -203,7 +204,6 @@ describe("hosted storage object keys", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "user_journal_123",
     });
     const storedJournalKey = findStoredObjectKey(bucket, (key) =>
@@ -211,7 +211,7 @@ describe("hosted storage object keys", () => {
     );
     expectOpaqueStrings([storedJournalKey], ["user_journal_123", "evt_journal_1"]);
 
-    const sideEffectStore = createHostedExecutionSideEffectJournalStore({
+    const sideEffectStore = createHostedAssistantDeliveryJournalStore({
       bucket,
       key: rootKey,
       keyId,
@@ -220,7 +220,7 @@ describe("hosted storage object keys", () => {
       userId: "user_side_effect_123",
       record: buildHostedAssistantDeliveryPreparedRecord({
         dedupeKey: "fingerprint_1",
-        intentId: "effect_1",
+        effectId: "effect_1",
         recordedAt: "2026-04-03T00:00:00.000Z",
       }),
     });

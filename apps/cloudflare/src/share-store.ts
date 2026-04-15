@@ -1,20 +1,19 @@
-import { parseHostedExecutionSharePack } from "@murphai/hosted-execution";
+import { parseHostedExecutionSharePack } from "@murphai/hosted-execution/parsers";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";
 import { hostedSharePackObjectKey } from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
-const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v2";
+const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v1";
 
 type HostedExecutionSharePack = ReturnType<typeof parseHostedExecutionSharePack>;
 
 interface StoredHostedSharePack {
-  ownerUserId: string;
+  ownerUserId?: string | null;
   pack: HostedExecutionSharePack;
   schema: typeof HOSTED_SHARE_PACK_SCHEMA;
-  shareId: string;
-  updatedAt: string;
+  shareId?: string | null;
 }
 
 export interface HostedShareStore {
@@ -65,13 +64,13 @@ export function createHostedShareStore(input: {
         return null;
       }
 
-      if (stored.ownerUserId !== input.ownerUserId) {
+      if (stored.ownerUserId && stored.ownerUserId !== input.ownerUserId) {
         throw new Error(
           `Hosted share pack ${shareId} owner mismatch: expected ${input.ownerUserId}, received ${stored.ownerUserId}.`,
         );
       }
 
-      if (stored.shareId !== shareId) {
+      if (stored.shareId && stored.shareId !== shareId) {
         throw new Error(`Hosted share pack record mismatch: expected ${shareId}, received ${stored.shareId}.`);
       }
 
@@ -90,11 +89,8 @@ export function createHostedShareStore(input: {
         keyId: input.keyId,
         scope: "share-pack",
         value: {
-          ownerUserId: input.ownerUserId,
           pack: normalizedPack,
           schema: HOSTED_SHARE_PACK_SCHEMA,
-          shareId,
-          updatedAt: new Date().toISOString(),
         } satisfies StoredHostedSharePack,
       });
 
@@ -121,11 +117,10 @@ function parseStoredHostedSharePack(value: unknown): StoredHostedSharePack {
   }
 
   return {
-    ownerUserId: requireString(record.ownerUserId, "Hosted share pack ownerUserId"),
+    ownerUserId: readOptionalString(record.ownerUserId),
     pack: parseHostedExecutionSharePack(record.pack),
     schema: HOSTED_SHARE_PACK_SCHEMA,
-    shareId: requireString(record.shareId, "Hosted share pack shareId"),
-    updatedAt: requireString(record.updatedAt, "Hosted share pack updatedAt"),
+    shareId: readOptionalString(record.shareId),
   };
 }
 
@@ -143,4 +138,8 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }

@@ -1,14 +1,14 @@
 import {
   bodyMeasurementEntrySchema,
-  profileUnitPreferencesSchema,
   type BodyMeasurementEntry,
+  type EventSource,
   type JsonObject,
-  type ProfileUnitPreferences,
   type StoredMedia,
+  type WorkoutUnitPreferences,
 } from '@murphai/contracts'
 import {
-  appendProfileSnapshot,
-  readCurrentProfile,
+  readPreferencesDocument,
+  updateWorkoutUnitPreferences,
 } from '@murphai/core'
 import { loadJsonInputObject } from '../json-input.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -26,7 +26,7 @@ interface MeasurementPayloadInput {
   measurements?: BodyMeasurementEntry[]
   media?: StoredMedia[]
   rawRefs?: string[]
-  source?: 'manual' | 'import' | 'device' | 'derived'
+  source?: EventSource
   tags?: string[]
   relatedIds?: string[]
   externalRef?: JsonObject
@@ -43,7 +43,7 @@ export interface AddWorkoutMeasurementInput {
   title?: string
   occurredAt?: string
   inputFile?: string
-  source?: 'manual' | 'import' | 'device' | 'derived'
+  source?: EventSource
   mediaPaths?: string[]
 }
 
@@ -57,10 +57,6 @@ function valueAsString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-function valueAsNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
 function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: string }[]): string {
   return issues
     .map((issue) => {
@@ -71,25 +67,18 @@ function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: str
 }
 
 function normalizeUnitPreferences(
-  value: ProfileUnitPreferences | null | undefined,
-): { weight: 'lb' | 'kg' | null; distance: 'km' | 'mi' | null; bodyMeasurement: 'cm' | 'in' | null } {
+  value: WorkoutUnitPreferences | null | undefined,
+): { weight: 'lb' | 'kg' | null; bodyMeasurement: 'cm' | 'in' | null } {
   return {
     weight: value?.weight ?? null,
-    distance: value?.distance ?? null,
     bodyMeasurement: value?.bodyMeasurement ?? null,
   }
-}
-
-async function readWorkoutUnitPreferences(vault: string): Promise<ProfileUnitPreferences | null> {
-  const current = await readCurrentProfile({ vaultRoot: vault })
-  const parsed = profileUnitPreferencesSchema.safeParse(current.profile?.unitPreferences)
-  return parsed.success ? parsed.data : null
 }
 
 function resolveMeasurementUnit(input: {
   type: BodyMeasurementEntry['type']
   explicitUnit?: BodyMeasurementEntry['unit']
-  preferences?: ProfileUnitPreferences | null
+  preferences?: WorkoutUnitPreferences | null
 }): BodyMeasurementEntry['unit'] {
   if (input.explicitUnit) {
     return input.explicitUnit
@@ -216,7 +205,7 @@ function buildMeasurementEventDraft(input: {
 }
 
 export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementInput) {
-  const preferences = await readWorkoutUnitPreferences(input.vault)
+  const preferencesDocument = await readPreferencesDocument(input.vault)
   const structuredPayload = typeof input.inputFile === 'string'
     ? await loadStructuredMeasurementPayload(input.inputFile)
     : undefined
@@ -239,7 +228,7 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
       unit: resolveMeasurementUnit({
         type: input.type,
         explicitUnit: input.unit,
-        preferences,
+        preferences: preferencesDocument.workoutUnitPreferences,
       }),
       note: normalizeOptionalText(input.note) ?? undefined,
     })]
@@ -293,34 +282,27 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
 }
 
 export async function showWorkoutUnitPreferences(vault: string) {
-  const current = await readCurrentProfile({ vaultRoot: vault })
-  const unitPreferences = normalizeUnitPreferences(
-    profileUnitPreferencesSchema.safeParse(current.profile?.unitPreferences).success
-      ? current.profile?.unitPreferences as ProfileUnitPreferences | undefined
-      : null,
-  )
+  const preferences = await readPreferencesDocument(vault)
 
   return {
     vault,
-    snapshotId: current.snapshot?.id ?? null,
+    preferencesPath: preferences.sourcePath,
     updated: false,
-    recordedAt: current.snapshot?.recordedAt ?? null,
-    unitPreferences,
+    recordedAt: preferences.updatedAt,
+    unitPreferences: normalizeUnitPreferences(preferences.workoutUnitPreferences),
   }
 }
 
 export async function setWorkoutUnitPreferences(input: {
   vault: string
   weight?: 'lb' | 'kg'
-  distance?: 'km' | 'mi'
   bodyMeasurement?: 'cm' | 'in'
   recordedAt?: string
 }) {
   const requested = compactObject({
     weight: input.weight,
-    distance: input.distance,
     bodyMeasurement: input.bodyMeasurement,
-  }) as ProfileUnitPreferences
+  }) as WorkoutUnitPreferences
 
   if (Object.keys(requested).length === 0) {
     throw new VaultCliError(
@@ -329,44 +311,33 @@ export async function setWorkoutUnitPreferences(input: {
     )
   }
 
-  const current = await readCurrentProfile({ vaultRoot: input.vault })
-  const currentPreferences = profileUnitPreferencesSchema.safeParse(current.profile?.unitPreferences).success
-    ? (current.profile?.unitPreferences as ProfileUnitPreferences | undefined)
-    : undefined
-  const nextPreferences = compactObject({
-    ...currentPreferences,
+  const current = await readPreferencesDocument(input.vault)
+  const currentNormalized = normalizeUnitPreferences(current.workoutUnitPreferences)
+  const nextNormalized = normalizeUnitPreferences({
+    ...current.workoutUnitPreferences,
     ...requested,
-  }) as ProfileUnitPreferences
-
-  const currentNormalized = normalizeUnitPreferences(currentPreferences)
-  const nextNormalized = normalizeUnitPreferences(nextPreferences)
+  })
   if (JSON.stringify(currentNormalized) === JSON.stringify(nextNormalized)) {
     return {
       vault: input.vault,
-      snapshotId: current.snapshot?.id ?? null,
+      preferencesPath: current.sourcePath,
       updated: false,
-      recordedAt: current.snapshot?.recordedAt ?? null,
+      recordedAt: current.updatedAt,
       unitPreferences: nextNormalized,
     }
   }
 
-  const snapshot = await appendProfileSnapshot({
+  const updated = await updateWorkoutUnitPreferences({
     vaultRoot: input.vault,
-    recordedAt: input.recordedAt,
-    source: 'manual',
-    sourceEventIds: current.snapshot?.sourceEventIds,
-    sourceAssessmentIds: current.snapshot?.sourceAssessmentIds,
-    profile: {
-      ...(current.profile ?? {}),
-      unitPreferences: nextPreferences,
-    },
+    updatedAt: input.recordedAt,
+    preferences: requested,
   })
 
   return {
     vault: input.vault,
-    snapshotId: snapshot.snapshot.id,
+    preferencesPath: updated.document.sourcePath,
     updated: true,
-    recordedAt: snapshot.snapshot.recordedAt,
-    unitPreferences: normalizeUnitPreferences(snapshot.snapshot.profile.unitPreferences),
+    recordedAt: updated.document.updatedAt,
+    unitPreferences: normalizeUnitPreferences(updated.document.workoutUnitPreferences),
   }
 }

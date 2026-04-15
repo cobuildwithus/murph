@@ -1,7 +1,9 @@
 import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
+  supportsAssistantNativeResume,
   supportsAssistantReasoningEffort,
+  supportsAssistantZeroDataRetention,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -11,10 +13,13 @@ import {
 import { codexCliProviderDefinition } from './codex-cli.js'
 import { createCatalogModel } from './catalog.js'
 import { openAiCompatibleProviderDefinition } from './openai-compatible.js'
+import { supportsAnyAssistantRichUserMessageContent } from './types.js'
 import type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
   AssistantModelDiscoveryResult,
+  AssistantMurphCommandAccessMode,
+  AssistantMurphCommandSurface,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderExecutionCapabilities,
@@ -23,6 +28,7 @@ import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
+  AssistantUserMessageContentType,
 } from './types.js'
 
 const ASSISTANT_PROVIDER_DEFINITIONS: Readonly<Record<
@@ -75,7 +81,9 @@ export function resolveAssistantProviderTargetCapabilities(
   const normalized = normalizeAssistantProviderConfig(input)
   return stripAssistantProviderExecutionCapabilities({
     ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    supportsNativeResume: supportsAssistantNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
+    supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
   })
 }
 
@@ -85,7 +93,9 @@ export function resolveAssistantProviderTargetExecutionCapabilities(
   const normalized = normalizeAssistantProviderConfig(input)
   return {
     ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    supportsNativeResume: supportsAssistantNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
+    supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
   }
 }
 
@@ -217,6 +227,8 @@ export type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
   AssistantModelDiscoveryResult,
+  AssistantMurphCommandAccessMode,
+  AssistantMurphCommandSurface,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
@@ -264,9 +276,13 @@ function stripAssistantProviderExecutionCapabilities(
   capabilities: AssistantProviderExecutionCapabilities,
 ): AssistantProviderCapabilities {
   return {
+    supportedUserMessageContentTypes: [...capabilities.supportedUserMessageContentTypes],
     supportsModelDiscovery: capabilities.supportsModelDiscovery,
     supportsNativeResume: capabilities.supportsNativeResume,
     supportsReasoningEffort: capabilities.supportsReasoningEffort,
-    supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
+    supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent(
+      capabilities.supportedUserMessageContentTypes,
+    ),
+    supportsZeroDataRetention: capabilities.supportsZeroDataRetention,
   }
 }

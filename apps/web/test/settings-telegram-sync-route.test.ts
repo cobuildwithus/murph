@@ -1,16 +1,19 @@
-import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedTelegramBotLink: vi.fn(),
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
   prismaClient: {
     label: "test-prisma",
+    $transaction: vi.fn(),
   },
-  requireHostedPrivyActiveRequestAuthContext: vi.fn(),
-  upsertHostedMemberTelegramRoutingBinding: vi.fn(),
+  resolveHostedMemberEmailLinked: vi.fn(),
+  requirePrivyMemberAuth: vi.fn(),
+  upsertHostedMemberTelegramRoutingBindingTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -18,7 +21,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyActiveRequestAuthContext: mocks.requireHostedPrivyActiveRequestAuthContext,
+  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
@@ -26,7 +29,16 @@ vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  upsertHostedMemberTelegramRoutingBinding: mocks.upsertHostedMemberTelegramRoutingBinding,
+  upsertHostedMemberTelegramRoutingBindingTx: mocks.upsertHostedMemberTelegramRoutingBindingTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedTx: mocks.enqueueHostedMemberChannelsUpdatedTx,
+  resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
+}));
+
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -50,12 +62,22 @@ describe("settings telegram sync route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
-    mocks.upsertHostedMemberTelegramRoutingBinding.mockResolvedValue(undefined);
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+    mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(mocks.prismaClient)
+    );
+    mocks.upsertHostedMemberTelegramRoutingBindingTx.mockResolvedValue(undefined);
+    mocks.resolveHostedMemberEmailLinked.mockResolvedValue(false);
+    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
+      eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
+    });
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
       member: {
+        billingStatus: "active",
         id: "member_123",
         privyUserId: "did:privy:user_123",
+        suspendedAt: null,
       },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -72,7 +94,7 @@ describe("settings telegram sync route", () => {
     mocks.buildHostedTelegramBotLink.mockReturnValue("https://t.me/murph_bot?start=connect");
   });
 
-  it("verifies the server-side Privy session and links the Telegram identity onto the hosted member", async () => {
+  it("verifies the server-side Privy cookie-backed session and links the Telegram identity onto the hosted member", async () => {
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
         body: JSON.stringify({
@@ -88,13 +110,123 @@ describe("settings telegram sync route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyActiveRequestAuthContext).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).toHaveBeenCalledWith({
+    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
       telegramUserId: "456",
     });
+    expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
+      linkedAccounts: [],
+      memberId: "member_123",
+      onUnconfirmed: "retry",
+    });
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
+      emailLinked: false,
+      memberId: "member_123",
+      occurredAt: expect.any(String),
+      prisma: mocks.prismaClient,
+      sourceType: "settings.telegram.sync",
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: ["member.channels.updated:settings.telegram.sync:member_123:evt_123"],
+    });
     expect(mocks.buildHostedTelegramBotLink).toHaveBeenCalledWith("connect");
+    await expect(response.json()).resolves.toEqual({
+      botLink: "https://t.me/murph_bot?start=connect",
+      ok: true,
+      runTriggered: true,
+      telegramUserId: "456",
+      telegramUsername: "alice",
+    });
+  });
+
+  it("skips the hosted channel dispatch when hosted access is not active yet", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      linkedAccounts: [],
+      member: {
+        billingStatus: "incomplete",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [
+          {
+            first_name: "Alice",
+            id: 456,
+            type: "telegram",
+            username: "alice",
+          },
+        ],
+      },
+    });
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedMemberEmailLinked).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      botLink: "https://t.me/murph_bot?start=connect",
+      ok: true,
+      runTriggered: false,
+      telegramUserId: "456",
+      telegramUsername: "alice",
+    });
+  });
+
+  it("updates Telegram routing without dispatching channel sync before activation", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      linkedAccounts: [],
+      member: {
+        billingStatus: "not_started",
+        id: "member_123",
+        privyUserId: "did:privy:user_123",
+        suspendedAt: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [
+          {
+            first_name: "Alice",
+            id: 456,
+            type: "telegram",
+            username: "alice",
+          },
+        ],
+      },
+    });
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       botLink: "https://t.me/murph_bot?start=connect",
       ok: true,
@@ -105,7 +237,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("requires Privy-authenticated hosted member context before syncing Telegram", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+    mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
       message: "Verify your phone to continue.",
@@ -125,7 +257,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "AUTH_REQUIRED",
@@ -144,7 +276,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "TELEGRAM_USER_ID_REQUIRED",
@@ -154,11 +286,11 @@ describe("settings telegram sync route", () => {
     });
   });
 
-  it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
-      code: "PRIVY_SESSION_MISMATCH",
+  it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {
+    mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
       httpStatus: 403,
-      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+      message: "Finish signup from your latest Murph link before continuing.",
     }));
 
     const response = await settingsTelegramSyncRoute.POST(
@@ -175,18 +307,18 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_SESSION_MISMATCH",
-        message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        message: "Finish signup from your latest Murph link before continuing.",
         retryable: false,
       },
     });
   });
 
   it("returns a retryable conflict while the Telegram account has not reached the server-side Privy session yet", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -208,7 +340,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_TELEGRAM_NOT_READY",
@@ -219,7 +351,11 @@ describe("settings telegram sync route", () => {
   });
 
   it("surfaces unique-constraint conflicts when the Telegram identity is already linked elsewhere", async () => {
-    mocks.upsertHostedMemberTelegramRoutingBinding.mockRejectedValue(createUniqueConstraintError());
+    mocks.upsertHostedMemberTelegramRoutingBindingTx.mockRejectedValue(hostedOnboardingError({
+      code: "TELEGRAM_IDENTITY_CONFLICT",
+      httpStatus: 409,
+      message: "That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely.",
+    }));
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
@@ -235,7 +371,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "TELEGRAM_IDENTITY_CONFLICT",
@@ -246,7 +382,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("returns a retryable conflict when the server-side Privy identity token is still on an older Telegram account", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -275,7 +411,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_TELEGRAM_NOT_READY",
@@ -286,7 +422,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("rejects ambiguous Telegram state when top-level and linked Telegram accounts disagree", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -320,7 +456,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_TELEGRAM_AMBIGUOUS",
@@ -331,7 +467,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("blocks sync when hosted access is suspended", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+    mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
       httpStatus: 403,
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -351,7 +487,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_MEMBER_SUSPENDED",
@@ -362,7 +498,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("blocks sync when hosted billing access is no longer active", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+    mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
       message: "Finish hosted activation before continuing.",
@@ -382,7 +518,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_ACCESS_REQUIRED",
@@ -392,10 +528,3 @@ describe("settings telegram sync route", () => {
     });
   });
 });
-
-function createUniqueConstraintError() {
-  return new Prisma.PrismaClientKnownRequestError("duplicate", {
-    clientVersion: "test",
-    code: "P2002",
-  });
-}

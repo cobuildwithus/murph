@@ -35,6 +35,7 @@ import {
   getHostedWebhookSideEffect,
   markHostedWebhookReceiptSideEffectFailed,
   markHostedWebhookReceiptSideEffectSent,
+  markHostedWebhookReceiptSideEffectSentUnconfirmed,
   queueHostedWebhookReceiptSideEffects,
 } from "../src/lib/hosted-onboarding/webhook-receipt-transitions";
 import { isHostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -79,10 +80,7 @@ describe("hosted webhook receipt transitions", () => {
         name: "Error",
         retryable: true,
       },
-      result: {
-        chatId: "chat_123",
-        messageId: "out_123",
-      },
+      result: { delivered: true as const },
       sentAt: "2026-03-26T12:00:30.000Z",
       status: "sent_unconfirmed" as const,
     };
@@ -96,6 +94,33 @@ describe("hosted webhook receipt transitions", () => {
 
     assert.equal(nextEffect.status, "sent_unconfirmed");
     assert.equal(nextEffect.lastError?.message, "Delivery confirmation timed out.");
+  });
+
+  it("fails closed on legacy Linq side-effect terminal result payloads", () => {
+    const sideEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat_123",
+      inviteId: "invite_123",
+      replyToMessageId: "msg_123",
+      sourceEventId: "evt_legacy",
+      template: "invite_signup",
+    });
+
+    assert.throws(
+      () =>
+        markHostedWebhookReceiptSideEffectSentUnconfirmed(
+          buildReceiptState({ sideEffects: [sideEffect] }),
+          sideEffect.effectId,
+          {
+            error: new Error("sent but not confirmed"),
+            result: {
+              chatId: "chat_123",
+              messageId: "msg_123",
+            } as never,
+            sentAt: "2026-03-26T12:00:30.000Z",
+          },
+        ),
+      /invalid terminal result/u,
+    );
   });
 
   it("stores pending Linq dispatch payloads from creation time and drops them once queued", () => {
@@ -251,6 +276,9 @@ describe("hosted webhook receipt transitions", () => {
       sourceEventId: "evt_123",
       template: "invite_signup",
     });
+    if (!("inviteId" in sideEffect.payload)) {
+      throw new Error("Expected an invite-backed Linq side effect.");
+    }
     const persistedState = serializeHostedWebhookReceiptStateRecords(buildReceiptState());
 
     try {
@@ -258,7 +286,6 @@ describe("hosted webhook receipt transitions", () => {
         receipt: persistedState.receipt,
         sideEffects: [{
           attemptCount: sideEffect.attemptCount,
-          dispatchPayloadJson: null,
           effectId: sideEffect.effectId,
           kind: sideEffect.kind,
           lastAttemptAt: null,
@@ -266,19 +293,11 @@ describe("hosted webhook receipt transitions", () => {
           lastErrorMessage: null,
           lastErrorName: null,
           lastErrorRetryable: null,
-          linqChatId: null,
-          linqInviteId: sideEffect.payload.inviteId,
-          linqReplyToMessageId: sideEffect.payload.replyToMessageId,
-          linqResultChatId: null,
-          linqResultMessageId: null,
-          linqTemplate: null,
-          revnetAmountPaid: null,
-          revnetChargeId: null,
-          revnetCurrency: null,
-          revnetInvoiceId: null,
-          revnetMemberId: null,
-          revnetPaymentIntentId: null,
-          revnetResultHandled: null,
+          payloadJson: {
+            inviteId: sideEffect.payload.inviteId,
+            replyToMessageId: sideEffect.payload.replyToMessageId,
+          },
+          resultJson: null,
           sentAt: null,
           status: sideEffect.status,
         }],
@@ -403,14 +422,15 @@ function normalizeSerializedSideEffectForRead(
   effectId: string,
   effect: ReturnType<typeof serializeHostedWebhookReceiptSideEffect>,
 ): NonNullable<Parameters<typeof readHostedWebhookReceiptState>[0]["sideEffects"]>[number] {
-  const dispatchPayloadJson: Prisma.InputJsonValue | null =
-    effect.dispatchPayloadJson === Prisma.DbNull
+  const resultJson: Prisma.InputJsonValue | null =
+    effect.resultJson === Prisma.DbNull
       ? null
-      : effect.dispatchPayloadJson as Prisma.InputJsonValue;
+      : effect.resultJson as Prisma.InputJsonValue;
 
   return {
     effectId,
     ...effect,
-    dispatchPayloadJson,
+    payloadJson: effect.payloadJson as Prisma.InputJsonValue,
+    resultJson,
   };
 }

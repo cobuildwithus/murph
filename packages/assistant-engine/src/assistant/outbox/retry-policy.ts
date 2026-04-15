@@ -7,6 +7,30 @@ import { redactAssistantStateString } from '../redaction.js'
 
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000
+const NON_RETRYABLE_OUTBOX_ERROR_CODE_MARKERS = [
+  'UNSUPPORTED',
+  'INVALID',
+  'TARGET_REQUIRED',
+  'CHANNEL_REQUIRED',
+] as const
+const RETRYABLE_OUTBOX_ERROR_CODE_MARKERS = [
+  'REQUEST_FAILED',
+  'DELIVERY_FAILED',
+  'TIMEOUT',
+  'CONNECTION',
+  'UNAVAILABLE',
+  'RATE',
+  'LIMIT',
+] as const
+const RETRYABLE_OUTBOX_ERROR_MESSAGE_MARKERS = [
+  'timed out',
+  'temporary',
+  'retry',
+  'rate limit',
+  'too many requests',
+  'connection',
+  'network',
+] as const
 
 export function shouldDispatchAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
@@ -45,73 +69,28 @@ export function shouldBeginAssistantOutboxDispatch(
 }
 
 export function isAssistantOutboxRetryableError(error: unknown): boolean {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'context' in error &&
-    typeof (error as { context?: unknown }).context === 'object' &&
-    (error as { context?: Record<string, unknown> }).context !== null &&
-    typeof (error as { context: Record<string, unknown> }).context.retryable === 'boolean'
-  ) {
-    return (error as { context: { retryable: boolean } }).context.retryable
-  }
-
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'retryable' in error &&
-    typeof (error as { retryable?: unknown }).retryable === 'boolean'
-  ) {
-    return (error as { retryable: boolean }).retryable
+  const explicitRetryable = readAssistantOutboxRetryableFlag(error)
+  if (explicitRetryable !== null) {
+    return explicitRetryable
   }
 
   const deliveryError = normalizeAssistantDeliveryError(error)
   const code = deliveryError.code?.toUpperCase() ?? ''
   const message = deliveryError.message.toLowerCase()
-  if (
-    code.endsWith('_REQUIRED') ||
-    code.includes('UNSUPPORTED') ||
-    code.includes('INVALID') ||
-    code.includes('TARGET_REQUIRED') ||
-    code.includes('CHANNEL_REQUIRED')
-  ) {
+  if (assistantOutboxErrorCodeLooksPermanent(code)) {
     return false
   }
 
-  return (
-    code.includes('REQUEST_FAILED') ||
-    code.includes('DELIVERY_FAILED') ||
-    code.includes('TIMEOUT') ||
-    code.includes('CONNECTION') ||
-    code.includes('UNAVAILABLE') ||
-    code.includes('RATE') ||
-    code.includes('LIMIT') ||
-    message.includes('timed out') ||
-    message.includes('temporary') ||
-    message.includes('retry') ||
-    message.includes('rate limit') ||
-    message.includes('too many requests') ||
-    message.includes('connection') ||
-    message.includes('network')
-  )
+  return assistantOutboxErrorCodeLooksRetryable(code) ||
+    assistantOutboxErrorMessageLooksRetryable(message)
 }
 
 export function normalizeAssistantDeliveryError(
   error: unknown,
 ): AssistantDeliveryError {
   return assistantDeliveryErrorSchema.parse({
-    code:
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      typeof (error as { code?: unknown }).code === 'string'
-        ? (error as { code: string }).code
-        : null,
-    message: redactAssistantStateString(
-      error instanceof Error && error.message.trim().length > 0
-        ? error.message
-        : String(error),
-    ),
+    code: readStringProperty(error, 'code'),
+    message: redactAssistantStateString(resolveAssistantDeliveryErrorMessage(error)),
   })
 }
 
@@ -133,4 +112,60 @@ export function createAssistantDeliveryConfirmationPendingError(
       ? `Assistant outbound delivery may have succeeded already and must be reconciled before resend. ${detail}`
       : 'Assistant outbound delivery may have succeeded already and must be reconciled before resend.',
   })
+}
+
+function readAssistantOutboxRetryableFlag(error: unknown): boolean | null {
+  const contextRetryable = readBooleanProperty(readRecord(error)?.context, 'retryable')
+  if (contextRetryable !== null) {
+    return contextRetryable
+  }
+
+  return readBooleanProperty(error, 'retryable')
+}
+
+function resolveAssistantDeliveryErrorMessage(error: unknown): string {
+  return readNonEmptyStringProperty(error, 'message') ?? String(error)
+}
+
+function assistantOutboxErrorCodeLooksPermanent(code: string): boolean {
+  return code.endsWith('_REQUIRED') || includesAny(code, NON_RETRYABLE_OUTBOX_ERROR_CODE_MARKERS)
+}
+
+function assistantOutboxErrorCodeLooksRetryable(code: string): boolean {
+  return includesAny(code, RETRYABLE_OUTBOX_ERROR_CODE_MARKERS)
+}
+
+function assistantOutboxErrorMessageLooksRetryable(message: string): boolean {
+  return includesAny(message, RETRYABLE_OUTBOX_ERROR_MESSAGE_MARKERS)
+}
+
+function includesAny(value: string, fragments: readonly string[]): boolean {
+  return fragments.some((fragment) => value.includes(fragment))
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : null
+}
+
+function readBooleanProperty(value: unknown, property: string): boolean | null {
+  const record = readRecord(value)
+  return record && typeof record[property] === 'boolean'
+    ? record[property] as boolean
+    : null
+}
+
+function readStringProperty(value: unknown, property: string): string | null {
+  const record = readRecord(value)
+  return record && typeof record[property] === 'string'
+    ? record[property] as string
+    : null
+}
+
+function readNonEmptyStringProperty(value: unknown, property: string): string | null {
+  const propertyValue = readStringProperty(value, property)
+  return propertyValue && propertyValue.trim().length > 0
+    ? propertyValue
+    : null
 }

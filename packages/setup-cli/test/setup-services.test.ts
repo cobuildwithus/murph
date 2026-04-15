@@ -5,6 +5,7 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import { test } from 'vitest'
 
+import { type SetupStepResult } from '@murphai/operator-config/setup-cli-contracts'
 import {
   discoverCodexHomes,
   resolveSetupCodexHomeSelection,
@@ -24,6 +25,7 @@ import {
   redactHomePathsInValue,
   resolveShellProfilePath,
 } from '../src/setup-services/shell.ts'
+import { configureSetupWearables } from '../src/setup-services/wearables.ts'
 import {
   resolveExecutablePath,
   withPrependedPath,
@@ -35,6 +37,7 @@ import {
   listSetupReadyWearables,
   resolveSetupPostLaunchAction,
   resolveInitialSetupWizardChannels,
+  resolveInitialSetupWizardWearables,
   shouldAutoLaunchAssistantAfterSetup,
   shouldRunSetupWizard,
 } from '../src/setup-cli.ts'
@@ -46,7 +49,6 @@ test('service-step helpers preserve the stable toolchain ordering and step shape
     specs.map((spec) => [spec.id, spec.commandCandidates, spec.key]),
     [
       ['ffmpeg', ['ffmpeg'], 'ffmpegCommand'],
-      ['pdftotext', ['pdftotext'], 'pdftotextCommand'],
       ['whisper-cpp', ['whisper-cli', 'whisper-cpp'], 'whisperCommand'],
     ],
   )
@@ -121,7 +123,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -153,7 +154,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -185,7 +185,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -217,7 +216,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -241,13 +239,12 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
       platform: 'darwin',
       scheduledUpdates: [],
       steps: [],
-      toolchainRoot: '~/.murph/toolchain',
-      tools: {
-        ffmpegCommand: null,
-        pdftotextCommand: null,
-        whisperCommand: null,
-        whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
-      },
+        toolchainRoot: '~/.murph/toolchain',
+        tools: {
+          ffmpegCommand: null,
+          whisperCommand: null,
+          whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
+        },
       vault: '~/vault',
       wearables: [
         {
@@ -280,13 +277,12 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
       platform: 'darwin',
       scheduledUpdates: [],
       steps: [],
-      toolchainRoot: '~/.murph/toolchain',
-      tools: {
-        ffmpegCommand: null,
-        pdftotextCommand: null,
-        whisperCommand: null,
-        whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
-      },
+        toolchainRoot: '~/.murph/toolchain',
+        tools: {
+          ffmpegCommand: null,
+          whisperCommand: null,
+          whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
+        },
       vault: '~/vault',
       wearables: [
         {
@@ -310,27 +306,68 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
   )
 })
 
-test('setup wizard initial channels reuse saved automation channels and fall back when none are saved', async () => {
+test('setup wizard initial channels prefer persisted state and only default when no persisted source exists', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-vault-'))
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
+  const inboxConfigPath = path.join(
+    vaultRoot,
+    '.runtime',
+    'operations',
+    'inbox',
+    'config.json',
+  )
 
   try {
     assert.deepEqual(
       await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
-      ['imessage'],
+      [],
     )
 
     await mkdir(path.dirname(automationStatePath), { recursive: true })
     await writeFile(
       automationStatePath,
       JSON.stringify({
-        version: 2,
+        version: 1,
         inboxScanCursor: null,
-        autoReplyScanCursor: null,
-        autoReplyChannels: ['telegram', 'email', 'unknown'],
-        autoReplyBacklogChannels: [],
-        autoReplyPrimed: true,
+        autoReply: [
+          { channel: 'telegram', cursor: null },
+          { channel: 'email', cursor: null },
+          { channel: 'unknown', cursor: null },
+        ],
         updatedAt: '2026-04-08T00:00:00.000Z',
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+      ['telegram', 'email'],
+    )
+
+    await mkdir(path.dirname(inboxConfigPath), { recursive: true })
+    await writeFile(
+      inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [
+            {
+              id: 'telegram:bot',
+              source: 'telegram',
+              enabled: true,
+              accountId: 'bot',
+              options: {},
+            },
+            {
+              id: 'email:primary',
+              source: 'email',
+              enabled: false,
+              accountId: 'primary',
+              options: {},
+            },
+          ],
+        },
       }),
       'utf8',
     )
@@ -343,20 +380,170 @@ test('setup wizard initial channels reuse saved automation channels and fall bac
     await writeFile(
       automationStatePath,
       JSON.stringify({
-        version: 2,
+        version: 1,
         inboxScanCursor: null,
-        autoReplyScanCursor: null,
-        autoReplyChannels: [],
-        autoReplyBacklogChannels: [],
-        autoReplyPrimed: false,
+        autoReply: [],
         updatedAt: '2026-04-08T00:00:00.000Z',
       }),
       'utf8',
     )
 
     assert.deepEqual(
-      await resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
       [],
+    )
+
+    await rm(automationStatePath, { force: true })
+    await mkdir(path.dirname(inboxConfigPath), { recursive: true })
+    await writeFile(
+      inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [
+            {
+              id: 'telegram:bot',
+              source: 'telegram',
+              enabled: true,
+              accountId: 'bot',
+              options: {},
+            },
+            {
+              id: 'email:primary',
+              source: 'email',
+              enabled: false,
+              accountId: 'primary',
+              options: {},
+            },
+          ],
+        },
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+      ['telegram'],
+    )
+
+    await writeFile(
+      inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [],
+        },
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+      [],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('setup wizard initial wearables prefer canonical wearable preferences', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wearable-prefs-'))
+
+  try {
+    assert.deepEqual(
+      await resolveInitialSetupWizardWearables(vaultRoot),
+      [],
+    )
+
+    await mkdir(path.join(vaultRoot, 'bank'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'bank', 'preferences.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: '2026-04-10T00:00:00.000Z',
+        workoutUnitPreferences: {},
+        wearablePreferences: {
+          desiredProviders: ['whoop', 'garmin', 'whoop'],
+        },
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardWearables(vaultRoot),
+      ['garmin', 'whoop'],
+    )
+
+    await writeFile(
+      path.join(vaultRoot, 'bank', 'preferences.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: '2026-04-10T01:00:00.000Z',
+        workoutUnitPreferences: {},
+        wearablePreferences: {
+          desiredProviders: [],
+        },
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardWearables(vaultRoot),
+      [],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('setup wearable preferences helper covers dry-run and unchanged canonical selections', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wearables-helper-'))
+
+  try {
+    const dryRunSteps: SetupStepResult[] = []
+    assert.deepEqual(
+      await configureSetupWearables({
+        dryRun: true,
+        steps: dryRunSteps,
+        vault: vaultRoot,
+        wearables: ['oura', 'oura'],
+      }),
+      ['oura'],
+    )
+    assert.equal(dryRunSteps[0]?.status, 'skipped')
+    assert.match(dryRunSteps[0]?.detail ?? '', /Would save canonical wearable preferences/u)
+    assert.match(dryRunSteps[0]?.detail ?? '', /Oura/u)
+    assert.deepEqual(
+      await resolveInitialSetupWizardWearables(vaultRoot),
+      [],
+    )
+
+    const firstRunSteps: SetupStepResult[] = []
+    await configureSetupWearables({
+      dryRun: false,
+      steps: firstRunSteps,
+      vault: vaultRoot,
+      wearables: ['oura'],
+    })
+    assert.equal(firstRunSteps[0]?.status, 'completed')
+    assert.deepEqual(
+      await resolveInitialSetupWizardWearables(vaultRoot),
+      ['oura'],
+    )
+
+    const secondRunSteps: SetupStepResult[] = []
+    await configureSetupWearables({
+      dryRun: false,
+      steps: secondRunSteps,
+      vault: vaultRoot,
+      wearables: ['oura'],
+    })
+    assert.equal(secondRunSteps[0]?.status, 'reused')
+    assert.match(
+      secondRunSteps[0]?.detail ?? '',
+      /Canonical wearable preferences already matched/u,
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

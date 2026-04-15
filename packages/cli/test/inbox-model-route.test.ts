@@ -130,8 +130,8 @@ function createDocumentShowResult(vaultRoot: string): InboxShowResult {
     vault: vaultRoot,
     capture: {
       captureId: 'cap_doc',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-1',
       threadId: 'thread-1',
       threadTitle: 'Care team',
@@ -171,8 +171,8 @@ function createImageShowResult(vaultRoot: string, mime: string, fileName: string
     vault: vaultRoot,
     capture: {
       captureId: 'cap_photo',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-2',
       threadId: 'thread-2',
       threadTitle: 'Meal log',
@@ -199,7 +199,6 @@ function createImageShowResult(vaultRoot: string, mime: string, fileName: string
           extractedText: null,
           transcriptText: null,
           derivedPath: null,
-          parserProviderId: null,
           parseState: 'pending',
         },
       ],
@@ -212,8 +211,8 @@ function createPdfFallbackShowResult(vaultRoot: string): InboxShowResult {
     vault: vaultRoot,
     capture: {
       captureId: 'cap_pdf',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-pdf',
       threadId: 'thread-pdf',
       threadTitle: 'Care team',
@@ -240,7 +239,6 @@ function createPdfFallbackShowResult(vaultRoot: string): InboxShowResult {
           extractedText: null,
           transcriptText: null,
           derivedPath: null,
-          parserProviderId: 'pdftotext',
           parseState: 'failed',
         },
       ],
@@ -290,7 +288,7 @@ test('routeInboxCaptureWithModel previews and applies text-only document plans w
     })
 
     assert.equal(preview.apply, false)
-    assert.equal(preview.model.providerMode, 'gateway')
+    assert.equal(preview.model.providerMode, 'openai-compatible')
     assert.equal(preview.preparedInputMode, 'text-only')
     assert.equal(preview.inputMode, 'text-only')
     assert.equal(preview.fallbackError, null)

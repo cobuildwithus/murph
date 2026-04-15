@@ -1,4 +1,7 @@
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionDispatchRequest,
+  HostedExecutionRunContext,
+} from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
@@ -13,6 +16,37 @@ export interface RecoveredCommittedPendingDispatch {
   committed: HostedExecutionCommittedResult;
   committedEventId: string;
   record: RunnerStateRecord;
+}
+
+interface CommitLeaseOwner {
+  policy?: "matching-run" | "same-event";
+  run: HostedExecutionRunContext | null;
+}
+
+// Recovered durable commits may outlive the original run context, but they
+// still own the event-specific lease that must be cleared before the queue can
+// resume work.
+function resolveCommitLeaseOwner(
+  eventId: string,
+  leaseOwner: CommitLeaseOwner | null,
+): {
+  eventId: string;
+  policy?: "matching-run" | "same-event";
+  run: HostedExecutionRunContext | null;
+} {
+  if (!leaseOwner || (leaseOwner.run === null && leaseOwner.policy === undefined)) {
+    return {
+      eventId,
+      policy: "same-event",
+      run: null,
+    };
+  }
+
+  return {
+    eventId,
+    policy: leaseOwner.policy,
+    run: leaseOwner.run,
+  };
 }
 
 export class RunnerCommitRecovery {
@@ -50,11 +84,17 @@ export class RunnerCommitRecovery {
           cleanupDispatch: pending.dispatch,
           committed,
           committedEventId: pending.eventId,
-          record: await this.syncCommittedBundlesWithoutConsuming(record.userId, committed),
+          record: await this.syncCommittedBundlesWithoutConsuming(record.userId, committed, {
+            policy: "same-event",
+            run: null,
+          }),
         };
       }
 
-      await this.syncCommittedBundlesWithoutConsuming(record.userId, committed);
+      await this.syncCommittedBundlesWithoutConsuming(record.userId, committed, {
+        policy: "same-event",
+        run: null,
+      });
     }
 
     return null;
@@ -75,22 +115,30 @@ export class RunnerCommitRecovery {
   async applyCommittedDispatch(
     userId: string,
     committed: HostedExecutionCommittedResult,
+    leaseOwner: CommitLeaseOwner | null = null,
   ): Promise<RunnerStateRecord> {
     return this.applyCommittedQueueTransition(
       userId,
       committed,
-      () => this.queueStore.applyCommittedDispatch(committed),
+      () => this.queueStore.applyCommittedDispatch(
+        committed,
+        resolveCommitLeaseOwner(committed.eventId, leaseOwner),
+      ),
     );
   }
 
   async syncCommittedBundlesWithoutConsuming(
     userId: string,
     committed: HostedExecutionCommittedResult,
+    leaseOwner: CommitLeaseOwner | null = null,
   ): Promise<RunnerStateRecord> {
     return this.applyCommittedQueueTransition(
       userId,
       committed,
-      () => this.queueStore.syncCommittedBundles(committed),
+      () => this.queueStore.syncCommittedBundles(
+        committed,
+        resolveCommitLeaseOwner(committed.eventId, leaseOwner),
+      ),
     );
   }
 

@@ -8,7 +8,6 @@ import {
 import type { RawArtifact } from "../raw.ts";
 import { VAULT_LAYOUT } from "../constants.ts";
 import type { UnknownRecord } from "../types.ts";
-import type { ProfileSnapshotProfile, ProfileSnapshotSource } from "../profile/types.ts";
 
 export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.assessmentResponse;
 export const ASSESSMENT_LEDGER_DIRECTORY = VAULT_LAYOUT.assessmentLedgerDirectory;
@@ -43,13 +42,6 @@ export interface AssessmentProposalSource {
   assessmentPointer?: string;
   importedFrom?: string;
   sourcePath?: string;
-}
-
-export interface ProfileSnapshotProposal {
-  source: ProfileSnapshotSource;
-  sourceAssessmentIds?: string[];
-  sourceEventIds?: string[];
-  profile: ProfileSnapshotProfile;
 }
 
 export interface GoalProposal {
@@ -122,7 +114,6 @@ export interface AssessmentResponseProposal {
   assessmentId?: string;
   sourcePath?: string;
   auditPath?: string;
-  profileSnapshots: ProfileSnapshotProposal[];
   goals: GoalProposal[];
   conditions: ConditionProposal[];
   allergies: AllergyProposal[];

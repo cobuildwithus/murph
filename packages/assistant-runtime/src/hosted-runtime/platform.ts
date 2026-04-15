@@ -5,8 +5,9 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionSideEffectRecord,
-} from "@murphai/hosted-execution";
+  HostedAssistantDeliveryRecord,
+  HostedAssistantDeliverySideEffect,
+} from "@murphai/hosted-execution/side-effects";
 
 import type {
   HostedEmailSendRequest,
@@ -20,25 +21,26 @@ export interface HostedRuntimeArtifactStore {
   }): Promise<void>;
 }
 
-export interface HostedRuntimeEffectsPort {
-  commit(input: {
-    eventId: string;
-    payload: Record<string, unknown>;
-  }): Promise<void>;
-  deletePreparedSideEffect(input: {
-    effectId: string;
-    fingerprint: string;
-    kind: string;
-  }): Promise<void>;
+type HostedRuntimeEffectsPortBase = {
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
-  readSideEffect(input: {
-    effectId: string;
-    fingerprint: string;
-    kind: string;
-  }): Promise<HostedExecutionSideEffectRecord | null>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
-  writeSideEffect(record: HostedExecutionSideEffectRecord): Promise<HostedExecutionSideEffectRecord>;
-}
+};
+
+type HostedRuntimeAssistantDeliveryJournalPort = {
+  deletePreparedAssistantDelivery(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<void>;
+  readAssistantDeliveryRecord(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<HostedAssistantDeliveryRecord | null>;
+  writeAssistantDeliveryRecord(
+    record: HostedAssistantDeliveryRecord,
+  ): Promise<HostedAssistantDeliveryRecord>;
+};
+
+export type HostedRuntimeEffectsPort =
+  HostedRuntimeEffectsPortBase
+  & HostedRuntimeAssistantDeliveryJournalPort;
 
 export interface HostedRuntimeDeviceSyncPort {
   applyUpdates(input: {
@@ -68,4 +70,40 @@ export interface HostedRuntimePlatform {
 export interface HostedRuntimeUsageRecordResponse {
   recorded: number;
   usageIds: string[];
+}
+
+export function parseHostedRuntimeUsageRecordResponse(
+  value: unknown,
+): HostedRuntimeUsageRecordResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime usage response must be an object.");
+  }
+
+  const recorded = (value as { recorded?: unknown }).recorded;
+  const usageIds = (value as { usageIds?: unknown }).usageIds;
+
+  if (typeof recorded !== "number" || !Number.isSafeInteger(recorded) || recorded < 0) {
+    throw new TypeError("Hosted runtime usage response.recorded must be a non-negative integer.");
+  }
+
+  if (!Array.isArray(usageIds)) {
+    throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+  }
+
+  const normalizedUsageIds: string[] = []
+  for (const entry of usageIds) {
+    if (typeof entry !== "string") {
+      throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+    }
+    const trimmedEntry = entry.trim()
+    if (trimmedEntry.length === 0) {
+      throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+    }
+    normalizedUsageIds.push(trimmedEntry)
+  }
+
+  return {
+    recorded,
+    usageIds: normalizedUsageIds,
+  };
 }

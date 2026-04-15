@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { DEVICE_SYNC_DB_RELATIVE_PATH, encodeRandomCrockford, generateUlid } from "@murphai/runtime-state/node";
+import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
+import { encodeRandomCrockford, generateUlid } from "@murphai/runtime-state/node/ulid";
 
 export const DEFAULT_DEVICE_SYNC_HOST = "127.0.0.1";
 
@@ -44,6 +45,10 @@ export function sha256Text(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function scopeWebhookTraceId(provider: string, externalAccountId: string, traceId: string): string {
+  return sha256Text(JSON.stringify(["device-sync-webhook-trace", provider, externalAccountId, traceId]));
+}
+
 export function normalizeString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -70,8 +75,30 @@ const DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
 const DEVICE_SYNC_METADATA_MAX_KEY_LENGTH = 64;
 const DEVICE_SYNC_METADATA_MAX_STRING_LENGTH = 256;
 const DEVICE_SYNC_METADATA_BLOCKED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const DEVICE_SYNC_METADATA_BLOCKED_KEY_SUBSTRINGS = [
+  "accesstoken",
+  "refreshtoken",
+  "authorization",
+  "bearer",
+  "cookie",
+  "setcookie",
+  "apikey",
+  "clientsecret",
+  "password",
+  "sessiontoken",
+  "sessionid",
+];
 
 type DeviceSyncMetadataScalar = string | number | boolean | null;
+
+function isBlockedDeviceSyncMetadataKey(value: string): boolean {
+  if (DEVICE_SYNC_METADATA_BLOCKED_KEYS.has(value)) {
+    return true;
+  }
+
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return DEVICE_SYNC_METADATA_BLOCKED_KEY_SUBSTRINGS.some((token) => normalized.includes(token));
+}
 
 function sanitizeStoredDeviceSyncMetadataValue(value: unknown): DeviceSyncMetadataScalar | undefined {
   if (value === null) {
@@ -109,7 +136,7 @@ export function sanitizeStoredDeviceSyncMetadata(
 
     const key = rawKey.trim();
 
-    if (!key || key.length > DEVICE_SYNC_METADATA_MAX_KEY_LENGTH || DEVICE_SYNC_METADATA_BLOCKED_KEYS.has(key)) {
+    if (!key || key.length > DEVICE_SYNC_METADATA_MAX_KEY_LENGTH || isBlockedDeviceSyncMetadataKey(key)) {
       continue;
     }
 

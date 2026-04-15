@@ -27,7 +27,8 @@ import {
   GOAL_HORIZONS,
   GOAL_STATUSES,
   ID_PREFIXES,
-  PROFILE_SNAPSHOT_SOURCES,
+  NUTRITION_CONFIDENCE_LEVELS,
+  NUTRITION_PROVENANCE_SOURCES,
   RAW_ASSET_OWNER_KINDS,
   RAW_IMPORT_KINDS,
   RECIPE_STATUSES,
@@ -73,9 +74,10 @@ export type ConditionVerificationStatus = (typeof CONDITION_VERIFICATION_STATUSE
 export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
 export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
-export type ProfileSnapshotSource = (typeof PROFILE_SNAPSHOT_SOURCES)[number];
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
+export type NutritionProvenanceSource = (typeof NUTRITION_PROVENANCE_SOURCES)[number];
+export type NutritionConfidenceLevel = (typeof NUTRITION_CONFIDENCE_LEVELS)[number];
 export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
 export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
 export type SampleStream = (typeof SAMPLE_STREAMS)[number];
@@ -103,8 +105,6 @@ export interface JsonObject {
 
 const DAY_KEY_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
 const RAW_PATH_PATTERN = "^raw/[A-Za-z0-9._/-]+$";
-const RAW_DOCUMENT_PATH_PATTERN = "^raw/documents/[A-Za-z0-9._/-]+$";
-const RAW_MEAL_PATH_PATTERN = "^raw/meals/[A-Za-z0-9._/-]+$";
 const RAW_ASSESSMENT_SOURCE_PATTERN = "^raw/assessments/[A-Za-z0-9._/-]+/source\\.json$";
 const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SINGLE_PATH_SEGMENT_PATTERN = "^[A-Za-z0-9._-]+$";
@@ -112,9 +112,7 @@ const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
-const LEGACY_WORKOUT_IMPORT_ID_PATTERN = "^wkimp_[0-9A-HJKMNP-TV-Z]{26}$";
 const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
-const LEGACY_WORKOUT_IMPORT_ID_REGEX = new RegExp(LEGACY_WORKOUT_IMPORT_ID_PATTERN);
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
   relationship: 120,
@@ -275,6 +273,38 @@ export const externalRefSchema = z
   })
   .strict();
 
+export const nutritionDataSchema = z
+  .object({
+    calories: numberSchema(0).optional(),
+    proteinGrams: numberSchema(0).optional(),
+    carbsGrams: numberSchema(0).optional(),
+    fatGrams: numberSchema(0).optional(),
+    fiberGrams: numberSchema(0).optional(),
+  })
+  .strict();
+
+export const nutritionProvenanceSchema = z
+  .object({
+    source: z.enum(NUTRITION_PROVENANCE_SOURCES),
+    confidence: z.enum(NUTRITION_CONFIDENCE_LEVELS).optional(),
+    sourceDetail: boundedString(1, 240).optional(),
+  })
+  .strict();
+
+export const foodNutritionSchema = z
+  .object({
+    perServing: nutritionDataSchema.optional(),
+    provenance: nutritionProvenanceSchema.optional(),
+  })
+  .strict();
+
+export const mealNutritionSchema = z
+  .object({
+    totals: nutritionDataSchema.optional(),
+    provenance: nutritionProvenanceSchema.optional(),
+  })
+  .strict();
+
 const activityStrengthExerciseBaseShape = {
   exercise: boundedString(1, 160),
   setCount: integerSchema(1),
@@ -334,9 +364,8 @@ export const bodyMeasurementTypeSchema = z.enum([
   "calves",
 ]);
 export const bodyMeasurementUnitSchema = z.enum(["lb", "kg", "percent", "cm", "in"]);
-export const profileWeightUnitSchema = z.enum(["lb", "kg"]);
-export const profileDistanceUnitSchema = z.enum(["km", "mi"]);
-export const profileBodyMeasurementUnitSchema = z.enum(["cm", "in"]);
+export const workoutWeightUnitPreferenceValueSchema = z.enum(["lb", "kg"]);
+export const workoutBodyMeasurementUnitPreferenceValueSchema = z.enum(["cm", "in"]);
 
 export const storedMediaSchema = z
   .object({
@@ -448,11 +477,10 @@ export const bodyMeasurementEntrySchema = z
     }
   });
 
-export const profileUnitPreferencesSchema = z
+export const workoutUnitPreferenceValuesSchema = z
   .object({
-    weight: profileWeightUnitSchema.optional(),
-    distance: profileDistanceUnitSchema.optional(),
-    bodyMeasurement: profileBodyMeasurementUnitSchema.optional(),
+    weight: workoutWeightUnitPreferenceValueSchema.optional(),
+    bodyMeasurement: workoutBodyMeasurementUnitPreferenceValueSchema.optional(),
   })
   .strict();
 
@@ -528,13 +556,15 @@ export const bloodTestResultSchema = z
     }
   });
 
+export const eventSourceSchema = z.enum(EVENT_SOURCES);
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
   occurredAt: isoDateTimeString(),
   recordedAt: isoDateTimeString(),
   dayKey: patternedString(DAY_KEY_PATTERN),
-  source: z.enum(EVENT_SOURCES),
+  source: eventSourceSchema,
   title: boundedString(1, 160),
 } satisfies z.ZodRawShape;
 
@@ -548,7 +578,6 @@ const eventLifecycleSchema = z
 const baseEventOptionalShape = {
   tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
   links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
-  relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
@@ -617,7 +646,6 @@ export const eventRecordSchema = withContractMetadata(
   z.discriminatedUnion("kind", [
     eventSchema("document", {
       documentId: idSchema(ID_PREFIXES.document),
-      documentPath: patternedString(RAW_DOCUMENT_PATH_PATTERN),
       mimeType: boundedString(3, 120),
       providerId: idSchema(ID_PREFIXES.provider).optional(),
     }),
@@ -628,9 +656,8 @@ export const eventRecordSchema = withContractMetadata(
     }),
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
-      photoPaths: uniqueArray(patternedString(RAW_MEAL_PATH_PATTERN), { uniqueItems: true }),
-      audioPaths: z.array(patternedString(RAW_MEAL_PATH_PATTERN)),
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
+      nutrition: mealNutritionSchema.optional(),
     }),
     eventSchema("symptom", {
       symptom: boundedString(1, 120),
@@ -933,6 +960,7 @@ export const foodFrontmatterSchema = withContractMetadata(
       vendor: boundedString(1, 160).optional(),
       location: boundedString(1, 160).optional(),
       serving: boundedString(1, 160).optional(),
+      nutrition: foodNutritionSchema.optional(),
       aliases: uniqueArray(boundedString(1, 160), { uniqueItems: true }).optional(),
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
@@ -1052,12 +1080,11 @@ export const rawAssetOwnerSchema = z
   .superRefine((owner, context) => {
     const requiresPartition = RAW_ASSET_OWNER_KINDS_REQUIRING_PARTITION.has(owner.kind);
     const hasGenericId = GENERIC_CONTRACT_ID_REGEX.test(owner.id);
-    const hasLegacyWorkoutImportId = LEGACY_WORKOUT_IMPORT_ID_REGEX.test(owner.id);
 
-    if (!hasGenericId && !(owner.kind === "workout_batch" && hasLegacyWorkoutImportId)) {
+    if (!hasGenericId) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Raw asset owner id must match ${GENERIC_CONTRACT_ID_PATTERN}${owner.kind === "workout_batch" ? ` or ${LEGACY_WORKOUT_IMPORT_ID_PATTERN}` : ""}.`,
+        message: `Raw asset owner id must match ${GENERIC_CONTRACT_ID_PATTERN}.`,
         path: ["id"],
       });
     }
@@ -1083,8 +1110,8 @@ export const rawImportManifestSchema = z
   .object({
     schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.rawImportManifest),
     importId: z.string().refine(
-      (value) => GENERIC_CONTRACT_ID_REGEX.test(value) || LEGACY_WORKOUT_IMPORT_ID_REGEX.test(value),
-      `Invalid raw import id. Expected ${GENERIC_CONTRACT_ID_PATTERN} or ${LEGACY_WORKOUT_IMPORT_ID_PATTERN}.`,
+      (value) => GENERIC_CONTRACT_ID_REGEX.test(value),
+      `Invalid raw import id. Expected ${GENERIC_CONTRACT_ID_PATTERN}.`,
     ),
     importKind: z.enum(RAW_IMPORT_KINDS),
     importedAt: isoDateTimeString(),
@@ -1095,61 +1122,6 @@ export const rawImportManifestSchema = z
     provenance: jsonObjectSchema,
   })
   .strict();
-
-export const profileSnapshotNarrativeSchema = z
-  .object({
-    summary: boundedString(1, 4000).optional(),
-    highlights: uniqueArray(boundedString(1, 240), { maxItems: 25, uniqueItems: true }).optional(),
-  })
-  .strict();
-
-export const profileSnapshotGoalsSchema = z
-  .object({
-    topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-  })
-  .strict();
-
-export const profileSnapshotProfileSchema = z
-  .object({
-    narrative: profileSnapshotNarrativeSchema.optional(),
-    goals: profileSnapshotGoalsSchema.optional(),
-    unitPreferences: profileUnitPreferencesSchema.optional(),
-    custom: jsonObjectSchema.optional(),
-  })
-  .strict();
-
-export const profileSnapshotSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.profileSnapshot),
-      id: idSchema(ID_PREFIXES.profileSnapshot),
-      recordedAt: isoDateTimeString(),
-      source: z.enum(PROFILE_SNAPSHOT_SOURCES),
-      sourceAssessmentIds: uniqueArray(idSchema(ID_PREFIXES.assessment), { uniqueItems: true }).optional(),
-      sourceEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
-      profile: profileSnapshotProfileSchema,
-    })
-    .strict(),
-  "@murphai/contracts/profile-snapshot.schema.json",
-  "Murph Profile Snapshot",
-);
-
-export const profileCurrentFrontmatterSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter),
-      docType: z.literal(FRONTMATTER_DOC_TYPES.profileCurrent),
-      snapshotId: idSchema(ID_PREFIXES.profileSnapshot),
-      updatedAt: isoDateTimeString(),
-      sourceAssessmentIds: uniqueArray(idSchema(ID_PREFIXES.assessment), { uniqueItems: true }).optional(),
-      sourceEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
-      topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-      unitPreferences: profileUnitPreferencesSchema.optional(),
-    })
-    .strict(),
-  "@murphai/contracts/frontmatter-profile-current.schema.json",
-  "Murph Profile Current Frontmatter",
-);
 
 export const goalFrontmatterSchema = withContractMetadata(
   z
@@ -1310,6 +1282,10 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 );
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
+export type NutritionData = z.infer<typeof nutritionDataSchema>;
+export type NutritionProvenance = z.infer<typeof nutritionProvenanceSchema>;
+export type FoodNutrition = z.infer<typeof foodNutritionSchema>;
+export type MealNutrition = z.infer<typeof mealNutritionSchema>;
 export type ActivityStrengthExercise = z.infer<typeof activityStrengthExerciseSchema>;
 export type WorkoutSetType = z.infer<typeof workoutSetTypeSchema>;
 export type WorkoutExerciseMode = z.infer<typeof workoutExerciseModeSchema>;
@@ -1322,10 +1298,11 @@ export type RawAssetOwner = z.infer<typeof rawAssetOwnerSchema>;
 export type BodyMeasurementType = z.infer<typeof bodyMeasurementTypeSchema>;
 export type BodyMeasurementUnit = z.infer<typeof bodyMeasurementUnitSchema>;
 export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;
-export type ProfileWeightUnit = z.infer<typeof profileWeightUnitSchema>;
-export type ProfileDistanceUnit = z.infer<typeof profileDistanceUnitSchema>;
-export type ProfileBodyMeasurementUnit = z.infer<typeof profileBodyMeasurementUnitSchema>;
-export type ProfileUnitPreferences = z.infer<typeof profileUnitPreferencesSchema>;
+export type WorkoutWeightUnitPreferenceValue = z.infer<typeof workoutWeightUnitPreferenceValueSchema>;
+export type WorkoutBodyMeasurementUnitPreferenceValue = z.infer<
+  typeof workoutBodyMeasurementUnitPreferenceValueSchema
+>;
+export type WorkoutUnitPreferenceValues = z.infer<typeof workoutUnitPreferenceValuesSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSession = z.infer<typeof workoutSessionSchema>;
@@ -1374,11 +1351,6 @@ export type WorkoutFormatFrontmatter = z.infer<typeof workoutFormatFrontmatterSc
 export type AssessmentResponseRecord = z.infer<typeof assessmentResponseSchema>;
 export type RawImportManifestArtifact = z.infer<typeof rawImportManifestArtifactSchema>;
 export type RawImportManifest = z.infer<typeof rawImportManifestSchema>;
-export type ProfileSnapshotNarrative = z.infer<typeof profileSnapshotNarrativeSchema>;
-export type ProfileSnapshotGoals = z.infer<typeof profileSnapshotGoalsSchema>;
-export type ProfileSnapshotProfile = z.infer<typeof profileSnapshotProfileSchema>;
-export type ProfileSnapshotRecord = z.infer<typeof profileSnapshotSchema>;
-export type ProfileCurrentFrontmatter = z.infer<typeof profileCurrentFrontmatterSchema>;
 export type GoalFrontmatter = z.infer<typeof goalFrontmatterSchema>;
 export type ConditionFrontmatter = z.infer<typeof conditionFrontmatterSchema>;
 export type AllergyFrontmatter = z.infer<typeof allergyFrontmatterSchema>;

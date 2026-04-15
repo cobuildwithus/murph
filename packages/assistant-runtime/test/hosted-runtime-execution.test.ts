@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
   assistantGatewayLocalProjectionSourceReader: Symbol(
     "assistantGatewayLocalProjectionSourceReader",
   ),
-  collectHostedExecutionSideEffects: vi.fn(),
+  collectHostedAssistantDeliverySideEffects: vi.fn(),
   createHostedArtifactUploadSink: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
-  drainHostedCommittedSideEffectsAfterCommit: vi.fn(),
+  drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
   executeHostedDispatchEvent: vi.fn(),
@@ -22,12 +23,18 @@ const mocks = vi.hoisted(() => ({
   snapshotHostedExecutionContext: vi.fn(),
 }));
 
-vi.mock("@murphai/runtime-state/node", () => ({
-  decodeHostedBundleBase64: mocks.decodeHostedBundleBase64,
-  encodeHostedBundleBase64: mocks.encodeHostedBundleBase64,
-  listHostedBundleArtifacts: mocks.listHostedBundleArtifacts,
-  snapshotHostedExecutionContext: mocks.snapshotHostedExecutionContext,
-}));
+vi.mock("@murphai/runtime-state/node", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
+    "@murphai/runtime-state/node",
+  );
+  return {
+    ...actual,
+    decodeHostedBundleBase64: mocks.decodeHostedBundleBase64,
+    encodeHostedBundleBase64: mocks.encodeHostedBundleBase64,
+    listHostedBundleArtifacts: mocks.listHostedBundleArtifacts,
+    snapshotHostedExecutionContext: mocks.snapshotHostedExecutionContext,
+  };
+});
 
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
@@ -62,9 +69,10 @@ vi.mock("../src/hosted-runtime/artifacts.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
-  collectHostedExecutionSideEffects: mocks.collectHostedExecutionSideEffects,
-  drainHostedCommittedSideEffectsAfterCommit:
-    mocks.drainHostedCommittedSideEffectsAfterCommit,
+  collectHostedAssistantDeliverySideEffects:
+    mocks.collectHostedAssistantDeliverySideEffects,
+  drainHostedCommittedAssistantDeliveriesAfterCommit:
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit,
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
@@ -83,6 +91,7 @@ import {
   completeHostedExecutionAfterCommit,
   executeHostedDispatchForCommit,
 } from "../src/hosted-runtime/execution.ts";
+import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
 const committedBundle = Uint8Array.from([4, 5, 6]);
@@ -105,11 +114,10 @@ beforeEach(() => {
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
   });
-  mocks.collectHostedExecutionSideEffects.mockResolvedValue([
+  mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
     {
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
     },
   ]);
@@ -127,6 +135,7 @@ beforeEach(() => {
       assistantProvider: null,
       assistantSeeded: false,
       emailAutoReplyEnabled: false,
+      linqAutoReplyEnabled: false,
       telegramAutoReplyEnabled: false,
       vaultCreated: true,
     },
@@ -139,7 +148,7 @@ beforeEach(() => {
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 3,
   });
-  mocks.drainHostedCommittedSideEffectsAfterCommit.mockResolvedValue(undefined);
+  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue(undefined);
   mocks.exportHostedPendingAssistantUsage.mockResolvedValue({
     exported: 1,
     failed: 0,
@@ -180,6 +189,11 @@ describe("executeHostedDispatchForCommit", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -187,6 +201,7 @@ describe("executeHostedDispatchForCommit", () => {
         },
       },
       restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
         operatorHomeRoot: "/tmp/operator-home",
         vaultRoot: "/tmp/vault-root",
       },
@@ -200,21 +215,21 @@ describe("executeHostedDispatchForCommit", () => {
             async put() {},
           },
           effectsPort: {
-            async commit() {},
-            async deletePreparedSideEffect() {},
+            async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;
             },
-            async readSideEffect() {
+            async readAssistantDeliveryRecord() {
               return null;
             },
             async sendEmail() {},
-            async writeSideEffect(record) {
+            async writeAssistantDeliveryRecord(record) {
               return record;
             },
           },
           usageExportPort: null,
         },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
         userEnv: {
           HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
         },
@@ -228,6 +243,11 @@ describe("executeHostedDispatchForCommit", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: false,
+          },
           userId: "member_123",
         },
         eventId: "evt_123",
@@ -258,12 +278,11 @@ describe("executeHostedDispatchForCommit", () => {
       preservedArtifacts: [],
       vaultRoot: "/tmp/vault-root",
     });
-    expect(mocks.collectHostedExecutionSideEffects).toHaveBeenCalledWith("/tmp/vault-root");
-    assert.deepEqual(result.committedSideEffects, [
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith("/tmp/vault-root");
+    assert.deepEqual(result.committedAssistantDeliveryEffects, [
       {
         effectId: "intent_123",
         fingerprint: "dedupe_123",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
     ]);
@@ -291,14 +310,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     ]);
 
     const result = await completeHostedExecutionAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       committedExecution: {
         committedGatewayProjectionSnapshot: {
           schema: "murph.gateway-projection-snapshot.v1",
@@ -315,11 +326,10 @@ describe("completeHostedExecutionAfterCommit", () => {
             summary: "completed summary",
           },
         },
-        committedSideEffects: [
+        committedAssistantDeliveryEffects: [
           {
             effectId: "intent_123",
             fingerprint: "dedupe_123",
-            intentId: "intent_123",
             kind: "assistant.delivery",
           },
         ],
@@ -335,6 +345,7 @@ describe("completeHostedExecutionAfterCommit", () => {
       },
       materializedArtifactPaths: new Set(["vault/raw/already-materialized.bin"]),
       restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
         operatorHomeRoot: "/tmp/operator-home",
         vaultRoot: "/tmp/vault-root",
       },
@@ -353,16 +364,15 @@ describe("completeHostedExecutionAfterCommit", () => {
             async put() {},
           },
           effectsPort: {
-            async commit() {},
-            async deletePreparedSideEffect() {},
+            async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;
             },
-            async readSideEffect() {
+            async readAssistantDeliveryRecord() {
               return null;
             },
             async sendEmail() {},
-            async writeSideEffect(record) {
+            async writeAssistantDeliveryRecord(record) {
               return record;
             },
           },
@@ -372,21 +382,14 @@ describe("completeHostedExecutionAfterCommit", () => {
             },
           },
         },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
         userEnv: {
           HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
         },
       },
     });
 
-    expect(mocks.drainHostedCommittedSideEffectsAfterCommit).toHaveBeenCalledWith({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
+    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -397,11 +400,10 @@ describe("completeHostedExecutionAfterCommit", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: expect.any(Object),
-      sideEffects: [
+      assistantDeliveryEffects: [
         {
           effectId: "intent_123",
           fingerprint: "dedupe_123",
-          intentId: "intent_123",
           kind: "assistant.delivery",
         },
       ],
@@ -444,6 +446,7 @@ describe("completeHostedExecutionAfterCommit", () => {
         messages: [],
         permissions: [],
       },
+      phase: "completed",
       result: {
         bundle: Buffer.from(Uint8Array.from([9, 9, 9])).toString("base64"),
         result: {

@@ -33,11 +33,8 @@ const mocks = vi.hoisted(() => ({
   listInboxCaptureMutationsMock: vi.fn(),
   openInboxRuntimeMock: vi.fn(),
   readInboxCaptureMutationHeadMock: vi.fn(),
-  appendImportAuditMock: vi.fn(),
-  appendInboxCaptureEventMock: vi.fn(),
   ensureInboxVaultMock: vi.fn(),
   persistCanonicalInboxCaptureMock: vi.fn(),
-  persistRawCaptureMock: vi.fn(),
   rebuildRuntimeFromVaultMock: vi.fn(),
 }));
 
@@ -58,11 +55,8 @@ vi.mock("../src/kernel/sqlite.ts", () => ({
 }));
 
 vi.mock("../src/indexing/persist.ts", () => ({
-  appendImportAudit: mocks.appendImportAuditMock,
-  appendInboxCaptureEvent: mocks.appendInboxCaptureEventMock,
   ensureInboxVault: mocks.ensureInboxVaultMock,
   persistCanonicalInboxCapture: mocks.persistCanonicalInboxCaptureMock,
-  persistRawCapture: mocks.persistRawCaptureMock,
   rebuildRuntimeFromVault: mocks.rebuildRuntimeFromVaultMock,
 }));
 
@@ -95,11 +89,8 @@ afterEach(() => {
   mocks.listInboxCaptureMutationsMock.mockReset();
   mocks.openInboxRuntimeMock.mockReset();
   mocks.readInboxCaptureMutationHeadMock.mockReset();
-  mocks.appendImportAuditMock.mockReset();
-  mocks.appendInboxCaptureEventMock.mockReset();
   mocks.ensureInboxVaultMock.mockReset();
   mocks.persistCanonicalInboxCaptureMock.mockReset();
-  mocks.persistRawCaptureMock.mockReset();
   mocks.rebuildRuntimeFromVaultMock.mockReset();
 });
 
@@ -507,7 +498,7 @@ function createParserRegistryStub(): ParserRegistry {
   };
 }
 
-function createRuntimeStoreStub(): InboxRuntimeStore {
+function createRuntimeStoreStub(): InboxRuntimeStore & { close: ReturnType<typeof vi.fn<() => void>> } {
   return {
     databasePath: "/tmp/inboxd.sqlite",
     close: vi.fn(),
@@ -591,10 +582,10 @@ function createRuntimeStoreStub(): InboxRuntimeStore {
 function createPollConnectorStub(
   id: string,
   options?: {
-    close?: ReturnType<typeof vi.fn>;
+    close?: ReturnType<typeof vi.fn<() => Promise<void>>>;
   },
 ): PollConnector & { close: ReturnType<typeof vi.fn> } {
-  const close = options?.close ?? vi.fn().mockResolvedValue(undefined);
+  const close = options?.close ?? vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
   return {
     id,

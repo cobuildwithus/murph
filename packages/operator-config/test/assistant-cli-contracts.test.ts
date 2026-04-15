@@ -1,0 +1,414 @@
+import { describe, expect, it } from 'vitest'
+import {
+  automationRouteSchema,
+  automationScheduleAtSchema,
+  automationScheduleCronSchema,
+  automationScheduleDailyLocalSchema,
+  automationScheduleEverySchema,
+  automationScheduleKindValues,
+  automationScheduleSchema,
+} from '@murphai/contracts'
+
+import {
+  gatewayDeliveryTargetKindValues,
+  gatewayReplyRouteKindValues,
+} from '@murphai/gateway-core'
+
+import {
+  assistantCronAtScheduleSchema,
+  assistantCronDailyLocalScheduleSchema,
+  assistantCronEveryScheduleSchema,
+  assistantCronExpressionScheduleInputSchema,
+  assistantCronExpressionScheduleSchema,
+  assistantCronJobSchema,
+  assistantCronJobStateSchema,
+  assistantCronScheduleKindValues,
+  assistantCronScheduleSchema,
+  assistantCronTargetSchema,
+  assistantCronRunRecordSchema,
+  assistantBindingDeliveryKindValues,
+  assistantChannelDeliveryTargetKindValues,
+  assistantOutboxIntentSchema,
+  assistantSessionSecretsSchema,
+  assistantSessionIdSchema,
+  assistantSelfDeliveryTargetSchema,
+  assistantTurnReceiptSchema,
+} from '../src/assistant-cli-contracts.ts'
+
+describe('assistant CLI delivery contracts', () => {
+  it('reuses gateway-owned delivery target kinds', () => {
+    expect(assistantChannelDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues)
+  })
+
+  it('reuses gateway-owned reply route kinds for bindings', () => {
+    expect(assistantBindingDeliveryKindValues).toEqual(gatewayReplyRouteKindValues)
+  })
+
+  it('trims assistant session ids before returning them', () => {
+    expect(assistantSessionIdSchema.parse('  session_123  ')).toBe('session_123')
+  })
+
+  it('normalizes assistant turn and outbox ids inside persisted assistant records', () => {
+    const receipt = assistantTurnReceiptSchema.parse({
+      schema: 'murph.assistant-turn-receipt.v1',
+      turnId: '  turn_123  ',
+      sessionId: '  session_123  ',
+      provider: 'codex-cli',
+      providerModel: null,
+      promptPreview: null,
+      responsePreview: null,
+      status: 'running',
+      deliveryRequested: false,
+      deliveryDisposition: 'not-requested',
+      deliveryIntentId: null,
+      startedAt: '2026-04-12T00:00:00.000Z',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+      completedAt: null,
+      lastError: null,
+      timeline: [],
+    })
+
+    expect(receipt.turnId).toBe('turn_123')
+    expect(receipt.sessionId).toBe('session_123')
+
+    const intent = assistantOutboxIntentSchema.parse({
+      schema: 'murph.assistant-outbox-intent.v1',
+      intentId: '  outbox_123  ',
+      sessionId: '  session_123  ',
+      turnId: '  turn_123  ',
+      createdAt: '2026-04-12T00:00:00.000Z',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+      lastAttemptAt: null,
+      nextAttemptAt: null,
+      sentAt: null,
+      attemptCount: 0,
+      status: 'pending',
+      message: 'hello',
+      dedupeKey: 'dedupe',
+      targetFingerprint: 'target',
+      channel: null,
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: null,
+      replyToMessageId: null,
+      bindingDelivery: null,
+      explicitTarget: null,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: false,
+      lastError: null,
+    })
+
+    expect(intent.intentId).toBe('outbox_123')
+    expect(intent.sessionId).toBe('session_123')
+    expect(intent.turnId).toBe('turn_123')
+  })
+
+  it('normalizes assistant cron ids and nullable session ids', () => {
+    const job = assistantCronJobSchema.parse({
+      schema: 'murph.assistant-cron-job.v1',
+      jobId: '  cronjob_123  ',
+      name: 'Daily check-in',
+      enabled: true,
+      keepAfterRun: false,
+      prompt: 'Ping me',
+      schedule: {
+        kind: 'every',
+        everyMs: 60_000,
+      },
+      target: {
+        sessionId: '  session_123  ',
+        alias: null,
+        channel: null,
+        identityId: null,
+        participantId: null,
+        sourceThreadId: null,
+        deliveryTarget: null,
+      },
+      createdAt: '2026-04-12T00:00:00.000Z',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+      state: {
+        nextRunAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        consecutiveFailures: 0,
+        lastError: null,
+        runningAt: null,
+        runningPid: null,
+      },
+    })
+
+    expect(job.jobId).toBe('cronjob_123')
+    expect(job.target.sessionId).toBe('session_123')
+
+    const run = assistantCronRunRecordSchema.parse({
+      schema: 'murph.assistant-cron-run.v1',
+      runId: '  cronrun_123  ',
+      jobId: '  cronjob_123  ',
+      trigger: 'manual',
+      status: 'succeeded',
+      startedAt: '2026-04-12T00:00:00.000Z',
+      finishedAt: '2026-04-12T00:01:00.000Z',
+      sessionId: '  session_123  ',
+      response: null,
+      responseLength: 0,
+      error: null,
+    })
+
+    expect(run.runId).toBe('cronrun_123')
+    expect(run.jobId).toBe('cronjob_123')
+    expect(run.sessionId).toBe('session_123')
+  })
+
+  it('rejects the removed assistant cron deliverResponse field', () => {
+    expect(() =>
+      assistantCronJobSchema.parse({
+        schema: 'murph.assistant-cron-job.v1',
+        jobId: 'cronjob_456',
+        name: 'Daily check-in',
+        enabled: true,
+        keepAfterRun: false,
+        prompt: 'Ping me',
+        schedule: {
+          kind: 'every',
+          everyMs: 60_000,
+        },
+        target: {
+          sessionId: null,
+          alias: null,
+          channel: 'telegram',
+          identityId: null,
+          participantId: 'user_123',
+          sourceThreadId: 'thread_123',
+          deliveryTarget: null,
+          deliverResponse: true,
+        },
+        createdAt: '2026-04-12T00:00:00.000Z',
+        updatedAt: '2026-04-12T00:00:00.000Z',
+        state: {
+          nextRunAt: null,
+          lastRunAt: null,
+          lastSucceededAt: null,
+          lastFailedAt: null,
+          consecutiveFailures: 0,
+          lastError: null,
+          runningAt: null,
+          runningPid: null,
+        },
+      }),
+    ).toThrow()
+  })
+
+  it('rejects assistant ids with path separators or traversal segments', () => {
+    expect(() => assistantSessionIdSchema.parse('../session_123')).toThrow(
+      /opaque runtime ids/i,
+    )
+  })
+
+  it('rejects the obsolete provider binding header bucket', () => {
+    expect(() =>
+      assistantSessionSecretsSchema.parse({
+        schema: 'murph.assistant-session-secrets.v1',
+        sessionId: 'sess_headers_roundtrip',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+        providerHeaders: {
+          'X-Upstream-Auth': 'Bearer firstsecret123',
+        },
+        providerBindingHeaders: {
+          'X-Old-Binding-Auth': 'Bearer oldsecret456',
+        },
+      }),
+    ).toThrow()
+  })
+})
+
+describe('assistant CLI automation shape ownership', () => {
+  it('keeps non-recurring schedules on the canonical owners while making recurring schedules vault-local', () => {
+    expect(assistantCronScheduleKindValues).toBe(automationScheduleKindValues)
+    expect(assistantCronAtScheduleSchema).toBe(automationScheduleAtSchema)
+    expect(assistantCronEveryScheduleSchema).toBe(automationScheduleEverySchema)
+    expect(assistantCronExpressionScheduleSchema).not.toBe(automationScheduleCronSchema)
+    expect(assistantCronDailyLocalScheduleSchema).not.toBe(automationScheduleDailyLocalSchema)
+    expect(assistantCronScheduleSchema).not.toBe(automationScheduleSchema)
+
+    expect(
+      assistantCronExpressionScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+      }),
+    ).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+    })
+
+    expect(
+      assistantCronDailyLocalScheduleSchema.parse({
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      }),
+    ).toEqual({
+      kind: 'dailyLocal',
+      localTime: '09:00',
+    })
+  })
+
+  it('reuses the canonical automation route for saved self-delivery targets', () => {
+    expect(assistantSelfDeliveryTargetSchema).toBe(automationRouteSchema)
+
+    const route = {
+      channel: 'slack',
+      deliveryTarget: 'channel:alerts',
+      identityId: 'idn_123',
+      participantId: 'user_123',
+      sourceThreadId: 'thread_123',
+    }
+
+    expect(assistantSelfDeliveryTargetSchema.parse(route)).toEqual(
+      automationRouteSchema.parse(route),
+    )
+  })
+
+  it('composes canonical route fields into cron targets while keeping local selector fields', () => {
+    const target = assistantCronTargetSchema.parse({
+      channel: 'telegram',
+      deliveryTarget: 'chat:123',
+      identityId: null,
+      participantId: 'participant_123',
+      sourceThreadId: null,
+      alias: 'personal',
+      sessionId: null,
+    })
+
+    const { alias, sessionId, ...route } = target
+    expect({ alias, sessionId }).toEqual({
+      alias: 'personal',
+      sessionId: null,
+    })
+    expect(route).toEqual(automationRouteSchema.parse(route))
+  })
+
+  it('keeps route-less cron targets valid for local-only jobs', () => {
+    expect(
+      assistantCronTargetSchema.parse({
+        channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        sourceThreadId: null,
+        alias: null,
+        sessionId: null,
+      }),
+    ).toEqual({
+      channel: null,
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      sourceThreadId: null,
+      alias: null,
+      sessionId: null,
+    })
+  })
+
+  it('drops timezone from recurring cron inputs and persisted schedules', () => {
+    expect(
+      assistantCronExpressionScheduleInputSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+      }),
+    ).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+    })
+
+    expect(
+      assistantCronScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+      }),
+    ).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+    })
+
+    expect(
+      assistantCronScheduleSchema.parse({
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      }),
+    ).toEqual({
+      kind: 'dailyLocal',
+      localTime: '09:00',
+    })
+
+    expect(() =>
+      assistantCronScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
+      }),
+    ).toThrow()
+
+    expect(
+      automationScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
+      }),
+    ).toEqual(
+      automationScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
+      }),
+    )
+
+    expect(() =>
+      assistantCronDailyLocalScheduleSchema.parse({
+        kind: 'dailyLocal',
+        localTime: '09:00',
+        timeZone: 'America/Los_Angeles',
+      }),
+    ).toThrow()
+  })
+
+  it('keeps the public cron job state surface stable on nextRunAt', () => {
+    expect(
+      assistantCronJobStateSchema.parse({
+        nextRunAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        consecutiveFailures: 0,
+        lastError: null,
+        runningAt: null,
+        runningPid: null,
+      }),
+    ).toEqual({
+      nextRunAt: null,
+      lastRunAt: null,
+      lastSucceededAt: null,
+      lastFailedAt: null,
+      consecutiveFailures: 0,
+      lastError: null,
+      runningAt: null,
+      runningPid: null,
+    })
+
+    expect(() =>
+      assistantCronJobStateSchema.parse({
+        pendingOccurrenceAt: null,
+        retryAfterAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        consecutiveFailures: 0,
+        lastError: null,
+        runningAt: null,
+        runningPid: null,
+      }),
+    ).toThrow()
+  })
+})

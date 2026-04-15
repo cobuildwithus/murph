@@ -42,6 +42,9 @@ export default defineConfig({
     name: 'setup-cli',
     environment: 'node',
     include: ['test/**/*.test.ts'],
+    // Ink/TTY setup flows mutate process-global state, so package tests must stay serial.
+    fileParallelism: false,
+    maxWorkers: 1,
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
       include: ['src/**/*.ts'],

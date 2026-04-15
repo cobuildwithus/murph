@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  ConsumeOAuthStateResult,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
   OAuthStateRecord,
@@ -9,6 +10,7 @@ import type {
   UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
 import type { HostedSecretCodec } from "./crypto";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
@@ -23,7 +25,6 @@ import type {
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
-  UpdateLocalHeartbeatInput,
 } from "./prisma-store/types";
 import { PrismaHostedSignalStore } from "./prisma-store/signals";
 import { PrismaHostedTokenAuditStore } from "./prisma-store/token-audits";
@@ -44,7 +45,6 @@ export type {
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
-  UpdateLocalHeartbeatInput,
 } from "./prisma-store/types";
 
 export class PrismaDeviceSyncControlPlaneStore
@@ -69,7 +69,6 @@ export class PrismaDeviceSyncControlPlaneStore
     });
     this.webhookTraces = new PrismaHostedWebhookTraceStore({
       prisma: this.prisma,
-      providerAccountBlindIndexKey: input.providerAccountBlindIndexKey,
     });
     this.signals = new PrismaHostedSignalStore(this.prisma);
     this.browserAssertionNonces = new PrismaHostedBrowserAssertionNonceStore(this.prisma);
@@ -89,8 +88,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.oauthSessions.createOAuthState(input);
   }
 
-  async consumeOAuthState(state: string, now: string): Promise<OAuthStateRecord | null> {
-    return this.oauthSessions.consumeOAuthState(state, now);
+  async consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+  ): Promise<ConsumeOAuthStateResult> {
+    return this.oauthSessions.consumeOAuthState(state, now, expectedProvider);
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -210,7 +213,7 @@ export class PrismaDeviceSyncControlPlaneStore
   async updateConnectionFromLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: UpdateLocalHeartbeatInput,
+    patch: HostedLocalHeartbeatPatch,
   ): Promise<PublicDeviceSyncAccount | null> {
     return this.localHeartbeats.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
   }

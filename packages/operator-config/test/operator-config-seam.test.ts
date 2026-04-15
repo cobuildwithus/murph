@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -18,6 +18,7 @@ import {
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   resolveAssistantSelfDeliveryTarget,
+  resolveConfiguredDefaultVault,
   resolveDefaultVault,
   resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
@@ -92,8 +93,22 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       },
       failoverRoutes: [
         {
+          apiKeyEnv: null,
+          approvalPolicy: null,
+          baseUrl: null,
+          codexCommand: null,
+          codexHome: null,
+          cooldownMs: null,
+          headers: null,
+          model: null,
           name: 'fallback',
+          oss: false,
+          profile: null,
           provider: 'codex-cli',
+          providerName: null,
+          reasoningEffort: null,
+          sandbox: null,
+          zeroDataRetention: undefined,
         },
       ],
       identityId: ' user-123 ',
@@ -115,10 +130,13 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       },
       model: 'gpt-4.1',
       oss: false,
+      presetId: null,
       profile: null,
       providerName: 'Example API',
       reasoningEffort: 'medium',
       sandbox: null,
+      webSearch: null,
+      zeroDataRetention: null,
     },
   )
 
@@ -146,6 +164,12 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
   const resolvedConfigPath = resolveOperatorConfigPath(homeDirectory)
   const rawSavedConfig = await readFile(resolvedConfigPath, 'utf8')
   assert.match(rawSavedConfig, /"defaultVault": "~\/vaults\/primary"/u)
+  if (process.platform !== 'win32') {
+    const directoryStats = await stat(path.dirname(resolvedConfigPath))
+    const fileStats = await stat(resolvedConfigPath)
+    assert.equal(directoryStats.mode & 0o777, 0o700)
+    assert.equal(fileStats.mode & 0o777, 0o600)
+  }
 
   assert.deepEqual((await readOperatorConfig(homeDirectory))?.hostedAssistant, hostedConfig)
   assert.deepEqual(await resolveHostedAssistantConfig(homeDirectory), hostedConfig)
@@ -198,15 +222,18 @@ test('operator config resolves default vaults and injects them only for eligible
 
   await saveDefaultVaultConfig(configuredVault, homeDirectory)
   assert.equal(await resolveDefaultVault(homeDirectory, {}), configuredVault)
+  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), configuredVault)
 
   await rm(configuredVault, { force: true, recursive: true })
   assert.equal(
     await realpath((await resolveDefaultVault(homeDirectory, {})) ?? ''),
     await realpath(cwdVault),
   )
+  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), null)
 
   await rm(cwdVault, { force: true, recursive: true })
   assert.equal(await resolveDefaultVault(homeDirectory, {}), null)
+  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), null)
 
   assert.equal(hasExplicitVaultOption(['assistant', '--vault', '/tmp/vault']), true)
   assert.equal(hasExplicitVaultOption(['assistant', '--vault=/tmp/vault']), true)
@@ -471,8 +498,10 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
         'X-Trace-Id': 'trace-1',
       },
       model: 'gpt-5.4',
+      presetId: null,
       providerName: 'Example Gateway',
       reasoningEffort: 'high',
+      webSearch: null,
     },
     failoverRoutes: [
       {

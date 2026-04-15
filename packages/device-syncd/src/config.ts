@@ -1,4 +1,8 @@
-import { isLoopbackHostname } from "@murphai/runtime-state";
+import {
+  assertListenerPort,
+  assertLoopbackListenerHost,
+  assertUnbracketedListenerHost,
+} from "@murphai/runtime-state";
 
 import {
   DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS,
@@ -24,6 +28,12 @@ import type {
 export interface LoadedDeviceSyncEnvironment {
   service: CreateDeviceSyncServiceInput;
   http: DeviceSyncHttpConfig;
+}
+
+export interface ConfiguredDeviceSyncProviderConfigs {
+  garmin?: GarminDeviceSyncProviderConfig;
+  oura?: OuraDeviceSyncProviderConfig;
+  whoop?: WhoopDeviceSyncProviderConfig;
 }
 
 type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
@@ -123,11 +133,10 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
   const publicListener = readOptionalPublicListener(env);
   const host = optionalEnv(env, DEVICE_SYNC_HOST_ENV_KEYS) ?? DEFAULT_DEVICE_SYNC_HOST;
 
-  if (!isLoopbackHostname(host)) {
-    throw new TypeError(
-      "DEVICE_SYNC_HOST must be a loopback hostname or address. Use DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT for externally reachable callback and webhook routes.",
-    );
-  }
+  assertLoopbackListenerHost(
+    host,
+    "DEVICE_SYNC_HOST must be a loopback hostname or address. Use DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT for externally reachable callback and webhook routes.",
+  );
 
   if (providers.length === 0) {
     throw new TypeError(
@@ -156,7 +165,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
     },
     http: {
       host,
-      port: parseIntegerEnv(env, DEVICE_SYNC_PORT_ENV_KEYS) ?? 8788,
+      port: parsePortEnv(env, DEVICE_SYNC_PORT_ENV_KEYS) ?? 8788,
       controlToken,
       ouraWebhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
       ...publicListener,
@@ -182,10 +191,18 @@ export function createConsoleDeviceSyncLogger(consoleLike: Console = console): D
 }
 
 export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): DeviceSyncProvider[] {
+  return createConfiguredDeviceSyncProvidersFromConfigs(
+    readConfiguredDeviceSyncProviderConfigs(env),
+  );
+}
+
+export function createConfiguredDeviceSyncProvidersFromConfigs(
+  configs: ConfiguredDeviceSyncProviderConfigs,
+): DeviceSyncProvider[] {
   const providers: DeviceSyncProvider[] = [];
-  const garminConfig = readConfiguredGarminDeviceSyncProviderConfig(env);
-  const whoopConfig = readConfiguredWhoopDeviceSyncProviderConfig(env);
-  const ouraConfig = readConfiguredOuraDeviceSyncProviderConfig(env);
+  const garminConfig = configs.garmin;
+  const whoopConfig = configs.whoop;
+  const ouraConfig = configs.oura;
 
   if (garminConfig) {
     providers.push(createGarminDeviceSyncProvider(garminConfig));
@@ -200,6 +217,20 @@ export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): D
   }
 
   return providers;
+}
+
+export function readConfiguredDeviceSyncProviderConfigs(
+  env: DeviceSyncEnvSource,
+): ConfiguredDeviceSyncProviderConfigs {
+  const garmin = readConfiguredGarminDeviceSyncProviderConfig(env);
+  const oura = readConfiguredOuraDeviceSyncProviderConfig(env);
+  const whoop = readConfiguredWhoopDeviceSyncProviderConfig(env);
+
+  return {
+    ...(garmin ? { garmin } : {}),
+    ...(oura ? { oura } : {}),
+    ...(whoop ? { whoop } : {}),
+  };
 }
 
 export function readConfiguredGarminDeviceSyncProviderConfig(
@@ -286,7 +317,7 @@ export function readConfiguredOuraDeviceSyncProviderConfig(
 
 function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttpConfig, "publicHost" | "publicPort"> {
   const publicHost = optionalEnv(env, DEVICE_SYNC_PUBLIC_HOST_ENV_KEYS);
-  const publicPort = parseIntegerEnv(env, DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS);
+  const publicPort = parsePortEnv(env, DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS);
 
   if (!publicHost && publicPort === undefined) {
     return {};
@@ -297,6 +328,11 @@ function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttp
       "Set DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT together to enable the public callback/webhook listener.",
     );
   }
+
+  assertUnbracketedListenerHost(
+    publicHost,
+    "DEVICE_SYNC_PUBLIC_HOST must be a hostname or address without URL bracket syntax. Use ::1, not [::1].",
+  );
 
   return {
     publicHost,
@@ -355,13 +391,31 @@ function parseIntegerEnv(env: DeviceSyncEnvSource, keys: readonly string[]): num
     return undefined;
   }
 
-  const parsed = Number.parseInt(value, 10);
+  return parseDecimalInteger(value, keys[0]);
+}
 
-  if (!Number.isFinite(parsed)) {
-    throw new TypeError(`Environment variable ${keys[0]} must be an integer.`);
+function parsePortEnv(env: DeviceSyncEnvSource, keys: readonly string[]): number | undefined {
+  const parsed = parseIntegerEnv(env, keys);
+
+  if (parsed === undefined) {
+    return undefined;
   }
 
+  assertListenerPort(
+    parsed,
+    `Environment variable ${keys[0]} must be an integer between 0 and 65535.`,
+    { allowZero: true },
+  );
+
   return parsed;
+}
+
+function parseDecimalInteger(value: string, key: string): number {
+  if (!/^\d+$/u.test(value)) {
+    throw new TypeError(`Environment variable ${key} must be an integer.`);
+  }
+
+  return Number.parseInt(value, 10);
 }
 
 function parseCsvEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string[] | undefined {

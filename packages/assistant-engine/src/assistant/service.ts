@@ -11,6 +11,7 @@ import {
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
+import { sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal } from './notification-turn.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
@@ -20,6 +21,7 @@ export {
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
+export { sendAssistantNotificationLocal } from './notification-turn.js'
 export type {
   AssistantChatInput,
   AssistantExecutionContext,
@@ -27,6 +29,11 @@ export type {
   AssistantHostedExecutionContext,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
+export type {
+  AssistantNotificationDecision,
+  AssistantNotificationInput,
+  AssistantNotificationResult,
+} from './notification-turn.js'
 
 export async function openAssistantConversation(
   input: AssistantSessionResolutionFields,
@@ -38,6 +45,12 @@ export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ) {
   return sendAssistantMessageLocal(input)
+}
+
+export async function sendAssistantNotification(
+  input: import('./notification-turn.js').AssistantNotificationInput,
+) {
+  return sendAssistantNotificationTurnLocal(input)
 }
 
 export async function queueAssistantFirstContactWelcome(

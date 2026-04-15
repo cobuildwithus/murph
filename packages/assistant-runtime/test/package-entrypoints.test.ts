@@ -4,16 +4,21 @@ import { readFileSync } from "node:fs";
 import { test } from "vitest";
 
 import {
-  parseHostedEmailSendRequest,
-  reconcileHostedVerifiedEmailSelfTarget,
   runHostedAssistantRuntimeJobInProcess,
 } from "@murphai/assistant-runtime";
+import {
+  parseHostedAssistantRuntimeJobInput,
+  readHostedRunnerCommitTimeoutMs,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestDirect,
 } from "../src/hosted-email.ts";
 import {
-  reconcileHostedVerifiedEmailSelfTarget as reconcileHostedVerifiedEmailSelfTargetDirect,
-} from "../src/hosted-email-route.ts";
+  parseHostedEmailSendRequest,
+} from "@murphai/assistant-runtime/hosted-email";
+import {
+  parseHostedAssistantRuntimeJobInput as parseHostedAssistantRuntimeJobInputDirect,
+} from "../src/hosted-runtime/parsers.ts";
 import {
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   HostedAssistantConfigurationError,
@@ -22,20 +27,27 @@ import {
 import {
   runHostedAssistantRuntimeJobInProcess as runHostedAssistantRuntimeJobInProcessDirect,
 } from "../src/hosted-runtime.ts";
+import {
+  readHostedRunnerCommitTimeoutMs as readHostedRunnerCommitTimeoutMsDirect,
+} from "../src/hosted-runtime/timeouts.ts";
 
-test("package root export re-exports the hosted runtime and hosted email surfaces", () => {
-  assert.equal(parseHostedEmailSendRequest, parseHostedEmailSendRequestDirect);
-  assert.equal(
-    reconcileHostedVerifiedEmailSelfTarget,
-    reconcileHostedVerifiedEmailSelfTargetDirect,
-  );
+test("package root export re-exports the hosted runtime surface only", () => {
   assert.equal(
     runHostedAssistantRuntimeJobInProcess,
     runHostedAssistantRuntimeJobInProcessDirect,
   );
 });
 
-test("package manifest declares the hosted assistant env subpath and the source re-export stays wired", () => {
+test("hosted-email subpath export stays wired to the hosted email source surface", () => {
+  assert.equal(parseHostedEmailSendRequest, parseHostedEmailSendRequestDirect);
+});
+
+test("hosted-runtime-contracts subpath stays wired to the worker-safe hosted runtime surface", () => {
+  assert.equal(parseHostedAssistantRuntimeJobInput, parseHostedAssistantRuntimeJobInputDirect);
+  assert.equal(readHostedRunnerCommitTimeoutMs, readHostedRunnerCommitTimeoutMsDirect);
+});
+
+test("package manifest declares the hosted assistant env, hosted runtime contracts, and hosted email subpaths", () => {
   const manifest = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
@@ -44,6 +56,8 @@ test("package manifest declares the hosted assistant env subpath and the source 
 
   assert.ok(manifest.exports);
   assert.ok("./hosted-assistant-env" in manifest.exports);
+  assert.ok("./hosted-runtime-contracts" in manifest.exports);
+  assert.ok("./hosted-email" in manifest.exports);
   assert.ok(Array.isArray(HOSTED_ASSISTANT_CONFIG_ENV_NAMES));
   assert.ok(HOSTED_ASSISTANT_CONFIG_ENV_NAMES.length > 0);
   assert.equal(typeof readHostedAssistantApiKeyEnvName, "function");

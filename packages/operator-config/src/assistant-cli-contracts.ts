@@ -1,10 +1,34 @@
 import { z } from 'zod'
 import {
+  automationRouteSchema,
+  automationScheduleAtSchema,
+  automationScheduleCronSchema,
+  automationScheduleDailyLocalSchema,
+  automationScheduleEverySchema,
+  automationScheduleKindValues,
+  type AutomationRoute,
+  type AutomationScheduleKind,
+} from '@murphai/contracts'
+import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
+import {
+  gatewayDeliveryTargetKindValues,
+  gatewayReplyRouteKindValues,
+  type GatewayDeliveryTargetKind,
+  type GatewayReplyRouteKind,
+} from '@murphai/gateway-core'
+import {
   isoTimestampSchema,
   pathSchema,
-  timeZoneSchema,
 } from './vault-cli-contracts.js'
-import { isValidAssistantOpaqueId } from './assistant/state-ids.js'
+import {
+  setupAssistantProviderPresetValues,
+} from './assistant/openai-compatible-provider-presets.js'
+import {
+  assistantExecutionDriverValues,
+  assistantResumeKindValues,
+  assistantWebSearchModeValues,
+  resolveAssistantRuntimeTarget,
+} from './assistant/target-runtime.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -25,15 +49,8 @@ export const assistantReasoningEffortValues = [
 ] as const
 
 export const assistantChatProviderValues = ['codex-cli', 'openai-compatible'] as const
-export const assistantChannelDeliveryTargetKindValues = [
-  'explicit',
-  'participant',
-  'thread',
-] as const
-export const assistantBindingDeliveryKindValues = [
-  'participant',
-  'thread',
-] as const
+export const assistantChannelDeliveryTargetKindValues = gatewayDeliveryTargetKindValues
+export const assistantBindingDeliveryKindValues = gatewayReplyRouteKindValues
 export const assistantTranscriptEntryKindValues = [
   'user',
   'assistant',
@@ -66,12 +83,7 @@ export const assistantTurnEventKindValues = [
   'failed',
   'completed',
 ] as const
-export const assistantCronScheduleKindValues = [
-  'at',
-  'every',
-  'cron',
-  'dailyLocal',
-] as const
+export const assistantCronScheduleKindValues = automationScheduleKindValues
 export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
 export const assistantCronRunStatusValues = [
   'succeeded',
@@ -195,8 +207,11 @@ export const assistantOpenAiCompatibleModelTargetSchema = z
     endpoint: z.string().min(1).nullable().default(null),
     headers: assistantHeadersSchema.nullable().default(null),
     model: z.string().min(1).nullable().default(null),
+    presetId: z.enum(setupAssistantProviderPresetValues).nullable().default(null),
     providerName: z.string().min(1).nullable().default(null),
     reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
+    webSearch: z.enum(assistantWebSearchModeValues).nullable().default(null),
+    zeroDataRetention: z.boolean().optional(),
   })
   .strict()
 
@@ -218,12 +233,21 @@ export const assistantSessionResumeStateSchema = z
   })
   .strict()
 
-export const assistantSessionIdSchema = z.string().refine(
-  (value) => isValidAssistantOpaqueId(value),
-  'Assistant session ids must be opaque runtime ids without path separators or traversal segments.',
-)
+function createAssistantOpaqueIdSchema(kind: string) {
+  return z.string().trim().refine(
+    (value) => normalizeAssistantOpaqueId(value) !== null,
+    `Assistant ${kind} ids must be opaque runtime ids without path separators or traversal segments.`,
+  )
+}
+
+export const assistantSessionIdSchema = createAssistantOpaqueIdSchema('session')
+export const assistantTurnIdSchema = createAssistantOpaqueIdSchema('turn')
+export const assistantOutboxIntentIdSchema = createAssistantOpaqueIdSchema('outbox intent')
+export const assistantCronJobIdSchema = createAssistantOpaqueIdSchema('cron job')
+export const assistantCronRunIdSchema = createAssistantOpaqueIdSchema('cron run')
 
 export const assistantProviderSessionOptionsSchema = z.object({
+  continuityFingerprint: z.string().min(1),
   model: z.string().min(1).nullable(),
   reasoningEffort: z.string().min(1).nullable().default(null),
   sandbox: z.enum(assistantSandboxValues).nullable(),
@@ -233,17 +257,21 @@ export const assistantProviderSessionOptionsSchema = z.object({
   codexHome: z.string().min(1).nullable().optional(),
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
+  executionDriver: z.enum(assistantExecutionDriverValues),
   providerName: z.string().min(1).nullable().optional(),
+  presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
+  resumeKind: z.enum(assistantResumeKindValues).nullable(),
   headers: assistantHeadersSchema.nullable().optional(),
+  webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
+  zeroDataRetention: z.boolean().optional(),
 })
 
 export const assistantSessionSecretsSchema = z
   .object({
     schema: z.literal('murph.assistant-session-secrets.v1'),
-    sessionId: z.string().min(1),
+    sessionId: assistantSessionIdSchema,
     updatedAt: isoTimestampSchema,
     providerHeaders: assistantHeadersSchema.nullable().default(null),
-    providerBindingHeaders: assistantHeadersSchema.nullable().default(null),
   })
   .strict()
 
@@ -262,14 +290,17 @@ export const assistantProviderFailoverRouteSchema = z
     baseUrl: z.string().min(1).nullable().optional(),
     apiKeyEnv: z.string().min(1).nullable().optional(),
     providerName: z.string().min(1).nullable().optional(),
+    presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
     headers: assistantHeadersSchema.nullable().optional(),
+    webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
+    zeroDataRetention: z.boolean().optional(),
     cooldownMs: z.number().int().positive().nullable().default(null),
   })
   .strict()
 
 export const assistantAliasStoreSchema = z
   .object({
-    version: z.literal(2),
+    version: z.literal(1),
     aliases: z.record(z.string(), assistantSessionIdSchema),
     conversationKeys: z.record(z.string(), assistantSessionIdSchema),
   })
@@ -301,7 +332,7 @@ export const assistantProviderBindingSchema = z
 
 export const assistantPersistedSessionSchema = z
   .object({
-    schema: z.literal('murph.assistant-session.v4'),
+    schema: z.literal('murph.assistant-session.v1'),
     sessionId: assistantSessionIdSchema,
     target: assistantModelTargetSchema,
     resumeState: assistantSessionResumeStateSchema.nullable().default(null),
@@ -343,11 +374,40 @@ function buildAssistantRuntimeSession(
   value: AssistantPersistedSessionRecord,
 ): AssistantSession {
   const provider = value.target.adapter
+  const resolvedRuntimeTarget = resolveAssistantRuntimeTarget(
+    value.target.adapter === 'openai-compatible'
+      ? {
+          provider: 'openai-compatible',
+          apiKeyEnv: value.target.apiKeyEnv,
+          baseUrl: value.target.endpoint,
+          headers: value.target.headers,
+          model: value.target.model,
+          presetId: value.target.presetId,
+          providerName: value.target.providerName,
+          reasoningEffort: value.target.reasoningEffort,
+          webSearch: value.target.webSearch,
+          zeroDataRetention: value.target.zeroDataRetention === true,
+        }
+      : {
+          provider: 'codex-cli',
+          approvalPolicy: value.target.approvalPolicy,
+          codexHome: value.target.codexHome,
+          model: value.target.model,
+          oss: value.target.oss,
+          profile: value.target.profile,
+          reasoningEffort: value.target.reasoningEffort,
+          sandbox: value.target.sandbox,
+        },
+  )
   const providerOptions =
     value.target.adapter === 'openai-compatible'
       ? assistantProviderSessionOptionsSchema.parse({
+          continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
+          executionDriver: resolvedRuntimeTarget.executionDriver,
           model: value.target.model,
+          presetId: resolvedRuntimeTarget.presetId,
           reasoningEffort: value.target.reasoningEffort,
+          resumeKind: resolvedRuntimeTarget.resumeKind,
           sandbox: null,
           approvalPolicy: null,
           profile: null,
@@ -358,10 +418,18 @@ function buildAssistantRuntimeSession(
             ? { providerName: value.target.providerName }
             : {}),
           ...(value.target.headers ? { headers: value.target.headers } : {}),
+          ...(value.target.webSearch ? { webSearch: value.target.webSearch } : {}),
+          ...(resolvedRuntimeTarget.supportsZeroDataRetention &&
+          value.target.zeroDataRetention
+            ? { zeroDataRetention: true }
+            : {}),
         })
       : assistantProviderSessionOptionsSchema.parse({
+          continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
+          executionDriver: resolvedRuntimeTarget.executionDriver,
           model: value.target.model,
           reasoningEffort: value.target.reasoningEffort,
+          resumeKind: resolvedRuntimeTarget.resumeKind,
           sandbox: value.target.sandbox,
           approvalPolicy: value.target.approvalPolicy,
           profile: value.target.profile,
@@ -409,12 +477,17 @@ function normalizeAssistantSessionResumeState(
       ? value.resumeRouteId.trim()
       : null
 
-  return providerSessionId || resumeRouteId
-    ? assistantSessionResumeStateSchema.parse({
-        providerSessionId,
-        resumeRouteId,
-      })
-    : null
+  // A stored route id without an upstream provider session id cannot resume
+  // anything safely, so greenfield runtime sessions only keep fully resumable
+  // state.
+  if (!providerSessionId) {
+    return null
+  }
+
+  return assistantSessionResumeStateSchema.parse({
+    providerSessionId,
+    resumeRouteId,
+  })
 }
 
 export const assistantTranscriptEntrySchema = z.object({
@@ -470,7 +543,7 @@ export const assistantTurnTimelineEventSchema = z
 export const assistantTurnReceiptSchema = z
   .object({
     schema: z.literal('murph.assistant-turn-receipt.v1'),
-    turnId: z.string().min(1),
+    turnId: assistantTurnIdSchema,
     sessionId: assistantSessionIdSchema,
     provider: z.enum(assistantChatProviderValues),
     providerModel: z.string().min(1).nullable(),
@@ -486,7 +559,7 @@ export const assistantTurnReceiptSchema = z
       'blocked',
       'failed',
     ]),
-    deliveryIntentId: z.string().min(1).nullable(),
+    deliveryIntentId: assistantOutboxIntentIdSchema.nullable(),
     startedAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     completedAt: isoTimestampSchema.nullable(),
@@ -500,9 +573,9 @@ export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
-    intentId: z.string().min(1),
+    intentId: assistantOutboxIntentIdSchema,
     sessionId: assistantSessionIdSchema,
-    turnId: z.string().min(1),
+    turnId: assistantTurnIdSchema,
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     lastAttemptAt: isoTimestampSchema.nullable(),
@@ -538,9 +611,9 @@ export const assistantDiagnosticEventSchema = z
     kind: z.string().min(1),
     message: z.string().min(1),
     code: z.string().min(1).nullable(),
-    sessionId: z.string().min(1).nullable(),
-    turnId: z.string().min(1).nullable(),
-    intentId: z.string().min(1).nullable(),
+    sessionId: assistantSessionIdSchema.nullable(),
+    turnId: assistantTurnIdSchema.nullable(),
+    intentId: assistantOutboxIntentIdSchema.nullable(),
     dataJson: z.string().nullable(),
   })
   .strict()
@@ -680,10 +753,14 @@ export const assistantStatusRunLockSchema = z
 export const assistantStatusAutomationSchema = z
   .object({
     inboxScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
-    autoReplyScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
-    autoReplyChannels: z.array(z.string().min(1)),
-    autoReplyBacklogChannels: z.array(z.string().min(1)),
-    autoReplyPrimed: z.boolean(),
+    autoReply: z.array(
+      z
+        .object({
+          channel: z.string().min(1),
+          cursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
+        })
+        .strict(),
+    ),
     updatedAt: isoTimestampSchema.nullable(),
   })
   .strict()
@@ -749,44 +826,18 @@ export const assistantDoctorResultSchema = z
   })
   .strict()
 
-export const assistantCronAtScheduleSchema = z
-  .object({
-    kind: z.literal('at'),
-    at: isoTimestampSchema,
-  })
+export const assistantCronAtScheduleSchema = automationScheduleAtSchema
+
+export const assistantCronEveryScheduleSchema = automationScheduleEverySchema
+
+export const assistantCronExpressionScheduleSchema = automationScheduleCronSchema
+  .omit({ timeZone: true })
   .strict()
 
-export const assistantCronEveryScheduleSchema = z
-  .object({
-    kind: z.literal('every'),
-    everyMs: z.number().int().positive(),
-  })
-  .strict()
+export const assistantCronExpressionScheduleInputSchema = assistantCronExpressionScheduleSchema
 
-export const assistantCronExpressionScheduleSchema = z
-  .object({
-    kind: z.literal('cron'),
-    expression: z.string().min(1),
-    timeZone: timeZoneSchema,
-  })
-  .strict()
-
-export const assistantCronExpressionScheduleInputSchema = z
-  .object({
-    kind: z.literal('cron'),
-    expression: z.string().min(1),
-    timeZone: timeZoneSchema.optional(),
-  })
-  .strict()
-
-export const assistantCronDailyLocalScheduleSchema = z
-  .object({
-    kind: z.literal('dailyLocal'),
-    localTime: z
-      .string()
-      .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u, 'Expected a 24-hour HH:MM time.'),
-    timeZone: timeZoneSchema,
-  })
+export const assistantCronDailyLocalScheduleSchema = automationScheduleDailyLocalSchema
+  .omit({ timeZone: true })
   .strict()
 
 export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
@@ -803,28 +854,21 @@ export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
   assistantCronDailyLocalScheduleSchema,
 ])
 
-export const assistantCronTargetSchema = z
-  .object({
-    sessionId: z.string().min(1).nullable(),
-    alias: z.string().min(1).nullable(),
+const assistantCronRouteSchema = automationRouteSchema
+  .omit({ channel: true })
+  .extend({
     channel: z.string().min(1).nullable(),
-    identityId: z.string().min(1).nullable(),
-    participantId: z.string().min(1).nullable(),
-    sourceThreadId: z.string().min(1).nullable(),
-    deliveryTarget: z.string().min(1).nullable(),
-    deliverResponse: z.boolean(),
   })
   .strict()
 
-export const assistantSelfDeliveryTargetSchema = z
-  .object({
-    channel: z.string().min(1),
-    identityId: z.string().min(1).nullable(),
-    participantId: z.string().min(1).nullable(),
-    sourceThreadId: z.string().min(1).nullable(),
-    deliveryTarget: z.string().min(1).nullable(),
+export const assistantCronTargetSchema = assistantCronRouteSchema
+  .extend({
+    sessionId: assistantSessionIdSchema.nullable(),
+    alias: z.string().min(1).nullable(),
   })
   .strict()
+
+export const assistantSelfDeliveryTargetSchema = automationRouteSchema
 
 export const assistantCronJobStateSchema = z
   .object({
@@ -848,7 +892,7 @@ export const assistantCronFoodAutoLogSchema = z
 export const assistantCronJobSchema = z
   .object({
     schema: z.literal('murph.assistant-cron-job.v1'),
-    jobId: z.string().min(1),
+    jobId: assistantCronJobIdSchema,
     name: z.string().min(1),
     enabled: z.boolean(),
     keepAfterRun: z.boolean(),
@@ -865,13 +909,13 @@ export const assistantCronJobSchema = z
 export const assistantCronRunRecordSchema = z
   .object({
     schema: z.literal('murph.assistant-cron-run.v1'),
-    runId: z.string().min(1),
-    jobId: z.string().min(1),
+    runId: assistantCronRunIdSchema,
+    jobId: assistantCronJobIdSchema,
     trigger: z.enum(assistantCronTriggerValues),
     status: z.enum(assistantCronRunStatusValues),
     startedAt: isoTimestampSchema,
     finishedAt: isoTimestampSchema,
-    sessionId: z.string().min(1).nullable(),
+    sessionId: assistantSessionIdSchema.nullable(),
     response: z.string().nullable(),
     responseLength: z.number().int().nonnegative(),
     error: z.string().nullable(),
@@ -910,7 +954,7 @@ export const assistantAskResultSchema = z.object({
   session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
   deliveryDeferred: z.boolean().default(false),
-  deliveryIntentId: z.string().min(1).nullable().default(null),
+  deliveryIntentId: assistantOutboxIntentIdSchema.nullable().default(null),
   deliveryError: assistantDeliveryErrorSchema.nullable(),
 })
 
@@ -994,12 +1038,12 @@ export const assistantCronRunsResultSchema = z.object({
   stateRoot: pathSchema,
   jobsPath: pathSchema,
   runsRoot: pathSchema,
-  jobId: z.string().min(1),
+  jobId: assistantCronJobIdSchema,
   runs: z.array(assistantCronRunRecordSchema),
 })
 
 export const assistantCronTargetSnapshotSchema = z.object({
-  jobId: z.string().min(1),
+  jobId: assistantCronJobIdSchema,
   jobName: z.string().min(1),
   target: assistantCronTargetSchema,
   bindingDelivery: assistantBindingDeliverySchema.nullable(),
@@ -1104,14 +1148,18 @@ export const assistantAutomationCursorSchema = z.object({
   captureId: z.string().min(1),
 })
 
+export const assistantAutoReplyChannelStateSchema = z
+  .object({
+    channel: z.string().min(1),
+    cursor: assistantAutomationCursorSchema.nullable(),
+  })
+  .strict()
+
 export const assistantAutomationStateSchema = z
   .object({
-    version: z.literal(2),
+    version: z.literal(1),
     inboxScanCursor: assistantAutomationCursorSchema.nullable(),
-    autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
-    autoReplyChannels: z.array(z.string().min(1)),
-    autoReplyBacklogChannels: z.array(z.string().min(1)).default([]),
-    autoReplyPrimed: z.boolean(),
+    autoReply: z.array(assistantAutoReplyChannelStateSchema),
     updatedAt: isoTimestampSchema,
   })
   .strict()
@@ -1211,7 +1259,11 @@ export type AssistantSessionShowResult = z.infer<
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
-export type AssistantCronTarget = z.infer<typeof assistantCronTargetSchema>
+export type AssistantCronTarget = Omit<AutomationRoute, 'channel'> & {
+  alias: string | null
+  channel: string | null
+  sessionId: string | null
+}
 export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
 export type AssistantCronFoodAutoLog = z.infer<typeof assistantCronFoodAutoLogSchema>
 export type AssistantCronJob = z.infer<typeof assistantCronJobSchema>
@@ -1257,9 +1309,7 @@ export type AssistantCronPresetShowResult = z.infer<
 export type AssistantCronPresetInstallResult = z.infer<
   typeof assistantCronPresetInstallResultSchema
 >
-export type AssistantSelfDeliveryTarget = z.infer<
-  typeof assistantSelfDeliveryTargetSchema
->
+export type AssistantSelfDeliveryTarget = AutomationRoute
 export type AssistantSelfDeliveryTargetListResult = z.infer<
   typeof assistantSelfDeliveryTargetListResultSchema
 >
@@ -1302,12 +1352,15 @@ export type AssistantApprovalPolicy =
   (typeof assistantApprovalPolicyValues)[number]
 export type AssistantReasoningEffort =
   (typeof assistantReasoningEffortValues)[number]
+export type AssistantExecutionDriver =
+  (typeof assistantExecutionDriverValues)[number]
+export type AssistantResumeKind = (typeof assistantResumeKindValues)[number]
+export type AssistantWebSearchMode =
+  (typeof assistantWebSearchModeValues)[number]
 export type AssistantChatProvider =
   (typeof assistantChatProviderValues)[number]
-export type AssistantChannelDeliveryTargetKind =
-  (typeof assistantChannelDeliveryTargetKindValues)[number]
-export type AssistantBindingDeliveryKind =
-  (typeof assistantBindingDeliveryKindValues)[number]
+export type AssistantChannelDeliveryTargetKind = GatewayDeliveryTargetKind
+export type AssistantBindingDeliveryKind = GatewayReplyRouteKind
 export type AssistantTranscriptEntryKind =
   (typeof assistantTranscriptEntryKindValues)[number]
 export type AssistantTurnTrigger =
@@ -1319,8 +1372,7 @@ export type AssistantTurnEventKind =
   (typeof assistantTurnEventKindValues)[number]
 export type AssistantOutboxIntentStatus =
   (typeof assistantOutboxIntentStatusValues)[number]
-export type AssistantCronScheduleKind =
-  (typeof assistantCronScheduleKindValues)[number]
+export type AssistantCronScheduleKind = AutomationScheduleKind
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
 export type AssistantCronRunStatus =
   (typeof assistantCronRunStatusValues)[number]

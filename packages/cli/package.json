@@ -1,6 +1,6 @@
 {
   "name": "@murphai/murph",
-  "version": "0.1.18",
+  "version": "0.2.13",
   "private": false,
   "description": "Murph is a personal health assistant you run locally. Install this package to get the murph CLI.",
   "license": "Apache-2.0",
@@ -40,20 +40,28 @@
     "murph": "dist/bin.js"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   },
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json",
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --force",
     "gen:config-schema": "tsx ./scripts/generate-incur-config-schema.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
-    "test": "pnpm --dir ../.. build:test-runtime:prepared && tsx ./scripts/verify-package-shape.ts && MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
+    "test": "pnpm test:source",
+    "test:source": "pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
+    "test:coverage": "pnpm test:source:coverage",
+    "test:source:coverage": "pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
+    "verify:prepared-runtime": "pnpm --dir ../.. build:test-runtime:prepared",
+    "verify:package-shape": "pnpm build && node --import=tsx ./scripts/verify-package-shape.ts",
+    "test:built-runtime": "MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
+    "test:built-runtime:coverage": "MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
+    "verify": "pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime",
+    "verify:coverage": "pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime:coverage",
     "prepack": "pnpm build"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.35",
     "@ai-sdk/openai-compatible": "^2.0.35",
     "@mozilla/readability": "0.6.0",
-    "@photon-ai/imessage-kit": "2.1.2",
     "@murphai/assistant-cli": "workspace:*",
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/assistantd": "workspace:*",
@@ -65,7 +73,6 @@
     "@murphai/importers": "workspace:*",
     "@murphai/inbox-services": "workspace:*",
     "@murphai/inboxd": "workspace:*",
-    "@murphai/inboxd-imessage": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/parsers": "workspace:*",
@@ -98,7 +105,6 @@
     "@murphai/importers",
     "@murphai/inbox-services",
     "@murphai/inboxd",
-    "@murphai/inboxd-imessage",
     "@murphai/messaging-ingress",
     "@murphai/operator-config",
     "@murphai/parsers",

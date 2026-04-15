@@ -25,7 +25,7 @@ function createSession(
   overrides: Partial<AssistantSession> = {},
 ): AssistantSession {
   return {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'asst_demo',
     target: {
       adapter: 'openai-compatible',
@@ -33,12 +33,15 @@ function createSession(
       endpoint: 'http://127.0.0.1:11434/v1',
       headers: null,
       model: null,
+      presetId: null,
       providerName: 'ollama',
       reasoningEffort: null,
+      webSearch: null,
     },
     resumeState: null,
     provider: 'openai-compatible',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-ui-logging',
       model: null,
       reasoningEffort: null,
       sandbox: null,
@@ -47,7 +50,9 @@ function createSession(
       oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKeyEnv: 'OLLAMA_API_KEY',
+      executionDriver: 'openai-compatible',
       providerName: 'ollama',
+      resumeKind: null,
       headers: null,
     },
     alias: 'chat:demo',
@@ -135,35 +140,26 @@ test('assistant CLI foreground logging keeps safe auto-reply summaries while hid
   )
 })
 
-test('assistant CLI foreground logging normalizes scan priming hints', () => {
+test('assistant CLI foreground logging summarizes reply scans', () => {
   assert.equal(
     formatAssistantRunEventForTerminal({
-      type: 'reply.scan.primed',
+      type: 'reply.scan.started',
     }),
-    'primed channel auto-reply',
+    'scanning channel auto-reply:',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      details:
-        'no existing captures yet; auto-reply will start with the next inbound message',
-      type: 'reply.scan.primed',
+      details: '2 capture(s)',
+      type: 'reply.scan.started',
     }),
-    'primed channel auto-reply: no existing captures yet; auto-reply will start with the next inbound message',
+    'scanning channel auto-reply: 2 capture(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      details:
-        'processing existing 4 capture backlog before switching to new inbound messages',
-      type: 'reply.scan.primed',
+      details: '0 capture(s)',
+      type: 'reply.scan.started',
     }),
-    'primed channel auto-reply: processing existing 4 capture backlog before switching to new inbound messages',
-  )
-  assert.equal(
-    formatAssistantRunEventForTerminal({
-      details: 'starting after 4 existing captures',
-      type: 'reply.scan.primed',
-    }),
-    'primed channel auto-reply: starting after latest existing capture',
+    null,
   )
 })
 
@@ -386,11 +382,11 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
   )
   assert.equal(
     formatInboxRunEventForTerminal({
-      connectorId: 'connector_imessage',
-      source: 'imessage',
+      connectorId: 'connector_telegram_watch',
+      source: 'telegram',
       type: 'connector.watch.started',
     }),
-    'iMessage connector watching for new messages',
+    'Telegram connector watching for new messages',
   )
   assert.equal(
     formatInboxRunEventForTerminal({
@@ -414,10 +410,20 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
   assert.equal(
     formatInboxRunEventForTerminal({
         capture: {
+          actor: {
+            displayName: null,
+            id: null,
+            isSelf: false,
+          },
           externalId: 'capture_1',
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'telegram',
           attachments: [{ kind: 'document' }],
+          raw: {},
+          text: null,
+          thread: {
+            id: 'thread_1',
+          },
         },
       connectorId: 'connector_telegram',
       phase: 'watch',
@@ -439,6 +445,7 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
           externalId: 'capture_2',
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'telegram',
+          raw: {},
           text: '  Need a quick follow-up on the parser status.  ',
           thread: {
             id: 'thread_123',
@@ -492,6 +499,7 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
           externalId: 'capture_signal',
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'signal' as never,
+          raw: {},
           text: `${'x'.repeat(120)}   `,
           thread: {
             id: 'thread_signal_123',
@@ -521,7 +529,12 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
           attachments: [],
           externalId: 'capture_email_self',
           occurredAt: '2026-04-08T00:00:00.000Z',
+          raw: {},
           source: 'email',
+          text: null,
+          thread: {
+            id: '   ',
+          },
         },
         connectorId: 'connector_email',
         phase: 'watch',
@@ -538,10 +551,20 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
     formatInboxRunEventForTerminal(
       {
         capture: {
+          actor: {
+            displayName: null,
+            id: null,
+            isSelf: false,
+          },
           attachments: [{ kind: 'image' }],
           externalId: 'capture_attachment_only',
           occurredAt: '2026-04-08T00:00:00.000Z',
+          raw: {},
           source: 'telegram',
+          text: null,
+          thread: {
+            id: '   ',
+          },
         },
         connectorId: 'connector_telegram',
         phase: 'watch',

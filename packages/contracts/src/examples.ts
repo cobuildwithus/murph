@@ -14,8 +14,6 @@ import type {
   GoalFrontmatter,
   InboxCaptureRecord,
   JournalDayFrontmatter,
-  ProfileCurrentFrontmatter,
-  ProfileSnapshotRecord,
   ProviderFrontmatter,
   RecipeFrontmatter,
   ProtocolFrontmatter,
@@ -40,7 +38,6 @@ type HealthFrontmatterExamples = {
   familyMember: FamilyMemberFrontmatter;
   geneticVariant: GeneticVariantFrontmatter;
   goal: GoalFrontmatter;
-  profileCurrent: ProfileCurrentFrontmatter;
   protocol: ProtocolFrontmatter;
 };
 
@@ -56,15 +53,15 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
   {
     schemaVersion: "murph.inbox-capture.v1",
     captureId: "cap_3f9f0d778d89c3beec6b8a13dc",
-    identityKey: "imessage\u0000self\u0000msg-123",
+    identityKey: "telegram\u0000bot\u0000msg-123",
     eventId: "evt_01JNV41B483QH9GQ1Y08D7RMTA",
-    source: "imessage",
-    accountId: "self",
+    source: "telegram",
+    accountId: "bot",
     externalId: "msg-123",
     thread: {
-      id: "chat-1",
+      id: "chat-123",
       title: "Breakfast",
-      isDirect: false,
+      isDirect: true,
     },
     actor: {
       id: "contact-1",
@@ -76,14 +73,14 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
     receivedAt: "2026-03-12T08:16:04Z",
     text: "Breakfast photo and note",
     raw: {
-      source: "imessage",
+      source: "telegram",
       attachmentCount: 1,
     },
-    sourceDirectory: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc",
-    envelopePath: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
+    sourceDirectory: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc",
+    envelopePath: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
     rawRefs: [
-      "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
-      "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
+      "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
+      "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
     ],
     attachments: [
       {
@@ -95,7 +92,7 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
         originalPath: null,
         fileName: "breakfast.jpg",
         byteSize: 12345,
-        storedPath: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
+        storedPath: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
         sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     ],
@@ -125,7 +122,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     source: "import",
     title: "Primary care visit summary",
     tags: ["clinic", "pdf"],
-    relatedIds: ["doc_01JNV41Q9MN0S1R6ZMW7FGD9DG"],
+    links: [{ type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" }],
     rawRefs: ["raw/documents/2026/03/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/visit-summary.pdf"],
     attachments: [
       {
@@ -138,7 +135,6 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
       },
     ],
     documentId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG",
-    documentPath: "raw/documents/2026/03/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/visit-summary.pdf",
     mimeType: "application/pdf",
     providerId: "prov_01JNV422Y2M5ZBV64ZP4N1DRB1",
   },
@@ -153,7 +149,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     title: "Lunch bowl",
     note: "Chicken, rice, and avocado.",
     tags: ["meal", "lunch"],
-    relatedIds: ["meal_01JNV42NP0KH6JQXMZM1G0V6SE"],
+    links: [{ type: "related_to", targetId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE" }],
     rawRefs: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
     attachments: [
       {
@@ -166,8 +162,20 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
       },
     ],
     mealId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
-    photoPaths: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
-    audioPaths: [],
+    nutrition: {
+      totals: {
+        calories: 640,
+        proteinGrams: 38,
+        carbsGrams: 52,
+        fatGrams: 28,
+        fiberGrams: 9,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "Estimated from photo and note.",
+      },
+    },
   },
   {
     schemaVersion: "murph.event.v1",
@@ -255,7 +263,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     dayKey: "2026-03-12",
     source: "manual",
     title: "Magnesium trial started",
-    relatedIds: ["exp_01JNV4458HYPP53JDQCBP1QJFM"],
+    links: [{ type: "related_to", targetId: "exp_01JNV4458HYPP53JDQCBP1QJFM" }],
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
     experimentSlug: "magnesium-sleep",
     phase: "start",
@@ -446,7 +454,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     source: "manual",
     title: "20-minute sauna",
     note: "20 min sauna after lifting.",
-    relatedIds: ["prot_01JNV422Y2M5ZBV64ZP4N1DRB1"],
+    links: [{ type: "related_to", targetId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1" }],
     interventionType: "sauna",
     durationMinutes: 20,
     protocolId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1",
@@ -596,43 +604,6 @@ export const exampleAssessmentResponses: readonly Readonly<AssessmentResponseRec
   },
 ]);
 
-export const exampleProfileSnapshots: readonly Readonly<ProfileSnapshotRecord>[] = Object.freeze([
-  {
-    schemaVersion: "murph.profile-snapshot.v1",
-    id: "psnap_01JNV42F34M22V2PE9Q4KQ7H1X",
-    recordedAt: "2026-03-12T13:05:00Z",
-    source: "assessment_projection",
-    sourceAssessmentIds: ["asmt_01JNV40W8VFYQ2H7CMJY5A9R4K"],
-    sourceEventIds: ["evt_01JNV46VFEV8Q05M8NSEJ2MZXG"],
-    profile: {
-      narrative: {
-        summary: "Sleep is a primary concern and caffeine load is likely contributing.",
-        highlights: ["Sleep latency is elevated", "Caffeine use remains high"],
-      },
-      goals: {
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-      },
-      unitPreferences: {
-        weight: "lb",
-        distance: "mi",
-        bodyMeasurement: "in",
-      },
-      custom: {
-        sleep: {
-          averageHours: 6.5,
-          difficultyFallingAsleep: true,
-        },
-        nutrition: {
-          pattern: "omnivore",
-        },
-        substances: {
-          caffeine: "3 servings daily",
-        },
-      },
-    },
-  },
-]);
-
 export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.freeze({
   core: {
     schemaVersion: "murph.frontmatter.core.v1",
@@ -673,6 +644,20 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     vendor: "Neighborhood Acai Bar",
     location: "Brooklyn, NY",
     serving: "1 bowl",
+    nutrition: {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "label",
+        confidence: "medium",
+        sourceDetail: "Menu board plus saved toppings.",
+      },
+    },
     aliases: ["regular acai bowl", "usual acai bowl"],
     ingredients: [
       "acai base",
@@ -779,20 +764,6 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
 });
 
 export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples> = Object.freeze({
-  profileCurrent: {
-    schemaVersion: "murph.frontmatter.profile-current.v1",
-    docType: "profile_current",
-    snapshotId: "psnap_01JNV42F34M22V2PE9Q4KQ7H1X",
-    updatedAt: "2026-03-12T13:05:00Z",
-    sourceAssessmentIds: ["asmt_01JNV40W8VFYQ2H7CMJY5A9R4K"],
-    sourceEventIds: ["evt_01JNV46VFEV8Q05M8NSEJ2MZXG"],
-    topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-    unitPreferences: {
-      weight: "lb",
-      distance: "mi",
-      bodyMeasurement: "in",
-    },
-  },
   goal: {
     schemaVersion: "murph.frontmatter.goal.v1",
     docType: "goal",
@@ -957,6 +928,17 @@ kind: acai bowl
 vendor: Neighborhood Acai Bar
 location: Brooklyn, NY
 serving: 1 bowl
+nutrition:
+  perServing:
+    calories: 540
+    proteinGrams: 11
+    carbsGrams: 68
+    fatGrams: 24
+    fiberGrams: 11
+  provenance:
+    source: label
+    confidence: medium
+    sourceDetail: Menu board plus saved toppings.
 aliases:
   - regular acai bowl
   - usual acai bowl

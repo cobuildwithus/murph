@@ -1,5 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
-import { statSync } from "node:fs";
+import { accessSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
 
 export interface LocalStatePathInput {
   currentPath: string;
@@ -7,20 +7,37 @@ export interface LocalStatePathInput {
 
 export function hasLocalStatePathSync(input: LocalStatePathInput): boolean {
   try {
-    statSync(input.currentPath);
+    accessSync(input.currentPath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+
+    throw error;
   }
 }
 
 export async function hasLocalStatePath(input: LocalStatePathInput): Promise<boolean> {
   try {
-    await stat(input.currentPath);
+    await access(input.currentPath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+
+    throw error;
   }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT",
+  );
 }
 
 export async function readLocalStateTextFile(

@@ -12,7 +12,7 @@ engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  - '@cobuild/review-gpt@0.5.51'
+  - '@cobuild/review-gpt@0.5.62'
   - next@16.2.2
   - '@next/env@16.2.2'
   - '@next/swc-darwin-arm64@16.2.2'
@@ -23,7 +23,7 @@ minimumReleaseAgeExclude:
   - '@next/swc-linux-x64-musl@16.2.2'
   - '@next/swc-win32-arm64-msvc@16.2.2'
   - '@next/swc-win32-x64-msvc@16.2.2'
-nodeVersion: 22.16.0
+nodeVersion: 24.14.1
 packageManagerStrictVersion: true
 savePrefix: ''
 trustPolicy: no-downgrade

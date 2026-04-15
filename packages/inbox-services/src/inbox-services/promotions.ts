@@ -8,14 +8,13 @@ import {
   readVersionedJsonStateFile,
   writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
-import { resolveAssistantVaultPath } from '../vault-paths.js'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   inboxPromotionStoreSchema,
   inboxPreserveDocumentAttachmentsResultSchema,
   type InboxPromotionEntry,
   type InboxPreserveDocumentAttachmentsResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import type { QueryRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CanonicalAttachmentPromotionResult,
@@ -26,8 +25,10 @@ import type {
   CoreRuntimeModule,
   InboxPaths,
   InboxRuntimeModule,
+  PromoteInput,
   PromotionStore,
   PromotionTarget,
+  QueryRuntimeModule,
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
@@ -45,12 +46,6 @@ const INBOX_PROMOTION_STORE_SCHEMA_VERSION = 1
 const RAW_MEALS_DIRECTORY = path.posix.join('raw', 'meals')
 const RAW_DOCUMENTS_DIRECTORY = path.posix.join('raw', 'documents')
 
-interface PromoteInput {
-  captureId: string
-  requestId: string | null
-  vault: string
-}
-
 interface PromotionScope<TPrepared, TDerived> {
   input: PromoteInput
   paths: InboxPaths
@@ -59,6 +54,12 @@ interface PromotionScope<TPrepared, TDerived> {
   derived: TDerived
   promotionStore: PromotionStore
   existing: InboxPromotionEntry | undefined
+}
+
+interface CanonicalPromotionMetadata {
+  note: string | null
+  occurredAt: string | null
+  source: string | null
 }
 
 export async function readPromotionsByCapture(
@@ -144,13 +145,17 @@ export async function promoteCanonicalAttachmentImport<
         promotionStore,
         existing,
       }) => {
+        const metadata = resolveCanonicalPromotionMetadata({
+          capture,
+          overrides: input.input,
+        })
         const attachment = input.findRequiredAttachment(capture)
         if (!attachment) {
           throw input.missingAttachmentError()
         }
 
         const canonicalPromotion = await findCanonicalPromotionMatch({
-          capture,
+          captureId: capture.captureId,
           absoluteVaultRoot: paths.absoluteVaultRoot,
           spec: input.canonicalPromotionSpec,
           context: await input.buildCanonicalMatchContext({
@@ -159,6 +164,7 @@ export async function promoteCanonicalAttachmentImport<
             prepared,
             attachment,
           }),
+          metadata,
         })
         const promotion = await reconcileCanonicalImportPromotion({
           paths,
@@ -168,6 +174,7 @@ export async function promoteCanonicalAttachmentImport<
           clock: input.clock,
           target: input.target,
           canonicalPromotion,
+          note: metadata.note,
           createPromotion: () =>
             input.createPromotion({
               paths,
@@ -221,11 +228,15 @@ export async function preserveCanonicalDocumentAttachments(input: {
   try {
     const capture = requirePromotionCapture(runtime, input.input.captureId)
     const documents: InboxPreserveDocumentAttachmentsResult['documents'] = []
+    const metadata = resolveCanonicalPromotionMetadata({
+      capture,
+      defaultSource: 'import',
+    })
 
     for (const attachment of capture.attachments.filter(isStoredDocumentAttachment)) {
       const title = resolveDocumentAttachmentTitle(attachment)
       const canonicalPromotion = await findCanonicalPromotionMatch({
-        capture,
+        captureId: capture.captureId,
         absoluteVaultRoot: paths.absoluteVaultRoot,
         spec: documentCanonicalPromotionSpec,
         context: {
@@ -236,6 +247,7 @@ export async function preserveCanonicalDocumentAttachments(input: {
           ),
           title,
         },
+        metadata,
       })
 
       if (canonicalPromotion) {
@@ -256,10 +268,10 @@ export async function preserveCanonicalDocumentAttachments(input: {
           attachment,
         ),
         vaultRoot: paths.absoluteVaultRoot,
-        occurredAt: capture.occurredAt,
+        occurredAt: metadata.occurredAt ?? undefined,
         title: title ?? undefined,
-        note: resolveCapturePromotionNote(capture) ?? undefined,
-        source: 'import',
+        note: metadata.note ?? undefined,
+        source: metadata.source ?? undefined,
       })
 
       documents.push({
@@ -333,7 +345,7 @@ export async function readExperimentPromotionEntries(
         status:
           typeof entity.attributes.status === 'string'
             ? entity.attributes.status
-            : entity.status,
+            : entity.status ?? null,
       },
     }))
 }
@@ -617,6 +629,22 @@ function resolveCapturePromotionNote(
   return normalizeNullableString(capture.text)
 }
 
+function resolveCanonicalPromotionMetadata(input: {
+  capture: Pick<RuntimeCaptureRecord, 'text' | 'occurredAt'>
+  overrides?: Pick<PromoteInput, 'note' | 'occurredAt' | 'source'>
+  defaultSource?: string
+}): CanonicalPromotionMetadata {
+  return {
+    note: resolveCapturePromotionNote({
+      text: input.overrides?.note ?? input.capture.text ?? null,
+    }),
+    occurredAt: normalizeNullableString(
+      input.overrides?.occurredAt ?? input.capture.occurredAt ?? null,
+    ),
+    source: normalizeNullableString(input.overrides?.source ?? input.defaultSource ?? 'import'),
+  }
+}
+
 async function readPromotionStore(
   paths: InboxPaths,
 ): Promise<PromotionStore> {
@@ -713,12 +741,12 @@ async function findCanonicalPromotionMatch<
   TManifest extends CanonicalPromotionManifest,
   TContext,
 >(input: {
-  capture: RuntimeCaptureRecord
+  captureId: string
   absoluteVaultRoot: string
   context: TContext
+  metadata: CanonicalPromotionMetadata
   spec: CanonicalPromotionLookupSpec<TManifest, TContext>
 }): Promise<CanonicalPromotionMatch | null> {
-  const note = normalizeNullableString(input.capture.text)
   const matches = (
     await Promise.all(
       (
@@ -739,7 +767,7 @@ async function findCanonicalPromotionMatch<
         if (!input.spec.matchesManifest(manifest, input.context)) {
           return null
         }
-        if (normalizeNullableString(manifest.source) !== 'import') {
+        if (normalizeNullableString(manifest.source) !== input.metadata.source) {
           return null
         }
 
@@ -747,13 +775,13 @@ async function findCanonicalPromotionMatch<
           manifest.provenance,
           'occurredAt',
         )
-        if (occurredAt !== input.capture.occurredAt) {
+        if (occurredAt !== input.metadata.occurredAt) {
           return null
         }
 
         if (
           normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
-          note
+          input.metadata.note
         ) {
           return null
         }
@@ -787,7 +815,7 @@ async function findCanonicalPromotionMatch<
       'INBOX_PROMOTION_DUPLICATE_CANONICAL',
       `Multiple canonical ${input.spec.target} records match this inbox capture.`,
       {
-        captureId: input.capture.captureId,
+        captureId: input.captureId,
         relatedIds: matches.map((match) => match.relatedId),
       },
     )
@@ -851,6 +879,7 @@ async function reconcileCanonicalImportPromotion(input: {
   clock: () => Date
   target: CanonicalPromotionLookupTarget
   canonicalPromotion: CanonicalPromotionMatch | null
+  note: string | null
   createPromotion(): Promise<{
     lookupId: string
     relatedId: string
@@ -874,7 +903,7 @@ async function reconcileCanonicalImportPromotion(input: {
       lookupId: input.canonicalPromotion.lookupId,
       promotedAt: input.canonicalPromotion.promotedAt,
       relatedId: input.canonicalPromotion.relatedId,
-      note: input.capture.text ?? null,
+      note: input.note,
     })
 
     return {
@@ -897,7 +926,7 @@ async function reconcileCanonicalImportPromotion(input: {
     lookupId: createdPromotion.lookupId,
     promotedAt: input.clock().toISOString(),
     relatedId: createdPromotion.relatedId,
-    note: input.capture.text ?? null,
+    note: input.note,
   })
 
   return {

@@ -4,17 +4,21 @@ import type { InboxServices } from '@murphai/inbox-services'
 import { routeInboxCaptureWithModel } from '../../inbox-model-harness.js'
 import { shouldBypassParserWaitForRouting } from '../../inbox-routing-vision.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
-import type { VaultServices } from '@murphai/vault-usecases'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { errorMessage } from '../shared.js'
 import { assistantResultArtifactExists } from './artifacts.js'
 import {
   compareAssistantCaptureOrder,
+  computeAssistantAutomationRetryAt,
   createEmptyInboxScanResult,
   cursorFromCapture,
+  earliestAssistantAutomationWakeAt,
   normalizeScanLimit,
   type AssistantInboxScanResult,
   type AssistantRunEvent,
 } from './shared.js'
+
+const ASSISTANT_ROUTING_PARSER_RETRY_DELAY_MS = 30 * 1000
 
 type AssistantInboxCaptureSummary = Awaited<
   ReturnType<InboxServices['list']>
@@ -23,6 +27,7 @@ type AssistantInboxCaptureSummary = Awaited<
 export interface AssistantRoutingCaptureOutcome {
   advanceCursor: boolean
   details?: string
+  nextWakeAt?: string | null
   status: 'failed' | 'noop' | 'routed' | 'skipped'
   tools?: string[]
 }
@@ -80,6 +85,9 @@ export async function routeAssistantInboxCapture(input: {
       return {
         advanceCursor: false,
         details: 'waiting for parser completion',
+        nextWakeAt: computeAssistantAutomationRetryAt(
+          ASSISTANT_ROUTING_PARSER_RETRY_DELAY_MS,
+        ),
         status: 'skipped',
       }
     }
@@ -185,6 +193,11 @@ export function applyRoutingOutcome(input: {
   outcome: AssistantRoutingCaptureOutcome
   summary: AssistantInboxScanResult
 }): void {
+  input.summary.nextWakeAt = earliestAssistantAutomationWakeAt(
+    input.summary.nextWakeAt,
+    input.outcome.nextWakeAt,
+  )
+
   switch (input.outcome.status) {
     case 'failed':
       input.summary.failed += 1

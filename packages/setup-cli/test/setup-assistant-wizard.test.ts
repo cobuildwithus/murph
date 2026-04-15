@@ -18,6 +18,23 @@ import {
   resolveSetupWizardAssistantSelection,
 } from '../src/setup-assistant-wizard.js'
 
+type InferProviderInput = Parameters<typeof inferSetupWizardAssistantProvider>[0]
+type InferMethodInput = Parameters<typeof inferSetupWizardAssistantMethod>[0]
+
+function expectInferredProvider(
+  input: InferProviderInput,
+  expected: ReturnType<typeof inferSetupWizardAssistantProvider>,
+): void {
+  assert.equal(inferSetupWizardAssistantProvider(input), expected)
+}
+
+function expectInferredMethod(
+  input: InferMethodInput,
+  expected: ReturnType<typeof inferSetupWizardAssistantMethod>,
+): void {
+  assert.equal(inferSetupWizardAssistantMethod(input), expected)
+}
+
 test('setup assistant wizard provider lists and indices normalize to safe defaults', () => {
   assert.equal(getDefaultSetupWizardAssistantPreset(), 'codex')
 
@@ -37,96 +54,96 @@ test('setup assistant wizard provider lists and indices normalize to safe defaul
 })
 
 test('setup assistant wizard infers providers and methods from saved selections', () => {
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'codex',
       oss: false,
-    }),
+    },
     'openai',
   )
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'codex',
       oss: true,
       baseUrl: 'http://127.0.0.1:11434/v1',
-    }),
+    },
     'ollama',
   )
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'openai-compatible',
       providerPreset: 'openrouter',
-    }),
+    },
     'openrouter',
   )
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'openai-compatible',
       baseUrl: 'https://api.openai.com/v1',
-    }),
+    },
     'openai',
   )
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'openai-compatible',
       baseUrl: 'https://example.test/v1',
       providerName: 'custom-provider',
-    }),
+    },
     'custom',
   )
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'skip',
-    }),
+    },
     'skip',
   )
 
-  assert.equal(
-    inferSetupWizardAssistantMethod({
+  expectInferredMethod(
+    {
       preset: 'codex',
       provider: 'openai',
       oss: false,
-    }),
+    },
     'openai-codex',
   )
-  assert.equal(
-    inferSetupWizardAssistantMethod({
+  expectInferredMethod(
+    {
       preset: 'codex',
       provider: 'ollama',
       oss: true,
-    }),
+    },
     'compatible-codex-local',
   )
-  assert.equal(
-    inferSetupWizardAssistantMethod({
+  expectInferredMethod(
+    {
       preset: 'openai-compatible',
       provider: 'openai',
       oss: false,
-    }),
+    },
     'openai-api-key',
   )
-  assert.equal(
-    inferSetupWizardAssistantMethod({
+  expectInferredMethod(
+    {
       preset: 'openai-compatible',
       provider: 'openrouter',
       oss: false,
-    }),
+    },
     'compatible-provider',
   )
-  assert.equal(
-    inferSetupWizardAssistantMethod({
+  expectInferredMethod(
+    {
       preset: 'openai-compatible',
       provider: 'custom',
       oss: false,
-    }),
+    },
     'compatible-endpoint',
   )
-  assert.equal(
-    inferSetupWizardAssistantMethod({
+  expectInferredMethod(
+    {
       preset: 'skip',
       provider: 'skip',
       oss: null,
-    }),
+    },
     'skip',
   )
 })
@@ -264,18 +281,18 @@ test('setup assistant wizard resolves provider selections into saved backend cho
 })
 
 test('setup assistant wizard infers named OpenAI selections from provider names and API keys', () => {
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'openai-compatible',
       providerName: '  openai  ',
-    }),
+    },
     'openai',
   )
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'openai-compatible',
       apiKeyEnv: 'OPENAI_API_KEY',
-    }),
+    },
     'openai',
   )
 })
@@ -371,11 +388,11 @@ test('setup assistant wizard badges reflect provider kind and current selections
 })
 
 test('setup assistant wizard falls back to custom providers when saved endpoint metadata is not a named preset', () => {
-  assert.equal(
-    inferSetupWizardAssistantProvider({
+  expectInferredProvider(
+    {
       preset: 'openai-compatible',
       baseUrl: ' https://example.test/v1 ',
-    }),
+    },
     'custom',
   )
   assert.deepEqual(

@@ -22,7 +22,7 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
 | provider | `prov` | provider page id |
 | food | `food` | regular-food page id |
 | assessment | `asmt` | assessment response id and raw-assessment path id |
-| profile snapshot | `psnap` | append-only profile snapshot id |
+| memory record | `mem` | record id stored inside `bank/memory.md` |
 | goal | `goal` | goal Markdown record id |
 | condition | `cond` | condition Markdown record id |
 | allergy | `alg` | allergy Markdown record id |
@@ -42,8 +42,10 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
   `schemaVersion`, `id`, `action`, `status`, `occurredAt`, `actor`, `commandName`, `summary`, `changes`
 - Assessment response records:
   `schemaVersion`, `id`, `assessmentType`, `recordedAt`, `source`, `rawPath`, `responses`
-- Profile snapshot records:
-  `schemaVersion`, `id`, `recordedAt`, `sourceAssessmentIds`, `sourceEventIds`, `profile`
+- Memory document:
+  `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`
+- Preferences singleton:
+  `schemaVersion`, `updatedAt`, `workoutUnitPreferences`
 - Markdown frontmatter:
   `CORE.md`, journal day pages, experiment pages, provider pages, food pages, workout-format pages, and health registry pages each use a closed or explicitly documented frontmatter schema
 
@@ -53,8 +55,8 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 
 | Kind | Required contract fields |
 | --- | --- |
-| `document` | `documentId`, `documentPath`, `mimeType` |
-| `meal` | `mealId`, `photoPaths`, `audioPaths` |
+| `document` | `documentId`, `mimeType` |
+| `meal` | `mealId` |
 | `symptom` | `symptom`, `intensity` |
 | `note` | `note` |
 | `observation` | `metric`, `value`, `unit` |
@@ -70,11 +72,11 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 | `adverse_effect` | `substance`, `effect`, `severity` |
 | `exposure` | `exposureType`, `substance` |
 
-Shared event envelope fields include `note`, `tags`, canonical `links[]`, compatibility `relatedIds`, `rawRefs`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive; `relatedIds` remains a compatibility projection for legacy/read-side surfaces. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
-
-Legacy file-specific fields such as `documentPath`, `photoPaths`, `audioPaths`, `media`, and nested `workout.media` remain compatibility projections rather than independent sources of truth.
+Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
+
+Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
 
 `activity_session` also carries a required nested `workout` payload as the canonical structured workout/session detail. Top-level `activityType`, `durationMinutes`, and optional `distanceKm` stay as query-friendly summaries, while exercises, sets, loads, session notes, source ids, and workout media descriptors live under `workout`.
 
@@ -108,8 +110,8 @@ Sample records may also carry optional `externalRef` provenance with the same sh
   `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`, optional `autoLogDaily.time`
 - Workout-format frontmatter (vault-local saved defaults, not a canonical event family):
   `schemaVersion`, `docType`, `workoutFormatId`, `slug`, `title`, `status`, `activityType`, required `template`, optional `durationMinutes`, optional `distanceKm`, optional `templateText`
-- Profile current frontmatter:
-  `schemaVersion`, `docType`, `snapshotId`, `updatedAt`
+- Memory frontmatter:
+  `docType`, `schemaVersion`, `title`, `updatedAt`
 - Goal frontmatter:
   `schemaVersion`, `docType`, `goalId`, `slug`, `status`, `title`
 - Condition frontmatter:
@@ -137,8 +139,6 @@ Health artifact filenames are reserved here. They do not become valid generated 
 - `frontmatter-food.schema.json`
 - `frontmatter-provider.schema.json`
 - `assessment-response.schema.json`
-- `profile-snapshot.schema.json`
-- `frontmatter-profile-current.schema.json`
 - `frontmatter-goal.schema.json`
 - `frontmatter-condition.schema.json`
 - `frontmatter-allergy.schema.json`

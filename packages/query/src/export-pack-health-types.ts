@@ -20,17 +20,7 @@ export interface ExportPackAssessmentRecord {
   relativePath: string;
 }
 
-export interface ExportPackProfileSnapshotRecord {
-  id: string;
-  recordedAt: string | null;
-  source: string | null;
-  sourceAssessmentIds: string[];
-  sourceEventIds: string[];
-  profile: Record<string, unknown>;
-  relativePath: string;
-}
-
-export interface ExportPackHistoryRecord {
+export interface ExportPackHealthEventRecord {
   id: string;
   kind: string;
   occurredAt: string;
@@ -55,22 +45,9 @@ export interface ExportPackBankPage {
   attributes: FrontmatterObject;
 }
 
-export interface ExportPackCurrentProfile {
-  snapshotId: string | null;
-  updatedAt: string | null;
-  sourceAssessmentIds: string[];
-  sourceEventIds: string[];
-  topGoalIds: string[];
-  relativePath: string;
-  markdown: string | null;
-  body: string | null;
-}
-
 export interface ExportPackHealthContext {
   assessments: ExportPackAssessmentRecord[];
-  profileSnapshots: ExportPackProfileSnapshotRecord[];
-  historyEvents: ExportPackHistoryRecord[];
-  currentProfile: ExportPackCurrentProfile | null;
+  healthEvents: ExportPackHealthEventRecord[];
   goals: ExportPackBankPage[];
   conditions: ExportPackBankPage[];
   allergies: ExportPackBankPage[];

@@ -40,7 +40,7 @@ describe("hosted assistant runner env policy", () => {
     });
   });
 
-  it("forwards a custom hosted assistant api key alias when explicitly referenced", () => {
+  it("does not forward a custom hosted assistant api key alias when explicitly referenced", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
@@ -52,7 +52,25 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      OPENAI_ENTERPRISE_API_KEY: "secret-value",
+    });
+    expect(env.OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
+  });
+
+  it("forwards Vercel AI Gateway bootstrap vars and gateway key aliases", () => {
+    const env = buildHostedRunnerContainerEnv({
+      VERCEL_AI_API_KEY: "gateway-secret",
+      HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "openai/gpt-5.4",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
+    });
+
+    expect(env).toMatchObject({
+      VERCEL_AI_API_KEY: "gateway-secret",
+      HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "openai/gpt-5.4",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
     });
   });
 
@@ -72,5 +90,6 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedUserEnvKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
     expect(isHostedUserEnvKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
     expect(isHostedUserEnvKeyAllowed("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedUserEnvKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
   });
 });

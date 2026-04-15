@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedWorkerSecretsPayload,
@@ -17,6 +17,37 @@ import {
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
+
+afterEach(() => {
+  vi.doUnmock("node:fs/promises");
+  vi.resetModules();
+});
+
+async function importRenderWorkerSecretsWithMockedAccess(
+  blockedPath: string,
+): Promise<typeof import("../scripts/render-worker-secrets.ts")> {
+  vi.resetModules();
+  vi.doMock("node:fs/promises", async () => {
+    const actual = await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
+
+    return {
+      ...actual,
+      access: async (targetPath: string) => {
+        if (targetPath === blockedPath) {
+          const error = new Error("permission denied") as NodeJS.ErrnoException;
+          error.code = "EACCES";
+          throw error;
+        }
+
+        return await actual.access(targetPath);
+      },
+    };
+  });
+
+  return await import("../scripts/render-worker-secrets.ts");
+}
 
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
@@ -44,6 +75,7 @@ describe("hosted deploy automation helpers", () => {
       containers: Array<{
         class_name: string;
         image: string;
+        image_build_context: string;
         instance_type: string | {
           disk_mb: number;
           memory_mib: number;
@@ -82,6 +114,7 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 250,
       },
@@ -110,9 +143,16 @@ describe("hosted deploy automation helpers", () => {
     expect(config.observability).toEqual({
       enabled: true,
       head_sampling_rate: 1,
+      logs: {
+        enabled: true,
+        invocation_logs: true,
+        persist: true,
+        head_sampling_rate: 1,
+      },
       traces: {
         enabled: true,
-        head_sampling_rate: 0.1,
+        persist: true,
+        head_sampling_rate: 1,
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
@@ -125,9 +165,6 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
     expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
-    expect(config.vars.HOSTED_AI_USAGE_BASE_URL).toBeUndefined();
-    expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBeUndefined();
-    expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBeUndefined();
     expect(config.vars.HOSTED_WEB_BASE_URL).toBeUndefined();
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
@@ -140,7 +177,6 @@ describe("hosted deploy automation helpers", () => {
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -148,6 +184,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "device-sync,hosted-email,linq,mapbox,telegram",
       MURPH_WEB_FETCH_ENABLED: "true",
     });
   });
@@ -161,6 +198,29 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.MURPH_WEB_FETCH_ENABLED).toBe("false");
+  });
+
+  it("passes explicit runner env profiles through to worker vars", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox",
+    });
+
+    expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
+  });
+
+  it("defaults runner env profiles to the full hosted integration set", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+    });
+
+    expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
+      "device-sync,hosted-email,linq,mapbox,telegram",
+    );
   });
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {
@@ -202,8 +262,10 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
+      TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
@@ -215,16 +277,18 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     });
   });
 
-  it("keeps a referenced hosted assistant api key env only when it is runner-safe", () => {
+  it("keeps only known hosted assistant provider env names in deploy automation", () => {
     expect(buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
@@ -245,9 +309,16 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
-    })).toMatchObject({
-      OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
-    });
+    }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
+
+    expect(readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+    }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
 
     expect(readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
@@ -296,6 +367,21 @@ describe("hosted deploy automation helpers", () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("rethrows non-ENOENT access errors while probing worker secrets output directories", async () => {
+    const tempRoot = path.join(tmpdir(), "murph-worker-secrets-blocked");
+    const blockedDirectory = path.join(tempRoot, "nested");
+    const { renderWorkerSecretsFile: renderWithMockedAccess } =
+      await importRenderWorkerSecretsWithMockedAccess(blockedDirectory);
+
+    await expect(
+      renderWithMockedAccess({
+        outputPath: path.join(blockedDirectory, "worker-secrets.json"),
+      }),
+    ).rejects.toMatchObject({
+      code: "EACCES",
+    });
   });
 
   it("builds a gradual canary split against the current stable version", () => {

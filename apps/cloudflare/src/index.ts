@@ -1,15 +1,23 @@
 import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
-  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution";
+import type {
+  HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
-  type HostedExecutionOutboxPayload,
   type HostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -30,9 +38,6 @@ import {
   verifyHostedExecutionVercelOidcRequest,
 } from "./auth-adapter.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
-import type {
-  HostedExecutionCommittedResult,
-} from "./execution-journal.ts";
 import {
   json,
   methodNotAllowed,
@@ -50,6 +55,7 @@ import {
 } from "./user-runner.ts";
 import { handleGatewayRoute } from "./worker-routes/gateway.ts";
 import {
+  handleEventStatusRoute,
   handleManualRunRoute,
   handlePendingUsageRoute,
   handlePendingUsageUsersRoute,
@@ -62,10 +68,11 @@ import {
   handleUserEnvRoute,
   handleUserStoredDispatchRoute,
 } from "./worker-routes/internal-user.ts";
-import type {
-  WorkerUserRunnerCommitInput,
+import {
+  asWorkerStringEnvironment,
 } from "./worker-contracts.ts";
 import {
+  decodeRouteParam,
   readCachedRequestText,
   resolveUserRunnerStub,
   type UserRunnerDurableObjectStubLike,
@@ -113,6 +120,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleManualRunRoute(context, params.userId);
     },
@@ -123,6 +131,18 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
+    async handle(context, params) {
+      return handleEventStatusRoute(context, params.userId, params.eventId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/events\/(?<eventId>[^/]+)\/status$/u),
+    methods: ["GET"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleStatusRoute(context, params.userId);
     },
@@ -133,6 +153,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserEnvRoute(context, params.userId);
     },
@@ -143,6 +164,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserDeviceSyncRuntimeRoute(context, params.userId);
     },
@@ -153,6 +175,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserCryptoContextRoute(context, params.userId);
     },
@@ -163,6 +186,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleSharePackRoute(context, params.userId, params.shareId);
     },
@@ -173,6 +197,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserEmailAddressRoute(context, params.userId);
     },
@@ -183,6 +208,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserDispatchPayloadRoute(context, params.userId);
     },
@@ -193,6 +219,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserStoredDispatchRoute(context, params.userId);
     },
@@ -213,6 +240,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handlePendingUsageRoute(context, params.userId);
     },
@@ -223,6 +251,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleGatewayRoute(context, params.userId, params.resource);
     },
@@ -241,9 +270,8 @@ export default {
         return publicResponse;
       }
 
-      const environment = readHostedExecutionEnvironment(
-        env as unknown as Readonly<Record<string, string | undefined>>,
-      );
+      const stringEnv = asWorkerStringEnvironment(env);
+      const environment = readHostedExecutionEnvironment(stringEnv);
       return (
         await dispatchDeclarativeRoute(workerInternalRoutes, {
           env,
@@ -268,9 +296,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     super(state as never, env as never);
     this.runner = new HostedUserRunner(
       state,
-      readHostedExecutionEnvironment(
-        env as unknown as Readonly<Record<string, string | undefined>>,
-      ),
+      readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
       env.BUNDLES,
       env,
       env.RUNNER_CONTAINER,
@@ -299,7 +325,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }> {
+  }): Promise<HostedRuntimeUsageRecordResponse> {
     return this.runner.putPendingUsage(input);
   }
 
@@ -337,10 +363,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.dispatchWithOutcome(input);
   }
 
-  async commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult> {
-    return this.runner.commit(input);
-  }
-
   async gatewayListConversations(input?: GatewayListConversationsInput) {
     return this.runner.gatewayListConversations(input);
   }
@@ -371,6 +393,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
+  }
+
+  async getEventStatus(input: {
+    eventId: string;
+  }) {
+    return this.runner.getEventStatus(input);
   }
 
   async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {
@@ -411,13 +439,13 @@ async function dispatchDeclarativeRoute<Context>(
       }
     }
 
+    if (!route.methods.includes(context.request.method)) {
+      return respondToWrongMethod(route.wrongMethodResponse ?? "not-found");
+    }
+
     const preMethodResponse = await route.beforeMethod?.(context, params);
     if (preMethodResponse) {
       return preMethodResponse;
-    }
-
-    if (!route.methods.includes(context.request.method)) {
-      return respondToWrongMethod(route.wrongMethodResponse ?? "not-found");
     }
 
     if (!route.authorizeBeforeMethod) {
@@ -462,8 +490,62 @@ async function authorizeRoute(
 async function handleDispatchRoute(context: WorkerRouteContext): Promise<Response> {
   const payload = await readCachedRequestText(context);
   const dispatch = parseHostedExecutionDispatchRequest(JSON.parse(payload) as unknown);
+  const boundUserError = requireHostedExecutionBoundUserResponse(
+    context.request,
+    dispatch.event.userId,
+    "Hosted execution bound user does not match the dispatch user.",
+  );
+
+  if (boundUserError) {
+    return boundUserError;
+  }
+
   const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatchWithOutcome(dispatch);
   return result.event.state === "backpressured" ? json(result, 429) : json(result);
+}
+
+function requireBoundInternalRouteUser(
+  context: Pick<WorkerRouteContext, "request">,
+  params: RouteParams,
+): Response | null {
+  return requireHostedExecutionBoundUserResponse(
+    context.request,
+    decodeRouteParam(params.userId),
+    "Hosted execution bound user does not match the route user.",
+  );
+}
+
+function requireHostedExecutionBoundUserResponse(
+  request: Request,
+  expectedUserId: string,
+  mismatchMessage: string,
+): Response | null {
+  const boundUserId = readHostedExecutionBoundUserId(request);
+
+  if (!boundUserId) {
+    return json({
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+    }, 401);
+  }
+
+  if (boundUserId !== expectedUserId) {
+    return json({
+      error: mismatchMessage,
+    }, 401);
+  }
+
+  return null;
+}
+
+function readHostedExecutionBoundUserId(request: Request): string | null {
+  const value = request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER);
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {

@@ -1,4 +1,4 @@
-import { verifyAccessToken, verifyIdentityToken } from "@privy-io/node";
+import { verifyIdentityToken } from "@privy-io/node";
 import { cookies } from "next/headers";
 
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -6,8 +6,11 @@ import {
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
   type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
+  type HostedPrivyTelegramAccount,
   type HostedPrivyWalletAccount,
+  extractHostedPrivyPreferredEmailAccount,
   resolveHostedPrivyLinkedAccountState,
+  resolveHostedPrivyTelegramAccountSelection,
 } from "./privy-shared";
 import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { getHostedOnboardingEnvironment } from "./runtime";
@@ -20,22 +23,13 @@ export interface HostedPrivyCookieStore {
   get(name: string): { value?: string } | undefined;
 }
 
-export const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
-const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
+export const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 
 export interface HostedPrivyIdentity {
-  phone: HostedPrivyPhoneAccount;
+  phone: HostedPrivyPhoneAccount | null;
+  telegram: HostedPrivyTelegramAccount | null;
   userId: string;
   wallet: HostedPrivyWalletAccount | null;
-}
-
-export interface HostedPrivyAccessTokenClaims {
-  appId: string;
-  expiration: number;
-  issuedAt: number;
-  issuer: string;
-  sessionId: string;
-  userId: string;
 }
 
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
@@ -50,7 +44,7 @@ export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPri
   if (!identityToken) {
     throw hostedOnboardingError({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+      message: "A Privy identity cookie is required to continue. Refresh and sign in again.",
       httpStatus: 401,
     });
   }
@@ -67,12 +61,12 @@ export async function requireHostedPrivyCompletionIdentityFromCookies(): Promise
 }
 
 export async function requireHostedPrivyIdentityFromRequest(request: Request): Promise<HostedPrivyIdentity> {
-  const identityToken = readHostedPrivyIdentityTokenFromRequest(request);
+  const identityToken = readHostedPrivyIdentityTokenFromRequestCookies(request);
 
   if (!identityToken) {
     throw hostedOnboardingError({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+      message: "A Privy identity cookie is required to continue. Refresh and sign in again.",
       httpStatus: 401,
     });
   }
@@ -126,12 +120,23 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
 }
 
 export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
-  const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
+  const linkedAccountState = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
+  const { phone, wallet } = linkedAccountState;
+  const email = extractHostedPrivyPreferredEmailAccount(linkedAccountState.linkedAccounts);
+  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
 
-  if (!phone) {
+  if (telegramSelection.ambiguous) {
     throw hostedOnboardingError({
-      code: "PRIVY_PHONE_REQUIRED",
-      message: "Finish phone verification before continuing.",
+      code: "PRIVY_TELEGRAM_AMBIGUOUS",
+      message: "Reconnect Telegram in Privy before continuing.",
+      httpStatus: 409,
+    });
+  }
+
+  if (!phone && !telegramSelection.account && !email) {
+    throw hostedOnboardingError({
+      code: "PRIVY_ACCOUNT_REQUIRED",
+      message: "Finish email, phone, or Telegram verification before continuing.",
       httpStatus: 400,
     });
   }
@@ -146,6 +151,7 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
 
   return {
     phone,
+    telegram: telegramSelection.account,
     userId: user.id,
     wallet: wallet ?? null,
   };
@@ -156,52 +162,36 @@ export function readHostedPrivyIdentityTokenFromCookieStore(cookieStore: HostedP
   return normalizeEnvValue(value);
 }
 
-export function readHostedPrivyIdentityTokenFromRequest(request: Request): string | null {
-  return normalizeEnvValue(request.headers.get(HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME));
-}
-
-export function readHostedPrivyAccessTokenFromRequest(request: Request): string | null {
-  return normalizeHostedPrivyAccessToken(request.headers.get("authorization"));
-}
-
-export async function verifyHostedPrivyAccessToken(accessToken: string): Promise<HostedPrivyAccessTokenClaims> {
-  const token = accessToken.trim();
-
-  if (!token) {
-    throw hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
-      httpStatus: 401,
-    });
+export function readHostedPrivyIdentityTokenFromCookieHeader(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
   }
 
-  const { appId, verificationKey } = requireHostedPrivyPhoneAuthConfig();
+  for (const entry of value.split(/;\s*/u)) {
+    const separatorIndex = entry.indexOf("=");
 
-  try {
-    const claims = await verifyAccessToken({
-      access_token: token,
-      app_id: appId,
-      verification_key: verificationKey,
-    });
+    if (separatorIndex <= 0) {
+      continue;
+    }
 
-    return {
-      appId: claims.app_id,
-      expiration: claims.expiration,
-      issuedAt: claims.issued_at,
-      issuer: claims.issuer,
-      sessionId: claims.session_id,
-      userId: claims.user_id,
-    };
-  } catch (error) {
-    throw hostedOnboardingError({
-      code: "PRIVY_AUTH_FAILED",
-      message: "We could not verify your Privy session. Request a fresh code and try again.",
-      httpStatus: 401,
-      details: {
-        cause: error instanceof Error ? error.name : typeof error,
-      },
-    });
+    if (entry.slice(0, separatorIndex).trim() !== HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME) {
+      continue;
+    }
+
+    const rawCookieValue = entry.slice(separatorIndex + 1);
+
+    try {
+      return normalizeEnvValue(decodeURIComponent(rawCookieValue));
+    } catch {
+      return normalizeEnvValue(rawCookieValue);
+    }
   }
+
+  return null;
+}
+
+export function readHostedPrivyIdentityTokenFromRequestCookies(request: Request): string | null {
+  return readHostedPrivyIdentityTokenFromCookieHeader(request.headers.get("cookie"));
 }
 
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
@@ -236,20 +226,19 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   return null;
 }
 
-function normalizeHostedPrivyAccessToken(value: string | null | undefined): string | null {
-  const normalized = normalizeEnvValue(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const match = /^Bearer\s+(.+)$/iu.exec(normalized);
-  return normalizeEnvValue(match?.[1]);
-}
-
 export function remapHostedPrivyCompletionLagError(error: unknown): unknown {
   if (!isHostedOnboardingError(error)) {
     return error;
+  }
+
+  if (error.code === "PRIVY_ACCOUNT_REQUIRED") {
+    return hostedOnboardingError({
+      code: "PRIVY_ACCOUNT_NOT_READY",
+      message:
+        "Your verified Privy account has not reached the server-side session yet. Wait a moment and try again.",
+      httpStatus: 409,
+      retryable: true,
+    });
   }
 
   if (error.code === "PRIVY_PHONE_REQUIRED") {

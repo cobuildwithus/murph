@@ -1,11 +1,9 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { LoaderCircleIcon } from "lucide-react";
 import type { FormEvent } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 import {
   HostedCodeEntryStep,
@@ -33,6 +31,7 @@ interface SharedFlowProps {
   sendCodeDisabled: boolean;
   secondaryActionSize: "sm" | "lg";
   selectedPhoneCountry: HostedPhoneCountryOption;
+  showPassiveConsentNotice?: boolean;
   onCodeChange: (value: string) => void;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
@@ -96,7 +95,9 @@ export function HostedPhoneAuthScaffold({
           onContinue={onContinue}
           onUseDifferentNumber={onUseDifferentNumber}
         />
-      ) : children}
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -129,6 +130,7 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
       phoneNumber={props.phoneNumber}
       sendCodeDisabled={props.sendCodeDisabled}
       selectedPhoneCountry={props.selectedPhoneCountry}
+      showPassiveConsentNotice={props.showPassiveConsentNotice}
       onPhoneCountryChange={props.onPhoneCountryChange}
       onPhoneNumberChange={props.onPhoneNumberChange}
       onSubmitPhoneEntry={props.onSubmitPhoneEntry}
@@ -163,8 +165,8 @@ export function HostedAuthenticatedPhoneAuthState({
       <Alert className="border-stone-200 bg-stone-50">
         <AlertTitle>
           {intent === "signin"
-            ? "You already started signing in on this browser."
-            : "You already started signup in this browser."}
+            ? "You already started signing in."
+            : "You already started signup."}
         </AlertTitle>
         <AlertDescription>
           Keep going with this number, or sign out and use a different one.
@@ -175,6 +177,7 @@ export function HostedAuthenticatedPhoneAuthState({
             onClick={onContinue}
             disabled={disabled}
             size="lg"
+            className="w-full"
           >
             {intent === "signin" ? "Continue sign in" : "Continue signup"}
           </Button>

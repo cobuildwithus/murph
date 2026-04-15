@@ -6,12 +6,14 @@ This repo now has durable owner-specific idempotency lanes for every currently i
 
 - encrypted `vault` and `agent-state` bundle refs are only advanced through the durable commit path
 - repeated worker and runner retries can recover from a lost runner response by replaying the durable commit journal
+- Cloudflare now commits hosted runner results inside the Durable Object that owns the pending event, so stale runner retries no longer race through a separate `/commit` callback path to challenge or recreate committed state
 - already-committed events are treated as consumed and will not re-run the same bundle commit indefinitely
 - hosted one-shot runs now collect due outbound side effects before the durable commit and persist those side effects alongside the committed hosted result
 - hosted assistant replies still create durable assistant outbox intents during the one-shot run, but post-commit delivery now resumes from the committed side-effect journal instead of treating assistant sends as a separate special-case path
 - hosted side-effect sends are reconciled through a hosted delivery journal so later hosted wakes can mark already-recorded actions sent without re-sending them first
 - Cloudflare-bound hosted execution dispatches from onboarding, hosted share acceptance, and hosted device-sync wakes now go through the shared Postgres `execution_outbox` instead of fire-and-forget dispatches
 - hosted onboarding webhook receipts now persist the planned response plus receipt-local side-effect state for Cloudflare dispatches and Linq or Telegram replies before send, transactionally queue hosted execution dispatches into `execution_outbox`, and reclaim expired processing leases so abandoned attempts can resume instead of burning the event
+- third-party webhook request paths now acknowledge after the durable receipt and `execution_outbox` enqueue complete; any immediate hosted-execution drain is only a non-blocking best-effort nudge, with cron recovery still owning retries
 - Stripe webhook ingress now dedupes at durable fact insertion time and retries through the hosted Stripe event queue plus reconciler instead of trying to resume receipt-local inline work
 - hosted RevNet issuance now fails closed once a tx hash exists, so a broadcast followed by a write-back failure is held for operator repair instead of being misclassified as a clean retry
 - committed hosted retries now resume post-commit side effects from the committed journal without rerunning the original one-shot compute stage first

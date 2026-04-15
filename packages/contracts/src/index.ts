@@ -1,7 +1,6 @@
 export * from "./bank-entities.ts";
 export * from "./command-capabilities.ts";
 export * from "./constants.ts";
-export * from "./current-profile.ts";
 export * from "./event-lifecycle.ts";
 export * from "./examples.ts";
 export * from "./frontmatter.ts";
@@ -9,6 +8,7 @@ export * from "./health-entities.ts";
 export * from "./ids.ts";
 export * from "./automation.ts";
 export * from "./memory.ts";
+export * from "./preferences.ts";
 export * from "./relation-links.ts";
 export * from "./shares.ts";
 export * from "./time.ts";

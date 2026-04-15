@@ -1,6 +1,7 @@
 import type { HostedOnboardingStage } from "./lifecycle";
 
 export interface HostedInviteStatusPayload {
+  activationPending: boolean;
   capabilities: {
     billingReady: boolean;
     phoneAuthReady: boolean;
@@ -10,6 +11,8 @@ export interface HostedInviteStatusPayload {
     expiresAt: string;
     phoneHint: string;
   } | null;
+  messagingSetupRequired: boolean;
+  murphPhoneNumber?: string | null;
   session: {
     authenticated: boolean;
     expiresAt: string | null;
@@ -19,7 +22,9 @@ export interface HostedInviteStatusPayload {
 }
 
 export interface HostedPrivyCompletionPayload {
+  activationPending: boolean;
   inviteCode: string;
   joinUrl: string;
-  stage: "checkout" | "activating" | "blocked" | "active";
+  messagingSetupRequired: boolean;
+  stage: "checkout" | "blocked" | "active";
 }

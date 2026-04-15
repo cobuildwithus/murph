@@ -3,7 +3,7 @@ import { HomepageAuthPanel } from "./homepage-auth-panel";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 
-export function HeroSection() {
+export function HeroSection({ authenticated }: { authenticated: boolean }) {
   return (
     <section className="mx-auto max-w-7xl px-6 pb-20 pt-16 md:px-12 md:pb-28 md:pt-24 lg:px-16">
       <div className="grid items-start gap-12 lg:grid-cols-[1fr_400px] lg:gap-16 xl:grid-cols-[1fr_440px] xl:gap-24">
@@ -30,7 +30,7 @@ export function HeroSection() {
         </div>
 
         <div className="animate-fade-up [animation-delay:0.2s]">
-          <HomepageAuthPanel />
+          <HomepageAuthPanel authenticated={authenticated} />
         </div>
       </div>
     </section>

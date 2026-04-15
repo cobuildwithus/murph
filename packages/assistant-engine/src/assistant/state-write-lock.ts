@@ -143,19 +143,21 @@ export function createAssistantStateWriteLock<
   }
 
   async function clearWriteLock(paths: TPaths): Promise<void> {
-    await Promise.all([
-      rm(path.join(paths.assistantStateRoot, options.lockDirectory), {
-        recursive: true,
-        force: true,
-        maxRetries: 3,
-        retryDelay: 10,
+    const cleanupTargets = [
+      path.join(paths.assistantStateRoot, options.lockDirectory),
+      path.join(paths.assistantStateRoot, options.lockMetadataPath),
+    ]
+
+    await Promise.all(
+      cleanupTargets.map(async (targetPath) => {
+        await rm(targetPath, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 10,
+        })
       }),
-      rm(path.join(paths.assistantStateRoot, options.lockMetadataPath), {
-        force: true,
-        maxRetries: 3,
-        retryDelay: 10,
-      }),
-    ])
+    )
   }
 
   return {

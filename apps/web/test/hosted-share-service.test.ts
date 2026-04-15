@@ -2,8 +2,10 @@ import { HostedBillingStatus, type ExecutionOutbox } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
 import {
   type HostedExecutionDispatchRequest,
-  type HostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const shareHarness = vi.hoisted(() => ({
@@ -555,7 +557,11 @@ describe("hosted share service", () => {
         memberId: "member_123",
         prisma: prisma as never,
         shareId: prisma.rows[0]?.id ?? "",
-      })).toBe(false);
+      })).toEqual({
+        finalized: false,
+        shareFound: true,
+        sharePackOwnerMemberId: null,
+      });
 
       expect(prisma.rows[0]).toMatchObject({
         acceptedByMemberId: "member_123",

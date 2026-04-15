@@ -4,7 +4,7 @@
  * rest of the hosted email lifecycle.
  */
 
-import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution";
+import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution/hosted-email";
 
 export interface HostedEmailConfig {
   apiBaseUrl: string;

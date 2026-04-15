@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionFirstContactTarget,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerSharePack,
 } from "@murphai/hosted-execution";
@@ -25,7 +26,7 @@ export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   sharePack?: HostedExecutionRunnerSharePack | null;
@@ -35,6 +36,7 @@ export async function executeHostedDispatchEvent(input: {
     input.vaultRoot,
     input.dispatch,
     input.runtimeEnv,
+    input.runtime.resolvedConfig,
   );
   const dispatchEffect = await handleHostedDispatchEvent({
     dispatch: input.dispatch,
@@ -54,7 +56,7 @@ async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
@@ -64,14 +66,12 @@ async function handleHostedDispatchEvent(input: {
   switch (dispatch.event.kind) {
     case "member.activated":
       if (dispatch.event.firstContact) {
-        await queueAssistantFirstContactWelcome({
-          channel: dispatch.event.firstContact.channel,
-          identityId: dispatch.event.firstContact.identityId,
-          threadId: dispatch.event.firstContact.threadId,
-          threadIsDirect: dispatch.event.firstContact.threadIsDirect,
-          vault: input.vaultRoot,
-        });
+        await queueAssistantFirstContactWelcome(
+          buildAssistantFirstContactWelcomeInput(dispatch.event.firstContact, input.vaultRoot),
+        );
       }
+      return createNoopDispatchEffect();
+    case "member.channels.updated":
       return createNoopDispatchEffect();
     case "linq.message.received":
       await ingestHostedLinqMessage(input.vaultRoot, {
@@ -132,5 +132,30 @@ function createNoopDispatchEffect(): HostedDispatchEffect {
   return {
     shareImportResult: null,
     shareImportTitle: null,
+  };
+}
+
+function buildAssistantFirstContactWelcomeInput(
+  firstContact: HostedExecutionFirstContactTarget,
+  vault: string,
+): Parameters<typeof queueAssistantFirstContactWelcome>[0] {
+  if (firstContact.kind === "linq-materialize-home-thread") {
+    return {
+      channel: "linq",
+      fromPhoneNumber: firstContact.fromPhoneNumber,
+      identityId: firstContact.identityId,
+      kind: firstContact.kind,
+      toPhoneNumber: firstContact.toPhoneNumber,
+      vault,
+    };
+  }
+
+  return {
+    actorId: null,
+    channel: firstContact.channel,
+    identityId: firstContact.identityId,
+    threadId: firstContact.threadId,
+    threadIsDirect: firstContact.threadIsDirect,
+    vault,
   };
 }

@@ -5,7 +5,7 @@ import {
   requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
-} from "@murphai/importers";
+} from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError } from "../errors.ts";
 import {
@@ -241,10 +241,6 @@ function buildDisplayName(profile: Record<string, unknown>): string {
   return [firstName, lastName].filter(Boolean).join(" ") || email || `WHOOP ${userId ?? "user"}`;
 }
 
-function hasWhoopScope(account: DeviceSyncAccount, scope: string): boolean {
-  return hasWhoopScopeValue(account.scopes, scope);
-}
-
 function hasWhoopScopeValue(scopes: readonly string[], scope: string): boolean {
   return scopes.includes(scope);
 }
@@ -467,19 +463,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         dedupeKey: `whoop-webhook:${traceId}`,
       },
     ];
-  }
-
-  function buildWhoopWebhookHint(eventType: string): Record<string, unknown> {
-    const eventDescriptor = WHOOP_WEBHOOK_EVENT_MAP[eventType];
-
-    return eventDescriptor
-      ? {
-          eventType,
-          resourceType: eventDescriptor.resourceType,
-        }
-      : {
-          eventType,
-        };
   }
 
   function createApiSession(context: ProviderJobContext) {
@@ -770,7 +753,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         eventType,
         traceId,
         occurredAt: context.now,
-        payload: buildWhoopWebhookHint(eventType),
+        resourceCategory: WHOOP_WEBHOOK_EVENT_MAP[eventType]?.resourceType ?? null,
         jobs: buildWhoopWebhookJobs(eventType, resourceId, payload, traceId),
       };
     },

@@ -4,7 +4,8 @@
     "noEmit": true,
     "rootDir": ".",
     "composite": false,
-    "incremental": false,
+    "incremental": true,
+    "tsBuildInfoFile": "typecheck.tsbuildinfo",
     "paths": {
       "@murphai/contracts": [
         "packages/contracts/src/index.ts"

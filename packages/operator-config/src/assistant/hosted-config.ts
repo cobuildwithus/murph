@@ -102,6 +102,7 @@ export function createHostedAssistantProfile(input: {
       resolveHostedAssistantProfileLabel({
         apiKeyEnv: target.apiKeyEnv,
         baseUrl: target.endpoint,
+        presetId: target.presetId,
         provider: target.adapter,
         providerName: target.providerName,
       }),

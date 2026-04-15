@@ -14,7 +14,7 @@ import {
   createDefaultAssistantCapabilityRegistry,
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-provider'
+} from '@murphai/assistant-engine/assistant-cli-tools'
 import { materializeInboxModelBundle } from '@murphai/assistant-engine/inbox-model-harness'
 import {
   CliBackedCapabilityHost,
@@ -149,7 +149,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
     prompt: 'Reply to the capture.',
     response: 'Acknowledged.',
     session: {
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'asst_session_1',
       target: {
         adapter: 'codex-cli',
@@ -164,6 +164,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
       resumeState: null,
       provider: 'codex-cli',
       providerOptions: {
+        continuityFingerprint: 'fingerprint-inbox-model-harness',
         model: 'gpt-5.4',
         reasoningEffort: null,
         sandbox: null,
@@ -172,7 +173,9 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
         oss: false,
         baseUrl: undefined,
         apiKeyEnv: undefined,
+        executionDriver: 'codex-cli',
         providerName: undefined,
+        resumeKind: 'codex-session',
       },
       providerBinding: null,
       alias: null,
@@ -241,8 +244,8 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
     vault: vaultRoot,
     capture: {
       captureId: 'cap_1',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-1',
       threadId: 'thread-1',
       threadTitle: 'Care team',
@@ -350,8 +353,8 @@ test('materializeInboxModelBundle rejects malicious capture ids before writing b
     vault: vaultRoot,
     capture: {
       captureId: maliciousCaptureId,
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-malicious',
       threadId: 'thread-malicious',
       threadTitle: 'Care team',
@@ -415,8 +418,8 @@ test('materializeInboxModelBundle marks supported meal photos as multimodal-read
     vault: vaultRoot,
     capture: {
       captureId: 'cap_photo',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-photo',
       threadId: 'thread-photo',
       threadTitle: 'Meal log',
@@ -443,7 +446,6 @@ test('materializeInboxModelBundle marks supported meal photos as multimodal-read
           extractedText: null,
           transcriptText: null,
           derivedPath: null,
-          parserProviderId: null,
           parseState: 'pending',
         },
       ],
@@ -506,8 +508,8 @@ test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text
     vault: vaultRoot,
     capture: {
       captureId: 'cap_heic',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-heic',
       threadId: 'thread-heic',
       threadTitle: 'Meal log',
@@ -534,7 +536,6 @@ test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text
           extractedText: null,
           transcriptText: null,
           derivedPath: null,
-          parserProviderId: null,
           parseState: 'pending',
         },
       ],
@@ -566,8 +567,8 @@ test('materializeInboxModelBundle marks parse-failed PDFs with no text as multim
     vault: vaultRoot,
     capture: {
       captureId: 'cap_pdf_fallback',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-pdf-fallback',
       threadId: 'thread-pdf-fallback',
       threadTitle: 'Care team',
@@ -594,7 +595,6 @@ test('materializeInboxModelBundle marks parse-failed PDFs with no text as multim
           extractedText: null,
           transcriptText: null,
           derivedPath: null,
-          parserProviderId: 'pdftotext',
           parseState: 'failed',
         },
       ],
@@ -657,8 +657,8 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
     vault: vaultRoot,
     capture: {
       captureId: 'cap_2',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-2',
       threadId: 'thread-2',
       threadTitle: 'Care team',
@@ -832,8 +832,8 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
     vault: vaultRoot,
     capture: {
       captureId: 'cap_2',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-2',
       threadId: 'thread-2',
       threadTitle: 'Care team',
@@ -928,8 +928,8 @@ test('materializeInboxModelBundle ignores manifest entries that point at in-vaul
     vault: vaultRoot,
     capture: {
       captureId: 'cap_3',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-3',
       threadId: 'thread-3',
       threadTitle: 'Care team',
@@ -1035,8 +1035,8 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
     vault: vaultRoot,
     capture: {
       captureId: 'cap_4',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-4',
       threadId: 'thread-4',
       threadTitle: 'Care team',
@@ -1538,8 +1538,8 @@ test('createDefaultAssistantToolCatalog disables inbox promotion tools when cano
       vault: '/tmp/murph-vault',
       capture: {
         captureId: 'cap_1',
-        source: 'imessage',
-        accountId: 'self',
+        source: 'telegram',
+        accountId: 'bot',
         externalId: 'message-1',
         threadId: 'thread-1',
         threadTitle: 'Care team',

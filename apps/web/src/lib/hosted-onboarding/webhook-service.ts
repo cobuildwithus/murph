@@ -31,6 +31,12 @@ import {
   planHostedOnboardingTelegramWebhook,
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
+import { sanitizeHostedOnboardingLogString } from "./http";
+import {
+  deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
+  startHostedOnboardingTiming,
+} from "./logging";
 import { createHostedWebhookReceiptHandlers } from "./webhook-transport";
 
 export type HostedStripeWebhookResponse = {
@@ -47,41 +53,100 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   prisma?: PrismaClient;
   signal?: AbortSignal;
 }): Promise<HostedOnboardingLinqWebhookResponse> {
-  const event = verifyAndParseHostedLinqWebhookRequest({
-    rawBody: input.rawBody,
-    signature: input.signature,
-    timestamp: input.timestamp,
+  const timing = startHostedOnboardingTiming("hosted-onboarding.webhook.linq", {
+    rawBodyBytes: new TextEncoder().encode(input.rawBody).byteLength,
+    signalAbortedAtStart: input.signal?.aborted ?? false,
+    signaturePresent: Boolean(input.signature),
+    timestampPresent: Boolean(input.timestamp),
   });
-  const prisma = input.prisma ?? getPrisma();
-  if (event.event_type === "message.received") {
-    requireHostedLinqMessageReceivedEvent(event);
+  let eventId: string | null = null;
+  let eventType: string | null = null;
+  let responseReason: string | null = null;
+
+  try {
+    const verifyTiming = startHostedOnboardingTiming(
+      "hosted-onboarding.webhook.linq.verify-request",
+      {
+        signaturePresent: Boolean(input.signature),
+        timestampPresent: Boolean(input.timestamp),
+      },
+    );
+    const event = verifyAndParseHostedLinqWebhookRequest({
+      rawBody: input.rawBody,
+      signature: input.signature,
+      timestamp: input.timestamp,
+    });
+    eventId = event.event_id;
+    eventType = event.event_type;
+    finishHostedOnboardingTiming(verifyTiming, "completed", {
+      eventId,
+      eventType,
+      signalAbortedAfterVerify: input.signal?.aborted ?? false,
+    });
+    const prisma = input.prisma ?? getPrisma();
+    if (event.event_type === "message.received") {
+      requireHostedLinqMessageReceivedEvent(event);
+    }
+    const receiptTiming = startHostedOnboardingTiming(
+      "hosted-onboarding.webhook.linq.receipt",
+      {
+        eventId,
+        eventType,
+      },
+    );
+    const response = await runHostedWebhookWithReceipt({
+      deferSideEffectDrain: input.defer,
+      duplicateResponse: {
+        ok: true,
+        duplicate: true,
+      },
+      eventId: event.event_id,
+      handlers: createHostedWebhookReceiptHandlers(),
+      plan: (transaction) =>
+        planHostedOnboardingLinqWebhook({
+          event,
+          prisma: transaction,
+        }),
+      prisma,
+      signal: input.signal,
+      source: "linq",
+    });
+    responseReason = response.reason ?? null;
+    finishHostedOnboardingTiming(receiptTiming, "completed", {
+      duplicate: Boolean(response.duplicate),
+      eventId,
+      eventType,
+      responseReason,
+    });
+    await maybeDrainHostedExecutionWebhookDispatch({
+      defer: input.defer,
+      eventId: event.event_id,
+      prisma,
+      response,
+      source: "linq",
+    });
+    finishHostedOnboardingTiming(timing, "completed", {
+      duplicate: Boolean(response.duplicate),
+      eventId,
+      eventType,
+      responseReason,
+      signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+    });
+    return response;
+  } catch (error) {
+    finishHostedOnboardingTiming(timing, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      eventId,
+      eventType,
+      responseReason,
+      signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+    });
+    throw error;
   }
-  const response = await runHostedWebhookWithReceipt({
-    deferSideEffectDrain: input.defer,
-    duplicateResponse: {
-      ok: true,
-      duplicate: true,
-    },
-    eventId: event.event_id,
-    handlers: createHostedWebhookReceiptHandlers(),
-    plan: (transaction) =>
-      planHostedOnboardingLinqWebhook({
-        event,
-        prisma: transaction,
-      }),
-    prisma,
-    signal: input.signal,
-    source: "linq",
-  });
-  await maybeDrainHostedExecutionWebhookDispatch({
-    eventId: event.event_id,
-    prisma,
-    response,
-  });
-  return response;
 }
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
+  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   secretToken: string | null;
   prisma?: PrismaClient;
@@ -109,14 +174,17 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     source: "telegram",
   });
   await maybeDrainHostedExecutionWebhookDispatch({
+    defer: input.defer,
     eventId: buildHostedTelegramWebhookEventId(update),
     prisma,
     response,
+    source: "telegram",
   });
   return response;
 }
 
 export async function handleHostedStripeWebhook(input: {
+  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   signature: string | null;
   prisma?: PrismaClient;
@@ -159,17 +227,35 @@ export async function handleHostedStripeWebhook(input: {
     });
 
     if (reconciled?.createdOrUpdatedRevnetIssuance) {
-      await drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma);
+      if (input.defer) {
+        await input.defer(() => drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma));
+      } else {
+        await drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma);
+      }
     }
 
-    if (reconciled?.hostedExecutionEventId) {
-      await drainHostedExecutionOutboxBestEffort({
-        eventIds: [
-          reconciled.hostedExecutionEventId,
-        ],
-        limit: 1,
-        prisma,
-      });
+    const hostedExecutionEventId = reconciled?.hostedExecutionEventId ?? null;
+
+    if (hostedExecutionEventId) {
+      if (input.defer) {
+        await input.defer(() =>
+          drainHostedExecutionOutboxBestEffort({
+            eventIds: [
+              hostedExecutionEventId,
+            ],
+            limit: 1,
+            prisma,
+          }),
+        );
+      } else {
+        await drainHostedExecutionOutboxBestEffort({
+          eventIds: [
+            hostedExecutionEventId,
+          ],
+          limit: 1,
+          prisma,
+        });
+      }
     }
   }
 
@@ -210,7 +296,9 @@ export async function continueHostedOnboardingWebhookReceiptBestEffort(input: {
   } catch (error) {
     console.error(
       "Hosted webhook receipt continuation failed.",
-      error instanceof Error ? error.message : String(error),
+      sanitizeHostedOnboardingLogString(
+        error instanceof Error ? error.message : String(error),
+      ) ?? "Unknown error.",
     );
   }
 }
@@ -255,7 +343,9 @@ export async function drainHostedOnboardingWebhookReceipts(input: {
 
       console.error(
         "Hosted webhook receipt claim failed during cron recovery.",
-        error instanceof Error ? error.message : String(error),
+        sanitizeHostedOnboardingLogString(
+          error instanceof Error ? error.message : String(error),
+        ) ?? "Unknown error.",
       );
       drained.push({
         eventId: candidate.eventId,
@@ -331,27 +421,77 @@ async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
   } catch (error) {
     console.error(
       "Hosted RevNet issuance best-effort drain failed.",
-      error instanceof Error ? error.message : String(error),
+      sanitizeHostedOnboardingLogString(
+        error instanceof Error ? error.message : String(error),
+      ) ?? "Unknown error.",
     );
   }
 }
 
 async function maybeDrainHostedExecutionWebhookDispatch(input: {
+  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
   prisma: PrismaClient;
   response:
     | HostedOnboardingLinqWebhookResponse
     | HostedOnboardingTelegramWebhookResponse;
+  source: "linq" | "telegram";
 }): Promise<void> {
   if (input.response.reason !== "dispatched-active-member") {
     return;
   }
 
+  const handoffTiming = startHostedOnboardingTiming(
+    `hosted-onboarding.webhook.${input.source}.outbox-handoff`,
+    {
+      deferred: Boolean(input.defer),
+      eventId: input.eventId,
+      responseReason: input.response.reason,
+    },
+  );
+
+  if (input.defer) {
+    await input.defer(async () => {
+      const drainTiming = startHostedOnboardingTiming(
+        `hosted-onboarding.webhook.${input.source}.outbox-drain`,
+        {
+          deferred: true,
+          eventId: input.eventId,
+          responseReason: input.response.reason,
+        },
+      );
+      await drainHostedExecutionOutboxBestEffort({
+        eventIds: [
+          input.eventId,
+        ],
+        limit: 1,
+        prisma: input.prisma,
+      });
+      finishHostedOnboardingTiming(drainTiming, "completed");
+    });
+    finishHostedOnboardingTiming(handoffTiming, "scheduled", {
+      deferred: true,
+    });
+    return;
+  }
+
+  const drainTiming = startHostedOnboardingTiming(
+    `hosted-onboarding.webhook.${input.source}.outbox-drain`,
+    {
+      deferred: false,
+      eventId: input.eventId,
+      responseReason: input.response.reason,
+    },
+  );
   await drainHostedExecutionOutboxBestEffort({
     eventIds: [
       input.eventId,
     ],
     limit: 1,
     prisma: input.prisma,
+  });
+  finishHostedOnboardingTiming(drainTiming, "completed");
+  finishHostedOnboardingTiming(handoffTiming, "completed", {
+    deferred: false,
   });
 }

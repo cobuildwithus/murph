@@ -45,11 +45,73 @@ export function resolveDeviceSyncDaemonBinPath(
 }
 
 export function resolveInstalledDeviceSyncPackageEntry(): string {
-  return resolveNodeRequire().resolve('@murphai/device-syncd')
+  try {
+    return createPackageScopedRequire('../../package.json').resolve(
+      '@murphai/device-syncd',
+    )
+  } catch (error) {
+    if (!isMissingDeviceSyncPackageError(error)) {
+      throw error
+    }
+
+    return createPackageScopedRequire('../../../../package.json').resolve(
+      '@murphai/device-syncd',
+    )
+  }
 }
 
-function resolveNodeRequire(): NodeJS.Require {
-  return createRequire(import.meta.url)
+function createPackageScopedRequire(relativePackageJsonPath: string): NodeJS.Require {
+  const moduleUrl =
+    typeof import.meta.url === 'string' && import.meta.url.length > 0
+      ? import.meta.url
+      : null
+
+  if (moduleUrl !== null) {
+    try {
+      return createRequire(new URL(relativePackageJsonPath, moduleUrl))
+    } catch (error) {
+      if (!isInvalidCreateRequirePathError(error)) {
+        throw error
+      }
+    }
+  }
+
+  if (typeof process !== 'undefined' && typeof process.cwd === 'function') {
+    return createRequire(path.join(process.cwd(), 'package.json'))
+  }
+
+  throw new TypeError(
+    'Unable to resolve a package root for @murphai/device-syncd.',
+  )
+}
+
+function isInvalidCreateRequirePathError(error: unknown): boolean {
+  return (
+    error instanceof TypeError &&
+    error.message.includes(
+      "The argument must be a file URL object, a file URL string, or an absolute path string.",
+    )
+  )
+}
+
+function isMissingDeviceSyncPackageError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' &&
+          error &&
+          'message' in error &&
+          typeof (error as { message?: unknown }).message === 'string'
+        ? (error as { message: string }).message
+        : null
+
+  return Boolean(
+    message?.includes("Cannot find module '@murphai/device-syncd'") &&
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'MODULE_NOT_FOUND',
+  )
 }
 
 export function buildManagedDeviceSyncEnvironment(input: {

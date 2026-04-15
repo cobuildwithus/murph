@@ -243,10 +243,7 @@ describe("hosted onboarding webhook retry safety", () => {
       payTxHash: "0xabc123",
       paymentAmount: 1_000_000_000_000_000n,
     });
-    mocks.sendHostedLinqChatMessage.mockResolvedValue({
-      chatId: "chat_123",
-      messageId: "out_msg_123",
-    });
+    mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.stripeChargesRetrieve.mockResolvedValue({
       customer: "cus_123",
       payment_intent: "pi_123",
@@ -409,17 +406,25 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalledWith({
-      create: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      create: expect.objectContaining({
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
         memberId: "member_123",
+        pendingLinqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+        pendingLinqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         telegramUserIdEncrypted: null,
         telegramUserLookupKey: null,
-      },
-      update: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
-      },
+      }),
+      update: expect.objectContaining({
+        pendingLinqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+        pendingLinqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+      }),
       where: {
         memberId: "member_123",
       },
@@ -958,6 +963,66 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
   });
 
+  it("does not wait for the hosted execution nudge when Stripe reconciliation defers it", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_deferred_123",
+      type: "invoice.paid",
+    });
+    mocks.recordHostedStripeEvent.mockResolvedValue({
+      duplicate: false,
+      type: "invoice.paid",
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue({
+      activatedMemberId: "member_123",
+      createdOrUpdatedRevnetIssuance: false,
+      eventId: "evt_stripe_deferred_123",
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_deferred_123",
+      status: "completed",
+    });
+    const prisma = withPrismaTransaction({});
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(
+      handleHostedStripeWebhook({
+        defer: (drain) => {
+          deferred.push(drain);
+        },
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_deferred_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "member.activated:stripe.invoice.paid:member_123:evt_stripe_deferred_123",
+      ],
+      limit: 1,
+      prisma,
+    });
+  });
+
   it("best-effort drains RevNet submissions when inline reconciliation queues one", async () => {
     mocks.stripeConstructEvent.mockReturnValue({
       created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
@@ -1006,6 +1071,63 @@ describe("hosted onboarding webhook retry safety", () => {
       prisma,
     });
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("does not wait for the RevNet nudge when Stripe reconciliation defers it", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_revnet_deferred_123",
+      type: "invoice.paid",
+    });
+    mocks.recordHostedStripeEvent.mockResolvedValue({
+      duplicate: false,
+      type: "invoice.paid",
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue({
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: true,
+      eventId: "evt_stripe_revnet_deferred_123",
+      hostedExecutionEventId: null,
+      status: "completed",
+    });
+    const prisma = withPrismaTransaction({});
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(
+      handleHostedStripeWebhook({
+        defer: (drain) => {
+          deferred.push(drain);
+        },
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_revnet_deferred_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).toHaveBeenCalledWith({
+      limit: 1,
+      prisma,
+    });
   });
 
   it("treats duplicate Stripe events as ingress duplicates without replaying durable work", async () => {
@@ -1235,8 +1357,6 @@ describe("hosted onboarding webhook retry safety", () => {
             lastErrorMessage: null,
             lastErrorName: null,
             lastErrorRetryable: null,
-            lastReceivedAt: expect.any(Date),
-            status: "processing",
             version: {
               increment: 1,
             },
@@ -1246,7 +1366,7 @@ describe("hosted onboarding webhook retry safety", () => {
     }
     expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(3);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1273,10 +1393,7 @@ describe("hosted onboarding webhook retry safety", () => {
     );
     mocks.sendHostedLinqChatMessage
       .mockRejectedValueOnce(retryableRateLimitError)
-      .mockResolvedValueOnce({
-        chatId: "chat_123",
-        messageId: "out_msg_123",
-      });
+      .mockResolvedValueOnce(undefined);
     const member = {
       billingStatus: HostedBillingStatus.not_started,
       id: "member_123",
@@ -1365,11 +1482,11 @@ describe("hosted onboarding webhook retry safety", () => {
           attemptId: expect.any(String),
           completedAt: null,
           lastErrorCode: null,
-          lastErrorMessage: "Linq outbound reply failed with HTTP 429.",
+          lastErrorMessage: "[redacted]",
           lastErrorName: "HostedOnboardingError",
           lastErrorRetryable: null,
           lastReceivedAt: expect.any(Date),
-          plannedAt: expect.any(Date),
+          plannedAt: null,
           status: "failed",
         }),
       }),
@@ -1385,7 +1502,6 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
-      duplicate: true,
       ok: true,
     });
 
@@ -1430,7 +1546,7 @@ describe("hosted onboarding webhook retry safety", () => {
     });
   });
 
-  it("does not resend an already-sent Linq invite reply when reclaiming a failed receipt", async () => {
+  it("retries the Linq invite reply when reclaiming a failed receipt without a durable side-effect row", async () => {
     const member = {
       billingStatus: HostedBillingStatus.not_started,
       id: "member_123",
@@ -1505,10 +1621,11 @@ describe("hosted onboarding webhook retry safety", () => {
         signature: null,
         timestamp: null,
       }),
-    ).rejects.toMatchObject({
-      code: "hosted_webhook_side_effect_delivery_uncertain",
-      name: "HostedOnboardingError",
-      retryable: false,
+    ).resolves.toEqual({
+      inviteCode: "join_123",
+      joinUrl: "https://join.example.test/join/join_123",
+      ok: true,
+      reason: "sent-signup-link",
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
@@ -1533,23 +1650,7 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(receiptCalls.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          attemptCount: 2,
-          attemptId: expect.any(String),
-          completedAt: null,
-          lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
-          lastErrorMessage: expect.stringContaining("may already have been delivered"),
-          lastErrorName: "HostedOnboardingError",
-          lastErrorRetryable: false,
-          lastReceivedAt: expect.any(Date),
-          plannedAt: expect.any(Date),
-          status: "failed",
-        }),
-      }),
-    );
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
   });
 
@@ -1670,23 +1771,11 @@ describe("hosted onboarding webhook retry safety", () => {
         attemptCount: 1,
         completedAt: null,
         lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
-        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
-        sideEffects: [
-          expect.objectContaining({
-            attemptCount: 1,
-            linqChatId: "chat_123",
-            linqInviteId: "invite_123",
-            linqReplyToMessageId: "msg_123",
-            linqResultChatId: "chat_123",
-            linqResultMessageId: "out_msg_123",
-            linqTemplate: "invite_signup",
-            lastErrorMessage: "Receipt persistence failed after the Linq send.",
-            status: "sent_unconfirmed",
-          }),
-        ],
+        plannedAt: null,
+        sideEffects: [],
         status: "failed",
       }),
     );
@@ -1711,23 +1800,11 @@ describe("hosted onboarding webhook retry safety", () => {
         attemptCount: 1,
         completedAt: null,
         lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
-        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
-        sideEffects: [
-          expect.objectContaining({
-            attemptCount: 1,
-            linqChatId: "chat_123",
-            linqInviteId: "invite_123",
-            linqReplyToMessageId: "msg_123",
-            linqResultChatId: "chat_123",
-            linqResultMessageId: "out_msg_123",
-            linqTemplate: "invite_signup",
-            lastErrorMessage: "Receipt persistence failed after the Linq send.",
-            status: "sent_unconfirmed",
-          }),
-        ],
+        plannedAt: null,
+        sideEffects: [],
         status: "failed",
       }),
     );
@@ -1824,10 +1901,10 @@ describe("hosted onboarding webhook retry safety", () => {
         attemptCount: 1,
         completedAt: null,
         lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
-        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
+        plannedAt: null,
         sideEffects: [],
         status: "failed",
       }),
@@ -1853,10 +1930,10 @@ describe("hosted onboarding webhook retry safety", () => {
         attemptCount: 1,
         completedAt: null,
         lastErrorCode: "hosted_webhook_side_effect_delivery_uncertain",
-        lastErrorMessage: expect.stringContaining("may already have been delivered"),
+        lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
+        plannedAt: null,
         sideEffects: [],
         status: "failed",
       }),
@@ -2341,17 +2418,16 @@ function buildLinqMessageSideEffect(input: {
     lastError: input.lastError ?? null,
     payload: {
       chatId: input.chatId ?? "chat_123",
+      homeRecipientPhone: null,
       inviteId: input.inviteId,
+      memberId: null,
       replyToMessageId: input.replyToMessageId ?? "msg_123",
       template: input.template ?? "invite_signup",
     },
     result:
       input.status === "pending"
         ? null
-        : {
-            chatId: createHostedOpaqueIdentifier("linq.chat", input.chatId ?? "chat_123"),
-            messageId: createHostedOpaqueIdentifier("linq.message", input.messageId ?? "out_msg_123"),
-          },
+        : { delivered: true as const },
     sentAt:
       input.sentAt ??
       (input.status === "pending" ? null : "2026-03-26T12:00:01.000Z"),
@@ -2610,7 +2686,11 @@ function readHostedWebhookSideEffectUpsertCalls(
     };
   } | undefined;
 
-  return readMockCallPayloads(hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []);
+  return readMockCallPayloads(hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map((call) => ({
+    ...call,
+    create: normalizeStoredWebhookSideEffectRecord(call.create),
+    update: normalizeStoredWebhookSideEffectRecord(call.update),
+  }));
 }
 
 function createInMemoryHostedWebhookReceiptStore() {
@@ -2725,7 +2805,7 @@ function createInMemoryHostedWebhookReceiptStore() {
       return receipt
         ? {
             ...receipt,
-            sideEffects: sideEffects.map((effect) => ({ ...effect })),
+            sideEffects: sideEffects.map((effect) => normalizeStoredWebhookSideEffectRecord(effect)),
           }
         : null;
     },
@@ -2993,6 +3073,55 @@ function normalizeLegacyWebhookReceiptSideEffect(value: unknown): Record<string,
   }
 
   return [];
+}
+
+function normalizeStoredWebhookSideEffectRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const effect = value as Record<string, unknown>;
+  const payload =
+    effect.payloadJson && typeof effect.payloadJson === "object" && !Array.isArray(effect.payloadJson)
+      ? effect.payloadJson as Record<string, unknown>
+      : null;
+  const result =
+    effect.resultJson && typeof effect.resultJson === "object" && !Array.isArray(effect.resultJson)
+      ? effect.resultJson as Record<string, unknown>
+      : null;
+
+  return {
+    ...effect,
+    dispatchPayloadJson: effect.kind === "hosted_execution_dispatch" ? effect.payloadJson ?? null : null,
+    linqChatId: effect.kind === "linq_message_send" && typeof payload?.chatId === "string" ? payload.chatId : null,
+    linqMemberId: effect.kind === "linq_message_send" && typeof payload?.memberId === "string" ? payload.memberId : null,
+    linqInviteId: effect.kind === "linq_message_send" && typeof payload?.inviteId === "string" ? payload.inviteId : null,
+    linqReplyToMessageId:
+      effect.kind === "linq_message_send" && typeof payload?.replyToMessageId === "string"
+        ? payload.replyToMessageId
+        : null,
+    linqResultChatId:
+      effect.kind === "linq_message_send" && typeof result?.chatId === "string" ? result.chatId : null,
+    linqResultMessageId:
+      effect.kind === "linq_message_send" && typeof result?.messageId === "string" ? result.messageId : null,
+    linqTemplate: effect.kind === "linq_message_send" && typeof payload?.template === "string" ? payload.template : null,
+    revnetAmountPaid:
+      effect.kind === "revnet_invoice_issue" && typeof payload?.amountPaid === "number" ? payload.amountPaid : null,
+    revnetChargeId:
+      effect.kind === "revnet_invoice_issue" && typeof payload?.chargeId === "string" ? payload.chargeId : null,
+    revnetCurrency:
+      effect.kind === "revnet_invoice_issue" && typeof payload?.currency === "string" ? payload.currency : null,
+    revnetInvoiceId:
+      effect.kind === "revnet_invoice_issue" && typeof payload?.invoiceId === "string" ? payload.invoiceId : null,
+    revnetMemberId:
+      effect.kind === "revnet_invoice_issue" && typeof payload?.memberId === "string" ? payload.memberId : null,
+    revnetPaymentIntentId:
+      effect.kind === "revnet_invoice_issue" && typeof payload?.paymentIntentId === "string"
+        ? payload.paymentIntentId
+        : null,
+    revnetResultHandled:
+      effect.kind === "revnet_invoice_issue" && result?.handled === true ? true : null,
+  };
 }
 
 function isHostedWebhookReceiptStatus(

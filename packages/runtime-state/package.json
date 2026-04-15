@@ -15,9 +15,37 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./assistant-ids": {
+      "types": "./dist/assistant-ids.d.ts",
+      "default": "./dist/assistant-ids.js"
+    },
     "./node": {
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
+    },
+    "./node/assistant-usage": {
+      "types": "./dist/node/assistant-usage.d.ts",
+      "default": "./dist/node/assistant-usage.js"
+    },
+    "./node/hosted-bundle-codec": {
+      "types": "./dist/node/hosted-bundle-codec.d.ts",
+      "default": "./dist/node/hosted-bundle-codec.js"
+    },
+    "./node/loopback-control-plane-auth": {
+      "types": "./dist/node/loopback-control-plane-auth.d.ts",
+      "default": "./dist/node/loopback-control-plane-auth.js"
+    },
+    "./node/runtime-paths": {
+      "types": "./dist/node/runtime-paths.d.ts",
+      "default": "./dist/node/runtime-paths.js"
+    },
+    "./node/sqlite-warning-filter": {
+      "types": "./dist/node/sqlite-warning-filter.d.ts",
+      "default": "./dist/node/sqlite-warning-filter.js"
+    },
+    "./node/ulid": {
+      "types": "./dist/node/ulid.d.ts",
+      "default": "./dist/node/ulid.js"
     }
   },
   "files": [
@@ -26,10 +54,11 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
-    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   }
 }

@@ -22,6 +22,22 @@ interface HostedPrivyWalletProvisioningInput extends HostedPrivyClientSessionSta
   createWallet: () => Promise<unknown>;
 }
 
+export async function ensureHostedPrivyWalletReady(
+  input: HostedPrivyWalletProvisioningInput,
+): Promise<void> {
+  const sessionState = readHostedPrivyClientSessionState(input);
+
+  if (!sessionState || sessionState.wallet) {
+    return;
+  }
+
+  try {
+    await input.createWallet();
+  } catch {
+    return;
+  }
+}
+
 export async function ensureHostedPrivyPhoneReady(
   input: HostedPrivyWalletProvisioningInput,
 ): Promise<void> {
@@ -35,15 +51,7 @@ export async function ensureHostedPrivyPhoneReady(
     throw new Error("This Privy session is missing a verified phone number.");
   }
 
-  if (sessionState.wallet) {
-    return;
-  }
-
-  try {
-    await input.createWallet();
-  } catch {
-    return;
-  }
+  await ensureHostedPrivyWalletReady(input);
 }
 
 export function readHostedPrivyClientSessionState(

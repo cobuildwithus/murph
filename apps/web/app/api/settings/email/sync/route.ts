@@ -1,45 +1,62 @@
+import { getPrisma } from "@/src/lib/prisma";
 import { syncHostedVerifiedEmailToHostedExecution } from "@/src/lib/hosted-execution/control";
+import { drainHostedExecutionOutboxBestEffort } from "@/src/lib/hosted-execution/outbox";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
-import { requireHostedPrivyActiveRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 export const POST = withJsonError(async (request: Request) => {
-    assertHostedOnboardingMutationOrigin(request);
-    const auth = await requireHostedPrivyActiveRequestAuthContext(request);
-    const body = await readOptionalJsonObject(request);
-    const expectedEmailAddress = normalizeComparableEmail(
-      typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,
-    );
-    const verifiedEmail = extractHostedPrivyVerifiedEmailAccount(auth.linkedAccounts);
-    const comparableVerifiedEmail = normalizeComparableEmail(verifiedEmail?.address ?? null);
+  assertHostedOnboardingMutationOrigin(request);
+  const auth = await requireActivePrivyMemberAuth(request);
+  const body = await readOptionalJsonObject(request);
+  const expectedEmailAddress = normalizeComparableEmail(
+    typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,
+  );
+  const verifiedEmail = extractHostedPrivyVerifiedEmailAccount(auth.linkedAccounts);
+  const comparableVerifiedEmail = normalizeComparableEmail(verifiedEmail?.address ?? null);
 
-    if (!verifiedEmail || (expectedEmailAddress && expectedEmailAddress !== comparableVerifiedEmail)) {
-      throw hostedOnboardingError({
-        code: "PRIVY_EMAIL_NOT_READY",
-        message:
-          "Your verified email has not reached the server-side Privy session yet. Wait a moment and try again.",
-        httpStatus: 409,
-        retryable: true,
-      });
-    }
-
-    const verifiedAt = new Date(verifiedEmail.verifiedAt * 1000).toISOString();
-    const syncResult = await syncHostedVerifiedEmailToHostedExecution({
-      emailAddress: verifiedEmail.address,
-      userId: auth.member.id,
-      verifiedAt,
+  if (!verifiedEmail || (expectedEmailAddress && expectedEmailAddress !== comparableVerifiedEmail)) {
+    throw hostedOnboardingError({
+      code: "PRIVY_EMAIL_NOT_READY",
+      message:
+        "Your verified email has not reached the server-side Privy session yet. Wait a moment and try again.",
+      httpStatus: 409,
+      retryable: true,
     });
+  }
 
-    return jsonOk({
-      emailAddress: syncResult.emailAddress,
-      ok: true,
-      runTriggered: syncResult.runTriggered,
-      verifiedAt: syncResult.verifiedAt,
+  const now = new Date().toISOString();
+  const verifiedAt = new Date(verifiedEmail.verifiedAt * 1000).toISOString();
+  const syncResult = await syncHostedVerifiedEmailToHostedExecution({
+    emailAddress: verifiedEmail.address,
+    userId: auth.member.id,
+    verifiedAt,
+  });
+  const channelSyncDispatch = await getPrisma().$transaction((tx) => {
+    return enqueueHostedMemberChannelsUpdatedTx({
+      emailLinked: true,
+      memberId: auth.member.id,
+      occurredAt: now,
+      prisma: tx,
+      sourceType: "settings.email.sync",
     });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await drainHostedExecutionOutboxBestEffort({
+    eventIds: [channelSyncDispatch.eventId],
+  });
+
+  return jsonOk({
+    emailAddress: syncResult.emailAddress,
+    ok: true,
+    runTriggered: true,
+    verifiedAt: syncResult.verifiedAt,
+  });
 });
 
 function normalizeComparableEmail(value: string | null | undefined): string | null {

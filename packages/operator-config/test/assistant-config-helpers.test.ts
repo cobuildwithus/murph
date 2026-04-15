@@ -23,14 +23,17 @@ import {
   normalizeAssistantHeaders,
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
+  resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
   shouldUseAssistantOpenAIResponsesApi,
   supportsAssistantReasoningEffort,
+  supportsAssistantZeroDataRetention,
 } from '../src/assistant/provider-config.ts'
 import {
   isSensitiveAssistantHeaderName,
   isSensitiveAssistantHeaderValue,
+  mergeAssistantHeaders,
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
 
@@ -57,8 +60,11 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
   assert.equal(isSensitiveAssistantHeaderName('x-api-key'), true)
   assert.equal(isSensitiveAssistantHeaderName('x-trace-id'), false)
   assert.equal(isSensitiveAssistantHeaderValue('Bearer secret-token-1234'), true)
+  assert.equal(isSensitiveAssistantHeaderValue('Basic second-secret-4567'), true)
+  assert.equal(isSensitiveAssistantHeaderValue('Bearer third-secret-8901'), true)
   assert.equal(isSensitiveAssistantHeaderValue('trace-id-1234'), false)
-  assert.deepEqual(splitAssistantHeadersForPersistence(normalizedHeaders), {
+  const split = splitAssistantHeadersForPersistence(normalizedHeaders)
+  assert.deepEqual(split, {
     persistedHeaders: {
       'X-Trace-Id': 'replacement-trace-id',
       'X-User': 'user-123',
@@ -70,6 +76,10 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
       'X-Custom-Token': 'custom-token',
     },
   })
+  assert.deepEqual(
+    mergeAssistantHeaders(split.persistedHeaders, split.secretHeaders),
+    normalizedHeaders,
+  )
   assert.deepEqual(normalizeAssistantPersistedHeaders(normalizedHeaders), {
     'X-Trace-Id': 'replacement-trace-id',
     'X-User': 'user-123',
@@ -124,15 +134,21 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     },
     model: 'codex-model',
     oss: false,
+    presetId: null,
     profile: null,
     provider: 'openai-compatible',
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     sandbox: null,
+    webSearch: null,
+    zeroDataRetention: null,
   })
+  const mergedOpenAiRuntime = resolveAssistantProviderRuntimeTarget(mergedOpenAi)
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedOpenAi), {
     apiKeyEnv: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
+    continuityFingerprint: mergedOpenAiRuntime.continuityFingerprint,
+    executionDriver: 'openai-compatible',
     headers: {
       Authorization: 'Bearer secret-value-1234',
       'X-Trace-Id': 'trace-id',
@@ -142,6 +158,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     profile: null,
     providerName: 'OpenAI',
     reasoningEffort: 'high',
+    resumeKind: null,
     sandbox: null,
     approvalPolicy: null,
   })
@@ -156,13 +173,17 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     },
     model: 'codex-model',
     oss: false,
+    presetId: null,
     profile: null,
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     sandbox: null,
+    webSearch: null,
+    zeroDataRetention: null,
   })
-  assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedOpenAi), true)
-  assert.equal(supportsAssistantReasoningEffort(mergedOpenAi), true)
+  assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedOpenAi), false)
+  assert.equal(supportsAssistantReasoningEffort(mergedOpenAi), false)
+  assert.equal(supportsAssistantZeroDataRetention(mergedOpenAi), false)
   assert.deepEqual(
     compactAssistantProviderConfigInput({
       provider: 'openai-compatible',
@@ -202,11 +223,14 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     headers: null,
     model: 'gpt-5',
     oss: true,
+    presetId: null,
     profile: 'default',
     provider: 'codex-cli',
     providerName: null,
     reasoningEffort: 'low',
     sandbox: 'workspace-write',
+    webSearch: null,
+    zeroDataRetention: null,
   })
   assert.equal(
     normalizeAssistantProviderConfig({ provider: 'codex-cli' }).reasoningEffort,
@@ -239,10 +263,20 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     shouldUseAssistantOpenAIResponsesApi({
       baseUrl: 'https://example.test/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
+      presetId: 'openai',
     }),
-    false,
+    true,
   )
   assert.equal(supportsAssistantReasoningEffort({ provider: 'codex-cli' }), true)
+  assert.equal(
+    supportsAssistantZeroDataRetention({
+      provider: 'openai-compatible',
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      presetId: 'vercel-ai-gateway',
+      zeroDataRetention: true,
+    }),
+    true,
+  )
 })
 
 test('hosted assistant helpers normalize equality, labels, and active-profile fallback', () => {
@@ -285,8 +319,10 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
         'X-Trace-Id': 'trace-id',
       },
       model: 'gpt-4.1',
+      presetId: null,
       providerName: null,
       reasoningEffort: null,
+      webSearch: null,
     },
   })
   assert.deepEqual(hostedAssistantProfileToProviderConfigInput(platformProfile), {
@@ -296,9 +332,12 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
       'X-Team': 'team-a',
     },
     model: null,
+    presetId: null,
     provider: 'openai-compatible',
     providerName: 'Internal Gateway',
     reasoningEffort: null,
+    webSearch: null,
+    zeroDataRetention: null,
   })
 
   const normalizedConfig = createHostedAssistantConfig({

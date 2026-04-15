@@ -17,19 +17,14 @@ interface StaticHeader {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
-const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = [
-  "PRIVY_CUSTOM_AUTH_DOMAIN",
-  "NEXT_PUBLIC_PRIVY_CUSTOM_AUTH_DOMAIN",
-] as const;
-const PRIVY_BASE_DOMAIN_ENV_KEYS = [
-  "PRIVY_BASE_DOMAIN",
-  "NEXT_PUBLIC_PRIVY_BASE_DOMAIN",
-] as const;
+const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = ["PRIVY_CUSTOM_AUTH_DOMAIN"] as const;
+const PRIVY_BASE_DOMAIN_ENV_KEYS = ["PRIVY_BASE_DOMAIN"] as const;
 const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
   "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
   "HOSTED_WEB_BASE_URL",
 ] as const;
 const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
+const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
 const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
   "https://auth.privy.io",
   "https://verify.walletconnect.com",
@@ -42,6 +37,15 @@ const PRIVY_REQUIRED_CONNECT_SOURCES = [
   "wss://www.walletlink.org",
   "https://*.rpc.privy.systems",
   "https://explorer-api.walletconnect.com",
+] as const;
+const PRIVY_REQUIRED_SCRIPT_SOURCES = [
+  "https://auth.privy.io",
+] as const;
+const TELEGRAM_REQUIRED_SCRIPT_SOURCES = [
+  "https://telegram.org",
+] as const;
+const TELEGRAM_REQUIRED_FRAME_SOURCES = [
+  "https://oauth.telegram.org",
 ] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 
@@ -83,26 +87,52 @@ export function resolveHostedPrivyOrigin(
   return resolvePrivyBaseDomainOrigin(readHostedPublicOriginFromEnvironment(environment));
 }
 
+export function resolveHostedPrivyOrigins(
+  environment: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const configuredCustomOrigin = resolveConfiguredOrigin(readFirstConfiguredValue(environment, PRIVY_CUSTOM_DOMAIN_ENV_KEYS));
+
+  if (configuredCustomOrigin) {
+    return [configuredCustomOrigin];
+  }
+
+  const configuredBaseDomainOrigin = resolvePrivyBaseDomainOrigin(
+    readFirstConfiguredValue(environment, PRIVY_BASE_DOMAIN_ENV_KEYS),
+  );
+
+  if (configuredBaseDomainOrigin) {
+    return [configuredBaseDomainOrigin];
+  }
+
+  return resolveHostedPrivyFallbackOrigins(readHostedPublicOriginFromEnvironment(environment));
+}
+
 export function buildHostedWebContentSecurityPolicy(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
   const isDevelopment = environment.NODE_ENV === "development";
   const isProduction = environment.NODE_ENV === "production";
-  const privyBaseDomainOrigin = resolveHostedPrivyOrigin(environment);
+  const privyOrigins = resolveHostedPrivyOrigins(environment);
   const privyFrameSources = uniqueSources([
     ...PRIVY_REQUIRED_CHILD_FRAME_SOURCES,
-    privyBaseDomainOrigin,
+    ...privyOrigins,
   ]);
-  const frameSources = uniqueSources([...privyFrameSources, ...TURNSTILE_SOURCES]);
+  const frameSources = uniqueSources([
+    ...privyFrameSources,
+    ...TELEGRAM_REQUIRED_FRAME_SOURCES,
+    ...TURNSTILE_SOURCES,
+  ]);
   const connectSources = uniqueSources([
     "'self'",
     ...PRIVY_REQUIRED_CONNECT_SOURCES,
-    privyBaseDomainOrigin,
+    ...privyOrigins,
     ...(isDevelopment ? ["ws:", "wss:"] : []),
   ]);
   const scriptSources = uniqueSources([
     "'self'",
     "'unsafe-inline'",
+    ...PRIVY_REQUIRED_SCRIPT_SOURCES,
+    ...TELEGRAM_REQUIRED_SCRIPT_SOURCES,
     ...TURNSTILE_SOURCES,
     ...(isDevelopment ? ["'unsafe-eval'"] : []),
   ]);
@@ -234,6 +264,23 @@ function resolveConfiguredOrigin(value: string | null | undefined): string | nul
   return buildOrigin(parsed.protocol, parsed.hostname, parsed.port);
 }
 
+function resolveHostedPrivyFallbackOrigins(value: string | null | undefined): string[] {
+  const parsed = parseConfiguredOrigin(value);
+
+  if (!parsed || isLoopbackHostname(parsed.hostname)) {
+    return [];
+  }
+
+  const hostnames = new Set<string>([normalizePrivyHostnameCandidate(parsed.hostname)]);
+  const strippedHostname = stripHostedPublicSubdomainPrefix(parsed.hostname);
+
+  if (strippedHostname) {
+    hostnames.add(normalizePrivyHostnameCandidate(strippedHostname));
+  }
+
+  return [...hostnames].map((hostname) => buildOrigin(parsed.protocol, hostname, parsed.port));
+}
+
 function parseConfiguredOrigin(value: string | null | undefined): URL | null {
   if (typeof value !== "string") {
     return null;
@@ -250,6 +297,32 @@ function parseConfiguredOrigin(value: string | null | undefined): URL | null {
   } catch {
     return null;
   }
+}
+
+function stripHostedPublicSubdomainPrefix(hostname: string): string | null {
+  const labels = hostname.toLowerCase().split(".");
+
+  if (labels.length < 3) {
+    return null;
+  }
+
+  const [firstLabel, ...remainingLabels] = labels;
+
+  if (!HOSTED_PUBLIC_SUBDOMAIN_PREFIXES.includes(firstLabel as typeof HOSTED_PUBLIC_SUBDOMAIN_PREFIXES[number])) {
+    return null;
+  }
+
+  return remainingLabels.join(".");
+}
+
+function normalizePrivyHostnameCandidate(hostname: string): string {
+  const normalizedHostname = hostname.toLowerCase();
+
+  if (normalizedHostname.startsWith("privy.")) {
+    return normalizedHostname;
+  }
+
+  return `privy.${normalizedHostname.replace(/^www\./u, "")}`;
 }
 
 function readHostedPublicOriginFromEnvironment(

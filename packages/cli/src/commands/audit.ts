@@ -72,13 +72,38 @@ export function registerAuditCommands(
     description: 'List audit records with optional action, actor, status, and date filters.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      action: z.string().min(1).optional(),
-      actor: z.string().min(1).optional(),
-      status: z.string().min(1).optional(),
-      from: localDateSchema.optional(),
-      to: localDateSchema.optional(),
-      sort: z.enum(['asc', 'desc']).default('desc'),
-      limit: z.number().int().positive().max(200).default(50),
+      action: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional audit action filter such as validate, samples_import_csv, or goal_update.'),
+      actor: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional audit actor filter such as cli, assistant, import, or system.'),
+      status: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional audit status filter such as success, warning, or error.'),
+      from: localDateSchema
+        .optional()
+        .describe('Inclusive lower occurredAt date bound in YYYY-MM-DD form.'),
+      to: localDateSchema
+        .optional()
+        .describe('Inclusive upper occurredAt date bound in YYYY-MM-DD form.'),
+      sort: z
+        .enum(['asc', 'desc'])
+        .default('desc')
+        .describe('Sort audit records by occurredAt in ascending or descending order.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .default(50)
+        .describe('Maximum number of audit records to return.'),
     }),
     output: auditListResultSchema,
     async run({ options }) {
@@ -98,7 +123,13 @@ export function registerAuditCommands(
     description: 'Show the latest audit records in descending occurredAt order.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      limit: z.number().int().positive().max(200).default(20),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .default(20)
+        .describe('Maximum number of recent audit records to return.'),
     }),
     output: auditListResultSchema,
     async run({ options }) {

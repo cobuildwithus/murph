@@ -4,11 +4,10 @@ import {
   type HostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
-import { readHostedEmailCapabilities } from "@murphai/hosted-execution";
 
 import {
   buildHostedRunnerContainerEnv,
-  buildHostedRunnerJobRuntimeConfig,
+  buildHostedRunnerJobRuntime,
 } from "./runner-env.ts";
 import {
   runHostedExecutionJobIsolatedDetailed,
@@ -17,7 +16,6 @@ import {
 import {
   buildHostedExecutionRuntimePlatform,
 } from "./runtime-platform.ts";
-import { normalizeHostedUserEnv } from "./user-env.ts";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
@@ -27,9 +25,10 @@ let hostedExecutionIsolatedRunnerForTests:
     options?: { signal?: AbortSignal },
   ) => Promise<HostedAssistantRuntimeJobResult>)
   | null = null;
-const hostedExecutionWorkerOnlyRuntimeEnvKeys = new Set([
+const hostedExecutionChildControlEnvKeys = new Set([
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+  "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
 ]);
 
 export function setHostedExecutionRunModeForTests(
@@ -101,61 +100,31 @@ export async function runHostedExecutionJob(
 function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
 ): HostedAssistantRuntimeConfig {
-  const forwardedEnv: Record<string, string> = {
-    ...buildHostedRunnerContainerEnv(process.env),
-    ...stripWorkerOnlyRuntimeEnvKeys(requestedRuntime.forwardedEnv),
-  };
-  const runtimeConfigSource = buildHostedExecutionRuntimeConfigSource(requestedRuntime, forwardedEnv);
-  const emailCapabilities = readHostedEmailCapabilities(forwardedEnv);
-  const resolvedForwardedEnv: Record<string, string> = {
-    ...forwardedEnv,
-    HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
-    HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
-  };
+  const forwardedEnv = requestedRuntime.forwardedEnv === undefined
+    ? buildHostedRunnerContainerEnv(process.env)
+    : stripChildProcessControlEnvKeys(requestedRuntime.forwardedEnv);
 
-  return {
-    ...buildHostedRunnerJobRuntimeConfig({
-      forwardedEnv: resolvedForwardedEnv,
-      runtimeConfigSource,
-      userEnv: normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, runtimeConfigSource),
-      userEnvSource: runtimeConfigSource,
-    }),
-  };
+  // The worker-owned runtime envelope is the source of truth when present.
+  // The container only falls back to ambient env for local/manual callers that omit it entirely.
+  return buildHostedRunnerJobRuntime({
+    commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
+    forwardedEnv,
+    resolvedConfig: requestedRuntime.resolvedConfig,
+    userEnv: requestedRuntime.userEnv ?? {},
+  });
 }
 
-function stripWorkerOnlyRuntimeEnvKeys(
+function stripChildProcessControlEnvKeys(
   forwardedEnv: HostedAssistantRuntimeConfig["forwardedEnv"],
 ): Record<string, string> {
   const filtered: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
-    if (hostedExecutionWorkerOnlyRuntimeEnvKeys.has(key)) {
+    if (hostedExecutionChildControlEnvKeys.has(key)) {
       continue;
     }
     filtered[key] = value;
   }
 
   return filtered;
-}
-
-function buildHostedExecutionRuntimeConfigSource(
-  requestedRuntime: HostedAssistantRuntimeConfig,
-  forwardedEnv: Readonly<Record<string, string>>,
-): Readonly<Record<string, string | undefined>> {
-  const requestedAllowedUserEnvKeys =
-    typeof requestedRuntime.forwardedEnv?.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS === "string"
-      ? requestedRuntime.forwardedEnv.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS
-      : undefined;
-  const requestedCommitTimeout =
-    typeof requestedRuntime.forwardedEnv?.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS === "string"
-      ? requestedRuntime.forwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS
-      : undefined;
-
-  return {
-    ...forwardedEnv,
-    HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS:
-      requestedCommitTimeout ?? process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS,
-    HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS:
-      requestedAllowedUserEnvKeys ?? process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS,
-  };
 }

@@ -1,4 +1,10 @@
-import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../../src/hosted-env-policy.ts";
+import {
+  isHostedAssistantApiKeyEnvName,
+  readHostedAssistantApiKeyEnvName,
+} from "@murphai/assistant-runtime/hosted-assistant-env";
+import {
+  HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV,
+} from "../../src/hosted-env-policy.ts";
 
 import {
   isObjectRecord,
@@ -27,7 +33,9 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "HOSTED_ASSISTANT_PROVIDER_NAME",
   "HOSTED_ASSISTANT_REASONING_EFFORT",
   "HOSTED_ASSISTANT_SANDBOX",
+  "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
+  HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV,
   "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
   "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
   "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
@@ -37,7 +45,6 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "MURPH_WEB_SEARCH_MAX_RESULTS",
   "MURPH_WEB_SEARCH_PROVIDER",
   "MURPH_WEB_SEARCH_TIMEOUT_MS",
-  "PDFTOTEXT_COMMAND",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_USERNAME",
   "TELEGRAM_FILE_BASE_URL",
@@ -45,11 +52,13 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "WHISPER_MODEL_PATH",
 ] as const;
 
-const DEFAULT_CONTAINER_INSTANCE_TYPE = "standard-1";
+const DEFAULT_CONTAINER_INSTANCE_TYPE: NamedContainerInstanceType = "standard-1";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
-const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
-const NAMED_CONTAINER_INSTANCE_TYPES = new Set([
+const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 1;
+const DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES =
+  "device-sync,hosted-email,linq,mapbox,telegram";
+const NAMED_CONTAINER_INSTANCE_TYPES = [
   "basic",
   "dev",
   "lite",
@@ -58,17 +67,10 @@ const NAMED_CONTAINER_INSTANCE_TYPES = new Set([
   "standard-2",
   "standard-3",
   "standard-4",
-] as const);
+] as const;
+const NAMED_CONTAINER_INSTANCE_TYPE_SET = new Set<string>(NAMED_CONTAINER_INSTANCE_TYPES);
 
-type NamedContainerInstanceType =
-  | "basic"
-  | "dev"
-  | "lite"
-  | "standard"
-  | "standard-1"
-  | "standard-2"
-  | "standard-3"
-  | "standard-4";
+type NamedContainerInstanceType = (typeof NAMED_CONTAINER_INSTANCE_TYPES)[number];
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -90,7 +92,6 @@ export interface HostedDeployAutomationEnvironment {
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
-  defaultAlarmDelayMs: string;
   logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
@@ -122,11 +123,6 @@ export function readHostedDeployAutomationEnvironment(
       source.CF_CONTAINER_MAX_INSTANCES,
       DEFAULT_CONTAINER_MAX_INSTANCES,
       "CF_CONTAINER_MAX_INSTANCES",
-    ),
-    defaultAlarmDelayMs: normalizePositiveIntegerString(
-      source.CF_DEFAULT_ALARM_DELAY_MS,
-      "21600000",
-      "CF_DEFAULT_ALARM_DELAY_MS",
     ),
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
@@ -183,13 +179,11 @@ function normalizePositiveInteger(
     return fallback;
   }
 
-  const parsed = Number.parseInt(normalized, 10);
+  return parsePositiveInteger(normalized, label, "positive integer");
+}
 
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
+function isNamedContainerInstanceType(value: string): value is NamedContainerInstanceType {
+  return NAMED_CONTAINER_INSTANCE_TYPE_SET.has(value);
 }
 
 function normalizeContainerInstanceType(
@@ -203,8 +197,8 @@ function normalizeContainerInstanceType(
     return fallback;
   }
 
-  if (NAMED_CONTAINER_INSTANCE_TYPES.has(normalized as NamedContainerInstanceType)) {
-    return normalized as NamedContainerInstanceType;
+  if (isNamedContainerInstanceType(normalized)) {
+    return normalized;
   }
 
   let parsed: unknown;
@@ -212,7 +206,7 @@ function normalizeContainerInstanceType(
     parsed = JSON.parse(normalized);
   } catch {
     throw new Error(
-      `${label} must be one of ${Array.from(NAMED_CONTAINER_INSTANCE_TYPES).join(", ")} or a JSON object with vcpu, memory_mib, and disk_mb.`,
+      `${label} must be one of ${NAMED_CONTAINER_INSTANCE_TYPES.join(", ")} or a JSON object with vcpu, memory_mib, and disk_mb.`,
     );
   }
 
@@ -244,13 +238,7 @@ function normalizePositiveIntegerString(
   label: string,
 ): string {
   const normalized = normalizeOptionalString(value) ?? fallback;
-  const parsed = Number.parseInt(normalized, 10);
-
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${label} must be a positive integer string.`);
-  }
-
-  return String(parsed);
+  return String(parsePositiveInteger(normalized, label, "positive integer string"));
 }
 
 function normalizeSamplingRate(
@@ -273,16 +261,28 @@ function normalizeSamplingRate(
   return parsed;
 }
 
+function parsePositiveInteger(value: string, label: string, description: string): number {
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a ${description}.`);
+  }
+
+  return parsed;
+}
+
 function resolveHostedWorkerVar(
   source: EnvSource,
   key: typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES[number],
 ): string | null {
-  const value = normalizeOptionalString(source[key]);
+  const value = key === "HOSTED_ASSISTANT_API_KEY_ENV"
+    ? readHostedAssistantApiKeyEnvName(source)
+    : normalizeOptionalString(source[key]);
 
   if (
     key === "HOSTED_ASSISTANT_API_KEY_ENV"
     && value
-    && !isAllowedHostedAssistantReferencedRunnerEnvKey(value)
+    && !isHostedAssistantApiKeyEnvName(value)
   ) {
     return null;
   }
@@ -293,6 +293,10 @@ function resolveHostedWorkerVar(
 
   if (key === "MURPH_WEB_FETCH_ENABLED") {
     return "true";
+  }
+
+  if (key === HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV) {
+    return DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
   }
 
   return null;

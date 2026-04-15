@@ -1,4 +1,5 @@
 import {
+  type EventSource,
   type ActivityStrengthExercise,
   type JsonObject,
   type WorkoutSession,
@@ -98,6 +99,64 @@ const knownWorkoutTypes = [
   },
 ] as const
 
+const explicitActivityMentionCandidates = [
+  {
+    activityType: 'running',
+    patterns: [/\brun(?:ning)?\b/iu, /\bjog(?:ging)?\b/iu],
+  },
+  {
+    activityType: 'walking',
+    patterns: [/\bwalk(?:ing)?\b/iu],
+  },
+  {
+    activityType: 'hiking',
+    patterns: [/\bhik(?:e|ing)\b/iu],
+  },
+  {
+    activityType: 'cycling',
+    patterns: [
+      /\bbik(?:e|ing)\b/iu,
+      /\bcycl(?:e|ing)\b/iu,
+      /\bspin(?:ning)?\b/iu,
+      /\bpeloton\b/iu,
+    ],
+  },
+  {
+    activityType: 'swimming',
+    patterns: [/\bswim(?:ming)?\b/iu],
+  },
+  {
+    activityType: 'rowing',
+    patterns: [/\brow(?:ing)?\b/iu, /\berg\b/iu],
+  },
+  {
+    activityType: 'yoga',
+    patterns: [/\byoga\b/iu],
+  },
+  {
+    activityType: 'pilates',
+    patterns: [/\bpilates\b/iu],
+  },
+  {
+    activityType: 'strength-training',
+    patterns: [
+      /\bstrength(?: training)?\b/iu,
+      /\bweight(?:s|lifting)?\b/iu,
+      /\blift(?:ing)?\b/iu,
+      /\bpush-?ups?\b/iu,
+      /\bpull-?ups?\b/iu,
+      /\bbench(?: ?press)?\b/iu,
+      /\bsquats?\b/iu,
+      /\bdeadlifts?\b/iu,
+      /\bdumbbells?\b/iu,
+      /\bbarbells?\b/iu,
+    ],
+  },
+] as const
+
+const mixedActivityTransitionPattern =
+  /\b(?:then|followed by|after|before|cooldown|warmup|break|including|plus)\b/iu
+
 const ambiguousDistancePattern =
   /\b\d+(?:\.\d+)?\s*(?:or|to|\/|-)\s*\d+(?:\.\d+)?\s*(?:km|kilometers?|kilometres?|mi|miles?|k)\b/iu
 const kilometerDistancePattern =
@@ -128,7 +187,7 @@ export interface AddWorkoutRecordInput {
   text?: string
   inputFile?: string
   occurredAt?: string
-  source?: 'manual' | 'import' | 'device' | 'derived'
+  source?: EventSource
   durationMinutes?: number
   activityType?: string
   distanceKm?: number
@@ -588,6 +647,13 @@ function resolveDurationMinutes(
     return validateDurationMinutes(explicitDurationMinutes)
   }
 
+  if (looksLikeSegmentedWorkout(text)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout note includes multiple activities or segments. Pass --duration <minutes> to record the total workout duration explicitly.',
+    )
+  }
+
   const inferred = inferDurationMinutes(text)
   if (typeof inferred === 'number') {
     return inferred
@@ -600,7 +666,33 @@ function resolveDurationMinutes(
     )
   }
 
-  return 30
+  throw new VaultCliError(
+    'invalid_option',
+    'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
+  )
+}
+
+function looksLikeSegmentedWorkout(text: string): boolean {
+  if (!mixedActivityTransitionPattern.test(text)) {
+    return false
+  }
+
+  const segments = text
+    .split(mixedActivityTransitionPattern)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+
+  const activitySegments = segments.filter((segment) =>
+    segmentHasExplicitActivityMention(segment.toLowerCase()),
+  )
+
+  return activitySegments.length >= 2
+}
+
+function segmentHasExplicitActivityMention(text: string): boolean {
+  return explicitActivityMentionCandidates.some((candidate) =>
+    candidate.patterns.some((pattern) => pattern.test(text)),
+  )
 }
 
 function resolveDistanceKm(

@@ -61,39 +61,40 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 
+const assistantIdentityRoutingDescription =
+  'Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.'
+
+const assistantParticipantRoutingDescription =
+  'Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.'
+
+const assistantSourceThreadRoutingDescription =
+  'Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.'
+
+const assistantOneSendDeliveryTargetRoutingDescription =
+  'Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.'
+
+const assistantSavedDeliveryTargetRoutingDescription =
+  'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.'
+
+function optionalNonEmptyStringOption(description: string) {
+  return z
+    .string()
+    .min(1)
+    .optional()
+    .describe(description)
+}
+
 const assistantSessionOptionFields = {
-  session: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Existing Murph assistant session id to resume.'),
-  alias: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional stable alias used to map an external conversation onto one assistant session.',
-    ),
-  channel: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional channel label such as imessage, telegram, linq, or email.'),
-  identity: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional local assistant identity id for multi-user routing.'),
-  participant: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional remote actor id for multi-user routing and direct-conversation binding.'),
-  sourceThread: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.'),
+  session: optionalNonEmptyStringOption('Existing Murph assistant session id to resume.'),
+  alias: optionalNonEmptyStringOption(
+    'Optional stable alias used to map an external conversation onto one assistant session.',
+  ),
+  channel: optionalNonEmptyStringOption(
+    'Optional channel label such as telegram, linq, or email.',
+  ),
+  identity: optionalNonEmptyStringOption(assistantIdentityRoutingDescription),
+  participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
+  sourceThread: optionalNonEmptyStringOption(assistantSourceThreadRoutingDescription),
 }
 
 const assistantProviderOptionFields = {
@@ -103,42 +104,24 @@ const assistantProviderOptionFields = {
     .describe(
       'Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.',
     ),
-  codexCommand: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex CLI executable path. Defaults to `codex`.'),
-  model: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional provider model override for local chat turns.'),
-  baseUrl: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
-    ),
-  apiKeyEnv: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
-    ),
-  providerName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
-    ),
-  headersJson: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.'),
+  codexCommand: optionalNonEmptyStringOption(
+    'Optional Codex CLI executable path. Defaults to `codex`.',
+  ),
+  model: optionalNonEmptyStringOption(
+    'Optional provider model override for local chat turns.',
+  ),
+  baseUrl: optionalNonEmptyStringOption(
+    'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
+  ),
+  apiKeyEnv: optionalNonEmptyStringOption(
+    'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
+  ),
+  providerName: optionalNonEmptyStringOption(
+    'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
+  ),
+  headersJson: optionalNonEmptyStringOption(
+    'Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.',
+  ),
   sandbox: z
     .enum(assistantSandboxValues)
     .optional()
@@ -151,11 +134,7 @@ const assistantProviderOptionFields = {
     .describe(
       'Codex approval policy for local assistant chat. Defaults to never for the privileged local Codex adapter.',
     ),
-  profile: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex config profile name.'),
+  profile: optionalNonEmptyStringOption('Optional Codex config profile name.'),
   oss: z
     .boolean()
     .optional()
@@ -171,38 +150,20 @@ const assistantDeliveryOptionFields = {
     .describe(
       'After generating a response, deliver it over the mapped outbound channel session when available.',
     ),
-  deliveryTarget: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
+  deliveryTarget: optionalNonEmptyStringOption(
+    assistantOneSendDeliveryTargetRoutingDescription,
   ),
 }
 
 const assistantSelfDeliveryTargetOptionFields = {
-  identity: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional local assistant identity id to reuse for this saved channel target.'),
-  participant: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional remote actor id to reuse for this saved channel target.'),
-  sourceThread: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional upstream thread id to reuse for this saved channel target.'),
-  deliveryTarget: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional explicit outbound destination to save for this channel target, such as a phone number, Telegram chat id, or email address.',
-    ),
+  identity: optionalNonEmptyStringOption(
+    'Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.',
+  ),
+  participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
+  sourceThread: optionalNonEmptyStringOption(assistantSourceThreadRoutingDescription),
+  deliveryTarget: optionalNonEmptyStringOption(
+    assistantSavedDeliveryTargetRoutingDescription,
+  ),
 }
 
 function assertAssistantSelfDeliveryTargetInput(input: {
@@ -279,7 +240,7 @@ function createAssistantStatusCommandDefinition(input?: {
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Show a compact assistant runtime snapshot including recent turn receipts and the outbound outbox backlog.',
+      'Show a compact assistant runtime snapshot including recent turn receipts and the outbound outbox backlog. Use this to inspect the provider and model actually used by recent or active assistant turns.',
     hint:
       input?.hint ??
       'Use this when the assistant feels stuck, duplicated a send, or you want the latest receipt timeline without opening the local runtime files under `.runtime/operations/assistant/`.',
@@ -288,7 +249,9 @@ function createAssistantStatusCommandDefinition(input?: {
         .string()
         .min(1)
         .optional()
-        .describe('Optional assistant session id to scope the recent turn receipts.'),
+        .describe(
+          'Optional assistant session id to scope the runtime snapshot to one session and inspect the provider/model used there.',
+        ),
       limit: z
         .number()
         .int()
@@ -461,6 +424,37 @@ async function resolveAssistantDeliveryRouteFromCli(input: {
   )
 }
 
+async function resolveAssistantDeliveryInvocationFromCli(
+  options: AssistantConversationCliOptions & AssistantDeliveryCliOptions,
+  input: {
+    resolveSavedRoute: boolean
+  },
+) {
+  const deliveryOverrides = assistantDeliveryOverridesFromCli(options)
+  const savedRoute = input.resolveSavedRoute
+    ? await resolveAssistantDeliveryRouteFromCli({
+        allowSingleSavedTargetFallback: true,
+        channel: options.channel,
+        identity: options.identity,
+        participant: options.participant,
+        sourceThread: options.sourceThread,
+        deliveryTarget: deliveryOverrides.deliveryTarget,
+      })
+    : null
+
+  return {
+    conversationOptions: assistantConversationOptionsFromCli({
+      ...options,
+      channel: savedRoute?.channel ?? options.channel,
+      identity: savedRoute?.identityId ?? options.identity,
+      participant: savedRoute?.participantId ?? options.participant,
+      sourceThread: savedRoute?.sourceThreadId ?? options.sourceThread,
+    }),
+    deliveryOverrides,
+    resolvedDeliveryTarget: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
+  }
+}
+
 async function runAssistantChatCommand(context: {
   args: AssistantChatArgs
   options: AssistantChatOptions
@@ -469,7 +463,6 @@ async function runAssistantChatCommand(context: {
 }) {
   const result = await runAssistantChat({
     vault: context.options.vault,
-    includeFirstTurnCheckIn: true,
     initialPrompt: context.args.prompt,
     ...assistantConversationOptionsFromCli(context.options),
     ...assistantProviderOverridesFromCli(context.options),
@@ -496,10 +489,10 @@ function createAssistantChatCommandDefinition(input?: {
     args: assistantChatArgsSchema,
     description:
       input?.description ??
-      'Open an Ink terminal chat UI backed by the chosen provider while Murph stores session metadata plus a local transcript outside the canonical vault.',
+      'Open an Ink terminal chat UI backed by the chosen provider while Murph stores session metadata plus a local transcript outside the canonical vault. This command requires interactive terminal input.',
     hint:
       input?.hint ??
-      'Type /exit to close the chat loop or /session to print the current Murph session id.',
+      'Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
     options: assistantChatOptionsSchema,
     output: assistantChatResultSchema,
     outputPolicy: 'agent-only' as const,
@@ -539,14 +532,9 @@ const assistantRunOptionsSchema = withBaseOptions({
     .string()
     .min(1)
     .optional()
-    .describe('Optional JSON object of extra HTTP headers for the routing endpoint.'),
-  scanIntervalMs: z
-    .number()
-    .int()
-    .positive()
-    .max(60000)
-    .default(5000)
-    .describe('Polling interval between inbox scans when running continuously.'),
+    .describe(
+      'Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.',
+    ),
   maxPerScan: z
     .number()
     .int()
@@ -558,7 +546,7 @@ const assistantRunOptionsSchema = withBaseOptions({
     .boolean()
     .optional()
     .describe(
-      'Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Murph.',
+      'Allow self-authored captures to trigger channel auto-reply. Useful for a dedicated assistant self-chat or sandbox thread, but only safe when you isolate that thread to Murph.',
     ),
   sessionRolloverHours: z
     .number()
@@ -573,10 +561,6 @@ const assistantRunOptionsSchema = withBaseOptions({
     .boolean()
     .optional()
     .describe('Run one assistant scan and then exit.'),
-  skipDaemon: z
-    .boolean()
-    .optional()
-    .describe('Do not start the inbox foreground daemon; only run the assistant scan loop.'),
 })
 
 function createAssistantRunCommandDefinition(
@@ -591,7 +575,7 @@ function createAssistantRunCommandDefinition(
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured channels such as Telegram, Linq, or email, and optionally applies model-routed canonical promotions.',
     hint:
       input?.hint ??
       'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and due automations fire while this loop is active.',
@@ -610,9 +594,8 @@ function createAssistantRunCommandDefinition(
           model: 'gpt-oss:20b',
           baseUrl: 'http://127.0.0.1:11434/v1',
           once: true,
-          skipDaemon: true,
         },
-        description: 'Run a single inbox scan without starting the foreground daemon.',
+        description: 'Run a single inbox scan in one-shot mode.',
       },
       {
         options: {
@@ -620,7 +603,7 @@ function createAssistantRunCommandDefinition(
           allowSelfAuthored: true,
           sessionRolloverHours: 48,
         },
-        description: 'Run dedicated iMessage self-chat mode with two-day session rollover.',
+        description: 'Run a dedicated self-chat thread with two-day session rollover.',
       },
     ],
     options: assistantRunOptionsSchema,
@@ -643,7 +626,6 @@ function createAssistantRunCommandDefinition(
               headers: parseHeadersJsonOption(context.options.headersJson),
             }
           : undefined,
-        scanIntervalMs: context.options.scanIntervalMs,
         maxPerScan: context.options.maxPerScan,
         allowSelfAuthored: context.options.allowSelfAuthored,
         sessionMaxAgeMs:
@@ -651,7 +633,7 @@ function createAssistantRunCommandDefinition(
             ? context.options.sessionRolloverHours * 60 * 60 * 1000
             : null,
         once: context.options.once,
-        startDaemon: context.options.skipDaemon ? false : true,
+        startDaemon: context.options.once === true ? false : true,
         onEvent(event) {
           const message = formatAssistantRunEventForTerminal(
             event,
@@ -693,7 +675,7 @@ export function registerAssistantCommands(
       description:
         'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
       hint:
-        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
+        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as Telegram, Linq, or email.',
       examples: [
         {
           args: {
@@ -710,11 +692,12 @@ export function registerAssistantCommands(
           },
           options: {
             vault: './vault',
-            channel: 'imessage',
-            participant: '+15551234567',
+            channel: 'linq',
+            sourceThread: 'chat_lunch',
+            deliveryTarget: 'chat_lunch',
             deliverResponse: true,
           },
-          description: 'Generate a reply locally and deliver it over iMessage.',
+          description: 'Generate a reply locally and deliver it over Linq.',
         },
         {
           args: {
@@ -750,32 +733,22 @@ export function registerAssistantCommands(
       }),
       output: assistantAskResultSchema,
       async run(context) {
-        const deliveryOverrides = assistantDeliveryOverridesFromCli(context.options)
-        const savedRoute =
-          deliveryOverrides.deliverResponse && !context.options.session
-            ? await resolveAssistantDeliveryRouteFromCli({
-                allowSingleSavedTargetFallback: true,
-                channel: context.options.channel,
-                identity: context.options.identity,
-                participant: context.options.participant,
-                sourceThread: context.options.sourceThread,
-                deliveryTarget: deliveryOverrides.deliveryTarget,
-              })
-            : null
+        const delivery = await resolveAssistantDeliveryInvocationFromCli(
+          context.options,
+          {
+            resolveSavedRoute: Boolean(
+              context.options.deliverResponse && !context.options.session,
+            ),
+          },
+        )
 
         return sendAssistantMessage({
           vault: context.options.vault,
           prompt: context.args.prompt,
-          ...assistantConversationOptionsFromCli({
-            ...context.options,
-            channel: savedRoute?.channel ?? context.options.channel,
-            identity: savedRoute?.identityId ?? context.options.identity,
-            participant: savedRoute?.participantId ?? context.options.participant,
-            sourceThread: savedRoute?.sourceThreadId ?? context.options.sourceThread,
-          }),
+          ...delivery.conversationOptions,
           ...assistantProviderOverridesFromCli(context.options),
-          ...deliveryOverrides,
-          deliveryTarget: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
+          ...delivery.deliveryOverrides,
+          deliveryTarget: delivery.resolvedDeliveryTarget,
         })
       },
     })
@@ -790,9 +763,9 @@ export function registerAssistantCommands(
           .describe('Outbound message body to deliver over the mapped assistant channel.'),
       }),
       description:
-        'Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, Linq, and email all use the same stored assistant channel binding surface.',
+        'Deliver one outbound assistant message without invoking the chat provider. Telegram, Linq, and email all use the same stored assistant channel binding surface.',
       hint:
-        'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
+        'Use --deliveryTarget to override the stored delivery target for one send only. For Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
       examples: [
         {
           args: {
@@ -800,10 +773,11 @@ export function registerAssistantCommands(
           },
           options: {
             vault: './vault',
-            channel: 'imessage',
-            participant: '+15551234567',
+            channel: 'telegram',
+            sourceThread: '123456789',
+            deliveryTarget: '123456789',
           },
-          description: 'Send a direct iMessage to one participant.',
+          description: 'Send a direct Telegram reply to one chat.',
         },
         {
           args: {
@@ -859,34 +833,21 @@ export function registerAssistantCommands(
           .string()
           .min(1)
           .optional()
-          .describe(
-            'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
-          ),
+          .describe(assistantOneSendDeliveryTargetRoutingDescription),
       }),
       output: assistantDeliverResultSchema,
       async run(context) {
-        const deliveryOverrides = assistantDeliveryOverridesFromCli(context.options)
-        const savedRoute = context.options.session
-          ? null
-          : await resolveAssistantDeliveryRouteFromCli({
-              allowSingleSavedTargetFallback: true,
-              channel: context.options.channel,
-              identity: context.options.identity,
-              participant: context.options.participant,
-              sourceThread: context.options.sourceThread,
-              deliveryTarget: deliveryOverrides.deliveryTarget,
-            })
+        const delivery = await resolveAssistantDeliveryInvocationFromCli(
+          context.options,
+          {
+            resolveSavedRoute: !context.options.session,
+          },
+        )
         return deliverAssistantMessage({
           vault: context.options.vault,
           message: context.args.message,
-          ...assistantConversationOptionsFromCli({
-            ...context.options,
-            channel: savedRoute?.channel ?? context.options.channel,
-            identity: savedRoute?.identityId ?? context.options.identity,
-            participant: savedRoute?.participantId ?? context.options.participant,
-            sourceThread: savedRoute?.sourceThreadId ?? context.options.sourceThread,
-          }),
-          target: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
+          ...delivery.conversationOptions,
+          target: delivery.resolvedDeliveryTarget,
         })
       },
     })
@@ -943,11 +904,12 @@ export function registerAssistantCommands(
         channel: z
           .string()
           .min(1)
-          .describe('Outbound channel to save, such as telegram, imessage, linq, or email.'),
+          .describe('Outbound channel to save, such as telegram, linq, or email.'),
       }),
-      description: 'Save or replace the local default outbound target for one channel.',
+      description:
+        'Save or replace the local default outbound target for one channel. Provide at least one of --participant, --sourceThread, or --deliveryTarget; saved email targets also require --identity with the configured AgentMail inbox id.',
       hint:
-        'Use this after the user gives you a phone number, Telegram chat, or email target so later actions can reuse it without asking again.',
+        'Provide at least one of --participant, --sourceThread, or --deliveryTarget. Saved email targets also require --identity with the configured AgentMail inbox id.',
       options: z.object({
         requestId: requestIdSchema,
         ...assistantSelfDeliveryTargetOptionFields,
@@ -1055,9 +1017,9 @@ export function registerAssistantCommands(
       'chat',
       createAssistantChatCommandDefinition({
         description:
-          'Open the same assistant chat UI as `assistant chat` directly from the CLI root.',
+          'Open the same interactive assistant chat UI as `assistant chat` directly from the CLI root.',
         hint:
-          'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Murph session id.',
+          'Shorthand for `assistant chat`. Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
       }),
     )
     cli.command(
@@ -1073,9 +1035,9 @@ export function registerAssistantCommands(
       'status',
       createAssistantStatusCommandDefinition({
         description:
-          'Show the same assistant runtime snapshot as `assistant status` directly from the CLI root.',
+          'Show the same assistant runtime snapshot as `assistant status` directly from the CLI root, including the provider and model used by recent turns.',
         hint:
-          'Shorthand for `assistant status`. Use this to inspect recent turn receipts, session freshness, and pending outbox work.',
+          'Shorthand for `assistant status`. Use this to inspect live or recent runtime evidence such as recent turn receipts, the provider/model used, session freshness, and pending outbox work.',
       }),
     )
     cli.command(

@@ -9,6 +9,19 @@ on:
 permissions:
   contents: read
 
+env:
+  # CI must still run apps/web verify, but this workflow does not have the hosted
+  # onboarding or hosted device-sync secrets that production deploy surfaces carry.
+  # The database/device-sync/contact-privacy values below are deterministic CI-only
+  # placeholders that let hosted-web routes boot for build/smoke without wiring the
+  # real production control-plane secrets into GitHub Actions.
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test
+  DEVICE_SYNC_ENCRYPTION_KEY: 0101010101010101010101010101010101010101010101010101010101010101
+  DEVICE_SYNC_ENCRYPTION_KEY_VERSION: v1
+  HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+  NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
+  PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+
 jobs:
   cli-host-matrix:
     name: CLI host matrix (${{ matrix.os }})
@@ -28,7 +41,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install deps
@@ -37,8 +50,11 @@ jobs:
       - name: Build workspace
         run: pnpm build
 
+      - name: Prepare built CLI runtime artifacts
+        run: pnpm build:test-runtime:prepared
+
       - name: Run cross-platform CLI coverage
-        run: pnpm exec vitest run packages/cli/test/setup-cli.test.ts packages/cli/test/inbox-cli.test.ts --no-coverage --maxWorkers 1
+        run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/setup-cli.test.ts packages/cli/test/cli-expansion-inbox-attachments.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1
 
   release-checks-linux:
     name: Release checks (ubuntu)
@@ -52,7 +68,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install deps

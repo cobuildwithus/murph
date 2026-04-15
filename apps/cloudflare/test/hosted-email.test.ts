@@ -12,6 +12,11 @@ import {
 import { readEncryptedR2Json, writeEncryptedR2Json } from "../src/crypto.ts";
 import type { HostedEmailConfig } from "../src/hosted-email/config.ts";
 import {
+  readHostedEmailMessageBytes,
+  readHostedEmailRawMessage,
+  writeHostedEmailRawMessage,
+} from "../src/hosted-email.ts";
+import {
   createHostedEmailUserAddress,
   reconcileHostedEmailVerifiedSenderRoute,
   resolveHostedEmailIngressRoute,
@@ -20,7 +25,7 @@ import {
 import { shouldRejectHostedEmailIngressFailure } from "../src/hosted-email/ingress-policy.ts";
 import { sendHostedEmailMessage } from "../src/hosted-email/transport.ts";
 
-import { MemoryEncryptedR2Bucket } from "./test-helpers";
+import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 const TEST_CONFIG: HostedEmailConfig = {
   apiBaseUrl: "https://api.cloudflare.com/client/v4",
@@ -91,6 +96,54 @@ describe("hosted email routing and transport", () => {
     expect(bucket.objects).toEqual(objectSnapshot);
   });
 
+  it("uses deterministic opaque ids for identical hosted raw-email retries", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const plaintext = new TextEncoder().encode("From: owner@example.com\r\n\r\nhello");
+
+    const firstKey = await writeHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      plaintext,
+      userId: "user_123",
+    });
+    const secondKey = await writeHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      plaintext,
+      userId: "user_123",
+    });
+
+    expect(firstKey).toMatch(/^[0-9a-f]{40}$/u);
+    expect(secondKey).toBe(firstKey);
+    await expect(readHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      rawMessageKey: firstKey,
+      userId: "user_123",
+    })).resolves.toEqual(plaintext);
+  });
+
+  it("fails closed when hosted raw-email inputs exceed the configured size bound", async () => {
+    await expect(readHostedEmailMessageBytes("abcdef", {
+      maxBytes: 5,
+    })).rejects.toThrow(/maximum accepted size/u);
+
+    const oversizedStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("abc"));
+        controller.enqueue(new TextEncoder().encode("def"));
+        controller.close();
+      },
+    });
+
+    await expect(readHostedEmailMessageBytes(oversizedStream, {
+      maxBytes: 5,
+    })).rejects.toThrow(/maximum accepted size/u);
+  });
+
   it("routes direct mail to the fixed public sender through the synced verified owner index", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     await reconcileHostedEmailVerifiedSenderRoute({
@@ -145,11 +198,11 @@ describe("hosted email routing and transport", () => {
 
     expect(storedRecord).toMatchObject({
       identityId: TEST_CONFIG.fromAddress,
-      schema: "murph.hosted-email-verified-sender-route.v2",
+      schema: "murph.hosted-email-verified-sender-route.v1",
       senderHash: await deriveVerifiedSenderHash(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
-      senderKey: await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
       userId: "user_123",
     });
+    expect(storedRecord).not.toHaveProperty("senderKey");
     expect(storedRecord).not.toHaveProperty("verifiedEmailAddress");
   });
 
@@ -216,7 +269,7 @@ describe("hosted email routing and transport", () => {
     })).resolves.toBeNull();
   });
 
-  it("does not resolve removed legacy verified-owner records and rewrites them on sync", async () => {
+  it("fails closed on legacy verified-owner records instead of rewriting them on sync", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const verifiedEmailAddress = "owner@example.com";
     const senderKey = await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress);
@@ -253,9 +306,9 @@ describe("hosted email routing and transport", () => {
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-    })).resolves.toBeNull();
+    })).rejects.toThrow("Hosted email verified sender route senderHash must be a non-empty string.");
 
-    await reconcileHostedEmailVerifiedSenderRoute({
+    await expect(reconcileHostedEmailVerifiedSenderRoute({
       bucket,
       config: TEST_CONFIG,
       key: TEST_KEY,
@@ -263,7 +316,7 @@ describe("hosted email routing and transport", () => {
       nextVerifiedEmailAddress: verifiedEmailAddress,
       previousVerifiedEmailAddress: null,
       userId: "legacy-user",
-    });
+    })).rejects.toThrow("Hosted email verified sender route senderHash must be a non-empty string.");
 
     expect(await readStoredVerifiedSenderRoute({
       bucket,
@@ -273,23 +326,10 @@ describe("hosted email routing and transport", () => {
       verifiedEmailAddress,
     })).toMatchObject({
       identityId: TEST_CONFIG.fromAddress,
-      schema: "murph.hosted-email-verified-sender-route.v2",
-      senderHash: await deriveVerifiedSenderHash(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
+      schema: "murph.hosted-email-verified-sender-route.v1",
       senderKey,
       userId: "legacy-user",
-    });
-
-    await expect(resolveHostedEmailIngressRoute({
-      bucket,
-      config: TEST_CONFIG,
-      envelopeFrom: verifiedEmailAddress,
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
-      to: TEST_CONFIG.fromAddress!,
-    })).resolves.toMatchObject({
-      userId: "legacy-user",
+      verifiedEmailAddress,
     });
   });
 
@@ -568,7 +608,7 @@ describe("hosted email routing and transport", () => {
     const legacyAddress = `${TEST_CONFIG.localPart}+${await createRouteToken({
       key: replyKey,
       scope: "thread",
-      secret: TEST_CONFIG.signingSecret,
+      secret: TEST_CONFIG.signingSecret!,
     })}@${TEST_CONFIG.domain}`;
     const route = await resolveHostedEmailInboundRoute({
       bucket,

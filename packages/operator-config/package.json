@@ -36,6 +36,16 @@
       "import": "./dist/assistant/provider-config.js",
       "default": "./dist/assistant/provider-config.js"
     },
+    "./assistant/redaction": {
+      "types": "./dist/assistant/redaction.d.ts",
+      "import": "./dist/assistant/redaction.js",
+      "default": "./dist/assistant/redaction.js"
+    },
+    "./assistant/target-runtime": {
+      "types": "./dist/assistant/target-runtime.d.ts",
+      "import": "./dist/assistant/target-runtime.js",
+      "default": "./dist/assistant/target-runtime.js"
+    },
     "./agentmail-runtime": {
       "types": "./dist/agentmail-runtime.d.ts",
       "import": "./dist/agentmail-runtime.js",
@@ -76,11 +86,6 @@
       "import": "./dist/hosted-assistant-config.js",
       "default": "./dist/hosted-assistant-config.js"
     },
-    "./imessage-readiness": {
-      "types": "./dist/imessage-readiness.d.ts",
-      "import": "./dist/imessage-readiness.js",
-      "default": "./dist/imessage-readiness.js"
-    },
     "./inbox-cli-contracts": {
       "types": "./dist/inbox-cli-contracts.d.ts",
       "import": "./dist/inbox-cli-contracts.js",
@@ -95,11 +100,6 @@
       "types": "./dist/operator-config.d.ts",
       "import": "./dist/operator-config.js",
       "default": "./dist/operator-config.js"
-    },
-    "./runtime-errors": {
-      "types": "./dist/runtime-errors.d.ts",
-      "import": "./dist/runtime-errors.js",
-      "default": "./dist/runtime-errors.js"
     },
     "./setup-cli-contracts": {
       "types": "./dist/setup-cli-contracts.d.ts",
@@ -149,12 +149,14 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
+    "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "zod": "^4.1.8"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   }
 }

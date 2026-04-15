@@ -19,16 +19,23 @@ import {
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 import { assistantOutboxIntentSchema } from "@murphai/operator-config/assistant-cli-contracts";
-import { HOSTED_ASSISTANT_CONFIG_ENV_NAMES } from "@murphai/operator-config/hosted-assistant-config";
+import {
+  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+  HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+} from "@murphai/operator-config/hosted-assistant-config";
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
+  HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
+import type { HostedExecutionBundlePayload } from "@murphai/hosted-execution";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
   runAssistantAutomation: vi.fn(),
 }));
+const ASSISTANT_AUTOMATION_STATE_FILENAME =
+  path.basename(resolveAssistantStatePaths("/tmp/placeholder").automationStatePath);
 
 vi.mock("@murphai/assistant-engine", async () => {
   const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
@@ -53,22 +60,46 @@ import {
 
 const describe = baseDescribe.sequential;
 const initialGlobalFetch = global.fetch;
+const HOSTED_DEVICE_SYNC_ENV_PREFIXES = [
+  "DEVICE_SYNC_",
+  "GARMIN_",
+  "OURA_",
+  "WHOOP_",
+] as const;
+const MEMBER_CHANNELS_NONE = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
+const MEMBER_CHANNELS_EMAIL = {
+  ...MEMBER_CHANNELS_NONE,
+  email: true,
+} as const;
+const MEMBER_CHANNELS_LINQ = {
+  ...MEMBER_CHANNELS_NONE,
+  linq: true,
+} as const;
 
 type NodeRunnerTestInput =
   Pick<
     HostedAssistantRuntimeConfig,
-    "forwardedEnv" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "userEnv"
   > & {
     internalWorkerProxyToken?: string | null;
-    bundles: HostedAssistantRuntimeJobInput["request"]["bundle"];
+    bundles:
+      | HostedAssistantRuntimeJobInput["request"]["bundle"]
+      | {
+        agentState: HostedExecutionBundlePayload;
+        vault: HostedExecutionBundlePayload;
+      };
     commit?: {
-      bundleRef?: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
+      bundleRef?: HostedAssistantRuntimeJobInput["request"]["currentBundleRef"] | null;
       bundleRefs?: {
         agentState: null;
-        vault: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
+        vault: HostedAssistantRuntimeJobInput["request"]["currentBundleRef"] | null;
       };
     };
-  } & Omit<HostedAssistantRuntimeJobInput["request"], "bundle" | "commit">;
+  } & Omit<HostedAssistantRuntimeJobInput["request"], "bundle" | "currentBundleRef">;
 
 async function snapshotHostedExecutionContext(
   input: Parameters<typeof snapshotHostedExecutionContextActual>[0],
@@ -102,9 +133,25 @@ async function readAssistantAutomationState(assistantStateRoot: string): Promise
   autoReplyChannels: string[];
 }> {
   try {
-    return JSON.parse(
-      await readFile(path.join(assistantStateRoot, "automation.json"), "utf8"),
-    ) as { autoReplyChannels: string[] };
+    const automationStatePath = path.join(
+      assistantStateRoot,
+      ASSISTANT_AUTOMATION_STATE_FILENAME,
+    );
+    const parsed = JSON.parse(
+      await readFile(automationStatePath, "utf8"),
+    ) as {
+      autoReply?: Array<{ channel?: string }>;
+      autoReplyChannels?: string[];
+    };
+    return {
+      autoReplyChannels: Array.isArray(parsed.autoReply)
+        ? parsed.autoReply
+            .map((entry) => (typeof entry?.channel === "string" ? entry.channel : ""))
+            .filter((channel) => channel.length > 0)
+        : Array.isArray(parsed.autoReplyChannels)
+          ? parsed.autoReplyChannels
+          : [],
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return {
@@ -121,9 +168,19 @@ async function runHostedExecutionJob(
   options?: {
     signal?: AbortSignal;
   },
-) {
+): Promise<{
+  finalGatewayProjectionSnapshot: HostedAssistantRuntimeJobResult["finalGatewayProjectionSnapshot"];
+  bundles: {
+    agentState: HostedExecutionBundlePayload;
+    vault: HostedExecutionBundlePayload;
+  };
+  gatewayProjectionSnapshot: HostedAssistantRuntimeJobResult["finalGatewayProjectionSnapshot"];
+  result: HostedAssistantRuntimeJobResult["result"]["result"];
+  runnerResult: HostedAssistantRuntimeJobResult["result"];
+}> {
   const {
     bundles,
+    commitTimeoutMs,
     commit,
     forwardedEnv,
     internalWorkerProxyToken,
@@ -131,31 +188,54 @@ async function runHostedExecutionJob(
     ...request
   } = input;
   const runtime: HostedAssistantRuntimeConfig = {
+    ...(commitTimeoutMs === undefined ? {} : { commitTimeoutMs }),
     ...(forwardedEnv === undefined ? {} : { forwardedEnv }),
     ...(userEnv === undefined ? {} : { userEnv }),
   };
+  const normalizedRequest: HostedAssistantRuntimeJobInput["request"] = {
+    ...request,
+    bundle:
+      bundles === null || typeof bundles === "string"
+        ? bundles
+        : (bundles.vault ?? bundles.agentState),
+    ...(commit === undefined ? {} : {
+      currentBundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
+    }),
+  };
 
-  const result = await runHostedExecutionJobInternal({
-    request: {
-      ...request,
-      bundle:
-        bundles === null || typeof bundles === "string"
-          ? bundles
-          : (bundles.vault ?? bundles.agentState),
-      ...(commit === undefined ? {} : {
-        commit: {
-          bundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
-        },
-      }),
-    },
+  let result = await runHostedExecutionJobInternal({
+    request: normalizedRequest,
     ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
   }, {
     ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
     ...options,
   });
 
+  if (result.phase === "committed" && normalizedRequest.resume === undefined) {
+    result = await runHostedExecutionJobInternal({
+      request: {
+        ...normalizedRequest,
+        bundle: result.result.bundle,
+        resume: {
+          committedResult: {
+            assistantDeliveryEffects: result.committedAssistantDeliveryEffects,
+            result: result.result.result,
+          },
+        },
+      },
+      ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
+    }, {
+      ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
+      ...options,
+    });
+  }
+
+  if (result.phase !== "completed") {
+    throw new Error("Expected the node-runner test helper to resolve a completed hosted result.");
+  }
+
   return {
-    ...result,
+    finalGatewayProjectionSnapshot: result.finalGatewayProjectionSnapshot,
     bundles: {
       agentState: result.result.bundle,
       vault: result.result.bundle,
@@ -206,11 +286,16 @@ function installHostedFetchBaseUrlProxy(input: {
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
+  let previousHostedDeviceSyncEnv: Record<string, string | undefined> = {};
 
   beforeEach(async () => {
     vi.restoreAllMocks();
     setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests("in-process");
+    previousHostedDeviceSyncEnv = captureEnvVarsWithPrefixes(HOSTED_DEVICE_SYNC_ENV_PREFIXES);
+    for (const key of Object.keys(previousHostedDeviceSyncEnv)) {
+      restoreEnvVar(key, undefined);
+    }
     const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-engine")>(
       "@murphai/assistant-engine",
     );
@@ -224,6 +309,7 @@ describe("runHostedExecutionJob", () => {
     setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
+    restoreEnvVars(previousHostedDeviceSyncEnv);
     if (initialGlobalFetch) {
       global.fetch = initialGlobalFetch;
     } else {
@@ -244,6 +330,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -290,6 +377,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_activation_first",
@@ -302,6 +390,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_activation_second",
@@ -323,6 +412,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
@@ -338,6 +428,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email_partial",
           },
           eventId: "evt_activation_email_partial",
@@ -357,6 +448,7 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
@@ -364,7 +456,180 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
+  it("bootstraps managed Linq auto-reply when activation first contact is a Linq thread", async () => {
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            firstContact: {
+              channel: "linq",
+              identityId: "hbidx:phone:v1:test",
+              threadId: "chat_123",
+              threadIsDirect: true,
+            },
+            memberChannels: MEMBER_CHANNELS_LINQ,
+            userId: "member_linq_bootstrap",
+          },
+          eventId: "evt_activation_linq_bootstrap",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-linq-bootstrap-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
+
+      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
+      expect(automationState.autoReplyChannels).toContain("linq");
+    } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
+  });
+
+  it("preserves managed Linq auto-reply on repeated activation after Linq bootstrap", async () => {
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+    try {
+      const firstActivation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            firstContact: {
+              channel: "linq",
+              identityId: "hbidx:phone:v1:test",
+              threadId: "chat_123",
+              threadIsDirect: true,
+            },
+            memberChannels: MEMBER_CHANNELS_LINQ,
+            userId: "member_linq_bootstrap",
+          },
+          eventId: "evt_activation_linq_bootstrap_first",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+
+      const secondActivation = await runHostedExecutionJob({
+        bundles: firstActivation.bundles,
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_LINQ,
+            userId: "member_linq_bootstrap",
+          },
+          eventId: "evt_activation_linq_bootstrap_second",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-linq-bootstrap-replay-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(secondActivation.bundles.agentState),
+        vaultBundle: Buffer.from(secondActivation.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
+
+      expect(secondActivation.result.summary).toContain("reused explicit hosted assistant config (openai-compatible)");
+      expect(automationState.autoReplyChannels).toContain("linq");
+    } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
+  });
+
+  it("syncs hosted managed auto-reply channels from explicit member channel update events", async () => {
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+    try {
+      const activation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
+            userId: "member_channel_sync",
+          },
+          eventId: "evt_activation_channel_sync",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+
+      const enabled = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            kind: "member.channels.updated",
+            memberChannels: MEMBER_CHANNELS_LINQ,
+            userId: "member_channel_sync",
+          },
+          eventId: "evt_member_channels_enabled",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+      const enabledWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-channel-sync-enabled-"));
+      cleanupPaths.push(enabledWorkspaceRoot);
+      const enabledContext = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(enabled.bundles.agentState),
+        vaultBundle: Buffer.from(enabled.bundles.vault!, "base64"),
+        workspaceRoot: enabledWorkspaceRoot,
+      });
+      const enabledAutomationState = await readAssistantAutomationState(
+        enabledContext.assistantStateRoot,
+      );
+
+      expect(enabled.result.summary).toContain("Processed member channel sync");
+      expect(enabledAutomationState.autoReplyChannels).toContain("linq");
+
+      const disabled = await runHostedExecutionJob({
+        bundles: enabled.bundles,
+        dispatch: {
+          event: {
+            kind: "member.channels.updated",
+            memberChannels: MEMBER_CHANNELS_NONE,
+            userId: "member_channel_sync",
+          },
+          eventId: "evt_member_channels_disabled",
+          occurredAt: "2026-03-26T12:10:00.000Z",
+        },
+      });
+      const disabledWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-channel-sync-disabled-"));
+      cleanupPaths.push(disabledWorkspaceRoot);
+      const disabledContext = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(disabled.bundles.agentState),
+        vaultBundle: Buffer.from(disabled.bundles.vault!, "base64"),
+        workspaceRoot: disabledWorkspaceRoot,
+      });
+      const disabledAutomationState = await readAssistantAutomationState(
+        disabledContext.assistantStateRoot,
+      );
+
+      expect(disabled.result.summary).toContain("Processed member channel sync");
+      expect(disabledAutomationState.autoReplyChannels).not.toContain("linq");
+    } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
+  });
+
   it("persists hosted Telegram captures from webhook-style dispatches", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("telegram");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -373,6 +638,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_telegram_ingress",
         },
         eventId: "evt_activation_telegram_ingress",
@@ -429,6 +695,7 @@ describe("runHostedExecutionJob", () => {
       });
     } finally {
       runtime.close();
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
@@ -438,6 +705,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
@@ -455,6 +723,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email",
           },
           eventId: "evt_activation_email",
@@ -471,6 +740,7 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
       expect(result.result.summary).toContain("hosted email auto-reply ready");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -486,6 +756,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailFromAddress = process.env.HOSTED_EMAIL_FROM_ADDRESS;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
@@ -503,6 +774,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email_no_domain",
           },
           eventId: "evt_activation_email_no_domain",
@@ -522,6 +794,7 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -537,6 +810,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = clearHostedAssistantSeedEnv();
 
     delete process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
@@ -554,6 +828,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email_late_env",
           },
           eventId: "evt_activation_email_late_env",
@@ -594,6 +869,7 @@ describe("runHostedExecutionJob", () => {
         readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
       ).rejects.toThrow();
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVars(previousHostedAssistantEnv);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
@@ -604,6 +880,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("fetches raw hosted email through the email worker bridge when processing inbound email events", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -612,8 +889,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_email_fetch",
-          normalizedPhoneNumber: "+15551230001",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_email_fetch",
         },
         eventId: "evt_activation_email_fetch",
@@ -681,10 +957,12 @@ describe("runHostedExecutionJob", () => {
     } finally {
       server.close();
       await once(server, "close");
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
   it("persists hosted stable-alias email captures with Reply-To-based thread targets", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -693,6 +971,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_email_alias",
         },
         eventId: "evt_activation_email_alias",
@@ -780,10 +1059,12 @@ describe("runHostedExecutionJob", () => {
     } finally {
       server.close();
       await once(server, "close");
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
   it("persists hosted Telegram captures through the hosted runtime event seam", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("telegram");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -792,6 +1073,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_telegram",
         },
         eventId: "evt_activation_telegram",
@@ -846,6 +1128,7 @@ describe("runHostedExecutionJob", () => {
       });
     } finally {
       runtime.close();
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
@@ -853,6 +1136,7 @@ describe("runHostedExecutionJob", () => {
     const previousTelegramApiBaseUrl = process.env.TELEGRAM_API_BASE_URL;
     const previousTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
     const previousTelegramFileBaseUrl = process.env.TELEGRAM_FILE_BASE_URL;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("telegram");
     process.env.TELEGRAM_API_BASE_URL = "https://telegram-api.example.test";
     process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
     process.env.TELEGRAM_FILE_BASE_URL = "https://telegram-files.example.test";
@@ -878,7 +1162,7 @@ describe("runHostedExecutionJob", () => {
             return new Response("Not found", { status: 404 });
           }
 
-          return new Response(storedBytes, {
+          return new Response(Buffer.from(storedBytes), {
             headers: {
               "content-type": "application/octet-stream",
             },
@@ -928,6 +1212,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_telegram_attachment",
           },
           eventId: "evt_activation_telegram_attachment",
@@ -1006,14 +1291,18 @@ describe("runHostedExecutionJob", () => {
       const telegramFetchCalls = fetchSpy.mock.calls.filter(([url]) =>
         String(url).startsWith("https://telegram-"),
       );
-      expect(telegramFetchCalls).toHaveLength(2);
-      expect(String(telegramFetchCalls[0]?.[0])).toBe(
-        "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123",
-      );
-      expect(String(telegramFetchCalls[1]?.[0])).toBe(
-        "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg",
+      const telegramFetchUrls = telegramFetchCalls.map(([url]) => String(url));
+      const telegramGetFileUrl =
+        "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123";
+      const telegramFileDownloadUrl =
+        "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg";
+      expect(telegramFetchUrls.filter((url) => url === telegramGetFileUrl)).toHaveLength(1);
+      expect(telegramFetchUrls.filter((url) => url === telegramFileDownloadUrl)).toHaveLength(1);
+      expect(telegramFetchUrls.indexOf(telegramGetFileUrl)).toBeLessThan(
+        telegramFetchUrls.indexOf(telegramFileDownloadUrl),
       );
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("TELEGRAM_API_BASE_URL", previousTelegramApiBaseUrl);
       restoreEnvVar("TELEGRAM_BOT_TOKEN", previousTelegramBotToken);
       restoreEnvVar("TELEGRAM_FILE_BASE_URL", previousTelegramFileBaseUrl);
@@ -1050,6 +1339,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_123",
         },
         eventId: "evt_activation",
@@ -1082,6 +1372,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_artifacts",
         },
         eventId: "evt_activation_artifacts",
@@ -1211,6 +1502,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_artifacts_missing",
         },
         eventId: "evt_activation_artifacts_missing",
@@ -1258,7 +1550,7 @@ describe("runHostedExecutionJob", () => {
         occurredAt: "2026-03-28T12:00:00.000Z",
         raw: {},
         receivedAt: "2026-03-28T12:00:05.000Z",
-        source: "imessage",
+        source: "telegram",
         text: "document inbound",
         thread: {
           id: "chat-404",
@@ -1367,6 +1659,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_456",
         },
         eventId: "evt_activation_share",
@@ -1453,6 +1746,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_proxy",
           },
           eventId: "evt_activation_share_proxy",
@@ -1511,6 +1805,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_isolated_env",
           },
           eventId: "evt_isolated_env",
@@ -1532,6 +1827,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_123",
         },
         eventId: "evt_user_env",
@@ -1567,6 +1863,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_usage_proxy",
         },
         eventId: "evt_activation_usage_proxy",
@@ -1593,11 +1890,7 @@ describe("runHostedExecutionJob", () => {
         occurredAt: "2026-03-29T10:05:00.000Z",
         outputTokens: 4,
         provider: "codex-cli",
-        providerMetadataJson: null,
         providerName: null,
-        providerRequestId: null,
-        providerSessionId: "sess_usage_proxy",
-        rawUsageJson: null,
         reasoningTokens: null,
         requestedModel: "gpt-5.4",
         routeId: "primary",
@@ -1692,6 +1985,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_user_env_restore",
@@ -1719,45 +2013,50 @@ describe("runHostedExecutionJob", () => {
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
 
-    const firstRunStarted = createDeferred<void>();
-    const secondRunStarted = createDeferred<void>();
-    const firstCommitSeen = createDeferred<void>();
-    const secondCommitSeen = createDeferred<void>();
-    const releaseFirstCommit = createDeferred<void>();
+    const firstPhaseStarted = createDeferred<void>();
+    const secondPhaseStarted = createDeferred<void>();
+    const releaseFirstPhase = createDeferred<void>();
     const seenApiKeys = new Map<string, string | undefined>();
-    let startedRunCount = 0;
-    let commitCount = 0;
-    let commitsInFlight = 0;
-    let maxCommitsInFlight = 0;
+    let startedInvocationCount = 0;
+    let firstPhaseCount = 0;
+    let firstPhasesInFlight = 0;
+    let maxFirstPhasesInFlight = 0;
 
     setHostedExecutionRunStartHookForTests(() => {
-      startedRunCount += 1;
-      if (startedRunCount === 1) {
-        firstRunStarted.resolve();
-      } else if (startedRunCount === 2) {
-        secondRunStarted.resolve();
-      }
+      startedInvocationCount += 1;
     });
     setHostedExecutionIsolatedRunnerForTests(async (input) => {
       const userId = input.job.request.dispatch.event.userId;
       const runtime = input.job.runtime ?? {};
       seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
-      const commitBaseUrl = runtime.forwardedEnv?.HOSTED_EXECUTION_TEST_COMMIT_BASE_URL;
-
-      if (typeof commitBaseUrl !== "string") {
-        throw new Error("Expected the isolated test runner to receive the commit callback base URL.");
+      if (input.job.request.resume) {
+        return {
+          finalGatewayProjectionSnapshot: null,
+          phase: "completed",
+          result: {
+            bundle: null,
+            result: {
+              eventsHandled: 1,
+              summary: `ok:${userId}`,
+            },
+          },
+        };
       }
 
-      const response = await fetch(`${commitBaseUrl}/commit`, {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        throw new Error(`Expected the isolated test commit callback to succeed, got HTTP ${response.status}.`);
+      firstPhaseCount += 1;
+      firstPhasesInFlight += 1;
+      maxFirstPhasesInFlight = Math.max(maxFirstPhasesInFlight, firstPhasesInFlight);
+      if (firstPhaseCount === 1) {
+        firstPhaseStarted.resolve();
+        await releaseFirstPhase.promise;
+      } else if (firstPhaseCount === 2) {
+        secondPhaseStarted.resolve();
       }
 
       return {
-        finalGatewayProjectionSnapshot: null,
+        committedAssistantDeliveryEffects: [],
+        committedGatewayProjectionSnapshot: null,
+        phase: "committed",
         result: {
           bundle: null,
           result: {
@@ -1768,39 +2067,7 @@ describe("runHostedExecutionJob", () => {
       };
     });
 
-    const server = createServer(async (request, response) => {
-      if (request.url?.includes("/commit")) {
-        commitCount += 1;
-        commitsInFlight += 1;
-        maxCommitsInFlight = Math.max(maxCommitsInFlight, commitsInFlight);
-
-        if (commitCount === 1) {
-          firstCommitSeen.resolve();
-          await releaseFirstCommit.promise;
-        } else if (commitCount === 2) {
-          secondCommitSeen.resolve();
-        }
-
-        response.statusCode = 200;
-        response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(JSON.stringify({ ok: true }));
-        commitsInFlight -= 1;
-        return;
-      }
-
-      response.statusCode = 404;
-      response.end("Not found");
-    });
-    await new Promise<void>((resolve) => {
-      server.listen(0, () => resolve());
-    });
-
     try {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted test server to expose a TCP port.");
-      }
-
       const firstRun = runHostedExecutionJob({
         bundles: {
           agentState: null,
@@ -1812,6 +2079,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_1",
           },
           eventId: "evt_one",
@@ -1819,9 +2087,6 @@ describe("runHostedExecutionJob", () => {
         },
         userEnv: {
           CUSTOM_API_KEY: "user-one-key",
-        },
-        forwardedEnv: {
-          HOSTED_EXECUTION_TEST_COMMIT_BASE_URL: `http://127.0.0.1:${address.port}`,
         },
       });
 
@@ -1836,6 +2101,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_2",
           },
           eventId: "evt_two",
@@ -1844,36 +2110,29 @@ describe("runHostedExecutionJob", () => {
         userEnv: {
           CUSTOM_API_KEY: "user-two-key",
         },
-        forwardedEnv: {
-          HOSTED_EXECUTION_TEST_COMMIT_BASE_URL: `http://127.0.0.1:${address.port}`,
-        },
       });
 
       await Promise.all([
-        firstRunStarted.promise,
-        secondRunStarted.promise,
-        firstCommitSeen.promise,
+        firstPhaseStarted.promise,
+        secondPhaseStarted.promise,
       ]);
-      await secondCommitSeen.promise;
 
-      releaseFirstCommit.resolve();
+      releaseFirstPhase.resolve();
       await Promise.all([firstRun, secondRun]);
 
-      expect(startedRunCount).toBe(2);
-      expect(commitCount).toBe(2);
-      expect(maxCommitsInFlight).toBe(2);
+      expect(startedInvocationCount).toBe(4);
+      expect(firstPhaseCount).toBe(2);
+      expect(maxFirstPhasesInFlight).toBe(2);
       expect(seenApiKeys).toEqual(new Map([
         ["member_1", "user-one-key"],
         ["member_2", "user-two-key"],
       ]));
     } finally {
-      server.close();
-      await once(server, "close");
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
     }
   });
 
-  it("reconciles journaled hosted assistant deliveries only after the durable commit callback", async () => {
+  it("reconciles journaled hosted assistant deliveries only after the Durable Object resumes the committed result", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
@@ -1927,10 +2186,6 @@ describe("runHostedExecutionJob", () => {
       vi.fn(async (url, init) => {
         fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
 
-        if (String(url).startsWith("http://results.worker/events/")) {
-          return new Response(JSON.stringify({ ok: true }), { status: 200 });
-        }
-
         if (
           String(url).startsWith(
             "http://results.worker/effects/",
@@ -1949,7 +2204,6 @@ describe("runHostedExecutionJob", () => {
               },
               effectId: intentId,
               fingerprint: "dedupe_hosted",
-              intentId,
               kind: "assistant.delivery",
               recordedAt: "2026-03-26T12:00:05.000Z",
               state: "sent",
@@ -1975,6 +2229,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_123",
         },
         eventId: "evt_outbox",
@@ -1983,8 +2238,7 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(fetchCalls).toEqual([
-      "POST http://results.worker/events/evt_outbox/commit",
-      "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
+      "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted",
     ]);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
@@ -2004,23 +2258,12 @@ describe("runHostedExecutionJob", () => {
     expect(savedIntent.delivery?.target).toBe("chat_123");
   });
 
-  it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
+  it("keeps newly queued hosted assistant deliveries pending when the durable commit records no committed side effects", async () => {
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
     const intentId = "outbox_hosted_send";
     const createdAt = "2026-03-26T12:00:00.000Z";
-    const sentAt = "2026-03-26T12:00:05.000Z";
-    const delivery = {
-      channel: "linq" as const,
-      idempotencyKey: "assistant-outbox:outbox_hosted_send",
-      sentAt,
-      target: "chat_123",
-      targetKind: "thread" as const,
-      messageLength: "Queued the Linq reply.".length,
-      providerMessageId: null,
-      providerThreadId: null,
-    };
     const writePendingIntent = async (vaultRoot: string) => {
       const statePaths = resolveAssistantStatePaths(vaultRoot);
       await mkdir(statePaths.outboxDirectory, { recursive: true });
@@ -2060,52 +2303,7 @@ describe("runHostedExecutionJob", () => {
     hostedCliMocks.runAssistantAutomation.mockImplementationOnce(async ({ vault }) => {
       await writePendingIntent(vault);
     });
-    hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dispatchHooks, intentId: nextIntentId, vault }) => {
-      expect(nextIntentId).toBe(intentId);
-      const statePaths = resolveAssistantStatePaths(vault);
-      const intentPath = path.join(statePaths.outboxDirectory, `${intentId}.json`);
-      const pendingIntent = assistantOutboxIntentSchema.parse(
-        JSON.parse(await readFile(intentPath, "utf8")),
-      );
-
-      await expect(
-        dispatchHooks?.resolveDeliveredIntent?.({
-          intent: pendingIntent,
-          vault,
-        }),
-      ).resolves.toBeNull();
-      await dispatchHooks?.persistDeliveredIntent?.({
-        delivery,
-        intent: pendingIntent,
-        vault,
-      });
-      await writeFile(
-        intentPath,
-        `${JSON.stringify({
-          ...pendingIntent,
-          updatedAt: sentAt,
-          nextAttemptAt: null,
-          sentAt,
-          status: "sent",
-          delivery,
-          lastError: null,
-        })}\n`,
-      );
-
-      return {
-        deliveryError: null,
-        intent: assistantOutboxIntentSchema.parse({
-          ...pendingIntent,
-          updatedAt: sentAt,
-          nextAttemptAt: null,
-          sentAt,
-          status: "sent",
-          delivery,
-          lastError: null,
-        }),
-        session: null,
-      };
-    });
+    hostedCliMocks.dispatchAssistantOutboxIntent.mockClear();
     const fetchCalls: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -2114,24 +2312,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/events/evt_outbox_send/commit"
-        ) {
-          expect(JSON.parse(String(init?.body))).toMatchObject({
-            sideEffects: [
-              {
-                effectId: intentId,
-                fingerprint: "dedupe_hosted_send",
-                intentId,
-                kind: "assistant.delivery",
-              },
-            ],
-          });
-          return new Response(JSON.stringify({ ok: true }), { status: 200 });
-        }
-
-        if (
-          String(url)
-          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send"
           && (init?.method ?? "GET") === "GET"
         ) {
           return new Response(JSON.stringify({
@@ -2142,7 +2323,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send"
           && init?.method === "PUT"
         ) {
           return new Response(JSON.stringify({
@@ -2170,6 +2351,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_outbox_send",
@@ -2177,11 +2359,8 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      expect(fetchCalls).toEqual([
-        "POST http://results.worker/events/evt_outbox_send/commit",
-        "GET http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-        "PUT http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-      ]);
+      expect(fetchCalls).toEqual([]);
+      expect(hostedCliMocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
       cleanupPaths.push(workspaceRoot);
@@ -2190,16 +2369,14 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      const savedIntent = assistantOutboxIntentSchema.parse(
-        JSON.parse(
-          await readFile(
-            path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
-            "utf8",
-          ),
+      await expect(
+        readFile(
+          path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
+          "utf8",
         ),
-      );
-      expect(savedIntent.status).toBe("sent");
-      expect(savedIntent.delivery).toEqual(delivery);
+      ).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
     }
@@ -2322,7 +2499,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume"
           && (init?.method ?? "GET") === "GET"
         ) {
           return new Response(JSON.stringify({
@@ -2333,7 +2510,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume"
           && init?.method === "PUT"
         ) {
           return new Response(JSON.stringify({
@@ -2368,28 +2545,26 @@ describe("runHostedExecutionJob", () => {
       },
       resume: {
         committedResult: {
+          assistantDeliveryEffects: [
+            {
+              effectId: intentId,
+              fingerprint: "dedupe_hosted_resume",
+              kind: "assistant.delivery",
+            },
+          ],
           result: {
             eventsHandled: 1,
             summary: "committed",
           },
-          sideEffects: [
-            {
-              effectId: intentId,
-              fingerprint: "dedupe_hosted_resume",
-              intentId,
-              kind: "assistant.delivery",
-            },
-          ],
         },
       },
     });
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
     expect(fetchCalls).toEqual([
-      "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
-      "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
+      "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
+      "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
     ]);
-    expect(fetchCalls).not.toContain("POST http://results.worker/events/evt_outbox_resume/commit");
     expect(result.result).toEqual({
       eventsHandled: 1,
       summary: "committed",
@@ -2414,109 +2589,7 @@ describe("runHostedExecutionJob", () => {
     expect(savedIntent.delivery).toEqual(delivery);
   });
 
-  it("posts a durable commit before returning when a commit callback is configured", async () => {
-    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
-    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
-    const commitFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-      }),
-    );
-    vi.stubGlobal("fetch", commitFetch);
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-
-    try {
-      const result = await runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit",
-          occurredAt: "2026-03-26T12:10:00.000Z",
-        },
-      });
-
-      expect(commitFetch).toHaveBeenCalledTimes(1);
-      expect(timeoutSpy).toHaveBeenCalledWith(15_000);
-      const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
-      expect(String(commitUrl)).toBe(
-        "http://results.worker/events/evt_commit/commit",
-      );
-      expect(commitInit?.headers).toMatchObject({
-        "content-type": "application/json; charset=utf-8",
-      });
-      expect(JSON.parse(String(commitInit?.body))).toMatchObject({
-        currentBundleRef: null,
-        result: result.result,
-        bundle: result.bundles.vault,
-      });
-      expect(result.gatewayProjectionSnapshot).toMatchObject({
-        conversations: [],
-        generatedAt: expect.any(String),
-        messages: [],
-        permissions: [],
-        schema: "murph.gateway-projection-snapshot.v1",
-      });
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
-    }
-  });
-
-  it("prefers per-job forwarded env over ambient process env when deriving the commit timeout", async () => {
-    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
-    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
-    const commitFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-      }),
-    );
-    vi.stubGlobal("fetch", commitFetch);
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-
-    try {
-      await runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit_forwarded_timeout",
-          occurredAt: "2026-03-26T12:10:00.000Z",
-        },
-        forwardedEnv: {
-          HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
-        },
-      });
-
-      expect(commitFetch).toHaveBeenCalledTimes(1);
-      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
-    }
-  });
-
-  it("keeps worker-only runtime overrides out of forwarded child env while still applying them", () => {
+  it("preserves worker-resolved runtime fields while keeping control-only keys out of child env", () => {
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
     process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "OPENAI_API_KEY";
@@ -2524,19 +2597,30 @@ describe("runHostedExecutionJob", () => {
 
     try {
       const runtime = buildHostedExecutionJobRuntimeForTests({
+        commitTimeoutMs: 45_000,
         forwardedEnv: {
           HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
           HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
+          HOSTED_EMAIL_INGRESS_READY: "true",
+          HOSTED_EMAIL_SEND_READY: "true",
           OPENAI_API_KEY: "sk-worker",
+        },
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: true,
+            telegramBotConfigured: false,
+          },
+          deviceSync: null,
         },
         userEnv: {
           CUSTOM_API_KEY: "custom-user",
-          OPENAI_API_KEY: "sk-user",
         },
       });
 
-      expect(runtime.commitTimeoutMs).toBe(5_000);
+      expect(runtime.commitTimeoutMs).toBe(45_000);
       expect(runtime.forwardedEnv).toMatchObject({
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
         OPENAI_API_KEY: "sk-worker",
       });
       expect(runtime.forwardedEnv).not.toHaveProperty(
@@ -2548,91 +2632,239 @@ describe("runHostedExecutionJob", () => {
       expect(runtime.userEnv).toMatchObject({
         CUSTOM_API_KEY: "custom-user",
       });
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
     }
   });
 
-  it("does not block a concurrent hosted run when another hosted commit fails", async () => {
-    const firstRunStarted = createDeferred<void>();
-    const secondRunStarted = createDeferred<void>();
-    const firstCommitEntered = createDeferred<void>();
-    const releaseFirstCommit = createDeferred<void>();
-    let startedRunCount = 0;
-
-    setHostedExecutionRunStartHookForTests(() => {
-      startedRunCount += 1;
-      if (startedRunCount === 1) {
-        firstRunStarted.resolve();
-      } else if (startedRunCount === 2) {
-        secondRunStarted.resolve();
-      }
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementationOnce(async () => {
-        firstCommitEntered.resolve();
-        await releaseFirstCommit.promise;
-        return new Response("commit failed", { status: 500 });
-      }),
-    );
+  it("trusts the worker-supplied runtime envelope instead of rehydrating ambient runner env", () => {
+    const previousRunnerEnvProfiles = process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
+    const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+    const previousTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES = "telegram";
+    process.env.OPENAI_API_KEY = "ambient-openai-key";
+    process.env.TELEGRAM_BOT_TOKEN = "ambient-telegram-token";
 
     try {
-      const firstRun = runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
+      const runtime = buildHostedExecutionJobRuntimeForTests({
+        forwardedEnv: {
+          HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
+          OPENAI_API_KEY: "job-openai-key",
         },
-        commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: false,
           },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit",
-          occurredAt: "2026-03-26T12:10:00.000Z",
+          deviceSync: null,
         },
       });
 
-      await firstRunStarted.promise;
-      await firstCommitEntered.promise;
-
-      const secondRun = runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_456",
-          },
-          eventId: "evt_after_failure",
-          occurredAt: "2026-03-26T12:10:01.000Z",
-        },
+      expect(runtime.forwardedEnv).toEqual({
+        OPENAI_API_KEY: "job-openai-key",
       });
-
-      await secondRunStarted.promise;
-      expect(startedRunCount).toBe(2);
-
-      releaseFirstCommit.resolve();
-      await expect(firstRun).rejects.toThrow(
-        "Hosted runner durable commit failed for member_123/evt_commit.",
-      );
-
-      const secondResult = await secondRun;
-
-      expect(startedRunCount).toBe(2);
-      expect(secondResult.result.summary).toContain("Processed member activation");
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
     } finally {
-      setHostedExecutionRunStartHookForTests(null);
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
+      restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
+      restoreEnvVar("TELEGRAM_BOT_TOKEN", previousTelegramBotToken);
     }
+  });
+
+  it("falls back to ambient runner env only when the runtime envelope omits forwarded env entirely", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+    const previousAmbientRunnerEnv = {
+      ...captureEnvVars([
+        "BRAVE_API_KEY",
+        "FFMPEG_COMMAND",
+        "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
+        "WHISPER_COMMAND",
+        "WHISPER_MODEL_PATH",
+        ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+        ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+      ]),
+      ...captureEnvVarsWithPrefixes([
+        ...HOSTED_DEVICE_SYNC_ENV_PREFIXES,
+        "HOSTED_EMAIL_",
+        "LINQ_",
+        "MAPBOX_",
+        "MURPH_WEB_",
+        "TELEGRAM_",
+      ]),
+    };
+    restoreEnvVars(
+      Object.fromEntries(
+        Object.keys(previousAmbientRunnerEnv).map((key) => [key, undefined]),
+      ),
+    );
+    process.env.NODE_ENV = "production";
+    process.env.OPENAI_API_KEY = "ambient-openai-key";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({});
+
+      expect(runtime.forwardedEnv).toEqual({
+        HOSTED_EMAIL_INGRESS_READY: "false",
+        HOSTED_EMAIL_SEND_READY: "false",
+        NODE_ENV: "production",
+        OPENAI_API_KEY: "ambient-openai-key",
+      });
+    } finally {
+      restoreEnvVar("NODE_ENV", previousNodeEnv);
+      restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
+      restoreEnvVars(previousAmbientRunnerEnv);
+    }
+  });
+
+  it("treats an explicitly empty forwarded env envelope as authoritative", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+    process.env.NODE_ENV = "production";
+    process.env.OPENAI_API_KEY = "ambient-openai-key";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({
+        forwardedEnv: {},
+      });
+
+      expect(runtime.forwardedEnv).toEqual({});
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
+    } finally {
+      restoreEnvVar("NODE_ENV", previousNodeEnv);
+      restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
+    }
+  });
+
+  it("derives explicit runtime capabilities from the forwarded runner env", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+        DEVICE_SYNC_SECRET: "secret_123",
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_SEND_READY: "true",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        WHOOP_CLIENT_ID: "whoop-client",
+        WHOOP_CLIENT_SECRET: "whoop-secret",
+      },
+    });
+
+    expect(runtime.resolvedConfig).toMatchObject({
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: true,
+      },
+      deviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "whoop-client",
+            clientSecret: "whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+    });
+  });
+
+  it("preserves worker-resolved hosted email readiness instead of rereading ambient env", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      },
+    });
+
+    expect(runtime.forwardedEnv).toMatchObject({
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      HOSTED_EMAIL_SEND_READY: "true",
+    });
+    expect(runtime.resolvedConfig).toEqual({
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    });
+  });
+
+  it("keeps worker-resolved hosted email readiness disabled", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
+        HOSTED_EMAIL_INGRESS_READY: "false",
+        HOSTED_EMAIL_SEND_READY: "false",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      },
+    });
+
+    expect(runtime.forwardedEnv).toMatchObject({
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+    });
+    expect(runtime.resolvedConfig).toEqual({
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    });
+  });
+
+  it("derives email channel readiness from forwarded capability flags when resolved config is absent", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
+      },
+    });
+
+    expect(runtime.resolvedConfig).toEqual({
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    });
   });
 
 });
@@ -2644,6 +2876,12 @@ function restoreEnvVar(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function setHostedRunnerEnvProfiles(value: string): string | undefined {
+  const previousValue = process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
+  process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES = value;
+  return previousValue;
 }
 
 function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
@@ -2663,6 +2901,14 @@ function clearHostedAssistantSeedEnv(): Record<string, string | undefined> {
 
 function captureEnvVars(keys: readonly string[]): Record<string, string | undefined> {
   return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function captureEnvVarsWithPrefixes(prefixes: readonly string[]): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.keys(process.env)
+      .filter((key) => prefixes.some((prefix) => key.startsWith(prefix)))
+      .map((key) => [key, process.env[key]]),
+  );
 }
 
 function restoreEnvVars(values: Record<string, string | undefined>): void {

@@ -32,6 +32,17 @@ kind: acai bowl
 vendor: Neighborhood Acai Bar
 location: Brooklyn, NY
 serving: 1 bowl
+nutrition:
+  perServing:
+    calories: 540
+    proteinGrams: 18
+    carbsGrams: 62
+    fatGrams: 24
+    fiberGrams: 11
+  provenance:
+    source: estimated
+    confidence: medium
+    sourceDetail: neighborhood menu plus standard granola serving
 aliases:
   - regular acai bowl
   - usual acai bowl
@@ -95,10 +106,25 @@ kind: granola
     assert.deepEqual(readById?.entity.autoLogDaily, {
       time: "08:00",
     });
+    assert.deepEqual(readById?.entity.nutrition, {
+      perServing: {
+        calories: 540,
+        proteinGrams: 18,
+        carbsGrams: 62,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "neighborhood menu plus standard granola serving",
+      },
+    });
     assert.equal(shownBySlug?.entity.slug, "regular-acai-bowl");
     assert.deepEqual(shownBySlug?.entity.autoLogDaily, {
       time: "08:00",
     });
+    assert.equal(shownBySlug?.entity.nutrition?.perServing?.proteinGrams, 18);
     assert.equal(shownByTitle?.entity.id, "food_01JNV4R0R1DVH1YP8KQQD5GQ7X");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

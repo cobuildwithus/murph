@@ -3,11 +3,13 @@ import type {
   HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
 import type {
+  HostedExecutionDeviceSyncJobHint as DeviceSyncHostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse as DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncRuntimeTokenBundle as DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle,
+  HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionBundlePayload,
@@ -28,6 +30,7 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
+  "member.channels.updated",
   "linq.message.received",
   "telegram.message.received",
   "email.message.received",
@@ -50,6 +53,7 @@ export const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS = [
 
 export const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS = [
   "member.activated",
+  "member.channels.updated",
   "assistant.cron.tick",
   "vault.share.accepted",
 ] as const satisfies readonly HostedExecutionEventKind[];
@@ -59,17 +63,42 @@ export interface HostedExecutionBaseEvent {
   userId: string;
 }
 
+export interface HostedExecutionMemberChannels {
+  email: boolean;
+  linq: boolean;
+  telegram: boolean;
+}
+
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
   firstContact?: HostedExecutionFirstContactTarget | null;
   kind: "member.activated";
+  memberChannels: HostedExecutionMemberChannels;
 }
 
-export interface HostedExecutionFirstContactTarget {
+export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecutionBaseEvent {
+  kind: "member.channels.updated";
+  memberChannels: HostedExecutionMemberChannels;
+}
+
+export interface HostedExecutionThreadFirstContactTarget {
   channel: "email" | "linq" | "telegram";
-  identityId: string;
+  identityId: string | null;
+  kind?: "thread";
   threadId: string;
   threadIsDirect: boolean;
 }
+
+export interface HostedExecutionLinqMaterializeHomeThreadFirstContactTarget {
+  channel: "linq";
+  fromPhoneNumber: string;
+  identityId: string;
+  kind: "linq-materialize-home-thread";
+  toPhoneNumber: string;
+}
+
+export type HostedExecutionFirstContactTarget =
+  | HostedExecutionThreadFirstContactTarget
+  | HostedExecutionLinqMaterializeHomeThreadFirstContactTarget;
 
 export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "linq.message.received";
@@ -108,37 +137,13 @@ export interface HostedExecutionTelegramMessageReceivedEvent extends HostedExecu
 
 export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "email.message.received";
-  identityId: string;
+  identityId: string | null;
   rawMessageKey: string;
   selfAddress?: string | null;
 }
 export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
   kind: "assistant.cron.tick";
   reason: "alarm" | "manual" | "device-sync";
-}
-
-export interface HostedExecutionDeviceSyncJobHint {
-  availableAt?: string;
-  dedupeKey?: string | null;
-  kind: string;
-  maxAttempts?: number;
-  payload?: Record<string, unknown>;
-  priority?: number;
-}
-
-export interface HostedExecutionDeviceSyncWakeHint {
-  eventType?: string | null;
-  jobs?: HostedExecutionDeviceSyncJobHint[];
-  nextReconcileAt?: string | null;
-  occurredAt?: string | null;
-  reason?: string | null;
-  resourceCategory?: string | null;
-  revokeWarning?: {
-    code: string;
-    message: string;
-  } | null;
-  scopes?: string[];
-  traceId?: string | null;
 }
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
@@ -176,6 +181,7 @@ export interface HostedExecutionGatewayMessageSendEvent extends HostedExecutionB
 
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
+  | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionLinqMessageReceivedEvent
   | HostedExecutionTelegramMessageReceivedEvent
   | HostedExecutionEmailMessageReceivedEvent
@@ -256,6 +262,12 @@ export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
 
+export type HostedExecutionDeviceSyncJobHint =
+  DeviceSyncHostedExecutionDeviceSyncJobHint;
+
+export type HostedExecutionDeviceSyncWakeHint =
+  DeviceSyncHostedExecutionDeviceSyncWakeHint;
+
 export type HostedExecutionDeviceSyncRuntimeTokenBundle =
   DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle;
 
@@ -271,40 +283,92 @@ export type HostedExecutionDeviceSyncRuntimeConnectionSnapshot =
 export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
   DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse;
 
-export interface HostedExecutionDispatchStateSnapshot {
-  backpressured: boolean;
-  consumed: boolean;
+export interface HostedExecutionDispatchOutcomeStatusSnapshot {
   lastError: string | null;
-  pending: boolean;
-  poisoned: boolean;
+  state: HostedExecutionEventDispatchState;
 }
 
 export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
   "Hosted execution dispatch is not configured.";
 
+export function resolveHostedExecutionDispatchOutcome(input: {
+  eventId: string;
+  initialStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
+  nextStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
+  userId: string;
+}): HostedExecutionEventDispatchStatus {
+  const currentStatus = input.nextStatus ?? input.initialStatus;
+
+  if (input.nextStatus?.state === "poisoned") {
+    return {
+      eventId: input.eventId,
+      lastError: input.nextStatus.lastError,
+      state: "poisoned",
+      userId: input.userId,
+    };
+  }
+
+  if (input.nextStatus?.state === "backpressured") {
+    return {
+      eventId: input.eventId,
+      lastError: input.nextStatus.lastError,
+      state: "backpressured",
+      userId: input.userId,
+    };
+  }
+
+  if (
+    input.initialStatus?.state === "completed"
+    || input.initialStatus?.state === "duplicate_consumed"
+  ) {
+    return {
+      eventId: input.eventId,
+      lastError: currentStatus?.lastError ?? input.initialStatus.lastError,
+      state: "duplicate_consumed",
+      userId: input.userId,
+    };
+  }
+
+  if (
+    input.initialStatus?.state === "queued"
+    || input.initialStatus?.state === "duplicate_pending"
+  ) {
+    return {
+      eventId: input.eventId,
+      lastError: currentStatus?.lastError ?? input.initialStatus.lastError,
+      state: "duplicate_pending",
+      userId: input.userId,
+    };
+  }
+
+  if (
+    input.nextStatus?.state === "completed"
+    || input.nextStatus?.state === "duplicate_consumed"
+  ) {
+    return {
+      eventId: input.eventId,
+      lastError: input.nextStatus.lastError,
+      state: "completed",
+      userId: input.userId,
+    };
+  }
+
+  return {
+    eventId: input.eventId,
+    lastError: currentStatus?.lastError ?? null,
+    state: "queued",
+    userId: input.userId,
+  };
+}
+
 export function resolveHostedExecutionDispatchOutcomeState(input: {
-  initialState: HostedExecutionDispatchStateSnapshot;
-  nextState: HostedExecutionDispatchStateSnapshot;
+  initialStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
+  nextStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
 }): HostedExecutionDispatchResult["event"]["state"] {
-  if (input.nextState.poisoned) {
-    return "poisoned";
-  }
-
-  if (input.nextState.backpressured) {
-    return "backpressured";
-  }
-
-  if (input.initialState.consumed) {
-    return "duplicate_consumed";
-  }
-
-  if (input.initialState.pending) {
-    return "duplicate_pending";
-  }
-
-  if (input.nextState.consumed) {
-    return "completed";
-  }
-
-  return "queued";
+  return resolveHostedExecutionDispatchOutcome({
+    eventId: "__hosted-dispatch-outcome__",
+    initialStatus: input.initialStatus,
+    nextStatus: input.nextStatus,
+    userId: "__hosted-dispatch-outcome__",
+  }).state;
 }

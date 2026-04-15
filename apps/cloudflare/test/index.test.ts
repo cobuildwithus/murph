@@ -5,22 +5,28 @@ import path from "node:path";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {
   createHostedVerifiedEmailUserEnv,
   parseHostedEmailThreadTarget,
-  type HostedExecutionDispatchRequest,
 } from "@murphai/runtime-state";
+import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
-import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import { reconcileHostedEmailVerifiedSenderRoute } from "../src/hosted-email.ts";
 import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObject } from "../src/index.ts";
 import { createHostedShareStore } from "../src/share-store.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
+import type {
+  UserRunnerDurableObjectStubLike,
+  WorkerEnvironmentSource,
+} from "../src/worker-routes/shared.ts";
+import type { HostedExecutionContainerNamespaceLike } from "../src/runner-container.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -174,6 +180,32 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
   });
 
+  it("rejects internal dispatch requests when the bound user header is missing or mismatched", async () => {
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_123");
+
+    const missingHeaderResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: null }),
+      createWorkerEnv(stub),
+    );
+
+    expect(missingHeaderResponse.status).toBe(401);
+    await expect(missingHeaderResponse.json()).resolves.toEqual({
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+    });
+
+    const mismatchedHeaderResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: "member_other" }),
+      createWorkerEnv(stub),
+    );
+
+    expect(mismatchedHeaderResponse.status).toBe(401);
+    await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the dispatch user.",
+    });
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+  });
+
   it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
     const stub = createUserRunnerStub();
     const request = await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias"));
@@ -221,61 +253,6 @@ describe("cloudflare worker routes", () => {
     );
     expect(wrongSubjectResponse.status).toBe(401);
     expect(stub.dispatch).not.toHaveBeenCalled();
-  });
-
-  it("persists runner commits through the outbound results.worker handler", async () => {
-    const harness = createUserRunnerDurableObject();
-    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
-    const sideEffects = [
-      {
-        effectId: "outbox_123",
-        fingerprint: "dedupe_123",
-        intentId: "outbox_123",
-        kind: "assistant.delivery" as const,
-      },
-    ];
-
-    const response = await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_commit/commit", {
-        body: JSON.stringify({
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-          sideEffects,
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      harness.env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      committed: {
-        eventId: "evt_commit",
-        result: {
-          summary: "ok",
-        },
-      },
-      ok: true,
-    });
-    expectHostedBundleKeys(harness.bucket.keys(), ["vault"]);
-    expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
-      /^transient\/execution-journal\/[0-9a-f]+\/[0-9a-f]+\.json$/u,
-    ));
-    await expect(hostedUserKeyEnvelopeObjectKeyForTest(harness.env, "member_123")).resolves.toSatisfy(
-      (expectedKey) => harness.bucket.keys().includes(expectedKey),
-    );
-    expect(harness.bucket.keys()).toHaveLength(3);
-    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
-    await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
-      sideEffects,
-    });
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -374,20 +351,13 @@ describe("cloudflare worker routes", () => {
     );
   });
 
-  it("hard-cuts the removed runner finalize route from the outbound results.worker handler", async () => {
+  it("hard-cuts the removed commit and finalize routes from the outbound results.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
 
-    await callRunnerOutbound(
+    const commitResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize/commit", {
-        body: JSON.stringify({
-          bundle: Buffer.from("vault-committed").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-        }),
+        body: JSON.stringify({}),
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -395,7 +365,6 @@ describe("cloudflare worker routes", () => {
       }),
       harness.env,
     );
-
     const finalizeResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize/finalize", {
         body: JSON.stringify({
@@ -408,42 +377,12 @@ describe("cloudflare worker routes", () => {
       }),
       harness.env,
     );
-    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
-
+    expect(commitResponse.status).toBe(404);
     expect(finalizeResponse.status).toBe(404);
-    await expect(journalStore.readCommittedResult("member_123", "evt_finalize")).resolves.toMatchObject({
-      bundleRef: {
-        size: "vault-committed".length,
-      },
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
   });
 
-  it("keeps malformed outbound callbacks from mutating journal state even when runner auth is unset", async () => {
+  it("keeps removed outbound callback routes hidden from public and internal callers", async () => {
     const harness = createUserRunnerDurableObject();
-    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
-
-    await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_finalize_auth/commit", {
-        body: JSON.stringify({
-          bundle: Buffer.from("vault-committed").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      harness.env,
-    );
-
     const removedFinalizeResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize_auth/finalize", {
         body: JSON.stringify({
@@ -458,15 +397,10 @@ describe("cloudflare worker routes", () => {
     );
     expect(removedFinalizeResponse.status).toBe(404);
 
-    await expect(() => callRunnerOutbound(
+    const removedCommitResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_bad_commit/commit", {
         body: JSON.stringify({
-          bundle: 42,
-          currentBundleRef: {},
-          result: {
-            eventsHandled: 1,
-            summary: "bad",
-          },
+          ignored: true,
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -474,7 +408,8 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    )).rejects.toThrow("bundle must be a string or null.");
+    );
+    expect(removedCommitResponse.status).toBe(404);
 
     const publicCommitResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
@@ -491,19 +426,12 @@ describe("cloudflare worker routes", () => {
       createWorkerEnv(),
     );
     expect(publicOutboxResponse.status).toBe(404);
-
-    await expect(journalStore.readCommittedResult("member_123", "evt_finalize_auth")).resolves.toMatchObject({
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
   });
 
   it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
     const env = createWorkerEnv();
     const response = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_123",
@@ -521,7 +449,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
 
     const readResponse = await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
@@ -532,7 +460,6 @@ describe("cloudflare worker routes", () => {
       effectId: "outbox_123",
       record: {
         effectId: "outbox_123",
-        intentId: "outbox_123",
         kind: "assistant.delivery",
         state: "prepared",
       },
@@ -543,7 +470,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_123", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_a",
@@ -559,7 +486,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const conflictResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_a?kind=assistant.delivery&fingerprint=dedupe_conflict", {
+      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_conflict", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_a",
@@ -584,7 +511,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
         body: JSON.stringify(createPreparedSideEffectRecord({
           effectId: "outbox_prepared",
           fingerprint: "dedupe_prepared",
@@ -597,7 +524,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
         body: JSON.stringify(createSentSideEffectRecord({
           effectId: "outbox_sent",
           fingerprint: "dedupe_sent",
@@ -611,7 +538,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const deletePreparedResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
         method: "DELETE",
       }),
       env,
@@ -619,7 +546,7 @@ describe("cloudflare worker routes", () => {
     expect(deletePreparedResponse.status).toBe(200);
 
     const readPreparedResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
         method: "GET",
       }),
       env,
@@ -630,7 +557,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const deleteSentResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
         method: "DELETE",
       }),
       env,
@@ -638,7 +565,7 @@ describe("cloudflare worker routes", () => {
     expect(deleteSentResponse.status).toBe(200);
 
     const readSentResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
         method: "GET",
       }),
       env,
@@ -678,7 +605,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await callRunnerOutbound(
-      new Request(`http://results.worker/intents/${record.effectId}?kind=${record.kind}&fingerprint=${record.fingerprint}`, {
+      new Request(`http://results.worker/effects/${record.effectId}?fingerprint=${record.fingerprint}`, {
         method: "GET",
       }),
       env,
@@ -693,7 +620,6 @@ describe("cloudflare worker routes", () => {
           target: "thread_123",
         },
         effectId: "outbox_rotated",
-        intentId: "outbox_rotated",
         kind: "assistant.delivery",
         state: "sent",
       },
@@ -765,6 +691,61 @@ describe("cloudflare worker routes", () => {
     );
     expect(statusResponse.status).toBe(200);
     expect(stub.status).toHaveBeenCalledWith();
+
+    const eventStatusResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/events/member.activated%3Aevt_123/status",
+        {
+          headers: {
+            authorization: "Bearer control-token",
+          },
+          method: "GET",
+        },
+      )),
+      env,
+    );
+    expect(eventStatusResponse.status).toBe(200);
+    expect(stub.getEventStatus).toHaveBeenCalledWith({
+      eventId: "member.activated:evt_123",
+    });
+  });
+
+  it("rejects pending-usage reads when the bound user header is missing or mismatched", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const missingHeaderResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/usage/pending",
+        { method: "GET" },
+      ), {
+        boundUserId: null,
+      }),
+      env,
+    );
+
+    expect(missingHeaderResponse.status).toBe(401);
+    await expect(missingHeaderResponse.json()).resolves.toEqual({
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+    });
+
+    const mismatchedHeaderResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/usage/pending",
+        { method: "GET" },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(mismatchedHeaderResponse.status).toBe(401);
+    await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the route user.",
+    });
+    expect(stub.readPendingUsage).not.toHaveBeenCalled();
   });
 
   it("forwards device-sync runtime reads and apply updates through the signed user route", async () => {
@@ -835,6 +816,89 @@ describe("cloudflare worker routes", () => {
         ],
         userId: "member_123",
       },
+    });
+  });
+
+  it("redacts device-sync token bundles by default and only returns them when includeSecrets=true", async () => {
+    const stub = createUserRunnerStub();
+    const snapshot: Awaited<ReturnType<UserRunnerDurableObjectStubLike["getDeviceSyncRuntimeSnapshot"]>> = {
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+            connectedAt: "2026-04-05T10:00:00.000Z",
+            createdAt: "2026-04-05T10:00:00.000Z",
+            displayName: "Oura Test",
+            externalAccountId: "oura-account-123",
+            id: "dsc_123",
+            metadata: { ring: "4" },
+            provider: "oura",
+            scopes: ["email", "offline"],
+            status: "active",
+            updatedAt: "2026-04-05T10:45:00.000Z",
+          },
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
+          tokenBundle: {
+            accessToken: "secret-access-token",
+            accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+            keyVersion: "v1",
+            refreshToken: "secret-refresh-token",
+            tokenVersion: 2,
+          },
+        },
+      ],
+      generatedAt: "2026-04-05T10:45:00.000Z",
+      userId: "member_123",
+    };
+    stub.getDeviceSyncRuntimeSnapshot.mockResolvedValue(snapshot);
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const redactedResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/device-sync/runtime?connectionId=dsc_123&provider=oura",
+        { method: "GET" },
+      )),
+      env,
+    );
+
+    expect(redactedResponse.status).toBe(200);
+    await expect(redactedResponse.json()).resolves.toMatchObject({
+      connections: [
+        {
+          tokenBundle: null,
+        },
+      ],
+    });
+
+    const secretsResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/device-sync/runtime?connectionId=dsc_123&provider=oura&includeSecrets=true",
+        { method: "GET" },
+      )),
+      env,
+    );
+
+    expect(secretsResponse.status).toBe(200);
+    await expect(secretsResponse.json()).resolves.toMatchObject({
+      connections: [
+        {
+          tokenBundle: {
+            accessToken: "secret-access-token",
+            refreshToken: "secret-refresh-token",
+            tokenVersion: 2,
+          },
+        },
+      ],
     });
   });
 
@@ -1080,19 +1144,20 @@ describe("cloudflare worker routes", () => {
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
       route: {
-        channel: "linq",
-        directness: "direct",
+        channel: "linq" as const,
+        directness: "direct" as const,
         identityId: "default",
         participantId: "contact:alex",
         reply: {
-          kind: "thread",
+          kind: "thread" as const,
           target: "chat_123",
         },
         threadId: "chat_123",
       },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     });
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -1143,19 +1208,20 @@ describe("cloudflare worker routes", () => {
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
       route: {
-        channel: "linq",
-        directness: "direct",
+        channel: "linq" as const,
+        directness: "direct" as const,
         identityId: "default",
         participantId: "contact:alex",
         reply: {
-          kind: "thread",
+          kind: "thread" as const,
           target: "chat_123",
         },
         threadId: "chat_123",
       },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     });
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -1193,19 +1259,20 @@ describe("cloudflare worker routes", () => {
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
       route: {
-        channel: "linq",
-        directness: "direct",
+        channel: "linq" as const,
+        directness: "direct" as const,
         identityId: "default",
         participantId: "contact:alex",
         reply: {
-          kind: "thread",
+          kind: "thread" as const,
           target: "chat_123",
         },
         threadId: "chat_123",
       },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     });
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -1311,6 +1378,43 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(200);
     expect(stub.status).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs safe route error summaries inline for worker control failures", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const priorOverride = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "on";
+    const stub = createUserRunnerStub();
+    stub.status.mockRejectedValueOnce(new Error("Runner returned HTTP 502 from upstream"));
+
+    try {
+      const response = await worker.fetch(
+        await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
+          method: "GET",
+        })),
+        createWorkerEnv(stub),
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Internal error.",
+      });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(errorSpy.mock.calls[0]?.[0]))).toMatchObject({
+        component: "worker",
+        errorCode: "runner_http_error",
+        errorMessage: "Hosted runner container returned HTTP 502.",
+        message:
+          "Hosted worker route failed. Hosted runner container returned HTTP 502. Detail: Runner returned HTTP 502 from upstream",
+        phase: "failed",
+      });
+    } finally {
+      if (priorOverride === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = priorOverride;
+      }
+    }
   });
 
   it("rejects control routes with a bearer token for the wrong workload identity", async () => {
@@ -1505,7 +1609,7 @@ describe("cloudflare worker routes", () => {
     expect(dispatchedEvent.userId).toBe("member_123");
     expect(dispatchedEvent.identityId).toBe("assistant@mail.example.test");
     expect("threadTarget" in dispatchedEvent).toBe(false);
-    expect(dispatchedEvent.rawMessageKey).toMatch(/^[0-9a-f]{32}$/u);
+    expect(dispatchedEvent.rawMessageKey).toMatch(/^[0-9a-f]{40}$/u);
     expect(dispatch.eventId).toBe(`email:${dispatchedEvent.rawMessageKey}`);
 
     const readResponse = await callRunnerOutbound(
@@ -1664,7 +1768,7 @@ describe("cloudflare worker routes", () => {
       event: expect.objectContaining({
         identityId: "assistant@mail.example.test",
         kind: "email.message.received",
-        rawMessageKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+        rawMessageKey: expect.stringMatching(/^[0-9a-f]{40}$/u),
         selfAddress: "assistant@mail.example.test",
         userId: "member_123",
       }),
@@ -1936,7 +2040,7 @@ describe("cloudflare worker routes", () => {
       event: expect.objectContaining({
         identityId: "assistant@mail.example.test",
         kind: "email.message.received",
-        rawMessageKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+        rawMessageKey: expect.stringMatching(/^[0-9a-f]{40}$/u),
         selfAddress: threadTarget.replyAliasAddress,
         userId: "member_123",
       }),
@@ -2095,7 +2199,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const wrongMethodOutboxResponse = await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_123", {
+      new Request("http://results.worker/effects/outbox_123", {
         method: "POST",
       }),
       createWorkerEnv(),
@@ -2103,6 +2207,22 @@ describe("cloudflare worker routes", () => {
 
     expect(wrongMethodOutboxResponse.status).toBe(405);
     await expect(wrongMethodOutboxResponse.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
+  });
+
+  it("returns 405 before bound-user validation on user-bound routes", async () => {
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "GET",
+      }), {
+        boundUserId: "member_other",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(response.status).toBe(405);
+    await expect(response.json()).resolves.toEqual({
       error: "Method not allowed.",
     });
   });
@@ -2153,35 +2273,34 @@ describe("cloudflare worker routes", () => {
 
 function createWorkerEnv(
   userRunnerStub: UserRunnerStub = createUserRunnerStub(),
-  overrides: Partial<Record<string, unknown>> = {},
-) {
+  overrides: Partial<WorkerEnvironmentSource & Record<string, unknown>> = {},
+): WorkerEnvironmentSource & { __bucketStore: ReturnType<typeof createBucketStore> } {
   const bucketStore = createBucketStore();
-  const defaultUserRunnerNamespace = {
+  const storage = createStorage();
+  const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
+  const defaultUserRunnerNamespace: WorkerEnvironmentSource["USER_RUNNER"] = {
     getByName(userId: string) {
       return getOrCreateWrappedUserRunnerStub(userId, userRunnerStub);
     },
   };
-  const userRunnerNamespace = "USER_RUNNER" in overrides
-    ? overrides.USER_RUNNER
-    : defaultUserRunnerNamespace;
-  const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
-  const env = {
+  const userRunnerNamespace: WorkerEnvironmentSource["USER_RUNNER"] = overrides.USER_RUNNER
+    ?? defaultUserRunnerNamespace;
+  const env: WorkerEnvironmentSource & {
+    __bucketStore: ReturnType<typeof createBucketStore>;
+  } & Record<string, unknown> = {
     __bucketStore: bucketStore,
-    ...createHostedExecutionTestEnv({
-      BUNDLES: bucketStore.api,
-      RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
-    }),
+    ...createHostedExecutionTestEnv(),
+    BUNDLES: bucketStore.api,
+    RUNNER_CONTAINER: storage.runnerContainerNamespace,
     ...overrides,
-  };
-
-  return {
-    ...env,
     USER_RUNNER: {
       getByName(userId: string) {
-        return (userRunnerNamespace as { getByName(boundUserId: string): UserRunnerStub }).getByName(userId);
+        return userRunnerNamespace.getByName(userId);
       },
     },
   };
+
+  return env;
 
   function getOrCreateWrappedUserRunnerStub(userId: string, seedStub: UserRunnerStub): UserRunnerStub {
     const existing = wrappedUserRunnerStubs.get(userId);
@@ -2301,7 +2420,11 @@ function createBucketStore(input: {
 
         return {
           async arrayBuffer() {
-            return Buffer.from(value, "utf8");
+            const bytes = Buffer.from(value, "utf8");
+            return bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            );
           },
         };
       },
@@ -2345,7 +2468,7 @@ function createStorage() {
 
     return new Response("Not found", { status: 404 });
   });
-  const runnerContainerNamespace = {
+  const runnerContainerNamespace: HostedExecutionContainerNamespaceLike = {
     getByName() {
       return {
         async destroyInstance() {
@@ -2356,7 +2479,9 @@ function createStorage() {
             method: "POST",
           }));
         },
-        async invoke(payload: Record<string, unknown>) {
+        async invoke(
+          payload: Parameters<ReturnType<HostedExecutionContainerNamespaceLike["getByName"]>["invoke"]>[0],
+        ): Promise<HostedAssistantRuntimeJobResult> {
           const response = await runnerContainerFetch(new Request("https://runner.internal/internal/invoke", {
             body: JSON.stringify(payload),
             headers: {
@@ -2432,19 +2557,6 @@ function createDispatch(eventId: string): HostedExecutionDispatchRequest {
   };
 }
 
-function createRunnerSuccessPayload() {
-  return {
-    bundles: {
-      agentState: null,
-      vault: null,
-    },
-    result: {
-      eventsHandled: 1,
-      summary: "ok",
-    },
-  };
-}
-
 function createOutboxDelivery() {
   return {
     channel: "telegram",
@@ -2463,7 +2575,6 @@ function createPreparedSideEffectRecord(input: {
   return {
     effectId: input.effectId,
     fingerprint: input.fingerprint,
-    intentId: input.effectId,
     kind: "assistant.delivery" as const,
     recordedAt: "2026-03-26T12:00:05.000Z",
     state: "prepared" as const,
@@ -2503,108 +2614,6 @@ async function sideEffectRecordObjectKey(
   return `transient/side-effects/${userSegment}/${effectSegment}.json`;
 }
 
-function expectHostedBundleKeys(
-  keys: string[],
-  kinds: Array<"vault">,
-): void {
-  for (const kind of kinds) {
-    expect(keys).toContainEqual(expect.stringMatching(
-      new RegExp(`^bundles/${kind}/[0-9a-f]+\\.bundle\\.json$`, "u"),
-    ));
-  }
-}
-
-async function createCommittedRunnerSuccessResponse(input: {
-  bucket: ReturnType<typeof createBucketStore>;
-  environment?: ReturnType<typeof createWorkerEnv>;
-  payload: ReturnType<typeof createRunnerSuccessPayload>;
-  requestBody: {
-    commit: {
-      bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
-    };
-    dispatch: {
-      event: {
-        userId: string;
-      };
-      eventId: string;
-    };
-  };
-}): Promise<Response> {
-  const environment = input.environment ?? createWorkerEnv();
-  const crypto = await resolveHostedUserCryptoContextForTest(
-    environment,
-    input.requestBody.dispatch.event.userId,
-  );
-
-  await persistHostedExecutionCommit({
-    bucket: input.bucket.api,
-    currentBundleRef: input.requestBody.commit.bundleRef,
-    eventId: input.requestBody.dispatch.eventId,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-    payload: input.payload,
-    userId: input.requestBody.dispatch.event.userId,
-  });
-
-  return new Response(JSON.stringify(input.payload), {
-    status: 200,
-  });
-}
-
-async function createRunnerContainerInvokeSuccessResponse(input: {
-  bucket: ReturnType<typeof createBucketStore>;
-  environment?: ReturnType<typeof createWorkerEnv>;
-  payload: ReturnType<typeof createRunnerSuccessPayload>;
-  request: Request;
-}): Promise<Response> {
-  const url = new URL(input.request.url);
-
-  if (url.pathname === "/internal/destroy") {
-    return new Response(null, { status: 204 });
-  }
-
-  if (url.pathname !== "/internal/invoke") {
-    return new Response("Not found", { status: 404 });
-  }
-
-  const requestBody = JSON.parse(await input.request.clone().text()) as {
-    job: {
-      request: {
-        commit: {
-          bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
-        };
-        dispatch: {
-          event: {
-            userId: string;
-          };
-          eventId: string;
-        };
-      };
-    };
-  };
-
-  return createCommittedRunnerSuccessResponse({
-    bucket: input.bucket,
-    environment: input.environment,
-    payload: input.payload,
-    requestBody: requestBody.job.request,
-  });
-}
-
-async function createHostedExecutionJournalStoreForTest(
-  env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
-  userId: string,
-) {
-  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
-  return createHostedExecutionJournalStore({
-    bucket: env.BUNDLES,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  });
-}
-
 async function hostedArtifactObjectKeyForTest(
   env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
   userId: string,
@@ -2639,7 +2648,7 @@ async function resolveHostedUserCryptoContextForTest(
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
 
-  return createHostedUserKeyStore({
+  const store = createHostedUserKeyStore({
     automationRecipientKeyId: environment.automationRecipientKeyId,
     automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
@@ -2652,7 +2661,9 @@ async function resolveHostedUserCryptoContextForTest(
     recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  }).bootstrapManagedUserCryptoContext(userId);
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
+  return store.requireUserCryptoContext(userId);
 }
 
 function createUserRunnerDurableObject(
@@ -2663,11 +2674,7 @@ function createUserRunnerDurableObject(
     durableObject: UserRunnerDurableObject;
     storage: ReturnType<typeof createStorage>;
   }>();
-  const env = createHostedExecutionTestEnv({
-    BUNDLES: bucket.api,
-    RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
-    ...overrides,
-  }) as Record<string, unknown>;
+  let env!: WorkerEnvironmentSource & Record<string, unknown>;
 
   const getOrCreateRunnerHarness = (userId: string) => {
     const existing = runnerHarnesses.get(userId);
@@ -2688,20 +2695,24 @@ function createUserRunnerDurableObject(
     runnerHarnesses.set(userId, created);
     return created;
   };
+  env = {
+    ...createHostedExecutionTestEnv(),
+    BUNDLES: bucket.api,
+    RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
+    USER_RUNNER: {
+      getByName(userId: string) {
+        return getOrCreateRunnerHarness(userId).durableObject;
+      },
+    },
+    ...overrides,
+  };
   const defaultHarness = getOrCreateRunnerHarness("member_123");
   env.RUNNER_CONTAINER = defaultHarness.storage.runnerContainerNamespace;
 
   return {
     bucket,
     durableObject: defaultHarness.durableObject,
-    env: {
-      ...env,
-      USER_RUNNER: {
-        getByName(userId: string) {
-          return getOrCreateRunnerHarness(userId).durableObject;
-        },
-      },
-    },
+    env,
     storage: defaultHarness.storage,
   };
 }
@@ -2722,6 +2733,7 @@ function createUserRunnerStub() {
         connectionId: update.connectionId,
         status: "updated" as const,
         tokenUpdate: "unchanged" as const,
+        writeUpdate: "applied" as const,
       })),
       userId: input.request.userId,
     })),
@@ -2732,18 +2744,8 @@ function createUserRunnerStub() {
       configuredUserEnvKeys: [],
       userId: "member_123",
     })),
-    commit: vi.fn(async (input: {
-      eventId: string;
-    }) => ({
-      bundleRef: null,
-      committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: input.eventId,
-      finalizedAt: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-    })),
+    deletePendingUsage: vi.fn(async () => {}),
+    deleteStoredDispatchPayload: vi.fn(async () => {}),
     dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
       buildDispatchResultFixture(input.event.userId, input.eventId)),
     dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
@@ -2759,70 +2761,78 @@ function createUserRunnerStub() {
       retryingEventId: null,
       userId: input.event.userId,
     })),
-    finalizeCommit: vi.fn(async (input: {
-      eventId: string;
-    }) => ({
-      bundleRef: null,
-      committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: input.eventId,
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-    })),
-    gatewayFetchAttachments: vi.fn(async () => ([{
+    dispatchStoredPayload: vi.fn(async (input: {
+      payload: {
+        dispatch?: HostedExecutionDispatchRequest;
+        dispatchRef?: {
+          eventId: string;
+          userId: string;
+        };
+      };
+    }) => buildDispatchResultFixture(
+      input.payload.dispatch?.event.userId ?? input.payload.dispatchRef?.userId ?? "member_123",
+      input.payload.dispatch?.eventId ?? input.payload.dispatchRef?.eventId ?? "evt_stored",
+    )),
+    gatewayFetchAttachments: vi.fn(async (
+      _input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayFetchAttachments"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayFetchAttachments"]>>>> => ([{
       attachmentId: "gwca_worker_test",
       byteSize: 3,
       extractedText: null,
       fileName: "labs.pdf",
-      kind: "document",
+      kind: "document" as const,
       messageId: "gwcm_worker_test",
       mime: "application/pdf",
-      parseState: "pending",
-      schema: "murph.gateway-attachment.v1",
+      parseState: "pending" as const,
+      schema: "murph.gateway-attachment.v1" as const,
       transcriptText: null,
     }])),
-    gatewayGetConversation: vi.fn(async () => ({
+    gatewayGetConversation: vi.fn(async (
+      _input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayGetConversation"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayGetConversation"]>>>> => ({
       canSend: true,
       lastActivityAt: "2026-03-26T12:00:00.000Z",
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
-      route: {
-        channel: "email",
-        directness: "group",
-        identityId: "murph@example.com",
-        participantId: "contact:alex",
-        reply: {
-          kind: "thread",
-          target: "thread-labs",
+        route: {
+          channel: "email" as const,
+          directness: "group" as const,
+          identityId: "murph@example.com",
+          participantId: "contact:alex",
+          reply: {
+            kind: "thread" as const,
+            target: "thread-labs",
+          },
+          threadId: "thread-labs",
         },
-        threadId: "thread-labs",
-      },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: "gwcs_worker_test",
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     })),
-    gatewayListConversations: vi.fn(async () => ({
+    gatewayListConversations: vi.fn(async (
+      _input?: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayListConversations"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayListConversations"]>>>> => ({
       conversations: [{
         canSend: true,
         lastActivityAt: "2026-03-26T12:00:00.000Z",
         lastMessagePreview: "Please send the latest PDF.",
         messageCount: 2,
         route: {
-          channel: "email",
-          directness: "group",
+          channel: "email" as const,
+          directness: "group" as const,
           identityId: "murph@example.com",
           participantId: "contact:alex",
           reply: {
-            kind: "thread",
+            kind: "thread" as const,
             target: "thread-labs",
           },
           threadId: "thread-labs",
         },
-        schema: "murph.gateway-conversation.v1",
+        schema: "murph.gateway-conversation.v1" as const,
         sessionKey: "gwcs_worker_test",
         title: "Lab thread",
+        titleSource: "thread-title" as const,
       }],
       nextCursor: null,
     })),
@@ -2832,31 +2842,37 @@ function createUserRunnerStub() {
       live: true,
       nextCursor: input?.cursor ?? 0,
     })),
-    gatewayReadMessages: vi.fn(async () => ({
+    gatewayReadMessages: vi.fn(async (
+      _input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayReadMessages"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayReadMessages"]>>>> => ({
       messages: [{
         actorDisplayName: "Alex",
         attachments: [],
         createdAt: "2026-03-26T12:00:00.000Z",
-        direction: "inbound",
+        direction: "inbound" as const,
         messageId: "gwcm_worker_test",
-        schema: "murph.gateway-message.v1",
+        schema: "murph.gateway-message.v1" as const,
         sessionKey: "gwcs_worker_test",
         text: "Here is the latest lab PDF.",
       }],
       nextCursor: null,
     })),
     gatewayRespondToPermission: vi.fn(async () => null),
-    getDeviceSyncRuntimeSnapshot: vi.fn(async (input: {
-      request: {
-        userId: string;
-      };
-    }) => ({
+    getDeviceSyncRuntimeSnapshot: vi.fn(async (
+      input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["getDeviceSyncRuntimeSnapshot"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["getDeviceSyncRuntimeSnapshot"]>>>> => ({
       connections: [],
       generatedAt: "2026-04-05T10:45:00.000Z",
       userId: input.request.userId,
     })),
     getUserEnvStatus: vi.fn(async () => ({
       configuredUserEnvKeys: [],
+      userId: "member_123",
+    })),
+    getEventStatus: vi.fn(async (input: { eventId: string }) => ({
+      eventId: input.eventId,
+      lastError: null,
+      state: "completed" as const,
       userId: "member_123",
     })),
     status: vi.fn(async () => ({
@@ -2872,18 +2888,34 @@ function createUserRunnerStub() {
       retryingEventId: null,
       userId: "member_123",
     })),
+    provisionManagedUserCrypto: vi.fn(async (userId: string) => ({
+      recipientKinds: ["automation", "recovery", "tee-automation"],
+      rootKeyId: "v1",
+      userId,
+    })),
+    putPendingUsage: vi.fn(async (input: {
+      usage: readonly Record<string, unknown>[];
+    }) => ({
+      recorded: input.usage.length,
+      usageIds: input.usage.map((_, index) => `usage_${index}`),
+    })),
+    readPendingUsage: vi.fn(async () => []),
+    storeDispatchPayload: vi.fn(async (input: { dispatch: HostedExecutionDispatchRequest }) => ({
+      dispatch: input.dispatch,
+      storage: "inline" as const,
+    })),
     updateUserEnv: vi.fn(async (update: { env: Record<string, string | null> }) => ({
       configuredUserEnvKeys: Object.keys(update.env).sort(),
       userId: "member_123",
     })),
-  };
+  } satisfies UserRunnerDurableObjectStubLike;
 }
 
 function createGatewayConversationSessionKeyForTests(routeToken: string): string {
   return `gwcs_${Buffer.from(JSON.stringify({
     kind: "conversation",
     routeToken,
-    version: 2,
+    version: 1,
   }), "utf8").toString("base64url")}`;
 }
 
@@ -2892,7 +2924,7 @@ function createGatewayOutboxMessageIdForTests(routeToken: string, sourceToken: s
     kind: "outbox-message",
     routeToken,
     sourceToken,
-    version: 2,
+    version: 1,
   }), "utf8").toString("base64url")}`;
 }
 
@@ -2901,7 +2933,7 @@ function createGatewayAttachmentIdForTests(routeToken: string, sourceToken: stri
     kind: "attachment",
     routeToken,
     sourceToken,
-    version: 2,
+    version: 1,
   }), "utf8").toString("base64url")}`;
 }
 
@@ -2934,18 +2966,25 @@ async function createSignedDispatchRequest(
   dispatch: HostedExecutionDispatchRequest,
   input: {
     aud?: string;
+    boundUserId?: string | null;
     iss?: string;
     sub?: string;
   } = {},
 ): Promise<Request> {
   installOidcJwksFetch();
 
+  const headers = new Headers({
+    authorization: `Bearer ${createTestVercelOidcToken(input)}`,
+    "content-type": "application/json; charset=utf-8",
+  });
+
+  if (input.boundUserId !== null) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? dispatch.event.userId);
+  }
+
   return new Request(`https://runner.example.test${path}`, {
     body: JSON.stringify(dispatch),
-    headers: {
-      authorization: `Bearer ${createTestVercelOidcToken(input)}`,
-      "content-type": "application/json; charset=utf-8",
-    },
+    headers,
     method: "POST",
   });
 }
@@ -2954,6 +2993,7 @@ async function signControlRequest(
   request: Request,
   input: {
     aud?: string;
+    boundUserId?: string | null;
     iss?: string;
     sub?: string;
   } = {},
@@ -2961,6 +3001,11 @@ async function signControlRequest(
   installOidcJwksFetch();
   const headers = new Headers(request.headers);
   headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+  const derivedUserId = /^\/internal\/users\/(?<userId>[^/]+)/u.exec(new URL(request.url).pathname)?.groups?.userId;
+
+  if (input.boundUserId !== null && (input.boundUserId || derivedUserId)) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? derivedUserId ?? "");
+  }
 
   return new Request(request, { headers });
 }

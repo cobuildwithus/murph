@@ -58,6 +58,7 @@ export function createHostedDeviceSyncRuntimeStore(input: {
             connectionId: update.connectionId,
             status: "missing",
             tokenUpdate: "missing",
+            writeUpdate: "missing",
           });
           continue;
         }
@@ -66,25 +67,28 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           ? cloneConnectionSnapshot(currentConnection)
           : createSeededConnectionSnapshot(update.connectionId, update.seed!, appliedAt);
         const nextConnection = cloneConnectionSnapshot(baseConnection);
-        const connectionMutationRequested = Boolean(update.connection) || update.tokenBundle !== undefined;
+        const stateMutationRequested = Boolean(update.connection)
+          || Boolean(update.localState);
+        const tokenMutationRequested = update.tokenBundle !== undefined;
+        const connectionWriteRequested = createdFromSeed
+          || stateMutationRequested
+          || tokenMutationRequested;
         const connectionVersionMismatch = Boolean(
           currentConnection
-          && connectionMutationRequested
+          && stateMutationRequested
           && update.observedUpdatedAt !== undefined
           && update.observedUpdatedAt !== null
           && (nextConnection.connection.updatedAt ?? null) !== update.observedUpdatedAt,
         );
         const tokenVersionMismatch = Boolean(
           currentConnection
-          && update.tokenBundle !== undefined
-          && update.tokenBundle !== null
-          && nextConnection.tokenBundle
+          && connectionWriteRequested
           && update.observedTokenVersion !== undefined
-          && update.observedTokenVersion !== null
-          && nextConnection.tokenBundle.tokenVersion !== update.observedTokenVersion,
+          && (nextConnection.tokenBundle?.tokenVersion ?? null) !== update.observedTokenVersion,
         );
+        const versionMismatch = connectionVersionMismatch || tokenVersionMismatch;
 
-        if (!connectionVersionMismatch && update.connection) {
+        if (!versionMismatch && update.connection) {
           if (Object.prototype.hasOwnProperty.call(update.connection, "displayName")) {
             nextConnection.connection.displayName = update.connection.displayName ?? null;
           }
@@ -101,7 +105,7 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           }
         }
 
-        if (update.localState) {
+        if (!versionMismatch && update.localState) {
           if (update.localState.clearError) {
             nextConnection.localState.lastErrorCode = null;
             nextConnection.localState.lastErrorMessage = null;
@@ -124,13 +128,15 @@ export function createHostedDeviceSyncRuntimeStore(input: {
         let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
         if (update.tokenBundle === undefined) {
           tokenUpdate = nextConnection.tokenBundle ? "unchanged" : "missing";
-        } else if (connectionVersionMismatch || tokenVersionMismatch) {
+        } else if (versionMismatch) {
           tokenUpdate = "skipped_version_mismatch";
         } else if (update.connection?.status === "disconnected") {
           nextConnection.tokenBundle = null;
+          nextConnection.connection.accessTokenExpiresAt = null;
           tokenUpdate = baseConnection.tokenBundle ? "cleared" : "missing";
         } else if (update.tokenBundle === null) {
           nextConnection.tokenBundle = null;
+          nextConnection.connection.accessTokenExpiresAt = null;
           tokenUpdate = baseConnection.tokenBundle ? "cleared" : "missing";
         } else {
           const nextTokenVersion = baseConnection.tokenBundle
@@ -151,13 +157,17 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           nextConnection.connection.updatedAt = baseConnection.connection.updatedAt ?? appliedAt;
         }
 
-        if (!connectionVersionMismatch && connectionMutationRequested) {
+        if (!versionMismatch && connectionWriteRequested) {
           nextConnection.connection.updatedAt = appliedAt;
         }
 
-        if (createdFromSeed && !nextConnection.connection.updatedAt) {
-          nextConnection.connection.updatedAt = appliedAt;
-        }
+        const writeUpdate = createdFromSeed
+          ? "applied"
+          : versionMismatch
+            ? "skipped_version_mismatch"
+            : connectionWriteRequested
+              ? "applied"
+              : "unchanged";
 
         byConnectionId.set(update.connectionId, nextConnection);
         updates.push({
@@ -165,6 +175,7 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           connectionId: update.connectionId,
           status: createdFromSeed ? "created" : "updated",
           tokenUpdate,
+          writeUpdate,
         });
       }
 
@@ -293,7 +304,7 @@ async function readStoredDeviceSyncRuntimeState(input: {
     expectedKeyId: input.keyId,
     key,
     parse(value) {
-      return parseStoredDeviceSyncRuntimeState(value);
+      return parseStoredDeviceSyncRuntimeState(value, input.userId);
     },
     scope: "device-sync-runtime",
   });
@@ -322,14 +333,25 @@ async function writeStoredDeviceSyncRuntimeState(input: {
   });
 }
 
-function parseStoredDeviceSyncRuntimeState(value: unknown): StoredDeviceSyncRuntimeState {
+function parseStoredDeviceSyncRuntimeState(
+  value: unknown,
+  expectedUserId?: string,
+): StoredDeviceSyncRuntimeState {
   const record = requireRecord(value, "Hosted device-sync runtime state");
 
-  return {
+  const parsed = {
     generatedAt: requireString(record.generatedAt, "Hosted device-sync runtime state.generatedAt"),
     schema: requireSchema(record.schema, "Hosted device-sync runtime state.schema"),
     snapshot: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(record.snapshot),
-  };
+  } satisfies StoredDeviceSyncRuntimeState;
+
+  if (expectedUserId && parsed.snapshot.userId !== expectedUserId) {
+    throw new Error(
+      `Hosted device-sync runtime state user mismatch: expected ${expectedUserId}, received ${parsed.snapshot.userId}.`,
+    );
+  }
+
+  return parsed;
 }
 
 function requireSchema(

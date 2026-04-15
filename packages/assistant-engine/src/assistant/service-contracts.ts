@@ -48,11 +48,14 @@ export interface AssistantSessionResolutionFields {
   model?: string | null
   oss?: boolean
   participantId?: string | null
+  presetId?: string | null
   profile?: string | null
   provider?: AssistantChatProvider
   providerName?: string | null
   reasoningEffort?: string | null
+  webSearch?: string | null
   sandbox?: AssistantSandbox | null
+  zeroDataRetention?: boolean | null
   sessionId?: string | null
   sourceThreadId?: string | null
   threadId?: string | null

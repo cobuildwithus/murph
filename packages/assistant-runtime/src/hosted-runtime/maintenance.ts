@@ -1,4 +1,4 @@
-import { createConfiguredDeviceSyncProviders } from "@murphai/device-syncd/config";
+import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
@@ -10,17 +10,15 @@ import {
   createInboxParserService,
 } from "@murphai/parsers";
 import {
+  type AssistantExecutionContext,
   createAssistantFoodAutoLogHooks,
+  runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
-import { createIntegratedVaultServices } from "@murphai/vault-usecases";
-import {
-  getAssistantCronStatus,
-  runAssistantAutomation,
-  type AssistantExecutionContext,
-} from "@murphai/assistant-engine";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
 import type {
+  HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
@@ -41,7 +39,12 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
+const HOSTED_MAX_MAINTENANCE_PASSES = 10;
 const HOSTED_MAX_PARSER_JOBS = 50;
+
+interface HostedMaintenancePassResult extends HostedMaintenanceMetrics {
+  progressed: boolean;
+}
 
 interface HostedAssistantAutomationReadiness {
   configStatus: "hosted-env" | "invalid" | "missing" | "saved" | "unready";
@@ -90,15 +93,13 @@ export async function runHostedMaintenanceLoop(input: {
   dispatch: HostedExecutionDispatchRequest;
   executionContext: AssistantExecutionContext;
   requestId: string;
+  resolvedConfig: {
+    deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
+  };
   skipAssistantAutomation?: boolean;
   timeoutMs: number | null;
-  runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
-  const parserResult = await drainHostedParserQueue({
-    artifactMaterializer: input.artifactMaterializer ?? null,
-    vaultRoot: input.vaultRoot,
-  });
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
     skipAssistantAutomation: input.skipAssistantAutomation ?? false,
   });
@@ -111,40 +112,53 @@ export async function runHostedMaintenanceLoop(input: {
     );
   }
 
-  if (assistantAutomation.shouldRun) {
-    await runHostedAssistantAutomation(
-      input.vaultRoot,
-      input.requestId,
-      input.executionContext,
-    );
+  let deviceSyncProcessed = 0;
+  let deviceSyncSkipped = true;
+  let nextWakeAt: string | null = null;
+  let parserProcessed = 0;
+
+  for (let pass = 0; pass < HOSTED_MAX_MAINTENANCE_PASSES; pass += 1) {
+    const passResult = await runHostedMaintenancePass({
+      artifactMaterializer: input.artifactMaterializer ?? null,
+      assistantAutomation,
+      deviceSyncPort: input.deviceSyncPort,
+      dispatch: input.dispatch,
+      executionContext: input.executionContext,
+      requestId: input.requestId,
+      resolvedConfig: input.resolvedConfig,
+      timeoutMs: input.timeoutMs,
+      vaultRoot: input.vaultRoot,
+    });
+
+    deviceSyncProcessed += passResult.deviceSyncProcessed;
+    deviceSyncSkipped &&= passResult.deviceSyncSkipped;
+    nextWakeAt = passResult.nextWakeAt;
+    parserProcessed += passResult.parserProcessed;
+
+    if (!passResult.progressed) {
+      break;
+    }
+
+    if (pass === HOSTED_MAX_MAINTENANCE_PASSES - 1) {
+      nextWakeAt = earliestHostedWakeAt(
+        new Date().toISOString(),
+        passResult.nextWakeAt,
+      );
+    }
   }
 
-  const assistantNextWakeAt = assistantAutomation.shouldRun
-    ? (await getAssistantCronStatus(input.vaultRoot)).nextRunAt
-    : null;
-  const deviceSyncResult = await runHostedDeviceSyncPass(
-    input.dispatch,
-    input.vaultRoot,
-    input.runtimeEnv,
-    input.deviceSyncPort,
-    input.timeoutMs,
-  );
-
   return {
-    deviceSyncProcessed: deviceSyncResult.processedJobs,
-    deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: earliestHostedWakeAt(
-      assistantNextWakeAt,
-      deviceSyncResult.nextWakeAt,
-    ),
-    parserProcessed: parserResult.processedJobs,
+    deviceSyncProcessed,
+    deviceSyncSkipped,
+    nextWakeAt,
+    parserProcessed,
   };
 }
 
 export async function drainHostedParserQueue(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   vaultRoot: string;
-}): Promise<{ processedJobs: number }> {
+}): Promise<{ nextWakeAt: string | null; processedJobs: number }> {
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
   });
@@ -174,6 +188,7 @@ export async function drainHostedParserQueue(input: {
     });
 
     return {
+      nextWakeAt: null,
       processedJobs: results.length,
     };
   } finally {
@@ -211,22 +226,20 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
   executionContext: AssistantExecutionContext,
-): Promise<void> {
+): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
 
   try {
-    await runAssistantAutomation({
+    return await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
       inboxServices,
       vaultServices,
-      once: true,
       requestId,
-      startDaemon: false,
       vault: vaultRoot,
     });
   } catch (error) {
@@ -236,7 +249,10 @@ export async function runHostedAssistantAutomation(
       && "code" in error
       && error.code === "INBOX_NOT_INITIALIZED"
     ) {
-      return;
+      return {
+        nextWakeAt: null,
+        progressed: false,
+      };
     }
 
     throw error;
@@ -246,12 +262,12 @@ export async function runHostedAssistantAutomation(
 export async function runHostedDeviceSyncPass(
   dispatch: HostedExecutionDispatchRequest,
   vaultRoot: string,
-  env: Readonly<Record<string, string>>,
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null,
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
   const service = createHostedDeviceSyncRuntime({
-    env,
+    deviceSyncConfig,
     vaultRoot,
   });
 
@@ -263,7 +279,7 @@ export async function runHostedDeviceSyncPass(
     };
   }
 
-  const secret = env.DEVICE_SYNC_SECRET ?? null;
+  const secret = deviceSyncConfig?.secret ?? null;
   let syncState: HostedDeviceSyncRuntimeSyncState = {
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
@@ -325,6 +341,60 @@ export async function runHostedDeviceSyncPass(
   }
 }
 
+async function runHostedMaintenancePass(input: {
+  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  assistantAutomation: HostedAssistantAutomationReadiness;
+  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  dispatch: HostedExecutionDispatchRequest;
+  executionContext: AssistantExecutionContext;
+  requestId: string;
+  resolvedConfig: {
+    deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
+  };
+  timeoutMs: number | null;
+  vaultRoot: string;
+}): Promise<HostedMaintenancePassResult> {
+  const parserResult = await drainHostedParserQueue({
+    artifactMaterializer: input.artifactMaterializer ?? null,
+    vaultRoot: input.vaultRoot,
+  });
+  const assistantResult = input.assistantAutomation.shouldRun
+    ? await runHostedAssistantAutomation(
+        input.vaultRoot,
+        input.requestId,
+        input.executionContext,
+      )
+    : {
+        nextWakeAt: null,
+        progressed: false,
+      };
+  const deviceSyncResult = await runHostedDeviceSyncPass(
+    input.dispatch,
+    input.vaultRoot,
+    input.resolvedConfig.deviceSync,
+    input.deviceSyncPort,
+    input.timeoutMs,
+  );
+
+  return {
+    deviceSyncProcessed: deviceSyncResult.processedJobs,
+    deviceSyncSkipped: deviceSyncResult.skipped,
+    nextWakeAt: earliestHostedWakeAt(
+      parserResult.nextWakeAt,
+      assistantResult.nextWakeAt,
+      deviceSyncResult.nextWakeAt,
+    ),
+    parserProcessed: parserResult.processedJobs,
+    progressed:
+      parserResult.processedJobs > 0 ||
+      assistantResult.progressed ||
+      (
+        deviceSyncResult.processedJobs > 0 &&
+        hostedWakeDueNow(deviceSyncResult.nextWakeAt)
+      ),
+  };
+}
+
 function reportHostedDeviceSyncControlPlaneFailure(
   phase: "reconcile" | "sync",
   dispatch: HostedExecutionDispatchRequest,
@@ -341,28 +411,25 @@ function reportHostedDeviceSyncControlPlaneFailure(
 }
 
 function createHostedDeviceSyncRuntime(input: {
-  env: Readonly<Record<string, string>>;
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
   vaultRoot: string;
 }) {
+  if (!input.deviceSyncConfig) {
+    return null;
+  }
+
   const registry = createDeviceSyncRegistry(
-    createConfiguredDeviceSyncProviders(input.env),
+    createConfiguredDeviceSyncProvidersFromConfigs(input.deviceSyncConfig.providerConfigs),
   );
 
   if (registry.list().length === 0) {
     return null;
   }
 
-  const secret = input.env.DEVICE_SYNC_SECRET ?? null;
-  const publicBaseUrl = input.env.DEVICE_SYNC_PUBLIC_BASE_URL ?? null;
-
-  if (!secret || !publicBaseUrl) {
-    return null;
-  }
-
   return createDeviceSyncService({
-    secret,
+    secret: input.deviceSyncConfig.secret,
     config: {
-      publicBaseUrl,
+      publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,
       vaultRoot: input.vaultRoot,
     },
     registry,
@@ -373,4 +440,13 @@ function earliestHostedWakeAt(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function hostedWakeDueNow(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const parsedMs = Date.parse(value);
+  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
 }

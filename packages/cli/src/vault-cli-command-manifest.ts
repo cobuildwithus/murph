@@ -31,23 +31,24 @@ import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
 import { registerMealCommands } from './commands/meal.js'
-import { registerProfileCommands } from './commands/profile.js'
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
 import { registerResearchCommands } from './commands/research.js'
+import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
+import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
+  knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
-  knowledgeLogTailResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
+  knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
-  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
-} from './knowledge-cli-contracts.js'
+} from '@murphai/query'
 import { registerReadCommands } from './commands/read.js'
 import { registerProtocolCommands } from './commands/protocol.js'
 import { registerSamplesCommands } from './commands/samples.js'
@@ -120,7 +121,6 @@ const genericHealthRootCommandNames = [
   'goal',
   'condition',
   'allergy',
-  'history',
   'blood-test',
   'family',
   'genetics',
@@ -262,7 +262,7 @@ export const vaultCliCommandDescriptors = [
     bindingMode: 'direct',
     rootCommandNames: ['init', 'validate', 'vault'],
     directVaultServiceBindings: {
-      core: ['init', 'validate', 'updateVault', 'repairVault', 'upgradeVault'],
+      core: ['init', 'validate', 'updateVault', 'repairVault'],
       query: ['showVault', 'showVaultStats'],
     },
     register({ cli, services }) {
@@ -369,13 +369,32 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'route',
+    bindingMode: 'none',
+    rootCommandNames: ['route'],
+    leafCommands: [
+      {
+        path: ['route', 'estimate'],
+        description:
+          'Estimate route distance, duration, and optional approximate elevation between two points through temporary Mapbox lookups without persisting route data in Murph state.',
+        hint:
+          'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, elevation is approximate when enabled, and text lookups stay temporary.',
+        output: mapboxRouteEstimateResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerRouteCommands(cli)
+    },
+  },
+  {
     id: 'meal',
     bindingMode: 'none',
     rootCommandNames: ['meal'],
     leafCommands: [
       {
         path: ['meal', 'add'],
-        description: 'Record one meal from raw photo/audio artifacts or a freeform note.',
+        description:
+          'Record one meal from simple media/text flags or a structured JSON payload.',
       },
       {
         path: ['meal', 'show'],
@@ -384,6 +403,10 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['meal', 'list'],
         description: 'List meal events within an optional date range.',
+      },
+      {
+        path: ['meal', 'totals'],
+        description: 'Show calorie and macro totals from meal nutrition over an optional date range.',
       },
       {
         path: ['meal', 'manifest'],
@@ -452,11 +475,11 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'units', 'show'],
-        description: 'Show the saved workout unit preferences from the current profile snapshot.',
+        description: 'Show the saved workout unit preferences from the canonical preferences document.',
       },
       {
         path: ['workout', 'units', 'set'],
-        description: 'Set one or more workout unit preferences on the current profile snapshot.',
+        description: 'Set one or more workout unit preferences on the canonical preferences document.',
       },
       {
         path: ['workout', 'import', 'inspect'],
@@ -951,15 +974,6 @@ export const vaultCliCommandDescriptors = [
       registerInboxCommands(cli, inboxServices, services)
     },
   },
-  buildHealthCommandManifestDescriptor({
-    commandName: 'profile',
-    additionalVaultServiceBindings: {
-      core: ['rebuildCurrentProfile'],
-    },
-    register({ cli, services }) {
-      registerProfileCommands(cli, services)
-    },
-  }),
   ...genericHealthCommandDescriptors,
   {
     id: 'supplement',
@@ -1068,7 +1082,7 @@ function assertValidVaultCliCommandManifest(
 
 assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 
-const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['model'])
+const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['model', 'route'])
 
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli

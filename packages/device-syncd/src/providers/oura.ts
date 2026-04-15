@@ -5,7 +5,7 @@ import {
   requireDeviceProviderOAuthDescriptor,
   requireDeviceProviderSyncDescriptor,
   requireDeviceProviderWebhookDescriptor,
-} from "@murphai/importers";
+} from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError } from "../errors.ts";
 import {
@@ -98,7 +98,6 @@ interface OuraDeleteMarker {
   resource_id: string;
   occurred_at: string;
   source_event_type?: string;
-  payload?: Record<string, unknown>;
 }
 
 interface OuraApiSession {
@@ -824,14 +823,12 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     objectId: string;
     occurredAt: string;
     sourceEventType: string;
-    webhookPayload: Record<string, unknown>;
   }): Record<string, unknown> {
     return {
       sourceEventType: input.sourceEventType,
       dataType: input.dataType,
       objectId: input.objectId,
       occurredAt: input.occurredAt,
-      webhookPayload: input.webhookPayload,
     };
   }
 
@@ -866,7 +863,6 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     const objectId = normalizeIdentifier(job.payload.objectId);
     const occurredAt = normalizeIsoTimestamp(job.payload.occurredAt) ?? context.now;
     const sourceEventType = normalizeString(job.payload.sourceEventType) ?? undefined;
-    const webhookPayload = coerceRecord(job.payload.webhookPayload);
 
     if (!dataType || !objectId) {
       throw deviceSyncError({
@@ -882,7 +878,6 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         resource_id: objectId,
         occurred_at: occurredAt,
         source_event_type: sourceEventType,
-        payload: webhookPayload,
       }),
     );
 
@@ -1069,11 +1064,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         eventType,
         traceId,
         occurredAt,
-        payload: {
-          eventType,
-          dataType,
-          operation,
-        },
+        resourceCategory: dataType,
         jobs: [
           {
             kind: operation === "delete" ? "delete" : operation ? "resource" : "reconcile",
@@ -1086,7 +1077,6 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
                     dataType,
                     objectId,
                     occurredAt,
-                    webhookPayload: payload,
                   })
                 : operation
                   ? buildOuraResourceWebhookJobPayload({

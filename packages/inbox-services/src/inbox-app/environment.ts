@@ -6,7 +6,6 @@ import {
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
-import { ensureImessageMessagesDbReadable } from '@murphai/operator-config/imessage-readiness'
 import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import {
   resolveTelegramApiBaseUrl,
@@ -18,25 +17,20 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CoreRuntimeModule,
   EmailDriver,
-  ImessageDriver,
   InboxAppEnvironment,
-  InboxImessageRuntimeModule,
+  ImportersFactoryRuntimeModule,
   InboxServicesDependencies,
   InboxRuntimeModule,
   ParsersRuntimeModule,
   ProvisionedMailboxResolution,
+  QueryRuntimeModule,
   RecoveredProvisionedMailbox,
   TelegramDriver,
 } from './types.js'
-import {
-  loadQueryRuntime,
-  loadRuntimeModule,
-  type ImportersFactoryRuntimeModule,
-} from '@murphai/vault-usecases/runtime'
+import { loadQueryRuntime } from '@murphai/vault-usecases/runtime'
+import { loadRuntimeModule } from '../runtime-import.js'
 
 import { normalizeNullableString } from '../inbox-services/shared.js'
-
-const IMESSAGE_MESSAGES_DB_RELATIVE_PATH = ['Library', 'Messages', 'chat.db'].join('/')
 
 function createParserRuntimeUnavailableError(
   operation: string,
@@ -58,42 +52,6 @@ function createParserRuntimeUnavailableError(
     details,
   )
 }
-
-function createImessageRuntimeUnavailableError(
-  operation: string,
-  cause?: unknown,
-): VaultCliError {
-  const details =
-    cause instanceof Error
-      ? {
-          cause: cause.message,
-          packages: ['@murphai/inboxd-imessage'],
-        }
-      : {
-          packages: ['@murphai/inboxd-imessage'],
-        }
-
-  return new VaultCliError(
-    'runtime_unavailable',
-    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @murphai/inboxd-imessage.`,
-    details,
-  )
-}
-
-function isInboxImessageRuntimeModule(
-  value: unknown,
-): value is InboxImessageRuntimeModule {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'createImessageConnector' in value &&
-    typeof value.createImessageConnector === 'function' &&
-    'loadImessageKitDriver' in value &&
-    typeof value.loadImessageKitDriver === 'function'
-  )
-}
-
-export { IMESSAGE_MESSAGES_DB_RELATIVE_PATH }
 
 export function createInboxAppEnvironment(
   dependencies: InboxServicesDependencies = {},
@@ -123,31 +81,6 @@ export function createInboxAppEnvironment(
   const loadInbox =
     dependencies.loadInboxModule ??
     (() => loadRuntimeModule<InboxRuntimeModule>('@murphai/inboxd'))
-  const loadInboxImessage = async (): Promise<InboxImessageRuntimeModule> => {
-    try {
-      if (dependencies.inboxImessageModule) {
-        return dependencies.inboxImessageModule
-      }
-
-      if (dependencies.loadInboxImessageModule) {
-        return dependencies.loadInboxImessageModule()
-      }
-
-      if (dependencies.loadInboxModule) {
-        const legacyInboxModule = await loadInbox()
-        if (isInboxImessageRuntimeModule(legacyInboxModule)) {
-          return legacyInboxModule
-        }
-      }
-
-      return loadRuntimeModule<InboxImessageRuntimeModule>('@murphai/inboxd-imessage')
-    } catch (error) {
-      throw createImessageRuntimeUnavailableError(
-        'the iMessage inbox connector',
-        error,
-      )
-    }
-  }
   const loadParsers =
     dependencies.loadParsersModule ??
     (() => loadRuntimeModule<ParsersRuntimeModule>('@murphai/parsers'))
@@ -162,27 +95,6 @@ export function createInboxAppEnvironment(
       return await loadParsers()
     } catch (error) {
       throw createParserRuntimeUnavailableError(operation, error)
-    }
-  }
-
-  const loadConfiguredImessageDriver = async (
-    config: InboxConnectorConfig,
-  ): Promise<ImessageDriver> => {
-    if (dependencies.loadImessageDriver) {
-      return dependencies.loadImessageDriver(config)
-    }
-
-    try {
-      const inboxImessage = await loadInboxImessage()
-      return inboxImessage.loadImessageKitDriver()
-    } catch (error) {
-      if (error instanceof VaultCliError && error.code === 'runtime_unavailable') {
-        throw error
-      }
-      throw createImessageRuntimeUnavailableError(
-        `the iMessage inbox connector for "${config.id}"`,
-        error,
-      )
     }
   }
 
@@ -435,23 +347,6 @@ export function createInboxAppEnvironment(
     }
   }
 
-  const ensureConfiguredImessageReady = async (): Promise<void> => {
-    await ensureImessageMessagesDbReadable(
-      {
-        homeDirectory: getHomeDirectory(),
-        platform: getPlatform(),
-        probeMessagesDb: dependencies.probeImessageMessagesDb,
-      },
-      {
-        unavailableCode: 'INBOX_IMESSAGE_UNAVAILABLE',
-        unavailableMessage: 'The iMessage inbox connector requires macOS.',
-        permissionCode: 'INBOX_IMESSAGE_PERMISSION_REQUIRED',
-        permissionMessage:
-          `The iMessage inbox connector requires read access to ~/${IMESSAGE_MESSAGES_DB_RELATIVE_PATH}. Grant Full Disk Access to the terminal or app running Murph, fully restart it, and retry.`,
-      },
-    )
-  }
-
   return {
     clock,
     getPid,
@@ -465,18 +360,15 @@ export function createInboxAppEnvironment(
     loadCore,
     loadImporters,
     loadInbox,
-    loadInboxImessage,
     loadParsers,
     loadQuery,
     requireParsers,
-    loadConfiguredImessageDriver,
     loadConfiguredTelegramDriver,
     loadConfiguredEmailDriver,
     createConfiguredAgentmailClient,
     enableAssistantAutoReplyChannel,
     provisionOrRecoverAgentmailInbox,
     tryResolveAgentmailInboxAddress,
-    ensureConfiguredImessageReady,
     journalPromotionEnabled:
       dependencies.enableJournalPromotion ?? dependencies.loadCoreModule === undefined,
   }

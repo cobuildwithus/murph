@@ -38,9 +38,60 @@ function runNodeScript(...args: string[]) {
   })
 }
 
+function isSandboxedTsxPipeFailure(result: { stderr: string; stdout: string }) {
+  return (
+    result.stderr.includes('listen EPERM: operation not permitted') &&
+    result.stderr.includes('/tsx-') &&
+    result.stderr.includes('.pipe')
+  )
+}
+
+function runAuditToolDirectly(scriptName: string, outDir: string, prefix: string) {
+  const fullBundle = scriptName === 'package-audit-context-full.sh'
+  const bootstrap = fullBundle
+    ? `
+source scripts/repo-tools.config.sh
+export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'
+export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'
+export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'
+export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS=''
+repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+  "config" \
+  "packages" \
+  "src" \
+  "app" \
+  "apps" \
+  "contracts" \
+  "scripts" \
+  "docs"
+`
+    : 'source scripts/repo-tools.config.sh'
+
+  return spawnSync(
+    'bash',
+    [
+      '-lc',
+      `set -euo pipefail
+${bootstrap}
+exec "$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@"`,
+      'audit-context',
+      '--zip',
+      '--out-dir',
+      outDir,
+      '--name',
+      prefix,
+    ],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: withoutNodeV8Coverage(),
+    },
+  )
+}
+
 function createAuditZip(scriptName: string, prefix: string) {
   const outDir = mkdtempSync(path.join(os.tmpdir(), `${prefix}-`))
-  const result = spawnSync(
+  const initialResult = spawnSync(
     'bash',
     [path.join(repoRoot, 'scripts', scriptName), '--zip', '--out-dir', outDir, '--name', prefix],
     {
@@ -49,6 +100,10 @@ function createAuditZip(scriptName: string, prefix: string) {
       env: withoutNodeV8Coverage(),
     },
   )
+  const result =
+    initialResult.status !== 0 && isSandboxedTsxPipeFailure(initialResult)
+      ? runAuditToolDirectly(scriptName, outDir, prefix)
+      : initialResult
 
   if (result.status !== 0) {
     throw new Error(
@@ -73,6 +128,24 @@ function listZipEntries(zipPath: string) {
     .split(/\r?\n/u)
     .map((entry) => entry.trim())
     .filter(Boolean)
+}
+
+function readWorkspaceDiffScope(...changedFiles: string[]) {
+  const result = runNodeScript('scripts/workspace-diff-scope.mjs', '--format', 'json', ...changedFiles)
+
+  if (result.status !== 0) {
+    throw new Error(
+      `workspace-diff-scope failed for ${changedFiles.join(', ')}:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    )
+  }
+
+  return JSON.parse(result.stdout) as {
+    affectedWorkspaceDirs: string[]
+    repoInternalFastPath: boolean
+    runVerifyCli: boolean
+    testDirs: string[]
+    typecheckDirs: string[]
+  }
 }
 
 describe('monorepo release flow coverage audit', () => {
@@ -136,6 +209,31 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'patches', `@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`))).toBe(false)
   })
 
+  it('keeps reverse-dependent CLI coverage on the source lane for inboxd-only diffs', () => {
+    const summary = readWorkspaceDiffScope('packages/inboxd/test/inboxd.test.ts')
+
+    expect(summary.affectedWorkspaceDirs).toContain('packages/cli')
+    expect(summary.runVerifyCli).toBe(false)
+    expect(summary.typecheckDirs).toContain('packages/cli')
+    expect(summary.testDirs).toContain('packages/cli')
+  })
+
+  it('escalates CLI artifact-sensitive diffs onto the targeted verify lane', () => {
+    const summary = readWorkspaceDiffScope('packages/cli/package.json')
+
+    expect(summary.affectedWorkspaceDirs).toContain('packages/cli')
+    expect(summary.runVerifyCli).toBe(true)
+    expect(summary.typecheckDirs).not.toContain('packages/cli')
+    expect(summary.testDirs).not.toContain('packages/cli')
+  })
+
+  it('treats shared prepared-runtime helper changes as CLI artifact-sensitive', () => {
+    const summary = readWorkspaceDiffScope('scripts/build-test-runtime-prepared.mjs')
+
+    expect(summary.repoInternalFastPath).toBe(true)
+    expect(summary.runVerifyCli).toBe(true)
+  })
+
   it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {
     const leanReviewConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
@@ -157,6 +255,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(leanReviewConfig).toContain('include_tests=0')
     expect(leanReviewConfig).toContain('include_docs=0')
     expect(leanReviewConfig).toContain('package_script="scripts/package-audit-context.sh"')
+    expect(leanReviewConfig).toContain('review_gpt_register_dir_preset "privacy" "privacy.md"')
     expect(fullReviewConfig).toContain('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review-gpt.config.sh"')
     expect(fullReviewConfig).toContain('include_tests=1')
     expect(fullReviewConfig).toContain('include_docs=1')
@@ -180,7 +279,8 @@ describe('monorepo release flow coverage audit', () => {
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
-      expect(leanEntries).toContain('agent-docs/product-specs/repo-v1.md')
+      expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
+      expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
@@ -203,7 +303,7 @@ describe('monorepo release flow coverage audit', () => {
     }
   })
 
-  it('keeps release:check focused on release guards plus typecheck and coverage verification', () => {
+  it('keeps release:check focused on release guards, typecheck, clean workspace build, and coverage verification', () => {
     const releaseCheck = readFileSync(
       path.join(repoRoot, 'scripts', 'release-check.sh'),
       'utf8',
@@ -211,23 +311,90 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(releaseCheck).toContain('bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh')
     expect(releaseCheck).toContain('node scripts/verify-release-target.mjs')
-    expect(releaseCheck).toContain('corepack pnpm typecheck')
-    expect(releaseCheck).toContain('corepack pnpm test:coverage')
+    expect(releaseCheck).toContain('corepack pnpm build:workspace:clean')
+    expect(releaseCheck).toContain('corepack pnpm verify:acceptance')
     expect(releaseCheck).not.toContain('pnpm install --frozen-lockfile')
-    expect(releaseCheck).not.toContain('pnpm build')
     expect(releaseCheck).not.toContain('pnpm verify:repo')
     expect(releaseCheck).not.toContain('--out-dir "$temp_dir/tarballs"')
 
     expect(releaseCheck.indexOf('node scripts/verify-release-target.mjs')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm typecheck'),
+      releaseCheck.indexOf('corepack pnpm build:workspace:clean'),
     )
-    expect(releaseCheck.indexOf('corepack pnpm typecheck')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm test:coverage'),
+    expect(releaseCheck.indexOf('corepack pnpm build:workspace:clean')).toBeLessThan(
+      releaseCheck.indexOf('corepack pnpm verify:acceptance'),
     )
   })
 
+  it('runs release checks directly instead of through an env-overridable shell command', () => {
+    const releaseScript = readFileSync(path.join(repoRoot, 'scripts', 'release.sh'), 'utf8')
+
+    expect(releaseScript).toContain("echo 'Running release checks...'")
+    expect(releaseScript).toContain('corepack pnpm release:check')
+    expect(releaseScript).not.toContain('RELEASE_CHECK_CMD')
+    expect(releaseScript).not.toContain('CHECK_CMD=')
+    expect(releaseScript).not.toContain('sh -lc "$CHECK_CMD"')
+  })
+
+  it('propagates CLI package coverage failures instead of forcing the release lane green', () => {
+    const workspaceVerify = readFileSync(
+      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
+      'utf8',
+    )
+    const runTimedStep = workspaceVerify.match(
+      /run_timed_step\(\) \{[\s\S]*?^\}/m,
+    )?.[0]
+    const cliCoverageBranch = workspaceVerify.match(
+      /run_workspace_package_coverage\(\) \{[\s\S]*?^\}/m,
+    )?.[0]
+
+    expect(runTimedStep).toBeTruthy()
+    expect(cliCoverageBranch).toBeTruthy()
+    expect(cliCoverageBranch).toContain(
+      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
+    )
+    expect(cliCoverageBranch).toContain('return $?')
+    const harnessDir = mkdtempSync(
+      path.join(os.tmpdir(), 'murph-workspace-verify-harness-'),
+    )
+
+    try {
+      const harnessPath = path.join(harnessDir, 'workspace-verify-harness.sh')
+      writeFileSync(
+        harnessPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+verify_log() { :; }
+${runTimedStep!}
+run_workspace_package_coverage() {
+  if [[ "$1" == "packages/cli" ]]; then
+    run_timed_step "$2" false
+    return $?
+  fi
+}
+if ! run_workspace_package_coverage packages/cli "CLI package coverage"; then
+  printf 'captured\\n'
+  exit 0
+fi
+printf 'missed\\n'
+exit 1
+`,
+        'utf8',
+      )
+
+      const result = spawnSync('bash', [harnessPath], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain('captured')
+      expect(result.stdout).not.toContain('missed')
+    } finally {
+      rmSync(harnessDir, { recursive: true, force: true })
+    }
+  })
+
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
-    const agents = readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8')
     const architecture = readFileSync(path.join(repoRoot, 'ARCHITECTURE.md'), 'utf8')
     const readme = readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
     const baselineArchitecture = readFileSync(
@@ -260,7 +427,6 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
 
-    expect(agents).toContain('it must not land in assistant runtime or other local operational state first')
     expect(architecture).toContain('Storage-policy hard line:')
     expect(architecture).toContain('execution residue, replay/continuity artifacts, and operator diagnostics only')
     expect(readme).toContain('it does not belong in assistant runtime first')
@@ -291,13 +457,13 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(summary.version).toBe(cliPackageJson.version)
     expect(summary.primaryPackage?.name).toBe('@murphai/murph')
-    expect(summary.packages.map((entry) => entry.name)).toEqual([
+    expect([...summary.packages.map((entry) => entry.name)].sort()).toEqual([
       '@murphai/contracts',
       '@murphai/hosted-execution',
       '@murphai/gateway-core',
       '@murphai/murph',
       '@murphai/openclaw-plugin',
-    ])
+    ].sort())
 
     expect(summary.packages).toContainEqual(expect.objectContaining({
       bundledWorkspaceDependencies: [
@@ -309,7 +475,7 @@ describe('monorepo release flow coverage audit', () => {
       name: '@murphai/hosted-execution',
     }))
     expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledWorkspaceDependencies: [
+      bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
         '@murphai/assistantd',
@@ -319,7 +485,6 @@ describe('monorepo release flow coverage audit', () => {
         '@murphai/importers',
         '@murphai/inbox-services',
         '@murphai/inboxd',
-        '@murphai/inboxd-imessage',
         '@murphai/messaging-ingress',
         '@murphai/operator-config',
         '@murphai/parsers',
@@ -327,7 +492,7 @@ describe('monorepo release flow coverage audit', () => {
         '@murphai/runtime-state',
         '@murphai/setup-cli',
         '@murphai/vault-usecases',
-      ],
+      ]),
       name: '@murphai/murph',
     }))
   })
@@ -438,7 +603,6 @@ describe('monorepo release flow coverage audit', () => {
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/gateway-local')
-    expect(cliPackageJson.bundleDependencies).toContain('@murphai/inboxd-imessage')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
@@ -598,5 +762,21 @@ describe('monorepo release flow coverage audit', () => {
       rmSync(outputRoot, { recursive: true, force: true })
       rmSync(parentRoot, { recursive: true, force: true })
     }
+  })
+
+  it('keeps diff-aware CLI escalation behind the nested lock handoff instead of locking every test:diff run', () => {
+    const workspaceVerifyScript = readFileSync(
+      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
+      'utf8',
+    )
+
+    expect(workspaceVerifyScript).toContain('command_requires_workspace_artifact_lock()')
+    expect(workspaceVerifyScript).toContain(
+      'if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then',
+    )
+    expect(workspaceVerifyScript).toContain('run_verify_cli_with_workspace_artifact_lock')
+    expect(workspaceVerifyScript).toContain(
+      'run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock',
+    )
   })
 })

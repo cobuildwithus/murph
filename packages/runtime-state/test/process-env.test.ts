@@ -68,3 +68,31 @@ test("getScopedProcessEnv falls back to the provided environment outside a scope
 
   assert.equal(getScopedProcessEnv(fallback).MURPH_PROCESS_ENV_FALLBACK_TEST, "fallback");
 });
+
+test("the scoped process.env proxy preserves normal behavior outside a scope and ignores symbol properties", async () => {
+  const outsideKey = "MURPH_PROCESS_ENV_OUTSIDE_SCOPE_TEST";
+  const originalValue = process.env[outsideKey];
+
+  try {
+    await withScopedProcessEnv(
+      buildScopedProcessEnv(
+        {
+          [outsideKey]: "inside",
+        },
+        process.env,
+      ),
+      async () => {
+        assert.equal(Reflect.get(process.env, Symbol.toStringTag), undefined);
+      },
+    );
+
+    process.env[outsideKey] = "outside";
+    assert.equal(process.env[outsideKey], "outside");
+    assert.equal(Object.keys(process.env).includes(outsideKey), true);
+
+    delete process.env[outsideKey];
+    assert.equal(process.env[outsideKey], undefined);
+  } finally {
+    restoreProcessEnvValue(outsideKey, originalValue);
+  }
+});

@@ -34,7 +34,6 @@ export type AssistantAutoReplyPreparedInput =
   | {
       kind: 'ready'
       prompt: string
-      requiresRichUserMessageContent: boolean
       userMessageContent: AssistantUserMessageContentPart[] | null
     }
   | { kind: 'skip'; reason: string }
@@ -140,8 +139,6 @@ export async function prepareAssistantAutoReplyInput(
   return {
     kind: 'ready',
     prompt: nextPrompt,
-    requiresRichUserMessageContent:
-      !hasTextualContent && preparedMultimodalInput.userMessageContent !== null,
     userMessageContent: preparedMultimodalInput.userMessageContent,
   }
 }
@@ -306,7 +303,7 @@ function buildAssistantAutoReplyContextLines(
     return []
   }
 
-  const mediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
+  const mediaGroupId = resolveGroupedTelegramMediaGroupId(captures)
   return [
     `Source: ${firstCapture.source}`,
     `Occurred at: ${
@@ -319,6 +316,22 @@ function buildAssistantAutoReplyContextLines(
     captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
     mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
   ]
+}
+
+function resolveGroupedTelegramMediaGroupId(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+): string | null {
+  const mediaGroupIds = captures
+    .map((capture) => capture.telegramMetadata?.mediaGroupId ?? null)
+    .filter((mediaGroupId): mediaGroupId is string => mediaGroupId !== null)
+  const firstMediaGroupId = mediaGroupIds[0] ?? null
+  if (!firstMediaGroupId) {
+    return null
+  }
+
+  return mediaGroupIds.every((mediaGroupId) => mediaGroupId === firstMediaGroupId)
+    ? firstMediaGroupId
+    : null
 }
 
 function buildAssistantAutoReplyPromptText(

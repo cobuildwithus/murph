@@ -1,17 +1,18 @@
 # Vault Layout
 
-Status: frozen baseline plus health extension fence
+Status: frozen current contract plus health extension fence
 
 ## Baseline Root
 
 ```text
-vault/
+  vault/
   vault.json
   CORE.md
   journal/YYYY/YYYY-MM-DD.md
+  bank/memory.md
+  bank/preferences.json
   bank/experiments/<slug>.md
   bank/providers/<provider-slug>.md
-  bank/profile/current.md
   bank/goals/<slug>.md
   bank/conditions/<slug>.md
   bank/allergies/<slug>.md
@@ -37,9 +38,11 @@ vault/
   ledger/inbox-captures/YYYY/YYYY-MM.jsonl
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
-  ledger/profile-snapshots/YYYY/YYYY-MM.jsonl
   ledger/samples/<stream>/YYYY/YYYY-MM.jsonl
   audit/YYYY/YYYY-MM.jsonl
+  derived/knowledge/index.md
+  derived/knowledge/log.md
+  derived/knowledge/pages/<slug>.md
   exports/packs/<packId>/
 ```
 
@@ -73,13 +76,11 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
-- Profile snapshot shards use `recordedAt`: `ledger/profile-snapshots/YYYY/YYYY-MM.jsonl`.
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
 - Export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
-- `bank/profile/current.md` is a generated current-state document rebuilt from profile snapshots; append-only truth remains in `ledger/profile-snapshots/`.
-- Keep both the snapshot ledger and `bank/profile/current.md`: the ledger is the authoritative historical source and rebuild input, while the Markdown page remains the operator-facing generated view owned by `profile current rebuild` and `vault repair`.
-- Query readers must tolerate `bank/profile/current.md` being stale, missing, or malformed by regenerating the view from the latest snapshot in memory; the materialized page improves human readability but must not become a hard dependency for current-state reads.
+- `bank/memory.md` is the durable freeform current-state document for user-facing context that should stay small enough to read whole.
+- `bank/preferences.json` is the canonical typed preferences singleton for compact machine-readable defaults such as workout units.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
 - `bank/library/**/*.md` is the stable health reference layer for reusable entities such as biomarkers, domains, protocol variants, and source artifacts. It is durable reference context, not the user-specific synthesized wiki.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
@@ -108,5 +109,5 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - `vault.json` uses `formatVersion` as its sole compatibility knob.
 - Stored documents and ledgers use explicit `schemaVersion` fields; raw import sidecars also carry a versioned manifest shape.
 - Published version strings are immutable.
-- Any incompatible change must mint a new version string and come with an explicit cutover decision: ship a one-time core migration or intentionally drop older read support.
-- `packages/core` owns migrations and versioned write behavior. Query/CLI paths may validate or branch on versions but must not keep legacy reads alive by silently rewriting stored records during reads.
+- Any incompatible change must mint a new version string and either ship an explicit core migration or fail closed until one exists.
+- `packages/core` owns the future migration seam and versioned write behavior. Current older-format vaults fail closed until an explicit upgrade step is registered, and query/CLI paths must not keep legacy reads alive by silently rewriting stored records during reads.

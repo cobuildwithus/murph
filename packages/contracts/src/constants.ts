@@ -14,12 +14,10 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   journalDayFrontmatter: "murph.frontmatter.journal-day.v1",
   memoryFrontmatter: "murph.frontmatter.memory.v1",
   coreFrontmatter: "murph.frontmatter.core.v1",
-  profileCurrentFrontmatter: "murph.frontmatter.profile-current.v1",
-  profileSnapshot: "murph.profile-snapshot.v1",
   providerFrontmatter: "murph.frontmatter.provider.v1",
   recipeFrontmatter: "murph.frontmatter.recipe.v1",
   workoutFormatFrontmatter: "murph.frontmatter.workout-format.v1",
-  rawImportManifest: "murph.raw-import-manifest.v2",
+  rawImportManifest: "murph.raw-import-manifest.v1",
   protocolFrontmatter: "murph.frontmatter.protocol.v1",
   sample: "murph.sample.v1",
   sharePack: "murph.share-pack.v1",
@@ -45,7 +43,6 @@ export const ID_PREFIXES = Object.freeze({
   meal: "meal",
   memory: "mem",
   pack: "pack",
-  profileSnapshot: "psnap",
   provider: "prov",
   recipe: "rcp",
   protocol: "prot",
@@ -129,8 +126,6 @@ export const RAW_ASSET_OWNER_KINDS = Object.freeze([
   "workout_batch",
 ] as const);
 
-export const PROFILE_SNAPSHOT_SOURCES = Object.freeze(["assessment_projection", "manual", "derived"] as const);
-
 export const GOAL_STATUSES = Object.freeze(["active", "paused", "completed", "abandoned"] as const);
 
 export const GOAL_HORIZONS = Object.freeze(["short_term", "medium_term", "long_term", "ongoing"] as const);
@@ -155,6 +150,10 @@ export const FOOD_STATUSES = Object.freeze(["active", "archived"] as const);
 export const WORKOUT_FORMAT_STATUSES = Object.freeze(["active", "archived"] as const);
 
 export const RECIPE_STATUSES = Object.freeze(["draft", "saved", "archived"] as const);
+export const NUTRITION_PROVENANCE_SOURCES = Object.freeze(
+  ["user", "label", "database", "inherited", "estimated"] as const,
+);
+export const NUTRITION_CONFIDENCE_LEVELS = Object.freeze(["low", "medium", "high"] as const);
 
 export const TEST_RESULT_STATUSES = Object.freeze(["pending", "normal", "abnormal", "mixed", "unknown"] as const);
 export const BLOOD_TEST_CATEGORY = "blood" as const;
@@ -179,29 +178,48 @@ export const AUDIT_ACTIONS = Object.freeze([
   "family_upsert",
   "genetics_upsert",
   "goal_upsert",
+  "food_delete",
+  "food_upsert",
   "history_add",
+  "inbox_capture_canonical_evidence",
+  "inbox_capture_persist",
+  "inbox_promote_experiment_note",
+  "inbox_promote_journal",
   "intake_import",
   "intake_project",
-  "vault_init",
-  "vault_upgrade",
-  "vault_repair",
+  "jsonl_append",
+  "journal_append",
+  "journal_ensure",
+  "journal_link",
+  "journal_unlink",
+  "knowledge_write",
+  "memory_forget",
+  "memory_upsert",
   "document_import",
   "device_import",
   "experiment_create",
-  "journal_ensure",
+  "experiment_lifecycle",
+  "experiment_update",
+  "event_delete",
+  "event_upsert",
   "list",
   "meal_add",
   "export_pack",
-  "food_upsert",
+  "preferences_update",
+  "provider_delete",
   "provider_upsert",
-  "profile_current_rebuild",
-  "profile_snapshot_add",
+  "raw_copy",
+  "recipe_delete",
   "recipe_upsert",
+  "research_note_write",
   "protocol_stop",
   "protocol_upsert",
   "samples_import_csv",
   "show",
   "validate",
+  "vault_init",
+  "vault_repair",
+  "vault_summary_update",
   "workout_format_save",
   "workout_import_csv",
 ] as const);
@@ -210,7 +228,7 @@ export const AUDIT_ACTORS = Object.freeze(["cli", "core", "importer", "query"] a
 
 export const AUDIT_STATUSES = Object.freeze(["success", "failure"] as const);
 
-export const FILE_CHANGE_OPERATIONS = Object.freeze(["create", "append", "update", "copy"] as const);
+export const FILE_CHANGE_OPERATIONS = Object.freeze(["create", "append", "update", "copy", "delete"] as const);
 
 export const FRONTMATTER_DOC_TYPES = Object.freeze({
   allergy: "allergy",
@@ -224,7 +242,6 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   goal: "goal",
   journalDay: "journal_day",
   memory: "memory",
-  profileCurrent: "profile_current",
   provider: "provider",
   recipe: "recipe",
   protocol: "protocol",

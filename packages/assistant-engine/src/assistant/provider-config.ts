@@ -1,9 +1,8 @@
 import type { AssistantModelSpec } from '../model-harness.js'
-import {
-  readAssistantEnvString,
-} from '@murphai/operator-config/assistant/shared'
+import { readAssistantEnvString } from '@murphai/operator-config/assistant/shared'
 import {
   normalizeAssistantProviderConfig,
+  resolveAssistantProviderRuntimeTarget,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -17,21 +16,39 @@ export function resolveAssistantModelSpecFromProviderConfig(
     return null
   }
 
+  const resolvedRuntimeTarget = resolveAssistantProviderRuntimeTarget(normalized)
   const model = normalizeNullableString(normalized.model)
+  if (!model) {
+    return null
+  }
+
   const baseUrl = normalizeNullableString(normalized.baseUrl)
-  if (!model || !baseUrl) {
+  if (!baseUrl && resolvedRuntimeTarget.executionDriver !== 'responses') {
     return null
   }
 
   const apiKeyEnv = normalizeNullableString(normalized.apiKeyEnv)
   const apiKeyValue = readAssistantEnvString(env, apiKeyEnv) ?? undefined
+  const responsesRequestPolicy = resolveAssistantResponsesRequestPolicy(normalized)
 
   return {
-    baseUrl,
+    ...(baseUrl ? { baseUrl } : {}),
+    executionDriver: resolvedRuntimeTarget.executionDriver,
     model,
     ...(apiKeyValue ? { apiKey: apiKeyValue } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}),
     ...(normalized.headers ? { headers: normalized.headers } : {}),
     ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
+    ...(responsesRequestPolicy ? { responsesRequestPolicy } : {}),
   }
+}
+
+function resolveAssistantResponsesRequestPolicy(
+  input: ReturnType<typeof normalizeAssistantProviderConfig>,
+): AssistantModelSpec['responsesRequestPolicy'] {
+  return input.presetId === 'vercel-ai-gateway' && input.zeroDataRetention === true
+    ? {
+        gatewayZeroDataRetention: true,
+      }
+    : undefined
 }

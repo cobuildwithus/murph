@@ -1,10 +1,17 @@
 /**
  * Owns hosted member messaging-routing lookup and binding surfaces.
  */
-import { type HostedMember, Prisma } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type HostedMember,
+  Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 
+import { getPrisma } from "../prisma";
 import {
   createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
   createHostedTelegramUserLookupKey,
   createHostedTelegramUserLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -12,14 +19,19 @@ import {
   buildHostedMemberRoutingPrivateColumns,
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
+import { normalizePhoneNumber } from "./phone";
+import { hostedOnboardingError } from "./errors";
 import {
-  type HostedOnboardingPrismaClient,
-  withHostedOnboardingTransaction,
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  type HostedOnboardingReadClient,
 } from "./shared";
 
 const hostedMemberRoutingStateSelect = Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
   linqChatIdEncrypted: true,
+  linqRecipientPhoneEncrypted: true,
   memberId: true,
+  pendingLinqChatIdEncrypted: true,
+  pendingLinqRecipientPhoneEncrypted: true,
   telegramUserLookupKey: true,
   telegramUserIdEncrypted: true,
 });
@@ -28,43 +40,73 @@ type HostedMemberRoutingRecord = Prisma.HostedMemberRoutingGetPayload<{
   select: typeof hostedMemberRoutingStateSelect;
 }>;
 
+const hostedMemberRoutingLookupSelect = Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
+  linqChatIdEncrypted: true,
+  linqRecipientPhoneEncrypted: true,
+  memberId: true,
+  pendingLinqChatIdEncrypted: true,
+  pendingLinqRecipientPhoneEncrypted: true,
+  telegramUserLookupKey: true,
+  telegramUserIdEncrypted: true,
+  member: {
+    select: {
+      billingStatus: true,
+      id: true,
+      suspendedAt: true,
+    },
+  },
+});
+
+type HostedMemberRoutingLookupRecord = Prisma.HostedMemberRoutingGetPayload<{
+  select: typeof hostedMemberRoutingLookupSelect;
+}>;
+
 export interface HostedMemberRoutingStateSnapshot {
   linqChatId: string | null;
+  linqRecipientPhone: string | null;
   memberId: string;
+  pendingLinqChatId: string | null;
+  pendingLinqRecipientPhone: string | null;
+  telegramUserId: string | null;
   telegramUserLookupKey: string | null;
 }
 
-export type HostedMemberTelegramLookupSnapshot = Pick<
-  HostedMember,
-  "billingStatus" | "id" | "suspendedAt"
->;
+export interface HostedMemberRoutingLookupSnapshot {
+  hasTelegramUserBinding: boolean;
+  linqChatId: string | null;
+  memberId: string;
+}
 
-export async function findHostedMemberByTelegramUserLookupKey(input: {
-  prisma: HostedOnboardingPrismaClient;
+export type HostedMemberRoutingLookupMatch =
+  | "telegramUserLookupKey"
+  | "telegramUserId";
+
+export interface HostedMemberRoutingLookup {
+  core: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
+  matchedBy: HostedMemberRoutingLookupMatch;
+  routing: HostedMemberRoutingLookupSnapshot;
+}
+
+export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
+  prisma: HostedOnboardingReadClient;
   telegramUserLookupKey: string;
-}): Promise<HostedMemberTelegramLookupSnapshot | null> {
+}): Promise<HostedMemberRoutingLookup | null> {
   const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
     where: {
       telegramUserLookupKey: input.telegramUserLookupKey,
     },
-    select: {
-      member: {
-        select: {
-          billingStatus: true,
-          id: true,
-          suspendedAt: true,
-        },
-      },
-    },
+    select: hostedMemberRoutingLookupSelect,
   });
 
-  return routingRecord?.member ?? null;
+  return routingRecord
+    ? projectHostedMemberRoutingLookup(routingRecord, "telegramUserLookupKey")
+    : null;
 }
 
-export async function findHostedMemberByTelegramUserId(input: {
-  prisma: HostedOnboardingPrismaClient;
+export async function lookupHostedMemberRoutingByTelegramUserId(input: {
+  prisma: HostedOnboardingReadClient;
   telegramUserId: string;
-}): Promise<HostedMemberTelegramLookupSnapshot | null> {
+}): Promise<HostedMemberRoutingLookup | null> {
   const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
     input.telegramUserId,
   );
@@ -79,23 +121,17 @@ export async function findHostedMemberByTelegramUserId(input: {
         in: telegramUserLookupKeys,
       },
     },
-    select: {
-      member: {
-        select: {
-          billingStatus: true,
-          id: true,
-          suspendedAt: true,
-        },
-      },
-    },
+    select: hostedMemberRoutingLookupSelect,
   });
 
-  return routingRecord?.member ?? null;
+  return routingRecord
+    ? projectHostedMemberRoutingLookup(routingRecord, "telegramUserId")
+    : null;
 }
 
 export async function readHostedMemberRoutingState(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberRoutingStateSnapshot | null> {
   const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
     where: {
@@ -107,58 +143,280 @@ export async function readHostedMemberRoutingState(input: {
   return routingRecord ? projectHostedMemberRoutingState(routingRecord) : null;
 }
 
-export async function upsertHostedMemberLinqChatBinding(input: {
-  linqChatId: string | null;
+export async function upsertHostedMemberPendingLinqBindingTx(input: {
+  linqChatId: string;
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+}): Promise<void> {
+  await writeHostedMemberLinqBindingTx({
+    clearPending: false,
+    kind: "pending",
+    linqChatId: input.linqChatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    recipientPhone: input.recipientPhone,
+  });
+}
+
+export async function upsertHostedMemberHomeLinqBindingTx(input: {
+  clearPending?: boolean;
+  linqChatId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+}): Promise<void> {
+  await writeHostedMemberLinqBindingTx({
+    clearPending: input.clearPending ?? false,
+    kind: "home",
+    linqChatId: input.linqChatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    recipientPhone: input.recipientPhone,
+  });
+}
+
+export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
+  clearPending?: boolean;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string;
+}): Promise<void> {
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
+
+  if (!recipientPhone || !recipientPhoneLookupKey) {
+    throw new TypeError("Hosted Linq home-line assignment requires a non-empty recipient phone.");
+  }
+
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: recipientPhone,
+    memberId: input.memberId,
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramUserId: null,
+  });
+
+  await input.prisma.hostedMemberRouting.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
+      linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
+      memberId: input.memberId,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    },
+    update: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
+      linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
+      ...(input.clearPending
+        ? {
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqChatLookupKey: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            pendingLinqRecipientPhoneLookupKey: null,
+          }
+        : {}),
+    },
+  });
+}
+
+export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
+  prisma: HostedOnboardingReadClient;
+  recipientPhones: readonly string[];
+}): Promise<Map<string, number>> {
+  const recipientPhoneEntries = buildHostedRecipientPhoneLookupEntries(
+    input.recipientPhones,
+  );
+
+  if (recipientPhoneEntries.length === 0) {
+    return new Map();
+  }
+
+  const counts = new Map<string, number>(
+    recipientPhoneEntries.map(({ recipientPhone }) => [recipientPhone, 0]),
+  );
+  const recipientPhoneByLookupKey = new Map(
+    recipientPhoneEntries.map(({ lookupKey, recipientPhone }) => [lookupKey, recipientPhone] as const),
+  );
+
+  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
+    where: {
+      linqRecipientPhoneLookupKey: {
+        in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
+      },
+      member: {
+        is: {
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+      },
+    },
+    select: {
+      linqRecipientPhoneLookupKey: true,
+    },
+  });
+
+  for (const routingRecord of routingRecords) {
+    const recipientPhone = routingRecord.linqRecipientPhoneLookupKey
+      ? recipientPhoneByLookupKey.get(routingRecord.linqRecipientPhoneLookupKey)
+      : null;
+
+    if (!recipientPhone) {
+      continue;
+    }
+
+    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  telegramUserId: string;
+}): Promise<void> {
+  const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
+
+  if (!telegramUserLookupKey) {
+    throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
+  }
+
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: input.memberId,
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramUserId: input.telegramUserId,
+  });
+
+  try {
+    await input.prisma.hostedMemberRouting.upsert({
+      where: {
+        memberId: input.memberId,
+      },
+      create: {
+        ...routingPrivateColumns,
+        linqChatLookupKey: null,
+        linqRecipientPhoneLookupKey: null,
+        memberId: input.memberId,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        telegramUserLookupKey,
+      },
+      update: {
+        telegramUserIdEncrypted: routingPrivateColumns.telegramUserIdEncrypted,
+        telegramUserLookupKey,
+      },
+    });
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw hostedOnboardingError({
+        code: "TELEGRAM_IDENTITY_CONFLICT",
+        message:
+          "That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely.",
+        httpStatus: 409,
+      });
+    }
+
+    throw error;
+  }
+}
+
+export async function syncHostedMemberTelegramRoutingBinding(input: {
+  memberId: string;
+  prisma?: PrismaClient;
+  telegramUserId: string;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+
+  await prisma.$transaction((tx) => upsertHostedMemberTelegramRoutingBindingTx({
+    memberId: input.memberId,
+    prisma: tx,
+    telegramUserId: input.telegramUserId,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+export function projectHostedMemberRoutingState(
+  routing: HostedMemberRoutingRecord,
+): HostedMemberRoutingStateSnapshot {
+  const privateState = readHostedMemberRoutingPrivateState(routing);
+
+  return {
+    linqChatId: privateState.linqChatId,
+    linqRecipientPhone: privateState.linqRecipientPhone,
+    memberId: routing.memberId,
+    pendingLinqChatId: privateState.pendingLinqChatId,
+    pendingLinqRecipientPhone: privateState.pendingLinqRecipientPhone,
+    telegramUserId: privateState.telegramUserId,
+    telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
+  };
+}
+
+async function writeHostedMemberLinqBindingTx(input: {
+  clearPending: boolean;
+  kind: "home" | "pending";
+  linqChatId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
 }): Promise<void> {
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
 
   if (!linqChatLookupKey) {
-    return;
+    throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
   }
+
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: input.kind === "home" ? input.linqChatId : null,
+    linqRecipientPhone: input.kind === "home" ? recipientPhone : null,
+    memberId: input.memberId,
+    pendingLinqChatId: input.kind === "pending" ? input.linqChatId : null,
+    pendingLinqRecipientPhone: input.kind === "pending" ? recipientPhone : null,
+    telegramUserId: null,
+  });
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-        // Hosted Linq replies and activation welcomes reuse the direct thread id, so
-        // the latest observed chat binding must be exclusive to one member.
-        await tx.hostedMemberRouting.updateMany({
-          where: {
-            linqChatLookupKey,
-            NOT: {
-              memberId: input.memberId,
-            },
-          },
-          data: {
-            linqChatIdEncrypted: null,
-            linqChatLookupKey: null,
-          },
-        });
+      await clearHostedMemberLinqChatConflicts({
+        linqChatLookupKey,
+        memberId: input.memberId,
+        tx: input.prisma,
+      });
 
-        await tx.hostedMemberRouting.upsert({
-          where: {
-            memberId: input.memberId,
-          },
-          create: {
-            ...buildHostedMemberRoutingPrivateColumns({
-              linqChatId: input.linqChatId,
-              memberId: input.memberId,
-              telegramUserId: null,
-            }),
-            memberId: input.memberId,
-            linqChatLookupKey,
-            telegramUserLookupKey: null,
-          },
-          update: {
-            linqChatIdEncrypted: buildHostedMemberRoutingPrivateColumns({
-              linqChatId: input.linqChatId,
-              memberId: input.memberId,
-              telegramUserId: null,
-            }).linqChatIdEncrypted,
-            linqChatLookupKey,
-          },
-        });
+      await input.prisma.hostedMemberRouting.upsert({
+        where: {
+          memberId: input.memberId,
+        },
+        create: buildHostedMemberLinqBindingCreateData({
+          kind: input.kind,
+          linqChatLookupKey,
+          memberId: input.memberId,
+          recipientPhoneLookupKey,
+          routingPrivateColumns,
+        }),
+        update: buildHostedMemberLinqBindingUpdateData({
+          clearPending: input.clearPending,
+          kind: input.kind,
+          linqChatLookupKey,
+          recipientPhoneLookupKey,
+          routingPrivateColumns,
+        }),
       });
       return;
     } catch (error) {
@@ -171,53 +429,151 @@ export async function upsertHostedMemberLinqChatBinding(input: {
   }
 }
 
-export async function upsertHostedMemberTelegramRoutingBinding(input: {
+function buildHostedMemberLinqBindingCreateData(input: {
+  kind: "home" | "pending";
+  linqChatLookupKey: string;
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
-  telegramUserId: string;
-}): Promise<void> {
-  const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
+  recipientPhoneLookupKey: string | null;
+  routingPrivateColumns: ReturnType<typeof buildHostedMemberRoutingPrivateColumns>;
+}): Prisma.HostedMemberRoutingUncheckedCreateInput {
+  return {
+    linqChatIdEncrypted: input.kind === "home"
+      ? input.routingPrivateColumns.linqChatIdEncrypted
+      : null,
+    linqChatLookupKey: input.kind === "home" ? input.linqChatLookupKey : null,
+    linqRecipientPhoneEncrypted: input.kind === "home"
+      ? input.routingPrivateColumns.linqRecipientPhoneEncrypted
+      : null,
+    linqRecipientPhoneLookupKey: input.kind === "home"
+      ? input.recipientPhoneLookupKey
+      : null,
+    memberId: input.memberId,
+    pendingLinqChatIdEncrypted: input.kind === "pending"
+      ? input.routingPrivateColumns.pendingLinqChatIdEncrypted
+      : null,
+    pendingLinqChatLookupKey: input.kind === "pending" ? input.linqChatLookupKey : null,
+    pendingLinqRecipientPhoneEncrypted: input.kind === "pending"
+      ? input.routingPrivateColumns.pendingLinqRecipientPhoneEncrypted
+      : null,
+    pendingLinqRecipientPhoneLookupKey: input.kind === "pending"
+      ? input.recipientPhoneLookupKey
+      : null,
+    telegramUserIdEncrypted: null,
+    telegramUserLookupKey: null,
+  };
+}
 
-  if (!telegramUserLookupKey) {
-    throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
+function buildHostedMemberLinqBindingUpdateData(input: {
+  clearPending: boolean;
+  kind: "home" | "pending";
+  linqChatLookupKey: string;
+  recipientPhoneLookupKey: string | null;
+  routingPrivateColumns: ReturnType<typeof buildHostedMemberRoutingPrivateColumns>;
+}): Prisma.HostedMemberRoutingUncheckedUpdateInput {
+  if (input.kind === "home") {
+    return {
+      linqChatIdEncrypted: input.routingPrivateColumns.linqChatIdEncrypted,
+      linqChatLookupKey: input.linqChatLookupKey,
+      linqRecipientPhoneEncrypted: input.routingPrivateColumns.linqRecipientPhoneEncrypted,
+      linqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
+      ...(input.clearPending
+        ? {
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqChatLookupKey: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            pendingLinqRecipientPhoneLookupKey: null,
+          }
+        : {}),
+    };
   }
 
-  await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await tx.hostedMemberRouting.upsert({
-      where: {
+  return {
+    pendingLinqChatIdEncrypted: input.routingPrivateColumns.pendingLinqChatIdEncrypted,
+    pendingLinqChatLookupKey: input.linqChatLookupKey,
+    pendingLinqRecipientPhoneEncrypted: input.routingPrivateColumns.pendingLinqRecipientPhoneEncrypted,
+    pendingLinqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
+  };
+}
+
+async function clearHostedMemberLinqChatConflicts(input: {
+  linqChatLookupKey: string;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedMemberRouting.updateMany({
+    where: {
+      linqChatLookupKey: input.linqChatLookupKey,
+      NOT: {
         memberId: input.memberId,
       },
-      create: {
-        ...buildHostedMemberRoutingPrivateColumns({
-          linqChatId: null,
-          memberId: input.memberId,
-          telegramUserId: input.telegramUserId,
-        }),
+    },
+    data: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+    },
+  });
+
+  await input.tx.hostedMemberRouting.updateMany({
+    where: {
+      pendingLinqChatLookupKey: input.linqChatLookupKey,
+      NOT: {
         memberId: input.memberId,
-        linqChatLookupKey: null,
-        telegramUserLookupKey,
       },
-      update: {
-        telegramUserIdEncrypted: buildHostedMemberRoutingPrivateColumns({
-          linqChatId: null,
-          memberId: input.memberId,
-          telegramUserId: input.telegramUserId,
-        }).telegramUserIdEncrypted,
-        telegramUserLookupKey,
-      },
-    });
+    },
+    data: {
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    },
   });
 }
 
-export function projectHostedMemberRoutingState(
-  routing: HostedMemberRoutingRecord,
-): HostedMemberRoutingStateSnapshot {
-  const privateState = readHostedMemberRoutingPrivateState(routing);
+function buildHostedRecipientPhoneLookupEntries(
+  recipientPhones: readonly string[],
+): Array<{ lookupKey: string; recipientPhone: string }> {
+  const seenRecipientPhones = new Set<string>();
+  const entries: Array<{ lookupKey: string; recipientPhone: string }> = [];
+
+  for (const value of recipientPhones) {
+    const recipientPhone = normalizePhoneNumber(value);
+
+    if (!recipientPhone || seenRecipientPhones.has(recipientPhone)) {
+      continue;
+    }
+
+    const lookupKey = createHostedPhoneLookupKey(recipientPhone);
+
+    if (!lookupKey) {
+      continue;
+    }
+
+    seenRecipientPhones.add(recipientPhone);
+    entries.push({
+      lookupKey,
+      recipientPhone,
+    });
+  }
+
+  return entries;
+}
+
+function projectHostedMemberRoutingLookup(
+  routing: HostedMemberRoutingLookupRecord,
+  matchedBy: HostedMemberRoutingLookupMatch,
+): HostedMemberRoutingLookup {
+  const routingState = projectHostedMemberRoutingState(routing);
 
   return {
-    linqChatId: privateState.linqChatId,
-    memberId: routing.memberId,
-    telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
+    core: routing.member,
+    matchedBy,
+    routing: {
+      hasTelegramUserBinding: Boolean(routing.telegramUserLookupKey),
+      linqChatId: routingState.linqChatId,
+      memberId: routingState.memberId,
+    },
   };
 }
 

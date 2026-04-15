@@ -9,10 +9,7 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
-  ensureImessageMessagesDbReadable,
-  mapImessageMessagesDbRuntimeError,
-} from '@murphai/operator-config/imessage-readiness'
-import {
+  createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
   startLinqChatTypingIndicator,
@@ -21,6 +18,9 @@ import {
 import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
+  type TelegramFetchImplementation,
+  type TelegramFetchResponse,
+  startTelegramTypingSession,
 } from '@murphai/operator-config/telegram-runtime'
 import { createTimeoutAbortController } from '@murphai/operator-config/http-retry'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -28,10 +28,6 @@ import type {
   AssistantChannelActivityHandle,
   AssistantDeliveryCandidate,
   EmailRuntimeDependencies,
-  FetchLike,
-  FetchLikeResponse,
-  ImessageSdkLike,
-  ImessageRuntimeDependencies,
   LinqRuntimeDependencies,
   TelegramRuntimeDependencies,
 } from './types.js'
@@ -40,8 +36,6 @@ import { normalizeOptionalText } from './helpers.js'
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
-const TELEGRAM_TYPING_REFRESH_MS = 4_000
-const IMESSAGE_KIT_MODULE_PARTS = ['@photon-ai', 'imessage-kit'] as const
 
 type TelegramParsedTarget = TelegramThreadTarget
 
@@ -53,7 +47,7 @@ type TelegramSendAttemptResult =
   | {
       kind: 'response'
       payload: unknown
-      response: FetchLikeResponse
+      response: TelegramFetchResponse
     }
 
 type TelegramSendAttemptOutcome =
@@ -76,70 +70,6 @@ type TelegramSendAttemptOutcome =
       retryAfterSeconds: number | null
     }
 
-export async function sendImessageMessage(
-  input: {
-    idempotencyKey?: string | null
-    message: string
-    target: string
-  },
-  dependencies: ImessageRuntimeDependencies = {},
-): Promise<void> {
-  await ensureImessageRuntimeReady(dependencies)
-  let sdk
-
-  try {
-    sdk = dependencies.createSdk
-      ? dependencies.createSdk()
-      : new (await loadImessageSdkConstructor())()
-  } catch (error) {
-    throw mapImessageRuntimeError(error)
-  }
-
-  if (typeof sdk.send !== 'function') {
-    throw new VaultCliError(
-      'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      '@photon-ai/imessage-kit did not expose the expected send() method on IMessageSDK.',
-    )
-  }
-
-  try {
-    await sdk.send(input.target, input.message)
-  } catch (error) {
-    throw mapImessageRuntimeError(error)
-  } finally {
-    try {
-      await sdk.close?.()
-    } catch {}
-  }
-}
-
-async function loadImessageSdkConstructor(): Promise<new () => ImessageSdkLike> {
-  const imported = await importImessageKitModule()
-  const sdkConstructor =
-    imported && typeof imported === 'object' && 'IMessageSDK' in imported
-      ? (imported as { IMessageSDK?: unknown }).IMessageSDK
-      : null
-
-  if (typeof sdkConstructor !== 'function') {
-    throw new VaultCliError(
-      'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      '@photon-ai/imessage-kit did not expose the expected IMessageSDK constructor.',
-    )
-  }
-
-  return sdkConstructor as new () => ImessageSdkLike
-}
-
-async function importImessageKitModule(): Promise<unknown> {
-  const specifier = IMESSAGE_KIT_MODULE_PARTS.join('/')
-  return await importDynamicModule(specifier)
-}
-
-const importDynamicModule = new Function(
-  'specifier',
-  'return import(specifier)',
-) as (specifier: string) => Promise<unknown>
-
 export async function sendTelegramMessage(
   input: {
     idempotencyKey?: string | null
@@ -154,13 +84,19 @@ export async function sendTelegramMessage(
 
 export async function sendLinqMessage(
   input: {
+    fromPhoneNumber?: string | null
     idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
     target: string
+    targetKind?: AssistantDeliveryCandidate['kind']
   },
   dependencies: LinqRuntimeDependencies = {},
-): Promise<{ providerMessageId: string | null }> {
+): Promise<{
+  providerMessageId: string | null
+  providerThreadId: string | null
+  target: string | null
+}> {
   const env = dependencies.env ?? process.env
   const token = resolveLinqApiToken(env)
   if (!token) {
@@ -170,9 +106,46 @@ export async function sendLinqMessage(
     )
   }
 
+  const target = input.target.trim()
+  if (target.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+      'Linq delivery requires an explicit chat id or a stored thread binding.',
+    )
+  }
+
+  if (input.targetKind === 'participant') {
+    const fromPhoneNumber = normalizeOptionalText(input.fromPhoneNumber)
+    if (!fromPhoneNumber) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
+        'Materializing a Linq direct chat requires a sender phone number.',
+      )
+    }
+
+    const created = await createLinqChat(
+      {
+        from: fromPhoneNumber,
+        idempotencyKey: input.idempotencyKey ?? null,
+        message: input.message,
+        to: [target],
+      },
+      {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+      },
+    )
+
+    return {
+      providerMessageId: normalizeOptionalText(created.messageId),
+      providerThreadId: normalizeOptionalText(created.chatId),
+      target: normalizeOptionalText(created.chatId),
+    }
+  }
+
   const delivered = await sendLinqChatMessage(
     {
-      chatId: input.target,
+      chatId: target,
       idempotencyKey: input.idempotencyKey ?? null,
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
@@ -184,6 +157,8 @@ export async function sendLinqMessage(
   )
   return {
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    providerThreadId: null,
+    target,
   }
 }
 
@@ -193,61 +168,15 @@ export async function startTelegramTypingIndicator(
   },
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<AssistantChannelActivityHandle> {
-  const env = dependencies.env ?? process.env
-  const token = resolveTelegramBotToken(env)
-  if (!token) {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
-      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
-    )
-  }
-
-  const fetchImplementation =
-    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
-  if (typeof fetchImplementation !== 'function') {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_UNAVAILABLE',
-      'Outbound Telegram delivery requires fetch support in the current Node.js runtime.',
-    )
-  }
-
-  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
-    /\/$/u,
-    '',
-  )
-  let target = parseTelegramTargetOrThrow(input.target)
-  const stopController = new AbortController()
-
-  target = await sendTelegramTypingIndicatorOnce({
-    baseUrl,
-    fetchImplementation,
-    target,
-    targetLabel: serializeTelegramThreadTarget(target),
-    token,
-  })
-
-  let failure: unknown = null
-  const running = keepTelegramTypingIndicatorAlive({
-    baseUrl,
-    fetchImplementation,
-    signal: stopController.signal,
-    target,
-    token,
-  }).catch((error) => {
-    if (!stopController.signal.aborted) {
-      failure = error
-    }
-  })
-
-  return {
-    async stop() {
-      stopController.abort()
-      await running
-      if (failure) {
-        throw failure
-      }
+  return startTelegramTypingSession(
+    {
+      target: input.target,
     },
-  }
+    {
+      env: dependencies.env,
+      fetchImplementation: dependencies.fetchImplementation,
+    },
+  )
 }
 
 export async function startLinqTypingIndicator(
@@ -463,49 +392,9 @@ function resolveAgentmailThreadReplyMessageId(input: {
   return null
 }
 
-async function ensureImessageRuntimeReady(
-  dependencies: ImessageRuntimeDependencies,
-): Promise<void> {
-  try {
-    await ensureImessageMessagesDbReadable(dependencies, {
-      unavailableCode: 'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      unavailableMessage: 'Outbound iMessage delivery requires macOS.',
-      permissionCode: 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
-      permissionMessage:
-        'Outbound iMessage delivery requires Full Disk Access or read access to ~/Library/Messages/chat.db. Grant access, restart it, and retry.',
-    })
-  } catch (error) {
-    throw mapImessageRuntimeError(error)
-  }
-}
-
-function mapImessageRuntimeError(error: unknown): VaultCliError {
-  if (error instanceof VaultCliError) {
-    return error
-  }
-
-  const mapped = mapImessageMessagesDbRuntimeError(error, {
-    permissionCode: 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
-    permissionMessage:
-      'Outbound iMessage delivery requires Full Disk Access or read access to ~/Library/Messages/chat.db. Grant access, restart it, and retry.',
-    fallbackCode: 'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
-    fallbackMessage: 'Outbound iMessage delivery failed.',
-  })
-  if (mapped) {
-    return mapped
-  }
-
-  return new VaultCliError(
-    'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
-    error instanceof Error && error.message.trim().length > 0
-      ? error.message
-      : 'Outbound iMessage delivery failed.',
-  )
-}
-
 async function sendTelegramTextChunk(input: {
   baseUrl: string
-  fetchImplementation: FetchLike
+  fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string
@@ -562,7 +451,7 @@ async function sendTelegramTextChunk(input: {
 }
 
 async function readTelegramResponsePayload(
-  response: FetchLikeResponse,
+  response: TelegramFetchResponse,
 ): Promise<unknown> {
   try {
     return await response.json()
@@ -624,13 +513,13 @@ function extractTelegramErrorContext(value: unknown): {
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
-  fetchImplementation: FetchLike
+  fetchImplementation: TelegramFetchImplementation
   method: 'POST'
   operation: 'sendChatAction' | 'sendMessage'
   payload: Record<string, unknown>
   signal?: AbortSignal
   token: string
-}): Promise<FetchLikeResponse> {
+}): Promise<TelegramFetchResponse> {
   const timeout = createTimeoutAbortController(
     input.signal,
     TELEGRAM_SEND_TIMEOUT_MS,
@@ -660,99 +549,6 @@ function buildTelegramTargetPayload(target: TelegramParsedTarget): Record<string
     direct_messages_topic_id: target.directMessagesTopicId ?? undefined,
     message_thread_id: target.messageThreadId ?? undefined,
   }
-}
-
-async function keepTelegramTypingIndicatorAlive(input: {
-  baseUrl: string
-  fetchImplementation: FetchLike
-  signal: AbortSignal
-  target: TelegramParsedTarget
-  token: string
-}): Promise<void> {
-  let target = input.target
-
-  while (!input.signal.aborted) {
-    await waitForTelegramActivityRefresh(TELEGRAM_TYPING_REFRESH_MS, input.signal)
-    if (input.signal.aborted) {
-      return
-    }
-
-    target = await sendTelegramTypingIndicatorOnce({
-      baseUrl: input.baseUrl,
-      fetchImplementation: input.fetchImplementation,
-      signal: input.signal,
-      target,
-      targetLabel: serializeTelegramThreadTarget(target),
-      token: input.token,
-    })
-  }
-}
-
-async function sendTelegramTypingIndicatorOnce(input: {
-  baseUrl: string
-  fetchImplementation: FetchLike
-  signal?: AbortSignal
-  target: TelegramParsedTarget
-  targetLabel: string
-  token: string
-}): Promise<TelegramParsedTarget> {
-  let response: FetchLikeResponse
-
-  try {
-    response = await sendTelegramBotApiRequest({
-      baseUrl: input.baseUrl,
-      fetchImplementation: input.fetchImplementation,
-      method: 'POST',
-      operation: 'sendChatAction',
-      payload: {
-        ...buildTelegramTargetPayload(input.target),
-        action: 'typing',
-      },
-      signal: input.signal,
-      token: input.token,
-    })
-  } catch (error) {
-    if (input.signal?.aborted) {
-      return input.target
-    }
-
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_ACTIVITY_FAILED',
-      'Telegram typing indicator failed while calling the Bot API.',
-      {
-        error: describeUnknownError(error),
-        target: input.targetLabel,
-      },
-    )
-  }
-
-  const payload = await readTelegramResponsePayload(response)
-  if (response.ok && isTelegramSuccessResponse(payload)) {
-    return input.target
-  }
-
-  const errorContext = extractTelegramErrorContext(payload)
-  if (
-    errorContext.migrateToChatId &&
-    errorContext.migrateToChatId !== input.target.chatId
-  ) {
-    return {
-      ...input.target,
-      chatId: errorContext.migrateToChatId,
-    }
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_TELEGRAM_ACTIVITY_FAILED',
-    errorContext.description ??
-      `Telegram Bot API sendChatAction failed with HTTP ${response.status}.`,
-    {
-      errorCode: errorContext.errorCode,
-      migrateToChatId: errorContext.migrateToChatId,
-      status: response.status,
-      target: input.targetLabel,
-    },
-  )
 }
 
 function splitTelegramMessageText(message: string): string[] {
@@ -836,31 +632,6 @@ async function waitForTelegramRetryDelay(
   await new Promise((resolve) => setTimeout(resolve, retryAfterMs))
 }
 
-async function waitForTelegramActivityRefresh(
-  delayMs: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  if (signal?.aborted) {
-    return
-  }
-
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      resolve()
-    }, delayMs)
-
-    const onAbort = () => {
-      clearTimeout(timeout)
-      cleanup()
-      resolve()
-    }
-
-    const cleanup = () => signal?.removeEventListener('abort', onAbort)
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
 function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
   const parsed = parseTelegramThreadTarget(target)
   if (parsed) {
@@ -886,7 +657,7 @@ function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
 
 async function sendTelegramTextChunkOnce(input: {
   baseUrl: string
-  fetchImplementation: FetchLike
+  fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string

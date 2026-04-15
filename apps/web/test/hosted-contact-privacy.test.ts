@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHostedDeviceSyncRuntimeApplyRequest } from "@/src/lib/device-sync/internal-runtime";
+import { parseHostedExecutionDeviceSyncRuntimeApplyRequest } from "@murphai/device-syncd/hosted-runtime";
+import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
+
 import { sanitizeHostedLinqEventForStorage } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { minimizeHostedLinqMessageReceivedEvent } from "@/src/lib/hosted-onboarding/webhook-event-snapshots";
 
 describe("hosted contact privacy", () => {
   it("preserves Linq attachment URLs in minimized webhook snapshots", () => {
-    const minimized = minimizeHostedLinqMessageReceivedEvent({
+    const minimized = minimizeLinqMessageReceivedEvent({
       api_version: "2026-04-01",
       created_at: "2026-04-01T00:00:00.000Z",
       webhook_version: "2026-02-03",
@@ -261,7 +262,7 @@ describe("hosted contact privacy", () => {
   });
 
   it("rejects duplicate connection updates in a single runtime apply request", () => {
-    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
+    expect(() => parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
         {
           connectionId: "conn_123",
@@ -277,6 +278,6 @@ describe("hosted contact privacy", () => {
         },
       ],
       userId: "user_123",
-    })).toThrow(/connectionId must be unique/i);
+    })).toThrow(/duplicate connectionId|must be unique/i);
   });
 });

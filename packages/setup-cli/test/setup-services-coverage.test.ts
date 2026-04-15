@@ -11,6 +11,10 @@ const readlineMockState = vi.hoisted(() => ({
   prompts: [] as string[],
 }))
 
+const toolchainMockState = vi.hoisted(() => ({
+  unavailableCommands: new Set<string>(),
+}))
+
 vi.mock('node:readline/promises', () => ({
   default: {
     createInterface: () => ({
@@ -23,6 +27,34 @@ vi.mock('node:readline/promises', () => ({
   },
 }))
 
+vi.mock('../src/setup-services/toolchain.ts', async () => {
+  const actual = await vi.importActual<
+    typeof import('../src/setup-services/toolchain.ts')
+  >('../src/setup-services/toolchain.ts')
+
+  return {
+    ...actual,
+    async resolveExecutablePath(
+      candidates: string[],
+      env: NodeJS.ProcessEnv,
+      absoluteFallbacks: string[] = [],
+    ): Promise<string | null> {
+      const requestedCandidates = [...absoluteFallbacks, ...candidates].map(
+        (candidate) => candidate.trim(),
+      )
+      if (
+        requestedCandidates.some((candidate) =>
+          toolchainMockState.unavailableCommands.has(candidate),
+        )
+      ) {
+        return null
+      }
+
+      return actual.resolveExecutablePath(candidates, env, absoluteFallbacks)
+    },
+  }
+})
+
 import {
   listAssistantCronPresets,
 } from '@murphai/assistant-engine/assistant-cron'
@@ -32,6 +64,7 @@ import {
 } from '@murphai/assistant-engine/assistant-state'
 import {
   createIntegratedVaultServices,
+  showWearablePreferences,
 } from '@murphai/vault-usecases'
 import type {
   InboxSourceSetEnabledResult,
@@ -92,6 +125,7 @@ import {
 afterEach(() => {
   readlineMockState.answers = []
   readlineMockState.prompts = []
+  toolchainMockState.unavailableCommands.clear()
 })
 
 async function fileExists(absolutePath: string): Promise<boolean> {
@@ -198,12 +232,6 @@ function makeInboxBootstrapResult(
           reason: 'configured for tests',
           source: 'config',
         },
-        pdftotext: {
-          available: true,
-          command: '/usr/bin/pdftotext',
-          reason: 'configured for tests',
-          source: 'config',
-        },
         whisper: {
           available: true,
           command: '/usr/bin/whisper-cli',
@@ -287,7 +315,7 @@ test('configureSetupScheduledUpdates describes a single deferred update outside 
 test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliation, and automation state updates', async () => {
   const dryRunSteps: SetupStepResult[] = []
   const dryRunChannels = await configureSetupChannels({
-    channels: ['imessage', 'telegram', 'email'],
+    channels: ['telegram', 'linq', 'email'],
     dryRun: true,
     env: {},
     inboxServices: {
@@ -301,15 +329,17 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     vault: '/tmp/vault',
   })
 
-  assert.equal(dryRunChannels[0]?.channel, 'imessage')
+  assert.equal(dryRunChannels[0]?.channel, 'telegram')
   assert.equal(dryRunChannels[0]?.configured, false)
+  assert.deepEqual(dryRunChannels[0]?.missingEnv, ['TELEGRAM_BOT_TOKEN'])
   assert.equal(dryRunChannels[0]?.enabled, true)
-  assert.equal(dryRunSteps[0]?.status, 'skipped')
-  assert.equal(dryRunChannels[1]?.channel, 'telegram')
-  assert.deepEqual(dryRunChannels[1]?.missingEnv, ['TELEGRAM_BOT_TOKEN'])
+  assert.equal(dryRunSteps[0]?.status, 'planned')
+  assert.equal(dryRunChannels[1]?.channel, 'linq')
+  assert.deepEqual(dryRunChannels[1]?.missingEnv, ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'])
   assert.equal(dryRunSteps[1]?.status, 'planned')
   assert.equal(dryRunChannels[2]?.channel, 'email')
   assert.deepEqual(dryRunChannels[2]?.missingEnv, ['AGENTMAIL_API_KEY'])
+  assert.equal(dryRunSteps[2]?.status, 'planned')
 
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-state-'))
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
@@ -317,12 +347,12 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
   await writeFile(
     automationStatePath,
     JSON.stringify({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: 'cursor-1',
-      autoReplyChannels: ['email', 'imessage'],
-      autoReplyBacklogChannels: ['email'],
-      autoReplyPrimed: true,
+      autoReply: [
+        { channel: 'email', cursor: null },
+        { channel: 'linq', cursor: null },
+      ],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
     'utf8',
@@ -368,12 +398,40 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
               },
               source: 'email',
             }),
-            makeInboxConnector({
-              accountId: 'self',
-              id: 'imessage:self',
-              source: 'imessage',
-            }),
           ])
+        },
+        async list() {
+          return {
+            filters: {
+              afterCaptureId: null,
+              afterOccurredAt: null,
+              limit: 1,
+              oldestFirst: false,
+              sourceId: null,
+            },
+            items: [
+              {
+                accountId: null,
+                actorId: 'contact_1',
+                actorIsSelf: false,
+                actorName: 'Sender',
+                attachmentCount: 0,
+                captureId: 'capture-latest',
+                envelopePath: '/tmp/latest-envelope.json',
+                eventId: 'evt_latest',
+                externalId: 'external_latest',
+                occurredAt: '2026-04-08T00:05:00.000Z',
+                promotions: [],
+                receivedAt: '2026-04-08T00:05:01.000Z',
+                source: 'telegram',
+                text: 'latest message',
+                threadId: 'thread-latest',
+                threadIsDirect: true,
+                threadTitle: null,
+              },
+            ],
+            vault: vaultRoot,
+          }
         },
         async sourceAdd() {
           throw new Error('sourceAdd should not run when telegram already exists')
@@ -391,9 +449,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
               id: input.connectorId,
               source: input.connectorId.startsWith('telegram')
                 ? 'telegram'
-                : input.connectorId.startsWith('email')
-                  ? 'email'
-                  : 'imessage',
+                : 'email',
             }),
             input.connectorId === 'telegram:bot' ? 3 : 2,
           )
@@ -425,16 +481,21 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     const savedAutomationState = JSON.parse(
       await readFile(automationStatePath, 'utf8'),
     ) as {
-      autoReplyBacklogChannels: string[]
-      autoReplyChannels: string[]
-      autoReplyPrimed: boolean
-      autoReplyScanCursor: string | null
+      autoReply: Array<{
+        channel: string
+        cursor: { captureId: string; occurredAt: string } | null
+      }>
     }
 
-    assert.deepEqual(savedAutomationState.autoReplyChannels, ['telegram'])
-    assert.deepEqual(savedAutomationState.autoReplyBacklogChannels, [])
-    assert.equal(savedAutomationState.autoReplyScanCursor, null)
-    assert.equal(savedAutomationState.autoReplyPrimed, false)
+    assert.deepEqual(savedAutomationState.autoReply, [
+      {
+        channel: 'telegram',
+        cursor: {
+          captureId: 'capture-latest',
+          occurredAt: '2026-04-08T00:05:00.000Z',
+        },
+      },
+    ])
 
     const missingEnvChannel = await configureSetupChannels({
       channels: ['email'],
@@ -474,54 +535,125 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
   }
 })
 
-test('configureSetupChannels covers iMessage adds, Linq reuse fallback, email inbox reuse, and runtime unavailability', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-branches-'))
+test('configureSetupChannels preserves unmanaged auto-reply entries when enabling a managed setup channel', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-preserve-unmanaged-'))
+  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
+  await mkdir(path.dirname(automationStatePath), { recursive: true })
+  await writeFile(
+    automationStatePath,
+    JSON.stringify({
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [{ channel: 'custom', cursor: null }],
+      updatedAt: TEST_TIMESTAMP,
+    }),
+    'utf8',
+  )
 
   try {
-    const imessageConfigured = await configureSetupChannels({
-      channels: ['imessage'],
+    await configureSetupChannels({
+      channels: ['telegram'],
       dryRun: false,
-      env: {},
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
       inboxServices: {
         async bootstrap() {
           throw new Error('bootstrap should not run in this test')
         },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-        async sourceAdd(input) {
-          return makeInboxSourceAddResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.account ?? 'self',
-              id: input.id,
-              options: {
-                includeOwnMessages: true,
+        async doctor(input) {
+          return makeInboxDoctorResult(vaultRoot, {
+            checks: [
+              {
+                message: 'Telegram ready',
+                name: 'probe',
+                status: 'pass',
               },
-              source: 'imessage',
+            ],
+            target: input.sourceId ?? null,
+          })
+        },
+        async sourceList() {
+          return makeInboxSourceListResult(vaultRoot, [
+            makeInboxConnector({
+              accountId: 'bot',
+              enabled: true,
+              id: 'telegram:bot',
+              source: 'telegram',
             }),
-          )
+          ])
+        },
+        async sourceAdd() {
+          throw new Error('sourceAdd should not run when telegram already exists')
+        },
+        async list() {
+          return {
+            filters: {
+              afterCaptureId: null,
+              afterOccurredAt: null,
+              limit: 1,
+              oldestFirst: false,
+              sourceId: null,
+            },
+            items: [
+              {
+                accountId: null,
+                actorId: 'contact_1',
+                actorIsSelf: false,
+                actorName: 'Sender',
+                attachmentCount: 0,
+                captureId: 'capture-latest',
+                envelopePath: '/tmp/latest-envelope.json',
+                eventId: 'evt_latest',
+                externalId: 'external_latest',
+                occurredAt: '2026-04-08T00:05:00.000Z',
+                promotions: [],
+                receivedAt: '2026-04-08T00:05:01.000Z',
+                source: 'telegram',
+                text: 'latest message',
+                threadId: 'thread-latest',
+                threadIsDirect: true,
+                threadTitle: null,
+              },
+            ],
+            vault: vaultRoot,
+          }
         },
       },
-      platform: 'darwin',
-      requestId: 'req-imessage',
+      platform: 'linux',
+      requestId: 'req-preserve-unmanaged',
       steps: [],
       vault: vaultRoot,
     })
 
-    assert.deepEqual(imessageConfigured, [
+    const savedAutomationState = JSON.parse(
+      await readFile(automationStatePath, 'utf8'),
+    ) as {
+      autoReply: Array<{
+        channel: string
+        cursor: { captureId: string; occurredAt: string } | null
+      }>
+    }
+
+    assert.deepEqual(savedAutomationState.autoReply, [
+      { channel: 'custom', cursor: null },
       {
-        autoReply: true,
-        channel: 'imessage',
-        configured: true,
-        connectorId: 'imessage:self',
-        detail:
-          'Configured the iMessage connector "imessage:self" and enabled assistant auto-reply for new iMessage conversations.',
-        enabled: true,
-        missingEnv: [],
+        channel: 'telegram',
+        cursor: {
+          captureId: 'capture-latest',
+          occurredAt: '2026-04-08T00:05:00.000Z',
+        },
       },
     ])
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
 
+test('configureSetupChannels covers Linq reuse fallback, email inbox reuse, and runtime unavailability', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-branches-'))
+
+  try {
     const linqConfigured = await configureSetupChannels({
       channels: ['linq'],
       dryRun: false,
@@ -706,12 +838,17 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
   await mkdir(path.dirname(automationStatePath), { recursive: true })
   const unchangedState = JSON.stringify({
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: 'cursor-email',
-    autoReplyChannels: ['email'],
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: false,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          captureId: 'capture-email',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+      },
+    ],
     updatedAt: TEST_TIMESTAMP,
   })
   await writeFile(automationStatePath, unchangedState, 'utf8')
@@ -790,11 +927,20 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
     const savedEmailState = JSON.parse(
       await readFile(automationStatePath, 'utf8'),
     ) as {
-      autoReplyBacklogChannels: string[]
-      autoReplyChannels: string[]
+      autoReply: Array<{
+        channel: string
+        cursor: { captureId: string; occurredAt: string } | null
+      }>
     }
-    assert.deepEqual(savedEmailState.autoReplyChannels, ['email'])
-    assert.deepEqual(savedEmailState.autoReplyBacklogChannels, ['email'])
+    assert.deepEqual(savedEmailState.autoReply, [
+      {
+        channel: 'email',
+        cursor: {
+          captureId: 'capture-email',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+      },
+    ])
 
     const telegramConfigured = await configureSetupChannels({
       channels: ['telegram'],
@@ -852,12 +998,9 @@ test('configureSetupChannels leaves empty automation state untouched when nothin
   await mkdir(path.dirname(automationStatePath), { recursive: true })
   const emptyState = `${JSON.stringify(
     {
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: true,
+      autoReply: [],
       updatedAt: TEST_TIMESTAMP,
     },
     null,
@@ -1152,12 +1295,9 @@ test('configureSetupChannels reuses Linq connectors when env is missing and pres
     )
 
     await saveAssistantAutomationState(vaultRoot, {
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['email'],
-      autoReplyBacklogChannels: ['email'],
-      autoReplyPrimed: false,
+      autoReply: [{ channel: 'email', cursor: null }],
       updatedAt: TEST_TIMESTAMP,
     })
 
@@ -1204,49 +1344,10 @@ test('configureSetupChannels reuses Linq connectors when env is missing and pres
   }
 })
 
-test('configureSetupChannels covers reused iMessage and missing-env Telegram reuse messaging', async () => {
+test('configureSetupChannels covers missing-env Telegram reuse messaging', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-reuse-'))
 
   try {
-    const imessageConfigured = await configureSetupChannels({
-      channels: ['imessage'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'self',
-              id: 'imessage-existing',
-              source: 'imessage',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when iMessage already exists')
-        },
-      },
-      platform: 'darwin',
-      requestId: 'req-imessage-reuse',
-      steps: [],
-      vault: vaultRoot,
-    })
-    assert.deepEqual(imessageConfigured, [
-      {
-        autoReply: true,
-        channel: 'imessage',
-        configured: true,
-        connectorId: 'imessage-existing',
-        detail:
-          'Reused the iMessage connector "imessage-existing" and enabled assistant auto-reply for new iMessage conversations.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
     const telegramConfigured = await configureSetupChannels({
       channels: ['telegram'],
       dryRun: false,
@@ -2092,7 +2193,7 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
   await mkdir(path.dirname(cliBinPath), { recursive: true })
   await writeFile(cliBinPath, '// cli stub\n', 'utf8')
 
-  for (const tool of ['ffmpeg', 'pdftotext', 'whisper-cli']) {
+  for (const tool of ['ffmpeg', 'whisper-cli']) {
     const toolPath = path.join(binDirectory, tool)
     await writeFile(toolPath, '#!/usr/bin/env bash\nexit 0\n', 'utf8')
     await chmod(toolPath, 0o755)
@@ -2168,7 +2269,7 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
 
     const result = await services.setupHost({
       assistant,
-      channels: ['imessage'],
+      channels: [],
       dryRun: false,
       requestId: 'req-setup',
       scheduledUpdatePresetIds: [
@@ -2199,8 +2300,8 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
       'completed',
     )
     assert.equal(
-      result.steps.find((step) => step.id === 'channel-imessage')?.status,
-      'skipped',
+      result.steps.find((step) => step.id === 'channel-email'),
+      undefined,
     )
     assert.equal(result.scheduledUpdates.length, 2)
 
@@ -2245,6 +2346,135 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
         error instanceof VaultCliError &&
         error.code === 'unsupported_platform' &&
         error.message.includes('setupMacos'),
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('createSetupServices saves canonical wearable preferences, including explicit empty selections', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-services-wearable-prefs-'))
+  const cwd = path.join(root, 'workspace')
+  const homeDirectory = path.join(root, 'home')
+  const binDirectory = path.join(root, 'bin')
+  const toolchainRoot = path.join(root, 'toolchain')
+  const vaultPath = path.join(cwd, 'vault')
+  const cliBinPath = path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js')
+
+  await mkdir(cwd, { recursive: true })
+  await mkdir(homeDirectory, { recursive: true })
+  await mkdir(binDirectory, { recursive: true })
+  await mkdir(path.dirname(cliBinPath), { recursive: true })
+  await writeFile(cliBinPath, '// cli stub\n', 'utf8')
+
+  for (const tool of ['ffmpeg', 'whisper-cli']) {
+    const toolPath = path.join(binDirectory, tool)
+    await writeFile(toolPath, '#!/usr/bin/env bash\nexit 0\n', 'utf8')
+    await chmod(toolPath, 0o755)
+  }
+
+  const whisperModelPath = path.join(
+    toolchainRoot,
+    'models',
+    'whisper',
+    'ggml-base.en.bin',
+  )
+  await mkdir(path.dirname(whisperModelPath), { recursive: true })
+  await writeFile(whisperModelPath, 'model', 'utf8')
+
+  const assistant: SetupConfiguredAssistant = {
+    preset: 'skip',
+    enabled: false,
+    provider: null,
+    model: null,
+    baseUrl: null,
+    apiKeyEnv: null,
+    providerName: null,
+    codexCommand: null,
+    codexHome: undefined,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    oss: false,
+    account: null,
+    detail: 'Skipped',
+  }
+
+  try {
+    const vaultCore = createIntegratedVaultServices().core
+    const services = createSetupServices({
+      arch: () => 'x64',
+      env: () => ({
+        PATH: binDirectory,
+      }),
+      getCwd: () => cwd,
+      getHomeDirectory: () => homeDirectory,
+      platform: () => 'linux',
+      resolveCliBinPath: () => cliBinPath,
+      inboxServices: {
+        async bootstrap(input) {
+          return makeInboxBootstrapResult(
+            input.vault,
+            path.join(homeDirectory, '.runtime', 'toolchain.json'),
+          )
+        },
+      },
+      vaultServices: {
+        core: {
+          ...vaultCore,
+          async init(input) {
+            await mkdir(input.vault, { recursive: true })
+            await writeFile(path.join(input.vault, 'vault.json'), '{}', 'utf8')
+            return {
+              created: true,
+              directories: [input.vault],
+              files: [path.join(input.vault, 'vault.json')],
+              vault: input.vault,
+            }
+          },
+        },
+      },
+    })
+
+    const firstResult = await services.setupHost({
+      assistant,
+      dryRun: false,
+      strict: false,
+      toolchainRoot,
+      vault: './vault',
+      wearables: ['whoop', 'garmin'],
+    })
+
+    assert.equal(
+      firstResult.steps.find((step) => step.id === 'wearable-preferences')?.status,
+      'completed',
+    )
+    assert.deepEqual(
+      (await showWearablePreferences(vaultPath)).wearablePreferences,
+      {
+        desiredProviders: ['garmin', 'whoop'],
+      },
+    )
+
+    const secondResult = await services.setupHost({
+      assistant,
+      dryRun: false,
+      strict: false,
+      toolchainRoot,
+      vault: './vault',
+      wearables: [],
+    })
+
+    assert.equal(
+      secondResult.steps.find((step) => step.id === 'wearable-preferences')?.status,
+      'completed',
+    )
+    assert.deepEqual(
+      (await showWearablePreferences(vaultPath)).wearablePreferences,
+      {
+        desiredProviders: [],
+      },
     )
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -2410,13 +2640,6 @@ test('createSetupServices on linux records apt provisioning failures and saves a
             stdout: '',
           }
         }
-        if (input.args.includes('poppler-utils')) {
-          return {
-            exitCode: 1,
-            stderr: '',
-            stdout: 'pdftotext install failed',
-          }
-        }
         if (input.args.includes('whisper-cpp')) {
           return {
             exitCode: 0,
@@ -2458,7 +2681,6 @@ test('createSetupServices on linux records apt provisioning failures and saves a
     assert.equal(result.platform, 'linux')
     assert.equal(result.vault, vaultPath)
     assert.equal(result.steps.find((step) => step.id === 'ffmpeg')?.status, 'skipped')
-    assert.equal(result.steps.find((step) => step.id === 'pdftotext')?.status, 'skipped')
     assert.equal(result.steps.find((step) => step.id === 'whisper-cpp')?.status, 'skipped')
     assert.equal(
       result.steps.find((step) => step.id === 'assistant-defaults')?.status,
@@ -2469,20 +2691,27 @@ test('createSetupServices on linux records apt provisioning failures and saves a
       'completed',
     )
     assert.match(result.notes.join('\n'), /apt update denied/u)
-    assert.match(result.notes.join('\n'), /pdftotext install failed/u)
     assert.match(
       result.notes.join('\n'),
       /Export OPENROUTER_API_KEY before using the saved OpenAI-compatible assistant backend\./u,
     )
     assert.equal(result.tools.ffmpegCommand, null)
-    assert.equal(result.tools.pdftotextCommand, null)
     assert.equal(result.tools.whisperCommand, null)
     assert.equal(
       result.bootstrap?.setup.configPath,
       path.join('~', '.runtime', 'toolchain.json'),
     )
     assert.ok(runCalls.some((call) => call.includes(' update')))
-    assert.ok(runCalls.some((call) => call.includes(' install -y poppler-utils')))
+    assert.ok(runCalls.some((call) => call.includes(' install -y whisper-cpp')))
+
+    toolchainMockState.unavailableCommands = new Set([
+      'apt-get',
+      '/usr/bin/apt-get',
+      '/bin/apt-get',
+      'sudo',
+      '/usr/bin/sudo',
+      '/bin/sudo',
+    ])
 
     const noAptServices = createSetupServices({
       downloadFile: async (_url, destinationPath) => {
@@ -2587,12 +2816,6 @@ test('createSetupServices on linux covers root apt install success paths', async
             return { exitCode: 0, stderr: '', stdout: '' }
           }
 
-          if (input.args.includes('install') && input.args.includes('poppler-utils')) {
-            await writeFile(path.join(rootBinDirectory, 'pdftotext'), '#!/usr/bin/env bash\nexit 0\n', 'utf8')
-            await chmod(path.join(rootBinDirectory, 'pdftotext'), 0o755)
-            return { exitCode: 0, stderr: '', stdout: '' }
-          }
-
           if (input.args.includes('install') && input.args.includes('whisper-cpp')) {
             await writeFile(path.join(rootBinDirectory, 'whisper-cli'), '#!/usr/bin/env bash\nexit 0\n', 'utf8')
             await chmod(path.join(rootBinDirectory, 'whisper-cli'), 0o755)
@@ -2631,15 +2854,10 @@ test('createSetupServices on linux covers root apt install success paths', async
         'completed',
       )
       assert.equal(
-        rootResult.steps.find((step) => step.id === 'pdftotext')?.status,
-        'completed',
-      )
-      assert.equal(
         rootResult.steps.find((step) => step.id === 'whisper-cpp')?.status,
         'completed',
       )
       assert.match(rootResult.tools.ffmpegCommand ?? '', /ffmpeg$/u)
-      assert.match(rootResult.tools.pdftotextCommand ?? '', /pdftotext$/u)
       assert.match(rootResult.tools.whisperCommand ?? '', /whisper-cli$/u)
     } finally {
       getuidMock?.mockRestore()

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHostedExecutionDeviceSyncWakeDispatch,
-  buildHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionDispatchRef,
+} from "@murphai/hosted-execution/dispatch-ref";
 
 import {
   createHostedExecutionDispatchPayloadStore,
@@ -66,6 +68,9 @@ describe("hosted dispatch payload store", () => {
     const payload = await store.writeStoredDispatch(dispatch);
 
     expect(payload.storage).toBe("reference");
+    if (payload.storage !== "reference") {
+      throw new Error("Expected device-sync dispatches to use reference payload storage.");
+    }
     expect(payload.stagedPayloadId).toBeTruthy();
     expect(bucket.objects.size).toBe(1);
     await expect(store.readStoredDispatch(payload)).resolves.toEqual(dispatch);
@@ -96,6 +101,38 @@ describe("hosted dispatch payload store", () => {
     expect(changedRef.stagedPayloadId).not.toBe(firstRef.stagedPayloadId);
   });
 
+  it("keeps the same staged payload id when equivalent nested dispatch JSON keys are reordered", async () => {
+    const bucket = new MemoryR2Bucket();
+    const store = createHostedExecutionDispatchPayloadStore({
+      bucket,
+      key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
+      keyId: "test-key",
+    });
+    const firstDispatch = createTestDispatch({
+      hint: {
+        nested: {
+          alpha: 1,
+          beta: true,
+        },
+        traceId: "trace-1",
+      },
+    });
+    const reorderedDispatch = createTestDispatch({
+      hint: {
+        traceId: "trace-1",
+        nested: {
+          beta: true,
+          alpha: 1,
+        },
+      },
+    });
+
+    const firstRef = await store.writeDispatchPayload(firstDispatch);
+    const reorderedRef = await store.writeDispatchPayload(reorderedDispatch);
+
+    expect(reorderedRef.stagedPayloadId).toBe(firstRef.stagedPayloadId);
+  });
+
   it("rejects reference payload envelopes without staged payload ids", async () => {
     const bucket = new MemoryR2Bucket();
     const store = createHostedExecutionDispatchPayloadStore({
@@ -114,5 +151,26 @@ describe("hosted dispatch payload store", () => {
     );
     expect(store.readStoredDispatchRef(legacyPayload)).toBeNull();
     await expect(store.deleteStoredDispatchPayload(legacyPayload)).resolves.toBeUndefined();
+  });
+
+  it("treats missing staged payload probes as absent instead of failing", async () => {
+    const bucket = new MemoryR2Bucket();
+    const store = createHostedExecutionDispatchPayloadStore({
+      bucket,
+      key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
+      keyId: "test-key",
+    });
+    const dispatch = createTestDispatch({ eventId: "device-sync.wake:test-user:event-missing" });
+    const payload = await store.writeStoredDispatch(dispatch);
+
+    if (payload.storage !== "reference") {
+      throw new Error("Expected device-sync dispatches to use reference payload storage.");
+    }
+
+    bucket.objects.clear();
+
+    await expect(store.readDispatchPayload({
+      stagedPayloadId: payload.stagedPayloadId,
+    })).resolves.toBeNull();
   });
 });

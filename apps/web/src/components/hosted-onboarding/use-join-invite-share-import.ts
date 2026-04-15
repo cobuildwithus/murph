@@ -43,7 +43,6 @@ export function useJoinInviteShareImport(input: {
     const poll = async () => {
       try {
         const payload = await requestHostedOnboardingJson<HostedSharePageData>({
-          auth: "optional",
           url: buildHostedShareStatusUrl({
             inviteCode: input.inviteCode,
             shareCode,

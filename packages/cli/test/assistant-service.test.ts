@@ -340,7 +340,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       {
         vault: '/tmp/vault',
         alias: 'chat:bob',
-        channel: 'imessage',
+        channel: 'telegram',
         participantId: 'contact:bob',
         sourceThreadId: 'thread-1',
       },
@@ -349,7 +349,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     {
       vault: '/tmp/vault',
       alias: 'chat:bob',
-      channel: 'imessage',
+      channel: 'telegram',
       identityId: 'assistant:primary',
       actorId: 'contact:bob',
       threadId: 'thread-1',
@@ -538,14 +538,19 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'high',
+      presetId: null,
+      webSearch: null,
+      zeroDataRetention: null,
       target: {
         adapter: 'openai-compatible',
         apiKeyEnv: null,
         endpoint: 'http://127.0.0.1:11434/v1',
         headers: null,
         model: 'gpt-oss:20b',
+        presetId: null,
         providerName: null,
         reasoningEffort: 'high',
+        webSearch: null,
       },
     },
   )
@@ -566,8 +571,10 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         endpoint: 'https://api.openai.com/v1',
         headers: null,
         model: 'gpt-5.4-mini',
+        presetId: null,
         providerName: 'openai',
         reasoningEffort: 'medium',
+        webSearch: null,
       },
     ),
     {
@@ -585,14 +592,19 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: 'openai',
       headers: null,
       reasoningEffort: 'medium',
+      presetId: null,
+      webSearch: null,
+      zeroDataRetention: null,
       target: {
         adapter: 'openai-compatible',
         apiKeyEnv: 'OPENAI_API_KEY',
         endpoint: 'https://api.openai.com/v1',
         headers: null,
         model: 'gpt-5.4-mini',
+        presetId: null,
         providerName: 'openai',
         reasoningEffort: 'medium',
+        webSearch: null,
       },
     },
   )
@@ -1362,15 +1374,11 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
 
   assert.match(
     outboundCall?.systemPrompt ?? '',
-    /Never include citations, source lists, footnotes, bracketed references/u,
+    /Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default/u,
   )
   assert.match(
     outboundCall?.systemPrompt ?? '',
-    /Do not mention internal vault paths, ledger filenames, JSONL files/u,
-  )
-  assert.match(
-    outboundCall?.systemPrompt ?? '',
-    /Do not surface raw machine timestamps such as ISO-8601 values by default/u,
+    /Reply naturally in plain conversational prose that fits the channel/u,
   )
   assert.match(
     outboundCall?.systemPrompt ?? '',
@@ -1378,11 +1386,7 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
   )
   assert.doesNotMatch(
     localChatCall?.systemPrompt ?? '',
-    /Never include citations, source lists, footnotes, bracketed references/u,
-  )
-  assert.doesNotMatch(
-    localChatCall?.systemPrompt ?? '',
-    /Do not mention internal vault paths, ledger filenames, JSONL files/u,
+    /Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default/u,
   )
   assert.doesNotMatch(
     localChatCall?.systemPrompt ?? '',
@@ -1390,11 +1394,15 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
   )
   assert.doesNotMatch(
     outboundCall?.systemPrompt ?? '',
-    /mention relative file paths when practical/u,
+    /mention relative file paths, record ids, dates, or source details/u,
   )
   assert.match(
     localChatCall?.systemPrompt ?? '',
-    /mention relative file paths when practical/u,
+    /mention relative file paths, record ids, dates, or source details/u,
+  )
+  assert.match(
+    localChatCall?.systemPrompt ?? '',
+    /Otherwise, keep the reply natural and direct/u,
   )
 })
 
@@ -1708,7 +1716,7 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
   })
   serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
     delivery: {
-      channel: 'imessage',
+      channel: 'telegram',
       target: '+15551234567',
       targetKind: 'participant',
       sentAt: '2026-03-26T01:10:00.000Z',
@@ -1720,7 +1728,7 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: '+15551234567',
     prompt: 'Send a quick check-in.',
     deliverResponse: true,
@@ -1745,7 +1753,11 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
   assert.equal(receipt.status, 'completed')
   assert.equal(receipt.deliveryDisposition, 'sent')
   assert.equal(typeof receipt.deliveryIntentId, 'string')
-  assert.equal(receipt.responsePreview, 'Assistant reply.')
+  assert.match(
+    receipt.responsePreview ?? '',
+    /^\[redacted \d+ chars sha256:[0-9a-f]{12}\]$/,
+  )
+  assert.notEqual(receipt.responsePreview, 'Assistant reply.')
   assert.equal(
     receipt.timeline.some((event) => event.kind === 'provider.attempt.started'),
     true,
@@ -2038,7 +2050,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     const firstToolCatalog = firstCall?.toolRuntime?.toolCatalog as
       | AssistantToolCatalog
       | undefined
-    assert.equal(firstToolCatalog?.hasTool('murph.cli.run'), true)
+    assert.equal(firstToolCatalog?.hasTool('vault.cli.run'), true)
     assert.deepEqual(secondCall?.conversationMessages, [
       {
         role: 'user',
@@ -2127,7 +2139,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
 
     assert.equal(providerCall?.provider, 'openai-compatible')
     assert.equal('capabilityRegistry' in (providerCall?.toolRuntime ?? {}), false)
-    assert.equal(toolCatalog?.hasTool('murph.cli.run'), true)
+    assert.equal(toolCatalog?.hasTool('vault.cli.run'), true)
     assert.equal(toolCatalog?.hasTool('vault.fs.readText'), true)
     assert.equal(toolCatalog?.hasTool('assistant.state.show'), false)
     assert.equal(toolCatalog?.hasTool('assistant.memory.search'), false)
@@ -2155,7 +2167,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /If you need the operator-facing CLI surface itself, use `murph\.cli\.run` for knowledge work only when you truly need/u,
+      /Use `vault\.cli\.run` as the canonical Murph runtime surface for this bound vault/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2163,7 +2175,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /When a turn produces durable understanding that is likely to help in future conversations, the assistant should usually capture it in the wiki/u,
+      /For wiki tasks, read `derived\/knowledge\/index\.md` first, then one to three targeted pages/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2178,19 +2190,19 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
       mode: 'apply',
       calls: [
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['assistant', 'session', 'list'],
           },
         },
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['assistant', 'session', 'show', result.session.sessionId],
           },
         },
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['journal', 'append', '2026-03-31', '--text', 'Auto-reply mutation proof.'],
           },
@@ -2199,17 +2211,17 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     })
     assert.deepEqual(toolResults.map((entry) => entry.status), ['succeeded', 'succeeded', 'succeeded'])
     const listedSessions = (toolResults[0]?.result as {
-      json?: { sessions?: Array<{ sessionId?: string }> }
-    } | undefined)?.json?.sessions
+      sessions?: Array<{ sessionId?: string }>
+    } | undefined)?.sessions
     const shownSession = (toolResults[1]?.result as {
-      json?: { session?: { sessionId?: string } }
-    } | undefined)?.json?.session
+      session?: { sessionId?: string }
+    } | undefined)?.session
     assert.ok(listedSessions?.some((session) => session.sessionId === result.session.sessionId))
     assert.equal(shownSession?.sessionId, result.session.sessionId)
 
     const journalRelativePath = (toolResults[2]?.result as {
-      json?: { journalPath?: string }
-    } | undefined)?.json?.journalPath
+      journalPath?: string
+    } | undefined)?.journalPath
     assert.equal(typeof journalRelativePath, 'string')
     const journalMarkdown = await readFile(
       path.isAbsolute(journalRelativePath as string)
@@ -2277,7 +2289,7 @@ test('sendAssistantMessage carries the provider-turn bound tool catalog into hos
 
     assert.equal(providerCall?.provider, 'openai-compatible')
     assert.equal('capabilityRegistry' in (providerCall?.toolRuntime ?? {}), false)
-    assert.equal(toolCatalog?.hasTool('murph.cli.run'), true)
+    assert.equal(toolCatalog?.hasTool('vault.cli.run'), true)
     assert.equal(toolCatalog?.hasTool('murph.device.connect'), true)
     assert.match(providerCall?.systemPrompt ?? '', /use `murph\.device\.connect` first/iu)
     assert.equal(result.response, 'hosted auto-reply')
@@ -2344,7 +2356,7 @@ test('sendAssistantMessage keeps murph.device.connect out of the prompt when the
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /For wiki work, use `vault-cli knowledge \.\.\.` directly in this turn rather than assuming a dedicated knowledge surface is callable/u,
+      /For wiki work, use `vault-cli knowledge \.\.\.` directly in this turn/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2352,7 +2364,7 @@ test('sendAssistantMessage keeps murph.device.connect out of the prompt when the
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /The assistant should actively keep the wiki up to date when later turns materially sharpen, extend, supersede, contradict, or meaningfully validate an existing page/u,
+      /Update an existing matching page instead of creating a near-duplicate/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2501,7 +2513,7 @@ test('sendAssistantMessage injects and persists a CLI surface bootstrap contract
   assert.equal(call?.continuityContext, null)
   assert.match(
     call?.systemPrompt ?? '',
-    /This assistant runtime is for Murph vault and assistant operations/u,
+    /Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route\./u,
   )
 
   const snapshot = await readAssistantStateRecord(
@@ -3719,12 +3731,8 @@ test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missi
     ...resolved.session,
     provider: 'openai-compatible',
     providerOptions: {
+      ...resolved.session.providerOptions,
       model: 'gpt-5',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
       providerName: 'openai',
@@ -3733,12 +3741,8 @@ test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missi
       provider: 'openai-compatible',
       providerSessionId: 'resp_legacy',
       providerOptions: {
+        ...resolved.session.providerOptions,
         model: 'gpt-5',
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
         baseUrl: 'https://api.openai.com/v1',
         apiKeyEnv: 'OPENAI_API_KEY',
         providerName: 'openai',
@@ -3797,12 +3801,8 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session when route
     ...resolved.session,
     provider: 'openai-compatible',
     providerOptions: {
+      ...resolved.session.providerOptions,
       model: 'gpt-5',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
     },
@@ -3810,12 +3810,8 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session when route
       provider: 'openai-compatible',
       providerSessionId: 'resp_old_route',
       providerOptions: {
+        ...resolved.session.providerOptions,
         model: 'gpt-5',
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
         baseUrl: 'https://api.openai.com/v1',
         apiKeyEnv: 'OPENAI_API_KEY',
       },
@@ -3866,6 +3862,7 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
   await mkdir(vaultRoot, { recursive: true })
 
   const providerOptions = {
+    continuityFingerprint: 'fingerprint-cli-service-openai',
     model: 'gpt-5',
     reasoningEffort: null,
     sandbox: null,
@@ -3874,7 +3871,9 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
     oss: false,
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    executionDriver: 'openai-compatible',
     providerName: 'openai',
+    resumeKind: null,
   } as const
   const failoverRoutes = [
     {
@@ -3977,6 +3976,11 @@ test('sendAssistantMessage preserves audited protected deletes', async () => {
     vaultRoot,
     operationType: 'assistant_guard_delete_seed',
     summary: 'Seed protected delete target',
+    audit: {
+      action: 'show',
+      commandName: 'test.assistantGuardDeleteSeed',
+      summary: 'Seeded protected delete target.',
+    },
     textWrites: [
       {
         relativePath: targetRelativePath,
@@ -3990,6 +3994,11 @@ test('sendAssistantMessage preserves audited protected deletes', async () => {
       vaultRoot,
       operationType: 'assistant_guard_delete_test',
       summary: 'Delete protected bank file',
+      audit: {
+        action: 'show',
+        commandName: 'test.assistantGuardDelete',
+        summary: 'Deleted protected bank file in assistant-service test.',
+      },
       deletes: [
         {
           relativePath: targetRelativePath,

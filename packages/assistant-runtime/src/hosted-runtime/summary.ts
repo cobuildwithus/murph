@@ -16,6 +16,8 @@ export function summarizeDispatch(
   switch (dispatch.event.kind) {
     case "member.activated":
       return `Processed member activation (${formatHostedBootstrapResult(metrics.bootstrapResult)}) and ran the hosted maintenance loop.${suffix}`;
+    case "member.channels.updated":
+      return `Processed member channel sync and ran the hosted maintenance loop.${suffix}`;
     case "linq.message.received":
       return `Persisted Linq capture and ran the hosted maintenance loop.${suffix}`;
     case "telegram.message.received":
@@ -54,6 +56,9 @@ function formatHostedBootstrapResult(result: HostedBootstrapResult | null): stri
     result.emailAutoReplyEnabled
       ? "hosted email auto-reply ready"
       : "hosted email auto-reply unavailable",
+    result.linqAutoReplyEnabled
+      ? "hosted Linq auto-reply ready"
+      : "hosted Linq auto-reply unavailable",
     result.telegramAutoReplyEnabled
       ? "hosted Telegram auto-reply ready"
       : "hosted Telegram auto-reply unavailable",

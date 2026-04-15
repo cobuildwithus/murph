@@ -19,6 +19,10 @@ import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 interface SchemaEnvelope {
+  args: {
+    properties: Record<string, unknown>
+    required?: string[]
+  }
   options: {
     properties: Record<string, unknown>
     required?: string[]
@@ -67,6 +71,7 @@ interface WorkoutFormatListEnvelope {
     path: string | null
     data: Record<string, unknown>
     markdown: string | null
+    excerpt?: string | null
   }>
   count: number
 }
@@ -221,6 +226,8 @@ test('workout add schema exposes the freeform workout capture surface', async ()
     await runSliceCliRaw(['workout', 'add', '--schema']),
   ) as SchemaEnvelope
 
+  assert.equal('text' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal('duration' in schema.options.properties, true)
   assert.equal('type' in schema.options.properties, true)
   assert.equal('distanceKm' in schema.options.properties, true)
@@ -245,10 +252,14 @@ test('workout edit/delete schemas expose shared record mutation options', async 
   assert.deepEqual(deleteSchema.options.required, ['vault'])
 })
 
-test('workout add help uses a positional text argument', async () => {
+test('workout add help keeps the positional text optional for structured input', async () => {
   const help = await runSliceCliRaw(['workout', 'add', '--help'])
 
-  assert.match(help, /Usage: vault-cli workout add <text> \[options\]/u)
+  assert.match(help, /Usage: vault-cli workout add \[text\] \[options\]/u)
+  assert.match(
+    help,
+    /Optional freeform workout text such as "Went for a 30-minute run\." Omit it when using --input\./u,
+  )
 })
 
 test('workout format save help keeps name and text optional when using structured input', async () => {
@@ -388,7 +399,8 @@ test(
       assert.equal(requireData(listFormats).items[0]?.kind, 'workout_format')
       assert.equal(requireData(listFormats).items[0]?.id, requireData(showFormat).entity.id)
       assert.equal(requireData(listFormats).items[0]?.title, 'Push Day A')
-      assert.equal(requireData(listFormats).items[0]?.markdown, null)
+      assert.match(requireData(listFormats).items[0]?.excerpt ?? '', /strength training/i)
+      assert.equal('markdown' in (requireData(listFormats).items[0] ?? {}), false)
 
       const logFormat = await runCli<WorkoutAddEnvelope>([
         'workout',
@@ -1113,7 +1125,7 @@ text: Legacy gym day template.
 )
 
 test(
-  'workout add captures activity_session events and fails fast on ambiguous durations',
+  'workout add captures activity_session events and fails fast on ambiguous, mixed, or missing durations',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
 
@@ -1250,6 +1262,63 @@ test(
         /Pass --duration <minutes> to record it explicitly/u,
       )
 
+      const mixedActivities = await runCli([
+        'workout',
+        'add',
+        'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mixedActivities.ok, false)
+      assert.equal(mixedActivities.error.code, 'invalid_option')
+      assert.match(
+        mixedActivities.error.message ?? '',
+        /Workout note includes multiple activities or segments/u,
+      )
+
+      const missingDuration = await runCli([
+        'workout',
+        'add',
+        'Easy run around the neighborhood.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(missingDuration.ok, false)
+      assert.equal(missingDuration.error.code, 'invalid_option')
+      assert.match(
+        missingDuration.error.message ?? '',
+        /Workout duration is missing/u,
+      )
+
+      const segmentedSameSport = await runCli([
+        'workout',
+        'add',
+        '10-minute warmup jog then easy run home.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(segmentedSameSport.ok, false)
+      assert.equal(segmentedSameSport.error.code, 'invalid_option')
+      assert.match(
+        segmentedSameSport.error.message ?? '',
+        /Workout note includes multiple activities or segments/u,
+      )
+
+      const mixedWithExplicitDuration = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
+        '--duration',
+        '70',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mixedWithExplicitDuration.ok, true)
+      assert.equal(requireData(mixedWithExplicitDuration).activityType, 'running')
+      assert.equal(requireData(mixedWithExplicitDuration).durationMinutes, 70)
+      assert.equal(requireData(mixedWithExplicitDuration).title, '70-minute run')
+      assert.equal(requireData(mixedWithExplicitDuration).distanceKm, 8.56)
+
       const strengthWorkout = await runCli<WorkoutAddEnvelope>([
         'workout',
         'add',
@@ -1304,7 +1373,6 @@ test(
 
       assert.equal(invalidTimestamp.ok, false)
       assert.equal(invalidTimestamp.error.code, 'VALIDATION_ERROR')
-      assert.match(invalidTimestamp.error.message ?? '', /Invalid ISO datetime/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

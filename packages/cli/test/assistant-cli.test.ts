@@ -19,7 +19,7 @@ import {
 } from '@murphai/operator-config/operator-config'
 import {
   createProviderTurnAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-provider'
+} from '@murphai/assistant-engine/assistant-cli-tools'
 import {
   assistantMemoryTurnEnvKeys,
 } from '@murphai/assistant-engine/assistant/memory'
@@ -156,16 +156,16 @@ test('formatAssistantRunEventForTerminal shows safe command labels by default', 
 test('formatAssistantRunEventForTerminal shows safe tool labels by default', () => {
   const event: AssistantRunEvent = {
     captureId: 'cap_safe_123',
-    details: 'Tool murph.cli.run',
+    details: 'Tool vault.cli.run',
     providerKind: 'tool',
     providerState: 'completed',
-    safeDetails: 'finished murph.cli.run',
+    safeDetails: 'finished vault.cli.run',
     type: 'capture.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
-  assert.equal(message, 'reply-progress cap_safe_123: finished murph.cli.run')
+  assert.equal(message, 'reply-progress cap_safe_123: finished vault.cli.run')
 })
 
 test('formatAssistantRunEventForTerminal keeps safe auto-reply heartbeat details visible by default', () => {
@@ -308,7 +308,7 @@ test.sequential(
     const statePaths = resolveAssistantStatePaths(vaultRoot)
 
     const listed = requireData(
-      await runCli<{
+      await runIsolatedCli<{
         stateRoot: string
         sessions: Array<{
           sessionId: string
@@ -326,7 +326,7 @@ test.sequential(
     )
 
     const shown = requireData(
-      await runCli<{
+      await runIsolatedCli<{
         session: {
           sessionId: string
           binding: {
@@ -376,7 +376,7 @@ test.sequential(
       )
 
       const listed = requireData(
-        await runCli<{
+        await runIsolatedCli<{
           stateRoot: string
           vault: string
         }>(['assistant', 'session', 'list', '--vault', vaultRoot]),
@@ -385,7 +385,7 @@ test.sequential(
       assert.equal(listed.stateRoot, expectedStateRoot)
 
       const shown = requireData(
-        await runCli<{
+        await runIsolatedCli<{
           stateRoot: string
           vault: string
           session: {
@@ -405,7 +405,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant commands use the saved default vault when --vault is omitted and still allow explicit overrides',
+  'raw vault-cli assistant commands use the saved default vault when --vault is omitted and still allow explicit overrides',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-default-vault-'))
     const homeRoot = path.join(parent, 'home')
@@ -586,7 +586,7 @@ test.sequential(
 )
 
 test.sequential(
-  'provider-turn murph.cli.run falls back to the workspace CLI when vault-cli is unavailable on PATH',
+  'provider-turn vault.cli.run falls back to the workspace CLI when vault-cli is unavailable on PATH',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-provider-turn-cli-fallback-'))
     const vaultRoot = path.join(parent, 'vault')
@@ -607,7 +607,7 @@ test.sequential(
       mode: 'apply',
       calls: [
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['--version'],
           },
@@ -617,13 +617,10 @@ test.sequential(
 
     assert.equal(result?.status, 'succeeded')
     const payload = result?.result as {
-      argv?: string[]
-      exitCode?: number
-      stdout?: string
-    }
-    assert.deepEqual(payload?.argv?.slice(0, 1), ['vault-cli'])
-    assert.equal(payload?.exitCode, 0)
-    assert.ok(String(payload?.stdout ?? '').trim().length > 0)
+      value?: string
+    } | undefined
+    assert.equal(typeof payload?.value, 'string')
+    assert.ok(String(payload?.value ?? '').trim().length > 0)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )
@@ -747,12 +744,21 @@ test('default-vault injection skips incomplete command groups', () => {
     applyDefaultVaultToArgs(['assistant', 'self-target', 'list'], '/tmp/default-vault'),
     ['assistant', 'self-target', 'list'],
   )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(
+      ['route', 'estimate', '123 Example St, Melbourne VIC', 'St Kilda Beach'],
+      '/tmp/default-vault',
+    ),
+    ['route', 'estimate', '123 Example St, Melbourne VIC', 'St Kilda Beach'],
+  )
 })
 
-test('manifest marks query as vault-backed and model as exempt', () => {
+test('manifest marks query as vault-backed while model and route are exempt', () => {
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('query'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('model'), true)
+  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('route'), true)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('model'), false)
+  assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('route'), false)
 })
 
 test('applyDefaultVaultToArgs keeps model outside default-vault injection', () => {
@@ -876,8 +882,10 @@ test('model --show summarizes a saved OpenAI-compatible backend without an endpo
         endpoint: null,
         headers: null,
         model: 'gpt-4.1-mini',
+        presetId: null,
         providerName: 'openai',
         reasoningEffort: null,
+        webSearch: null,
       },
       account: null,
     },
@@ -1033,8 +1041,10 @@ test('interactive bare model clears stale saved model and provider metadata when
         endpoint: 'https://openrouter.ai/api/v1',
         headers: null,
         model: 'openai/gpt-4.1-mini',
+        presetId: null,
         providerName: 'OpenRouter',
         reasoningEffort: 'high',
+        webSearch: null,
       },
       account: null,
     },
@@ -1098,6 +1108,7 @@ test('interactive bare model clears stale saved model and provider metadata when
       whisperModel: 'base.en',
       assistantPreset: 'openai-compatible',
       assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+      assistantProviderPreset: undefined,
     },
     preset: 'openai-compatible',
   })
@@ -1115,8 +1126,10 @@ test('model reuses existing backend defaults when only the model changes', async
         endpoint: 'http://127.0.0.1:11434/v1',
         headers: null,
         model: 'llama3.2:latest',
+        presetId: null,
         providerName: 'ollama',
         reasoningEffort: 'high',
+        webSearch: null,
       },
       account: null,
     },
@@ -1183,6 +1196,7 @@ test('model reuses existing backend defaults when only the model changes', async
       assistantBaseUrl: 'http://127.0.0.1:11434/v1',
       assistantApiKeyEnv: 'OLLAMA_API_KEY',
       assistantProviderName: 'ollama',
+      assistantProviderPreset: undefined,
     },
     preset: 'openai-compatible',
   })
@@ -1192,8 +1206,10 @@ test('model reuses existing backend defaults when only the model changes', async
     endpoint: 'http://127.0.0.1:11434/v1',
     headers: null,
     model: 'gpt-oss:20b',
+    presetId: null,
     providerName: 'ollama',
     reasoningEffort: null,
+    webSearch: null,
   })
   assert.deepEqual(result.envelope.data?.notes, [
     'Export OLLAMA_API_KEY before using the saved OpenAI-compatible assistant backend.',
@@ -1221,8 +1237,10 @@ test('changing presets does not leak saved defaults from a different backend ada
         endpoint: 'https://openrouter.ai/api/v1',
         headers: null,
         model: 'openai/gpt-4.1-mini',
+        presetId: null,
         providerName: 'OpenRouter',
         reasoningEffort: 'high',
+        webSearch: null,
       },
       account: null,
     },
@@ -1282,6 +1300,68 @@ test('changing presets does not leak saved defaults from a different backend ada
       whisperModel: 'base.en',
       assistantPreset: 'codex',
       assistantModel: 'gpt-5.4',
+    },
+    preset: 'codex',
+  })
+})
+
+test('model treats an explicit false OSS flag as a codex option when inferring the preset', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-oss-false-'))
+  cleanupPaths.push(homeRoot)
+
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'codex-cli',
+      model: options.assistantModel ?? null,
+      baseUrl: options.assistantBaseUrl ?? null,
+      apiKeyEnv: options.assistantApiKeyEnv ?? null,
+      providerName: options.assistantProviderName ?? null,
+      codexCommand: options.assistantCodexCommand ?? null,
+      profile: options.assistantProfile ?? null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: options.assistantOss ?? false,
+      account: null,
+      detail: 'saved codex backend',
+    }),
+  )
+  const assistantSetup: SetupAssistantResolver = {
+    resolve: resolveAssistant,
+  }
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson(cli, [
+    'model',
+    '--model',
+    'gpt-5.4',
+    '--no-oss',
+  ])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(resolveAssistant.mock.calls.length, 1)
+  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
+    allowPrompt: false,
+    commandName: 'model',
+    options: {
+      vault: './vault',
+      strict: true,
+      whisperModel: 'base.en',
+      assistantPreset: 'codex',
+      assistantModel: 'gpt-5.4',
+      assistantOss: false,
     },
     preset: 'codex',
   })
@@ -1378,7 +1458,6 @@ test('root chat prints only a resume hint after a human TTY session exits', asyn
     [
       {
         vault: '/tmp/mock-vault',
-        includeFirstTurnCheckIn: true,
         initialPrompt: undefined,
         sessionId: undefined,
         alias: undefined,
@@ -1475,7 +1554,7 @@ function createMockChatResult(sessionId: string) {
     stoppedAt: '2026-03-17T23:21:22.167Z',
     turns: 0,
     session: {
-      schema: 'murph.assistant-session.v4' as const,
+      schema: 'murph.assistant-session.v1' as const,
       sessionId,
       target: {
         adapter: 'codex-cli' as const,
@@ -1632,5 +1711,36 @@ async function runSourceCli<TData = Record<string, unknown>>(
       ...process.env,
       ...options?.env,
     }),
+  })
+}
+
+async function runIsolatedCli<TData = Record<string, unknown>>(
+  args: string[],
+  options?: {
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<{
+  ok: true
+  data: TData
+  meta: {
+    command: string
+    duration: string
+  }
+} | {
+  ok: false
+  error: {
+    code?: string
+    message?: string
+  }
+  meta: {
+    command: string
+    duration: string
+  }
+}> {
+  return runCli(args, {
+    env: {
+      ...options?.env,
+      MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+    },
   })
 }

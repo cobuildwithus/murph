@@ -3,6 +3,7 @@ export {
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantCapabilityRegistry,
   createInboxRoutingAssistantToolCatalog,
+  createNotificationTurnAssistantToolCatalog,
   createProviderTurnAssistantCapabilityRegistry,
   createProviderTurnAssistantCapabilityRuntime,
   createProviderTurnAssistantToolCatalog,

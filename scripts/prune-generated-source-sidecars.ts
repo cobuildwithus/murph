@@ -7,6 +7,11 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = ["packages", "apps", "e2e"] as const;
+export const generatedArtifactDirectories = [
+  "apps/cloudflare/.deploy/.deploy",
+  "apps/cloudflare/.deploy/dry-run",
+  "apps/cloudflare/.deploy/smoke-dist",
+] as const;
 const sourceExtensions = [".ts", ".tsx", ".mts", ".cts"] as const;
 const sourceSidecarSuffixes = [
   ".d.ts.map",
@@ -42,12 +47,13 @@ export async function main(): Promise<void> {
 }
 
 export async function pruneGeneratedSourceSidecars(): Promise<string[]> {
+  const prunedGeneratedArtifactPaths = await pruneKnownGeneratedArtifactDirectories();
   const [trackedFiles, untrackedFiles] = await Promise.all([
     listGitFiles(["ls-files", "--", ...scanRoots]),
     listGitFiles(["ls-files", "--others", "--exclude-standard", "--", ...scanRoots]),
   ]);
   const trackedSourceFiles = new Set(trackedFiles);
-  const prunedFiles: string[] = [];
+  const prunedFiles = [...prunedGeneratedArtifactPaths];
 
   for (const filePath of untrackedFiles) {
     if (getGeneratedSourceSidecarSourcePath(filePath, trackedSourceFiles) === null) {
@@ -59,6 +65,18 @@ export async function pruneGeneratedSourceSidecars(): Promise<string[]> {
   }
 
   return prunedFiles.sort();
+}
+
+async function pruneKnownGeneratedArtifactDirectories(): Promise<string[]> {
+  const prunedPaths: string[] = [];
+
+  for (const relativePath of generatedArtifactDirectories) {
+    const absolutePath = path.join(repoRoot, relativePath);
+    await rm(absolutePath, { force: true, recursive: true });
+    prunedPaths.push(relativePath);
+  }
+
+  return prunedPaths;
 }
 
 export function getGeneratedSourceSidecarSourcePath(

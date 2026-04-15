@@ -28,6 +28,7 @@ function createAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAc
     id: "acct-shared-oauth-1",
     provider: "demo",
     externalAccountId: "demo-user-1",
+    disconnectGeneration: 0,
     displayName: "Demo User",
     status: "active",
     scopes: ["offline"],
@@ -51,12 +52,10 @@ function createAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAc
 
 test("shared oauth helpers normalize response parsing, retry metadata, scopes, and expiry helpers", async () => {
   assert.equal(await parseResponseBody(new Response("ok")), "ok");
+  const unreadableResponse = new Response("ok");
+  vi.spyOn(unreadableResponse, "text").mockRejectedValue(new Error("boom"));
   assert.equal(
-    await parseResponseBody({
-      async text() {
-        throw new Error("boom");
-      },
-    } as Response),
+    await parseResponseBody(unreadableResponse),
     "",
   );
 
@@ -420,11 +419,15 @@ test("shared oauth refreshing sessions reuse refreshed credentials and rethrow n
         });
       },
     },
-    requestJsonWithAccessToken: async (accessToken, path) => {
+    requestJsonWithAccessToken: async <T>(
+      accessToken: string,
+      path: string,
+      _options: { optional?: boolean },
+    ) => {
       requestedTokens.push(`${accessToken}:${path}`);
       return {
         ok: true,
-      };
+      } as T;
     },
     shouldRefresh() {
       return requestedTokens.length === 0;

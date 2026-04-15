@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
+const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";
+
 type MutableSignal = {
   id: number;
   userId: string;
@@ -255,6 +257,15 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
     const { store, traces } = createWebhookTraceStore([
       {
         provider: "oura",
+        traceId: "trace-prunable",
+        providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-prunable"),
+        eventType: "sleep.updated",
+        status: "processed",
+        processingExpiresAt: null,
+        receivedAt: new Date("2025-01-01T00:00:00.000Z"),
+      },
+      {
+        provider: "oura",
         traceId: "trace-processed",
         providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processed"),
         eventType: "sleep.updated",
@@ -331,6 +342,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
       processingExpiresAt: null,
     });
     expect(traces.get("oura:trace-expired")).toBeUndefined();
+    expect(traces.get("oura:trace-prunable")).toBeUndefined();
     expect(traces.get("oura:trace-processing")).toMatchObject({
       status: "processing",
       providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processing"),
@@ -356,7 +368,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
 
     expect(traces.get("oura:trace-raced")).toMatchObject({
       status: "processing",
-      providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-raced"),
+      providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
     });
   });
 });
@@ -446,6 +458,14 @@ function matchesWebhookTraceWhere(trace: MutableWebhookTrace, where: Record<stri
   }
 
   if (typeof where.status === "string" && trace.status !== where.status) {
+    return false;
+  }
+
+  if (
+    isRecord(where.receivedAt)
+    && where.receivedAt.lt instanceof Date
+    && trace.receivedAt.getTime() >= where.receivedAt.lt.getTime()
+  ) {
     return false;
   }
 

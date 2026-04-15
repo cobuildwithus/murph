@@ -13,7 +13,7 @@ function createSession(
   overrides: Partial<AssistantSession> = {},
 ): AssistantSession {
   return {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'asst_demo',
     target: {
       adapter: 'openai-compatible',
@@ -21,12 +21,15 @@ function createSession(
       endpoint: 'http://127.0.0.1:11434/v1',
       headers: null,
       model: null,
+      presetId: null,
       providerName: 'ollama',
       reasoningEffort: null,
+      webSearch: null,
     },
     resumeState: null,
     provider: 'openai-compatible',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-chat-controller',
       model: null,
       reasoningEffort: null,
       sandbox: null,
@@ -35,8 +38,10 @@ function createSession(
       oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKeyEnv: 'OLLAMA_API_KEY',
+      executionDriver: 'openai-compatible',
       providerName: 'ollama',
       headers: null,
+      resumeKind: null,
     },
     alias: 'chat:demo',
     binding: {

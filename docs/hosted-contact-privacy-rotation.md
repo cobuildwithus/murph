@@ -1,25 +1,25 @@
 # Hosted Contact-Privacy Rotation
 
-Last verified: 2026-04-07
+Last verified: 2026-04-09
 
 ## Goal
 
-Hosted blind indexes must be rotatable before production without widening raw-identifier storage in Postgres or freezing one HMAC key forever.
+Hosted blind indexes keep a future rotation seam without widening raw-identifier storage in Postgres or carrying prelaunch cutover tooling in the current launch posture.
 
-## Long-Term Model
+## Current Model
 
 - `apps/web` owns the authoritative encrypted raw values for lookup-backed hosted-member identifiers.
 - Postgres stores one canonical blind lookup key per field, not parallel `current` and `previous` columns.
 - Contact-privacy writes always use one `current` key version.
 - Contact-privacy reads derive candidates for every configured version in `HOSTED_CONTACT_PRIVACY_KEYS`, ordered with `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION` first.
-- Rotation is an in-place backfill of canonical lookup-key columns, not a permanent dual-write architecture.
+- The current repo intentionally does not ship an active backfill script or cutover runbook for prelaunch rotation.
 
 This keeps the steady state simple:
 
 - one encrypted owner-table source of truth
 - one canonical lookup key in Postgres
 - one current write version
-- a temporary multi-version read window only during rotation
+- one multi-version read seam available when future rotation work is actually needed
 
 ## Required Envs
 
@@ -28,9 +28,9 @@ This keeps the steady state simple:
 - `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION`
   Required when the keyring contains more than one version
 
-## Backfill Scope
+## Future Rotation Coverage
 
-The rotation backfill rewrites the canonical lookup-key columns that can be re-derived from encrypted owner-table values:
+The encrypted owner-table fields already preserve the raw values needed to re-derive these canonical lookup-key columns in a future rotation-specific migration:
 
 - `HostedMemberIdentity.phoneLookupKey`
 - `HostedMemberIdentity.privyUserLookupKey`
@@ -40,20 +40,8 @@ The rotation backfill rewrites the canonical lookup-key columns that can be re-d
 - `HostedMemberBillingRef.stripeCustomerLookupKey`
 - `HostedMemberBillingRef.stripeSubscriptionLookupKey`
 
-The same pass also fills any missing encrypted owner-table source fields now required for future re-derivation, such as the canonical encrypted hosted phone number and Telegram user id.
+## Current Guidance
 
-## Cutover Playbook
-
-1. Add the new versioned key to `HOSTED_CONTACT_PRIVACY_KEYS` and set `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION` to the new version.
-2. Pause hosted onboarding/webhook traffic or otherwise hold the system in a state where new lookup-bearing events are not being generated.
-3. Drain lookup-bearing hosted execution outbox rows for `member.activated` and `linq.message.received`.
-4. Run `pnpm --dir apps/web contact-privacy:backfill` first and inspect the dry-run JSON.
-5. Resolve any blockers. A blocker means a stored lookup key exists but the encrypted owner-table raw value needed to re-derive it is missing.
-6. Run `pnpm --dir apps/web contact-privacy:backfill --write`.
-7. Re-run the dry-run and confirm it reports zero pending rewrites and zero blockers.
-8. Resume hosted traffic.
-9. After the old version has been fully backfilled and no runtime still depends on it, remove the old version from `HOSTED_CONTACT_PRIVACY_KEYS`.
-
-## Why Queue Drain Is Required
-
-`member.activated` and `linq.message.received` use reference-only hosted execution payload storage. During the dual-read window, database lookups can tolerate old keys, but queued staged payload refs may still point at older lookup identities. Draining those events before write-mode backfill keeps the rotation story deterministic and avoids a second payload-rewrite system.
+- Treat `HOSTED_CONTACT_PRIVACY_KEYS` plus `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION` as the durable seam that preserves future rotation options.
+- Do not add parallel lookup columns, permanent dual-write logic, or deploy-history backfill commands just to keep the option open.
+- If a real deployed rotation is needed later, design a targeted procedure against the then-current runtime behavior, queue semantics, and stored data shape instead of reviving the removed prelaunch campaign tooling unchanged.

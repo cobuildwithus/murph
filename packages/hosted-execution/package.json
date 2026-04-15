@@ -1,6 +1,6 @@
 {
   "name": "@murphai/hosted-execution",
-  "version": "0.1.18",
+  "version": "0.2.13",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",
@@ -30,6 +30,14 @@
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
     },
+    "./bundles": {
+      "types": "./dist/bundles.d.ts",
+      "default": "./dist/bundles.js"
+    },
+    "./dispatch-ref": {
+      "types": "./dist/dispatch-ref.d.ts",
+      "default": "./dist/dispatch-ref.js"
+    },
     "./env": {
       "types": "./dist/env.d.ts",
       "default": "./dist/env.js"
@@ -38,6 +46,10 @@
       "types": "./dist/hosted-email.d.ts",
       "default": "./dist/hosted-email.js"
     },
+    "./outbox-payload": {
+      "types": "./dist/outbox-payload.d.ts",
+      "default": "./dist/outbox-payload.js"
+    },
     "./parsers": {
       "types": "./dist/parsers.d.ts",
       "default": "./dist/parsers.js"
@@ -45,6 +57,10 @@
     "./routes": {
       "types": "./dist/routes.d.ts",
       "default": "./dist/routes.js"
+    },
+    "./side-effects": {
+      "types": "./dist/side-effects.d.ts",
+      "default": "./dist/side-effects.js"
     }
   },
   "files": [
@@ -53,17 +69,18 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   },
   "dependencies": {
     "@murphai/core": "workspace:*",
     "@murphai/contracts": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

@@ -1,6 +1,9 @@
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
+
 export interface HostedExecutionWebJsonRequest<TResponse> {
   allowNotFound?: boolean;
   body?: string;
+  boundUserId?: string;
   label: string;
   method: "DELETE" | "GET" | "POST" | "PUT";
   parse: (value: unknown) => TResponse;
@@ -30,6 +33,10 @@ export function createHostedExecutionWebJsonRequester(input: {
 
       const headers = new Headers();
       headers.set("authorization", await readHostedExecutionBearerAuthorization(input.getBearerToken));
+
+      if (request.boundUserId) {
+        headers.set(HOSTED_EXECUTION_USER_ID_HEADER, request.boundUserId);
+      }
 
       if (request.body !== undefined) {
         headers.set("content-type", "application/json; charset=utf-8");

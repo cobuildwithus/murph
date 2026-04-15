@@ -67,7 +67,7 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
   assert.equal(runtime.databasePath, resolveRuntimePaths(vaultRoot).inboxDbPath);
 
   const first = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "msg-1",
     accountId: "self",
     thread: {
@@ -93,7 +93,7 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
       },
     ],
     raw: {
-      localPath: "/Users/<REDACTED_USER>/Library/Messages/chat.db",
+      localPath: "/Users/<REDACTED_USER>/Documents/inbox-source/capture.sqlite",
       authorization: "Bearer <AUTH_SECRET>",
       cookie: "session=<COOKIE_SECRET>",
       stringifiedAuth: "Authorization: Bearer <AUTH_SECRET>",
@@ -102,7 +102,7 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
         "set-cookie": "session=<COOKIE_SECRET>; Path=/",
       },
       nested: {
-        attachmentPath: "/home/<REDACTED_USER>/Attachments/foo.jpg",
+        attachmentPath: "/home/<REDACTED_USER>/Downloads/foo.jpg",
         access_token: "<ACCESS_TOKEN>",
         refreshToken: "<REFRESH_TOKEN>",
         api_key: "<API_KEY>",
@@ -115,7 +115,7 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
   });
 
   const duplicate = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "msg-1",
     accountId: "self",
     thread: {
@@ -142,7 +142,7 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
   assert.match(capture.attachments[0]?.attachmentId ?? "", /^att_/u);
   assert.equal(capture.attachments[0]?.parseState, "pending");
   assert.equal(capture.attachments[0]?.originalPath, null);
-  assert.equal(capture.attachments[0]?.storedPath?.startsWith("raw/inbox/imessage/self/"), true);
+  assert.equal(capture.attachments[0]?.storedPath?.startsWith("raw/inbox/email/self/"), true);
   assert.equal(capture.raw.localPath, "<REDACTED_PATH>");
   assert.equal(capture.raw.authorization, "<REDACTED_SECRET>");
   assert.equal(capture.raw.cookie, "<REDACTED_SECRET>");
@@ -228,12 +228,58 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
     await readJsonlRecordsIfPresent(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
     [],
   );
+  const auditRecords = await readJsonlRecordsIfPresent(
+    vaultRoot,
+    `audit/${first.createdAt.slice(0, 4)}/${first.createdAt.slice(0, 7)}.jsonl`,
+  );
   assert.deepEqual(
-    await readJsonlRecordsIfPresent(
-      vaultRoot,
-      `audit/${first.createdAt.slice(0, 4)}/${first.createdAt.slice(0, 7)}.jsonl`,
-    ),
-    [],
+    auditRecords.filter(
+      (record) =>
+        typeof record === "object" &&
+        record !== null &&
+        "action" in record &&
+        record.action === "inbox_capture_persist",
+    ).map((record) => ({
+      action: typeof record === "object" && record !== null && "action" in record ? record.action : undefined,
+      actor: typeof record === "object" && record !== null && "actor" in record ? record.actor : undefined,
+      changes: typeof record === "object" && record !== null && "changes" in record ? record.changes : undefined,
+      commandName:
+        typeof record === "object" && record !== null && "commandName" in record ? record.commandName : undefined,
+      occurredAt:
+        typeof record === "object" && record !== null && "occurredAt" in record ? record.occurredAt : undefined,
+      schemaVersion:
+        typeof record === "object" && record !== null && "schemaVersion" in record ? record.schemaVersion : undefined,
+      status: typeof record === "object" && record !== null && "status" in record ? record.status : undefined,
+      summary: typeof record === "object" && record !== null && "summary" in record ? record.summary : undefined,
+      targetIds:
+        typeof record === "object" && record !== null && "targetIds" in record ? record.targetIds : undefined,
+    })),
+    [
+      {
+        action: "inbox_capture_persist",
+        actor: "core",
+        changes: [
+          {
+            op: "copy",
+            path: capture.attachments[0]?.storedPath,
+          },
+          {
+            op: "create",
+            path: capture.envelopePath,
+          },
+          {
+            op: "append",
+            path: "ledger/inbox-captures/2026/2026-03.jsonl",
+          },
+        ],
+        commandName: "inboxd.persistCanonicalInboxCapture",
+        occurredAt: first.createdAt,
+        schemaVersion: "murph.audit.v1",
+        status: "success",
+        summary: `Persisted inbox capture ${first.captureId}.`,
+        targetIds: [first.captureId, first.eventId],
+      },
+    ],
   );
 
   pipeline.close();
@@ -376,7 +422,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "toast-1",
     thread: {
       id: "chat-breakfast",
@@ -442,7 +488,7 @@ test("completed attachment parse jobs refresh capture search text and attachment
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "lab-1",
     thread: {
       id: "chat-lab",
@@ -503,7 +549,7 @@ test("capture mutation cursors advance for new captures, attachment parse update
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "cursor-1",
     thread: { id: "chat-cursor" },
     actor: { isSelf: false },
@@ -584,7 +630,7 @@ test("attachment parse job filters and requeue reset runtime-only parser state",
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const first = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "requeue-first",
     thread: {
       id: "chat-requeue",
@@ -605,7 +651,7 @@ test("attachment parse job filters and requeue reset runtime-only parser state",
     raw: {},
   });
   const second = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "requeue-second",
     thread: {
       id: "chat-requeue",
@@ -710,7 +756,7 @@ test("requeue can reset running attachment parse jobs back to pending", async ()
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "requeue-running",
     thread: {
       id: "chat-requeue-running",
@@ -771,7 +817,7 @@ test("requeue invalidates stale running claims before finalization", async () =>
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "email",
     externalId: "requeue-stale",
     thread: {
       id: "chat-requeue-stale",
@@ -853,8 +899,8 @@ test("runtime list and search filters stay scoped across both search branches", 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const selfCapture = await pipeline.processCapture({
-    source: "imessage",
-    externalId: "filter-imessage-self",
+    source: "email",
+    externalId: "filter-email-self",
     accountId: "self",
     thread: {
       id: "chat-filter",
@@ -868,8 +914,8 @@ test("runtime list and search filters stay scoped across both search branches", 
     raw: {},
   });
   await pipeline.processCapture({
-    source: "imessage",
-    externalId: "filter-imessage-other",
+    source: "email",
+    externalId: "filter-email-other",
     accountId: "other",
     thread: {
       id: "chat-filter",
@@ -883,8 +929,8 @@ test("runtime list and search filters stay scoped across both search branches", 
     raw: {},
   });
   await pipeline.processCapture({
-    source: "mail",
-    externalId: "filter-mail-self",
+    source: "telegram",
+    externalId: "filter-telegram-self",
     accountId: "self",
     thread: {
       id: "chat-filter",
@@ -900,7 +946,7 @@ test("runtime list and search filters stay scoped across both search branches", 
 
   assert.deepEqual(
     runtime.listCaptures({
-      source: "imessage",
+      source: "email",
       accountId: "self",
       limit: 10,
     }).map((capture) => capture.captureId),
@@ -909,7 +955,7 @@ test("runtime list and search filters stay scoped across both search branches", 
   assert.deepEqual(
     runtime.searchCaptures({
       text: "toast",
-      source: "imessage",
+      source: "email",
       accountId: "self",
       limit: 10,
     }).map((capture) => capture.captureId),
@@ -918,7 +964,7 @@ test("runtime list and search filters stay scoped across both search branches", 
   assert.deepEqual(
     runtime.searchCaptures({
       text: "   ",
-      source: "imessage",
+      source: "email",
       accountId: "self",
       limit: 10,
     }).map((capture) => capture.captureId),
@@ -961,7 +1007,7 @@ test("runtime decoding rejects malformed sqlite rows with clear column errors", 
     )
     .run(
       "cap-malformed",
-      "imessage",
+      "email",
       "",
       "malformed-1",
       "chat-malformed",
@@ -975,7 +1021,7 @@ test("runtime decoding rejects malformed sqlite rows with clear column errors", 
       "toast",
       "{}",
       "evt-malformed",
-      "raw/inbox/imessage/self/2026/03/13/cap-malformed.json",
+      "raw/inbox/email/self/2026/03/13/cap-malformed.json",
       "2026-03-13T10:00:00.000Z",
     );
 

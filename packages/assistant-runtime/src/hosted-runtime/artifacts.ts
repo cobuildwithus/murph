@@ -2,10 +2,16 @@ import type {
   HostedBundleArtifactRef,
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
+import {
+  materializeHostedExecutionArtifacts,
+} from "@murphai/runtime-state/node";
 
 import type {
   HostedRuntimeArtifactStore,
 } from "./platform.ts";
+import type {
+  HostedWorkspaceArtifactMaterializer,
+} from "./models.ts";
 
 export function createHostedArtifactResolver(input: {
   artifactStore: HostedRuntimeArtifactStore;
@@ -34,6 +40,33 @@ export function createHostedArtifactUploadSink(input: {
 
     await uploadHostedArtifact(input, artifact);
     uploadedHashes.add(artifact.ref.sha256);
+  };
+}
+
+export function createHostedArtifactMaterializer(input: {
+  artifactResolver: ReturnType<typeof createHostedArtifactResolver>;
+  bundle: Uint8Array;
+  materializedArtifactPaths: Set<string>;
+  workspaceRoot: string;
+}): HostedWorkspaceArtifactMaterializer {
+  return async (relativePaths) => {
+    const pendingPaths = [...new Set(relativePaths)]
+      .filter((relativePath) => !input.materializedArtifactPaths.has(relativePath));
+    if (pendingPaths.length === 0) {
+      return;
+    }
+
+    await materializeHostedExecutionArtifacts({
+      artifactResolver: input.artifactResolver,
+      bundle: input.bundle,
+      shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+        root === "vault" && pendingPaths.includes(artifactPath)
+      ),
+      workspaceRoot: input.workspaceRoot,
+    });
+    for (const relativePath of pendingPaths) {
+      input.materializedArtifactPaths.add(relativePath);
+    }
   };
 }
 

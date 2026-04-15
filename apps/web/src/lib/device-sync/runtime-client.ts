@@ -20,7 +20,9 @@ export interface HostedDeviceSyncRuntimeClient {
   ): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   getDeviceSyncRuntimeSnapshot(
     userId: string,
-    input?: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId">,
+    input?: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId"> & {
+      includeSecrets?: boolean;
+    },
   ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
 }
 
@@ -46,6 +48,7 @@ export function readHostedDeviceSyncRuntimeClientIfConfigured(): HostedDeviceSyn
 
       const response = await requester.requestJson({
         body: JSON.stringify(requestPayload),
+        boundUserId: userId,
         label: "device-sync runtime apply",
         method: "POST",
         parse: parseHostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -69,7 +72,12 @@ export function readHostedDeviceSyncRuntimeClientIfConfigured(): HostedDeviceSyn
         search.set("provider", input.provider);
       }
 
+      if (input.includeSecrets) {
+        search.set("includeSecrets", "true");
+      }
+
       const response = await requester.requestJson({
+        boundUserId: userId,
         label: "device-sync runtime snapshot",
         method: "GET",
         parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,

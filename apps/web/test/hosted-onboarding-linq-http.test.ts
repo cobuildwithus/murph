@@ -146,6 +146,20 @@ describe("sendHostedLinqChatMessage", () => {
       },
     });
   });
+
+  it("treats an empty success body as a successful send", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      message: "hello",
+    })).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("createHostedLinqChat", () => {

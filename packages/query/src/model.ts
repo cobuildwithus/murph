@@ -6,6 +6,7 @@ import {
   type CanonicalEntityFamily,
   type CanonicalRecordClass,
 } from "./canonical-entities.ts";
+import { ALL_QUERY_ENTITY_FAMILIES } from "./entity-families.ts";
 import { readVaultSourceTolerant, type QueryRecordData } from "./vault-source.ts";
 
 type VaultReadModelFamilyViews = {
@@ -103,30 +104,6 @@ interface RecordLikeFilterSource {
   tags: readonly string[];
 }
 
-export const ALL_QUERY_ENTITY_FAMILIES = [
-  "allergy",
-  "assessment",
-  "audit",
-  "condition",
-  "core",
-  "current_profile",
-  "event",
-  "experiment",
-  "family",
-  "food",
-  "genetics",
-  "goal",
-  "history",
-  "journal",
-  "profile_snapshot",
-  "protocol",
-  "provider",
-  "recipe",
-  "sample",
-  "workout_format",
-] as const satisfies readonly CanonicalEntityFamily[];
-
-
 // Convenience views stay derived from the authoritative canonical entity array.
 const VAULT_FAMILY_VIEW_SPECS = {
   coreDocument: { family: "core", mode: "single" },
@@ -136,13 +113,10 @@ const VAULT_FAMILY_VIEW_SPECS = {
   samples: { family: "sample", mode: "many" },
   audits: { family: "audit", mode: "many" },
   assessments: { family: "assessment", mode: "many" },
-  profileSnapshots: { family: "profile_snapshot", mode: "many" },
-  currentProfile: { family: "current_profile", mode: "single" },
   goals: { family: "goal", mode: "many" },
   conditions: { family: "condition", mode: "many" },
   allergies: { family: "allergy", mode: "many" },
   protocols: { family: "protocol", mode: "many" },
-  history: { family: "history", mode: "many" },
   familyMembers: { family: "family", mode: "many" },
   geneticVariants: { family: "genetics", mode: "many" },
   foods: { family: "food", mode: "many" },
@@ -333,13 +307,11 @@ export function getVaultEntities(vault: VaultReadModel): CanonicalEntity[] {
 }
 
 export function entityRelationTargetIds(
-  entity: Pick<CanonicalEntity, "links" | "relatedIds" | "lookupIds">,
+  entity: Pick<CanonicalEntity, "links" | "lookupIds">,
 ): string[] {
   return entity.links.length > 0
     ? linkTargetIds(entity.links)
-    : entity.relatedIds.length > 0
-      ? entity.relatedIds
-      : entity.lookupIds;
+    : entity.lookupIds;
 }
 
 export function lookupEntityById(

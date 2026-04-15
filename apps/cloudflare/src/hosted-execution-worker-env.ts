@@ -15,7 +15,6 @@ export interface HostedExecutionWorkerEnvironment {
   platformEnvelopeKeyBase64: string;
   platformEnvelopeKeyId: string;
   platformEnvelopeKeyringJson: string | null;
-  defaultAlarmDelayMs: number;
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerTimeoutMs: number;
@@ -64,11 +63,6 @@ export function readHostedExecutionWorkerEnvironment(
     ) ?? "v1",
     platformEnvelopeKeyringJson: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON,
-    ),
-    defaultAlarmDelayMs: parsePositiveInteger(
-      normalizeHostedExecutionString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),
-      15 * 60 * 1000,
-      "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS",
     ),
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),

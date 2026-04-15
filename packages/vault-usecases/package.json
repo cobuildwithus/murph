@@ -15,9 +15,17 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./vault-services": {
+      "types": "./dist/vault-services.d.ts",
+      "default": "./dist/vault-services.js"
+    },
     "./helpers": {
       "types": "./dist/helpers.d.ts",
       "default": "./dist/helpers.js"
+    },
+    "./assistant-vault-paths": {
+      "types": "./dist/assistant-vault-paths.d.ts",
+      "default": "./dist/assistant-vault-paths.js"
     },
     "./records": {
       "types": "./dist/records.d.ts",
@@ -26,10 +34,6 @@
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "default": "./dist/runtime.js"
-    },
-    "./testing": {
-      "types": "./dist/testing.d.ts",
-      "default": "./dist/testing.js"
     },
     "./workouts": {
       "types": "./dist/workouts.d.ts",
@@ -42,7 +46,9 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
-    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
@@ -54,6 +60,6 @@
     "zod": "^4.1.8"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   }
 }

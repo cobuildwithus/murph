@@ -486,21 +486,15 @@ async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<Prot
   const normalizedSlug = normalizeSelectorSlug(input.slug);
   const normalizedGroup = input.group ? normalizeGroupPath(input.group, "protocol") : undefined;
   const records = await loadProtocolItems(input.vaultRoot);
-  const match = records.find((record) => {
-    if (normalizedProtocolId && record.entity.protocolId === normalizedProtocolId) {
-      return true;
-    }
 
-    if (!normalizedSlug) {
-      return false;
+  if (normalizedSlug && !normalizedGroup && !normalizedProtocolId) {
+    const collisions = records.filter((record) => record.entity.slug === normalizedSlug);
+    if (collisions.length > 1) {
+      throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group.");
     }
+  }
 
-    if (record.entity.slug !== normalizedSlug) {
-      return false;
-    }
-
-    return normalizedGroup ? record.entity.group === normalizedGroup : true;
-  });
+  const match = selectProtocolRecord(records, normalizedProtocolId, normalizedSlug, normalizedGroup);
 
   if (!match) {
     throw new VaultError("VAULT_PROTOCOL_MISSING", "Protocol item was not found.");

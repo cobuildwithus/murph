@@ -10,7 +10,7 @@ import {
   readConfiguredOuraDeviceSyncProviderConfig,
 } from "../src/config.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
-import { createDeviceSyncEnv } from "./helpers.ts";
+import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
 
 test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
   assert.equal(computeRetryDelayMs(1), 15_000);
@@ -23,9 +23,10 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
     OURA_CLIENT_SECRET: "oura-client-secret",
     ...createDeviceSyncEnv(),
   });
+  const providers = requireValue(loaded.service.providers);
 
-  assert.equal(loaded.service.providers.length, 1);
-  assert.equal(loaded.service.providers[0]?.provider, "oura");
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0]?.provider, "oura");
   assert.equal(loaded.http.host, "127.0.0.1");
   assert.equal(loaded.http.controlToken, "control-token-for-tests");
 });
@@ -36,9 +37,10 @@ test("loadDeviceSyncEnvironment supports Garmin-only deployments", () => {
     GARMIN_CLIENT_SECRET: "garmin-client-secret",
     ...createDeviceSyncEnv(),
   });
+  const providers = requireValue(loaded.service.providers);
 
-  assert.equal(loaded.service.providers.length, 1);
-  assert.equal(loaded.service.providers[0]?.provider, "garmin");
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0]?.provider, "garmin");
 });
 
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
@@ -49,9 +51,10 @@ test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () =
     OURA_CLIENT_SECRET: "oura-client-secret",
     ...createDeviceSyncEnv(),
   });
+  const providers = requireValue(loaded.service.providers);
 
   assert.deepEqual(
-    loaded.service.providers.map((provider) => provider.provider),
+    providers.map((provider) => provider.provider),
     ["whoop", "oura"],
   );
 });
@@ -66,9 +69,10 @@ test("loadDeviceSyncEnvironment supports Garmin, WHOOP, and Oura together", () =
     OURA_CLIENT_SECRET: "oura-client-secret",
     ...createDeviceSyncEnv(),
   });
+  const providers = requireValue(loaded.service.providers);
 
   assert.deepEqual(
-    loaded.service.providers.map((provider) => provider.provider),
+    providers.map((provider) => provider.provider),
     ["garmin", "whoop", "oura"],
   );
 });
@@ -98,11 +102,48 @@ test("loadDeviceSyncEnvironment supports an explicit control token and public li
   assert.equal(loaded.http.publicPort, 9876);
 });
 
+test("loadDeviceSyncEnvironment rejects non-decimal and out-of-range listener ports", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_PORT: "1e3",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_PORT must be an integer/u,
+  );
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
+        DEVICE_SYNC_PUBLIC_PORT: "70000",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_PUBLIC_PORT must be an integer between 0 and 65535/u,
+  );
+});
+
 test("loadDeviceSyncEnvironment rejects non-loopback DEVICE_SYNC_HOST values", () => {
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
         DEVICE_SYNC_HOST: "0.0.0.0",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_HOST must be a loopback hostname or address/u,
+  );
+});
+
+test("loadDeviceSyncEnvironment rejects URL-bracket control listener hosts", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_HOST: "[::1]",
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
         ...createDeviceSyncEnv(),
@@ -132,6 +173,20 @@ test("loadDeviceSyncEnvironment rejects partial public listener configuration", 
         ...createDeviceSyncEnv(),
       }),
     /DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT together/u,
+  );
+});
+
+test("loadDeviceSyncEnvironment rejects URL-bracket public listener hosts", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_PUBLIC_HOST: "[::1]",
+        DEVICE_SYNC_PUBLIC_PORT: "9876",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_PUBLIC_HOST must be a hostname or address without URL bracket syntax/u,
   );
 });
 
@@ -221,6 +276,15 @@ test("readConfiguredOuraDeviceSyncProviderConfig rejects invalid integer overrid
       }),
     /OURA_BACKFILL_DAYS must be an integer/u,
   );
+  assert.throws(
+    () =>
+      readConfiguredOuraDeviceSyncProviderConfig({
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        OURA_BACKFILL_DAYS: "7days",
+      }),
+    /OURA_BACKFILL_DAYS must be an integer/u,
+  );
 });
 
 test("createConsoleDeviceSyncLogger forwards messages and defaults missing context to an empty object", () => {
@@ -232,11 +296,15 @@ test("createConsoleDeviceSyncLogger forwards messages and defaults missing conte
     },
   });
   const logger = createConsoleDeviceSyncLogger(new Console({ stdout: sink, stderr: sink }));
+  const debug = requireValue(logger.debug);
+  const info = requireValue(logger.info);
+  const warn = requireValue(logger.warn);
+  const error = requireValue(logger.error);
 
-  logger.debug("debug message");
-  logger.info("info message", { connected: true });
-  logger.warn("warn message");
-  logger.error("error message", { retryable: false });
+  debug("debug message");
+  info("info message", { connected: true });
+  warn("warn message");
+  error("error message", { retryable: false });
 
   const output = writes.join("");
   assert.match(output, /debug message \{\}/u);
@@ -252,7 +320,9 @@ test("loadDeviceSyncEnvironment wires Oura webhook timestamp tolerance into the 
     OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "1000",
     ...createDeviceSyncEnv(),
   });
-  const provider = loaded.service.providers.find((entry) => entry.provider === "oura");
+  const providers = requireValue(loaded.service.providers);
+  const provider = requireValue(providers.find((entry) => entry.provider === "oura"));
+  const verifyAndParseWebhook = requireValue(provider.verifyAndParseWebhook);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "delete",
@@ -269,7 +339,7 @@ test("loadDeviceSyncEnvironment wires Oura webhook timestamp tolerance into the 
     .digest("hex");
 
   await assert.rejects(
-    provider?.verifyAndParseWebhook?.({
+    verifyAndParseWebhook({
       headers: new Headers({
         "x-oura-signature": signature,
         "x-oura-timestamp": timestamp,

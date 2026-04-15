@@ -5,8 +5,8 @@ import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.
 import type { HostedExecutionCommittedResult } from "../src/execution-journal.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
-import { expectOpaqueStrings } from "./object-key-assertions";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
+import { expectOpaqueStrings } from "./object-key-assertions.js";
 
 function createQueueHarness(state: { storage: { sql: ReturnType<typeof createTestSqlStorage> } }) {
   const bucket = new MemoryEncryptedR2Bucket();
@@ -77,11 +77,14 @@ describe("RunnerQueueStore", () => {
     );
     expect(claimed.pendingDispatch?.eventId).toBe("evt_good");
 
-    const badEvent = await store.readEventState("evt_bad");
-    expect(badEvent.pending).toBe(false);
-    expect(badEvent.poisoned).toBe(true);
-    expect(badEvent.lastError).toBe("Hosted execution rejected an invalid request.");
-    expectOpaqueStrings([badEvent.lastError], ["evt_bad"]);
+    const badEvent = await store.readEventDispatchStatus("evt_bad");
+    expect(badEvent).toEqual({
+      eventId: "evt_bad",
+      lastError: "Hosted execution rejected an invalid request.",
+      state: "poisoned",
+      userId: "member_123",
+    });
+    expectOpaqueStrings(badEvent?.lastError ? [badEvent.lastError] : [], ["evt_bad"]);
   });
 
   it("classifies malformed pending rows as invalid requests", async () => {
@@ -178,6 +181,59 @@ describe("RunnerQueueStore", () => {
     }).toThrow(/runner_meta schema is unsupported; missing runtime_bootstrapped; forbidden activated/u);
   });
 
+  it("upgrades an existing runner_meta row by adding active-run lease columns in place", async () => {
+    const state = createState();
+    const sql = state.storage.sql!;
+    sql.exec("DROP TABLE runner_meta");
+    sql.exec(`
+      CREATE TABLE runner_meta (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        user_id TEXT NOT NULL,
+        runtime_bootstrapped INTEGER NOT NULL DEFAULT 0,
+        in_flight INTEGER NOT NULL DEFAULT 0,
+        last_error_at TEXT,
+        last_error_code TEXT,
+        last_run_at TEXT,
+        next_wake_at TEXT
+      )
+    `);
+    sql.exec(
+      `INSERT INTO runner_meta (
+        singleton,
+        user_id,
+        runtime_bootstrapped,
+        in_flight,
+        last_error_at,
+        last_error_code,
+        last_run_at,
+        next_wake_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      1,
+      "member_123",
+      1,
+      1,
+      "2026-03-29T10:00:00.000Z",
+      "runner_http_error",
+      "2026-03-29T10:05:00.000Z",
+      "2026-03-29T10:06:00.000Z",
+    );
+
+    const { store } = createQueueHarness(state);
+    const columns = sql.exec<{ name: string }>("PRAGMA table_info(runner_meta)").toArray()
+      .map((row) => row.name);
+    const record = await store.readState();
+
+    expect(columns).toContain("active_run_event_id");
+    expect(columns).toContain("active_run_id");
+    expect(columns).toContain("active_run_attempt");
+    expect(columns).toContain("active_run_started_at");
+    expect(record.userId).toBe("member_123");
+    expect(record.runtimeBootstrapped).toBe(true);
+    expect(record.inFlight).toBe(true);
+    expect(record.lastErrorCode).toBe("runner_http_error");
+    expect(record.lastRunAt).toBe("2026-03-29T10:05:00.000Z");
+  });
+
   it("persists only operator-safe queue metadata in Durable Object storage", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
@@ -225,7 +281,7 @@ describe("RunnerQueueStore", () => {
 
     const sql = state.storage.sql!;
     const originalExec = sql.exec.bind(sql);
-    sql.exec = ((query: string, ...bindings: unknown[]) => {
+    sql.exec = ((query: string, ...bindings: Array<ArrayBuffer | string | number | null>) => {
       if (query.includes("INSERT INTO pending_events")) {
         throw new Error("simulated enqueue failure");
       }
@@ -269,6 +325,9 @@ describe("RunnerQueueStore", () => {
 
     const storedPayload = await dispatchPayloadStore.writeStoredDispatch(dispatch);
     expect(storedPayload.storage).toBe("reference");
+    if (storedPayload.storage !== "reference") {
+      throw new Error("Expected device-sync wake payloads to use reference storage.");
+    }
     expect(bucket.objects.size).toBe(1);
 
     const result = await store.enqueueDispatch(dispatch, storedPayload.stagedPayloadId);
@@ -377,9 +436,17 @@ describe("RunnerQueueStore", () => {
     expect(result.record.lastError).toBe("Hosted execution authorization failed.");
     expect(result.record.lastErrorCode).toBe("authorization_error");
 
-    const eventState = await store.readEventState("evt_secret_retry");
-    expect(eventState.lastError).toBe("Hosted execution authorization failed.");
-    expectOpaqueStrings([eventState.lastError], ["secret-token", "ops@example.com"]);
+    const eventState = await store.readEventDispatchStatus("evt_secret_retry");
+    expect(eventState).toMatchObject({
+      eventId: "evt_secret_retry",
+      lastError: "Hosted execution authorization failed.",
+      state: "queued",
+      userId: "member_123",
+    });
+    expectOpaqueStrings(
+      eventState?.lastError ? [eventState.lastError] : [],
+      ["secret-token", "ops@example.com"],
+    );
   });
 
   it("keeps runtime exception summaries generic in persisted retry state", async () => {
@@ -435,9 +502,17 @@ describe("RunnerQueueStore", () => {
     expect(result.lastError).toBe("Hosted execution configuration is invalid.");
     expect(result.lastErrorCode).toBe("configuration_error");
 
-    const eventState = await store.readEventState("evt_secret_config");
-    expect(eventState.lastError).toBe("Hosted execution configuration is invalid.");
-    expectOpaqueStrings([eventState.lastError], ["sk-live-secret"]);
+    const eventState = await store.readEventDispatchStatus("evt_secret_config");
+    expect(eventState).toMatchObject({
+      eventId: "evt_secret_config",
+      lastError: "Hosted execution configuration is invalid.",
+      state: "queued",
+      userId: "member_123",
+    });
+    expectOpaqueStrings(
+      eventState?.lastError ? [eventState.lastError] : [],
+      ["sk-live-secret"],
+    );
   });
 
   it("stores sanitized finalize-retry summaries for committed results", async () => {
@@ -455,6 +530,7 @@ describe("RunnerQueueStore", () => {
     });
 
     const committed: HostedExecutionCommittedResult = {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-29T10:00:00.000Z",
       eventId: "evt_secret_finalize",
@@ -464,7 +540,6 @@ describe("RunnerQueueStore", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "member_123",
     };
 
@@ -478,9 +553,17 @@ describe("RunnerQueueStore", () => {
     expect(result.lastError).toBe("Hosted execution authorization failed.");
     expect(result.lastErrorCode).toBe("authorization_error");
 
-    const eventState = await store.readEventState("evt_secret_finalize");
-    expect(eventState.lastError).toBe("Hosted execution authorization failed.");
-    expectOpaqueStrings([eventState.lastError], ["secret-token", "ops@example.com"]);
+    const eventState = await store.readEventDispatchStatus("evt_secret_finalize");
+    expect(eventState).toMatchObject({
+      eventId: "evt_secret_finalize",
+      lastError: "Hosted execution authorization failed.",
+      state: "queued",
+      userId: "member_123",
+    });
+    expectOpaqueStrings(
+      eventState?.lastError ? [eventState.lastError] : [],
+      ["secret-token", "ops@example.com"],
+    );
   });
 
   it("clears stale last-error text when committed bundles are synchronized after a finalize retry", async () => {
@@ -497,6 +580,7 @@ describe("RunnerQueueStore", () => {
     );
 
     const committed: HostedExecutionCommittedResult = {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-29T10:00:00.000Z",
       eventId: "evt_finalize_cleared",
@@ -506,7 +590,6 @@ describe("RunnerQueueStore", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "member_123",
     };
 
@@ -514,6 +597,62 @@ describe("RunnerQueueStore", () => {
     expect(result.lastError).toBeNull();
     expect(result.lastErrorAt).toBeNull();
     expect(result.lastErrorCode).toBeNull();
+  });
+
+  it("keeps the active run lease while syncing committed bundles for the same in-flight run", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_commit_sync",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    const claimed = await store.claimNextDuePendingDispatch(Date.now());
+
+    if (!claimed.run) {
+      throw new Error("Expected claimNextDuePendingDispatch to return an active run.");
+    }
+
+    const committed: HostedExecutionCommittedResult = {
+      assistantDeliveryEffects: [],
+      bundleRef: {
+        hash: "bundle_hash",
+        key: "bundles/member_123/bundle.enc",
+        size: 64,
+        updatedAt: "2026-03-29T10:00:01.000Z",
+      },
+      committedAt: "2026-03-29T10:00:01.000Z",
+      eventId: "evt_commit_sync",
+      finalizedAt: null,
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: "2026-03-29T10:15:00.000Z",
+        summary: "ok",
+      },
+      userId: "member_123",
+    };
+
+    const synced = await store.syncCommittedBundles(committed, {
+      eventId: committed.eventId,
+      run: claimed.run,
+    });
+
+    expect(synced.inFlight).toBe(true);
+    expect(synced.run).toMatchObject({
+      attempt: claimed.run.attempt,
+      eventId: committed.eventId,
+      phase: "claimed",
+      runId: claimed.run.runId,
+      startedAt: claimed.run.startedAt,
+    });
+    expect(synced.bundleRef).toEqual(committed.bundleRef);
   });
 
   it("records a bounded run trace and derives stable error codes", async () => {
@@ -560,6 +699,103 @@ describe("RunnerQueueStore", () => {
       message: "phase-25",
       phase: "retry.scheduled",
     });
+  });
+
+  it("clears a same-event active lease during committed recovery when the journal already owns the event", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_recovered_commit",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    const claim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
+    if (!claim.run) {
+      throw new Error("Expected a claimed run lease.");
+    }
+
+    await store.applyCommittedDispatch({
+      assistantDeliveryEffects: [],
+      bundleRef: null,
+      committedAt: "2026-03-29T10:01:00.000Z",
+      eventId: "evt_recovered_commit",
+      finalizedAt: null,
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+      userId: "member_123",
+    }, {
+      eventId: "evt_recovered_commit",
+      policy: "same-event",
+      run: null,
+    });
+
+    const stateAfterRecovery = await store.readState();
+    expect(stateAfterRecovery.inFlight).toBe(false);
+    expect(stateAfterRecovery.pendingEventCount).toBe(0);
+
+    const nextClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
+    expect(nextClaim.pendingDispatch).toBeNull();
+    expect(nextClaim.run).toBeNull();
+  });
+
+  it("does not clear one event's live lease while cleaning up another committed event", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_active",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+    const activeClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
+    if (!activeClaim.run) {
+      throw new Error("Expected the active event to claim a run lease.");
+    }
+
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_duplicate",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    await store.applyCommittedDispatch({
+      assistantDeliveryEffects: [],
+      bundleRef: null,
+      committedAt: "2026-03-29T10:01:00.000Z",
+      eventId: "evt_duplicate",
+      finalizedAt: null,
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+      userId: "member_123",
+    });
+    await store.rememberCommittedEvent("evt_other_duplicate");
+
+    const nextClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
+    expect(nextClaim.pendingDispatch).toBeNull();
+    expect(nextClaim.run).toBeNull();
+    expect((await store.readState()).inFlight).toBe(true);
   });
 
   it("clears the persisted last-error string when a later phase requests clearError", async () => {

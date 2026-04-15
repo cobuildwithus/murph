@@ -1,10 +1,12 @@
+import type { EventSource, MealNutrition } from "@murphai/contracts";
+
 export interface DocumentImportPayload {
   vaultRoot?: string;
   sourcePath: string;
   title: string;
   occurredAt?: string;
   note?: string;
-  source?: string;
+  source?: EventSource;
 }
 
 export interface MealImportPayload {
@@ -13,7 +15,9 @@ export interface MealImportPayload {
   audioPath?: string;
   occurredAt?: string;
   note?: string;
-  source?: string;
+  source?: EventSource;
+  ingredients?: string[];
+  nutrition?: MealNutrition;
 }
 
 export interface SampleImportRecord {

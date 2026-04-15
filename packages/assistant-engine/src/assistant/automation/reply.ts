@@ -1,5 +1,4 @@
 import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
-import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantUserMessageContentPart } from '../../model-harness.js'
@@ -9,12 +8,8 @@ import {
   resolveAcceptedInboundMessageOperatorAuthority,
   type AssistantOperatorAuthority,
 } from '../operator-authority.js'
-import { resolveAssistantProviderCapabilities } from '../provider-registry.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
-import {
-  resolveAssistantOperatorDefaults,
-} from '@murphai/operator-config/operator-config'
 import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
@@ -23,15 +18,9 @@ import { listAssistantTurnReceipts } from '../receipts.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
 import {
-  type AssistantTurnRouteOverride,
-  resolveAssistantTurnRoutesForMessage,
-  selectAssistantTurnRouteOverride,
-} from '../service-turn-routes.js'
-import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
 } from '../store.js'
-import type { AssistantMessageInput } from '../service-contracts.js'
 import {
   assistantAutoReplyGroupOutcomeArtifactExists,
   assistantChatReplyArtifactExists,
@@ -40,6 +29,10 @@ import {
   writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts,
 } from './artifacts.js'
+import {
+  computeAssistantAutoReplyRetryAt,
+  isAssistantProviderCapacityError,
+} from './auto-reply-retry.js'
 import {
   describeAssistantAutoReplyFailure,
   type AssistantAutoReplyFailureSnapshot,
@@ -57,8 +50,10 @@ import {
   type AssistantAutoReplyPromptCapture,
 } from './prompt-builder.js'
 import {
+  computeAssistantAutomationRetryAt,
   createEmptyAutoReplyScanResult,
   cursorFromCapture,
+  earliestAssistantAutomationWakeAt,
   normalizeEnabledChannels,
   normalizeScanLimit,
   type AssistantAutoReplyScanResult,
@@ -67,6 +62,7 @@ import {
 } from './shared.js'
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
 const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
 
@@ -85,13 +81,13 @@ interface AssistantAutoReplyReplyDecision {
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
-  providerOverride: AssistantAutoReplyProviderOverride | null
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
 
 interface AssistantAutoReplySkipDecision {
   kind: 'skip'
   advanceCursor: boolean
+  nextWakeAt: string | null
   reason: string
   stopScanning: boolean
 }
@@ -108,8 +104,6 @@ interface AssistantAutoReplyScanState {
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
 >
-
-type AssistantAutoReplyProviderOverride = AssistantTurnRouteOverride
 
 interface AssistantAutoReplyOutcomeSummary {
   failed: number
@@ -141,6 +135,7 @@ interface AssistantAutoReplyGroupOutcome {
   artifact: AssistantAutoReplyOutcomeArtifact
   event: AssistantAutoReplyOutcomeEvent
   kind: 'deferred' | 'failed' | 'ignored' | 'replied' | 'skipped'
+  nextWakeAt: string | null
   stopScanning: boolean
   summary: AssistantAutoReplyOutcomeSummary
 }
@@ -150,6 +145,7 @@ type AssistantAutoReplyGroupArtifactStatus = 'complete' | 'none' | 'partial'
 export interface AssistantAutoReplyProcessResult {
   advanceCursor: boolean
   failed: number
+  nextWakeAt: string | null
   replied: number
   skipped: number
   stopScanning: boolean
@@ -158,8 +154,6 @@ export interface AssistantAutoReplyProcessResult {
 export async function scanAssistantAutoReplyOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
   allowSelfAuthored?: boolean
-  autoReplyPrimed?: boolean
-  backlogChannels?: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
   inboxServices: InboxServices
@@ -177,54 +171,8 @@ export async function scanAssistantAutoReplyOnce(input: {
   vault: string
 }): Promise<AssistantAutoReplyScanResult> {
   const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
-  const backlogChannels = normalizeEnabledChannels(input.backlogChannels ?? [])
-  const backlogActive = backlogChannels.length > 0
   if (enabledChannels.length === 0) {
     return createEmptyAutoReplyScanResult()
-  }
-
-  if (!(input.autoReplyPrimed ?? true) && !backlogActive) {
-    const latest = await input.inboxServices.list({
-      vault: input.vault,
-      requestId: input.requestId ?? null,
-      limit: 1,
-      sourceId: null,
-      afterOccurredAt: null,
-      afterCaptureId: null,
-      oldestFirst: false,
-    })
-    const latestCapture = [...latest.items].sort((left, right) =>
-      left.occurredAt === right.occurredAt
-        ? right.captureId.localeCompare(left.captureId)
-        : right.occurredAt.localeCompare(left.occurredAt),
-    )[0]
-    const nextCursor = latestCapture
-      ? {
-          occurredAt: latestCapture.occurredAt,
-          captureId: latestCapture.captureId,
-        }
-      : input.afterCursor ?? null
-
-    await input.onStateProgress?.({
-      cursor: nextCursor,
-      primed: true,
-    })
-    input.onEvent?.({
-      type: 'reply.scan.primed',
-      details:
-        nextCursor === null
-          ? 'no existing captures yet; auto-reply will start with the next inbound message'
-          : `starting after ${nextCursor.captureId}`,
-    })
-
-    return createEmptyAutoReplyScanResult()
-  }
-
-  if (backlogActive) {
-    input.onEvent?.({
-      type: 'reply.scan.primed',
-      details: `processing existing ${backlogChannels.join(', ')} backlog before switching to new inbound messages`,
-    })
   }
 
   const listed = await input.inboxServices.list({
@@ -245,15 +193,6 @@ export async function scanAssistantAutoReplyOnce(input: {
     type: 'reply.scan.started',
     details: `${captures.length} capture(s)`,
   })
-
-  if (backlogActive && captures.length === 0) {
-    await input.onStateProgress?.({
-      cursor: input.afterCursor ?? null,
-      backlogChannels: [],
-      primed: true,
-    })
-    return createEmptyAutoReplyScanResult()
-  }
 
   const summary = createEmptyAutoReplyScanResult()
   const scanState: AssistantAutoReplyScanState = {
@@ -309,8 +248,10 @@ export async function scanAssistantAutoReplyOnce(input: {
   }
 
   await input.onStateProgress?.({
-    cursor: scanState.cursor,
-    primed: true,
+    autoReply: enabledChannels.map((channel) => ({
+      channel,
+      cursor: scanState.cursor,
+    })),
   })
 
   return summary
@@ -323,6 +264,10 @@ export function applyAssistantAutoReplyProcessResult(input: {
   updateCursor: (cursor: AssistantAutomationCursor) => void
 }): boolean {
   input.summary.failed += input.result.failed
+  input.summary.nextWakeAt = earliestAssistantAutomationWakeAt(
+    input.summary.nextWakeAt,
+    input.result.nextWakeAt,
+  )
   input.summary.replied += input.result.replied
   input.summary.skipped += input.result.skipped
   if (input.result.advanceCursor) {
@@ -431,7 +376,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       operatorAuthority: decision.operatorAuthority,
       primaryCapture: decision.primaryCapture,
       prompt: decision.prompt,
-      providerOverride: decision.providerOverride,
       replyCaptureId: input.context.firstCaptureId,
       userMessageContent: decision.userMessageContent,
       vault: input.vault,
@@ -466,6 +410,7 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
   return {
     advanceCursor: input.outcome.advanceCursor,
     failed: input.outcome.summary.failed,
+    nextWakeAt: input.outcome.nextWakeAt,
     replied: input.outcome.summary.replied,
     skipped: input.outcome.summary.skipped,
     stopScanning: input.outcome.stopScanning,
@@ -554,6 +499,7 @@ function createIgnoredGroupOutcome(): AssistantAutoReplyGroupOutcome {
     artifact: { kind: 'none' },
     event: null,
     kind: 'ignored',
+    nextWakeAt: null,
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary(),
   }
@@ -567,12 +513,14 @@ function createSkippedDecisionOutcome(input: {
     return createSkippedGroupOutcome({
       captureCount: input.captureCount,
       reason: input.decision.reason,
+      nextWakeAt: input.decision.nextWakeAt,
       stopScanning: input.decision.stopScanning,
     })
   }
 
   return createDeferredGroupOutcome({
     captureCount: input.captureCount,
+    nextWakeAt: input.decision.nextWakeAt,
     reason: input.decision.reason,
     stopScanning: input.decision.stopScanning,
   })
@@ -580,6 +528,7 @@ function createSkippedDecisionOutcome(input: {
 
 function createSkippedGroupOutcome(input: {
   captureCount: number
+  nextWakeAt?: string | null
   reason: string
   stopScanning?: boolean
 }): AssistantAutoReplyGroupOutcome {
@@ -591,6 +540,7 @@ function createSkippedGroupOutcome(input: {
       type: 'capture.reply-skipped',
     },
     kind: 'skipped',
+    nextWakeAt: input.nextWakeAt ?? null,
     stopScanning: input.stopScanning ?? false,
     summary: createAssistantAutoReplyOutcomeSummary({
       skipped: input.captureCount,
@@ -600,6 +550,7 @@ function createSkippedGroupOutcome(input: {
 
 function createDeferredGroupOutcome(input: {
   captureCount: number
+  nextWakeAt?: string | null
   reason: string
   stopScanning: boolean
 }): AssistantAutoReplyGroupOutcome {
@@ -611,6 +562,7 @@ function createDeferredGroupOutcome(input: {
       type: 'capture.reply-skipped',
     },
     kind: 'deferred',
+    nextWakeAt: input.nextWakeAt ?? null,
     stopScanning: input.stopScanning,
     summary: createAssistantAutoReplyOutcomeSummary({
       skipped: input.captureCount,
@@ -634,6 +586,7 @@ function createDeferredDeliveryGroupOutcome(
       type: 'capture.replied',
     },
     kind: 'deferred',
+    nextWakeAt: null,
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary({
       replied: 1,
@@ -662,6 +615,7 @@ function createSuccessfulReplyGroupOutcome(
       type: 'capture.replied',
     },
     kind: 'replied',
+    nextWakeAt: null,
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary({
       replied: 1,
@@ -672,6 +626,7 @@ function createSuccessfulReplyGroupOutcome(
 function createFailedGroupOutcome(input: {
   advanceCursor: boolean
   error: unknown
+  nextWakeAt?: string | null
   stopScanning?: boolean
 }): AssistantAutoReplyGroupOutcome {
   const failure = describeAssistantAutoReplyFailure(input.error)
@@ -690,6 +645,7 @@ function createFailedGroupOutcome(input: {
       type: 'capture.reply-failed',
     },
     kind: 'failed',
+    nextWakeAt: input.nextWakeAt ?? null,
     stopScanning: input.stopScanning ?? false,
     summary: createAssistantAutoReplyOutcomeSummary({
       failed: 1,
@@ -785,23 +741,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (preparedInput.kind === 'skip') {
     return createAdvancingSkipDecision(preparedInput.reason)
   }
-  let providerOverride: AssistantAutoReplyProviderOverride | null = null
-  if (
-    preparedInput.requiresRichUserMessageContent
-  ) {
-    const richRoute = await resolveAutoReplyRichContentRoute({
-      capture: primaryCapture,
-      prompt: preparedInput.prompt,
-      userMessageContent: preparedInput.userMessageContent,
-      vault: input.vault,
-    })
-    if (!richRoute.supported) {
-      return createAdvancingSkipDecision(
-        'capture has image/PDF evidence but the configured assistant provider only accepts text input',
-      )
-    }
-    providerOverride = richRoute.providerOverride
-  }
 
   if (
     input.group.firstItem.summary.actorIsSelf &&
@@ -821,7 +760,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: resolveAcceptedInboundMessageOperatorAuthority(),
     primaryCapture,
     prompt: preparedInput.prompt,
-    providerOverride,
     userMessageContent: preparedInput.userMessageContent,
   }
 }
@@ -860,7 +798,6 @@ async function executeAssistantAutoReply(input: {
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
-  providerOverride: AssistantAutoReplyProviderOverride | null
   replyCaptureId: string
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
@@ -876,7 +813,6 @@ async function executeAssistantAutoReply(input: {
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
-      ...(input.providerOverride ?? {}),
       userMessageContent: input.userMessageContent,
       includeFirstTurnCheckIn: true,
       deliverResponse: true,
@@ -911,7 +847,13 @@ function readAutoReplyDeliveryReplyToMessageId(
   }
 
   if (primaryCapture.source === 'linq') {
-    return readLinqReplyToMessageId(primaryCapture)
+    for (let index = captures.length - 1; index >= 0; index -= 1) {
+      const messageId = readLinqReplyToMessageId(captures[index]?.capture)
+      if (messageId) {
+        return messageId
+      }
+    }
+    return null
   }
 
   if (primaryCapture.source !== 'telegram') {
@@ -987,6 +929,7 @@ function classifyAssistantAutoReplyFailure(input: {
   if (isAssistantProviderStalledError(input.error)) {
     return createDeferredGroupOutcome({
       captureCount: input.captureCount,
+      nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
       reason: AUTO_REPLY_PROVIDER_STALLED_DETAIL,
       stopScanning: true,
     })
@@ -996,6 +939,7 @@ function classifyAssistantAutoReplyFailure(input: {
   if (isAssistantProviderConnectionLostError(input.error)) {
     return createDeferredGroupOutcome({
       captureCount: input.captureCount,
+      nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
       reason: `${detail} Will retry this capture after the provider reconnects.`,
       stopScanning: true,
     })
@@ -1005,6 +949,7 @@ function classifyAssistantAutoReplyFailure(input: {
     return createFailedGroupOutcome({
       advanceCursor: false,
       error: input.error,
+      nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
       stopScanning: true,
     })
   }
@@ -1013,33 +958,6 @@ function classifyAssistantAutoReplyFailure(input: {
     advanceCursor: true,
     error: input.error,
   })
-}
-
-function isAssistantProviderCapacityError(error: unknown): boolean {
-  const message = errorMessage(error).toLowerCase()
-  const code =
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    typeof (error as { code?: unknown }).code === 'string'
-      ? (error as { code: string }).code.toUpperCase()
-      : ''
-  const providerFailure =
-    code.startsWith('ASSISTANT_') ||
-    message.includes('codex cli failed') ||
-    message.includes('assistant provider')
-
-  return providerFailure && (
-    code.includes('RATE') ||
-    code.includes('LIMIT') ||
-    code.includes('QUOTA') ||
-    message.includes('rate limit') ||
-    message.includes('usage limit') ||
-    message.includes('quota') ||
-    message.includes('too many requests') ||
-    message.includes('purchase more credits') ||
-    message.includes('try again at ')
-  )
 }
 
 function classifyAssistantAutoReplyGroupArtifactStatus(
@@ -1060,6 +978,7 @@ function createAdvancingSkipDecision(
   return {
     advanceCursor: true,
     kind: 'skip',
+    nextWakeAt: null,
     reason,
     stopScanning: false,
   }
@@ -1100,10 +1019,19 @@ async function assistantAutoReplyHandledByTurnReceipt(
 
 function createDeferredSkipDecision(
   reason: string,
+  input?: {
+    nextWakeAt?: string | null
+  },
 ): AssistantAutoReplySkipDecision {
   return {
     advanceCursor: false,
     kind: 'skip',
+    nextWakeAt:
+      input?.nextWakeAt === undefined
+        ? computeAssistantAutomationRetryAt(
+            ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS,
+          )
+        : input.nextWakeAt,
     reason,
     stopScanning: true,
   }
@@ -1179,51 +1107,4 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
 
 function normalizeComparableText(text: string): string {
   return text.replace(/\s+/gu, ' ').trim()
-}
-
-async function resolveAutoReplyRichContentRoute(input: {
-  capture: InboxShowResult['capture']
-  prompt: string
-  userMessageContent: AssistantUserMessageContentPart[] | null
-  vault: string
-}): Promise<{
-  providerOverride: AssistantAutoReplyProviderOverride | null
-  supported: boolean
-}> {
-  const defaults = await resolveAssistantOperatorDefaults()
-  const messageInput = {
-    conversation: conversationRefFromCapture(input.capture),
-    prompt: input.prompt,
-    userMessageContent: input.userMessageContent,
-    vault: input.vault,
-  } satisfies AssistantMessageInput
-  const routes = await resolveAssistantTurnRoutesForMessage(
-    messageInput,
-    defaults,
-    createDefaultLocalAssistantModelTarget(),
-  )
-  return selectAutoReplyRichContentRouteOverride(routes)
-}
-
-function selectAutoReplyRichContentRouteOverride(
-  routes: Parameters<typeof selectAssistantTurnRouteOverride>[0],
-): {
-  providerOverride: AssistantAutoReplyProviderOverride | null
-  supported: boolean
-} {
-  const richRoute = selectAssistantTurnRouteOverride(routes, (route) =>
-    resolveAssistantProviderCapabilities(route.provider ?? 'codex-cli')
-      .supportsRichUserMessageContent,
-  )
-  if (!richRoute.route) {
-    return {
-      providerOverride: null,
-      supported: false,
-    }
-  }
-
-  return {
-    providerOverride: richRoute.providerOverride,
-    supported: true,
-  }
 }

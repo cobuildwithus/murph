@@ -93,8 +93,6 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/core/dist/index.d.ts'),
   path.join(repoRoot, 'packages/core/dist/public-mutations.js'),
   path.join(repoRoot, 'packages/core/dist/public-mutations.d.ts'),
-  path.join(repoRoot, 'packages/core/dist/vault-upgrade.js'),
-  path.join(repoRoot, 'packages/core/dist/vault-upgrade.d.ts'),
   path.join(repoRoot, 'packages/importers/dist/index.js'),
   path.join(repoRoot, 'packages/importers/dist/index.d.ts'),
   path.join(repoRoot, 'packages/importers/dist/core-port.js'),
@@ -455,7 +453,8 @@ export async function rebuildCliRuntimeArtifacts(): Promise<void> {
 
   await execWorkspaceCommand([
     'exec',
-    'tsx',
+    'node',
+    '--import=tsx',
     'packages/cli/scripts/verify-package-shape.ts',
   ])
 }
@@ -515,9 +514,19 @@ async function execCliProcess(
   },
 ) {
   const commandEnv = buildCliExecutionEnv(options?.env)
+  const executionMode = resolveCliProcessExecutionMode(options)
 
-  if (resolveCliProcessExecutionMode(options) === 'harness') {
-    return execCliProcessThroughHarness(args, commandEnv)
+  if (executionMode === 'harness') {
+    try {
+      return await execCliProcessThroughHarness(args, commandEnv)
+    } catch (error) {
+      if (shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
+        resetCliCommandHarnessPool()
+        return await execCliProcessThroughHarness(args, commandEnv)
+      }
+
+      throw error
+    }
   }
 
   return execCliProcessIsolated(args, {
@@ -789,6 +798,10 @@ function installCliCommandHarnessProcessExitCleanup(): void {
   }
 
   process.once('exit', cleanup)
+}
+
+function resetCliCommandHarnessPool(): void {
+  cliCommandHarnessPoolPromise = null
 }
 
 function registerCliCommandHarnessChild(

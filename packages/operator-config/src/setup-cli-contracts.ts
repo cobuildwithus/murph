@@ -1,5 +1,10 @@
 import { z } from 'zod'
 import {
+  normalizeWearablePreferenceProviders,
+  wearablePreferenceProviderValues,
+  type WearablePreferenceProvider,
+} from '@murphai/contracts'
+import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
   assistantCronPresetSchema,
@@ -29,11 +34,17 @@ export const whisperModelValues = [
 
 export const whisperModelSchema = z.enum(whisperModelValues)
 
-export const setupChannelValues = ['imessage', 'telegram', 'linq', 'email'] as const
+export const setupChannelValues = ['telegram', 'linq', 'email'] as const
 export const setupChannelSchema = z.enum(setupChannelValues)
 
-export const setupWearableValues = ['garmin', 'oura', 'whoop'] as const
+export const setupWearableValues = wearablePreferenceProviderValues
 export const setupWearableSchema = z.enum(setupWearableValues)
+
+export function normalizeSetupWearables(
+  wearables: readonly SetupWearable[] | null | undefined,
+): SetupWearable[] {
+  return normalizeWearablePreferenceProviders(wearables)
+}
 
 export const setupAssistantPresetValues = [
   'codex',
@@ -72,7 +83,6 @@ export const setupStepResultSchema = z.object({
 
 export const setupToolsSchema = z.object({
   ffmpegCommand: pathSchema.nullable(),
-  pdftotextCommand: pathSchema.nullable(),
   whisperCommand: pathSchema.nullable(),
   whisperModelPath: pathSchema,
 })
@@ -130,6 +140,7 @@ export const setupConfiguredAssistantSchema = z.object({
   model: z.string().min(1).nullable(),
   baseUrl: z.string().min(1).nullable(),
   apiKeyEnv: z.string().min(1).nullable(),
+  presetId: setupAssistantProviderPresetSchema.nullable().optional(),
   providerName: z.string().min(1).nullable(),
   codexCommand: z.string().min(1).nullable(),
   codexHome: z.string().min(1).nullable().optional(),
@@ -138,6 +149,7 @@ export const setupConfiguredAssistantSchema = z.object({
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   oss: z.boolean().nullable(),
+  zeroDataRetention: z.boolean().optional(),
   account: setupAssistantAccountSchema.nullable().optional(),
   detail: z.string().min(1),
 })
@@ -146,6 +158,12 @@ export const setupScheduledUpdateSchema = z.object({
   preset: assistantCronPresetSchema,
   jobName: z.string().min(1),
   status: setupStepStatusSchema,
+})
+
+export const setupVaultSelectionResultSchema = z.object({
+  configPath: pathSchema,
+  status: z.enum(['completed', 'reused']),
+  vault: pathSchema,
 })
 
 export const setupCommandOptionsSchema = z.object({
@@ -176,7 +194,7 @@ export const setupCommandOptionsSchema = z.object({
     .describe('Optional onboarding assistant preset: Codex, OpenAI-compatible endpoint, or skip.'),
   assistantProviderPreset: setupAssistantProviderPresetSchema
     .optional()
-    .describe('Optional named OpenAI-compatible provider preset to save during setup, such as openrouter, venice, groq, ollama, or custom.'),
+    .describe('Optional named OpenAI-compatible provider preset to save during setup, such as openai, vercel-ai-gateway, openrouter, venice, groq, ollama, or custom. Named presets also enable provider-specific runtime behavior such as native resume, web search, and zero-data-retention when supported.'),
   assistantModel: z
     .string()
     .min(1)
@@ -217,6 +235,10 @@ export const setupCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Optional assistant reasoning effort default to save during setup.'),
+  assistantZeroDataRetention: z
+    .boolean()
+    .optional()
+    .describe('Optional OpenAI-compatible flag to request Vercel AI Gateway zero data retention on each assistant turn.'),
   assistantOss: z
     .boolean()
     .optional()
@@ -242,7 +264,7 @@ export const setupResultSchema = z.object({
 
 export type WhisperModel = z.infer<typeof whisperModelSchema>
 export type SetupChannel = z.infer<typeof setupChannelSchema>
-export type SetupWearable = z.infer<typeof setupWearableSchema>
+export type SetupWearable = WearablePreferenceProvider
 export type SetupAssistantPreset = z.infer<typeof setupAssistantPresetSchema>
 export type SetupAssistantProviderPreset = z.infer<
   typeof setupAssistantProviderPresetSchema
@@ -259,6 +281,9 @@ export type SetupConfiguredAssistant = z.infer<
   typeof setupConfiguredAssistantSchema
 >
 export type SetupScheduledUpdate = z.infer<typeof setupScheduledUpdateSchema>
+export type SetupVaultSelectionResult = z.infer<
+  typeof setupVaultSelectionResultSchema
+>
 export type SetupCommandOptions = z.infer<typeof setupCommandOptionsSchema>
 export type SetupStepKind = z.infer<typeof setupStepKindSchema>
 export type SetupStepStatus = z.infer<typeof setupStepStatusSchema>

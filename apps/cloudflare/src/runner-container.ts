@@ -3,9 +3,11 @@ import {
   parseHostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobResult,
-} from "@murphai/assistant-runtime";
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   emitHostedExecutionStructuredLog,
+  sanitizeHostedExecutionStructuredLogDetails,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 
 import {
@@ -20,16 +22,28 @@ const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/__internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_READY_TIMEOUT_MS = 20_000;
+const RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_TTL_MS = 120_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
+  readonly details: HostedExecutionStructuredLogDetails | null;
+  readonly statusCode: number | null;
 
-  constructor(message: string, code: string | null = null) {
+  constructor(
+    message: string,
+    code: string | null = null,
+    options: {
+      details?: HostedExecutionStructuredLogDetails | null;
+      statusCode?: number | null;
+    } = {},
+  ) {
     super(message);
     this.code = code;
+    this.details = options.details ?? null;
     this.name = "HostedExecutionConfigurationError";
+    this.statusCode = options.statusCode ?? null;
   }
 }
 
@@ -64,50 +78,29 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
 
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 
-type RunnerOutboundHandlerName =
-  | "artifactsWorker"
-  | "deviceSyncWorker"
-  | "resultsWorker"
-  | "usageWorker";
+// Cloudflare rolls Worker code ahead of container instances, so keep the
+// worker/container outbound contract to one stable handler method.
+const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
 
-interface RunnerContainerStateLike {
-  storage?: {
-    deleteAlarm?: () => Promise<void>;
-    setAlarm?: (scheduledTime: number | Date) => Promise<void>;
-  };
-}
-
-const RUNNER_OUTBOUND_HOSTS = {
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore]: "artifactsWorker",
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: "resultsWorker",
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort]: "deviceSyncWorker",
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort]: "usageWorker",
-} as const satisfies Record<string, RunnerOutboundHandlerName>;
+const RUNNER_OUTBOUND_HOSTS = Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS);
 
 export class RunnerContainer extends Container {
-  static override outboundHandlers = {
-    artifactsWorker: createRunnerOutboundHandler(),
-    deviceSyncWorker: createRunnerOutboundHandler(),
-    resultsWorker: createRunnerOutboundHandler(),
-    usageWorker: createRunnerOutboundHandler(),
-  };
-
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
+  sleepAfter = formatRunnerSleepAfter(DEFAULT_RUNNER_IDLE_TTL_MS);
 
-  private readonly containerState: RunnerContainerStateLike;
-  private readonly idleTtlMs: number;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private runnerControlToken: string | null = null;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
-    this.containerState = state as RunnerContainerStateLike;
-    this.idleTtlMs = readRunnerIdleTtlMs(env);
+    this.sleepAfter = formatRunnerSleepAfter(readRunnerIdleTtlMs(env));
   }
 
-  async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedAssistantRuntimeJobResult> {
+  async invoke(
+    payload: HostedExecutionContainerInvokeRequest,
+  ): Promise<HostedAssistantRuntimeJobResult> {
     return this.withLifecycleLock(async () =>
       this.invokeHostedExecution(parseHostedExecutionContainerInvokeInput(payload))
     );
@@ -119,9 +112,9 @@ export class RunnerContainer extends Container {
     });
   }
 
-  async alarm(): Promise<void> {
+  override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
-      await this.stopWarmContainer();
+      await this.stopWarmContainer({ failClosed: false });
     });
   }
 
@@ -142,8 +135,6 @@ export class RunnerContainer extends Container {
     const run = input.job.request.run ?? null;
     const internalWorkerProxyToken = crypto.randomUUID();
     let keepWarm = false;
-
-    await this.clearIdleDestroyAlarm();
 
     try {
       const startTime = Date.now();
@@ -187,7 +178,7 @@ export class RunnerContainer extends Container {
       throw error;
     } finally {
       const outboundInvalidated = await this.invalidateOutboundHandlers(input.userId);
-      const shouldDestroy = !(keepWarm && outboundInvalidated && await this.scheduleIdleDestroy());
+      const shouldDestroy = !(keepWarm && outboundInvalidated);
 
       if (shouldDestroy) {
         await this.stopWarmContainer();
@@ -209,12 +200,31 @@ export class RunnerContainer extends Container {
         emitHostedExecutionStructuredLog({
           component: "container",
           dispatch,
+          details: {
+            readinessLatencyMs: Date.now() - readinessStartedAt,
+            runElapsedMs: computeHostedRunElapsedMs(run),
+            startMode: "warm",
+          },
           message: "Hosted execution container is ready.",
           phase: "container.ready",
           run,
         });
         return this.runnerControlToken;
-      } catch {
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          dispatch,
+          details: {
+            readinessLatencyMs: Date.now() - readinessStartedAt,
+            runElapsedMs: computeHostedRunElapsedMs(run),
+            startMode: "warm",
+          },
+          error,
+          level: "warn",
+          message: "Hosted execution container warm health check failed; restarting shell.",
+          phase: "container.starting",
+          run,
+        });
         await this.stopWarmContainer();
       }
     } else if (!isRunnerContainerStopped(status)) {
@@ -224,6 +234,10 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       dispatch,
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(run),
+        startMode: "cold",
+      },
       message: "Hosted execution container starting.",
       phase: "container.starting",
       run,
@@ -253,6 +267,11 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       dispatch,
+      details: {
+        readinessLatencyMs: Date.now() - readinessStartedAt,
+        runElapsedMs: computeHostedRunElapsedMs(run),
+        startMode: "cold",
+      },
       message: "Hosted execution container is ready.",
       phase: "container.ready",
       run,
@@ -267,10 +286,10 @@ export class RunnerContainer extends Container {
   ): Promise<void> {
     await this.setOutboundByHosts(
       Object.fromEntries(
-        Object.entries(RUNNER_OUTBOUND_HOSTS).map(([host, method]) => [
+        RUNNER_OUTBOUND_HOSTS.map((host) => [
           host,
           {
-            method,
+            method: RUNNER_OUTBOUND_HANDLER_METHOD,
             params: {
               internalWorkerProxyToken,
               userId,
@@ -290,10 +309,7 @@ export class RunnerContainer extends Container {
       }
 
       await this.destroy();
-
-      if (!isRunnerContainerStopped(readContainerStatus(await this.getState()))) {
-        throw new Error("Hosted runner container destroy did not stop the shell.");
-      }
+      await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
     } catch {
       if (input.failClosed) {
         throw new Error("Hosted runner container failed to destroy cleanly.");
@@ -302,39 +318,13 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private async scheduleIdleDestroy(): Promise<boolean> {
-    const setAlarm = this.containerState.storage?.setAlarm;
-
-    if (typeof setAlarm !== "function") {
-      return false;
-    }
-
-    try {
-      await setAlarm(Date.now() + this.idleTtlMs);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private async clearIdleDestroyAlarm(): Promise<void> {
-    const deleteAlarm = this.containerState.storage?.deleteAlarm;
-
-    if (typeof deleteAlarm !== "function") {
-      return;
-    }
-
-    try {
-      await deleteAlarm();
-    } catch {
-      // best-effort cleanup only
-    }
-  }
-
-  private async stopWarmContainer(): Promise<void> {
+  private async stopWarmContainer(input: {
+    failClosed?: boolean;
+  } = {
+    failClosed: true,
+  }): Promise<void> {
     this.runnerControlToken = null;
-    await this.clearIdleDestroyAlarm();
-    await this.destroyIfRunning({ failClosed: true });
+    await this.destroyIfRunning(input);
   }
 
   private async invalidateOutboundHandlers(userId: string): Promise<boolean> {
@@ -360,6 +350,10 @@ export class RunnerContainer extends Container {
   }
 }
 
+RunnerContainer.outboundHandlers = {
+  [RUNNER_OUTBOUND_HANDLER_METHOD]: createRunnerOutboundHandler(),
+};
+
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,
 ): Promise<HostedAssistantRuntimeJobResult> {
@@ -375,7 +369,9 @@ async function classifyHostedRunnerContainerErrorResponse(
 ): Promise<Error> {
   let payload: {
     code?: unknown;
+    details?: unknown;
     error?: unknown;
+    errorName?: unknown;
   } | null = null;
 
   try {
@@ -393,12 +389,40 @@ async function classifyHostedRunnerContainerErrorResponse(
   const code = typeof payload?.code === "string" && payload.code.trim().length > 0
     ? payload.code
     : null;
+  const details = sanitizeHostedExecutionStructuredLogDetails(
+    payload?.details && typeof payload.details === "object" && !Array.isArray(payload.details)
+      ? payload.details as HostedExecutionStructuredLogDetails
+      : null,
+  );
+  const errorName = typeof payload?.errorName === "string" && payload.errorName.trim().length > 0
+    ? payload.errorName.trim()
+    : readHostedExecutionErrorNameForCode(code);
 
   if (response.status === 503) {
-    return new HostedExecutionConfigurationError(message, code);
+    return new HostedExecutionConfigurationError(message, code, {
+      details,
+      statusCode: response.status,
+    });
   }
 
-  return new Error(message);
+  const error = new Error(message) as Error & {
+    code?: string | null;
+    details?: HostedExecutionStructuredLogDetails | null;
+    status?: number;
+    statusCode?: number;
+  };
+  if (code) {
+    error.code = code;
+  }
+  if (details) {
+    error.details = details;
+  }
+  if (errorName) {
+    error.name = errorName;
+  }
+  error.status = response.status;
+  error.statusCode = response.status;
+  return error;
 }
 
 function createRunnerOutboundHandler() {
@@ -499,6 +523,22 @@ function isRunnerContainerStopped(status: string | null): boolean {
   return status === "stopped" || status === "stopped_with_code";
 }
 
+async function waitForRunnerContainerStop(
+  container: RunnerContainer,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (isRunnerContainerStopped(readContainerStatus(await container.getState()))) {
+      return;
+    }
+    await sleep(RUNNER_WAIT_INTERVAL_MS);
+  }
+
+  throw new Error("Hosted runner container destroy did not stop the shell.");
+}
+
 function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
   const raw = source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS;
 
@@ -518,4 +558,46 @@ function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
   }
 
   return parsed;
+}
+
+function computeHostedRunElapsedMs(
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
+}
+
+function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {
+  return `${Math.max(1, Math.ceil(idleTtlMs / 1_000))}s`;
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function readHostedExecutionErrorNameForCode(code: string | null): string | null {
+  switch (code) {
+    case "configuration_error":
+      return "HostedExecutionConfigurationError";
+    case "range_error":
+      return "RangeError";
+    case "reference_error":
+      return "ReferenceError";
+    case "syntax_error":
+      return "SyntaxError";
+    case "type_error":
+      return "TypeError";
+    case "uri_error":
+      return "URIError";
+    default:
+      return null;
+  }
 }

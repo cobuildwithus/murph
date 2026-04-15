@@ -1,14 +1,19 @@
 import {
   deviceSyncError,
   isDeviceSyncError,
+  type DeviceSyncIngressWebhook,
   type DeviceSyncJobInput,
   type DeviceSyncRegistry,
   type ProviderConnectionResult,
   type PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
-import type {
-  HostedExecutionDeviceSyncJobHint,
+import {
+  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
+  type HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDispatchRequest,
@@ -29,9 +34,13 @@ import {
   composeHostedRuntimeDeviceSyncAccount,
   findHostedDeviceSyncRuntimeConnection,
 } from "./internal-runtime";
-import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
 import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
-import { normalizeNullableString, sha256Hex, toIsoTimestamp } from "./shared";
+import {
+  normalizeNullableString,
+  sha256Hex,
+  toIsoTimestamp,
+} from "./shared";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -56,6 +65,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   const runtimeClient = requireHostedDeviceSyncRuntimeClient();
   const runtimeSnapshot = await runtimeClient.getDeviceSyncRuntimeSnapshot(input.userId, {
     connectionId: input.connectionId,
+    includeSecrets: true,
     provider: existing.provider,
   });
   const runtimeConnection = findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, input.connectionId);
@@ -78,9 +88,16 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           tokenBundle: runtimeConnection.tokenBundle,
         }));
       } catch (error) {
+        const code = sanitizeHostedRuntimeErrorCode(
+          isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
+        ) ?? "PROVIDER_REVOKE_FAILED";
+        const message = sanitizeHostedRuntimeErrorText(
+          error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
+        ) ?? "Provider revoke request failed during disconnect.";
+
         warning = {
-          code: isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
-          message: error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
+          code,
+          message,
         };
       }
     }
@@ -121,6 +138,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           lastErrorMessage: disconnectLocalState.lastErrorMessage,
           nextReconcileAt: null,
         },
+        observedTokenVersion: runtimeConnection?.tokenBundle?.tokenVersion ?? null,
         seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
           account: {
             ...existing,
@@ -144,9 +162,15 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       },
     ],
   });
-  const appliedUpdate = applyResponse.updates.find((entry) => entry.connectionId === input.connectionId) ?? null;
+  const appliedUpdate = findHostedExecutionDeviceSyncRuntimeApplyEntry(applyResponse, input.connectionId);
 
-  if (!appliedUpdate || appliedUpdate.status === "missing" || appliedUpdate.connection?.status !== "disconnected") {
+  if (
+    !appliedUpdate
+    || appliedUpdate.status === "missing"
+    || !didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(appliedUpdate)
+    || appliedUpdate.tokenUpdate === "skipped_version_mismatch"
+    || appliedUpdate.connection?.status !== "disconnected"
+  ) {
     throw deviceSyncError({
       code: "RUNTIME_STATE_CONFLICT",
       message: `Hosted device-sync runtime did not persist the disconnected state for connection ${input.connectionId}.`,
@@ -180,23 +204,22 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     source: "disconnect",
     userId: input.userId,
   });
-  await input.store.prisma.$transaction(async (tx) => {
-    return input.store.createSignal({
-      userId: input.userId,
-      connectionId: input.connectionId,
-      provider: existing.provider,
-      kind: "disconnected",
-      occurredAt: now,
-      reason: normalizeNullableString(hint.reason),
-      revokeWarning: warning ?? null,
-      createdAt: now,
-      tx,
-    });
-  });
-
-  await publishHostedDeviceSyncWake({
+  await persistHostedDeviceSyncWake({
     dispatch,
     store: input.store,
+    persist: async (tx) => {
+      await input.store.createSignal({
+        userId: input.userId,
+        connectionId: input.connectionId,
+        provider: existing.provider,
+        kind: "disconnected",
+        occurredAt: now,
+        reason: normalizeNullableString(hint.reason),
+        revokeWarning: warning ?? null,
+        createdAt: now,
+        tx,
+      });
+    },
   });
 
   return {
@@ -240,22 +263,21 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     source: "connection-established",
     userId: ownerId,
   });
-  await input.store.prisma.$transaction(async (tx) => {
-    return input.store.createSignal({
-      userId: ownerId,
-      connectionId: input.account.id,
-      provider: input.account.provider,
-      kind: "connected",
-      occurredAt: input.now,
-      nextReconcileAt: input.connection.nextReconcileAt ?? null,
-      createdAt: input.now,
-      tx,
-    });
-  });
-
-  await publishHostedDeviceSyncWake({
+  await persistHostedDeviceSyncWake({
     dispatch,
     store: input.store,
+    persist: async (tx) => {
+      await input.store.createSignal({
+        userId: ownerId,
+        connectionId: input.account.id,
+        provider: input.account.provider,
+        kind: "connected",
+        occurredAt: input.now,
+        nextReconcileAt: input.connection.nextReconcileAt ?? null,
+        createdAt: input.now,
+        tx,
+      });
+    },
   });
 }
 
@@ -266,29 +288,25 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   };
   now: string;
   store: PrismaDeviceSyncControlPlaneStore;
-  webhook: {
-    eventType: string;
-    jobs?: readonly DeviceSyncJobInput[];
-    occurredAt?: string | null;
-    payload?: Record<string, unknown>;
-    traceId?: string | null;
-  };
+  traceId?: string | null;
+  webhook: DeviceSyncIngressWebhook;
 }): Promise<void> {
+  const traceId = normalizeNullableString(input.traceId);
   const ownerId = await input.store.getConnectionOwnerId(input.account.id);
 
   if (!ownerId) {
-    if (input.webhook.traceId) {
-      console.warn("Closing hosted device-sync webhook trace without an owner mapping.", {
-        connectionId: input.account.id,
-        provider: input.account.provider,
-        traceId: input.webhook.traceId,
-      });
-      await input.store.prisma.$transaction(async (tx) => {
-        await input.store.completeWebhookTrace(input.account.provider, input.webhook.traceId!, tx);
-      });
-    }
+    console.warn("Rejecting hosted device-sync webhook without an owner mapping.", {
+      connectionId: input.account.id,
+      provider: input.account.provider,
+      traceId,
+    });
 
-    return;
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_NOT_FOUND",
+      message: "Hosted device-sync connection owner mapping is missing. Retry later.",
+      retryable: true,
+      httpStatus: 503,
+    });
   }
 
   const hint = buildHostedWebhookHintSignal({
@@ -296,9 +314,9 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     eventType: input.webhook.eventType,
     jobs: input.webhook.jobs,
     occurredAt: input.webhook.occurredAt ?? null,
-    payload: input.webhook.payload,
     provider: input.account.provider,
-    traceId: input.webhook.traceId ?? null,
+    resourceCategory: input.webhook.resourceCategory ?? null,
+    traceId,
   });
   const dispatch = buildHostedDeviceSyncWakeDispatch({
     connectionId: input.account.id,
@@ -306,31 +324,32 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     occurredAt: input.now,
     provider: input.account.provider,
     source: "webhook-accepted",
-    traceId: input.webhook.traceId ?? null,
+    traceId,
     userId: ownerId,
   });
-  await publishHostedDeviceSyncWake({
+
+  await persistHostedDeviceSyncWake({
     dispatch,
     store: input.store,
-  });
-
-  await input.store.prisma.$transaction(async (tx) => {
-    await input.store.createSignal({
-      userId: ownerId,
-      connectionId: input.account.id,
-      provider: input.account.provider,
-      kind: "webhook_hint",
-      occurredAt: input.webhook.occurredAt ?? input.now,
-      traceId: input.webhook.traceId ?? null,
-      eventType: input.webhook.eventType,
-      resourceCategory: hint.resourceCategory ?? null,
-      createdAt: input.now,
-      tx,
-    });
-
-    if (input.webhook.traceId) {
-      await input.store.completeWebhookTrace(input.account.provider, input.webhook.traceId, tx);
-    }
+    persist: async (tx) => {
+      await input.store.createSignal({
+        userId: ownerId,
+        connectionId: input.account.id,
+        provider: input.account.provider,
+        kind: "webhook_hint",
+        occurredAt: input.webhook.occurredAt ?? input.now,
+        traceId,
+        eventType: input.webhook.eventType,
+        resourceCategory: hint.resourceCategory ?? null,
+        createdAt: input.now,
+        tx,
+      });
+    },
+    complete: traceId
+      ? async (tx) => {
+          await input.store.completeWebhookTrace(input.account.provider, traceId, tx);
+        }
+      : undefined,
   });
 }
 
@@ -353,27 +372,26 @@ export async function dispatchHostedDeviceSyncWake(input: {
     hint,
   });
 
-  await prisma.$transaction(async (tx) => {
-    return store.createSignal({
-      userId: input.userId,
-      connectionId: input.connectionId,
-      provider: input.provider,
-      kind: mapHostedDeviceSyncSignalKind(input.source),
-      occurredAt: hint.occurredAt ?? null,
-      traceId: normalizeNullableString(hint.traceId),
-      eventType: normalizeNullableString(hint.eventType),
-      resourceCategory: normalizeNullableString(hint.resourceCategory),
-      reason: normalizeNullableString(hint.reason),
-      nextReconcileAt: hint.nextReconcileAt ?? null,
-      revokeWarning: hint.revokeWarning ?? null,
-      createdAt: input.occurredAt,
-      tx,
-    });
-  });
-
-  await publishHostedDeviceSyncWake({
+  await persistHostedDeviceSyncWake({
     dispatch,
     store,
+    persist: async (tx) => {
+      await store.createSignal({
+        userId: input.userId,
+        connectionId: input.connectionId,
+        provider: input.provider,
+        kind: mapHostedDeviceSyncSignalKind(input.source),
+        occurredAt: hint.occurredAt ?? null,
+        traceId: normalizeNullableString(hint.traceId),
+        eventType: normalizeNullableString(hint.eventType),
+        resourceCategory: normalizeNullableString(hint.resourceCategory),
+        reason: normalizeNullableString(hint.reason),
+        nextReconcileAt: hint.nextReconcileAt ?? null,
+        revokeWarning: hint.revokeWarning ?? null,
+        createdAt: input.occurredAt,
+        tx,
+      });
+    },
   });
 
   return {
@@ -381,19 +399,26 @@ export async function dispatchHostedDeviceSyncWake(input: {
   };
 }
 
-async function publishHostedDeviceSyncWake(input: {
+async function persistHostedDeviceSyncWake(input: {
   dispatch: HostedExecutionDispatchRequest;
   store: PrismaDeviceSyncControlPlaneStore;
+  persist(tx: HostedPrismaTransactionClient): Promise<void>;
+  complete?(tx: HostedPrismaTransactionClient): Promise<void>;
 }): Promise<void> {
   // Webhook retries rebuild fresh signal rows, so the outbox identity must stay tied to
   // the stable wake event id instead of the transient signal primary key.
-  await enqueueHostedExecutionOutbox({
-    dispatch: input.dispatch,
-    sourceId: input.dispatch.eventId,
-    sourceType: "device_sync_signal",
-    storage: "reference",
-    tx: input.store.prisma,
+  await input.store.prisma.$transaction(async (tx) => {
+    await input.persist(tx);
+    await enqueueHostedExecutionOutbox({
+      dispatch: input.dispatch,
+      sourceId: input.dispatch.eventId,
+      sourceType: "device_sync_signal",
+      storage: "reference",
+      tx,
+    });
+    await input.complete?.(tx);
   });
+
   void drainHostedExecutionOutboxBestEffort({
     eventIds: [
       input.dispatch.eventId,
@@ -434,16 +459,9 @@ function buildHostedWebhookHintSignal(input: {
   jobs?: readonly DeviceSyncJobInput[];
   traceId?: string | null;
   occurredAt?: string | null;
-  payload?: Record<string, unknown>;
   provider: string;
+  resourceCategory?: string | null;
 }): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
-  const resourceCategory =
-    typeof input.payload?.dataType === "string"
-      ? input.payload.dataType
-      : typeof input.payload?.resourceType === "string"
-        ? input.payload.resourceType
-        : null;
-
   return {
     eventType: input.eventType,
     jobs: normalizeHostedDeviceSyncJobHints({
@@ -455,7 +473,7 @@ function buildHostedWebhookHintSignal(input: {
       traceId: input.traceId,
     }),
     occurredAt: input.occurredAt ?? null,
-    resourceCategory,
+    resourceCategory: input.resourceCategory ?? null,
     traceId: input.traceId ?? null,
   } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
 }

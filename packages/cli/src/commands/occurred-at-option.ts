@@ -1,0 +1,118 @@
+import { formatTimeZoneDateTimeParts, isStrictIsoDate } from '@murphai/contracts'
+import { loadVault } from '@murphai/core'
+import {
+  isoTimestampSchema,
+  localDateSchema,
+} from '@murphai/operator-config/vault-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+
+const LOCAL_NOON_HOUR = 12
+const LOCAL_NOON_MINUTE = 0
+const LOCAL_NOON_SECOND = 0
+const MAX_TIMEZONE_RESOLUTION_ITERATIONS = 4
+
+interface NormalizeOccurredAtOptionInput {
+  vault: string
+  occurredAt?: string
+}
+
+interface LocalDateParts {
+  year: number
+  month: number
+  day: number
+}
+
+export async function normalizeOccurredAtOption(
+  input: NormalizeOccurredAtOptionInput,
+): Promise<string | undefined> {
+  if (typeof input.occurredAt !== 'string') {
+    return undefined
+  }
+
+  const occurredAt = input.occurredAt.trim()
+  if (occurredAt.length === 0) {
+    return undefined
+  }
+
+  if (isoTimestampSchema.safeParse(occurredAt).success) {
+    return occurredAt
+  }
+
+  if (!localDateSchema.safeParse(occurredAt).success || !isStrictIsoDate(occurredAt)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Expected --occurred-at to be an ISO 8601 timestamp with an explicit offset or a YYYY-MM-DD date.',
+    )
+  }
+
+  const vault = await loadVault({ vaultRoot: input.vault })
+  return resolveLocalDateAtVaultNoon(occurredAt, vault.metadata.timezone)
+}
+
+function resolveLocalDateAtVaultNoon(localDate: string, timeZone: string): string {
+  const parts = parseLocalDateParts(localDate)
+  const targetLocalMilliseconds = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    LOCAL_NOON_HOUR,
+    LOCAL_NOON_MINUTE,
+    LOCAL_NOON_SECOND,
+    0,
+  )
+
+  let guessMilliseconds = targetLocalMilliseconds
+
+  for (let iteration = 0; iteration < MAX_TIMEZONE_RESOLUTION_ITERATIONS; iteration += 1) {
+    const observed = formatTimeZoneDateTimeParts(guessMilliseconds, timeZone)
+    const observedLocalMilliseconds = Date.UTC(
+      observed.year,
+      observed.month - 1,
+      observed.day,
+      observed.hour,
+      observed.minute,
+      observed.second,
+      0,
+    )
+    const deltaMilliseconds = observedLocalMilliseconds - targetLocalMilliseconds
+
+    if (deltaMilliseconds === 0) {
+      return new Date(guessMilliseconds).toISOString()
+    }
+
+    guessMilliseconds -= deltaMilliseconds
+  }
+
+  const resolved = formatTimeZoneDateTimeParts(guessMilliseconds, timeZone)
+  if (
+    resolved.year === parts.year &&
+    resolved.month === parts.month &&
+    resolved.day === parts.day &&
+    resolved.hour === LOCAL_NOON_HOUR &&
+    resolved.minute === LOCAL_NOON_MINUTE &&
+    resolved.second === LOCAL_NOON_SECOND
+  ) {
+    return new Date(guessMilliseconds).toISOString()
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    `Could not resolve --occurred-at date "${localDate}" in vault timezone "${timeZone}".`,
+  )
+}
+
+function parseLocalDateParts(value: string): LocalDateParts {
+  const match = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})$/u.exec(value)
+  if (!match?.groups) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Expected a YYYY-MM-DD date, received "${value}".`,
+    )
+  }
+
+  return {
+    year: Number(match.groups.year),
+    month: Number(match.groups.month),
+    day: Number(match.groups.day),
+  }
+}

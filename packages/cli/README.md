@@ -10,9 +10,9 @@ The repo implementation happens to live in `packages/cli`, but that is a maintai
 
 If you want a local, inspectable assistant that keeps durable truth in normal files you can read, this is the package you install.
 
-Runtime: Node `>= 22.16.0`.
+Runtime: Node `>= 24.14.1`.
 
-Supported host setup path: macOS and Linux. iMessage remains macOS-only.
+Supported host setup path: macOS and Linux.
 
 ## Install
 
@@ -56,11 +56,19 @@ When you need to read from the vault, use this chooser:
 
 - `vault-cli show <id>` for one exact canonical read id, including stable family ids such as `meal_*` or `doc_*`
 - `vault-cli list` for structured filtering by family, kind, status, stream, tag, or date range
-- `vault-cli search query --text "..."` for fuzzy recall or remembered phrases
-- `vault-cli timeline` for chronology across journals, events, assessments, profile snapshots, and sample summaries
-- `vault-cli profile show current` for the current synthesized profile
+- `vault-cli search query "<query>"` for fuzzy recall or remembered phrases; `--text "<query>"` remains valid for explicit callers
+- `vault-cli timeline` for chronology across journals, events, assessments, and sample summaries
+- `vault-cli memory show` plus targeted `vault-cli knowledge ...` reads for saved user context
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
+
+When you need route distance or duration between two points for a run, walk, ride, or hike, use:
+
+```bash
+MAPBOX_ACCESS_TOKEN=... vault-cli route estimate "123 Example St, Melbourne VIC" "St Kilda Beach" --profile walking
+```
+
+Add `--elevation` when you want an approximate elevation summary. Geometry stays omitted unless you opt in with `--geometry`, and walking lookups can now resolve hiking POIs such as trailheads or huts through temporary Mapbox Search Box fallback without persisting that lookup data in Murph state.
 
 For durable local synthesis that should keep adding up inside the vault, use the derived knowledge wiki commands:
 
@@ -91,6 +99,20 @@ pnpm install --frozen-lockfile
 pnpm onboard --vault ./vault
 ```
 
+For package-local CLI iteration, use the source-first test lane:
+
+```bash
+pnpm --dir packages/cli test
+```
+
+For the explicit built-runtime and package-shape acceptance lane, use:
+
+```bash
+pnpm --dir packages/cli verify
+# or the repo-composed CLI acceptance entrypoint
+pnpm verify:cli
+```
+
 If `pnpm` is not available yet, use:
 
 ```bash
@@ -99,11 +121,13 @@ If `pnpm` is not available yet, use:
 
 ## Config defaults
 
-The CLI supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json` and then `~/.config/vault-cli/config.json`.
+The CLI supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json`.
+
+Those incur config defaults are local CLI convenience only. Hosted execution does not snapshot or honor `~/.config/murph/config.json`; portable runtime behavior must live in canonical vault state or typed operator config under `~/.murph/config.json`.
 
 - `murph --config <path> ...` selects an explicit config file
 - `murph --no-config ...` disables config loading for a single run
-- the published package now ships `config.schema.json` so editors can validate and autocomplete those config files
+- the published package now ships Incur's native `config.schema.json` so editors can validate and autocomplete those config files
 
 Config files only supply command `options`, following incur's nested `commands` shape. For example:
 
@@ -118,6 +142,8 @@ Config files only supply command `options`, following incur's nested `commands` 
   }
 }
 ```
+
+The shipped schema is the direct Incur output for config defaults only. Command help text, hints, examples, and agent-facing discovery stay on Incur's normal `--help` and `--llms` surfaces instead of a Murph-specific schema extension.
 
 To refresh the shipped schema artifact from the built CLI entrypoint during package work:
 

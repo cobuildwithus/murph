@@ -8,7 +8,7 @@ import {
   hostedSideEffectRecordKey,
   hostedUserEnvObjectKey,
 } from "../src/storage-paths.js";
-import { expectOpaqueStrings } from "./object-key-assertions";
+import { expectOpaqueStrings } from "./object-key-assertions.js";
 
 const rootKey = new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1));
 

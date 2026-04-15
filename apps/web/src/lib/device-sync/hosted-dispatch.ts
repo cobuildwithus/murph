@@ -1,3 +1,4 @@
+import { parseHostedExecutionDeviceSyncWakeHint } from "@murphai/device-syncd/hosted-runtime";
 import {
   buildHostedExecutionDeviceSyncWakeDispatch,
   type HostedExecutionDeviceSyncWakeEvent,
@@ -44,7 +45,7 @@ export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
     connectionId: input.connectionId,
     eventId: input.eventId,
     hint: input.signalPayload
-      ? toJsonRecord(input.signalPayload) as HostedExecutionDeviceSyncWakeEvent["hint"]
+      ? parseHostedExecutionDeviceSyncWakeHint(toJsonRecord(input.signalPayload))
       : null,
     occurredAt: input.occurredAt,
     provider: input.provider,

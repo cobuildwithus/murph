@@ -1,5 +1,10 @@
+/**
+ * Service-only knowledge entrypoint.
+ *
+ * Query-owned result contracts stay on @murphai/query so callers do not pick
+ * up shared knowledge schemas through @murphai/assistant-engine/knowledge.
+ */
 export {
-  assertKnowledgeSourcePathAllowed,
   getKnowledgePage,
   lintKnowledgePages,
   listKnowledgePages,
@@ -15,26 +20,3 @@ export {
   type KnowledgeServiceDependencies,
   type KnowledgeUpsertInput,
 } from './knowledge/service.js'
-
-export {
-  matchesKnowledgeFilter,
-  normalizeLibrarySlugInputs,
-  normalizeRelatedSlugInputs,
-  normalizeSourcePathInputs,
-} from './knowledge/documents.js'
-
-export type {
-  KnowledgeGetResult,
-  KnowledgeIndexRebuildResult,
-  KnowledgeLogEntry,
-  KnowledgeLogTailResult,
-  KnowledgeLintProblem,
-  KnowledgeLintResult,
-  KnowledgeListResult,
-  KnowledgePage,
-  KnowledgePageMetadata,
-  KnowledgePageReference,
-  KnowledgeSearchHit,
-  KnowledgeSearchResult,
-  KnowledgeUpsertResult,
-} from './knowledge/contracts.js'

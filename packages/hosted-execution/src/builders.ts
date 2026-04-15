@@ -1,5 +1,7 @@
 import type {
   HostedExecutionAssistantCronTickEvent,
+  HostedExecutionMemberChannels,
+  HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchRequest,
   HostedExecutionEmailMessageReceivedEvent,
@@ -14,14 +16,33 @@ export function buildHostedExecutionMemberActivatedDispatch(input: {
   eventId: string;
   firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
   memberId: string;
+  memberChannels: HostedExecutionMemberChannels;
   occurredAt: string;
 }): HostedExecutionDispatchRequest {
   return {
     event: {
       ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
       kind: "member.activated",
+      memberChannels: { ...input.memberChannels },
       userId: input.memberId,
     } satisfies HostedExecutionMemberActivatedEvent,
+    eventId: input.eventId,
+    occurredAt: input.occurredAt,
+  };
+}
+
+export function buildHostedExecutionMemberChannelsUpdatedDispatch(input: {
+  eventId: string;
+  memberChannels: HostedExecutionMemberChannels;
+  memberId: string;
+  occurredAt: string;
+}): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      kind: "member.channels.updated",
+      memberChannels: { ...input.memberChannels },
+      userId: input.memberId,
+    } satisfies HostedExecutionMemberChannelsUpdatedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
   };
@@ -74,7 +95,7 @@ export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
 
 export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
   eventId: string;
-  identityId: string;
+  identityId: string | null;
   occurredAt: string;
   rawMessageKey: string;
   selfAddress?: string | null;

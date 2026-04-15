@@ -21,6 +21,31 @@ const LINQ_HTTP_TIMEOUT_MS = 30_000
 const LINQ_HTTP_MAX_ATTEMPTS = 3
 const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 
+type LinqOperation =
+  | 'create_chat'
+  | 'create_webhook_subscription'
+  | 'list_phone_numbers'
+  | 'send_message'
+  | 'typing_start'
+  | 'typing_stop'
+
+type LinqSafeRequestDetails = {
+  failureStage?: 'configuration' | 'http' | 'transport'
+  hasIdempotencyKey?: boolean
+  hasReplyToMessageId?: boolean
+  method?: LinqHttpMethod
+  operation: LinqOperation
+  path?: string
+  phoneNumberCount?: number
+  provider: 'linq'
+  recipientCount?: number
+  retryable?: boolean
+  status?: number
+  subscribedEventCount?: number
+  timedOut?: boolean
+  timeoutMs?: number
+}
+
 export interface LinqFetchResponse {
   arrayBuffer(): Promise<ArrayBuffer>
   headers?: ResponseHeadersLike | null
@@ -82,6 +107,10 @@ export async function probeLinqApi(
 ): Promise<ProbeLinqApiResult> {
   const env = dependencies.env ?? process.env
   const response = await requestLinqJson<LinqListPhoneNumbersResponse>({
+    details: {
+      operation: 'list_phone_numbers',
+      provider: 'linq',
+    },
     env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'GET',
@@ -112,9 +141,16 @@ export async function sendLinqChatMessage(
 ): Promise<LinqSendMessageResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const message = normalizeRequiredString(input.message, 'message')
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
 
   return requestLinqJson<LinqSendMessageResponse>({
+    details: {
+      hasIdempotencyKey: idempotencyKey !== null,
+      hasReplyToMessageId: replyToMessageId !== null,
+      operation: 'send_message',
+      provider: 'linq',
+    },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
@@ -141,6 +177,10 @@ export async function startLinqChatTypingIndicator(
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
 
   await requestLinqNoContent({
+    details: {
+      operation: 'typing_start',
+      provider: 'linq',
+    },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
@@ -162,6 +202,10 @@ export async function stopLinqChatTypingIndicator(
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
 
   await requestLinqNoContent({
+    details: {
+      operation: 'typing_stop',
+      provider: 'linq',
+    },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'DELETE',
@@ -183,18 +227,27 @@ export async function createLinqChat(
     signal?: AbortSignal
   } = {},
 ): Promise<CreateLinqChatResult> {
+  const from = normalizeRequiredString(input.from, 'from')
+  const recipients = normalizeLinqStringList(input.to, 'recipient')
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const response = await requestLinqJson<LinqCreateChatResponse>({
+    details: {
+      hasIdempotencyKey: idempotencyKey !== null,
+      operation: 'create_chat',
+      provider: 'linq',
+      recipientCount: recipients.length,
+    },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/chats',
     body: {
-      from: normalizeRequiredString(input.from, 'from'),
+      from,
       message: buildLinqTextMessageBody({
         idempotencyKey: input.idempotencyKey,
         message: input.message,
       }).message,
-      to: normalizeLinqStringList(input.to, 'recipient'),
+      to: recipients,
     },
     signal: dependencies.signal,
   })
@@ -217,18 +270,28 @@ export async function createLinqWebhookSubscription(
     signal?: AbortSignal
   } = {},
 ): Promise<CreateLinqWebhookSubscriptionResult> {
+  const phoneNumbers = input.phoneNumbers && input.phoneNumbers.length > 0
+    ? normalizeLinqStringList(input.phoneNumbers, 'phone number')
+    : null
+  const subscribedEvents = normalizeLinqStringList(input.subscribedEvents, 'subscribed event')
   const response = await requestLinqJson<LinqCreateWebhookSubscriptionResponse>({
+    details: {
+      operation: 'create_webhook_subscription',
+      phoneNumberCount: phoneNumbers?.length ?? 0,
+      provider: 'linq',
+      subscribedEventCount: subscribedEvents.length,
+    },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/webhook-subscriptions',
     body: {
-      ...(input.phoneNumbers && input.phoneNumbers.length > 0
+      ...(phoneNumbers
         ? {
-            phone_numbers: normalizeLinqStringList(input.phoneNumbers, 'phone number'),
+            phone_numbers: phoneNumbers,
           }
         : {}),
-      subscribed_events: normalizeLinqStringList(input.subscribedEvents, 'subscribed event'),
+      subscribed_events: subscribedEvents,
       target_url: normalizeRequiredString(input.targetUrl, 'target url'),
     },
     signal: dependencies.signal,
@@ -247,6 +310,7 @@ export async function createLinqWebhookSubscription(
 }
 
 async function requestLinqJson<T>(input: {
+  details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   method: LinqHttpMethod
@@ -254,104 +318,121 @@ async function requestLinqJson<T>(input: {
   body?: Record<string, unknown>
   signal?: AbortSignal
 }): Promise<T> {
-  const token = resolveLinqApiToken(input.env)
-  if (!token) {
-    throw new VaultCliError(
-      'LINQ_API_TOKEN_REQUIRED',
-      'Linq access requires LINQ_API_TOKEN.',
-    )
-  }
-
-  const fetchImplementation = input.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
-  if (typeof fetchImplementation !== 'function') {
-    throw new VaultCliError(
-      'LINQ_UNAVAILABLE',
-      'Linq access requires fetch support in the current Node.js runtime.',
-    )
-  }
-
-  const baseUrl = normalizeLinqBaseUrl(
-    resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
-  )
-  const url = new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`)
-
-  return requestJsonWithRetry<T, LinqFetchResponse>({
-    createHttpError: (response) =>
-      createLinqHttpError(response, input.method, input.path),
-    fetchResponse: () =>
-      fetchLinqResponse({
-        fetchImplementation,
-        url: url.toString(),
-        method: input.method,
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(input.body ? { 'content-type': 'application/json' } : {}),
-        },
-        body: input.body ? JSON.stringify(input.body) : undefined,
-        signal: input.signal,
-        path: input.path,
-      }),
-    isRetryableError: isRetryableLinqRequestError,
-    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+  return requestLinq<T>({
+    ...input,
     parseResponse: async (response) => (await response.json()) as T,
-    signal: input.signal,
-    waitForRetryDelay: waitForLinqRetryDelay,
   })
 }
 
 async function requestLinqNoContent(input: {
+  details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   method: LinqHttpMethod
   path: string
   signal?: AbortSignal
 }): Promise<void> {
+  await requestLinq<void>({
+    ...input,
+    parseResponse: async () => undefined,
+  })
+}
+
+type LinqHttpMethod = 'DELETE' | 'GET' | 'POST'
+
+async function requestLinq<T>(input: {
+  details: LinqSafeRequestDetails
+  env: NodeJS.ProcessEnv
+  fetchImplementation?: LinqFetch
+  method: LinqHttpMethod
+  path: string
+  body?: Record<string, unknown>
+  parseResponse(response: LinqFetchResponse): Promise<T>
+  signal?: AbortSignal
+}): Promise<T> {
+  const request = resolveLinqRequest(input)
+
+  return requestJsonWithRetry<T, LinqFetchResponse>({
+    createHttpError: (response) =>
+      createLinqHttpError(response, input.details, input.method, input.path),
+    fetchResponse: () =>
+      fetchLinqResponse({
+        body: request.body,
+        details: input.details,
+        fetchImplementation: request.fetchImplementation,
+        headers: request.headers,
+        method: input.method,
+        path: input.path,
+        signal: input.signal,
+        url: request.url,
+      }),
+    isRetryableError: isRetryableLinqRequestError,
+    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+    parseResponse: input.parseResponse,
+    signal: input.signal,
+    waitForRetryDelay: waitForLinqRetryDelay,
+  })
+}
+
+function resolveLinqRequest(input: {
+  details: LinqSafeRequestDetails
+  env: NodeJS.ProcessEnv
+  fetchImplementation?: LinqFetch
+  path: string
+  body?: Record<string, unknown>
+}): {
+  body?: string
+  fetchImplementation: LinqFetch
+  headers: Record<string, string>
+  url: string
+} {
   const token = resolveLinqApiToken(input.env)
   if (!token) {
-    throw new VaultCliError(
+    throw createLinqConfigurationError(
       'LINQ_API_TOKEN_REQUIRED',
       'Linq access requires LINQ_API_TOKEN.',
+      input.details,
     )
   }
 
   const fetchImplementation = input.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
   if (typeof fetchImplementation !== 'function') {
-    throw new VaultCliError(
+    throw createLinqConfigurationError(
       'LINQ_UNAVAILABLE',
       'Linq access requires fetch support in the current Node.js runtime.',
+      input.details,
     )
   }
 
   const baseUrl = normalizeLinqBaseUrl(
     resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
   )
-  const url = new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`)
+  const body = input.body ? JSON.stringify(input.body) : undefined
 
-  await requestJsonWithRetry<void, LinqFetchResponse>({
-    createHttpError: (response) =>
-      createLinqHttpError(response, input.method, input.path),
-    fetchResponse: () =>
-      fetchLinqResponse({
-        fetchImplementation,
-        url: url.toString(),
-        method: input.method,
-        headers: {
-          authorization: `Bearer ${token}`,
-        },
-        signal: input.signal,
-        path: input.path,
-      }),
-    isRetryableError: isRetryableLinqRequestError,
-    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
-    parseResponse: async () => undefined,
-    signal: input.signal,
-    waitForRetryDelay: waitForLinqRetryDelay,
+  return {
+    body,
+    fetchImplementation,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(body ? { 'content-type': 'application/json' } : {}),
+    },
+    url: new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`).toString(),
+  }
+}
+
+function createLinqConfigurationError(
+  code: 'LINQ_API_TOKEN_REQUIRED' | 'LINQ_UNAVAILABLE',
+  message: string,
+  details: LinqSafeRequestDetails,
+): VaultCliError {
+  return new VaultCliError(code, message, {
+    ...details,
+    failureStage: 'configuration',
   })
 }
 
-type LinqHttpMethod = 'DELETE' | 'GET' | 'POST'
-
 async function fetchLinqResponse(input: {
+  details: LinqSafeRequestDetails
   fetchImplementation: LinqFetch
   url: string
   method: LinqHttpMethod
@@ -364,6 +445,7 @@ async function fetchLinqResponse(input: {
     body: input.body,
     createTransportError: ({ error, timedOut }) =>
       createLinqRequestError({
+        details: input.details,
         method: input.method,
         path: input.path,
         error,
@@ -381,6 +463,7 @@ async function fetchLinqResponse(input: {
 
 async function createLinqHttpError(
   response: LinqFetchResponse,
+  details: LinqSafeRequestDetails,
   method: LinqHttpMethod,
   path: string,
 ): Promise<VaultCliError> {
@@ -391,6 +474,8 @@ async function createLinqHttpError(
     extractLinqErrorMessage(payload, rawText) ??
       `Linq request ${method} ${path} failed with HTTP ${response.status}.`,
     {
+      ...details,
+      failureStage: 'http',
       method,
       path,
       retryable: shouldRetryLinqHttpStatus(method, response.status),
@@ -400,6 +485,7 @@ async function createLinqHttpError(
 }
 
 function createLinqRequestError(input: {
+  details: LinqSafeRequestDetails
   method: LinqHttpMethod
   path: string
   error: unknown
@@ -414,7 +500,9 @@ function createLinqRequestError(input: {
     'LINQ_API_REQUEST_FAILED',
     baseMessage,
     {
+      ...input.details,
       error: errorMessage(input.error),
+      failureStage: 'transport',
       method: input.method,
       path: input.path,
       retryable: input.retryable,

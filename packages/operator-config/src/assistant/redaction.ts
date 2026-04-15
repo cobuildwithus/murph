@@ -1,8 +1,6 @@
-const REDACTED_SECRET_TEXT = '[REDACTED]' as const
-
 const SENSITIVE_HEADER_NAME_PATTERN =
   /(?:^|[-_])(?:authorization|cookie|token|secret|api[-_]?key|session[-_]?key)(?:$|[-_])/iu
-const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/gu
+const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/iu
 
 export interface AssistantHeaderPersistenceSplit {
   persistedHeaders: Record<string, string> | null
@@ -44,4 +42,16 @@ export function isSensitiveAssistantHeaderName(name: string): boolean {
 
 export function isSensitiveAssistantHeaderValue(value: string): boolean {
   return SENSITIVE_HEADER_VALUE_PATTERN.test(value)
+}
+
+export function mergeAssistantHeaders(
+  publicHeaders: Record<string, string> | null | undefined,
+  secretHeaders: Record<string, string> | null | undefined,
+): Record<string, string> | null {
+  const merged = {
+    ...(publicHeaders ?? {}),
+    ...(secretHeaders ?? {}),
+  }
+
+  return Object.keys(merged).length > 0 ? merged : null
 }

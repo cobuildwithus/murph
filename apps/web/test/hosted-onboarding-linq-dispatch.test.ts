@@ -2,18 +2,29 @@ import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import {
+  buildHostedInviteReply,
+  buildHostedLinqConversationHomeRedirectReply,
+} from "@/src/lib/hosted-onboarding/linq";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
+  deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
   drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
+  finishHostedOnboardingTiming: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
   maybeStageHostedExecutionDispatchPayload: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
+    baseDetails,
+    startedAtMs: 0,
+    step,
+  })),
   stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
 }));
 
@@ -96,6 +107,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       isProduction: false,
       linqApiBaseUrl: "https://linq.example.test",
       linqApiToken: "linq-token",
+      linqConversationPhoneNumbers: [],
+      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -115,6 +128,19 @@ vi.mock("@/src/lib/prisma", () => ({
     throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-dispatch.test.ts");
   }),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/logging")>(
+    "@/src/lib/hosted-onboarding/logging",
+  );
+
+  return {
+    ...actual,
+    deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
+    finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+    startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
+  };
+});
 
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
@@ -241,6 +267,119 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.verify-request",
+      expect.objectContaining({
+        signaturePresent: false,
+        timestampPresent: false,
+      }),
+    );
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.receipt",
+      expect.objectContaining({
+        eventId: "evt_123",
+        eventType: "message.received",
+      }),
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq",
+      }),
+      "completed",
+      expect.objectContaining({
+        duplicate: false,
+        eventId: "evt_123",
+        eventType: "message.received",
+        responseReason: "dispatched-active-member",
+        signalAbortedBeforeReturn: false,
+      }),
+    );
+    expect(
+      mocks.finishHostedOnboardingTiming.mock.calls.some(
+        ([handle, outcome]) =>
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.outbox-drain"
+          && outcome === "completed",
+      ),
+    ).toBe(true);
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.outbox-handoff",
+      }),
+      "completed",
+      expect.objectContaining({
+        deferred: false,
+      }),
+    );
+  });
+
+  it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      defer: (drain) => {
+        deferred.push(drain);
+      },
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_deferred_dispatch",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "dispatched-active-member",
+    });
+
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "evt_deferred_dispatch",
+      ],
+      limit: 1,
+      prisma,
+    });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.outbox-handoff",
+      }),
+      "scheduled",
+      expect.objectContaining({
+        deferred: true,
+      }),
+    );
+    expect(
+      mocks.finishHostedOnboardingTiming.mock.calls.some(
+        ([handle, outcome]) =>
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.outbox-drain"
+          && outcome === "completed",
+      ),
+    ).toBe(true);
   });
 
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {
@@ -297,7 +436,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "dispatched-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
@@ -903,6 +1042,196 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
+  it("redirects active users who text a non-home Murph line without rebinding the home chat", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: {
+            linqChatIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-chat-id",
+              memberId: "member_123",
+              value: "chat_home",
+            }),
+            linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-recipient-phone",
+              memberId: "member_123",
+              value: "+15550100001",
+            }),
+            memberId: "member_123",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: null,
+          },
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-chat-id",
+            memberId: "member_123",
+            value: "chat_home",
+          }),
+          linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-recipient-phone",
+            memberId: "member_123",
+            value: "+15550100001",
+          }),
+          memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted: null,
+          telegramUserLookupKey: null,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn(),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_other",
+            owner_handle: {
+              handle: "+15550100002",
+              id: "handle_owner_other",
+              is_me: true,
+              service: "sms",
+            },
+          },
+        },
+        eventId: "evt_redirect",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "redirected-to-home-line",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_other",
+        message: buildHostedLinqConversationHomeRedirectReply({
+          homeRecipientPhone: "+15550100001",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceiptSideEffect: {
+          upsert: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceiptSideEffect.upsert,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        payloadJson: expect.objectContaining({
+          chatId: "chat_other",
+          homeRecipientPhone: "+15550100001",
+          memberId: "member_123",
+          template: "conversation_home_redirect",
+        }),
+      }),
+    }));
+    expect(
+      (prisma as unknown as {
+        hostedMemberRouting: {
+          upsert: ReturnType<typeof vi.fn>;
+        };
+      }).hostedMemberRouting.upsert,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("ignores sparse non-home webhook payloads when the saved home line is known but the incoming line is missing", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: {
+            linqChatIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-chat-id",
+              memberId: "member_123",
+              value: "chat_home",
+            }),
+            linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-recipient-phone",
+              memberId: "member_123",
+              value: "+15550100001",
+            }),
+            memberId: "member_123",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: null,
+          },
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_other",
+          },
+        },
+        eventId: "evt_sparse_redirect",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "unknown-home-line",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(
+      (prisma as unknown as {
+        hostedMemberRouting: {
+          upsert: ReturnType<typeof vi.fn>;
+        };
+      }).hostedMemberRouting.upsert,
+    ).not.toHaveBeenCalled();
+  });
+
   it("suppresses repeat signup links after the first send that day", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 2,
@@ -1386,9 +1715,54 @@ function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefine
     };
   }).hostedWebhookReceiptSideEffect;
 
-  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map(
-    (call) => ((call[0] as Record<string, unknown> | undefined) ?? {}),
+  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map((call) =>
+    normalizeHostedWebhookSideEffectUpsertCall(
+      ((call[0] as Record<string, unknown> | undefined) ?? {}),
+    )
   );
+}
+
+function normalizeHostedWebhookSideEffectUpsertCall(
+  call: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...call,
+    create: normalizeHostedWebhookSideEffectRecord(call.create),
+    update: normalizeHostedWebhookSideEffectRecord(call.update),
+  };
+}
+
+function normalizeHostedWebhookSideEffectRecord(value: unknown): Record<string, unknown> | unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const payload =
+    record.payloadJson && typeof record.payloadJson === "object" && !Array.isArray(record.payloadJson)
+      ? record.payloadJson as Record<string, unknown>
+      : null;
+  const result =
+    record.resultJson && typeof record.resultJson === "object" && !Array.isArray(record.resultJson)
+      ? record.resultJson as Record<string, unknown>
+      : null;
+
+  return {
+    ...record,
+    dispatchPayloadJson: record.kind === "hosted_execution_dispatch" ? record.payloadJson ?? null : null,
+    linqChatId: record.kind === "linq_message_send" && typeof payload?.chatId === "string" ? payload.chatId : null,
+    linqMemberId: record.kind === "linq_message_send" && typeof payload?.memberId === "string" ? payload.memberId : null,
+    linqInviteId: record.kind === "linq_message_send" && typeof payload?.inviteId === "string" ? payload.inviteId : null,
+    linqReplyToMessageId:
+      record.kind === "linq_message_send" && typeof payload?.replyToMessageId === "string"
+        ? payload.replyToMessageId
+        : null,
+    linqResultChatId:
+      record.kind === "linq_message_send" && typeof result?.chatId === "string" ? result.chatId : null,
+    linqResultMessageId:
+      record.kind === "linq_message_send" && typeof result?.messageId === "string" ? result.messageId : null,
+    linqTemplate: record.kind === "linq_message_send" && typeof payload?.template === "string" ? payload.template : null,
+  };
 }
 
 function makeHostedLinqDailyState(input: {

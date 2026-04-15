@@ -69,14 +69,18 @@ export function normalizeConnectorAccountId(
   const normalized = normalizeNullableString(value)
 
   switch (source) {
-    case 'imessage':
-      return normalized ?? 'self'
     case 'telegram':
       return normalized ?? 'bot'
     case 'email':
       return normalized
     case 'linq':
       return normalized ?? 'default'
+    default: {
+      throw new VaultCliError(
+        'INBOX_SOURCE_UNSUPPORTED',
+        `Inbox source "${source}" is not supported.`,
+      )
+    }
   }
 }
 
@@ -243,7 +247,21 @@ export function resolveAttachmentParseState(
   attachment: RuntimeAttachmentRecord,
   jobs: RuntimeAttachmentParseJobRecord[],
 ): 'pending' | 'running' | 'succeeded' | 'failed' | null {
-  return attachment.parseState ?? jobs[0]?.state ?? null
+  return readAttachmentParseState(attachment.parseState) ?? jobs[0]?.state ?? null
+}
+
+function readAttachmentParseState(
+  value: RuntimeAttachmentRecord['parseState'],
+): 'pending' | 'running' | 'succeeded' | 'failed' | null {
+  switch (value) {
+    case 'pending':
+    case 'running':
+    case 'succeeded':
+    case 'failed':
+      return value
+    default:
+      return null
+  }
 }
 
 export function occurredDayFromCapture(

@@ -7,15 +7,16 @@ import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";
 import { OURA_DEFAULT_WEBHOOK_TARGETS } from "../src/providers/oura-webhooks.ts";
 import { subtractDays } from "../src/shared.ts";
-import { createJsonResponse } from "./helpers.ts";
+import { createJsonResponse, requireValue } from "./helpers.ts";
 
-import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext } from "../src/types.ts";
+import type { DeviceSyncAccount, DeviceSyncJobRecord, DeviceSyncProvider, ProviderJobContext } from "../src/types.ts";
 
 function createAccount(scopes: string[]): DeviceSyncAccount {
   return {
     id: "acct-oura-1",
     provider: "oura",
     externalAccountId: "oura-user-1",
+    disconnectGeneration: 0,
     displayName: "oura@example.com",
     status: "active",
     scopes,
@@ -78,6 +79,12 @@ function createOuraWebhookHeaders(secret: string, timestamp: string, rawBody: Bu
     "x-oura-signature": createOuraWebhookSignature(secret, timestamp, rawBody),
     "x-oura-timestamp": timestamp,
   });
+}
+
+function requireVerifyAndParseWebhook(
+  provider: DeviceSyncProvider,
+): NonNullable<DeviceSyncProvider["verifyAndParseWebhook"]> {
+  return requireValue(provider.verifyAndParseWebhook);
 }
 
 test("Oura provider exchanges an auth code into a refreshable connection", async () => {
@@ -606,6 +613,7 @@ test("Oura provider turns non-operation webhook events into reconcile hints and 
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "sync_completed",
@@ -617,7 +625,7 @@ test("Oura provider turns non-operation webhook events into reconcile hints and 
   );
   const timestamp = "2026-03-16T09:58:10.000Z";
 
-  const parsed = await provider.verifyAndParseWebhook?.({
+  const parsed = await verifyAndParseWebhook({
     headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
     rawBody,
     now: "2026-03-16T10:00:00.000Z",
@@ -628,11 +636,7 @@ test("Oura provider turns non-operation webhook events into reconcile hints and 
     eventType: "sync_completed",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T10:00:00.000Z",
-    payload: {
-      eventType: "sync_completed",
-      dataType: "workout",
-      operation: null,
-    },
+    resourceCategory: "workout",
     jobs: [
       {
         kind: "reconcile",
@@ -649,12 +653,12 @@ test("Oura provider turns non-operation webhook events into reconcile hints and 
 
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
         rawBody,
         now: "2026-03-16T10:10:00.000Z",
       }),
-    (error) =>
+    (error: unknown) =>
       error instanceof DeviceSyncError &&
       error.code === "OURA_WEBHOOK_TIMESTAMP_INVALID" &&
       error.httpStatus === 400,
@@ -666,6 +670,7 @@ test("Oura provider validates webhook signatures and turns notifications into re
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "daily_sleep.updated",
@@ -678,7 +683,7 @@ test("Oura provider validates webhook signatures and turns notifications into re
   );
   const timestamp = "2026-03-16T09:58:10.000Z";
 
-  const parsed = await provider.verifyAndParseWebhook?.({
+  const parsed = await verifyAndParseWebhook({
     headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
     rawBody,
     now: "2026-03-16T10:00:00.000Z",
@@ -689,11 +694,7 @@ test("Oura provider validates webhook signatures and turns notifications into re
     eventType: "daily_sleep.updated",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T09:58:00.000Z",
-    payload: {
-      eventType: "daily_sleep.updated",
-      dataType: "daily_sleep",
-      operation: "update",
-    },
+    resourceCategory: "daily_sleep",
     jobs: [
       {
         kind: "resource",
@@ -719,6 +720,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "update",
@@ -733,7 +735,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
   const signature = createOuraWebhookSignature("oura-client-secret", timestamp, rawBody)
     .toUpperCase();
 
-  const parsed = await provider.verifyAndParseWebhook?.({
+  const parsed = await verifyAndParseWebhook({
     headers: new Headers({
       "x-oura-signature": signature,
       "x-oura-timestamp": timestamp,
@@ -743,7 +745,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
   });
 
   assert.equal(parsed?.eventType, "daily_sleep.updated");
-  assert.equal(parsed?.payload?.dataType, "daily_sleep");
+  assert.equal(parsed?.resourceCategory, "daily_sleep");
 });
 
 test("Oura provider accepts base64 webhook signatures and falls back to the request time when event_time is absent", async () => {
@@ -751,6 +753,7 @@ test("Oura provider accepts base64 webhook signatures and falls back to the requ
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "update",
@@ -764,7 +767,7 @@ test("Oura provider accepts base64 webhook signatures and falls back to the requ
   const now = "2026-03-16T10:00:00.000Z";
   const reconcileDays = provider.descriptor.sync?.windows.reconcileDays ?? 0;
 
-  const parsed = await provider.verifyAndParseWebhook?.({
+  const parsed = await verifyAndParseWebhook({
     headers: new Headers({
       "x-oura-signature": createOuraWebhookEncodedSignature("oura-client-secret", timestamp, rawBody, "base64"),
       "x-oura-timestamp": timestamp,
@@ -778,11 +781,7 @@ test("Oura provider accepts base64 webhook signatures and falls back to the requ
     eventType: "workout.updated",
     traceId: parsed?.traceId,
     occurredAt: now,
-    payload: {
-      eventType: "workout.updated",
-      dataType: "workout",
-      operation: "update",
-    },
+    resourceCategory: "workout",
     jobs: [
       {
         kind: "resource",
@@ -846,14 +845,16 @@ test("Oura provider webhook admin no-ops without a verification token and reuses
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     },
   });
+  const webhookAdmin = requireValue(provider.webhookAdmin);
+  const ensureSubscriptions = requireValue(webhookAdmin.ensureSubscriptions);
 
-  await provider.webhookAdmin?.ensureSubscriptions({
+  await ensureSubscriptions({
     publicBaseUrl: "https://sync.example.test/device-sync",
     verificationToken: "   ",
   });
   assert.deepEqual(requests, []);
 
-  await provider.webhookAdmin?.ensureSubscriptions({
+  await ensureSubscriptions({
     publicBaseUrl: "https://sync.example.test/device-sync",
     verificationToken: "verify-token-for-tests",
   });
@@ -870,6 +871,7 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "delete",
@@ -881,7 +883,7 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
     "utf8",
   );
   const timestamp = String(Math.floor(Date.parse("2026-03-16T10:00:00.000Z") / 1000));
-  const parsed = await provider.verifyAndParseWebhook?.({
+  const parsed = await verifyAndParseWebhook({
     headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
     rawBody,
     now: "2026-03-16T10:00:00.000Z",
@@ -892,11 +894,7 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
     eventType: "session.deleted",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T09:58:00.000Z",
-    payload: {
-      eventType: "session.deleted",
-      dataType: "session",
-      operation: "delete",
-    },
+    resourceCategory: "session",
     jobs: [
       {
         kind: "delete",
@@ -907,13 +905,6 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
           dataType: "session",
           objectId: "session-42",
           occurredAt: "2026-03-16T09:58:00.000Z",
-          webhookPayload: {
-            event_type: "delete",
-            data_type: "session",
-            object_id: "session-42",
-            user_id: "oura-user-1",
-            event_time: "2026-03-16T09:58:00.000Z",
-          },
         },
       },
     ],
@@ -944,13 +935,6 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
           resource_id: "session-42",
           occurred_at: "2026-03-16T09:58:00.000Z",
           source_event_type: "session.deleted",
-          payload: {
-            event_type: "delete",
-            data_type: "session",
-            object_id: "session-42",
-            user_id: "oura-user-1",
-            event_time: "2026-03-16T09:58:00.000Z",
-          },
         },
       ],
     },
@@ -991,14 +975,6 @@ test("Oura provider imports hosted-narrowed delete wake payloads as deletion sna
     objectId: "session-42",
     occurredAt: "2026-03-27T08:03:00.000Z",
     sourceEventType: "session.deleted",
-    webhookPayload: {
-      data_type: "session",
-      event_time: "2026-03-27T08:03:00.000Z",
-      event_type: "delete",
-      object_id: "session-42",
-      trace_id: "trace_delete_123",
-      user_id: "oura-user-1",
-    },
   }));
 
   assert.deepEqual(importedSnapshots, [
@@ -1011,14 +987,6 @@ test("Oura provider imports hosted-narrowed delete wake payloads as deletion sna
           resource_id: "session-42",
           occurred_at: "2026-03-27T08:03:00.000Z",
           source_event_type: "session.deleted",
-          payload: {
-            data_type: "session",
-            event_time: "2026-03-27T08:03:00.000Z",
-            event_type: "delete",
-            object_id: "session-42",
-            trace_id: "trace_delete_123",
-            user_id: "oura-user-1",
-          },
         },
       ],
     },
@@ -1030,6 +998,7 @@ test("Oura provider fallback trace ids ignore transport timestamps when the webh
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "update",
@@ -1040,12 +1009,12 @@ test("Oura provider fallback trace ids ignore transport timestamps when the webh
     }),
     "utf8",
   );
-  const first = await provider.verifyAndParseWebhook?.({
+  const first = await verifyAndParseWebhook({
     headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:00:00.000Z", rawBody),
     rawBody,
     now: "2026-03-16T10:00:00.000Z",
   });
-  const second = await provider.verifyAndParseWebhook?.({
+  const second = await verifyAndParseWebhook({
     headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:05:00.000Z", rawBody),
     rawBody,
     now: "2026-03-16T10:05:00.000Z",
@@ -1198,6 +1167,7 @@ test("Oura webhook rejects malformed timestamp headers even when the signature m
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "daily_sleep.updated",
@@ -1213,7 +1183,7 @@ test("Oura webhook rejects malformed timestamp headers even when the signature m
 
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: new Headers({
           "x-oura-signature": signature,
           "x-oura-timestamp": timestamp,
@@ -1230,6 +1200,7 @@ test("Oura webhook rejects missing or invalid signatures before parsing the payl
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       event_type: "update",
@@ -1243,7 +1214,7 @@ test("Oura webhook rejects missing or invalid signatures before parsing the payl
 
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: new Headers({
           "x-oura-timestamp": timestamp,
         }),
@@ -1257,7 +1228,7 @@ test("Oura webhook rejects missing or invalid signatures before parsing the payl
   );
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: new Headers({
           "x-oura-signature": "invalid-signature",
           "x-oura-timestamp": timestamp,
@@ -1277,6 +1248,7 @@ test("Oura provider rejects invalid webhook payloads, schedules reconcile jobs, 
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const reconcileProvider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
@@ -1302,7 +1274,7 @@ test("Oura provider rejects invalid webhook payloads, schedules reconcile jobs, 
 
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
         rawBody,
         now: "2026-03-16T10:00:00.000Z",
@@ -1384,6 +1356,8 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
   });
+  const webhookAdmin = requireValue(provider.webhookAdmin);
+  const resolveVerificationChallenge = requireValue(webhookAdmin.resolveVerificationChallenge);
   const fallbackSnapshots: unknown[] = [];
 
   assert.equal(
@@ -1396,7 +1370,7 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
     "https://cloud.ouraring.com/oauth/authorize?client_id=oura-client-id&response_type=code&redirect_uri=https%3A%2F%2Fsync.example.test%2Fdevice-sync%2Foauth%2Foura%2Fcallback&scope=personal+workout&state=state-connect",
   );
   assert.equal(
-    provider.webhookAdmin?.resolveVerificationChallenge({
+    resolveVerificationChallenge({
       url: new URL("https://sync.example.test/device-sync/webhooks/oura?verification_token=verify-token&challenge=challenge-123"),
       verificationToken: "verify-token",
     }),

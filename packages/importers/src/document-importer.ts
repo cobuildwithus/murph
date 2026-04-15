@@ -1,9 +1,11 @@
+import { type EventSource } from "@murphai/contracts";
 import { z } from "zod";
 
 import { assertCanonicalWritePort } from "./core-port.ts";
 import type { DocumentImportPayload } from "./core-port.ts";
 import {
   inspectFileAsset,
+  optionalEventSourceSchema,
   optionalTimestampSchema,
   optionalTrimmedStringSchema,
   parseInputObject,
@@ -17,7 +19,7 @@ export interface DocumentImportInput {
   title?: string;
   occurredAt?: string | number | Date;
   note?: string;
-  source?: string;
+  source?: EventSource;
 }
 
 export interface ImporterExecutionOptions {
@@ -31,7 +33,7 @@ const documentImportInputSchema = z
     title: optionalTrimmedStringSchema("title"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
-    source: optionalTrimmedStringSchema("source"),
+    source: optionalEventSourceSchema("source"),
   })
   .passthrough();
 

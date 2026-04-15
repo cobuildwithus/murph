@@ -1,6 +1,7 @@
 "use client";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 import { useHostedEmailSettingsController } from "./hosted-email-settings-controller";
 import {
   HostedEmailSettingsContent,
@@ -8,12 +9,14 @@ import {
 } from "./hosted-email-settings-sections";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
-export function HostedEmailSettings() {
-  return <HostedEmailSettingsInner />;
-}
-
-function HostedEmailSettingsInner() {
-  const controller = useHostedEmailSettingsController();
+export function HostedEmailSettings(props: {
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+}) {
+  const controller = useHostedEmailSettingsController({
+    authenticated: props.authenticated,
+    initialLinkedAccounts: props.initialLinkedAccounts,
+  });
 
   return (
     <div className="space-y-5">
@@ -35,7 +38,7 @@ function HostedEmailSettingsInner() {
         <Alert className="border-stone-200 bg-stone-50">
           <AlertTitle>Finishing email sync</AlertTitle>
           <AlertDescription>
-            Finishing the hosted email connection and updating your assistant.
+            Saving your email&hellip;
           </AlertDescription>
         </Alert>
       ) : null}
@@ -43,10 +46,7 @@ function HostedEmailSettingsInner() {
       {!controller.canManageEmail ? (
         <HostedSettingsSessionState
           authenticated={controller.authenticated}
-          isLoadingAuthenticatedUser={controller.isLoadingAuthenticatedUser}
-          profileLabel="email settings"
-          ready={controller.ready}
-          signedOutDescription="Open your latest Murph invite or sign-in flow in this browser first. We need your Privy session before we can verify an email on your account."
+          signedOutDescription="Sign in to manage your email."
         />
       ) : (
         <HostedEmailSettingsContent
@@ -56,10 +56,8 @@ function HostedEmailSettingsInner() {
           isBusy={controller.isBusy}
           isSendingCode={controller.isSendingCode}
           isSyncingEmailRoute={controller.isSyncingEmailRoute}
-          loggingOut={controller.loggingOut}
           pendingEmailAddress={controller.pendingEmailAddress}
           onChangeEmailAddress={controller.setEmailAddress}
-          onLogout={controller.handleLogout}
           onOpenDialog={() => controller.setDialogOpen(true)}
           onResendCode={controller.handleResendCode}
           onSendCode={controller.handleSendCode}

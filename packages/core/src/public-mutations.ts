@@ -1,4 +1,3 @@
-import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.ts";
 import {
   addMeal as addMealInternal,
   importDeviceBatch as importDeviceBatchInternal,
@@ -12,9 +11,12 @@ import {
 import {
   acquireCanonicalWriteLock,
   inspectCanonicalWriteLock,
+  withCanonicalWriteLockScope,
 } from "./operations/canonical-write-lock.ts";
-import { runCanonicalWrite } from "./operations/write-batch.ts";
-import { copyRawArtifact as copyRawArtifactInternal } from "./raw.ts";
+import {
+  type CopyRawArtifactInput as RawCopyRawArtifactInput,
+  prepareRawArtifact,
+} from "./raw.ts";
 import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.ts";
 import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.ts";
 import { upsertCondition as upsertConditionInternal } from "./bank/conditions.ts";
@@ -55,9 +57,10 @@ import {
 } from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
 import {
-  appendProfileSnapshot as appendProfileSnapshotInternal,
-  rebuildCurrentProfile as rebuildCurrentProfileInternal,
-} from "./profile/storage.ts";
+  updateWearablePreferences as updateWearablePreferencesInternal,
+  updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
+} from "./preferences.ts";
+import { commitAuditedCanonicalWrite, type CanonicalMutationAuditInput } from "./audited-write.ts";
 import { VaultError } from "./errors.ts";
 import {
   initializeVault as initializeVaultInternal,
@@ -65,7 +68,6 @@ import {
   repairVault as repairVaultInternal,
   validateVault as validateVaultInternal,
 } from "./vault.ts";
-import { upgradeVault as upgradeVaultInternal } from "./vault-upgrade.ts";
 
 import type { DateInput, ValidationIssue } from "./types.ts";
 
@@ -106,6 +108,7 @@ export interface ApplyCanonicalWriteBatchInput {
   operationType: string;
   summary: string;
   occurredAt?: DateInput;
+  audit: CanonicalMutationAuditInput;
   rawCopies?: CanonicalRawCopyInput[];
   rawContents?: CanonicalRawContentInput[];
   textWrites?: CanonicalTextWriteInput[];
@@ -125,13 +128,16 @@ async function withCanonicalWriteLock<TResult>(
   vaultRoot: string | undefined,
   operation: () => Promise<TResult>,
 ): Promise<TResult> {
-  const lock = await acquireCanonicalWriteLock(vaultRoot ?? process.cwd());
+  const normalizedVaultRoot = vaultRoot ?? process.cwd();
+  return await withCanonicalWriteLockScope(normalizedVaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(normalizedVaultRoot);
 
-  try {
-    return await operation();
-  } finally {
-    await lock.release();
-  }
+    try {
+      return await operation();
+    } finally {
+      await lock.release();
+    }
+  });
 }
 
 function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResult>(
@@ -139,6 +145,10 @@ function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResu
   operation: (input: TInput) => Promise<TResult>,
 ): Promise<TResult> {
   return withCanonicalWriteLock(input.vaultRoot, () => operation(input));
+}
+
+function hasStableCanonicalId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function buildStaleCanonicalWriteLockIssue(
@@ -186,12 +196,35 @@ export async function validateVault(
   };
 }
 
-export async function appendJsonlRecord<TRecord extends object>(input: {
+export async function appendJsonlRecord<TRecord extends Record<string, unknown>>(input: {
   vaultRoot: string;
   relativePath: string;
   record: TRecord;
 }): Promise<TRecord> {
-  return withCanonicalInputWriteLock(input, appendJsonlRecordInternal);
+  if (!input.record || typeof input.record !== "object" || Array.isArray(input.record)) {
+    throw new VaultError("VAULT_INVALID_RECORD", "JSONL records must be plain objects.", {
+      relativePath: input.relativePath,
+    });
+  }
+
+  await applyCanonicalWriteBatch({
+    vaultRoot: input.vaultRoot,
+    operationType: "jsonl_append",
+    summary: `Append JSONL record to ${input.relativePath}`,
+    audit: {
+      action: "jsonl_append",
+      commandName: "core.appendJsonlRecord",
+      summary: `Appended JSONL record to ${input.relativePath}.`,
+    },
+    jsonlAppends: [
+      {
+        relativePath: input.relativePath,
+        record: input.record,
+      },
+    ],
+  });
+
+  return input.record;
 }
 
 export async function applyCanonicalWriteBatch(
@@ -216,80 +249,134 @@ export async function applyCanonicalWriteBatch(
     );
   }
 
-  return withCanonicalWriteLock(input.vaultRoot, async () => {
-    await loadVaultInternal({ vaultRoot: input.vaultRoot });
+  await loadVaultInternal({ vaultRoot: input.vaultRoot });
 
-    return runCanonicalWrite({
-      vaultRoot: input.vaultRoot,
-      operationType: input.operationType,
-      summary: input.summary,
-      occurredAt: input.occurredAt,
-      mutate: async ({ batch }) => {
-        for (const rawCopy of rawCopies) {
-          await batch.stageRawCopy({
-            sourcePath: rawCopy.sourcePath,
-            targetRelativePath: rawCopy.targetRelativePath,
-            originalFileName: rawCopy.originalFileName,
-            mediaType: rawCopy.mediaType,
-            allowExistingMatch: rawCopy.allowExistingMatch,
-          });
-        }
+  const result = await commitAuditedCanonicalWrite({
+    vaultRoot: input.vaultRoot,
+    operationType: input.operationType,
+    summary: input.summary,
+    occurredAt: input.occurredAt,
+    audit: input.audit,
+    mutate: async ({ batch }) => {
+      for (const rawCopy of rawCopies) {
+        await batch.stageRawCopy({
+          sourcePath: rawCopy.sourcePath,
+          targetRelativePath: rawCopy.targetRelativePath,
+          originalFileName: rawCopy.originalFileName,
+          mediaType: rawCopy.mediaType,
+          allowExistingMatch: rawCopy.allowExistingMatch,
+        });
+      }
 
-        for (const rawContent of rawContents) {
-          if (typeof rawContent.content === "string") {
-            await batch.stageRawText({
-              targetRelativePath: rawContent.targetRelativePath,
-              originalFileName: rawContent.originalFileName,
-              mediaType: rawContent.mediaType,
-              content: rawContent.content,
-              allowExistingMatch: rawContent.allowExistingMatch,
-            });
-            continue;
-          }
-
-          await batch.stageRawBytes({
+      for (const rawContent of rawContents) {
+        if (typeof rawContent.content === "string") {
+          await batch.stageRawText({
             targetRelativePath: rawContent.targetRelativePath,
             originalFileName: rawContent.originalFileName,
             mediaType: rawContent.mediaType,
             content: rawContent.content,
             allowExistingMatch: rawContent.allowExistingMatch,
           });
+          continue;
         }
 
-        for (const textWrite of textWrites) {
-          await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
-            overwrite: textWrite.overwrite,
-            allowExistingMatch: textWrite.allowExistingMatch,
-          });
-        }
+        await batch.stageRawBytes({
+          targetRelativePath: rawContent.targetRelativePath,
+          originalFileName: rawContent.originalFileName,
+          mediaType: rawContent.mediaType,
+          content: rawContent.content,
+          allowExistingMatch: rawContent.allowExistingMatch,
+        });
+      }
 
-        for (const jsonlAppend of jsonlAppends) {
-          await batch.stageJsonlAppend(
-            jsonlAppend.relativePath,
-            `${JSON.stringify(jsonlAppend.record)}\n`,
-          );
-        }
+      for (const textWrite of textWrites) {
+        await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
+          overwrite: textWrite.overwrite,
+          allowExistingMatch: textWrite.allowExistingMatch,
+        });
+      }
 
-        for (const deletion of deletes) {
-          await batch.stageDelete(deletion.relativePath);
-        }
+      for (const jsonlAppend of jsonlAppends) {
+        await batch.stageJsonlAppend(
+          jsonlAppend.relativePath,
+          `${JSON.stringify(jsonlAppend.record)}\n`,
+        );
+      }
 
-        return {
+      for (const deletion of deletes) {
+        await batch.stageDelete(deletion.relativePath);
+      }
+
+      const changes = [
+        ...rawCopies.map((entry) => ({
+          path: entry.targetRelativePath,
+          op: "copy" as const,
+        })),
+        ...rawContents.map((entry) => ({
+          path: entry.targetRelativePath,
+          op: "create" as const,
+        })),
+        ...textWrites.map((entry) => ({
+          path: entry.relativePath,
+          op: entry.overwrite ? "update" as const : "create" as const,
+        })),
+        ...jsonlAppends.map((entry) => ({
+          path: entry.relativePath,
+          op: "append" as const,
+        })),
+        ...deletes.map((entry) => ({
+          path: entry.relativePath,
+          op: "delete" as const,
+        })),
+      ];
+
+      return {
+        result: {
           rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
           rawContents: rawContents.map((entry) => entry.targetRelativePath),
           textWrites: textWrites.map((entry) => entry.relativePath),
           jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
           deletes: deletes.map((entry) => entry.relativePath),
-        };
-      },
-    });
+        },
+        changes,
+      };
+    },
   });
+
+  return result.result;
 }
 
 export async function copyRawArtifact(
-  input: Parameters<typeof copyRawArtifactInternal>[0],
-): ReturnType<typeof copyRawArtifactInternal> {
-  return withCanonicalInputWriteLock(input, copyRawArtifactInternal);
+  input: RawCopyRawArtifactInput,
+): Promise<ReturnType<typeof prepareRawArtifact>> {
+  const artifact = prepareRawArtifact({
+    sourcePath: input.sourcePath,
+    owner: input.owner,
+    occurredAt: input.occurredAt,
+    role: input.role,
+    targetName: input.targetName,
+  });
+  await applyCanonicalWriteBatch({
+    vaultRoot: input.vaultRoot,
+    operationType: "raw_copy",
+    summary: `Copy raw artifact ${artifact.relativePath}`,
+    occurredAt: input.occurredAt,
+    audit: {
+      action: "raw_copy",
+      commandName: "core.copyRawArtifact",
+      summary: `Copied raw artifact ${artifact.relativePath}.`,
+    },
+    rawCopies: [
+      {
+        sourcePath: input.sourcePath,
+        targetRelativePath: artifact.relativePath,
+        originalFileName: artifact.originalFileName,
+        mediaType: artifact.mediaType,
+        allowExistingMatch: input.allowExistingMatch,
+      },
+    ],
+  });
+  return artifact;
 }
 
 export async function ensureJournalDay(
@@ -355,25 +442,29 @@ export async function stopExperiment(
 export async function importDocument(
   input: Parameters<typeof importDocumentInternal>[0],
 ): ReturnType<typeof importDocumentInternal> {
-  return withCanonicalInputWriteLock(input, importDocumentInternal);
+  return importDocumentInternal(input);
 }
 
 export async function addMeal(
   input: Parameters<typeof addMealInternal>[0],
 ): ReturnType<typeof addMealInternal> {
-  return withCanonicalInputWriteLock(input, addMealInternal);
+  return addMealInternal(input);
 }
 
 export async function addActivitySession(
   input: Parameters<typeof addActivitySessionInternal>[0],
 ): ReturnType<typeof addActivitySessionInternal> {
-  return withCanonicalInputWriteLock(input, addActivitySessionInternal);
+  return hasStableCanonicalId(input.draft.id)
+    ? withCanonicalInputWriteLock(input, addActivitySessionInternal)
+    : addActivitySessionInternal(input);
 }
 
 export async function addBodyMeasurement(
   input: Parameters<typeof addBodyMeasurementInternal>[0],
 ): ReturnType<typeof addBodyMeasurementInternal> {
-  return withCanonicalInputWriteLock(input, addBodyMeasurementInternal);
+  return hasStableCanonicalId(input.draft.id)
+    ? withCanonicalInputWriteLock(input, addBodyMeasurementInternal)
+    : addBodyMeasurementInternal(input);
 }
 
 export async function importSamples(
@@ -409,19 +500,13 @@ export async function deleteEvent(
 export async function updateVaultSummary(
   input: Parameters<typeof updateVaultSummaryInternal>[0],
 ): ReturnType<typeof updateVaultSummaryInternal> {
-  return withCanonicalInputWriteLock(input, updateVaultSummaryInternal);
+  return updateVaultSummaryInternal(input);
 }
 
 export async function repairVault(
   input: Parameters<typeof repairVaultInternal>[0] = {},
 ): ReturnType<typeof repairVaultInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => repairVaultInternal(input));
-}
-
-export async function upgradeVault(
-  input: Parameters<typeof upgradeVaultInternal>[0] = {},
-): ReturnType<typeof upgradeVaultInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upgradeVaultInternal(input));
 }
 
 export async function promoteInboxJournal(
@@ -445,31 +530,31 @@ export async function importDeviceBatch(
 export async function importAssessmentResponse(
   input: Parameters<typeof importAssessmentResponseInternal>[0],
 ): ReturnType<typeof importAssessmentResponseInternal> {
-  return withCanonicalInputWriteLock(input, importAssessmentResponseInternal);
+  return importAssessmentResponseInternal(input);
 }
 
-export async function appendProfileSnapshot(
-  input: Parameters<typeof appendProfileSnapshotInternal>[0],
-): ReturnType<typeof appendProfileSnapshotInternal> {
-  return withCanonicalInputWriteLock(input, appendProfileSnapshotInternal);
+export async function updateWorkoutUnitPreferences(
+  input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
+): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
+  return updateWorkoutUnitPreferencesInternal(input);
 }
 
-export async function rebuildCurrentProfile(
-  input: Parameters<typeof rebuildCurrentProfileInternal>[0],
-): ReturnType<typeof rebuildCurrentProfileInternal> {
-  return withCanonicalInputWriteLock(input, rebuildCurrentProfileInternal);
+export async function updateWearablePreferences(
+  input: Parameters<typeof updateWearablePreferencesInternal>[0],
+): ReturnType<typeof updateWearablePreferencesInternal> {
+  return updateWearablePreferencesInternal(input);
 }
 
 export async function appendHistoryEvent(
   input: Parameters<typeof appendHistoryEventInternal>[0],
 ): ReturnType<typeof appendHistoryEventInternal> {
-  return withCanonicalInputWriteLock(input, appendHistoryEventInternal);
+  return appendHistoryEventInternal(input);
 }
 
 export async function appendBloodTest(
   input: Parameters<typeof appendBloodTestInternal>[0],
 ): ReturnType<typeof appendBloodTestInternal> {
-  return withCanonicalInputWriteLock(input, appendBloodTestInternal);
+  return appendBloodTestInternal(input);
 }
 
 export async function upsertFamilyMember(

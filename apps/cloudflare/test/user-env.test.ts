@@ -74,7 +74,7 @@ describe("hosted user env helpers", () => {
       current: {},
       update: {
         env: {
-          AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+          AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
         },
         mode: "replace",
       },
@@ -115,16 +115,6 @@ describe("hosted user env helpers", () => {
       update: {
         env: {
           FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-        },
-        mode: "replace",
-      },
-    })).toThrow(/not allowed/u);
-
-    expect(() => applyHostedUserEnvUpdate({
-      current: {},
-      update: {
-        env: {
-          PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
         },
         mode: "replace",
       },

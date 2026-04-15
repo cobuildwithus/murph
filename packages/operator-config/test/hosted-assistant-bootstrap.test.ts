@@ -3,27 +3,30 @@ import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 
 import {
+  type HostedAssistantConfig,
   createHostedAssistantConfig,
   createHostedAssistantProfile,
 } from '../src/assistant/hosted-config.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  vi.resetModules()
-  vi.doUnmock('../src/operator-config.ts')
 })
 
 async function loadHostedAssistantModule(options?: {
-  readOperatorConfigResult?: unknown
-  saveHostedAssistantConfigImpl?: (config: unknown, homeDirectory: string | undefined) => Promise<unknown>
+  readOperatorConfigResult?: {
+    hostedAssistant?: HostedAssistantConfig | null
+    hostedAssistantInvalid?: boolean
+  } | null
+  saveHostedAssistantConfigImpl?: (
+    config: HostedAssistantConfig | null,
+    homeDirectory: string | undefined,
+  ) => Promise<{ hostedAssistant: HostedAssistantConfig | null }>
 }) {
   vi.resetModules()
-  vi.doUnmock('../src/operator-config.ts')
-
   const readOperatorConfig = vi.fn(async () => options?.readOperatorConfigResult ?? null)
   const saveHostedAssistantConfig = vi.fn(
     options?.saveHostedAssistantConfigImpl ??
-      (async (config: unknown) => ({ hostedAssistant: config })),
+      (async (config: HostedAssistantConfig | null) => ({ hostedAssistant: config })),
   )
 
   vi.doMock('../src/operator-config.ts', () => ({
@@ -43,6 +46,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
   const hostedConfigModule = await loadHostedAssistantModule()
   const {
     HOSTED_ASSISTANT_API_KEY_ENV,
+    HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
     compileHostedAssistantProfileProviderConfig,
     isHostedAssistantProfileReady,
     parseHostedAssistantConfig,
@@ -86,7 +90,32 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
   assert.equal(tryParseHostedAssistantConfig('bad-json-shape'), null)
   assert.deepEqual(prepareHostedAssistantConfigForWrite(config), config)
   assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: ' OPENAI_API_KEY ' }), 'OPENAI_API_KEY')
+  assert.equal(
+    prepareHostedAssistantConfigForWrite(
+      createHostedAssistantConfig({
+        activeProfileId: 'zdr',
+        profiles: [
+          createHostedAssistantProfile({
+            id: 'zdr',
+            providerConfig: {
+              provider: 'openai-compatible',
+              apiKeyEnv: 'VERCEL_AI_API_KEY',
+              baseUrl: 'https://ai-gateway.vercel.sh/v1',
+              model: 'openai/gpt-5.4',
+              presetId: 'vercel-ai-gateway',
+              zeroDataRetention: true,
+            },
+          }),
+        ],
+      }),
+    )?.profiles[0]?.target.zeroDataRetention,
+    true,
+  )
   assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: '   ' }), null)
+  assert.equal(
+    HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
+    'HOSTED_ASSISTANT_ZERO_DATA_RETENTION',
+  )
   assert.deepEqual(resolveHostedAssistantProfile(config, ' platform-default '), readyProfile)
   assert.equal(resolveHostedAssistantProfile(config, 'missing'), null)
   assert.equal(resolveHostedAssistantProfile(config, '   '), null)
@@ -100,24 +129,30 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     baseUrl: 'https://api.openai.com/v1',
     headers: null,
     model: 'gpt-5',
+    presetId: null,
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
+    webSearch: null,
+    zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantProviderConfig(config), {
     apiKeyEnv: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
     headers: null,
     model: 'gpt-5',
+    presetId: null,
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
+    webSearch: null,
+    zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(config), {
     configured: true,
     provider: 'openai-compatible',
   })
-  assert.deepEqual(resolveHostedAssistantOperatorDefaultsState({ profiles: 'bad' }), {
+  assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(null), {
     configured: false,
     provider: null,
   })
@@ -204,6 +239,65 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
       error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
       /HOSTED_ASSISTANT_APPROVAL_POLICY cannot be used/u.test(error.message),
+  )
+
+  const gatewaySeed = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
+    },
+  })
+
+  assert.deepEqual(gatewaySeed, {
+    configured: true,
+    provider: 'openai-compatible',
+    seeded: true,
+    source: 'hosted-env',
+  })
+  assert.equal(
+    hostedConfigModule.saveHostedAssistantConfig.mock.calls[1]?.[0]?.profiles?.[0]?.target
+      ?.zeroDataRetention,
+    true,
+  )
+
+  const gatewaySeedWithoutZdr = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'false',
+    },
+  })
+
+  assert.deepEqual(gatewaySeedWithoutZdr, {
+    configured: true,
+    provider: 'openai-compatible',
+    seeded: true,
+    source: 'hosted-env',
+  })
+  assert.equal(
+    hostedConfigModule.saveHostedAssistantConfig.mock.calls[2]?.[0]?.profiles?.[0]?.target
+      ?.zeroDataRetention,
+    undefined,
+  )
+
+  await assert.rejects(
+    () =>
+      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_PROVIDER: 'openai',
+          HOSTED_ASSISTANT_MODEL: 'gpt-5',
+          HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'true',
+        },
+      }),
+    (error) =>
+      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
+      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
+      /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with a hosted target that enforces zero data retention/u.test(
+        error.message,
+      ),
   )
 })
 
@@ -352,10 +446,10 @@ test('hosted assistant bootstrap seeds or updates platform profiles from hosted 
   assert.deepEqual(unchanged, {
     configured: true,
     provider: 'openai-compatible',
-    seeded: false,
-    source: 'saved',
+    seeded: true,
+    source: 'hosted-env',
   })
-  assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 0)
+  assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 1)
 })
 
 test('hosted assistant bootstrap validates env combinations and unsupported provider settings', async () => {

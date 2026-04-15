@@ -84,6 +84,31 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
       generatedAt: "2026-04-01T00:00:00.000Z",
       userId: "user-1",
     });
+    mocks.applyDeviceSyncRuntimeUpdates.mockResolvedValue({
+      appliedAt: "2026-04-01T00:10:00.000Z",
+      updates: [
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
+            connectedAt: "2026-03-20T00:00:00.000Z",
+            createdAt: "2026-03-20T00:00:00.000Z",
+            displayName: "WHOOP User",
+            externalAccountId: "whoop-user-1",
+            id: "conn-1",
+            metadata: {},
+            provider: "whoop",
+            scopes: ["offline"],
+            status: "reauthorization_required",
+            updatedAt: "2026-04-01T00:10:00.000Z",
+        },
+        connectionId: "conn-1",
+        status: "updated",
+        tokenUpdate: "unchanged",
+        writeUpdate: "applied",
+      },
+    ],
+    userId: "user-1",
+    });
     const tx = {
       deviceConnection: {
         findFirst: vi.fn(async () => createConnectionRecord()),
@@ -238,6 +263,7 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             lastErrorCode: "WHOOP_REFRESH_TOKEN_MISSING",
             lastErrorMessage: "WHOOP refresh token is missing.",
           }),
+          observedTokenVersion: 7,
         }),
       ],
     });
@@ -336,13 +362,14 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             scopes: ["offline"],
             status: "active",
             updatedAt: "2026-04-01T00:10:00.000Z",
-          },
-          connectionId: "conn-1",
-          status: "updated",
-          tokenUpdate: "skipped_version_mismatch",
         },
-      ],
-      userId: "user-1",
+        connectionId: "conn-1",
+        status: "updated",
+        tokenUpdate: "skipped_version_mismatch",
+        writeUpdate: "skipped_version_mismatch",
+      },
+    ],
+    userId: "user-1",
     });
     const tx = {
       deviceConnection: {

@@ -15,31 +15,24 @@ import type {
 } from "@murphai/gateway-core";
 import type {
   HostedExecutionBundleRef,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {
   HostedExecutionCommitPayload,
-  HostedExecutionCommittedResult,
 } from "./execution-journal.ts";
-
-export interface WorkerUserRunnerCommitInput {
-  eventId: string;
-  payload: HostedExecutionCommitPayload & {
-    currentBundleRef: HostedExecutionBundleRef | null;
-  };
-}
+import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
   provisionManagedUserCrypto?(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
-  commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
   gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
   gatewayGetConversation?(input: GatewayGetConversationInput): Promise<GatewayConversation | null>;
   gatewayListConversations?(input?: GatewayListConversationsInput): Promise<GatewayListConversationsResult>;
@@ -55,7 +48,7 @@ export interface WorkerUserRunnerStubLike {
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage?(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }>;
+  }): Promise<HostedRuntimeUsageRecordResponse>;
   readPendingUsage?(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
   deletePendingUsage?(input: { usageIds: readonly string[] }): Promise<void>;
 }
@@ -82,6 +75,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_PROVIDER_NAME?: string;
   HOSTED_ASSISTANT_REASONING_EFFORT?: string;
   HOSTED_ASSISTANT_SANDBOX?: string;
+  HOSTED_ASSISTANT_ZERO_DATA_RETENTION?: string;
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID?: string;
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK?: string;
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON?: string;
@@ -93,9 +87,9 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY?: string;
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID?: string;
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON?: string;
-  HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
+  HOSTED_EXECUTION_RUNNER_ENV_PROFILES?: string;
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME?: string;
@@ -112,4 +106,10 @@ export interface WorkerEnvironmentContract<
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?: string;
   HOSTED_WEB_BASE_URL?: string;
   USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
+}
+
+export function asWorkerStringEnvironment(
+  source: Readonly<Record<string, unknown>>,
+): StringEnvSource {
+  return toStringEnvSource(source);
 }

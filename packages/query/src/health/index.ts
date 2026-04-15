@@ -1,10 +1,4 @@
 export { listAssessments, readAssessment, showAssessment } from "./assessments.ts";
-export {
-  listProfileSnapshots,
-  readCurrentProfile,
-  readProfileSnapshot,
-  showProfile,
-} from "./profile-snapshots.ts";
 export { listGoals, readGoal, showGoal } from "./goals.ts";
 export { listConditions, readCondition, showCondition } from "./conditions.ts";
 export { listAllergies, readAllergy, showAllergy } from "./allergies.ts";
@@ -26,11 +20,6 @@ export {
   showBloodTest,
 } from "./blood-tests.ts";
 export {
-  listHistoryEvents,
-  readHistoryEvent,
-  showHistoryEvent,
-} from "./history.ts";
-export {
   listFamilyMembers,
   readFamilyMember,
   showFamilyMember,
@@ -42,11 +31,6 @@ export {
 } from "./genetics.ts";
 
 export type { AssessmentListOptions, AssessmentQueryRecord } from "./assessments.ts";
-export type {
-  CurrentProfileQueryRecord,
-  ProfileSnapshotListOptions,
-  ProfileSnapshotQueryRecord,
-} from "./profile-snapshots.ts";
 export type {
   AllergyQueryRecord,
   ConditionQueryRecord,
@@ -70,11 +54,6 @@ export type {
   BloodTestListOptions,
   BloodTestQueryRecord,
 } from "./blood-tests.ts";
-export type {
-  HealthHistoryKind,
-  HistoryListOptions,
-  HistoryQueryRecord,
-} from "./history.ts";
 export type {
   SupplementCompoundListOptions,
   SupplementCompoundQueryRecord,

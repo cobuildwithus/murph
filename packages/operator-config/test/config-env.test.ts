@@ -35,6 +35,7 @@ import {
   tryParseHostedAssistantConfig,
 } from '../src/hosted-assistant-config.ts'
 import { normalizeHostedAssistantConfig } from '../src/assistant/hosted-config.ts'
+import { resolveAssistantRuntimeTarget } from '../src/assistant/target-runtime.ts'
 import {
   applySetupRuntimeEnvOverridesToProcess,
   describeSelectedSetupWearables,
@@ -42,6 +43,7 @@ import {
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
 } from '../src/setup-runtime-env.ts'
+import { normalizeSetupWearables } from '../src/setup-cli-contracts.ts'
 import {
   timeZoneSchema,
   workoutFormatListResultSchema,
@@ -76,7 +78,7 @@ async function withTemporaryProcessEnv(
   }
 }
 
-test('setup env helpers trim values, report missing keys, and surface platform readiness', () => {
+test('setup env helpers trim values, report missing keys, and surface channel readiness', () => {
   const env: NodeJS.ProcessEnv = {
     AGENTMAIL_API_KEY: '  agentmail-key  ',
     LINQ_API_TOKEN: '  linq-token  ',
@@ -88,16 +90,12 @@ test('setup env helpers trim values, report missing keys, and surface platform r
   assert.deepEqual(resolveSetupChannelMissingEnv('telegram', env), [])
   assert.deepEqual(resolveSetupChannelMissingEnv('linq', env), ['LINQ_WEBHOOK_SECRET'])
   assert.deepEqual(resolveSetupChannelMissingEnv('email', env), [])
-  const imessageDarwinStatus = describeSetupChannelStatus('imessage', env, 'darwin')
-  const imessageLinuxStatus = describeSetupChannelStatus('imessage', env, 'linux')
-
-  assert.equal(imessageDarwinStatus.badge, 'ready')
-  assert.equal(imessageDarwinStatus.ready, true)
-  assert.deepEqual(imessageDarwinStatus.missingEnv, [])
-  assert.match(imessageDarwinStatus.detail, /Messages\.app/u)
-  assert.equal(imessageLinuxStatus.badge, 'macOS only')
-  assert.equal(imessageLinuxStatus.ready, false)
-  assert.match(imessageLinuxStatus.detail, /macOS host/u)
+  assert.deepEqual(describeSetupChannelStatus('telegram', env, 'darwin'), {
+    badge: 'ready',
+    detail: 'Bot token is available in the current environment.',
+    missingEnv: [],
+    ready: true,
+  })
 })
 
 test('setup wearables are deduplicated, sorted, and keyed off trimmed env values', () => {
@@ -144,6 +142,10 @@ test('setup wearables are deduplicated, sorted, and keyed off trimmed env values
   assert.match(
     configuredWearables[0]?.detail ?? '',
     /GARMIN_CLIENT_SECRET/u,
+  )
+  assert.deepEqual(
+    normalizeSetupWearables(['whoop', 'garmin', 'whoop']),
+    ['garmin', 'whoop'],
   )
 })
 
@@ -270,8 +272,10 @@ test('assistant backend targets trim config input and strip sensitive headers be
       'X-Trace': ' trace-id ',
     },
     model: '  gpt-4o  ',
+    presetId: null,
     providerName: '  Example Provider  ',
     reasoningEffort: 'high',
+    webSearch: null,
   })
 
   assert.deepEqual(persistedOpenAiTarget, {
@@ -282,8 +286,10 @@ test('assistant backend targets trim config input and strip sensitive headers be
       'X-Trace': 'trace-id',
     },
     model: 'gpt-4o',
+    presetId: null,
     providerName: 'Example Provider',
     reasoningEffort: 'high',
+    webSearch: null,
   })
   assert.equal(
     assistantBackendTargetsEqual(
@@ -332,6 +338,17 @@ test('representative contract schemas stay wired to the owned setup/operator sea
 
   assert.equal(assistantSessionIdSchema.safeParse('session_1').success, true)
   assert.equal(assistantSessionIdSchema.safeParse('../session').success, false)
+  const openAiCompatibleRuntime = resolveAssistantRuntimeTarget({
+    provider: 'openai-compatible',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    baseUrl: 'https://api.example.test/v1',
+    headers: {
+      'X-Trace-Id': 'trace',
+    },
+    model: 'gpt-5.4',
+    providerName: 'Example',
+    reasoningEffort: 'high',
+  })
   assert.deepEqual(
     parseAssistantSessionRecord({
       alias: 'daily',
@@ -353,7 +370,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         providerSessionId: ' provider-session ',
         resumeRouteId: ' route-1 ',
       },
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_1',
       target: {
         adapter: 'openai-compatible',
@@ -363,8 +380,10 @@ test('representative contract schemas stay wired to the owned setup/operator sea
           'X-Trace-Id': 'trace',
         },
         model: 'gpt-5.4',
+        presetId: null,
         providerName: 'Example',
         reasoningEffort: 'high',
+        webSearch: null,
       },
       turnCount: 3,
       updatedAt: '2026-04-08T12:05:00.000Z',
@@ -375,14 +394,18 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         apiKeyEnv: 'OPENAI_API_KEY',
         approvalPolicy: null,
         baseUrl: 'https://api.example.test/v1',
+        continuityFingerprint: openAiCompatibleRuntime.continuityFingerprint,
+        executionDriver: 'openai-compatible',
         headers: {
           'X-Trace-Id': 'trace',
         },
         model: 'gpt-5.4',
         oss: false,
+        presetId: null,
         profile: null,
         providerName: 'Example',
         reasoningEffort: 'high',
+        resumeKind: null,
         sandbox: null,
       },
       providerSessionId: 'provider-session',
@@ -393,17 +416,27 @@ test('representative contract schemas stay wired to the owned setup/operator sea
   )
   assert.deepEqual(
     assistantStatusAutomationSchema.parse({
-      autoReplyBacklogChannels: ['email'],
-      autoReplyChannels: ['telegram'],
-      autoReplyPrimed: true,
-      autoReplyScanCursor: {
-        captureId: 'capture-1',
-        occurredAt: '2026-04-08T12:05:00.000Z',
-      },
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: {
+            captureId: 'capture-1',
+            occurredAt: '2026-04-08T12:05:00.000Z',
+          },
+        },
+      ],
       inboxScanCursor: null,
       updatedAt: '2026-04-08T12:10:00.000Z',
-    }).autoReplyChannels,
-    ['telegram'],
+    }).autoReply,
+    [
+      {
+        channel: 'telegram',
+        cursor: {
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T12:05:00.000Z',
+        },
+      },
+    ],
   )
   assert.deepEqual(
     parseAssistantSessionRecord({
@@ -420,7 +453,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       createdAt: '2026-04-08T12:00:00.000Z',
       lastTurnAt: null,
       resumeState: null,
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_codex',
       target: {
         adapter: 'codex-cli',
@@ -456,7 +489,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         providerSessionId: '   ',
         resumeRouteId: ' route-only ',
       },
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_route_only',
       target: {
         adapter: 'openai-compatible',
@@ -464,27 +497,15 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         endpoint: null,
         headers: null,
         model: 'gpt-5.4',
+        presetId: null,
         providerName: null,
         reasoningEffort: 'medium',
+        webSearch: null,
       },
       turnCount: 1,
       updatedAt: '2026-04-08T12:05:00.000Z',
     }).providerBinding,
-    {
-      provider: 'openai-compatible',
-      providerOptions: {
-        approvalPolicy: null,
-        model: 'gpt-5.4',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: null,
-      },
-      providerSessionId: null,
-      providerState: {
-        resumeRouteId: 'route-only',
-      },
-    },
+    null,
   )
 })
 
@@ -505,8 +526,10 @@ test('hosted assistant config normalization keeps the active profile ready and s
             'X-Trace': ' trace-id ',
           },
           model: '  gpt-4o  ',
+          presetId: null,
           providerName: ' ',
           reasoningEffort: 'high',
+          webSearch: null,
         },
       },
     ],
@@ -529,8 +552,10 @@ test('hosted assistant config normalization keeps the active profile ready and s
             'X-Trace': 'trace-id',
           },
           model: 'gpt-4o',
+          presetId: null,
           providerName: null,
           reasoningEffort: 'high',
+          webSearch: null,
         },
       },
     ],
@@ -559,9 +584,12 @@ test('hosted assistant config normalization keeps the active profile ready and s
       'X-Trace': 'trace-id',
     },
     model: 'gpt-4o',
+    presetId: null,
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: 'high',
+    webSearch: null,
+    zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(normalizedConfig), {
     configured: true,

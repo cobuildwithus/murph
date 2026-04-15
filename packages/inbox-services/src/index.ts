@@ -4,6 +4,7 @@
 export { createIntegratedInboxServices } from './inbox-app/service.js'
 
 export type {
+  AgentmailApiClient,
   CanonicalAttachmentPromotionResult,
   CanonicalPromotionLookupSpec,
   CanonicalPromotionLookupTarget,
@@ -12,14 +13,14 @@ export type {
   ConfiguredParserRegistryRuntime,
   CoreRuntimeModule,
   EmailDriver,
-  ImessageDriver,
-  InboxImessageRuntimeModule,
+  InboxConnectorConfig,
   InboxServices,
   InboxSourceSetEnabledResult,
   InboxParserServiceRuntime,
   InboxPaths,
   InboxPipeline,
   InboxRunEvent,
+  InboxRuntimeConfig,
   InboxRuntimeModule,
   ParserDoctorRuntimeReport,
   ParserRuntimeDrainResult,

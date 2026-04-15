@@ -10,6 +10,7 @@ import {
   forgetMemory,
   getMemoryRecord,
   readMemoryDocument,
+  updateMemory,
   upsertMemory,
 } from "@murphai/core";
 
@@ -19,8 +20,23 @@ const vaultOptionSchema = z.object({
 
 const memoryUpsertOptionsSchema = vaultOptionSchema.extend({
   section: memorySectionSchema.describe("Memory section to write into."),
-  memoryId: z.string().min(1).optional().describe("Optional existing memory id to update."),
 });
+
+const memoryUpdateOptionsSchema = vaultOptionSchema.extend({
+  section: memorySectionSchema.optional().describe(
+    "Optional replacement memory section. Defaults to the current section.",
+  ),
+});
+
+const memoryIdArgSchema = z
+  .string()
+  .min(1)
+  .describe("Canonical memory record id.");
+
+const memoryTextArgSchema = z
+  .string()
+  .min(1)
+  .describe("Memory text to store in the canonical memory document.");
 
 const memoryShowResultSchema = z.object({
   vault: z.string().min(1),
@@ -50,7 +66,9 @@ export function registerMemoryCommands(cli: Cli.Cli) {
   memory.command("show", {
     description: "Show the canonical memory document or one memory record.",
     args: z.object({
-      memoryId: z.string().min(1).optional(),
+      memoryId: memoryIdArgSchema
+        .optional()
+        .describe("Optional canonical memory record id to show; omit to return the whole memory document."),
     }),
     options: vaultOptionSchema,
     output: memoryShowResultSchema,
@@ -66,15 +84,14 @@ export function registerMemoryCommands(cli: Cli.Cli) {
   });
 
   memory.command("upsert", {
-    description: "Add or update one canonical memory record.",
+    description: "Add one new canonical memory record.",
     args: z.object({
-      text: z.string().min(1),
+      text: memoryTextArgSchema,
     }),
     options: memoryUpsertOptionsSchema,
     output: memoryUpsertResultSchema,
     async run({ args, options }) {
       const result = await upsertMemory(options.vault, {
-        recordId: options.memoryId ?? null,
         section: options.section as MemorySection,
         text: args.text,
       });
@@ -87,10 +104,33 @@ export function registerMemoryCommands(cli: Cli.Cli) {
     },
   });
 
+  memory.command("update", {
+    description: "Update one existing canonical memory record by id.",
+    args: z.object({
+      memoryId: memoryIdArgSchema,
+      text: memoryTextArgSchema,
+    }),
+    options: memoryUpdateOptionsSchema,
+    output: memoryUpsertResultSchema,
+    async run({ args, options }) {
+      const result = await updateMemory(options.vault, {
+        recordId: args.memoryId,
+        section: options.section ?? null,
+        text: args.text,
+      });
+      return {
+        vault: options.vault,
+        created: false,
+        document: result.document,
+        memory: result.record,
+      };
+    },
+  });
+
   memory.command("forget", {
     description: "Delete one canonical memory record by id.",
     args: z.object({
-      memoryId: z.string().min(1),
+      memoryId: memoryIdArgSchema,
     }),
     options: vaultOptionSchema,
     output: memoryForgetResultSchema,

@@ -14,6 +14,7 @@ import {
   parseRetryAfterHeaderMs,
   waitForRetryDelay,
 } from '../src/http-retry.ts'
+import { createDeviceSyncClient } from '../src/device-sync-client.ts'
 import {
   createLinqChat,
   createLinqWebhookSubscription,
@@ -30,6 +31,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
+
+async function loadDeviceSyncClientWithMockedSpawn(
+  spawn: (
+    command: string,
+    args: string[],
+    options: import('node:child_process').SpawnOptions,
+  ) => EventEmitter & { unref(): void },
+): Promise<typeof import('../src/device-sync-client.ts')> {
+  vi.resetModules()
+  vi.doMock('node:child_process', () => ({ spawn }))
+  return await import('../src/device-sync-client.ts')
+}
 
 function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
@@ -347,6 +360,9 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'transport' &&
       error.context?.retryable === false &&
       error.context?.timedOut === false,
   )
@@ -392,6 +408,9 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'create_webhook_subscription' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
       error.context?.retryable === true &&
       error.context?.status === 429 &&
       error.message === 'rate limited',
@@ -503,6 +522,9 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message === 'Linq request GET /phone_numbers failed with HTTP 408.' &&
+      error.context?.operation === 'list_phone_numbers' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
       error.context?.retryable === true &&
       error.context?.status === 408,
   )
@@ -533,6 +555,11 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message ===
         'Linq request POST /chats/chat-123/messages timed out after 30000ms.' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.hasIdempotencyKey === false &&
+      error.context?.hasReplyToMessageId === false &&
       error.context?.retryable === false &&
       error.context?.timedOut === true &&
       error.context?.timeoutMs === 30000 &&
@@ -542,10 +569,9 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
   await timeoutAssertion
 })
 
-test('device sync client covers list, begin, and default browser open paths', async () => {
+test('device sync client covers list, begin, and browser open paths', async () => {
   const seenRequests: Array<{ method: string; url: string; body: string | null }> = []
   const openBrowser = vi.fn(async () => true)
-  const { createDeviceSyncClient } = await import('../src/device-sync-client.ts')
   const client = createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     controlToken: 'token-123',
@@ -627,7 +653,8 @@ test('device sync client covers list, begin, and default browser open paths', as
     account: { accountId: 'acct-1', disconnected: true },
   })
 
-  assert.equal(openBrowser, openBrowser)
+  assert.equal(openBrowser.mock.calls.length, 1)
+  assert.equal(openBrowser.mock.calls.at(0)?.at(0), 'https://example.test/oauth')
   assert.deepEqual(seenRequests.map(({ method, url }) => ({ method, url })), [
     { method: 'GET', url: 'http://127.0.0.1:8788/providers' },
     { method: 'POST', url: 'http://127.0.0.1:8788/providers/oura/connect' },
@@ -640,8 +667,7 @@ test('device sync client covers list, begin, and default browser open paths', as
     returnTo: 'https://murph.example.test/return',
   })
 
-  vi.resetModules()
-  const spawn = vi.fn((_command: string, _args: string[]) => {
+  const successfulSpawn = vi.fn((_command: string, _args: string[]) => {
     const child = new EventEmitter() as EventEmitter & {
       unref(): void
     }
@@ -651,8 +677,7 @@ test('device sync client covers list, begin, and default browser open paths', as
     })
     return child
   })
-  vi.doMock('node:child_process', () => ({ spawn }))
-  const dynamicModule = await import('../src/device-sync-client.ts')
+  const dynamicModule = await loadDeviceSyncClientWithMockedSpawn(successfulSpawn)
   const browserClient = dynamicModule.createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     fetchImpl: async () =>
@@ -669,18 +694,36 @@ test('device sync client covers list, begin, and default browser open paths', as
   })
   assert.equal(browserResult.openedBrowser, true)
   assert.equal(
-    spawn.mock.calls[0]?.[0],
+    successfulSpawn.mock.calls[0]?.[0],
     process.platform === 'darwin'
       ? 'open'
       : process.platform === 'win32'
         ? 'cmd'
         : 'xdg-open',
   )
+
+  const failingSpawn = vi.fn((_command: string, _args: string[]) => {
+    throw new Error('missing browser launcher')
+  })
+  const failureModule = await loadDeviceSyncClientWithMockedSpawn(failingSpawn)
+  const failingBrowserClient = failureModule.createDeviceSyncClient({
+    baseUrl: 'http://127.0.0.1:8788',
+    fetchImpl: async () =>
+      createJsonResponse({
+        authorizationUrl: 'https://example.test/oauth',
+        expiresAt: '2026-04-08T00:00:00.000Z',
+        provider: 'oura',
+        state: 'state-3',
+      }),
+  })
+  const failedBrowserResult = await failingBrowserClient.beginConnection({
+    open: true,
+    provider: 'oura',
+  })
+  assert.equal(failedBrowserResult.openedBrowser, false)
 })
 
 test('device sync client wraps transport and http failures with control-plane context', async () => {
-  const { createDeviceSyncClient } = await import('../src/device-sync-client.ts')
-
   const unavailableClient = createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     fetchImpl: async () => {

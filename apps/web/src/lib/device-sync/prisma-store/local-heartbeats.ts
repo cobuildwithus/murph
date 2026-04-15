@@ -1,11 +1,17 @@
 import { PrismaClient } from "@prisma/client";
 
 import { deviceSyncError, type PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+import {
+  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
+} from "@murphai/device-syncd/hosted-runtime";
 
-import { buildHostedLocalHeartbeatUpdate } from "../local-heartbeat";
+import {
+  buildHostedLocalHeartbeatRuntimeLocalStateUpdate,
+  type HostedLocalHeartbeatPatch,
+} from "../local-heartbeat";
 import { requireHostedDeviceSyncRuntimeClient } from "../runtime-client";
 import { PrismaHostedConnectionStore } from "./connections";
-import type { UpdateLocalHeartbeatInput } from "./types";
 
 export class PrismaHostedLocalHeartbeatStore {
   readonly prisma: PrismaClient;
@@ -19,7 +25,7 @@ export class PrismaHostedLocalHeartbeatStore {
   async updateConnectionFromLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: UpdateLocalHeartbeatInput,
+    patch: HostedLocalHeartbeatPatch,
   ): Promise<PublicDeviceSyncAccount | null> {
     const existing = await this.connections.getRuntimeConnectionForUser(userId, connectionId);
 
@@ -27,31 +33,31 @@ export class PrismaHostedLocalHeartbeatStore {
       return null;
     }
 
-    buildHostedLocalHeartbeatUpdate(existing, toLocalHeartbeatValidationPatch(patch));
-
     const response = await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(userId, {
       occurredAt: new Date().toISOString(),
       updates: [
         {
           connectionId,
-          localState: {
-            ...(patch.clearError ? { clearError: true } : {}),
-            ...(patch.lastErrorCode !== undefined ? { lastErrorCode: patch.lastErrorCode } : {}),
-            ...(patch.lastErrorMessage !== undefined ? { lastErrorMessage: patch.lastErrorMessage } : {}),
-            ...(patch.lastSyncCompletedAt !== undefined ? { lastSyncCompletedAt: patch.lastSyncCompletedAt } : {}),
-            ...(patch.lastSyncErrorAt !== undefined ? { lastSyncErrorAt: patch.lastSyncErrorAt } : {}),
-            ...(patch.lastSyncStartedAt !== undefined ? { lastSyncStartedAt: patch.lastSyncStartedAt } : {}),
-            ...(patch.nextReconcileAt !== undefined ? { nextReconcileAt: patch.nextReconcileAt } : {}),
-          },
+          localState: buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch),
+          observedUpdatedAt: existing.updatedAt,
         },
       ],
     });
-    const update = response.updates.find((entry) => entry.connectionId === connectionId) ?? null;
+    const update = findHostedExecutionDeviceSyncRuntimeApplyEntry(response, connectionId);
 
     if (update?.status === "missing") {
       throw deviceSyncError({
         code: "RUNTIME_STATE_CONFLICT",
         message: `Hosted device-sync runtime is missing connection ${connectionId}.`,
+        retryable: true,
+        httpStatus: 409,
+      });
+    }
+
+    if (!didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(update)) {
+      throw deviceSyncError({
+        code: "RUNTIME_STATE_CONFLICT",
+        message: `Hosted device-sync runtime rejected a stale local heartbeat for connection ${connectionId}.`,
         retryable: true,
         httpStatus: 409,
       });
@@ -65,26 +71,4 @@ export class PrismaHostedLocalHeartbeatStore {
 
     return connection;
   }
-}
-
-function toLocalHeartbeatValidationPatch(
-  input: UpdateLocalHeartbeatInput,
-): Parameters<typeof buildHostedLocalHeartbeatUpdate>[1] {
-  return {
-    ...(input.lastSyncStartedAt !== undefined && input.lastSyncStartedAt !== null
-      ? { lastSyncStartedAt: input.lastSyncStartedAt }
-      : {}),
-    ...(input.lastSyncCompletedAt !== undefined && input.lastSyncCompletedAt !== null
-      ? { lastSyncCompletedAt: input.lastSyncCompletedAt }
-      : {}),
-    ...(input.lastSyncErrorAt !== undefined && input.lastSyncErrorAt !== null
-      ? { lastSyncErrorAt: input.lastSyncErrorAt }
-      : {}),
-    ...(input.lastErrorCode !== undefined && input.lastErrorCode !== null
-      ? { lastErrorCode: input.lastErrorCode }
-      : {}),
-    ...(input.lastErrorMessage !== undefined && input.lastErrorMessage !== null
-      ? { lastErrorMessage: input.lastErrorMessage }
-      : {}),
-  };
 }

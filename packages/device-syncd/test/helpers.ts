@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import type { IncomingHttpHeaders } from "node:http";
 
 export async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -17,6 +19,17 @@ export function createJsonResponse(body: unknown, status = 200): Response {
 
 export function readUrl(input: RequestInfo | URL): string {
   return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+}
+
+export function requireValue<T>(value: T, message?: string): NonNullable<T> {
+  assert.ok(value, message);
+  return value;
+}
+
+export function withIncomingHeader(name: string, value: string | string[]): IncomingHttpHeaders {
+  const headers: IncomingHttpHeaders = {};
+  Reflect.set(headers, name, value);
+  return headers;
 }
 
 export function createDeviceSyncEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {

@@ -6,6 +6,7 @@ import {
 } from "../src/automation.ts";
 import {
   collapseEventRevisions,
+  compareEventRevisionPriority,
   eventRevisionFromLifecycle,
   hasInvalidEventLifecycle,
   parseEventLifecycle,
@@ -18,14 +19,14 @@ import {
   upsertMemoryRecord,
 } from "../src/memory.ts";
 import { foodUpsertPayloadSchema } from "../src/shares.ts";
+import { eventRecordSchema } from "../src/zod.ts";
 
 describe("automation contract seams", () => {
   it("applies scaffold defaults while preserving parsed schedule and route fields", () => {
     const parsed = automationScaffoldPayloadSchema.parse({
-      prompt: "Summarize the day",
+      instructions: "Summarize the day",
       route: {
         channel: "email",
-        deliverResponse: true,
         deliveryTarget: "thread_123",
         identityId: null,
         participantId: null,
@@ -34,23 +35,20 @@ describe("automation contract seams", () => {
       schedule: {
         kind: "dailyLocal",
         localTime: "08:30",
-        timeZone: "UTC",
       },
       title: "Daily summary",
     });
 
     expect(parsed).toMatchObject({
       continuityPolicy: "preserve",
-      prompt: "Summarize the day",
+      instructions: "Summarize the day",
       route: {
         channel: "email",
-        deliverResponse: true,
         deliveryTarget: "thread_123",
       },
       schedule: {
         kind: "dailyLocal",
         localTime: "08:30",
-        timeZone: "UTC",
       },
       status: "active",
       title: "Daily summary",
@@ -65,6 +63,30 @@ describe("automation contract seams", () => {
         timeZone: "Mars/Olympus",
       }),
     ).toThrow(/IANA timezone/u);
+  });
+
+  it("accepts recurring schedules with and without a legacy timezone field", () => {
+    expect(
+      automationScheduleSchema.parse({
+        expression: "0 8 * * *",
+        kind: "cron",
+      }),
+    ).toEqual({
+      expression: "0 8 * * *",
+      kind: "cron",
+    });
+
+    expect(
+      automationScheduleSchema.parse({
+        kind: "dailyLocal",
+        localTime: "08:30",
+        timeZone: "UTC",
+      }),
+    ).toEqual({
+      kind: "dailyLocal",
+      localTime: "08:30",
+      timeZone: "UTC",
+    });
   });
 });
 
@@ -170,6 +192,7 @@ describe("memory contract seams", () => {
 describe("event lifecycle seams", () => {
   it("parses missing, valid, and invalid lifecycle values through the public helpers", () => {
     expect(parseEventLifecycle(undefined)).toEqual({ state: "missing" });
+    expect(parseEventLifecycle(null)).toEqual({ state: "invalid" });
     expect(
       parseEventLifecycle({
         revision: 2,
@@ -183,8 +206,58 @@ describe("event lifecycle seams", () => {
       state: "valid",
     });
     expect(parseEventLifecycle({ revision: 0 })).toEqual({ state: "invalid" });
+    expect(parseEventLifecycle({ revision: 1, state: "archived" })).toEqual({
+      state: "invalid",
+    });
     expect(hasInvalidEventLifecycle({ revision: 0 })).toBe(true);
     expect(eventRevisionFromLifecycle({ revision: 0 })).toBe(1);
+  });
+
+  it("compares revision ties by recordedAt, occurredAt, and relativePath", () => {
+    expect(
+      compareEventRevisionPriority(
+        {
+          lifecycle: { revision: 3 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+        },
+        {
+          lifecycle: { revision: 2 },
+          recordedAt: "2026-04-08T23:59:59.000Z",
+        },
+      ),
+    ).toBeGreaterThan(0);
+
+    expect(
+      compareEventRevisionPriority(
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:02:00.000Z",
+        },
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:01:00.000Z",
+        },
+      ),
+    ).toBeGreaterThan(0);
+
+    expect(
+      compareEventRevisionPriority(
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          relativePath: "ledger/events/z.jsonl",
+        },
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          relativePath: "ledger/events/a.jsonl",
+        },
+      ),
+    ).toBeGreaterThan(0);
   });
 
   it("collapses revisions, prefers the latest surviving record, and skips invalid lifecycle entries", () => {
@@ -269,6 +342,21 @@ describe("event lifecycle seams", () => {
       },
     ]);
   });
+
+  it("skips blank event ids during collapse", () => {
+    expect(
+      collapseEventRevisions(
+        [
+          {
+            eventId: "   ",
+            lifecycle: { revision: 1 },
+            value: "ignored",
+          },
+        ],
+        (value) => value,
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe("shares schema seam", () => {
@@ -280,6 +368,85 @@ describe("shares schema seam", () => {
     ).toMatchObject({
       status: "active",
       title: "Greek yogurt",
+    });
+  });
+
+  it("accepts optional nutrition on food payloads and meal events", () => {
+    expect(
+      foodUpsertPayloadSchema.parse({
+        title: "Greek yogurt",
+        nutrition: {
+          perServing: {
+            calories: 160,
+            proteinGrams: 15,
+            carbsGrams: 9,
+            fatGrams: 5,
+          },
+          provenance: {
+            source: "label",
+            confidence: "high",
+            sourceDetail: "Container label",
+          },
+        },
+      }),
+    ).toMatchObject({
+      nutrition: {
+        perServing: {
+          calories: 160,
+          proteinGrams: 15,
+          carbsGrams: 9,
+          fatGrams: 5,
+        },
+        provenance: {
+          source: "label",
+          confidence: "high",
+          sourceDetail: "Container label",
+        },
+      },
+    });
+
+    expect(
+      eventRecordSchema.parse({
+        schemaVersion: "murph.event.v1",
+        id: "evt_01JQ1A0M6R6ZXQX3C2D8K6YV0A",
+        kind: "meal",
+        occurredAt: "2026-04-13T12:00:00Z",
+        recordedAt: "2026-04-13T12:01:00Z",
+        dayKey: "2026-04-13",
+        source: "manual",
+        title: "Lunch",
+        mealId: "meal_01JQ1A0M6R6ZXQX3C2D8K6YV0B",
+        nutrition: {
+          totals: {
+            calories: 620,
+            proteinGrams: 40,
+            carbsGrams: 55,
+            fatGrams: 25,
+            fiberGrams: 8,
+          },
+          provenance: {
+            source: "estimated",
+            confidence: "medium",
+            sourceDetail: "Estimated from note",
+          },
+        },
+      }),
+    ).toMatchObject({
+      kind: "meal",
+      nutrition: {
+        totals: {
+          calories: 620,
+          proteinGrams: 40,
+          carbsGrams: 55,
+          fatGrams: 25,
+          fiberGrams: 8,
+        },
+        provenance: {
+          source: "estimated",
+          confidence: "medium",
+          sourceDetail: "Estimated from note",
+        },
+      },
     });
   });
 });

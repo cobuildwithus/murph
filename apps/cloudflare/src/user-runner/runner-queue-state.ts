@@ -29,6 +29,10 @@ import {
 
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
+  active_run_attempt: number | null;
+  active_run_event_id: string | null;
+  active_run_id: string | null;
+  active_run_started_at: string | null;
   runtime_bootstrapped: number;
   in_flight: number;
   last_error_at: string | null;
@@ -97,6 +101,10 @@ export function classifyMalformedPendingDispatchError(error: unknown): {
 
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
+    active_run_attempt: null,
+    active_run_event_id: null,
+    active_run_id: null,
+    active_run_started_at: null,
     runtime_bootstrapped: 0,
     in_flight: 0,
     last_error_at: null,
@@ -160,19 +168,13 @@ export function projectRunnerStateRecord(input: {
 }
 
 export function resolveRunnerNextWakeAt(input: {
-  runtimeBootstrapped: boolean;
-  defaultAlarmDelayMs: number;
   nextPendingAvailableAt: string | null;
   preferredWakeAt?: string | null;
 }): string | null {
-  const scheduledWakeAt = earliestIsoTimestamp(
+  return earliestIsoTimestamp(
     input.nextPendingAvailableAt,
     normalizePreferredWakeAt(input.preferredWakeAt ?? null),
   );
-  const fallbackWakeAt = input.runtimeBootstrapped
-    ? new Date(Date.now() + input.defaultAlarmDelayMs).toISOString()
-    : null;
-  return scheduledWakeAt ?? fallbackWakeAt;
 }
 
 function isInvalidRequestFamilyErrorCode(errorCode: string): boolean {
@@ -190,11 +192,11 @@ function normalizePreferredWakeAt(value: string | null): string | null {
   }
 
   const parsedMs = Date.parse(value);
-  if (!Number.isFinite(parsedMs) || parsedMs <= Date.now()) {
+  if (!Number.isFinite(parsedMs)) {
     return null;
   }
 
-  return new Date(parsedMs).toISOString();
+  return new Date(Math.max(parsedMs, Date.now())).toISOString();
 }
 
 function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRef | null {

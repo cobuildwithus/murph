@@ -29,7 +29,6 @@ export const FRONTMATTER_SCHEMA_VERSIONS = Object.freeze({
   geneticVariant: CONTRACT_SCHEMA_VERSION.geneticVariantFrontmatter,
   goal: CONTRACT_SCHEMA_VERSION.goalFrontmatter,
   journalDay: CONTRACT_SCHEMA_VERSION.journalDayFrontmatter,
-  profileCurrent: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
   recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
   protocol: CONTRACT_SCHEMA_VERSION.protocolFrontmatter,
   workoutFormat: CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter,
@@ -37,7 +36,6 @@ export const FRONTMATTER_SCHEMA_VERSIONS = Object.freeze({
 
 export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.assessmentResponse;
 export const EVENT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.event;
-export const PROFILE_SNAPSHOT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.profileSnapshot;
 export const SAMPLE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.sample;
 export const AUDIT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.audit;
 
@@ -63,9 +61,6 @@ export const VAULT_PATHS = Object.freeze({
   inboxCaptureLedgerRoot: VAULT_LAYOUT.inboxCaptureLedgerDirectory,
   journalRoot: VAULT_LAYOUT.journalDirectory,
   memoryDocument: VAULT_LAYOUT.memoryDocument,
-  profileCurrentDocument: VAULT_LAYOUT.profileCurrentDocument,
-  profileRoot: VAULT_LAYOUT.profileDirectory,
-  profileSnapshotsRoot: VAULT_LAYOUT.profileSnapshotsDirectory,
   protocolsRoot: VAULT_LAYOUT.protocolsDirectory,
   providersRoot: VAULT_LAYOUT.providersDirectory,
   rawAssessmentsRoot: VAULT_LAYOUT.rawAssessmentsDirectory,

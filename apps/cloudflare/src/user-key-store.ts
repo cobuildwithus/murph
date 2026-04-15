@@ -1,4 +1,7 @@
 import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   createHostedUserRootKeyEnvelope,
   findHostedWrappedRootKeyRecipient,
   parseHostedUserRootKeyEnvelope,
@@ -22,6 +25,11 @@ export interface HostedUserCryptoContext {
   keysById: Readonly<Record<string, Uint8Array>>;
 }
 
+export interface HostedManagedUserCryptoEnvelopeStatus {
+  envelope: HostedUserRootKeyEnvelope;
+  needsRunnerStoreRefresh: boolean;
+}
+
 export interface HostedUserKeyAuditRecord {
   action: "root-key-bootstrap" | "root-key-reconcile" | "root-key-unwrap";
   reason: string;
@@ -31,10 +39,10 @@ export interface HostedUserKeyAuditRecord {
 }
 
 export interface HostedUserKeyStore {
-  bootstrapManagedUserCryptoContext(
+  ensureManagedUserCryptoEnvelope(
     userId: string,
     options?: { reason?: string },
-  ): Promise<HostedUserCryptoContext>;
+  ): Promise<HostedManagedUserCryptoEnvelopeStatus>;
   requireUserCryptoContext(
     userId: string,
     options?: { reason?: string },
@@ -80,8 +88,8 @@ export function createHostedUserKeyStore(input: {
   });
 
   return {
-    async bootstrapManagedUserCryptoContext(userId, options = {}) {
-      return resolveHostedUserCryptoContext({
+    async ensureManagedUserCryptoEnvelope(userId, options = {}) {
+      const resolved = await resolveHostedUserRootKeyEnvelope({
         auditLog: input.auditLog ?? null,
         automationRecipientPrivateKeysById: automationPrivateKeysById,
         bucket: input.bucket,
@@ -93,6 +101,11 @@ export function createHostedUserKeyStore(input: {
         reason: options.reason ?? "managed-user-provisioning",
         userId,
       });
+
+      return {
+        envelope: resolved.envelope,
+        needsRunnerStoreRefresh: resolved.rootKey !== null,
+      };
     },
     async requireUserCryptoContext(userId, options = {}) {
       return resolveHostedUserCryptoContext({
@@ -302,12 +315,30 @@ async function readStoredHostedUserRootKeyEnvelope(input: {
     }
 
     return {
-      envelope: parseHostedUserRootKeyEnvelope(JSON.parse(new TextDecoder().decode(plaintext)) as unknown),
+      envelope: parseStoredHostedUserRootKeyEnvelope(
+        JSON.parse(new TextDecoder().decode(plaintext)) as unknown,
+        input.userId,
+      ),
       objectKey,
     };
   }
 
   return null;
+}
+
+function parseStoredHostedUserRootKeyEnvelope(
+  value: unknown,
+  expectedUserId: string,
+): HostedUserRootKeyEnvelope {
+  const envelope = parseHostedUserRootKeyEnvelope(value);
+
+  if (envelope.userId !== expectedUserId) {
+    throw new Error(
+      `Hosted user root key envelope user mismatch: expected ${expectedUserId}, received ${envelope.userId}.`,
+    );
+  }
+
+  return envelope;
 }
 
 async function writeHostedUserRootKeyEnvelope(input: {
@@ -496,9 +527,17 @@ async function emitHostedUserKeyAudit(
   try {
     await auditLog(record);
   } catch (error) {
-    console.error(
-      `Hosted user key audit logging failed for ${record.userId}/${record.action}.`,
-      error instanceof Error ? error.message : String(error),
-    );
+    emitHostedExecutionStructuredLog({
+      component: "hosted.user-key-store",
+      details: {
+        action: record.action,
+        reason: record.reason,
+      },
+      error,
+      level: "error",
+      message: `Hosted user key audit logging failed during ${record.action}.`,
+      phase: "runtime.starting",
+      userId: record.userId,
+    });
   }
 }

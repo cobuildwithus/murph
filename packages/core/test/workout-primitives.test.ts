@@ -40,6 +40,13 @@ async function createSourceFile(vaultRoot: string, fileName: string, content: st
   return sourcePath
 }
 
+async function readAuditRecords(vaultRoot: string, occurredAt: string) {
+  return readJsonlRecords({
+    vaultRoot,
+    relativePath: `audit/${occurredAt.slice(0, 4)}/${occurredAt.slice(0, 7)}.jsonl`,
+  })
+}
+
 describe('workout primitive core mutations', () => {
   it('adds activity sessions through a dedicated core seam and stages workout media in one write', async () => {
     const vaultRoot = await createTempVault('murph-core-activity-')
@@ -103,12 +110,32 @@ describe('workout primitive core mutations', () => {
     const manifest = JSON.parse(
       await readFile(path.join(vaultRoot, result.manifestPath!), 'utf8'),
     ) as { importKind: string; provenance?: Record<string, unknown> }
+    const auditRecords = await readAuditRecords(vaultRoot, result.event.occurredAt)
+    const auditRecord = auditRecords.find(
+      (record) =>
+        (record as { action?: string }).action === 'event_upsert' &&
+        Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+        (record as { targetIds: string[] }).targetIds.includes(result.eventId),
+    ) as
+      | {
+          commandName?: string
+          changes?: Array<{ path?: string }>
+        }
+      | undefined
     expect(manifest.importKind).toBe('workout_batch')
     expect(manifest.provenance).toMatchObject({
       eventId: result.eventId,
       family: 'workout',
       mediaCount: 1,
     })
+    expect(auditRecord?.commandName).toBe('core.addActivitySession')
+    expect(auditRecord?.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: result.ledgerFile,
+        }),
+      ]),
+    )
   })
 
   it('merges existing workout raw refs and media with newly staged attachments', async () => {
@@ -204,10 +231,30 @@ describe('workout primitive core mutations', () => {
       vaultRoot,
       relativePath: result.ledgerFile,
     })
+    const auditRecords = await readAuditRecords(vaultRoot, result.event.occurredAt)
+    const auditRecord = auditRecords.find(
+      (record) =>
+        (record as { action?: string }).action === 'event_upsert' &&
+        Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+        (record as { targetIds: string[] }).targetIds.includes(result.eventId),
+    ) as
+      | {
+          commandName?: string
+          changes?: Array<{ path?: string }>
+        }
+      | undefined
     expect(ledgerRecords).toHaveLength(1)
     expect(ledgerRecords[0]).toMatchObject({
       id: result.eventId,
       kind: 'body_measurement',
     })
+    expect(auditRecord?.commandName).toBe('core.addBodyMeasurement')
+    expect(auditRecord?.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: result.ledgerFile,
+        }),
+      ]),
+    )
   })
 })

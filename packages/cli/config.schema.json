@@ -166,34 +166,6 @@
                       }
                     }
                   }
-                },
-                "upgrade": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "dryRun": {
-                          "default": false,
-                          "description": "Preview the upgrade plan without writing canonical files.",
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
                 }
               }
             }
@@ -237,22 +209,22 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram, linq, or email.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
+                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
                         "sourceThread": {
-                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -290,7 +262,7 @@
                           "minLength": 1
                         },
                         "headersJson": {
-                          "description": "Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.",
+                          "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -326,7 +298,7 @@
                           "type": "boolean"
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -364,22 +336,22 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram, linq, or email.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
+                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
                         "sourceThread": {
-                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -417,7 +389,7 @@
                           "minLength": 1
                         },
                         "headersJson": {
-                          "description": "Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.",
+                          "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -482,27 +454,27 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram, linq, or email.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
+                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
                         "sourceThread": {
-                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -555,16 +527,9 @@
                           "minLength": 1
                         },
                         "headersJson": {
-                          "description": "Optional JSON object of extra HTTP headers for the routing endpoint.",
+                          "description": "Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.",
                           "type": "string",
                           "minLength": 1
-                        },
-                        "scanIntervalMs": {
-                          "default": 5000,
-                          "description": "Polling interval between inbox scans when running continuously.",
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 60000
                         },
                         "maxPerScan": {
                           "default": 50,
@@ -574,7 +539,7 @@
                           "maximum": 200
                         },
                         "allowSelfAuthored": {
-                          "description": "Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Murph.",
+                          "description": "Allow self-authored captures to trigger channel auto-reply. Useful for a dedicated assistant self-chat or sandbox thread, but only safe when you isolate that thread to Murph.",
                           "type": "boolean"
                         },
                         "sessionRolloverHours": {
@@ -585,10 +550,6 @@
                         },
                         "once": {
                           "description": "Run one assistant scan and then exit.",
-                          "type": "boolean"
-                        },
-                        "skipDaemon": {
-                          "description": "Do not start the inbox foreground daemon; only run the assistant scan loop.",
                           "type": "boolean"
                         }
                       }
@@ -654,22 +615,22 @@
                                   "maxLength": 128
                                 },
                                 "identity": {
-                                  "description": "Optional local assistant identity id to reuse for this saved channel target.",
+                                  "description": "Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "participant": {
-                                  "description": "Optional remote actor id to reuse for this saved channel target.",
+                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "sourceThread": {
-                                  "description": "Optional upstream thread id to reuse for this saved channel target.",
+                                  "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "deliveryTarget": {
-                                  "description": "Optional explicit outbound destination to save for this channel target, such as a phone number, Telegram chat id, or email address.",
+                                  "description": "Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -719,7 +680,7 @@
                           "maxLength": 128
                         },
                         "session": {
-                          "description": "Optional assistant session id to scope the recent turn receipts.",
+                          "description": "Optional assistant session id to scope the runtime snapshot to one session and inspect the provider/model used there.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -877,22 +838,22 @@
                   "minLength": 1
                 },
                 "channel": {
-                  "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                  "description": "Optional channel label such as telegram, linq, or email.",
                   "type": "string",
                   "minLength": 1
                 },
                 "identity": {
-                  "description": "Optional local assistant identity id for multi-user routing.",
+                  "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                   "type": "string",
                   "minLength": 1
                 },
                 "participant": {
-                  "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                   "type": "string",
                   "minLength": 1
                 },
                 "sourceThread": {
-                  "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                  "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -930,7 +891,7 @@
                   "minLength": 1
                 },
                 "headersJson": {
-                  "description": "Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.",
+                  "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -1010,16 +971,9 @@
                   "minLength": 1
                 },
                 "headersJson": {
-                  "description": "Optional JSON object of extra HTTP headers for the routing endpoint.",
+                  "description": "Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.",
                   "type": "string",
                   "minLength": 1
-                },
-                "scanIntervalMs": {
-                  "default": 5000,
-                  "description": "Polling interval between inbox scans when running continuously.",
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 60000
                 },
                 "maxPerScan": {
                   "default": 50,
@@ -1029,7 +983,7 @@
                   "maximum": 200
                 },
                 "allowSelfAuthored": {
-                  "description": "Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Murph.",
+                  "description": "Allow self-authored captures to trigger channel auto-reply. Useful for a dedicated assistant self-chat or sandbox thread, but only safe when you isolate that thread to Murph.",
                   "type": "boolean"
                 },
                 "sessionRolloverHours": {
@@ -1040,10 +994,6 @@
                 },
                 "once": {
                   "description": "Run one assistant scan and then exit.",
-                  "type": "boolean"
-                },
-                "skipDaemon": {
-                  "description": "Do not start the inbox foreground daemon; only run the assistant scan loop.",
                   "type": "boolean"
                 }
               }
@@ -1070,7 +1020,7 @@
                   "maxLength": 128
                 },
                 "session": {
-                  "description": "Optional assistant session id to scope the recent turn receipts.",
+                  "description": "Optional assistant session id to scope the runtime snapshot to one session and inspect the provider/model used there.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -1222,7 +1172,7 @@
                           }
                         },
                         "text": {
-                          "description": "Optional lexical filter across title, prompt, route, and metadata.",
+                          "description": "Optional lexical filter across title, instructions, route, and metadata.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -1318,29 +1268,33 @@
                           "maxLength": 128
                         },
                         "action": {
+                          "description": "Optional audit action filter such as validate, samples_import_csv, or goal_update.",
                           "type": "string",
                           "minLength": 1
                         },
                         "actor": {
+                          "description": "Optional audit actor filter such as cli, assistant, import, or system.",
                           "type": "string",
                           "minLength": 1
                         },
                         "status": {
+                          "description": "Optional audit status filter such as success, warning, or error.",
                           "type": "string",
                           "minLength": 1
                         },
                         "from": {
+                          "description": "Inclusive lower occurredAt date bound in YYYY-MM-DD form.",
                           "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "description": "Calendar date in YYYY-MM-DD form."
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
+                          "description": "Inclusive upper occurredAt date bound in YYYY-MM-DD form.",
                           "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "description": "Calendar date in YYYY-MM-DD form."
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "sort": {
                           "default": "desc",
+                          "description": "Sort audit records by occurredAt in ascending or descending order.",
                           "type": "string",
                           "enum": [
                             "asc",
@@ -1349,6 +1303,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of audit records to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -1378,6 +1333,7 @@
                         },
                         "limit": {
                           "default": 20,
+                          "description": "Maximum number of recent audit records to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -1423,10 +1379,20 @@
                           "minLength": 1
                         },
                         "occurredAt": {
-                          "description": "Optional occurrence timestamp in ISO 8601 form.",
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
                         },
                         "note": {
                           "description": "Optional freeform note.",
@@ -1490,12 +1456,12 @@
                           "maxLength": 128
                         },
                         "from": {
-                          "description": "Optional inclusive start date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
-                          "description": "Optional inclusive end date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
@@ -1637,9 +1603,9 @@
                           "format": "uri"
                         },
                         "returnTo": {
-                          "description": "Optional post-connect redirect. device-syncd accepts relative paths or configured allowed origins.",
+                          "description": "Optional post-connect redirect. Accepts a root-relative path like /settings/devices or an absolute URL; device-syncd still rejects absolute URLs outside its allowed origin list.",
                           "type": "string",
-                          "format": "uri"
+                          "minLength": 1
                         },
                         "open": {
                           "description": "Open the authorization URL in the default browser after creating the OAuth state.",
@@ -1965,11 +1931,33 @@
                             "Context"
                           ],
                           "description": "Memory section to write into."
-                        },
-                        "memoryId": {
-                          "description": "Optional existing memory id to update.",
+                        }
+                      }
+                    }
+                  }
+                },
+                "update": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "description": "Vault root."
+                        },
+                        "section": {
+                          "description": "Optional replacement memory section. Defaults to the current section.",
+                          "type": "string",
+                          "enum": [
+                            "Identity",
+                            "Preferences",
+                            "Instructions",
+                            "Context"
+                          ]
                         }
                       }
                     }
@@ -2005,11 +1993,11 @@
               "additionalProperties": false,
               "properties": {
                 "show": {
-                  "description": "Show the saved default assistant backend without changing it.",
+                  "description": "Show the saved default assistant backend configuration without changing it. This inspects persisted defaults, not live session state. When set, no update options are allowed.",
                   "type": "boolean"
                 },
                 "preset": {
-                  "description": "Assistant backend preset to save: Codex or an OpenAI-compatible endpoint.",
+                  "description": "Assistant backend preset to save. Required for non-interactive updates when Murph cannot infer or reuse the backend, and required when switching between Codex and an OpenAI-compatible endpoint.",
                   "type": "string",
                   "enum": [
                     "codex",
@@ -2017,10 +2005,11 @@
                   ]
                 },
                 "providerPreset": {
-                  "description": "Optional named OpenAI-compatible provider preset to seed the endpoint prompts.",
+                  "description": "Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`. Named presets carry provider-specific runtime behavior in addition to endpoint defaults.",
                   "type": "string",
                   "enum": [
                     "openai",
+                    "vercel-ai-gateway",
                     "openrouter",
                     "venice",
                     "deepseek",
@@ -2039,37 +2028,41 @@
                   ]
                 },
                 "model": {
-                  "description": "Default model to save for the selected backend.",
+                  "description": "Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.",
                   "type": "string",
                   "minLength": 1
                 },
                 "baseUrl": {
-                  "description": "OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.",
+                  "description": "OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1. Only applies with `--preset openai-compatible`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "apiKeyEnv": {
-                  "description": "Environment variable name that should hold the OpenAI-compatible API key.",
+                  "description": "Environment variable name that should hold the OpenAI-compatible API key. Only applies with `--preset openai-compatible`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "providerName": {
-                  "description": "Stable label for the saved OpenAI-compatible provider.",
+                  "description": "Stable label for the saved OpenAI-compatible provider. Only applies with `--preset openai-compatible`.",
                   "type": "string",
                   "minLength": 1
                 },
+                "zeroDataRetention": {
+                  "description": "Request zero data retention on Vercel AI Gateway assistant turns. Only applies with `--preset openai-compatible`.",
+                  "type": "boolean"
+                },
                 "codexCommand": {
-                  "description": "Optional Codex CLI executable path. Defaults to codex.",
+                  "description": "Optional Codex CLI executable path. Only applies with `--preset codex`. Defaults to `codex`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "profile": {
-                  "description": "Optional Codex profile name to save.",
+                  "description": "Optional Codex profile name to save. Only applies with `--preset codex`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "reasoningEffort": {
-                  "description": "Optional assistant reasoning effort default to save.",
+                  "description": "Optional assistant reasoning effort default to save for the selected backend. Use the matching `--preset` when Murph cannot infer the backend non-interactively.",
                   "type": "string",
                   "enum": [
                     "low",
@@ -2079,8 +2072,86 @@
                   ]
                 },
                 "oss": {
-                  "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path.",
+                  "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path. Only applies with `--preset codex`.",
                   "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "route": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "estimate": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "waypoint": {
+                          "description": "Optional intermediate stops. Repeat --waypoint to add more than one.",
+                          "maxItems": 23,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "profile": {
+                          "description": "Routing profile. Use walking for hikes, runs, and on-foot trail estimates.",
+                          "type": "string",
+                          "enum": [
+                            "walking",
+                            "cycling",
+                            "driving",
+                            "driving-traffic"
+                          ]
+                        },
+                        "elevation": {
+                          "description": "Include an approximate elevation summary from bounded terrain contour samples.",
+                          "type": "boolean"
+                        },
+                        "geometry": {
+                          "description": "Include the routed GeoJSON LineString in the response.",
+                          "type": "boolean"
+                        },
+                        "country": {
+                          "description": "Optional ISO 3166-1 alpha-2 country hints for geocoding when plain-text places are ambiguous. Repeat --country to add more than one.",
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z]{2}$"
+                          }
+                        },
+                        "language": {
+                          "description": "Optional language hint for provider geocoding display names.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 10
+                        },
+                        "elevationSampleSpacingMeters": {
+                          "description": "Approximate spacing between elevation samples when --elevation is set.",
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 10000
+                        },
+                        "maxElevationSamples": {
+                          "description": "Maximum number of elevation sample points when --elevation is set.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 24
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -2113,6 +2184,10 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "input": {
+                          "description": "Optional structured meal payload in @file.json form or - for stdin.",
+                          "type": "string"
+                        },
                         "photo": {
                           "description": "Optional meal photo path.",
                           "type": "string",
@@ -2129,10 +2204,20 @@
                           "minLength": 1
                         },
                         "occurredAt": {
-                          "description": "Optional occurrence timestamp in ISO 8601 form.",
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
                         },
                         "source": {
                           "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
@@ -2191,12 +2276,12 @@
                           "maxLength": 128
                         },
                         "from": {
-                          "description": "Optional inclusive start date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
-                          "description": "Optional inclusive end date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
@@ -2222,6 +2307,39 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "totals": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "from": {
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "to": {
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
                       }
                     }
@@ -2355,10 +2473,20 @@
                           "maximum": 1000
                         },
                         "occurredAt": {
-                          "description": "Optional occurrence timestamp in ISO 8601 form.",
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
                         },
                         "source": {
                           "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
@@ -2426,15 +2554,18 @@
                           "maxLength": 128
                         },
                         "from": {
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -2618,10 +2749,20 @@
                                   "maxLength": 160
                                 },
                                 "occurredAt": {
-                                  "description": "Optional occurrence timestamp in ISO 8601 form.",
-                                  "type": "string",
-                                  "format": "date-time",
-                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                                      "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                                      "description": "Calendar date in YYYY-MM-DD form."
+                                    }
+                                  ]
                                 },
                                 "source": {
                                   "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
@@ -2790,13 +2931,6 @@
                                     "kg"
                                   ]
                                 },
-                                "distance": {
-                                  "type": "string",
-                                  "enum": [
-                                    "km",
-                                    "mi"
-                                  ]
-                                },
                                 "bodyMeasurement": {
                                   "description": "Preferred circumference/body-measurement unit.",
                                   "type": "string",
@@ -2806,7 +2940,7 @@
                                   ]
                                 },
                                 "recordedAt": {
-                                  "description": "Optional profile-snapshot timestamp override in ISO 8601 form.",
+                                  "description": "Optional preferences update timestamp override in ISO 8601 form.",
                                   "type": "string",
                                   "format": "date-time",
                                   "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
@@ -3048,10 +3182,20 @@
                                   "maximum": 1000
                                 },
                                 "occurredAt": {
-                                  "description": "Optional occurrence timestamp in ISO 8601 form.",
-                                  "type": "string",
-                                  "format": "date-time",
-                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                                      "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                                      "description": "Calendar date in YYYY-MM-DD form."
+                                    }
+                                  ]
                                 },
                                 "source": {
                                   "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
@@ -3129,10 +3273,20 @@
                           "pattern": "^prot_[0-9A-Za-z]+$"
                         },
                         "occurredAt": {
-                          "description": "Optional occurrence timestamp in ISO 8601 form.",
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
                         },
                         "source": {
                           "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
@@ -3332,6 +3486,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -3520,6 +3675,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -3707,6 +3863,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -3974,6 +4131,7 @@
                           "maxLength": 128
                         },
                         "kind": {
+                          "description": "Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -3988,7 +4146,7 @@
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "tag": {
-                          "description": "Optional tag filter. Repeat --tag for multiple values.",
+                          "description": "Optional tag filter. Repeat --tag to match any listed tag.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -3996,12 +4154,13 @@
                           }
                         },
                         "experiment": {
+                          "description": "Optional experiment slug filter for events linked to one experiment.",
                           "type": "string",
-                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-                          "description": "Stable lowercase kebab-case identifier."
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -4827,6 +4986,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -4909,10 +5069,20 @@
                           "maxLength": 128
                         },
                         "occurredAt": {
-                          "description": "Optional stop timestamp in ISO 8601 form.",
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          "description": "Optional stop timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
                         },
                         "note": {
                           "description": "Optional stop note.",
@@ -5001,17 +5171,18 @@
                           "maxLength": 128
                         },
                         "from": {
-                          "description": "Inclusive lower date bound.",
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
-                          "description": "Inclusive upper date bound.",
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -5068,7 +5239,7 @@
                           "maxLength": 128
                         },
                         "eventId": {
-                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values.",
+                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values. Mutually exclusive with --stream.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5076,7 +5247,7 @@
                           }
                         },
                         "stream": {
-                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values.",
+                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5107,7 +5278,7 @@
                           "maxLength": 128
                         },
                         "eventId": {
-                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values.",
+                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values. Mutually exclusive with --stream.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5115,7 +5286,7 @@
                           }
                         },
                         "stream": {
-                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values.",
+                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5173,7 +5344,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families such as event, journal, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.",
+                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, journal, protocol, provider, recipe, sample, workout_format.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -5259,12 +5430,12 @@
                           "maxLength": 128
                         },
                         "text": {
-                          "description": "Search text to run across titles, notes, tags, ids, and record payloads.",
+                          "description": "Named search text alias. Required when the positional query is omitted; use this for explicit machine-oriented calls.",
                           "type": "string",
                           "minLength": 1
                         },
                         "recordType": {
-                          "description": "Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics.",
+                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, journal, protocol, provider, recipe, sample, workout_format.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5446,7 +5617,7 @@
                   }
                 },
                 "entryType": {
-                  "description": "Optional entry types: journal, event, assessment, history, profile_snapshot, sample_summary. Repeat --entry-type for multiple values.",
+                  "description": "Optional entry types: journal, event, assessment, sample_summary. Repeat --entry-type for multiple values.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -6063,10 +6234,20 @@
                           "minLength": 1
                         },
                         "occurredAt": {
-                          "description": "Optional occurrence timestamp in ISO 8601 form.",
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
                         },
                         "importedAt": {
                           "description": "Optional import timestamp in ISO 8601 form.",
@@ -6285,11 +6466,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "pdftotextCommand": {
-                          "description": "Optional explicit pdftotext command or path to persist.",
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "whisperCommand": {
                           "description": "Optional explicit whisper.cpp command or path to persist.",
                           "type": "string",
@@ -6329,11 +6505,6 @@
                         },
                         "ffmpegCommand": {
                           "description": "Optional explicit ffmpeg command or path to persist.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "pdftotextCommand": {
-                          "description": "Optional explicit pdftotext command or path to persist.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -6384,7 +6555,7 @@
                                   "description": "Runtime connector id."
                                 },
                                 "account": {
-                                  "description": "Optional account identity for the connector. Defaults to `self` for iMessage, `bot` for Telegram, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.",
+                                  "description": "Optional account identity for the connector. Defaults to `bot` for Telegram, `default` for Linq, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -6392,10 +6563,6 @@
                                   "description": "Optional email address to associate with an existing AgentMail inbox connector.",
                                   "type": "string",
                                   "minLength": 1
-                                },
-                                "includeOwn": {
-                                  "description": "Include messages sent by the local account when supported.",
-                                  "type": "boolean"
                                 },
                                 "backfillLimit": {
                                   "default": 500,
@@ -7133,165 +7300,6 @@
             }
           }
         },
-        "profile": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "scaffold": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "upsert": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "input": {
-                          "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
-                        }
-                      }
-                    }
-                  }
-                },
-                "show": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "list": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "from": {
-                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "to": {
-                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "limit": {
-                          "default": 50,
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
-                        }
-                      }
-                    }
-                  }
-                },
-                "current": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "rebuild": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
         "goal": {
           "type": "object",
           "additionalProperties": false,
@@ -7399,6 +7407,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -7518,6 +7527,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -7637,140 +7647,7 @@
                         },
                         "limit": {
                           "default": 50,
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "history": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "scaffold": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "upsert": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "input": {
-                          "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
-                        }
-                      }
-                    }
-                  }
-                },
-                "show": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "list": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "status": {
-                          "description": "Optional health-event status to filter by.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "kind": {
-                          "description": "Optional history event kind filter such as encounter, procedure, test, adverse_effect, or exposure.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "from": {
-                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "to": {
-                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "limit": {
-                          "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -7900,6 +7777,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -8014,6 +7892,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -8133,6 +8012,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -8252,6 +8132,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
@@ -8280,9 +8161,9 @@
                           "maxLength": 128
                         },
                         "stoppedOn": {
+                          "description": "Optional calendar day when the supplement stopped. Defaults to today.",
                           "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "description": "Calendar date in YYYY-MM-DD form."
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
                       }
                     }
@@ -8351,6 +8232,7 @@
                                 },
                                 "limit": {
                                   "default": 50,
+                                  "description": "Maximum number of results to return.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -8507,6 +8389,7 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200

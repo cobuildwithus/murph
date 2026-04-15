@@ -49,7 +49,7 @@ const assistantdFetchMock = vi.fn(
 let nextAssistantdFetchId = 1
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session_daemon_test',
   target: {
     adapter: 'codex-cli',
@@ -64,12 +64,15 @@ const TEST_SESSION = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
+    continuityFingerprint: 'codex-fingerprint',
+    executionDriver: 'codex-cli',
     model: null,
     reasoningEffort: null,
     sandbox: null,
     approvalPolicy: null,
     profile: null,
     oss: false,
+    resumeKind: 'codex-session',
   },
   providerBinding: null,
   alias: 'chat:test',
@@ -140,7 +143,6 @@ const TEST_CRON_JOB = {
     participantId: 'chat-123',
     sourceThreadId: 'chat-123',
     deliveryTarget: null,
-    deliverResponse: true,
   },
   createdAt: '2026-03-28T00:00:00.000Z',
   updatedAt: '2026-03-28T00:00:00.000Z',
@@ -385,10 +387,7 @@ test('assistant daemon client routes serializable assistant operations through t
             },
             automation: {
               inboxScanCursor: null,
-              autoReplyScanCursor: null,
-              autoReplyChannels: [],
-              autoReplyBacklogChannels: [],
-              autoReplyPrimed: false,
+              autoReply: [],
               updatedAt: '2026-03-28T00:00:00.000Z',
             },
             outbox: {
@@ -916,6 +915,50 @@ test('assistant daemon client preserves typed error codes from the control plane
         )
         assert.equal((error as Error).message, 'Assistant session "missing" was not found.')
         assert.equal((error as { status?: number }).status, 404)
+        return true
+      },
+    )
+  } finally {
+    release()
+  }
+})
+
+test('assistant daemon client surfaces continuous automation daemon requirements cleanly', async () => {
+  const { env, release } = registerAssistantdFetchHandler(async (input, init) => {
+    const url = new URL(typeof input === 'string' ? input : input.toString())
+    assert.equal(url.pathname, '/automation/run-once')
+    assert.equal(init?.method, 'POST')
+
+    const body = JSON.parse(String(init?.body)) as {
+      once?: boolean
+      startDaemon?: boolean
+    }
+    assert.equal(body.once, false)
+    assert.equal(body.startDaemon, false)
+
+    return new Response(
+      JSON.stringify({
+        error: 'Assistant daemon request failed.',
+      }),
+      { status: 500 },
+    )
+  })
+
+  try {
+    await assert.rejects(
+      () =>
+        maybeRunAssistantAutomationViaDaemon(
+          {
+            once: false,
+            startDaemon: false,
+            vault: '/tmp/vault',
+          },
+          env,
+        ),
+      (error) => {
+        assert.equal(error instanceof Error, true)
+        assert.equal((error as Error).message, 'Assistant daemon request failed.')
+        assert.equal((error as { status?: number }).status, 500)
         return true
       },
     )

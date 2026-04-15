@@ -1,4 +1,8 @@
 import {
+  inferGatewayReplyRouteForChannel,
+  type GatewayResolvedReplyRoute,
+} from '@murphai/gateway-core'
+import {
   assistantBindingDeliverySchema,
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
@@ -16,10 +20,20 @@ import type {
 export function createAssistantChannelAdapter(
   spec: AssistantChannelAdapterSpec,
 ): AssistantChannelAdapter {
+  const inferBindingDelivery =
+    spec.inferBindingDelivery ??
+    ((input) =>
+      inferBindingDeliveryForChannel({
+        channel: spec.channel,
+        conversation: input.conversation,
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+      }))
+
   return {
     channel: spec.channel,
     canAutoReply: spec.canAutoReply,
-    inferBindingDelivery: spec.inferBindingDelivery,
+    inferBindingDelivery,
     isReadyForSetup: spec.isReadyForSetup,
     ...(spec.startTypingIndicator
       ? {
@@ -141,80 +155,34 @@ export function createAssistantBindingDelivery(
   })
 }
 
-export function resolveExplicitBindingDelivery(input: {
-  deliveryKind?: AssistantBindingDeliveryKind | null
-  deliveryTarget?: string | null
-}): AssistantBindingDelivery | null {
-  const explicitKind = input.deliveryKind ?? null
-  const explicitTarget = normalizeOptionalText(input.deliveryTarget)
-  if (!explicitKind || !explicitTarget) {
+function assistantBindingDeliveryFromGatewayReply(
+  reply: GatewayResolvedReplyRoute | null,
+): AssistantBindingDelivery | null {
+  if (!reply) {
     return null
   }
 
-  return createAssistantBindingDelivery(explicitKind, explicitTarget)
+  return createAssistantBindingDelivery(reply.kind, reply.target)
 }
 
-export function inferThreadFirstBindingDelivery(
-  input: {
-    conversation: ConversationRef
-    deliveryKind?: AssistantBindingDeliveryKind | null
-    deliveryTarget?: string | null
-  },
-  options: {
-    includeParticipant: boolean
-  },
-): AssistantBindingDelivery | null {
-  const explicitDelivery = resolveExplicitBindingDelivery(input)
-  if (explicitDelivery) {
-    return explicitDelivery
-  }
-
-  if (input.conversation.threadId) {
-    return createAssistantBindingDelivery('thread', input.conversation.threadId)
-  }
-
-  if (options.includeParticipant && input.conversation.participantId) {
-    return createAssistantBindingDelivery(
-      'participant',
-      input.conversation.participantId,
-    )
-  }
-
-  return null
-}
-
-export function inferFallbackBindingDelivery(input: {
+export function inferBindingDeliveryForChannel(input: {
+  channel?: string | null
   conversation: ConversationRef
   deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
-  const explicitDelivery = resolveExplicitBindingDelivery(input)
-  if (explicitDelivery) {
-    return explicitDelivery
-  }
-
-  if (input.conversation.directness === 'group' && input.conversation.threadId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'thread',
-      target: input.conversation.threadId,
-    })
-  }
-
-  if (input.conversation.participantId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'participant',
-      target: input.conversation.participantId,
-    })
-  }
-
-  if (input.conversation.threadId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'thread',
-      target: input.conversation.threadId,
-    })
-  }
-
-  return null
+  return assistantBindingDeliveryFromGatewayReply(
+    inferGatewayReplyRouteForChannel({
+      channel: input.channel ?? input.conversation.channel ?? null,
+      conversation: {
+        directness: input.conversation.directness,
+        participantId: input.conversation.participantId,
+        threadId: input.conversation.threadId,
+      },
+      deliveryKind: input.deliveryKind ?? null,
+      deliveryTarget: input.deliveryTarget ?? null,
+    }),
+  )
 }
 
 export function normalizeOptionalText(value: string | null | undefined): string | null {

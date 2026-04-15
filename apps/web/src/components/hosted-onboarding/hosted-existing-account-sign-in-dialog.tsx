@@ -2,16 +2,16 @@
 
 import { useState } from "react";
 
-import { Button } from "@/src/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/src/components/ui/dialog";
+} from "@/components/ui/dialog";
 
-import { HostedPhoneAuth } from "./hosted-phone-auth";
+import { HostedAuthPanel } from "./hosted-auth-panel";
 
 export function HostedExistingAccountSignInDialog() {
   const [open, setOpen] = useState(false);
@@ -25,20 +25,20 @@ export function HostedExistingAccountSignInDialog() {
         className="h-auto p-0 text-sm font-medium text-white underline-offset-4 hover:text-white hover:underline"
         onClick={() => setOpen(true)}
       >
-        Already have an account? Sign in
+        Already murph&apos;n? Sign in.
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md p-6 md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
-              Sign in with your phone
+              Sign in to Murph
             </DialogTitle>
-            <DialogDescription>We&apos;ll text you a sign-in code.</DialogDescription>
+            <DialogDescription>
+              Use your phone number, email address, or Telegram to sign in.
+            </DialogDescription>
           </DialogHeader>
           {open ? (
-            <HostedPhoneAuth
-              intent="signin"
-            />
+            <HostedAuthPanel intent="signin" methods={["phone", "telegram", "email"]} />
           ) : null}
         </DialogContent>
       </Dialog>

@@ -10,6 +10,7 @@ import gatewayCoreProject from "./packages/gateway-core/vitest.config.ts";
 import gatewayLocalProject from "./packages/gateway-local/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
 import importersProject from "./packages/importers/vitest.config.ts";
+import inboxServicesProject from "./packages/inbox-services/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
 import messagingIngressProject from "./packages/messaging-ingress/vitest.config.ts";
 import openclawPluginProject from "./packages/openclaw-plugin/vitest.config.ts";
@@ -22,6 +23,7 @@ import parsersProject from "./packages/parsers/vitest.config.ts";
 import queryProject from "./packages/query/vitest.config.ts";
 import runtimeStateProject from "./packages/runtime-state/vitest.config.ts";
 import setupCliProject from "./packages/setup-cli/vitest.config.ts";
+import vaultUsecasesProject from "./packages/vault-usecases/vitest.config.ts";
 import {
   defineConfig,
   mergeConfig,
@@ -29,7 +31,7 @@ import {
 } from "vitest/config";
 
 import { resolveMurphVitestConcurrency } from "./config/vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "./config/vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "./config/vitest-timeouts.js";
 
 const rootRepoVitestConcurrency = resolveMurphVitestConcurrency();
 
@@ -96,6 +98,11 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
     include: ["test/**/*.test.ts"],
   },
   {
+    config: inboxServicesProject,
+    root: "packages/inbox-services",
+    include: ["test/**/*.test.ts"],
+  },
+  {
     config: messagingIngressProject,
     root: "packages/messaging-ingress",
     include: ["test/**/*.test.ts"],
@@ -140,6 +147,11 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
     root: "packages/setup-cli",
     include: ["test/**/*.test.ts"],
   },
+  {
+    config: vaultUsecasesProject,
+    root: "packages/vault-usecases",
+    include: ["test/**/*.test.ts"],
+  },
 ];
 
 const rootRepoCliProjects: UserWorkspaceConfig[] = cliVitestProjectSpecs.map(
@@ -148,7 +160,7 @@ const rootRepoCliProjects: UserWorkspaceConfig[] = cliVitestProjectSpecs.map(
 
 export default defineConfig({
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     // apps/web and apps/cloudflare stay in their dedicated verify lanes so the
     // root multi-project run does not execute them twice.
     projects: [

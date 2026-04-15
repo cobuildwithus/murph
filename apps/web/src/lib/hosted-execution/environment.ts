@@ -13,7 +13,9 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export function readHostedExecutionDispatchEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionDispatchEnvironment {
-  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
+  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL, {
+    allowHttpLocalhost: true,
+  });
   const dispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS);
 
   return {
@@ -29,7 +31,9 @@ export function readHostedExecutionDispatchEnvironment(
 export function readHostedExecutionControlBaseUrl(
   source: EnvSource = process.env,
 ): string | null {
-  return normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
+  return normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL, {
+    allowHttpLocalhost: true,
+  });
 }
 
 function parsePositiveInteger(value: string | null, fallback: number, label: string): number {

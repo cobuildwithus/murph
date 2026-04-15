@@ -1,3 +1,7 @@
+import {
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+} from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -122,14 +126,7 @@ describe("device-sync hosted runtime helpers", () => {
   });
 
   it("binds device-sync runtime requests to the trusted hosted execution user and normalizes timestamps", async () => {
-    const {
-      parseHostedDeviceSyncRuntimeApplyRequest,
-      parseHostedDeviceSyncRuntimeSnapshotRequest,
-    } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-
-    expect(parseHostedDeviceSyncRuntimeSnapshotRequest({
+    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotRequest({
       provider: "oura",
       userId: "user-123",
     }, "user-123")).toEqual({
@@ -137,7 +134,7 @@ describe("device-sync hosted runtime helpers", () => {
       userId: "user-123",
     });
 
-    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       occurredAt: "2026-03-26T12:00:00Z",
       updates: [
         {
@@ -178,14 +175,8 @@ describe("device-sync hosted runtime helpers", () => {
     });
   });
 
-  it("ignores removed flat runtime update fields and only reads canonical nested updates", async () => {
-    const {
-      parseHostedDeviceSyncRuntimeApplyRequest,
-    } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-
-    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+  it("ignores removed flat runtime update fields and only reads canonical nested updates", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
         {
           connection: {
@@ -215,6 +206,108 @@ describe("device-sync hosted runtime helpers", () => {
         },
       ],
       userId: "user-123",
+    });
+  });
+
+  it("redacts secret-bearing hosted runtime error text across heartbeat, apply, projection, and seed helpers", async () => {
+    const {
+      buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
+      buildHostedPublicDeviceSyncAccount,
+    } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+    const {
+      parseHostedLocalHeartbeatPatch,
+    } = await import(
+      "@/src/lib/device-sync/local-heartbeat"
+    );
+
+    const errorText =
+      "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature";
+
+    expect(parseHostedLocalHeartbeatPatch({
+      lastErrorCode: "access_token=top-secret",
+      lastErrorMessage: errorText,
+      lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
+    })).toMatchObject({
+      lastErrorCode: "access_token=[redacted]",
+      lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+    });
+
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          localState: {
+            lastErrorCode: "access_token=apply-secret",
+            lastErrorMessage: errorText,
+          },
+        },
+      ],
+      userId: "user-123",
+    }, "user-123")).toMatchObject({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          localState: {
+            lastErrorCode: "access_token=[redacted]",
+            lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+          },
+        },
+      ],
+      userId: "user-123",
+    });
+
+    expect(buildHostedPublicDeviceSyncAccount({
+      record: {
+        id: "dsc_123",
+        userId: "user-123",
+        provider: "oura",
+        status: "active",
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        lastWebhookAt: null,
+        lastSyncStartedAt: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
+        lastErrorCode: "refresh_token=db-secret",
+        lastErrorMessage: errorText,
+        nextReconcileAt: null,
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+    })).toMatchObject({
+      lastErrorCode: "refresh_token=[redacted]",
+      lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+    });
+
+    expect(buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
+      account: {
+        externalAccountId: "oura_alice",
+        id: "dsc_123",
+        provider: "oura",
+        displayName: "Oura",
+        status: "active",
+        scopes: ["heartrate"],
+        accessTokenExpiresAt: null,
+        metadata: {},
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        lastWebhookAt: null,
+        lastSyncStartedAt: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
+        lastErrorCode: "id_token=seed-secret",
+        lastErrorMessage: errorText,
+        nextReconcileAt: null,
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+      externalAccountId: "oura_alice",
+      tokenBundle: null,
+    })).toMatchObject({
+      localState: {
+        lastErrorCode: "id_token=[redacted]",
+        lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+      },
     });
   });
 });

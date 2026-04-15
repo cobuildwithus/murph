@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -12,8 +12,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberIdentity: [
     'memberId String @unique @map("member_id")',
-    'maskedPhoneNumberHint String @map("masked_phone_number_hint")',
-    'phoneLookupKey String @unique @map("phone_lookup_key")',
+    'maskedPhoneNumberHint String? @map("masked_phone_number_hint")',
+    'phoneLookupKey String? @unique @map("phone_lookup_key")',
     'phoneNumberEncrypted String? @map("phone_number_encrypted")',
     'phoneNumberVerifiedAt DateTime? @map("phone_number_verified_at")',
     'privyUserLookupKey String? @unique @map("privy_user_lookup_key")',
@@ -34,6 +34,12 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'memberId String @unique @map("member_id")',
     'linqChatLookupKey String? @unique @map("linq_chat_lookup_key")',
     'linqChatIdEncrypted String? @map("linq_chat_id_encrypted")',
+    'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
+    'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
+    'pendingLinqChatLookupKey String? @unique @map("pending_linq_chat_lookup_key")',
+    'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
+    'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
+    'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
     'telegramUserLookupKey String? @unique @map("telegram_user_lookup_key")',
     'telegramUserIdEncrypted String? @map("telegram_user_id_encrypted")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -63,24 +69,48 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
 
 describe("hosted Prisma baseline migration", () => {
   it("starts from the current split-table hosted-member shape", () => {
+    const migrationEntries = readdirSync(new URL("../prisma/migrations/", import.meta.url))
+      .filter((entry) => !entry.startsWith("."))
+      .sort();
     const baselineMigrationSql = readFileSync(
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
     );
+    const optionalPhoneMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604141730_hosted_member_identity_optional_phone/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
+    expect(migrationEntries).toEqual([
+      "2026040600_init",
+      "202604141730_hosted_member_identity_optional_phone",
+      "migration_lock.toml",
+    ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_routing"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');
-    expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_id_key"');
+    expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT NOT NULL');
     expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT NOT NULL');
+    expect(optionalPhoneMigrationSql).toContain('ALTER TABLE "hosted_member_identity"');
+    expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "masked_phone_number_hint" DROP NOT NULL');
+    expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "phone_lookup_key" DROP NOT NULL');
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
+    expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
+    expect(baselineMigrationSql).toContain('"result_json" JSONB');
+    expect(baselineMigrationSql).toContain('"dispatch_state" TEXT NOT NULL DEFAULT \'queued\'');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
     expect(baselineMigrationSql).not.toContain('"phone_number" TEXT');
     expect(baselineMigrationSql).not.toContain('"normalized_phone_number" TEXT');
     expect(baselineMigrationSql).not.toContain('"telegram_username" TEXT');
     expect(baselineMigrationSql).not.toContain('"webauthn_user_id" TEXT');
     expect(baselineMigrationSql).not.toContain('"email" TEXT');
+    expect(baselineMigrationSql).not.toContain('"dispatch_payload_json" JSONB');
+    expect(baselineMigrationSql).not.toContain('"linq_chat_id" TEXT');
+    expect(baselineMigrationSql).not.toContain('"revnet_amount_paid" INTEGER');
   });
 
   it("keeps hosted-member models on the reviewed owner-table set", () => {

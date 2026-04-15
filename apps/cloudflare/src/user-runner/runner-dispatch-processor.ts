@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
@@ -9,9 +10,10 @@ import type {
 import type {
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
-} from "@murphai/assistant-runtime";
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   emitHostedExecutionStructuredLog,
+  formatHostedExecutionLogMessage,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "../bundle-store.js";
@@ -86,7 +88,6 @@ interface RunnerDispatchProcessorDependencies {
   bucket: R2BucketLike;
   ensureRunnerStores(userId?: string): Promise<RunnerUserStores>;
   env: HostedExecutionEnvironment;
-  provisionManagedUserCrypto(userId: string): Promise<void>;
   queueStore: RunnerQueueStore;
   readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>>;
   readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>>;
@@ -104,10 +105,6 @@ export class RunnerDispatchProcessor {
     input: HostedExecutionDispatchRequest,
     stagedPayloadId: string | null = null,
   ): Promise<HostedExecutionUserStatus> {
-    if (input.event.kind === "member.activated") {
-      await this.dependencies.provisionManagedUserCrypto(input.event.userId);
-    }
-
     const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(
       input.event.userId,
     );
@@ -180,6 +177,10 @@ export class RunnerDispatchProcessor {
   async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
     await this.dependencies.ensureRunnerStores(userId);
     let record = await this.dependencies.queueStore.readState();
+    if (record.inFlight && record.run) {
+      return toUserStatus(record);
+    }
+
     let processedDispatch = false;
     const recovered = await this.recoverCommittedPendingDispatchAndCleanup(record);
     if (recovered) {
@@ -196,9 +197,10 @@ export class RunnerDispatchProcessor {
 
       const claim = await this.dependencies.queueStore.claimNextDuePendingDispatch(Date.now());
       const nextPending = claim.pendingDispatch;
+      const run = claim.run;
       record = claim.record;
 
-      if (!nextPending) {
+      if (!nextPending || !run) {
         return toUserStatus(
           processedDispatch
             ? record
@@ -206,7 +208,6 @@ export class RunnerDispatchProcessor {
         );
       }
 
-      const run = this.createRunContext(record, nextPending);
       record = await this.advanceRunPhase({
         clearError: true,
         dispatch: nextPending.dispatch,
@@ -222,6 +223,11 @@ export class RunnerDispatchProcessor {
           nextPending.dispatch.eventId,
         );
         if (committed && !isCommittedResultFinalized(committed)) {
+          record = await commitRecovery.syncCommittedBundlesWithoutConsuming(
+            record.userId,
+            committed,
+            { run },
+          );
           await (await this.dependencies.ensureRunnerStores(record.userId)).gatewayStore.applySnapshot(
             committed.gatewayProjectionSnapshot ?? null,
           );
@@ -242,14 +248,23 @@ export class RunnerDispatchProcessor {
           committed && !isCommittedResultFinalized(committed)
             ? {
               committedResult: {
+                assistantDeliveryEffects: committed.assistantDeliveryEffects,
                 result: committed.result,
-                sideEffects: committed.sideEffects,
               },
             }
             : null,
         );
-        const durableCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
-          .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
+        const durableCommit = runnerResult.phase === "committed"
+          ? await this.persistReturnedRunnerCommit({
+            assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
+            currentBundleRef: (await this.dependencies.queueStore.readBundleMetaState()).bundleRef,
+            dispatch: nextPending.dispatch,
+            gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
+            result: runnerResult.result,
+            run,
+          })
+          : await (await this.dependencies.ensureRunnerStores(record.userId))
+            .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
         if (!durableCommit) {
           throw new Error("Hosted runner returned before recording a durable commit.");
         }
@@ -260,10 +275,28 @@ export class RunnerDispatchProcessor {
           phase: "commit.recorded",
           run,
         });
+        record = await (await this.dependencies.ensureRunnerStores(record.userId))
+          .commitRecovery.syncCommittedBundlesWithoutConsuming(record.userId, durableCommit, { run });
+        const finalRunnerResult = runnerResult.phase === "completed"
+          ? runnerResult
+          : await this.invokeRunner(
+            record.userId,
+            nextPending.dispatch,
+            run,
+            {
+              committedResult: {
+                assistantDeliveryEffects: durableCommit.assistantDeliveryEffects,
+                result: durableCommit.result,
+              },
+            },
+          );
+        if (finalRunnerResult.phase !== "completed") {
+          throw new Error("Hosted runner returned a duplicate committed result during finalize.");
+        }
         await this.finalizeReturnedRunnerResult({
           eventId: nextPending.dispatch.eventId,
-          finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
-          result: runnerResult.result,
+          finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
+          result: finalRunnerResult.result,
         });
         const finalizedCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
           .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
@@ -428,8 +461,9 @@ export class RunnerDispatchProcessor {
     run: HostedExecutionRunContext,
     resume: {
       committedResult: {
+        assistantDeliveryEffects:
+          HostedExecutionCommittedResult["assistantDeliveryEffects"];
         result: HostedExecutionCommittedResult["result"];
-        sideEffects: HostedExecutionCommittedResult["sideEffects"];
       };
     } | null = null,
   ): Promise<HostedAssistantRuntimeJobResult> {
@@ -456,27 +490,148 @@ export class RunnerDispatchProcessor {
     const job: HostedAssistantRuntimeJobInput = {
       request: {
         bundle: await bundleSync.readBundlesForRunner(),
-        commit: {
-          bundleRef: bundleState.bundleRef,
-        },
+        currentBundleRef: bundleState.bundleRef,
         dispatch,
         ...(sharePack ? { sharePack } : {}),
         run,
         ...(resume ? { resume } : {}),
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
+        configSource: this.dependencies.readRunnerRuntimeConfigSource(),
         forwardedEnv,
-        runtimeConfigSource: this.dependencies.readRunnerRuntimeConfigSource(),
-        userEnvSource: this.dependencies.readRunnerRuntimeConfigSource(),
         userEnv,
       }),
     };
+
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        bundlePresent: job.request.bundle !== null,
+        forwardedEnvCategories: {
+          assistantConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "ANTHROPIC_API_KEY",
+            "CEREBRAS_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "FIREWORKS_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+            "GROQ_API_KEY",
+            "MISTRAL_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "TOGETHER_API_KEY",
+            "VERCEL_AI_API_KEY",
+            "VENICE_API_KEY",
+            "XAI_API_KEY",
+          ]),
+          hostedEmailConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "HOSTED_EMAIL_DOMAIN",
+            "HOSTED_EMAIL_FROM_ADDRESS",
+            "HOSTED_EMAIL_LOCAL_PART",
+          ]),
+          linqConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "LINQ_API_BASE_URL",
+            "LINQ_API_TOKEN",
+            "LINQ_WEBHOOK_SECRET",
+          ]),
+          parserToolingConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "FFMPEG_COMMAND",
+            "WHISPER_COMMAND",
+            "WHISPER_MODEL_PATH",
+          ]),
+          telegramConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "TELEGRAM_API_BASE_URL",
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_BOT_USERNAME",
+            "TELEGRAM_FILE_BASE_URL",
+          ]),
+          webSearchConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "BRAVE_API_KEY",
+            "MURPH_WEB_FETCH_ENABLED",
+            "MURPH_WEB_SEARCH_MAX_RESULTS",
+            "MURPH_WEB_SEARCH_PROVIDER",
+          ]),
+        },
+        forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
+        runElapsedMs: computeHostedRunElapsedMs(run),
+        resumeFromCommit: Boolean(resume),
+        sharePackAttached: Boolean(sharePack),
+        userEnvCategories: {
+          modelCredentialConfigured: hasAnyRunnerConfigKey(userEnv, [
+            "ANTHROPIC_API_KEY",
+            "BRAVE_API_KEY",
+            "CEREBRAS_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "FIREWORKS_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+            "GROQ_API_KEY",
+            "HF_TOKEN",
+            "HUGGINGFACEHUB_API_TOKEN",
+            "HUGGINGFACE_API_KEY",
+            "HUGGING_FACE_HUB_TOKEN",
+            "LITELLM_PROXY_API_KEY",
+            "MISTRAL_API_KEY",
+            "NVIDIA_API_KEY",
+            "NGC_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "TOGETHER_API_KEY",
+            "VERCEL_AI_API_KEY",
+            "VENICE_API_KEY",
+            "XAI_API_KEY",
+          ]),
+          verifiedEmailPresent: typeof userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
+            && userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
+        },
+        userEnvKeyCount: Object.keys(userEnv).length,
+        verifiedEmailPresent: typeof userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
+          && userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
+      },
+      dispatch,
+      message: "Hosted runner prepared container invocation.",
+      phase: "dispatch.running",
+      run,
+    });
 
     return invokeHostedExecutionContainerRunner({
       job,
       runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
       timeoutMs: this.dependencies.env.runnerTimeoutMs,
       userId,
+    });
+  }
+
+  private async persistReturnedRunnerCommit(input: {
+    assistantDeliveryEffects: HostedExecutionCommittedResult["assistantDeliveryEffects"];
+    currentBundleRef: HostedExecutionBundleRef | null;
+    dispatch: HostedExecutionDispatchRequest;
+    gatewayProjectionSnapshot: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+    result: HostedAssistantRuntimeJobResult["result"];
+    run: HostedExecutionRunContext;
+  }): Promise<HostedExecutionCommittedResult> {
+    return this.dependencies.applyHostedTransition({
+      eventId: input.dispatch.eventId,
+      gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
+      run: async (userId, stores) => {
+        return persistHostedExecutionCommit({
+          bucket: this.dependencies.bucket,
+          currentBundleRef: input.currentBundleRef,
+          eventId: input.dispatch.eventId,
+          key: stores.crypto.rootKey,
+          keyId: stores.crypto.rootKeyId,
+          keysById: stores.crypto.keysById,
+          payload: {
+            assistantDeliveryEffects: input.assistantDeliveryEffects,
+            bundle: input.result.bundle,
+            gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
+            result: input.result.result,
+          },
+          userId,
+        });
+      },
     });
   }
 
@@ -569,6 +724,10 @@ export class RunnerDispatchProcessor {
         eventId: recovered.committedEventId,
         startedAt: recovered.record.lastRunAt ?? recovered.committed.committedAt,
       }),
+      {
+        policy: "same-event",
+        run: null,
+      },
     );
   }
 
@@ -578,13 +737,17 @@ export class RunnerDispatchProcessor {
     dispatch: HostedExecutionDispatchProgressRecord,
     cleanupDispatch: HostedExecutionDispatchRequest | null = null,
     run: HostedExecutionRunContext | null = null,
+    leaseOwner: {
+      policy?: "matching-run" | "same-event";
+      run: HostedExecutionRunContext | null;
+    } | null = run === null ? null : { run },
   ): Promise<RunnerStateRecord> {
     const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(userId);
     if (cleanupDispatch) {
       await this.applyHostedBusinessOutcomeIfNeeded(cleanupDispatch);
     }
     await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
-    let record = await commitRecovery.applyCommittedDispatch(userId, committed);
+    let record = await commitRecovery.applyCommittedDispatch(userId, committed, leaseOwner);
     record = await this.advanceRunPhase({
       clearError: true,
       dispatch,
@@ -610,21 +773,6 @@ export class RunnerDispatchProcessor {
       dispatch,
       env: this.dependencies.readWorkerStringEnvSource(),
     });
-  }
-
-  private createRunContext(
-    record: RunnerStateRecord,
-    pending: PendingDispatchRecord,
-  ): HostedExecutionRunContext {
-    const priorAttempt = record.run?.eventId === pending.eventId
-      ? record.run.attempt
-      : 0;
-
-    return {
-      attempt: Math.max(pending.attempts + 1, priorAttempt + 1),
-      runId: crypto.randomUUID(),
-      startedAt: new Date().toISOString(),
-    };
   }
 
   private resolveRunContext(
@@ -659,6 +807,7 @@ export class RunnerDispatchProcessor {
     phase: HostedExecutionRunPhase;
     run: HostedExecutionRunContext;
   }): Promise<RunnerStateRecord> {
+    const message = formatHostedExecutionLogMessage(input.message, input.error);
     const record = await this.dependencies.queueStore.recordRunPhase({
       attempt: input.run.attempt,
       clearError: input.clearError,
@@ -666,7 +815,7 @@ export class RunnerDispatchProcessor {
       error: input.error,
       eventId: input.dispatch.eventId,
       level: input.level,
-      message: input.message,
+      message,
       phase: input.phase,
       runId: input.run.runId,
       startedAt: input.run.startedAt,
@@ -674,10 +823,13 @@ export class RunnerDispatchProcessor {
 
     emitHostedExecutionStructuredLog({
       component: "runner",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+      },
       dispatch: input.dispatch,
       error: input.error,
       level: input.level,
-      message: input.message,
+      message,
       phase: input.phase,
       run: input.run,
     });
@@ -690,7 +842,11 @@ export class RunnerDispatchProcessor {
     eventId: string,
     dispatch: HostedExecutionDispatchRequest | null = null,
   ): Promise<RunnerStateRecord> {
-    const record = await this.dependencies.queueStore.rememberCommittedEvent(eventId);
+    const record = await this.dependencies.queueStore.rememberCommittedEvent(eventId, {
+      eventId,
+      policy: "same-event",
+      run: null,
+    });
     await this.deleteCommittedDispatchBestEffort(userId, eventId);
     if (dispatch) {
       await this.deleteTransientDispatchDataBestEffort(dispatch);
@@ -732,6 +888,21 @@ export class RunnerDispatchProcessor {
   }
 }
 
+function computeHostedRunElapsedMs(
+  run: HostedExecutionRunContext | null | undefined,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
+}
+
 function createMissingHostedSharePackError(input: {
   ownerUserId: string;
   shareId: string;
@@ -747,4 +918,11 @@ function isMissingHostedSharePackError(error: unknown): error is Error & { code:
   return error instanceof Error
     && "code" in error
     && error.code === "HOSTED_SHARE_PACK_NOT_FOUND";
+}
+
+function hasAnyRunnerConfigKey(
+  source: Readonly<Record<string, string>>,
+  keys: readonly string[],
+): boolean {
+  return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }

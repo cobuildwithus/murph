@@ -3,7 +3,6 @@
   "command": "vault-cli <noun> upsert --vault <path> --input @file.json [--format json|md] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
-    "fixtures/health-extensions/payloads/profile-upsert.json",
     "fixtures/health-extensions/payloads/goal-upsert.json",
     "fixtures/health-extensions/payloads/condition-upsert.json",
     "fixtures/health-extensions/payloads/allergy-upsert.json",

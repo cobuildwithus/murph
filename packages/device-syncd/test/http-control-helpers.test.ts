@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 
 import { test } from "vitest";
+import { isLoopbackRemoteAddress } from "@murphai/runtime-state/node";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import {
   assertDeviceSyncControlRequest,
   buildPublicDeviceSyncErrorPayload,
-  isLoopbackRemoteAddress,
   renderCallbackHtml,
 } from "../src/http.ts";
+import { withIncomingHeader } from "./helpers.ts";
 
 test("isLoopbackRemoteAddress accepts localhost forms and rejects non-loopback values", () => {
   assert.equal(isLoopbackRemoteAddress("127.0.0.1"), true);
@@ -24,6 +25,7 @@ test("assertDeviceSyncControlRequest accepts valid loopback bearer auth and reje
     assertDeviceSyncControlRequest({
       headers: {
         authorization: "  bearer control-token-for-tests  ",
+        host: "127.0.0.1:8788",
       },
       remoteAddress: "::ffff:127.0.0.1",
       controlToken: "control-token-for-tests",
@@ -34,7 +36,8 @@ test("assertDeviceSyncControlRequest accepts valid loopback bearer auth and reje
     () =>
       assertDeviceSyncControlRequest({
         headers: {
-          authorization: ["Bearer control-token-for-tests", "Bearer duplicate"],
+          ...withIncomingHeader("authorization", ["Bearer control-token-for-tests", "Bearer duplicate"]),
+          host: "127.0.0.1:8788",
         },
         remoteAddress: "127.0.0.1",
         controlToken: "control-token-for-tests",
@@ -43,6 +46,56 @@ test("assertDeviceSyncControlRequest accepts valid loopback bearer auth and reje
       error instanceof DeviceSyncError &&
       error.code === "CONTROL_PLANE_AUTH_REQUIRED" &&
       error.httpStatus === 401,
+  );
+});
+
+test("assertDeviceSyncControlRequest rejects forwarded proxy headers with the specific control-plane error", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: "Bearer control-token",
+          forwarded: "for=127.0.0.1",
+          host: "localhost",
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: "control-token",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "CONTROL_PLANE_PROXY_HEADERS_REJECTED" &&
+      error.httpStatus === 403,
+  );
+});
+
+test("assertDeviceSyncControlRequest rejects non-loopback host headers with the mapped control-plane error", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: "Bearer control-token",
+          host: "device-sync.example",
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: "control-token",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED" &&
+      error.httpStatus === 403,
+  );
+});
+
+test("assertDeviceSyncControlRequest accepts ipv6 loopback hosts after shared loopback validation", () => {
+  assert.doesNotThrow(() =>
+    assertDeviceSyncControlRequest({
+      headers: {
+        authorization: "Bearer control-token",
+        host: "[::1]:8788",
+      },
+      remoteAddress: "::ffff:127.0.0.1",
+      controlToken: "control-token",
+    }),
   );
 });
 
@@ -86,6 +139,27 @@ test("buildPublicDeviceSyncErrorPayload exposes only safe numeric status details
     error: {
       code: "OURA_API_REQUEST_FAILED",
       message: "Provider request failed.",
+      retryable: true,
+      details: undefined,
+    },
+  });
+});
+
+test("buildPublicDeviceSyncErrorPayload redacts secret-bearing error text", () => {
+  const payload = buildPublicDeviceSyncErrorPayload(
+    new DeviceSyncError({
+      code: "OURA_API_REQUEST_FAILED",
+      message:
+        "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
+      retryable: true,
+      httpStatus: 502,
+    }),
+  );
+
+  assert.deepEqual(payload, {
+    error: {
+      code: "OURA_API_REQUEST_FAILED",
+      message: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
       retryable: true,
       details: undefined,
     },

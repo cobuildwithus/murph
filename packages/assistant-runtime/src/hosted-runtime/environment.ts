@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type {
+  HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
@@ -43,7 +44,56 @@ export function normalizeHostedAssistantRuntimeConfig(
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
     forwardedEnv,
     platform: normalizedPlatform,
+    resolvedConfig: cloneHostedAssistantRuntimeResolvedConfig(input?.resolvedConfig),
     userEnv: { ...(input?.userEnv ?? {}) },
+  };
+}
+
+function cloneHostedAssistantRuntimeResolvedConfig(
+  input: HostedAssistantRuntimeResolvedConfig | undefined,
+): HostedAssistantRuntimeResolvedConfig {
+  return {
+    channelCapabilities: {
+      emailSendReady: input?.channelCapabilities.emailSendReady ?? false,
+      telegramBotConfigured: input?.channelCapabilities.telegramBotConfigured ?? false,
+    },
+    deviceSync: input?.deviceSync
+      ? {
+          providerConfigs: cloneConfiguredDeviceSyncProviderConfigs(input.deviceSync.providerConfigs),
+          publicBaseUrl: input.deviceSync.publicBaseUrl,
+          secret: input.deviceSync.secret,
+        }
+      : null,
+  };
+}
+
+function cloneConfiguredDeviceSyncProviderConfigs(
+  input: NonNullable<HostedAssistantRuntimeResolvedConfig["deviceSync"]>["providerConfigs"],
+): NonNullable<HostedAssistantRuntimeResolvedConfig["deviceSync"]>["providerConfigs"] {
+  return {
+    ...(input.garmin
+      ? {
+          garmin: {
+            ...input.garmin,
+          },
+        }
+      : {}),
+    ...(input.oura
+      ? {
+          oura: {
+            ...input.oura,
+            ...(input.oura.scopes ? { scopes: [...input.oura.scopes] } : {}),
+          },
+        }
+      : {}),
+    ...(input.whoop
+      ? {
+          whoop: {
+            ...input.whoop,
+            ...(input.whoop.scopes ? { scopes: [...input.whoop.scopes] } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -51,9 +101,11 @@ export function resolveHostedRuntimeTsconfigPath(): string {
   return fileURLToPath(new URL("../../../../tsconfig.base.json", import.meta.url));
 }
 
-export function resolveHostedRuntimeTsxImportSpecifier(): string {
+export function resolveHostedRuntimeTsxImportSpecifier(
+  moduleRequire: NodeJS.Require = resolveHostedRuntimeModuleRequire(),
+): string {
   try {
-    return pathToFileURL(resolveHostedRuntimeModuleRequire().resolve("tsx")).href;
+    return pathToFileURL(moduleRequire.resolve("tsx")).href;
   } catch {
     return "tsx";
   }

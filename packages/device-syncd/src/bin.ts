@@ -6,25 +6,101 @@ import { createDeviceSyncService } from "./service.ts";
 async function main(): Promise<void> {
   const environment = loadDeviceSyncEnvironment(process.env);
   const service = createDeviceSyncService(environment.service);
-  service.start();
+  const server = await (async () => {
+    let startedServer: Awaited<ReturnType<typeof startDeviceSyncHttpServer>> | null = null;
 
-  const server = await startDeviceSyncHttpServer({
-    service,
-    config: environment.http,
-  });
+    try {
+      startedServer = await startDeviceSyncHttpServer({
+        service,
+        config: environment.http,
+      });
+      service.start();
+      return startedServer;
+    } catch (error) {
+      let rollbackError: unknown = null;
 
-  const shutdown = async () => {
-    service.stop();
-    await server.close();
-    service.close();
+      if (startedServer) {
+        try {
+          await startedServer.close();
+        } catch (closeError) {
+          rollbackError = closeError;
+        }
+      }
+
+      service.close();
+
+      if (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "Device sync startup failed and could not fully roll back the HTTP server.",
+        );
+      }
+
+      throw error;
+    }
+  })();
+
+  let exitRequested = false;
+  let shutdownPromise: Promise<number> | null = null;
+
+  const shutdown = (): Promise<number> => {
+    if (shutdownPromise) {
+      return shutdownPromise;
+    }
+
+    shutdownPromise = (async () => {
+      const shutdownErrors: unknown[] = [];
+
+      try {
+        service.stop();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+
+      try {
+        await server.close();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+
+      try {
+        service.close();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+
+      if (shutdownErrors.length === 1) {
+        throw shutdownErrors[0];
+      }
+
+      if (shutdownErrors.length > 1) {
+        throw new AggregateError(
+          shutdownErrors,
+          "Device sync shutdown failed.",
+        );
+      }
+    })().then(
+      () => 0,
+      (error) => {
+        console.error(formatDeviceSyncStartupError(error));
+        return 1;
+      },
+    );
+
+    return shutdownPromise;
   };
 
-  process.once("SIGINT", () => {
-    void shutdown().finally(() => process.exit(0));
-  });
-  process.once("SIGTERM", () => {
-    void shutdown().finally(() => process.exit(0));
-  });
+  const requestExit = () => {
+    if (exitRequested) {
+      return;
+    }
+
+    exitRequested = true;
+    void shutdown().then((exitCode) => process.exit(exitCode));
+  };
+
+  process.once("SIGINT", requestExit);
+  process.once("SIGTERM", requestExit);
 }
 
 void main().catch((error) => {

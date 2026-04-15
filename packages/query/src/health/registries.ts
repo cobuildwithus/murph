@@ -2,6 +2,8 @@ import {
   requireBankEntityRegistryDefinition,
   type BankEntityDefinitionWithRegistry,
   type BankEntityKind,
+  type NutritionData,
+  type NutritionProvenance,
 } from "@murphai/contracts";
 import {
   applyLimit,
@@ -489,6 +491,11 @@ export interface FoodAutoLogDailyQueryRule {
   time: string;
 }
 
+export interface FoodNutritionQueryValue {
+  perServing: NutritionData | null;
+  provenance: NutritionProvenance | null;
+}
+
 export interface FoodQueryEntity extends RegistryQueryEntity {
   summary: string | null;
   kind: string | null;
@@ -496,6 +503,7 @@ export interface FoodQueryEntity extends RegistryQueryEntity {
   vendor: string | null;
   location: string | null;
   serving: string | null;
+  nutrition: FoodNutritionQueryValue | null;
   aliases: string[];
   ingredients: string[];
   tags: string[];

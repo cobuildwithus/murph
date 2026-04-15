@@ -5,15 +5,22 @@ import { test } from "vitest";
 import { DeviceSyncError } from "../src/errors.ts";
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { sha256Text, subtractDays } from "../src/shared.ts";
-import { createJsonResponse, readUrl } from "./helpers.ts";
+import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
-import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.ts";
+import type {
+  DeviceSyncAccount,
+  DeviceSyncJobRecord,
+  DeviceSyncProvider,
+  ProviderJobContext,
+  StoredDeviceSyncAccount,
+} from "../src/types.ts";
 
 function createAccount(scopes: string[], overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAccount {
   return {
     id: "acct-whoop-1",
     provider: "whoop",
     externalAccountId: "whoop-user-1",
+    disconnectGeneration: 0,
     displayName: "whoop@example.com",
     status: "active",
     scopes,
@@ -91,6 +98,16 @@ function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timest
     "x-whoop-signature": signature,
     "x-whoop-signature-timestamp": timestamp,
   });
+}
+
+function requireVerifyAndParseWebhook(
+  provider: DeviceSyncProvider,
+): NonNullable<DeviceSyncProvider["verifyAndParseWebhook"]> {
+  return requireValue(provider.verifyAndParseWebhook);
+}
+
+function requireRevokeAccess(provider: DeviceSyncProvider): NonNullable<DeviceSyncProvider["revokeAccess"]> {
+  return requireValue(provider.revokeAccess);
 }
 
 test("WHOOP provider builds a connect URL and exchanges an auth code into a refreshable connection", async () => {
@@ -330,8 +347,9 @@ test("WHOOP provider revokes with the persisted access token even when it is nea
       throw new Error(`Unexpected request: ${url}`);
     },
   });
+  const revokeAccess = requireRevokeAccess(provider);
 
-  await provider.revokeAccess(
+  await revokeAccess(
     createAccount(["offline"], {
       accessToken: "persisted-access-token",
       accessTokenExpiresAt: new Date(Date.now() - 60_000).toISOString(),
@@ -498,6 +516,7 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
 
   const cases = [
     { eventType: "sleep.updated", kind: "resource", resourceType: "sleep", priority: 90 },
@@ -517,7 +536,7 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
     };
     const rawBody = Buffer.from(JSON.stringify(webhookPayload), "utf8");
     const now = "2026-03-16T10:00:00.000Z";
-    const result = await provider.verifyAndParseWebhook?.({
+    const result = await verifyAndParseWebhook({
       headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, String(Date.parse(now))),
       rawBody,
       now,
@@ -527,10 +546,7 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
     assert.equal(result?.eventType, testCase.eventType);
     assert.equal(result?.externalAccountId, "whoop-user-1");
     assert.equal(result?.traceId, `trace:${testCase.eventType}`);
-    assert.deepEqual(result?.payload, {
-      eventType: testCase.eventType,
-      resourceType: testCase.resourceType,
-    });
+    assert.equal(result?.resourceCategory, testCase.resourceType);
     assert.deepEqual(result?.jobs, [
       {
         kind: testCase.kind,
@@ -551,6 +567,7 @@ test("WHOOP provider synthesizes a deterministic trace id and job dedupe key whe
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const webhookPayload = {
     user_id: "whoop-user-1",
     type: "sleep.updated",
@@ -558,7 +575,7 @@ test("WHOOP provider synthesizes a deterministic trace id and job dedupe key whe
   };
   const rawBody = Buffer.from(JSON.stringify(webhookPayload), "utf8");
   const timestamp = String(Date.parse("2026-03-16T10:00:00.000Z"));
-  const parsed = await provider.verifyAndParseWebhook?.({
+  const parsed = await verifyAndParseWebhook({
     headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
     rawBody,
     now: "2026-03-16T10:00:00.000Z",
@@ -582,6 +599,7 @@ test("WHOOP provider keeps the same synthetic trace id across retry deliveries w
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const webhookPayload = {
     user_id: "whoop-user-1",
     type: "sleep.deleted",
@@ -592,12 +610,12 @@ test("WHOOP provider keeps the same synthetic trace id across retry deliveries w
   const firstTimestamp = String(Date.parse("2026-03-16T10:00:00.000Z"));
   const retryTimestamp = String(Date.parse("2026-03-16T10:20:00.000Z"));
 
-  const first = await provider.verifyAndParseWebhook?.({
+  const first = await verifyAndParseWebhook({
     headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, firstTimestamp),
     rawBody,
     now: "2026-03-16T10:00:00.000Z",
   });
-  const retry = await provider.verifyAndParseWebhook?.({
+  const retry = await verifyAndParseWebhook({
     headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, retryTimestamp),
     rawBody,
     now: "2026-03-16T10:20:00.000Z",
@@ -612,6 +630,7 @@ test("WHOOP provider accepts numeric-second timestamps and leaves unknown webhoo
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const now = "2026-03-16T10:00:00.000Z";
   const rawBody = Buffer.from(
     JSON.stringify({
@@ -626,7 +645,7 @@ test("WHOOP provider accepts numeric-second timestamps and leaves unknown webhoo
     `whoop-user-1:team.updated:resource-1:${sha256Text(rawBody.toString("utf8"))}`,
   );
 
-  const parsed = await provider.verifyAndParseWebhook?.({
+  const parsed = await verifyAndParseWebhook({
     headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
     rawBody,
     now,
@@ -637,9 +656,7 @@ test("WHOOP provider accepts numeric-second timestamps and leaves unknown webhoo
     eventType: "team.updated",
     traceId: expectedTraceId,
     occurredAt: now,
-    payload: {
-      eventType: "team.updated",
-    },
+    resourceCategory: null,
     jobs: [],
   });
 });
@@ -649,13 +666,14 @@ test("WHOOP provider rejects non-object webhook payloads after signature verific
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const now = "2026-03-16T10:00:00.000Z";
   const rawBody = Buffer.from('["not-an-object"]', "utf8");
   const timestamp = String(Date.parse(now));
 
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
         rawBody,
         now,
@@ -728,6 +746,7 @@ test("WHOOP provider rejects missing, invalid, stale, and bad-signature webhook 
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       user_id: "whoop-user-1",
@@ -739,7 +758,7 @@ test("WHOOP provider rejects missing, invalid, stale, and bad-signature webhook 
 
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: new Headers(),
         rawBody,
         now: "2026-03-16T10:00:00.000Z",
@@ -751,7 +770,7 @@ test("WHOOP provider rejects missing, invalid, stale, and bad-signature webhook 
   );
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: new Headers({
           "x-whoop-signature": "signature",
           "x-whoop-signature-timestamp": "not-a-number",
@@ -766,7 +785,7 @@ test("WHOOP provider rejects missing, invalid, stale, and bad-signature webhook 
   );
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: createWhoopWebhookHeaders(
           "whoop-client-secret",
           rawBody,
@@ -782,7 +801,7 @@ test("WHOOP provider rejects missing, invalid, stale, and bad-signature webhook 
   );
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: new Headers({
           "x-whoop-signature": "invalid-signature",
           "x-whoop-signature-timestamp": String(Date.parse("2026-03-16T10:00:00.000Z")),
@@ -830,6 +849,7 @@ test("WHOOP provider rejects profile responses without a stable user id and tole
       throw new Error(`Unexpected request: ${url}`);
     },
   });
+  const revokeAccess = requireRevokeAccess(provider);
 
   await assert.rejects(
     () =>
@@ -848,8 +868,8 @@ test("WHOOP provider rejects profile responses without a stable user id and tole
       error.httpStatus === 502,
   );
 
-  await provider.revokeAccess?.(createAccount(["offline"]));
-  await provider.revokeAccess?.(createAccount(["offline"]));
+  await revokeAccess(createAccount(["offline"]));
+  await revokeAccess(createAccount(["offline"]));
 });
 
 test("WHOOP webhook replay checks use the request context timestamp instead of process wall clock", async () => {
@@ -857,6 +877,7 @@ test("WHOOP webhook replay checks use the request context timestamp instead of p
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
   });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       user_id: "whoop-user-1",
@@ -872,7 +893,7 @@ test("WHOOP webhook replay checks use the request context timestamp instead of p
   Date.now = () => Date.parse("2027-03-16T10:00:00.000Z");
 
   try {
-    const parsed = await provider.verifyAndParseWebhook?.({
+    const parsed = await verifyAndParseWebhook({
       headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
       rawBody,
       now: "2026-03-16T10:00:00.000Z",
@@ -899,6 +920,8 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
       throw new Error(`Unexpected request: ${url}`);
     },
   });
+  const revokeAccess = requireRevokeAccess(provider);
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
   const rawBody = Buffer.from(
     JSON.stringify({
       type: "sleep.updated",
@@ -909,14 +932,14 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
   const importedSnapshots: unknown[] = [];
 
   await assert.rejects(
-    () => provider.revokeAccess?.(createAccount(["offline"])),
+    () => revokeAccess(createAccount(["offline"])),
     (error: unknown) =>
       error instanceof DeviceSyncError &&
       error.code === "WHOOP_REVOKE_FAILED",
   );
   await assert.rejects(
     () =>
-      provider.verifyAndParseWebhook?.({
+      verifyAndParseWebhook({
         headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, String(Date.parse("2026-03-16T10:00:00.000Z"))),
         rawBody,
         now: "2026-03-16T10:00:00.000Z",

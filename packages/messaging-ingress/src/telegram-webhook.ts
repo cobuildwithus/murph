@@ -2,141 +2,34 @@ import {
   normalizeTextValue,
   toIsoTimestamp,
 } from "./internal.ts";
+import type {
+  TelegramChat,
+  TelegramContact,
+  TelegramLocation,
+  TelegramMessageLike,
+  TelegramPoll,
+  TelegramUpdateLike,
+  TelegramUser,
+  TelegramVenue,
+} from "./telegram-types.ts";
 
-export {
-  minimizeTelegramUpdate,
-  parseTelegramWebhookUpdate,
-} from "./telegram-webhook-payload.ts";
-
-export interface TelegramUser {
-  id: number;
-  is_bot?: boolean;
-  first_name?: string;
-  last_name?: string;
-  username?: string;
-  [key: string]: unknown;
-}
-
-export interface TelegramChat {
-  id: number | string;
-  type?: "private" | "group" | "supergroup" | "channel" | string;
-  title?: string | null;
-  username?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
-  is_direct_messages?: boolean | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramFileBase {
-  file_id: string;
-  file_unique_id?: string;
-  file_size?: number;
-  file_name?: string;
-  mime_type?: string;
-  [key: string]: unknown;
-}
-
-export interface TelegramPhotoSize extends TelegramFileBase {
-  width?: number;
-  height?: number;
-}
-
-export interface TelegramDirectMessagesTopic {
-  topic_id?: number | null;
-  title?: string | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramContact {
-  first_name?: string | null;
-  last_name?: string | null;
-  phone_number?: string | null;
-  user_id?: number | null;
-  vcard?: string | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramLocation {
-  latitude?: number | null;
-  longitude?: number | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramVenue {
-  title?: string | null;
-  address?: string | null;
-  location?: TelegramLocation | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramPollOption {
-  text?: string | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramPoll {
-  question?: string | null;
-  options?: TelegramPollOption[] | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramTextQuote {
-  text?: string | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramMessageLike {
-  message_id: number;
-  date?: number | null;
-  edit_date?: number | null;
-  business_connection_id?: string | null;
-  direct_messages_topic?: TelegramDirectMessagesTopic | null;
-  media_group_id?: string | null;
-  message_thread_id?: number | null;
-  text?: string | null;
-  caption?: string | null;
-  chat: TelegramChat;
-  from?: TelegramUser | null;
-  sender_chat?: TelegramChat | null;
-  sender_business_bot?: TelegramUser | null;
-  reply_to_message?: TelegramMessageLike | null;
-  quote?: TelegramTextQuote | null;
-  photo?: TelegramPhotoSize[] | null;
-  document?: TelegramFileBase | null;
-  audio?: TelegramFileBase | null;
-  voice?: TelegramFileBase | null;
-  video?: TelegramFileBase | null;
-  video_note?: TelegramFileBase | null;
-  animation?: TelegramFileBase | null;
-  sticker?: TelegramFileBase | null;
-  contact?: TelegramContact | null;
-  location?: TelegramLocation | null;
-  venue?: TelegramVenue | null;
-  poll?: TelegramPoll | null;
-  [key: string]: unknown;
-}
-
-export interface TelegramUpdateLike {
-  update_id: number;
-  message?: TelegramMessageLike;
-  business_message?: TelegramMessageLike;
-  [key: string]: unknown;
-}
-
-export interface TelegramFile {
-  file_id: string;
-  file_unique_id?: string;
-  file_size?: number;
-  file_path?: string;
-  [key: string]: unknown;
-}
-
-export interface TelegramWebhookInfo {
-  url?: string;
-  pending_update_count?: number;
-  [key: string]: unknown;
-}
+export type {
+  TelegramChat,
+  TelegramContact,
+  TelegramDirectMessagesTopic,
+  TelegramFile,
+  TelegramFileBase,
+  TelegramLocation,
+  TelegramMessageLike,
+  TelegramPhotoSize,
+  TelegramPoll,
+  TelegramPollOption,
+  TelegramTextQuote,
+  TelegramUpdateLike,
+  TelegramUser,
+  TelegramVenue,
+  TelegramWebhookInfo,
+} from "./telegram-types.ts";
 
 export interface TelegramThreadTarget {
   chatId: string;
@@ -226,32 +119,33 @@ export function parseTelegramThreadTarget(target: string): TelegramThreadTarget 
 }
 
 export function serializeTelegramThreadTarget(input: TelegramThreadTarget): string {
-  const segments = [input.chatId];
+  const normalized = normalizeTelegramThreadTarget(input);
+  const segments = [normalized.chatId];
 
-  if (input.businessConnectionId) {
-    segments.push("business", encodeURIComponent(input.businessConnectionId));
+  if (normalized.businessConnectionId) {
+    segments.push("business", encodeURIComponent(normalized.businessConnectionId));
   }
 
-  if (input.messageThreadId) {
-    segments.push("topic", String(input.messageThreadId));
+  if (normalized.messageThreadId) {
+    segments.push("topic", String(normalized.messageThreadId));
   }
 
-  if (input.directMessagesTopicId) {
-    segments.push("dm-topic", String(input.directMessagesTopicId));
+  if (normalized.directMessagesTopicId) {
+    segments.push("dm-topic", String(normalized.directMessagesTopicId));
   }
 
   return segments.join(":");
 }
 
 export function buildTelegramThreadTarget(message: TelegramMessageLike): TelegramThreadTarget {
-  return {
+  return normalizeTelegramThreadTarget({
     businessConnectionId: normalizeTextValue(message.business_connection_id ?? null),
     chatId: String(message.chat.id),
     directMessagesTopicId: normalizeTelegramPositiveInteger(
       message.direct_messages_topic?.topic_id,
     ),
     messageThreadId: normalizeTelegramPositiveInteger(message.message_thread_id),
-  };
+  });
 }
 
 export function buildTelegramThreadId(message: TelegramMessageLike): string {
@@ -535,6 +429,20 @@ function nowUnixSeconds(): number {
 
 function normalizeTelegramPositiveInteger(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function normalizeTelegramThreadTarget(input: TelegramThreadTarget): TelegramThreadTarget {
+  const directMessagesTopicId = normalizeTelegramPositiveInteger(input.directMessagesTopicId);
+
+  return {
+    businessConnectionId: normalizeTextValue(input.businessConnectionId ?? null),
+    chatId: input.chatId,
+    directMessagesTopicId,
+    messageThreadId:
+      directMessagesTopicId === null
+        ? normalizeTelegramPositiveInteger(input.messageThreadId)
+        : null,
+  };
 }
 
 function parseTelegramPositiveInteger(value: string): number | null {

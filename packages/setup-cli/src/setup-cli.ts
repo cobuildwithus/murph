@@ -1,19 +1,33 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
+import path from 'node:path'
 import { Cli, z } from 'incur'
 import { assistantAutomationStateSchema } from '@murphai/operator-config/assistant-cli-contracts'
-import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
+import { inboxRuntimeConfigSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import {
+  normalizeVaultForConfig,
+  readOperatorConfig,
+  resolveOperatorConfigPath,
+  resolveOperatorHomeDirectory,
+  saveDefaultVaultConfig,
+} from '@murphai/operator-config/operator-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
+import { showWearablePreferences } from '@murphai/vault-usecases'
+import {
+  normalizeSetupWearables,
   type SetupAssistantPreset,
   type SetupAssistantProviderPreset,
   type SetupChannel,
   type SetupCommandOptions,
   type SetupConfiguredWearable,
   type SetupResult,
+  type SetupVaultSelectionResult,
   type SetupWearable,
   setupChannelValues,
   setupCommandOptionsSchema,
-  setupResultSchema,
+  setupVaultSelectionResultSchema,
   setupWearableValues,
+  setupResultSchema,
 } from '@murphai/operator-config/setup-cli-contracts'
 import {
   createSetupAssistantResolver,
@@ -47,7 +61,6 @@ import {
   describeSetupWizardPublicUrlStrategyChoice,
   getDefaultSetupWizardChannels,
   getDefaultSetupWizardScheduledUpdates,
-  getDefaultSetupWizardWearables,
   inferSetupWizardAssistantProvider,
   resolveSetupWizardInitialScheduledUpdates,
   resolveSetupWizardAssistantSelection,
@@ -56,7 +69,18 @@ import {
 } from './setup-wizard.js'
 import { configureSetupChannels } from './setup-services/channels.js'
 import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
+import { redactHomePath } from './setup-services/shell.js'
 import { incurErrorBridge } from './incur-error-bridge.js'
+
+const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
+const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION = 1
+const initialSetupWizardInboxConfigEnvelopeSchema = z
+  .object({
+    schema: z.literal(INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA),
+    schemaVersion: z.literal(INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION),
+    value: inboxRuntimeConfigSchema,
+  })
+  .strict()
 
 export {
   buildSetupWizardPublicUrlReview,
@@ -189,7 +213,9 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         initialScheduledUpdates: await resolveInitialSetupWizardScheduledUpdates(
           context.options.vault,
         ),
-        initialWearables: getDefaultSetupWizardWearables(),
+        initialWearables: await resolveInitialSetupWizardWearables(
+          context.options.vault,
+        ),
         linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
         platform: getPlatform(),
         publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
@@ -293,6 +319,32 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     run: runSetupCommand,
   })
 
+  cli.command('use', {
+    args: z.object({
+      vault: z
+        .string()
+        .min(1)
+        .describe('Existing Murph vault path to make active for future `murph` commands.'),
+    }),
+    description:
+      'Set the active Murph vault for future `murph` commands without rerunning onboarding.',
+    examples: [
+      {
+        description: 'Select an existing local vault as the active Murph vault.',
+        args: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Use `murph onboard --vault <path>` when the vault does not exist yet. `murph use` only selects an existing vault.',
+    options: z.object({}),
+    output: setupVaultSelectionResultSchema,
+    async run(context): Promise<SetupVaultSelectionResult> {
+      return await selectActiveMurphVault(context.args.vault)
+    },
+  })
+
   return cli
 }
 
@@ -377,22 +429,28 @@ export async function resolveInitialSetupWizardChannels(
 ): Promise<SetupChannel[]> {
   const state = await readInitialSetupWizardAutomationState(vault)
 
-  if (state === null) {
-    return getDefaultSetupWizardChannels(platform)
+  if (state !== null) {
+    return setupChannelValues.filter((channel) =>
+      state.autoReply.some((entry) => entry.channel === channel),
+    )
   }
 
-  const savedChannels = setupChannelValues.filter((channel) =>
-    state.autoReplyChannels.includes(channel),
-  )
-  return savedChannels.length > 0
-    ? savedChannels
-    : getDefaultSetupWizardChannels(platform)
+  const configuredChannels = await readInitialSetupWizardInboxChannels(vault)
+  return configuredChannels ?? getDefaultSetupWizardChannels(platform)
 }
 
 export async function resolveInitialSetupWizardScheduledUpdates(
   _vault: string,
 ): Promise<string[]> {
   return getDefaultSetupWizardScheduledUpdates()
+}
+
+export async function resolveInitialSetupWizardWearables(
+  vault: string,
+): Promise<SetupWearable[]> {
+  const preferences = await showWearablePreferences(vault)
+
+  return normalizeSetupWearables(preferences.wearablePreferences.desiredProviders)
 }
 
 async function readInitialSetupWizardAutomationState(vault: string) {
@@ -415,6 +473,49 @@ async function readInitialSetupWizardAutomationState(vault: string) {
   }
 }
 
+async function readInitialSetupWizardInboxChannels(
+  vault: string,
+): Promise<SetupChannel[] | null> {
+  const inboxConfigPath = resolveInitialSetupWizardInboxConfigPath(vault)
+
+  try {
+    const raw = await readFile(inboxConfigPath, 'utf8')
+    const config = parseInitialSetupWizardInboxConfig(raw)
+    return setupChannelValues.filter((channel) =>
+      config.connectors.some(
+        (connector) => connector.enabled && connector.source === channel,
+      ),
+    )
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+function resolveInitialSetupWizardInboxConfigPath(vault: string): string {
+  return path.join(
+    resolveAssistantStatePaths(vault).absoluteVaultRoot,
+    '.runtime',
+    'operations',
+    'inbox',
+    'config.json',
+  )
+}
+
+function parseInitialSetupWizardInboxConfig(raw: string) {
+  return initialSetupWizardInboxConfigEnvelopeSchema.parse(
+    JSON.parse(raw) as unknown,
+  ).value
+}
+
 function buildSetupCtaCommands(result: SetupResult): Array<{
   command: string
   description: string
@@ -428,7 +529,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'assistant run',
       description:
-        'Start the assistant automation loop so configured channels like iMessage, Telegram, Linq, or email can receive automatic replies.',
+        'Start the assistant automation loop so configured Telegram, Linq, or email channels can receive automatic replies.',
     })
   }
 
@@ -456,17 +557,6 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       description: 'Verify the local runtime after setup.',
     },
   )
-
-  if (
-    result.platform === 'darwin' &&
-    !result.channels.some((channel) => channel.channel === 'imessage' && channel.configured)
-  ) {
-    commands.push({
-      command: 'inbox source add imessage --id imessage:self --account self --includeOwn',
-      description:
-        'Add a local iMessage connector when you are ready to ingest captures and deliver assistant replies.',
-    })
-  }
 
   if (!result.channels.some((channel) => channel.channel === 'telegram' && channel.configured)) {
     commands.push({
@@ -638,6 +728,57 @@ function registerSetupCommand(
       return await input.run(context)
     },
   })
+}
+
+async function selectActiveMurphVault(
+  candidateVault: string,
+  input?: {
+    cwd?: string
+    homeDirectory?: string
+  },
+): Promise<SetupVaultSelectionResult> {
+  const cwd = input?.cwd ?? process.cwd()
+  const homeDirectory = input?.homeDirectory ?? resolveOperatorHomeDirectory()
+  const absoluteVault = path.resolve(cwd, candidateVault)
+  const vaultMetadataPath = path.join(absoluteVault, 'vault.json')
+
+  try {
+    const metadataStats = await stat(vaultMetadataPath)
+    if (!metadataStats.isFile()) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Murph can only switch to an existing vault. Run `murph onboard --vault <path>` to create one first.',
+      )
+    }
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Murph can only switch to an existing vault. Run `murph onboard --vault <path>` to create one first.',
+      )
+    }
+
+    throw error
+  }
+
+  const existingConfig = await readOperatorConfig(homeDirectory)
+  const normalizedVault = normalizeVaultForConfig(absoluteVault, homeDirectory)
+  const status =
+    existingConfig?.defaultVault === normalizedVault ? 'reused' : 'completed'
+
+  if (status === 'completed') {
+    await saveDefaultVaultConfig(absoluteVault, homeDirectory)
+  }
+
+  return {
+    configPath: redactHomePath(resolveOperatorConfigPath(homeDirectory), homeDirectory),
+    status,
+    vault: redactHomePath(absoluteVault, homeDirectory),
+  }
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
 export { detectSetupProgramName, isSetupInvocation }

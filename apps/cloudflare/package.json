@@ -18,15 +18,17 @@
     "DEPLOY.md"
   ],
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --pretty false",
-    "typecheck": "tsc -p tsconfig.json --pretty false",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm typecheck && pnpm test:node",
     "test:node": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
+    "test:e2e:local": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts --no-coverage",
     "test:workers": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.workers.config.ts --no-coverage",
     "verify": "bash scripts/verify-fast.sh",
+    "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh",
     "deploy:config:render": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/render-deploy-config.ts",
     "deploy:preflight": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-deploy-env.ts",
     "deploy:artifacts": "pnpm deploy:config:render && pnpm deploy:secrets:render && pnpm runner:bundle",
@@ -37,15 +39,17 @@
     "deploy:secrets:render": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/render-worker-secrets.ts",
     "deploy:smoke": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/scripts/smoke-hosted-deploy.ts",
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
-    "runner:docker:build": "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner ../..",
+    "runner:bundle:assemble-only": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
+    "runner:docker:build": "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
+    "runner:docker:smoke:prepare": "pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only && node ../../scripts/rm-paths.mjs .deploy/smoke-dist && pnpm --dir ../.. exec tsc -p apps/cloudflare/tsconfig.smoke-build.json --pretty false && pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/sync-smoke-runner-bundle.ts",
+    "runner:docker:smoke:built": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-docker-smoke.ts",
+    "runner:docker:smoke": "pnpm runner:docker:smoke:prepare && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner . && pnpm runner:docker:smoke:built",
+    "worker:dev:prepared": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/dev-worker.ts",
     "worker:deploy:apply": "pnpm exec wrangler deploy",
     "worker:deploy": "pnpm deploy:artifacts && pnpm worker:deploy:apply",
     "worker:deployment:status": "pnpm exec wrangler deployments status",
     "worker:dev": "pnpm exec wrangler dev",
     "worker:secret:bulk": "pnpm exec wrangler secret bulk",
-    "worker:version:deploy": "pnpm exec wrangler versions deploy",
-    "worker:version:upload:apply": "pnpm exec wrangler versions upload",
-    "worker:version:upload": "pnpm deploy:artifacts && pnpm worker:version:upload:apply",
     "prepack": "pnpm build"
   },
   "dependencies": {
@@ -55,7 +59,6 @@
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
-    "@murphai/murph": "workspace:*",
     "@murphai/inboxd": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

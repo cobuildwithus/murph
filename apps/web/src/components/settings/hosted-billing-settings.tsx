@@ -1,99 +1,30 @@
-"use client";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { usePrivy, useUser } from "@privy-io/react-auth";
-import { useState } from "react";
+import { HostedSettingsSessionState } from "./hosted-settings-session-state";
+import { HostedBillingSettingsAction } from "./hosted-billing-settings-action";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
-
-import { toErrorMessage } from "./hosted-settings-sync-helpers";
-
-interface HostedBillingPortalResponse {
-  url: string;
-}
-
-export function HostedBillingSettings() {
-  return <HostedBillingSettingsInner />;
-}
-
-function HostedBillingSettingsInner() {
-  const { authenticated, ready } = usePrivy();
-  const { user } = useUser();
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isOpeningPortal, setIsOpeningPortal] = useState(false);
-
-  const canManageBilling = ready && authenticated && Boolean(user);
-  const isLoadingAuthenticatedUser = ready && authenticated && !user;
-
-  async function handleManageSubscription() {
-    setErrorMessage(null);
-
-    if (!ready) {
-      setErrorMessage("We are still loading your Privy session. Try again in a moment.");
-      return;
-    }
-
-    if (!authenticated) {
-      setErrorMessage("Sign in with your hosted account before you manage billing.");
-      return;
-    }
-
-    if (!user) {
-      setErrorMessage("We are still loading your account details. Try again in a moment.");
-      return;
-    }
-
-    setIsOpeningPortal(true);
-
-    try {
-      const response = await requestHostedOnboardingJson<HostedBillingPortalResponse>({
-        method: "POST",
-        url: "/api/settings/billing/portal",
-      });
-
-      window.location.assign(response.url);
-    } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not open Stripe billing yet."));
-    } finally {
-      setIsOpeningPortal(false);
-    }
-  }
-
+export function HostedBillingSettings(props: { authenticated: boolean }) {
   return (
-    <Card className="shadow-sm">
+    <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
       <CardHeader className="space-y-2">
-        <CardTitle className="text-2xl font-semibold tracking-tight text-stone-900">Subscription</CardTitle>
+        <CardTitle className="text-lg font-semibold tracking-tight text-stone-900">Subscription</CardTitle>
         <CardDescription className="leading-relaxed text-stone-500">
-          Manage your Murph subscription in Stripe without leaving this account.
+          View or update your plan and payment details.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to open billing</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {!ready || isLoadingAuthenticatedUser ? (
-          <p className="text-sm leading-relaxed text-stone-500">Checking your Privy session before we show billing.</p>
-        ) : !authenticated ? (
-          <p className="text-sm leading-relaxed text-stone-500">
-            Sign in with your hosted account to manage the subscription attached to this invite.
-          </p>
-        ) : !canManageBilling ? (
-          <p className="text-sm leading-relaxed text-stone-500">Loading your hosted profile before we show billing.</p>
+        {!props.authenticated ? (
+          <HostedSettingsSessionState
+            authenticated={props.authenticated}
+            signedOutDescription="Sign in to manage your subscription."
+          />
         ) : (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <>
             <p className="text-sm leading-relaxed text-stone-500">
-              Stripe handles plan changes, payment method updates, and cancellation in one place.
+              Change your plan, update payment methods, or cancel.
             </p>
-            <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal}>
-              {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
-            </Button>
-          </div>
+            <HostedBillingSettingsAction />
+          </>
         )}
       </CardContent>
     </Card>

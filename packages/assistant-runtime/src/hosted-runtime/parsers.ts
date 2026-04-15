@@ -1,15 +1,20 @@
+import type {
+  HostedExecutionRunnerResult,
+} from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedAssistantDeliveryEffects,
+} from "@murphai/hosted-execution/side-effects";
 import {
   parseHostedExecutionBundleRef,
   parseHostedExecutionRunnerRequest,
-  parseHostedExecutionSideEffects,
-  type HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 
 import type {
+  HostedAssistantRuntimeDeviceSyncConfig,
+  HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobRequest,
-  HostedExecutionCommitCallback,
 } from "./models.ts";
 
 export function parseHostedAssistantRuntimeJobInput(
@@ -30,19 +35,23 @@ export function parseHostedAssistantRuntimeJobRequest(
 ): HostedAssistantRuntimeJobRequest {
   const record = requireObject(value, "Hosted assistant runtime job request");
   const request = parseHostedExecutionRunnerRequest(record);
+  const resume = record.resume === undefined
+    ? undefined
+    : record.resume === null
+      ? null
+      : parseHostedAssistantRuntimeResume(record.resume);
 
   return {
     ...request,
-    ...(record.commit === undefined
+    ...(record.currentBundleRef === undefined
       ? {}
       : {
-          commit: record.commit === null ? null : parseHostedExecutionCommitCallback(record.commit),
+          currentBundleRef: parseHostedExecutionBundleRef(
+            record.currentBundleRef,
+            "Hosted assistant runtime job request.currentBundleRef",
+          ),
         }),
-    ...(record.resume === undefined
-      ? {}
-      : {
-          resume: record.resume === null ? null : parseHostedAssistantRuntimeResume(record.resume),
-        }),
+    ...(resume === undefined ? {} : { resume }),
   };
 }
 
@@ -77,6 +86,14 @@ export function parseHostedAssistantRuntimeConfig(
             "Hosted assistant runtime config.forwardedEnv",
           ),
         }),
+    ...(record.resolvedConfig === undefined
+      ? {}
+      : {
+          resolvedConfig: parseHostedAssistantRuntimeResolvedConfig(
+            record.resolvedConfig,
+            "Hosted assistant runtime config.resolvedConfig",
+          ),
+        }),
     ...(record.userEnv === undefined
       ? {}
       : {
@@ -88,15 +105,152 @@ export function parseHostedAssistantRuntimeConfig(
   };
 }
 
-function parseHostedExecutionCommitCallback(
+function parseHostedAssistantRuntimeResolvedConfig(
   value: unknown,
-): HostedExecutionCommitCallback {
-  const record = requireObject(value, "Hosted assistant runtime commit callback");
+  label: string,
+): HostedAssistantRuntimeResolvedConfig {
+  const record = requireObject(value, label);
 
   return {
-    bundleRef: parseHostedExecutionBundleRef(
-      record.bundleRef,
-      "Hosted assistant runtime commit callback.bundleRef",
+    channelCapabilities: parseHostedAssistantRuntimeChannelCapabilities(
+      record.channelCapabilities,
+      `${label}.channelCapabilities`,
+    ),
+    deviceSync:
+      record.deviceSync === undefined || record.deviceSync === null
+        ? null
+        : parseHostedAssistantRuntimeDeviceSyncConfig(
+            record.deviceSync,
+            `${label}.deviceSync`,
+          ),
+  };
+}
+
+function parseHostedAssistantRuntimeChannelCapabilities(
+  value: unknown,
+  label: string,
+): HostedAssistantRuntimeResolvedConfig["channelCapabilities"] {
+  const record = requireObject(value, label);
+
+  return {
+    emailSendReady: requireBoolean(record.emailSendReady, `${label}.emailSendReady`),
+    telegramBotConfigured: requireBoolean(
+      record.telegramBotConfigured,
+      `${label}.telegramBotConfigured`,
+    ),
+  };
+}
+
+function parseHostedAssistantRuntimeDeviceSyncConfig(
+  value: unknown,
+  label: string,
+): HostedAssistantRuntimeDeviceSyncConfig {
+  const record = requireObject(value, label);
+
+  return {
+    providerConfigs: parseConfiguredDeviceSyncProviderConfigs(
+      record.providerConfigs,
+      `${label}.providerConfigs`,
+    ),
+    publicBaseUrl: requireString(record.publicBaseUrl, `${label}.publicBaseUrl`),
+    secret: requireString(record.secret, `${label}.secret`),
+  };
+}
+
+function parseConfiguredDeviceSyncProviderConfigs(
+  value: unknown,
+  label: string,
+): HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"] {
+  const record = requireObject(value, label);
+
+  return {
+    ...(record.garmin === undefined
+      ? {}
+      : {
+          garmin: parseGarminDeviceSyncProviderConfig(record.garmin, `${label}.garmin`),
+        }),
+    ...(record.oura === undefined
+      ? {}
+      : {
+          oura: parseOuraDeviceSyncProviderConfig(record.oura, `${label}.oura`),
+        }),
+    ...(record.whoop === undefined
+      ? {}
+      : {
+          whoop: parseWhoopDeviceSyncProviderConfig(record.whoop, `${label}.whoop`),
+        }),
+  };
+}
+
+function parseGarminDeviceSyncProviderConfig(
+  value: unknown,
+  label: string,
+): NonNullable<HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"]["garmin"]> {
+  const record = requireSerializableProviderConfigRecord(value, label);
+
+  return {
+    apiBaseUrl: parseOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
+    authBaseUrl: parseOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
+    backfillDays: parseOptionalNumber(record.backfillDays, `${label}.backfillDays`),
+    clientId: requireString(record.clientId, `${label}.clientId`),
+    clientSecret: requireString(record.clientSecret, `${label}.clientSecret`),
+    reconcileDays: parseOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
+    reconcileIntervalMs: parseOptionalNumber(
+      record.reconcileIntervalMs,
+      `${label}.reconcileIntervalMs`,
+    ),
+    requestTimeoutMs: parseOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
+    tokenBaseUrl: parseOptionalString(record.tokenBaseUrl, `${label}.tokenBaseUrl`),
+  };
+}
+
+function parseOuraDeviceSyncProviderConfig(
+  value: unknown,
+  label: string,
+): NonNullable<HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"]["oura"]> {
+  const record = requireSerializableProviderConfigRecord(value, label);
+
+  return {
+    apiBaseUrl: parseOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
+    authBaseUrl: parseOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
+    backfillDays: parseOptionalNumber(record.backfillDays, `${label}.backfillDays`),
+    clientId: requireString(record.clientId, `${label}.clientId`),
+    clientSecret: requireString(record.clientSecret, `${label}.clientSecret`),
+    reconcileDays: parseOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
+    reconcileIntervalMs: parseOptionalNumber(
+      record.reconcileIntervalMs,
+      `${label}.reconcileIntervalMs`,
+    ),
+    requestTimeoutMs: parseOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
+    scopes: parseOptionalStringArray(record.scopes, `${label}.scopes`),
+    webhookTimestampToleranceMs: parseOptionalNumber(
+      record.webhookTimestampToleranceMs,
+      `${label}.webhookTimestampToleranceMs`,
+    ),
+  };
+}
+
+function parseWhoopDeviceSyncProviderConfig(
+  value: unknown,
+  label: string,
+): NonNullable<HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"]["whoop"]> {
+  const record = requireSerializableProviderConfigRecord(value, label);
+
+  return {
+    backfillDays: parseOptionalNumber(record.backfillDays, `${label}.backfillDays`),
+    baseUrl: parseOptionalString(record.baseUrl, `${label}.baseUrl`),
+    clientId: requireString(record.clientId, `${label}.clientId`),
+    clientSecret: requireString(record.clientSecret, `${label}.clientSecret`),
+    reconcileDays: parseOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
+    reconcileIntervalMs: parseOptionalNumber(
+      record.reconcileIntervalMs,
+      `${label}.reconcileIntervalMs`,
+    ),
+    requestTimeoutMs: parseOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
+    scopes: parseOptionalStringArray(record.scopes, `${label}.scopes`),
+    webhookTimestampToleranceMs: parseOptionalNumber(
+      record.webhookTimestampToleranceMs,
+      `${label}.webhookTimestampToleranceMs`,
     ),
   };
 }
@@ -109,6 +263,11 @@ function parseHostedAssistantRuntimeResume(
     record.committedResult,
     "Hosted assistant runtime resume state.committedResult",
   );
+  rejectRemovedHostedAssistantRuntimeField(
+    committedResult,
+    "sideEffects",
+    "Hosted assistant runtime resume state.committedResult",
+  );
 
   return {
     committedResult: {
@@ -116,7 +275,10 @@ function parseHostedAssistantRuntimeResume(
         committedResult.result,
         "Hosted assistant runtime resume state.committedResult.result",
       ),
-      sideEffects: parseHostedExecutionSideEffects(committedResult.sideEffects),
+      assistantDeliveryEffects: requireHostedAssistantDeliveryEffects(
+        committedResult.assistantDeliveryEffects,
+        "Hosted assistant runtime resume state.committedResult.assistantDeliveryEffects",
+      ),
     },
   };
 }
@@ -153,6 +315,26 @@ function parseStringRecord(value: unknown, label: string): Record<string, string
   return parsed;
 }
 
+function parseOptionalString(value: unknown, label: string): string | undefined {
+  return value === undefined ? undefined : requireString(value, label);
+}
+
+function parseOptionalNumber(value: unknown, label: string): number | undefined {
+  return value === undefined ? undefined : requireNumber(value, label);
+}
+
+function parseOptionalStringArray(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array of strings.`);
+  }
+
+  return value.map((entry, index) => requireString(entry, `${label}[${index}]`));
+}
+
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -161,9 +343,30 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function requireSerializableProviderConfigRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  const record = requireObject(value, label);
+
+  if (record.fetchImpl !== undefined) {
+    throw new TypeError(`${label}.fetchImpl is not supported in serialized runtime config.`);
+  }
+
+  return record;
+}
+
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -188,10 +391,22 @@ function readNullableString(value: unknown, label: string): string | null {
 function rejectRemovedHostedAssistantRuntimeField(
   record: Record<string, unknown>,
   field: string,
+  label = "Hosted assistant runtime config",
 ): void {
   if (record[field] !== undefined) {
     throw new TypeError(
-      `Hosted assistant runtime config.${field} is no longer supported.`,
+      `${label}.${field} is no longer supported.`,
     );
   }
+}
+
+function requireHostedAssistantDeliveryEffects(
+  value: unknown,
+  label: string,
+) {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return parseHostedAssistantDeliveryEffects(value);
 }

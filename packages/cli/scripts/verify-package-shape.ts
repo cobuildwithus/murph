@@ -1,7 +1,11 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { configSchemaPath, generateIncurConfigSchema } from './incur-config-schema.js'
+import {
+  configSchemaPath,
+  generateIncurArtifacts,
+  incurGeneratedTypesPath,
+} from './incur-config-schema.js'
 
 interface PackageJsonShape {
   name?: string
@@ -54,10 +58,10 @@ const tsconfigBuild = JSON.parse(
 const tsconfigTypecheck = JSON.parse(
   await readFile(path.join(packageDir, 'tsconfig.typecheck.json'), 'utf8'),
 ) as TsConfigShape
-const rootTsconfigBase = JSON.parse(
-  await readFile(path.join(packageDir, '../../tsconfig.base.json'), 'utf8'),
-) as TsConfigShape
 const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
+const packageLocalRelativePaths = packageLocalTsFiles.map((filePath) =>
+  path.relative(packageDir, filePath),
+)
 
 assert(
   packageJson.name === '@murphai/murph',
@@ -117,6 +121,12 @@ assert(
   'package.json must expose only the murph and vault-cli binaries.',
 )
 assert(
+  packageLocalRelativePaths.every(
+    (relativePath) => !relativePath.includes('runner-vault-cli'),
+  ),
+  'packages/cli must not reintroduce runner-vault-cli compatibility files now that murph and vault-cli share dist/bin.js.',
+)
+assert(
   packageJson.exports?.['.']?.default === './dist/index.js',
   'package.json exports must target dist/index.js.',
 )
@@ -130,61 +140,8 @@ assert(
   'package.json must expose only the CLI root entrypoint.',
 )
 assert(
-  packageJson.exports?.['./assistant-core'] === undefined,
-  'package.json must not publish the removed assistant-core compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./vault-cli-services'] === undefined,
-  'package.json must not publish the removed vault-cli-services compatibility subpath.',
-)
-assert(
-  rootTsconfigBase.compilerOptions?.paths?.['murph/vault-cli-services'] === undefined,
-  'tsconfig.base.json must not preserve the removed vault-cli-services compatibility path alias.',
-)
-for (const removedAssistantPathAlias of [
-  'murph/assistant/automation',
-  'murph/assistant/cron',
-  'murph/assistant/service',
-  'murph/assistant/outbox',
-  'murph/assistant/status',
-  'murph/assistant/store',
-]) {
-  assert(
-    rootTsconfigBase.compilerOptions?.paths?.[removedAssistantPathAlias] === undefined,
-    `tsconfig.base.json must not preserve the removed ${removedAssistantPathAlias} compatibility path alias.`,
-  )
-}
-assert(
-  packageJson.exports?.['./assistant/state-ids'] === undefined,
-  'package.json must not publish the removed assistant/state-ids compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./assistant-cli-contracts'] === undefined,
-  'package.json must not publish the removed assistant-cli-contracts compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./inbox-services'] === undefined,
-  'package.json must not publish the removed inbox-services compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./operator-config'] === undefined,
-  'package.json must not publish the removed operator-config compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./gateway-core'] === undefined,
-  'package.json must not publish the removed gateway-core compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./gateway-core-local'] === undefined,
-  'package.json must not publish the removed gateway-core-local compatibility subpath.',
-)
-assert(
   packageJson.dependencies?.['@murphai/gateway-core'] === undefined,
   'package.json must not keep a runtime dependency on @murphai/gateway-core after the hard cut.',
-)
-assert(
-  packageJson.exports?.['./vault-services'] === undefined,
-  'package.json must not publish the removed vault-services compatibility subpath.',
 )
 assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===
@@ -194,9 +151,35 @@ assert(
 assert(
   packageJson.scripts?.build &&
     packageJson.scripts?.typecheck &&
-    packageJson.scripts?.test &&
+    packageJson.scripts?.test === 'pnpm test:source' &&
+    packageJson.scripts?.['test:source'] ===
+      'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+    packageJson.scripts?.['test:coverage'] === 'pnpm test:source:coverage' &&
+    packageJson.scripts?.['test:source:coverage'] ===
+      'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+    packageJson.scripts?.['verify:prepared-runtime'] ===
+      'pnpm --dir ../.. build:test-runtime:prepared' &&
+    packageJson.scripts?.build ===
+      'node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --force' &&
+    packageJson.scripts?.['verify:package-shape'] ===
+      'pnpm build && node --import=tsx ./scripts/verify-package-shape.ts' &&
+    packageJson.scripts?.['test:built-runtime'] ===
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+    packageJson.scripts?.['test:built-runtime:coverage'] ===
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+    packageJson.scripts?.verify ===
+      'pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime' &&
+    packageJson.scripts?.['verify:coverage'] ===
+      'pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime:coverage' &&
     packageJson.scripts?.prepack === 'pnpm build',
-  'package.json must define build/test/typecheck plus prepack.',
+  'package.json must keep source-local test scripts separate from explicit built-runtime/package-shape verification scripts.',
+)
+assert(
+  !packageJson.scripts?.test?.includes('build:test-runtime:prepared') &&
+    !packageJson.scripts?.test?.includes('verify-package-shape') &&
+    !packageJson.scripts?.['test:coverage']?.includes('build:test-runtime:prepared') &&
+    !packageJson.scripts?.['test:coverage']?.includes('verify-package-shape'),
+  'package.json local test scripts must not block on prepared-runtime or package-shape acceptance gates.',
 )
 assert(
   !packageJson.scripts?.['verify:release-target'] &&
@@ -209,20 +192,11 @@ assert(
   'package.json must not keep package-local release scripts once the monorepo release flow is root-owned.',
 )
 assert(
-  !Object.values(packageJson.scripts ?? {}).some((script) =>
-    script?.includes('node --import=tsx'),
+  Object.entries(packageJson.scripts ?? {}).every(
+    ([name, script]) =>
+      name === 'verify:package-shape' || script?.includes('node --import=tsx') !== true,
   ),
-  'package.json package-local scripts must call tsx or vitest directly instead of node --import=tsx.',
-)
-assert(
-  !Object.values(packageJson.scripts ?? {}).some((script) =>
-    script ? referencesPackageLocalLegacyMjs(script, packageDir) : false
-  ),
-  'package.json package-local scripts must not point at package-local legacy .mjs files.',
-)
-assert(
-  !packageLocalTsFiles.some((filePath) => path.basename(filePath) === 'require-cli-toolchain.ts'),
-  'packages/cli/scripts/require-cli-toolchain.ts should not exist once the package scripts rely on the workspace toolchain directly.',
+  'package.json must reserve node --import=tsx for the verify:package-shape acceptance script only.',
 )
 assert(
   tsconfig.extends === '../../tsconfig.base.json',
@@ -322,35 +296,9 @@ const configSchema = JSON.parse(
     }
   }
 }
-assert(
-  !/\.serve\(\)/u.test(libraryEntry),
-  'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
-)
-assert(
-  !/@murph(?:ai)?\/assistant-core\//u.test(libraryEntry),
-  'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
-)
-assert(
-  !/\bcreateIntegratedInboxCliServices\b/u.test(libraryEntry) &&
-    !/\bInboxCliServices\b/u.test(libraryEntry) &&
-    !/\bcreateIntegratedVaultCliServices\b/u.test(libraryEntry) &&
-    !/\bcreateUnwiredVaultCliServices\b/u.test(libraryEntry) &&
-    !/\bVaultCliServices\b/u.test(libraryEntry),
-  'src/index.ts must not re-export the removed CLI-shaped service compatibility aliases.',
-)
-assert(
-  configSchema.type === 'object',
-  'config.schema.json must stay a JSON object schema.',
-)
-assert(
-  typeof configSchema.properties?.commands?.properties?.vault === 'object' &&
-    typeof configSchema.properties?.commands?.properties?.assistant === 'object',
-  'config.schema.json must cover the nested vault and assistant command groups.',
-)
-assert(
-  JSON.stringify(configSchema) === JSON.stringify(JSON.parse(await generateIncurConfigSchema())),
-  'config.schema.json must stay in sync with the current built CLI entrypoint. Run pnpm --dir packages/cli gen:config-schema after CLI config-surface changes.',
-)
+assertImportSafeLibraryEntry(libraryEntry)
+assertConfigSchemaSmoke(configSchema)
+await assertGeneratedArtifactsFresh(configSchema)
 
 console.log('packages/cli package shape verified.')
 
@@ -358,6 +306,55 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
+}
+
+function assertImportSafeLibraryEntry(libraryEntry: string): void {
+  assert(
+    !/\.serve\(\)/u.test(libraryEntry),
+    'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
+  )
+  assert(
+    !/@murph(?:ai)?\/assistant-core\//u.test(libraryEntry),
+    'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
+  )
+}
+
+function assertConfigSchemaSmoke(configSchema: {
+  type?: string
+  properties?: {
+    commands?: {
+      properties?: Record<string, unknown>
+    }
+  }
+}): void {
+  assert(
+    configSchema.type === 'object',
+    'config.schema.json must stay a JSON object schema.',
+  )
+  assert(
+    typeof configSchema.properties?.commands?.properties?.vault === 'object' &&
+      typeof configSchema.properties?.commands?.properties?.assistant === 'object',
+    'config.schema.json must cover the nested vault and assistant command groups.',
+  )
+  assert(
+    JSON.stringify(configSchema).includes('"x-incur-') !== true,
+    'config.schema.json must stay on native incur output and avoid Murph-specific x-incur metadata.',
+  )
+}
+
+async function assertGeneratedArtifactsFresh(configSchema: object): Promise<void> {
+  const generatedTypes = await readFile(incurGeneratedTypesPath, 'utf8')
+  const generatedArtifacts = await generateIncurArtifacts({ rebuildCli: false })
+
+  assert(
+    JSON.stringify(configSchema)
+      === JSON.stringify(JSON.parse(generatedArtifacts.configSchema)),
+    'config.schema.json must stay in sync with the current built CLI entrypoint. Run pnpm --dir packages/cli gen:config-schema after CLI config-surface changes.',
+  )
+  assert(
+    generatedTypes === generatedArtifacts.types,
+    'src/incur.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
+  )
 }
 
 async function listFiles(
@@ -391,26 +388,4 @@ async function listFilesRecursive(directoryPath: string): Promise<string[]> {
   }
 
   return files
-}
-
-function referencesPackageLocalLegacyMjs(
-  script: string,
-  packageRoot: string,
-): boolean {
-  const matches = script.match(/(?:"([^"]+)"|'([^']+)'|`([^`]+)`|(\S+))/gu) ?? []
-
-  return matches.some((token) => {
-    const raw = token.replace(/^['"`]|['"`]$/gu, '')
-
-    if (!raw.endsWith('.mjs')) {
-      return false
-    }
-
-    if (!raw.startsWith('./') && !raw.startsWith('../')) {
-      return false
-    }
-
-    const resolved = path.resolve(packageRoot, raw)
-    return resolved.startsWith(packageRoot + path.sep)
-  })
 }

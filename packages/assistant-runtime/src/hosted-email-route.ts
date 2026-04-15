@@ -5,7 +5,7 @@ import {
 import {
   readHostedVerifiedEmailFromEnv,
 } from "@murphai/runtime-state";
-import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution";
+import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution/hosted-email";
 
 type HostedEmailSelfTargetStatus =
   | "missing-sender-identity"

@@ -25,14 +25,14 @@ import {
   type GatewayProjectionSnapshot,
   type GatewayReadMessagesInput,
   type GatewayReadMessagesResult,
-} from './contracts.js'
+} from './contracts.ts'
 import {
   readGatewayAttachmentId,
   readGatewayConversationSessionToken,
   readGatewayMessageRouteToken,
   sameGatewayConversationSession,
-} from './opaque-ids.js'
-import { createGatewayInvalidRuntimeIdError } from './errors.js'
+} from './opaque-ids.ts'
+import { createGatewayInvalidRuntimeIdError } from './errors.ts'
 
 export interface GatewayEventEmission
   extends Omit<GatewayEvent, 'cursor' | 'schema'> {}
@@ -409,7 +409,7 @@ function conversationPresentationForRequest(
         : deriveGatewayConversationDisplayTitle(
             snapshot,
             conversation,
-            input.includeDerivedTitles,
+            input.includeDerivedTitles ?? true,
           ),
     lastMessagePreview:
       input.includeLastMessage === false ? null : conversation.lastMessagePreview,

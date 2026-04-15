@@ -1,4 +1,5 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
   addMilliseconds,
   generateStateCode,
@@ -7,12 +8,15 @@ import {
   normalizePublicBaseUrl,
   normalizeString,
   resolveRelativeOrAllowedOriginUrl,
+  scopeWebhookTraceId,
+  sha256Text,
   toIsoTimestamp,
 } from "./shared.ts";
 
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
+  DeviceSyncIngressWebhook,
   DeviceSyncLogger,
   DeviceSyncProvider,
   DeviceSyncPublicIngressConnectionEstablishedInput,
@@ -36,6 +40,22 @@ export interface CreateDeviceSyncPublicIngressInput {
 }
 
 const WEBHOOK_TRACE_PROCESSING_TTL_MS = 5 * 60_000;
+
+function toIngressWebhook(parsed: {
+  eventType: string;
+  jobs: DeviceSyncIngressWebhook["jobs"];
+  occurredAt?: string;
+  resourceCategory?: string | null;
+}): DeviceSyncIngressWebhook {
+  const resourceCategory = normalizeString(parsed.resourceCategory);
+
+  return {
+    eventType: parsed.eventType,
+    jobs: [...parsed.jobs],
+    ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
+    ...(resourceCategory ? { resourceCategory } : {}),
+  };
+}
 
 export class DeviceSyncPublicIngress {
   readonly publicBaseUrl: string;
@@ -132,9 +152,9 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    const stateRecord = await this.store.consumeOAuthState(state, now);
+    const stateResult = await this.store.consumeOAuthState(state, now, provider.provider);
 
-    if (!stateRecord) {
+    if (stateResult.status === "missing") {
       throw deviceSyncError({
         code: "OAUTH_STATE_INVALID",
         message: "OAuth state is invalid or expired.",
@@ -143,23 +163,25 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    try {
-      if (stateRecord.provider !== provider.provider) {
-        throw deviceSyncError({
-          code: "OAUTH_PROVIDER_MISMATCH",
-          message: `OAuth state belongs to provider ${stateRecord.provider}, not ${provider.provider}.`,
-          retryable: false,
-          httpStatus: 400,
-        });
-      }
+    if (stateResult.status === "provider_mismatch") {
+      throw deviceSyncError({
+        code: "OAUTH_PROVIDER_MISMATCH",
+        message: `OAuth state belongs to provider ${stateResult.provider}, not ${provider.provider}.`,
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
 
+    const stateRecord = stateResult.record;
+    const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
+
+    try {
       const callbackError = normalizeString(input.error);
 
       if (callbackError) {
         this.logger.warn?.("OAuth callback was rejected by the provider.", {
           provider: provider.provider,
           callbackError,
-          errorDescription: normalizeString(input.errorDescription),
         });
 
         throw deviceSyncError({
@@ -226,12 +248,12 @@ export class DeviceSyncPublicIngress {
 
       return {
         account,
-        returnTo: stateRecord.returnTo ?? null,
+        returnTo,
       };
     } catch (error) {
       throw attachOAuthCallbackContext(error, {
         provider: provider.provider,
-        returnTo: stateRecord.returnTo ?? null,
+        returnTo,
       });
     }
   }
@@ -254,14 +276,19 @@ export class DeviceSyncPublicIngress {
       rawBody,
       now,
     });
+    const traceId = scopeWebhookTraceId(
+      provider.provider,
+      parsed.externalAccountId,
+      parsed.traceId,
+    );
+    const webhook = toIngressWebhook(parsed);
 
     const traceClaim = await this.store.claimWebhookTrace({
       provider: provider.provider,
-      traceId: parsed.traceId,
+      traceId,
       externalAccountId: parsed.externalAccountId,
-      eventType: parsed.eventType,
+      eventType: webhook.eventType,
       receivedAt: now,
-      payload: parsed.payload,
       processingExpiresAt: addMilliseconds(now, WEBHOOK_TRACE_PROCESSING_TTL_MS),
     });
 
@@ -270,8 +297,8 @@ export class DeviceSyncPublicIngress {
         accepted: true,
         duplicate: true,
         provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
+        eventType: webhook.eventType,
+        traceId,
       };
     }
 
@@ -287,67 +314,93 @@ export class DeviceSyncPublicIngress {
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
 
     if (!account) {
-      this.logger.warn?.("Ignoring webhook for unknown device sync account.", {
+      this.logger.warn?.("Delaying webhook for unknown device sync account.", {
         provider: provider.provider,
-        externalAccountId: parsed.externalAccountId,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
+        externalAccountIdHash: hashExternalAccountIdForLogs(parsed.externalAccountId),
+        eventType: webhook.eventType,
+        traceId,
       });
 
       try {
         await this.hooks.onUnknownWebhook?.({
           provider,
-          webhook: parsed,
+          traceId,
+          webhook,
           externalAccountId: parsed.externalAccountId,
           now,
         });
-        await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
-      } catch (error) {
-        await this.store.releaseWebhookTrace(provider.provider, parsed.traceId);
-        throw error;
+      } finally {
+        await this.store.releaseWebhookTrace(provider.provider, traceId);
       }
 
-      return {
-        accepted: true,
-        duplicate: false,
-        provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-      };
-    }
-
-    if (account.status !== "active") {
-      this.logger.warn?.("Ignoring webhook side effects for non-active device sync account.", {
-        provider: provider.provider,
-        accountId: account.id,
-        status: account.status,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
+      throw deviceSyncError({
+        code: "WEBHOOK_ACCOUNT_NOT_READY",
+        message: "Webhook account is not connected yet. Retry later.",
+        retryable: true,
+        httpStatus: 503,
       });
-      await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
-
-      return {
-        accepted: true,
-        duplicate: false,
-        provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-      };
     }
+
+    switch (account.status) {
+      case "active":
+        break;
+      case "reauthorization_required":
+        this.logger.warn?.("Delaying webhook side effects for device sync account awaiting reauthorization.", {
+          provider: provider.provider,
+          accountId: account.id,
+          status: account.status,
+          eventType: webhook.eventType,
+          traceId,
+        });
+        await this.store.releaseWebhookTrace(provider.provider, traceId);
+        throw deviceSyncError({
+          code: "WEBHOOK_ACCOUNT_NOT_READY",
+          message: "Device sync account must be reconnected before webhook side effects can be accepted.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      case "disconnected":
+        this.logger.warn?.("Ignoring webhook side effects for disconnected device sync account.", {
+          provider: provider.provider,
+          accountId: account.id,
+          status: account.status,
+          eventType: webhook.eventType,
+          traceId,
+        });
+        await this.store.completeWebhookTrace(provider.provider, traceId);
+
+        return {
+          accepted: true,
+          duplicate: false,
+          provider: provider.provider,
+          eventType: webhook.eventType,
+          traceId,
+        };
+    }
+
+    const onWebhookAccepted = this.hooks.onWebhookAccepted;
 
     try {
-      await this.hooks.onWebhookAccepted?.({
+      const acceptedResult = await onWebhookAccepted?.({
         account,
-        webhook: parsed,
+        traceId,
+        webhook,
         provider,
         now,
       });
 
-      if (!this.hooks.onWebhookAccepted) {
-        await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+      if (!onWebhookAccepted) {
+        await this.store.completeWebhookTrace(provider.provider, traceId);
+      } else if (acceptedResult?.webhookTraceCompleted !== true) {
+        throw deviceSyncError({
+          code: "WEBHOOK_TRACE_COMPLETION_REQUIRED",
+          message: "Webhook acceptance must complete the claimed trace before returning.",
+          retryable: true,
+          httpStatus: 503,
+        });
       }
     } catch (error) {
-      await this.store.releaseWebhookTrace(provider.provider, parsed.traceId);
+      await this.store.releaseWebhookTrace(provider.provider, traceId);
       throw error;
     }
 
@@ -357,9 +410,11 @@ export class DeviceSyncPublicIngress {
       this.logger.warn?.("Failed to record last webhook receipt time after durable acceptance.", {
         provider: provider.provider,
         accountId: account.id,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-        error: error instanceof Error ? error.message : String(error),
+        eventType: webhook.eventType,
+        traceId,
+        error: sanitizeHostedRuntimeErrorText(
+          error instanceof Error ? error.message : String(error),
+        ) ?? "[redacted]",
       });
     }
 
@@ -367,8 +422,8 @@ export class DeviceSyncPublicIngress {
       accepted: true,
       duplicate: false,
       provider: provider.provider,
-      eventType: parsed.eventType,
-      traceId: parsed.traceId,
+      eventType: webhook.eventType,
+      traceId,
     };
   }
 
@@ -401,10 +456,25 @@ export class DeviceSyncPublicIngress {
 
     return resolved;
   }
+
+  private sanitizeStoredReturnTo(candidate: string | null): string | null {
+    const resolved = resolveRelativeOrAllowedOriginUrl(candidate, this.publicBaseUrl, this.allowedReturnOrigins);
+
+    if (candidate && !resolved) {
+      this.logger.warn?.("Discarding invalid persisted OAuth returnTo state.");
+      return null;
+    }
+
+    return resolved;
+  }
 }
 
 export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngressInput): DeviceSyncPublicIngress {
   return new DeviceSyncPublicIngress(input);
+}
+
+function hashExternalAccountIdForLogs(value: string): string {
+  return sha256Text(value);
 }
 
 function attachOAuthCallbackContext(
@@ -420,7 +490,7 @@ function attachOAuthCallbackContext(
 
   return deviceSyncError({
     code: error.code,
-    message: error.message,
+    message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
     retryable: error.retryable,
     httpStatus: error.httpStatus,
     accountStatus: error.accountStatus,
@@ -438,27 +508,28 @@ export { createDeviceSyncRegistry } from "./registry.ts";
 export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
-export { buildPublicDeviceSyncErrorPayload } from "./http.ts";
-export {
-  readConfiguredGarminDeviceSyncProviderConfig,
-  readConfiguredOuraDeviceSyncProviderConfig,
-  readConfiguredWhoopDeviceSyncProviderConfig,
-} from "./config.ts";
 export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
 export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+export {
+  DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
+  DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
+} from "./types.ts";
 export type {
   BeginConnectionResult,
   ClaimDeviceSyncWebhookTraceInput,
   CompleteConnectionResult,
+  ConsumeOAuthStateResult,
   DeviceSyncAccount,
   DeviceSyncAccountStatus,
+  DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
   DeviceSyncProvider,
   DeviceSyncPublicIngressStore,
+  DeviceSyncPublicIngressWebhookAcceptedResult,
   DeviceSyncRegistry,
   DeviceSyncWebhookTraceClaimResult,
   HandleWebhookResult,

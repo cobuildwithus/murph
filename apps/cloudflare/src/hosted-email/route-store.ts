@@ -15,19 +15,15 @@ import {
 } from "../crypto.ts";
 
 export interface HostedEmailUserRouteRecord {
-  aliasKey: string;
   identityId: string;
   schema: "murph.hosted-email-user-route.v1";
-  updatedAt: string;
   userId: string;
 }
 
 export interface HostedEmailVerifiedSenderRouteRecord {
   identityId: string;
-  schema: "murph.hosted-email-verified-sender-route.v2";
+  schema: "murph.hosted-email-verified-sender-route.v1";
   senderHash: string;
-  senderKey: string;
-  updatedAt: string;
   userId: string;
 }
 
@@ -50,30 +46,30 @@ export interface HostedEmailRouteStore {
 
 interface HostedEmailRouteStoreInput {
   bucket: R2BucketLike;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
+  cryptoKey: Uint8Array;
+  cryptoKeyId: string;
+  cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
 }
 
 const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v1";
-const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA = "murph.hosted-email-verified-sender-route.v2";
+const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA = "murph.hosted-email-verified-sender-route.v1";
 
 export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): HostedEmailRouteStore {
   return {
     async readUserRoute(aliasKey) {
-      const key = await hostedEmailUserRouteObjectKey(input.key, aliasKey);
+      const objectKey = await hostedEmailUserRouteObjectKey(input.cryptoKey, aliasKey);
       return readEncryptedR2Json({
         aad: buildHostedStorageAad({
           aliasKey,
-          key,
+          key: objectKey,
           purpose: "email-route",
           routeKind: "user",
         }),
         bucket: input.bucket,
-        cryptoKey: input.key,
-        cryptoKeysById: input.keysById,
-        expectedKeyId: input.keyId,
-        key,
+        cryptoKey: input.cryptoKey,
+        cryptoKeysById: input.cryptoKeysById,
+        expectedKeyId: input.cryptoKeyId,
+        key: objectKey,
         parse(value) {
           return parseHostedEmailUserRouteRecord(value);
         },
@@ -82,84 +78,71 @@ export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): 
     },
 
     async readVerifiedSenderRoute(senderKey) {
-      const key = await hostedEmailVerifiedSenderRouteObjectKey(input.key, senderKey);
-
-      try {
-        return await readEncryptedR2Json({
-          aad: buildHostedStorageAad({
-            key,
-            purpose: "email-route",
-            routeKind: "verified-sender",
-            senderKey,
-          }),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
-          key,
-          parse(value) {
-            return parseHostedEmailVerifiedSenderRouteRecord(value);
-          },
-          scope: "email-route",
-        });
-      } catch (error) {
-        if (!(error instanceof TypeError)) {
-          throw error;
-        }
-      }
-
-      return null;
+      const objectKey = await hostedEmailVerifiedSenderRouteObjectKey(input.cryptoKey, senderKey);
+      return readEncryptedR2Json({
+        aad: buildHostedStorageAad({
+          key: objectKey,
+          purpose: "email-route",
+          routeKind: "verified-sender",
+          senderKey,
+        }),
+        bucket: input.bucket,
+        cryptoKey: input.cryptoKey,
+        cryptoKeysById: input.cryptoKeysById,
+        expectedKeyId: input.cryptoKeyId,
+        key: objectKey,
+        parse(value) {
+          return parseHostedEmailVerifiedSenderRouteRecord(value);
+        },
+        scope: "email-route",
+      });
     },
 
     async deleteVerifiedSenderRoute(senderKey) {
-      const key = await hostedEmailVerifiedSenderRouteObjectKey(input.key, senderKey);
-      await input.bucket.delete?.(key);
+      const objectKey = await hostedEmailVerifiedSenderRouteObjectKey(input.cryptoKey, senderKey);
+      await input.bucket.delete?.(objectKey);
     },
 
     async writeUserRoute(writeInput) {
-      const key = await hostedEmailUserRouteObjectKey(input.key, writeInput.aliasKey);
+      const objectKey = await hostedEmailUserRouteObjectKey(input.cryptoKey, writeInput.aliasKey);
       await writeEncryptedR2Json({
         aad: buildHostedStorageAad({
           aliasKey: writeInput.aliasKey,
-          key,
+          key: objectKey,
           purpose: "email-route",
           routeKind: "user",
         }),
         bucket: input.bucket,
-        cryptoKey: input.key,
-        key,
-        keyId: input.keyId,
+        cryptoKey: input.cryptoKey,
+        key: objectKey,
+        keyId: input.cryptoKeyId,
         scope: "email-route",
         value: {
-          aliasKey: writeInput.aliasKey,
           identityId: writeInput.identityId,
           schema: HOSTED_EMAIL_USER_ROUTE_SCHEMA,
-          updatedAt: new Date().toISOString(),
           userId: writeInput.userId,
         } satisfies HostedEmailUserRouteRecord,
       });
     },
 
     async writeVerifiedSenderRoute(writeInput) {
-      const key = await hostedEmailVerifiedSenderRouteObjectKey(input.key, writeInput.senderKey);
+      const objectKey = await hostedEmailVerifiedSenderRouteObjectKey(input.cryptoKey, writeInput.senderKey);
       await writeEncryptedR2Json({
         aad: buildHostedStorageAad({
-          key,
+          key: objectKey,
           purpose: "email-route",
           routeKind: "verified-sender",
           senderKey: writeInput.senderKey,
         }),
         bucket: input.bucket,
-        cryptoKey: input.key,
-        key,
-        keyId: input.keyId,
+        cryptoKey: input.cryptoKey,
+        key: objectKey,
+        keyId: input.cryptoKeyId,
         scope: "email-route",
         value: {
           identityId: writeInput.identityId,
           schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
           senderHash: writeInput.senderHash,
-          senderKey: writeInput.senderKey,
-          updatedAt: new Date().toISOString(),
           userId: writeInput.userId,
         } satisfies HostedEmailVerifiedSenderRouteRecord,
       });
@@ -193,30 +176,22 @@ async function hostedEmailVerifiedSenderRouteObjectKey(
 }
 
 function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted email user route must be an object.");
-  }
-
-  const record = value as Partial<HostedEmailUserRouteRecord>;
+  const record = requireHostedEmailRouteRecordObject(value, "Hosted email user route");
   if (record.schema !== HOSTED_EMAIL_USER_ROUTE_SCHEMA) {
     throw new TypeError("Hosted email user route schema is invalid.");
   }
 
   return {
-    aliasKey: requireHostedEmailRecordString(record.aliasKey, "Hosted email user route aliasKey"),
     identityId: requireHostedEmailRecordString(record.identityId, "Hosted email user route identityId"),
     schema: HOSTED_EMAIL_USER_ROUTE_SCHEMA,
-    updatedAt: requireHostedEmailRecordString(record.updatedAt, "Hosted email user route updatedAt"),
     userId: requireHostedEmailRecordString(record.userId, "Hosted email user route userId"),
   };
 }
 
-function parseHostedEmailVerifiedSenderRouteRecord(value: unknown): HostedEmailVerifiedSenderRouteRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted email verified sender route must be an object.");
-  }
-
-  const record = value as Partial<HostedEmailVerifiedSenderRouteRecord>;
+function parseHostedEmailVerifiedSenderRouteRecord(
+  value: unknown,
+): HostedEmailVerifiedSenderRouteRecord {
+  const record = requireHostedEmailRouteRecordObject(value, "Hosted email verified sender route");
   if (record.schema !== HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA) {
     throw new TypeError("Hosted email verified sender route schema is invalid.");
   }
@@ -225,14 +200,6 @@ function parseHostedEmailVerifiedSenderRouteRecord(value: unknown): HostedEmailV
     identityId: requireHostedEmailRecordString(
       record.identityId,
       "Hosted email verified sender route identityId",
-    ),
-    senderKey: requireHostedEmailRecordString(
-      record.senderKey,
-      "Hosted email verified sender route senderKey",
-    ),
-    updatedAt: requireHostedEmailRecordString(
-      record.updatedAt,
-      "Hosted email verified sender route updatedAt",
     ),
     userId: requireHostedEmailRecordString(
       record.userId,
@@ -244,6 +211,17 @@ function parseHostedEmailVerifiedSenderRouteRecord(value: unknown): HostedEmailV
       "Hosted email verified sender route senderHash",
     ),
   };
+}
+
+function requireHostedEmailRouteRecordObject(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function requireHostedEmailRecordString(value: unknown, label: string): string {

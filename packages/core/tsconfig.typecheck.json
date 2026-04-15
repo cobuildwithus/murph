@@ -2,19 +2,13 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "composite": false,
-    "incremental": false
+    "incremental": true,
+    "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../runtime-state"
-    },
-    {
-      "path": "../contracts/tsconfig.build.json"
-    }
-  ],
   "include": [
+    "*.ts",
     "src/**/*.ts",
     "test/**/*.ts"
   ],

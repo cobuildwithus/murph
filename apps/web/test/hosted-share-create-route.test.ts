@@ -5,7 +5,7 @@ import { createJsonPostRequest } from "./route-test-helpers";
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedShareLink: vi.fn(),
-  requireHostedPrivyActiveRequestAuthContext: vi.fn(),
+    requireActivePrivyMemberAuth: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -13,7 +13,7 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyActiveRequestAuthContext: mocks.requireHostedPrivyActiveRequestAuthContext,
+  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-share/service", () => ({
@@ -35,7 +35,7 @@ describe("hosted share create route", () => {
       shareCode: "share_123",
       url: "https://join.example.test/share/share_123",
     });
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+    mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_sender",
       },
@@ -65,7 +65,7 @@ describe("hosted share create route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledTimes(1);
-    expect(mocks.requireHostedPrivyActiveRequestAuthContext).toHaveBeenCalledTimes(1);
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedShareLink).toHaveBeenCalledWith({
       expiresInHours: undefined,
       inviteCode: null,

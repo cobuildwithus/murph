@@ -1,4 +1,10 @@
-import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
+import {
+  FOOD_STATUSES,
+  RECIPE_STATUSES,
+  eventSourceSchema,
+  mealNutritionSchema,
+  type MealNutrition,
+} from '@murphai/contracts'
 import { buildSharePackFromVault } from '@murphai/core'
 import { z, type ZodTypeAny } from 'zod'
 import type { AssistantToolProvenance } from '../inbox-model-contracts.js'
@@ -11,10 +17,12 @@ import {
   upsertKnowledgePage,
 } from '../knowledge.js'
 import {
-  assistantWebFetchExtractModeValues,
   fetchAssistantWeb,
-  resolveAssistantWebFetchEnabled,
 } from '../assistant/web-fetch.js'
+import {
+  assistantWebFetchExtractModeValues,
+  resolveAssistantWebFetchEnabled,
+} from '../assistant/web-fetch/config.js'
 import {
   assistantWebPdfReadMaxChars,
   assistantWebPdfReadMaxPages,
@@ -30,7 +38,7 @@ import {
   healthEntityDescriptors,
   hasHealthCommandDescriptor,
 } from '@murphai/vault-usecases'
-import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   defineAssistantCapability,
   type AssistantCapabilityDefinition,
@@ -68,6 +76,10 @@ const isoTimestampSchema = z.string().min(1)
 const vaultFilePathSchema = z.string().min(1)
 const jsonObjectSchema = z.record(z.string(), z.unknown())
 const optionalStringArraySchema = z.array(z.string().min(1)).optional()
+const mealIngredientSchema = z.string().trim().min(1).max(4000)
+const mealIngredientsSchema = z
+  .array(mealIngredientSchema)
+  .max(100)
 const assistantWebFetchExtractModeSchema = z.enum(assistantWebFetchExtractModeValues)
 const assistantWebSearchProviderSchema = z.enum(assistantWebSearchProviderValues)
 const assistantWebSearchFreshnessSchema = z.enum(assistantWebSearchFreshnessValues)
@@ -85,6 +97,26 @@ const knowledgeMetadataTagSchema = z.string().min(1)
 const knowledgeSourcePathSchema = z.string().min(1)
 const knowledgeSlugSchema = z.string().min(1)
 
+function assertMealAddInputHasContent(input: {
+  photo?: string
+  audio?: string
+  note?: string
+  ingredients?: string[]
+  nutrition?: MealNutrition
+}) {
+  const hasTrimmedNote = typeof input.note === 'string' && input.note.trim().length > 0
+  const hasIngredients = Array.isArray(input.ingredients) && input.ingredients.length > 0
+  const hasNutrition =
+    input.nutrition !== undefined &&
+    (Object.keys(input.nutrition.totals ?? {}).length > 0 ||
+      Object.keys(input.nutrition.provenance ?? {}).length > 0)
+  if (input.photo || input.audio || hasTrimmedNote || hasIngredients || hasNutrition) {
+    return
+  }
+
+  throw new Error('Provide at least one of photo, audio, note, ingredients, or nutrition.')
+}
+
 export function createAssistantCliExecutorToolDefinitions(
   input: AssistantToolContext,
 ) {
@@ -101,13 +133,20 @@ export function createAssistantCliExecutorToolDefinitions(
       inputExample: {
         args: ['device', 'provider', 'list'],
       },
-      execute: async ({ args, stdin, timeoutMs }) =>
-        await executeAssistantCliCommand({
+      execute: async ({ args, stdin, timeoutMs }) => {
+        const result = await executeAssistantCliCommand({
           args,
           stdin,
           timeoutMs,
           input,
-        }),
+        })
+
+        if (result.json !== null) {
+          return result.json
+        }
+
+        return result.stdout.length > 0 ? result.stdout : null
+      },
     }),
   ]
 }
@@ -432,21 +471,45 @@ export function createInboxPromotionToolDefinitions(
   const captureIdSchema = z.object({
     captureId: z.literal(input.captureId),
   })
+  const mealPromotionInputSchema = captureIdSchema.extend({
+    note: z.string().trim().min(1).optional(),
+    occurredAt: isoTimestampSchema.optional(),
+    source: eventSourceSchema.optional(),
+    ingredients: mealIngredientsSchema.optional(),
+    nutrition: mealNutritionSchema.optional(),
+  })
 
   return [
     defineHandAuthoredHelperTool({
       name: 'inbox.promote.meal',
       description:
-        'Promote the current inbox capture into canonical meal storage when the capture is primarily a meal, snack, or drink log anchored by an image.',
-      inputSchema: captureIdSchema,
+        'Promote the current inbox capture into canonical meal storage when it is primarily a meal, snack, or drink log. Preserve the capture-backed photo or audio context, and pass recovered note, time, source, ingredient, or nutrition details when you have them.',
+      inputSchema: mealPromotionInputSchema,
       inputExample: {
         captureId: input.captureId,
+        note: 'Only ate the sweet potatoes and green beans.',
+        ingredients: ['sweet potatoes', 'green beans'],
+        nutrition: {
+          totals: {
+            calories: 180,
+          },
+          provenance: {
+            source: 'estimated',
+            confidence: 'medium',
+            sourceDetail: 'Estimated from the photo and note.',
+          },
+        },
       },
-      execute: ({ captureId }) =>
+      execute: ({ captureId, note, occurredAt, source, ingredients, nutrition }) =>
         input.inboxServices!.promoteMeal({
           vault: input.vault,
           requestId: input.requestId ?? null,
           captureId,
+          note,
+          occurredAt,
+          source,
+          ingredients,
+          nutrition,
         }),
     }),
     defineHandAuthoredHelperTool({
@@ -812,7 +875,7 @@ export function createCanonicalVaultWriteToolDefinitions(
         title: z.string().min(1).optional(),
         occurredAt: isoTimestampSchema.optional(),
         note: z.string().min(1).optional(),
-        source: z.enum(['manual', 'import', 'device', 'derived']).optional(),
+        source: eventSourceSchema.optional(),
       }),
       inputExample: {
         file: 'raw/inbox/captures/cap_123/attachments/1/report.pdf',
@@ -832,28 +895,80 @@ export function createCanonicalVaultWriteToolDefinitions(
     defineVaultServiceBackedTool({
       name: 'vault.meal.add',
       description:
-        'Create one canonical meal record from a photo plus an optional audio note and optional text note. Use this for meals, snacks, and drink logs, preserving snack/drink context in the note when helpful.',
+        'Create one canonical meal record from any combination of photo, audio note, text note, ingredients, and nutrition. Photo-only, note-only, and structured-only meals are allowed. Use structured ingredients and nutrition when you can recover them, and keep leftover context in the note.',
       inputSchema: z.object({
-        photo: vaultFilePathSchema,
+        photo: vaultFilePathSchema.optional(),
         audio: vaultFilePathSchema.optional(),
-        note: z.string().min(1).optional(),
+        note: z.string().trim().min(1).optional(),
         occurredAt: isoTimestampSchema.optional(),
-      }),
+        source: eventSourceSchema.optional(),
+        ingredients: mealIngredientsSchema.optional(),
+        nutrition: mealNutritionSchema.optional(),
+      }).refine(
+        (value) =>
+          Boolean(
+            value.photo ||
+              value.audio ||
+              value.note ||
+              value.ingredients?.length ||
+              (value.nutrition &&
+                (Object.keys(value.nutrition.totals ?? {}).length > 0 ||
+                  Object.keys(value.nutrition.provenance ?? {}).length > 0)),
+          ),
+        {
+          message:
+            'Provide at least one of photo, audio, note, ingredients, or nutrition.',
+        },
+      ),
       inputExample: {
-        photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
-        note: 'Post-workout meal',
+        note: 'Only ate the sweet potatoes and green beans from the pictured meal.',
+        occurredAt: '2026-04-08T18:15:00Z',
+        source: 'manual',
+        ingredients: ['sweet potatoes', 'green beans'],
+        nutrition: {
+          totals: {
+            calories: 180,
+            carbsGrams: 33,
+            fiberGrams: 7,
+          },
+          provenance: {
+            source: 'estimated',
+            confidence: 'medium',
+            sourceDetail: 'Estimated from the photo and note.',
+          },
+        },
       },
-      execute: async ({ photo, audio, note, occurredAt }) =>
-        input.vaultServices!.core.addMeal({
+      execute: async ({
+        photo,
+        audio,
+        note,
+        occurredAt,
+        source,
+        ingredients,
+        nutrition,
+      }) => {
+        assertMealAddInputHasContent({ photo, audio, note, ingredients, nutrition })
+
+        return input.vaultServices!.core.addMeal({
           vault: input.vault,
           requestId: input.requestId ?? null,
-          photo: await resolveAssistantVaultPath(input.vault, photo, 'file path'),
-          audio: audio
-            ? await resolveAssistantVaultPath(input.vault, audio, 'file path')
-            : undefined,
+          ...(photo
+            ? {
+                photo: await resolveAssistantVaultPath(input.vault, photo, 'file path'),
+              }
+            : {}),
+          ...(audio
+            ? {
+                audio: await resolveAssistantVaultPath(input.vault, audio, 'file path'),
+              }
+            : {}),
           note,
           occurredAt,
-        }),
+          source,
+          ingredients,
+          nutrition,
+        })
+      },
     }),
     defineVaultServiceBackedTool({
       name: 'vault.journal.ensure',
@@ -1096,18 +1211,6 @@ export function createCanonicalVaultWriteToolDefinitions(
           }),
       }),
       defineVaultServiceBackedTool({
-        name: 'vault.profile.rebuildCurrent',
-        description:
-          'Rebuild the derived current profile page from the latest accepted profile snapshot.',
-        inputSchema: z.object({}),
-        inputExample: {},
-        execute: () =>
-          input.vaultServices!.core.rebuildCurrentProfile({
-            vault: input.vault,
-            requestId: input.requestId ?? null,
-          }),
-      }),
-      defineVaultServiceBackedTool({
         name: 'vault.protocol.stop',
         description:
           'Stop an existing protocol while preserving its canonical id.',
@@ -1143,7 +1246,7 @@ export function createOutwardSideEffectToolDefinitions(
       defineHostedApiBackedTool({
         name: 'murph.device.connect',
         description:
-          'Create a hosted wearable connection link for the requested provider and return a clickable authorization URL for the user. Prefer this over `murph.cli.run` when the user wants help connecting WHOOP, Oura, Garmin, or another hosted wearable integration in hosted assistant sessions.',
+          'Create a hosted wearable connection link for the requested provider and return a clickable authorization URL for the user. Prefer this over `vault.cli.run` when the user wants help connecting WHOOP, Oura, Garmin, or another hosted wearable integration in hosted assistant sessions.',
         inputSchema: z.object({
           provider: z.string().min(1),
         }),

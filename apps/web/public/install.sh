@@ -20,8 +20,8 @@ ERROR='\033[38;5;203m'
 MUTED='\033[38;5;245m'
 NC='\033[0m'
 
-MURPH_REQUIRED_NODE_VERSION="${MURPH_REQUIRED_NODE_VERSION:-22.16.0}"
-MURPH_NODE_LINE="${MURPH_NODE_LINE:-22}"
+MURPH_REQUIRED_NODE_VERSION="${MURPH_REQUIRED_NODE_VERSION:-24.14.1}"
+MURPH_NODE_LINE="${MURPH_NODE_LINE:-24}"
 MURPH_REPO_URL="${MURPH_REPO_URL:-https://github.com/cobuildwithus/murph.git}"
 MURPH_NPM_PACKAGE="${MURPH_NPM_PACKAGE:-@murphai/murph}"
 MURPH_INSTALL_METHOD="${MURPH_INSTALL_METHOD:-auto}"
@@ -179,7 +179,7 @@ Environment variables:
   MURPH_NO_PROMPT=0|1
   MURPH_VERBOSE=0|1
   MURPH_REPO_URL=https://github.com/cobuildwithus/murph.git
-  MURPH_REQUIRED_NODE_VERSION=22.16.0
+  MURPH_REQUIRED_NODE_VERSION=24.14.1
 EOF_USAGE
 }
 
@@ -928,7 +928,7 @@ install_from_npm() {
   local setup_args=("${PREPARED_SETUP_ARGS[@]}")
 
   ui_section "Running Murph setup"
-  ui_info "Murph will provision or reuse ffmpeg, poppler/pdftotext, whisper.cpp, a local Whisper model, optional OCR support, your vault bootstrap, and user-level murph/vault-cli shims."
+  ui_info "Murph will provision or reuse ffmpeg, whisper.cpp, a local Whisper model, optional OCR support, your vault bootstrap, and user-level murph/vault-cli shims."
 
   if can_attach_tty_for_onboarding; then
     "$murph_bin" onboard "${setup_args[@]}" < /dev/tty
@@ -1035,7 +1035,7 @@ print_plan() {
     echo "Murph args:     ${rendered_args% }"
   fi
   echo
-  echo "Murph setup itself will provision or reuse ffmpeg, poppler/pdftotext, whisper.cpp, a local Whisper model, your vault bootstrap, and user-level murph/vault-cli shims."
+  echo "Murph setup itself will provision or reuse ffmpeg, whisper.cpp, a local Whisper model, your vault bootstrap, and user-level murph/vault-cli shims."
 }
 
 main() {

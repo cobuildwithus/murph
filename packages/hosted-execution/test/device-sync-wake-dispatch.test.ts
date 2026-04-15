@@ -57,6 +57,10 @@ describe("device-sync wake dispatch", () => {
     const parsed = parseHostedExecutionDispatchRequest(dispatch);
 
     expect(parsed.event.kind).toBe("device-sync.wake");
+    if (parsed.event.kind !== "device-sync.wake") {
+      throw new Error("Expected a device-sync.wake event.");
+    }
+
     expect(parsed.event.runtimeSnapshot?.connections[0]?.connection.externalAccountId).toBe("acct_123");
     expect(parsed.event.runtimeSnapshot?.connections[0]?.connection.metadata).toEqual({
       source: "test",

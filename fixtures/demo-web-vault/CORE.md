@@ -1,6 +1,6 @@
 ---
 schemaVersion: hv/core@v1
-vaultId: vault_demo_web_01
+vaultId: vault_01JNV40W8VFYQ2H7CMJY5A9R4K
 title: Demo Web Vault
 ---
 # Demo Web Vault

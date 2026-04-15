@@ -23,7 +23,7 @@ import { HostedGatewayProjectionStore } from "../src/gateway-store.ts";
 import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 
 const EMAIL_THREAD_SESSION_KEY =
-  "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoyfQ";
+  "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoxfQ";
 const GATEWAY_STATE_STORAGE_AAD = buildHostedStorageAad({
   key: "gateway.state",
   purpose: "gateway-store",
@@ -214,6 +214,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "newest message",
         lastActivityAt: "2026-03-30T21:05:00.000Z",
         messageCount: 1,
@@ -260,6 +261,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "older message",
         lastActivityAt: "2026-03-30T21:00:00.000Z",
         messageCount: 0,
@@ -308,14 +310,15 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("serializes snapshot writes and permission responses so newer projections are not clobbered", async () => {
-    let releaseSnapshotWrite: (() => void) | null = null;
+    let releaseSnapshotWrite!: () => void;
+    let snapshotWriteBlocked = false;
     let markSnapshotWriteBlocked!: () => void;
     const snapshotWriteSeen = new Promise<void>((resolve) => {
       markSnapshotWriteBlocked = resolve;
     });
     const { store } = createStore({
       async onPut(key, value) {
-        if (key !== "gateway.state" || releaseSnapshotWrite !== null) {
+        if (key !== "gateway.state" || snapshotWriteBlocked) {
           return;
         }
 
@@ -341,6 +344,7 @@ describe("HostedGatewayProjectionStore", () => {
           const releasePromise = new Promise<void>((resolve) => {
             releaseSnapshotWrite = resolve;
           });
+          snapshotWriteBlocked = true;
           markSnapshotWriteBlocked();
           await releasePromise;
         }
@@ -354,6 +358,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "older message",
         lastActivityAt: "2026-03-30T21:00:00.000Z",
         messageCount: 1,
@@ -400,6 +405,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "newest message",
         lastActivityAt: "2026-03-30T21:05:00.000Z",
         messageCount: 2,
@@ -446,7 +452,10 @@ describe("HostedGatewayProjectionStore", () => {
       note: "approved after refresh",
     });
 
-    releaseSnapshotWrite?.();
+    if (!snapshotWriteBlocked) {
+      throw new Error("Expected the snapshot write lock to install a release callback.");
+    }
+    releaseSnapshotWrite();
     await applyingSnapshot;
     await resolvingPermission;
 
@@ -679,6 +688,93 @@ describe("HostedGatewayProjectionStore", () => {
     expect(await store.listOpenPermissions()).toEqual([]);
 
     await store.applySnapshot(baseSnapshot);
+
+    expect(writes).toEqual([]);
+  });
+
+  it("does not rewrite durable state when an equivalent snapshot is replayed with reordered keys", async () => {
+    const writes: string[] = [];
+    const { store } = createStore({
+      onPut(key) {
+        writes.push(key);
+      },
+    });
+    const baseSnapshot = gatewayProjectionSnapshotSchema.parse({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-07T00:00:00.000Z",
+      conversations: [{
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        title: "Thread",
+        titleSource: "thread-title",
+        lastMessagePreview: "hello",
+        lastActivityAt: "2026-04-07T00:00:00.000Z",
+        messageCount: 1,
+        canSend: true,
+        route: {
+          channel: "email",
+          identityId: "identity-1",
+          participantId: "participant-1",
+          threadId: "thread-1",
+          directness: "direct",
+          reply: {
+            kind: "thread",
+            target: "thread-1",
+          },
+        },
+      }],
+      messages: [{
+        schema: "murph.gateway-message.v1",
+        messageId: "message-1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        direction: "inbound",
+        createdAt: "2026-04-07T00:00:00.000Z",
+        actorDisplayName: "Alex",
+        text: "hello",
+        attachments: [],
+      }],
+      permissions: [],
+    });
+
+    await store.applySnapshot(baseSnapshot);
+    writes.length = 0;
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-07T00:00:00.000Z",
+      conversations: [{
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        titleSource: "thread-title",
+        title: "Thread",
+        lastActivityAt: "2026-04-07T00:00:00.000Z",
+        lastMessagePreview: "hello",
+        messageCount: 1,
+        canSend: true,
+        route: {
+          threadId: "thread-1",
+          participantId: "participant-1",
+          channel: "email",
+          directness: "direct",
+          identityId: "identity-1",
+          reply: {
+            target: "thread-1",
+            kind: "thread",
+          },
+        },
+      }],
+      messages: [{
+        schema: "murph.gateway-message.v1",
+        messageId: "message-1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        direction: "inbound",
+        createdAt: "2026-04-07T00:00:00.000Z",
+        actorDisplayName: "Alex",
+        text: "hello",
+        attachments: [],
+      }],
+      permissions: [],
+    });
 
     expect(writes).toEqual([]);
   });

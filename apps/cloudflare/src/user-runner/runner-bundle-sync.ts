@@ -2,7 +2,7 @@ import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   sameHostedBundlePayloadRef,
-} from "@murphai/runtime-state/node";
+} from "@murphai/runtime-state/node/hosted-bundle-codec";
 import {
   type HostedExecutionBundleRef,
   type HostedExecutionRunnerResult,

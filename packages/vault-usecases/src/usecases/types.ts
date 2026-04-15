@@ -9,6 +9,7 @@ import type {
   DeviceDaemonStopResult,
   DeviceProviderListResult,
 } from "@murphai/operator-config/device-cli-contracts"
+import type { MealNutrition } from "@murphai/contracts"
 import type {
   DocumentImportResult,
   ExperimentCreateResult,
@@ -16,8 +17,8 @@ import type {
   JournalEnsureResult,
   ListFilters,
   ListResult,
+  ListEntity,
   MealAddResult,
-  ReadEntity,
   SamplesImportCsvResult,
   ShowResult,
   VaultInitResult,
@@ -37,6 +38,9 @@ import type {
 } from "../health-cli-method-types.js"
 import type {
   QueryCanonicalEntity,
+  QueryMealNutritionDayTotal,
+  QueryMealNutritionMetricTotal,
+  QueryMealNutritionTotals,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryWearableActivitySummary,
   QueryWearableBodyStateSummary,
@@ -73,13 +77,6 @@ export interface AssessmentImportResult {
   ledgerFile?: string
 }
 
-export interface RebuildCurrentProfileResult {
-  vault: string
-  profilePath: string
-  snapshotId: string | null
-  updated: boolean
-}
-
 export interface ProviderScaffoldResult {
   vault: string
   noun: "provider"
@@ -100,7 +97,7 @@ export interface ProviderListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -125,7 +122,7 @@ export interface RecipeListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -162,7 +159,7 @@ export interface FoodListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -201,9 +198,24 @@ export interface EventListResult {
     experiment: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
+}
+
+export type MealNutritionMetricResult = QueryMealNutritionMetricTotal
+export type MealNutritionTotals = QueryMealNutritionTotals
+export type MealNutritionDayResult = QueryMealNutritionDayTotal
+
+export interface MealNutritionTotalsResult {
+  vault: string
+  filters: {
+    from: string | null
+    to: string | null
+  }
+  mealCount: number
+  totals: MealNutritionTotals
+  days: MealNutritionDayResult[]
 }
 
 export interface SamplesAddResult {
@@ -237,7 +249,7 @@ export interface ExperimentListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -270,7 +282,7 @@ export interface JournalListResult {
     to?: string
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -329,12 +341,10 @@ export interface VaultStatsResult {
     samples: number
     audits: number
     assessments: number
-    profileSnapshots: number
     goals: number
     conditions: number
     allergies: number
     protocols: number
-    history: number
     familyMembers: number
     geneticVariants: number
   }
@@ -363,25 +373,6 @@ export interface VaultRepairResult {
   timezone: string
   createdDirectories: string[]
   updated: boolean
-  auditPath: string | null
-}
-
-export interface VaultUpgradeResult {
-  vault: string
-  metadataFile: string
-  title: string
-  timezone: string
-  fromFormatVersion: number
-  toFormatVersion: number
-  steps: Array<{
-    description: string
-    fromFormatVersion: number
-    toFormatVersion: number
-  }>
-  affectedFiles: string[]
-  rebuildableProjectionStores: string[]
-  updated: boolean
-  dryRun: boolean
   auditPath: string | null
 }
 
@@ -450,10 +441,13 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   validate(input: CommandContext): Promise<VaultValidateResult>
   addMeal(
     input: CommandContext & {
-      photo: string
+      photo?: string
       audio?: string
       note?: string
       occurredAt?: string
+      source?: ImporterSource
+      ingredients?: string[]
+      nutrition?: MealNutrition
     },
   ): Promise<MealAddResult>
   createExperiment(
@@ -592,17 +586,9 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     },
   ): Promise<VaultUpdateResult>
   repairVault(input: CommandContext): Promise<VaultRepairResult>
-  upgradeVault(
-    input: CommandContext & {
-      dryRun?: boolean
-    },
-  ): Promise<VaultUpgradeResult>
   projectAssessment(
     input: ProjectAssessmentInput,
   ): Promise<AssessmentProjectionResult>
-  rebuildCurrentProfile(
-    input: CommandContext,
-  ): Promise<RebuildCurrentProfileResult>
   scaffoldSupplement(
     input: CommandContext,
   ): Promise<{
@@ -725,6 +711,12 @@ export interface QueryServices extends HealthQueryServiceMethods {
       limit: number
     },
   ): Promise<FoodListResult>
+  showMealNutritionTotals(
+    input: CommandContext & {
+      from?: string
+      to?: string
+    },
+  ): Promise<MealNutritionTotalsResult>
   showEvent(
     input: CommandContext & {
       eventId: string
@@ -894,6 +886,12 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     operationType: string
     summary: string
     occurredAt?: string
+    audit: {
+      action: string
+      commandName: string
+      summary: string
+      targetIds?: string[]
+    }
     textWrites?: Array<{
       relativePath: string
       content: string
@@ -932,38 +930,24 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     updated: boolean
     auditPath: string | null
   }>
-  upgradeVault(input: {
-    vaultRoot: string
-    dryRun?: boolean
-  }): Promise<{
-    metadataFile: string
-    title: string
-    timezone: string
-    fromFormatVersion: number
-    toFormatVersion: number
-    steps: Array<{
-      description: string
-      fromFormatVersion: number
-      toFormatVersion: number
-    }>
-    affectedFiles: string[]
-    rebuildableProjectionStores: string[]
-    updated: boolean
-    dryRun: boolean
-    auditPath: string | null
-  }>
   addMeal(input: {
     vaultRoot: string
     photoPath?: string
     audioPath?: string
     note?: string
     occurredAt?: string
+    source?: ImporterSource
+    ingredients?: string[]
+    nutrition?: MealNutrition
   }): Promise<{
     mealId: string
     event: {
       id: string
       occurredAt?: string | null
       note?: string | null
+      source?: ImporterSource | null
+      ingredients?: string[]
+      nutrition?: MealNutrition
     }
     manifestPath: string
     photo: {
@@ -1002,15 +986,6 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   projectAssessmentResponse(input: {
     assessmentResponse: JsonObject
   }): Promise<JsonObject>
-  rebuildCurrentProfile(input: {
-    vaultRoot: string
-  }): Promise<{
-    relativePath: string
-    snapshot?: {
-      id: string
-    } | null
-    updated: boolean
-  }>
   stopProtocolItem(input: {
     vaultRoot: string
     protocolId: string
@@ -1069,13 +1044,18 @@ export interface ImportersRuntime {
     vaultRoot: string
     occurredAt?: string
     note?: string
-    source?: string
+    source?: ImporterSource
+    ingredients?: string[]
+    nutrition?: MealNutrition
   }): Promise<{
     mealId: string
     event: {
       id: string
       occurredAt?: string | null
       note?: string | null
+      source?: ImporterSource | null
+      ingredients?: string[]
+      nutrition?: MealNutrition
     }
     photo: {
       relativePath: string

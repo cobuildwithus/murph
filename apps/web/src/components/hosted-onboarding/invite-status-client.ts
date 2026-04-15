@@ -4,38 +4,24 @@ import { useEffect, useEffectEvent } from "react";
 
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
-import { requestHostedOnboardingJson, type HostedOnboardingAuthMode } from "./client-api";
+import { requestHostedOnboardingJson } from "./client-api";
 
 const HOSTED_INVITE_STATUS_POLL_INTERVAL_MS = 3_000;
 
-export function resolveHostedInviteStatusAuthMode(authenticated: boolean): HostedOnboardingAuthMode {
-  return authenticated ? "required" : "optional";
-}
-
-export async function fetchHostedInviteStatus(
-  inviteCode: string,
-  authMode: HostedOnboardingAuthMode = "optional",
-): Promise<HostedInviteStatusPayload> {
+export async function fetchHostedInviteStatus(inviteCode: string): Promise<HostedInviteStatusPayload> {
   return requestHostedOnboardingJson<HostedInviteStatusPayload>({
-    auth: authMode,
     url: buildHostedInviteStatusUrl(inviteCode),
   });
 }
 
 export function useHostedInviteStatusRefresh(input: {
-  authenticated: boolean;
   inviteCode: string;
   onError?: (error: unknown) => void;
   onStatus: (payload: HostedInviteStatusPayload) => void;
-  ready: boolean;
-  sessionAuthenticated: boolean;
   shouldPoll: boolean;
 }) {
   const refreshStatusEffect = useEffectEvent(() => {
-    void fetchHostedInviteStatus(
-      input.inviteCode,
-      resolveHostedInviteStatusAuthMode(input.authenticated),
-    )
+    void fetchHostedInviteStatus(input.inviteCode)
       .then(input.onStatus)
       .catch((error: unknown) => {
         input.onError?.(error);
@@ -43,19 +29,14 @@ export function useHostedInviteStatusRefresh(input: {
   });
 
   useEffect(() => {
-    if (!input.ready || !input.authenticated || input.sessionAuthenticated) {
-      return;
-    }
-
     refreshStatusEffect();
-  }, [input.authenticated, input.ready, input.sessionAuthenticated]);
+  }, [input.inviteCode]);
 
   useEffect(() => {
-    if (!input.ready || !input.authenticated || !input.shouldPoll) {
+    if (!input.shouldPoll) {
       return;
     }
 
-    refreshStatusEffect();
     const timer = window.setInterval(() => {
       refreshStatusEffect();
     }, HOSTED_INVITE_STATUS_POLL_INTERVAL_MS);
@@ -63,7 +44,7 @@ export function useHostedInviteStatusRefresh(input: {
     return () => {
       window.clearInterval(timer);
     };
-  }, [input.authenticated, input.ready, input.shouldPoll]);
+  }, [input.inviteCode, input.shouldPoll]);
 }
 
 function buildHostedInviteStatusUrl(inviteCode: string): string {

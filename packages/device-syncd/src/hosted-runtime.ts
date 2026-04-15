@@ -5,6 +5,18 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
 
+const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
+const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 512;
+const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
+const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
+const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
+  /\bBearer\s+(?=[A-Za-z0-9._~+/=-]{8,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/giu;
+const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
+const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
+  /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
+const HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN =
+  /\b(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b(\s*[:=]\s*)((?:Bearer\s+)?[^\s,;]+)/giu;
+
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;
   expiresAt: string;
@@ -107,12 +119,26 @@ export interface HostedExecutionDeviceSyncRuntimeApplyEntry {
   connectionId: string;
   status: "created" | "missing" | "updated";
   tokenUpdate: "applied" | "cleared" | "missing" | "skipped_version_mismatch" | "unchanged";
+  writeUpdate: "applied" | "missing" | "skipped_version_mismatch" | "unchanged";
 }
 
 export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
   appliedAt: string;
   updates: HostedExecutionDeviceSyncRuntimeApplyEntry[];
   userId: string;
+}
+
+export function findHostedExecutionDeviceSyncRuntimeApplyEntry(
+  response: HostedExecutionDeviceSyncRuntimeApplyResponse,
+  connectionId: string,
+): HostedExecutionDeviceSyncRuntimeApplyEntry | null {
+  return response.updates.find((entry) => entry.connectionId === connectionId) ?? null;
+}
+
+export function didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(
+  entry: Pick<HostedExecutionDeviceSyncRuntimeApplyEntry, "writeUpdate"> | null,
+): boolean {
+  return entry?.writeUpdate === "applied";
 }
 
 export interface HostedExecutionDeviceSyncJobHint {
@@ -240,9 +266,13 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
   value: unknown,
 ): HostedExecutionDeviceSyncRuntimeApplyResponse {
   const record = requireObject(value, "Hosted device-sync runtime apply response");
+  const appliedAt = requireString(
+    record.appliedAt,
+    "Hosted device-sync runtime apply response appliedAt",
+  );
 
   return {
-    appliedAt: requireString(record.appliedAt, "Hosted device-sync runtime apply response appliedAt"),
+    appliedAt,
     updates: requireArray(
       record.updates,
       "Hosted device-sync runtime apply response updates",
@@ -278,6 +308,153 @@ export function normalizeHostedDeviceSyncJobHints(
         ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
       }))
     : [];
+}
+
+export function parseHostedExecutionDeviceSyncWakeHint(
+  value: unknown,
+): HostedExecutionDeviceSyncWakeHint | null {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, "Hosted execution device-sync.wake hint");
+  const next: HostedExecutionDeviceSyncWakeHint = {};
+
+  if (record.eventType !== undefined) {
+    next.eventType = readNullableStringValue(
+      record.eventType,
+      "Hosted execution device-sync.wake hint eventType",
+    );
+  }
+
+  if (record.jobs !== undefined) {
+    next.jobs = requireArray(
+      record.jobs,
+      "Hosted execution device-sync.wake hint jobs",
+    ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index));
+  }
+
+  if (record.nextReconcileAt !== undefined) {
+    next.nextReconcileAt = readNullableStringValue(
+      record.nextReconcileAt,
+      "Hosted execution device-sync.wake hint nextReconcileAt",
+    );
+  }
+
+  if (record.occurredAt !== undefined) {
+    next.occurredAt = readNullableStringValue(
+      record.occurredAt,
+      "Hosted execution device-sync.wake hint occurredAt",
+    );
+  }
+
+  if (record.reason !== undefined) {
+    next.reason = readNullableStringValue(
+      record.reason,
+      "Hosted execution device-sync.wake hint reason",
+    );
+  }
+
+  if (record.resourceCategory !== undefined) {
+    next.resourceCategory = readNullableStringValue(
+      record.resourceCategory,
+      "Hosted execution device-sync.wake hint resourceCategory",
+    );
+  }
+
+  if (record.revokeWarning !== undefined) {
+    next.revokeWarning = parseHostedExecutionDeviceSyncRevokeWarning(record.revokeWarning);
+  }
+
+  if (record.scopes !== undefined) {
+    next.scopes = requireStringArray(
+      record.scopes,
+      "Hosted execution device-sync.wake hint scopes",
+    );
+  }
+
+  if (record.traceId !== undefined) {
+    next.traceId = readNullableStringValue(
+      record.traceId,
+      "Hosted execution device-sync.wake hint traceId",
+    );
+  }
+
+  return next;
+}
+
+function parseHostedExecutionDeviceSyncJobHint(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncJobHint {
+  const record = requireObject(
+    value,
+    `Hosted execution device-sync.wake hint jobs[${index}]`,
+  );
+  const next: HostedExecutionDeviceSyncJobHint = {
+    kind: requireString(
+      record.kind,
+      `Hosted execution device-sync.wake hint jobs[${index}].kind`,
+    ),
+  };
+
+  if (record.availableAt !== undefined) {
+    next.availableAt = requireString(
+      record.availableAt,
+      `Hosted execution device-sync.wake hint jobs[${index}].availableAt`,
+    );
+  }
+
+  if (record.dedupeKey !== undefined) {
+    next.dedupeKey = readNullableStringValue(
+      record.dedupeKey,
+      `Hosted execution device-sync.wake hint jobs[${index}].dedupeKey`,
+    );
+  }
+
+  if (record.maxAttempts !== undefined) {
+    next.maxAttempts = requireNumber(
+      record.maxAttempts,
+      `Hosted execution device-sync.wake hint jobs[${index}].maxAttempts`,
+    );
+  }
+
+  if (record.payload !== undefined) {
+    next.payload = requireObject(
+      record.payload,
+      `Hosted execution device-sync.wake hint jobs[${index}].payload`,
+    );
+  }
+
+  if (record.priority !== undefined) {
+    next.priority = requireNumber(
+      record.priority,
+      `Hosted execution device-sync.wake hint jobs[${index}].priority`,
+    );
+  }
+
+  return next;
+}
+
+function parseHostedExecutionDeviceSyncRevokeWarning(
+  value: unknown,
+): { code: string; message: string } | null {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, "Hosted execution device-sync.wake hint revokeWarning");
+
+  return {
+    code: requireString(
+      record.code,
+      "Hosted execution device-sync.wake hint revokeWarning.code",
+    ),
+    message: requireString(
+      record.message,
+      "Hosted execution device-sync.wake hint revokeWarning.message",
+    ),
+  };
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
@@ -318,6 +495,7 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
     record.tokenUpdate,
     `Hosted device-sync runtime apply response updates[${index}].tokenUpdate`,
   );
+  const rawWriteUpdate = record.writeUpdate;
 
   if (status !== "created" && status !== "missing" && status !== "updated") {
     throw new TypeError(`Hosted device-sync runtime apply response updates[${index}].status is invalid.`);
@@ -333,20 +511,47 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
     throw new TypeError(`Hosted device-sync runtime apply response updates[${index}].tokenUpdate is invalid.`);
   }
 
+  const connection = record.connection === null
+    ? null
+    : parseHostedExecutionDeviceSyncRuntimeConnection(
+        record.connection,
+        `Hosted device-sync runtime apply response updates[${index}].connection`,
+      );
+  const writeUpdate = parseHostedExecutionDeviceSyncRuntimeWriteUpdate(rawWriteUpdate, index);
+
   return {
-    connection: record.connection === null
-      ? null
-      : parseHostedExecutionDeviceSyncRuntimeConnection(
-          record.connection,
-          `Hosted device-sync runtime apply response updates[${index}].connection`,
-        ),
+    connection,
     connectionId: requireString(
       record.connectionId,
       `Hosted device-sync runtime apply response updates[${index}].connectionId`,
     ),
     status,
     tokenUpdate,
+    writeUpdate,
   };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeWriteUpdate(
+  rawWriteUpdate: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] {
+  const writeUpdate = requireString(
+    rawWriteUpdate,
+    `Hosted device-sync runtime apply response updates[${index}].writeUpdate`,
+  );
+
+  if (
+    writeUpdate !== "applied"
+    && writeUpdate !== "missing"
+    && writeUpdate !== "skipped_version_mismatch"
+    && writeUpdate !== "unchanged"
+  ) {
+    throw new TypeError(
+      `Hosted device-sync runtime apply response updates[${index}].writeUpdate is invalid.`,
+    );
+  }
+
+  return writeUpdate;
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnection(
@@ -386,8 +591,12 @@ function parseHostedExecutionDeviceSyncRuntimeLocalState(
   const record = requireObject(value, label);
 
   return {
-    lastErrorCode: readNullableStringValue(record.lastErrorCode, `${label}.lastErrorCode`),
-    lastErrorMessage: readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    lastErrorCode: sanitizeHostedRuntimeErrorCode(
+      readNullableStringValue(record.lastErrorCode, `${label}.lastErrorCode`),
+    ),
+    lastErrorMessage: sanitizeHostedRuntimeErrorText(
+      readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    ),
     lastSyncCompletedAt: readNullableIsoTimestamp(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
     lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
     lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
@@ -538,10 +747,14 @@ function parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(
     "lastErrorMessage",
   ] as const) {
     if (record[field] !== undefined) {
-      next[field] = readNullableStringValue(
+      const value = readNullableStringValue(
         record[field],
         `Hosted device-sync runtime apply request updates[${index}].localState.${field}`,
       );
+
+      next[field] = field === "lastErrorCode"
+        ? sanitizeHostedRuntimeErrorCode(value)
+        : sanitizeHostedRuntimeErrorText(value);
     }
   }
 
@@ -652,6 +865,48 @@ function readNullableStringValue(value: unknown, label: string): string | null {
 
   if (typeof value !== "string") {
     throw new TypeError(`${label} must be a string or null.`);
+  }
+
+  return value;
+}
+
+function sanitizeHostedRuntimeErrorString(
+  value: string | null,
+  maxLength: number,
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  let sanitized = value
+    .replace(HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN, " ")
+    .replace(HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN, "$1[redacted]")
+    .replace(HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN, "$1$2[redacted]")
+    .replace(HOSTED_RUNTIME_ERROR_JWT_PATTERN, "[redacted.jwt]")
+    .replace(HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN, "Bearer [redacted]")
+    .replace(HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN, " ")
+    .trim();
+
+  if (!sanitized) {
+    sanitized = "[redacted]";
+  }
+
+  return sanitized.length <= maxLength
+    ? sanitized
+    : `${sanitized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+export function sanitizeHostedRuntimeErrorCode(value: string | null): string | null {
+  return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH);
+}
+
+export function sanitizeHostedRuntimeErrorText(value: string | null): string | null {
+  return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
+}
+
+function requireNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
   }
 
   return value;

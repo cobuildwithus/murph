@@ -11,78 +11,15 @@ import {
 import { test } from 'vitest'
 import type {
   EmailDriver,
-  ImessageDriver,
-  InboxImessageRuntimeModule,
   InboxRuntimeModule,
   PollConnector,
   TelegramDriver,
 } from '@murphai/inbox-services'
-
 import {
   instantiateConnector,
   normalizeDaemonState,
   readPromotionsByCapture,
 } from '@murphai/inbox-services/testing'
-
-test('instantiateConnector delegates iMessage defaults through the connector factory', async () => {
-  let received: {
-    accountId?: string | null
-    backfillLimit?: number
-    id?: string
-    includeOwnMessages?: boolean
-  } | null = null
-  const inboxCoreModule = createStubInboxRuntimeModule()
-  const imessageModule = createStubInboxImessageRuntimeModule({
-    createImessageConnector(options) {
-      received = options
-      return createStubPollConnector({
-        id: options.id ?? 'imessage:self',
-        source: 'imessage',
-      })
-    },
-  })
-
-  const connector = await instantiateConnector({
-    connector: {
-      id: 'imessage:self',
-      source: 'imessage',
-      enabled: true,
-      accountId: null,
-      options: {
-        includeOwnMessages: false,
-        backfillLimit: 42,
-      },
-    },
-    inputLimit: 7,
-    async loadInbox() {
-      return inboxCoreModule
-    },
-    async loadInboxImessage() {
-      return imessageModule
-    },
-    async loadImessageDriver() {
-      return createUnreachableImessageDriver()
-    },
-    async loadTelegramDriver() {
-      throw new Error('unreachable')
-    },
-    linqWebhookSecret: null,
-  })
-
-  assert.equal(connector.id, 'imessage:self')
-  assert.equal('createImessageConnector' in inboxCoreModule, false)
-  if (!received) {
-    throw new Error('expected connector options to be captured')
-  }
-  const captured: {
-    accountId?: string | null
-    backfillLimit?: number
-    includeOwnMessages?: boolean
-  } = received
-  assert.equal(captured.accountId, 'self')
-  assert.equal(captured.includeOwnMessages, false)
-  assert.equal(captured.backfillLimit, 7)
-})
 
 test('instantiateConnector delegates Linq webhook options through the connector factory', async () => {
   let received: {
@@ -140,12 +77,6 @@ test('instantiateConnector delegates Linq webhook options through the connector 
         },
       })
     },
-    async loadInboxImessage() {
-      throw new Error('unreachable')
-    },
-    async loadImessageDriver() {
-      throw new Error('unreachable')
-    },
     async loadTelegramDriver() {
       throw new Error('unreachable')
     },
@@ -192,12 +123,6 @@ test('instantiateConnector fails closed for Linq when the local webhook secret i
             },
           })
         },
-        async loadInboxImessage() {
-          throw new Error('unreachable')
-        },
-        async loadImessageDriver() {
-          throw new Error('unreachable')
-        },
         async loadTelegramDriver() {
           throw new Error('unreachable')
         },
@@ -240,6 +165,9 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
         }) => {
           received = options
           return {
+            async backfill() {
+              return null
+            },
             id: options.id ?? 'telegram:bot',
             source: 'telegram',
             kind: 'poll',
@@ -250,15 +178,10 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
               watch: true,
               webhooks: false,
             },
+            async watch() {},
           }
         },
       })
-    },
-    async loadInboxImessage() {
-      throw new Error('unreachable')
-    },
-    async loadImessageDriver() {
-      throw new Error('unreachable')
     },
     async loadTelegramDriver() {
       return createUnreachableTelegramDriver()
@@ -297,7 +220,7 @@ test.sequential('normalizeDaemonState rewrites stale daemon state records', asyn
             startedAt: '2026-03-18T12:00:00.000Z',
             stoppedAt: null,
             status: 'running',
-            connectorIds: ['imessage:self'],
+            connectorIds: ['telegram:bot'],
             message: null,
             statePath: '.runtime/operations/inbox/state.json',
             configPath: '.runtime/operations/inbox/config.json',
@@ -358,6 +281,9 @@ function createStubPollConnector(input: {
   accountId?: string | null
 }): PollConnector {
   return {
+    async backfill() {
+      return null
+    },
     id: input.id,
     source: input.source,
     accountId: input.accountId ?? null,
@@ -368,17 +294,7 @@ function createStubPollConnector(input: {
       watch: true,
       webhooks: false,
     },
-  }
-}
-
-function createUnreachableImessageDriver(): ImessageDriver {
-  return {
-    async getMessages() {
-      throw new Error('unreachable')
-    },
-    async listChats() {
-      throw new Error('unreachable')
-    },
+    async watch() {},
   }
 }
 
@@ -414,24 +330,6 @@ function createUnreachableEmailDriver(): EmailDriver {
     async downloadAttachment() {
       throw new Error('unreachable')
     },
-  }
-}
-
-function createStubInboxImessageRuntimeModule(
-  overrides: Partial<InboxImessageRuntimeModule> = {},
-): InboxImessageRuntimeModule {
-  return {
-    createImessageConnector(input) {
-      return createStubPollConnector({
-        id: input.id ?? 'imessage:self',
-        source: 'imessage',
-        accountId: input.accountId ?? null,
-      })
-    },
-    async loadImessageKitDriver() {
-      return createUnreachableImessageDriver()
-    },
-    ...overrides,
   }
 }
 

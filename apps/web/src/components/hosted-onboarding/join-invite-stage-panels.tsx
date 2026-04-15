@@ -1,5 +1,7 @@
 "use client";
 
+import { usePrivy } from "@privy-io/react-auth";
+import { useState } from "react";
 import Link from "next/link";
 
 import {
@@ -14,11 +16,17 @@ import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
+import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
+import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
+import { HostedTelegramSettings } from "../settings/hosted-telegram-settings";
+
+const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 
 interface JoinInviteVerificationPanelProps {
   awaitingInviteSessionResolution: boolean;
@@ -31,24 +39,42 @@ interface JoinInviteVerificationPanelProps {
 }
 
 export function JoinInviteSignedInMismatchAlert({
-  pendingAction,
   onSignOut,
 }: {
-  pendingAction: "checkout" | "logout" | "share" | null;
   onSignOut: () => Promise<void>;
 }) {
   return (
     <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-      <AlertTitle>This browser is signed in with a different number.</AlertTitle>
+      <AlertTitle>This browser is signed in with a different Murph account.</AlertTitle>
       <AlertDescription>
-        This browser is already signed in with a different number. Sign out first to continue with this invite.
+        This browser is already signed in with a different Murph account. Sign out first to continue with this invite.
       </AlertDescription>
       <div className="mt-3">
-        <Button type="button" onClick={onSignOut} disabled={pendingAction !== null} variant="outline" size="lg">
-          {pendingAction === "logout" ? "Signing out..." : "Use this invite instead"}
-        </Button>
+        <HostedInviteSignOutButton onSignOut={onSignOut} />
       </div>
     </Alert>
+  );
+}
+
+function HostedInviteSignOutButton({ onSignOut }: { onSignOut: () => Promise<void> }) {
+  const { logout } = usePrivy();
+  const [signOutPending, setSignOutPending] = useState(false);
+
+  async function handleSignOut() {
+    setSignOutPending(true);
+
+    try {
+      await logout();
+      await onSignOut();
+    } finally {
+      setSignOutPending(false);
+    }
+  }
+
+  return (
+    <Button type="button" onClick={handleSignOut} disabled={signOutPending} variant="outline" size="lg">
+      {signOutPending ? "Signing out..." : "Use this invite instead"}
+    </Button>
   );
 }
 
@@ -67,7 +93,7 @@ export function JoinInviteVerificationPanel({
         <Alert variant="destructive">
           <AlertTitle>Unable to refresh your signup state</AlertTitle>
           <AlertDescription>
-            We couldn&apos;t pick up your verified phone session yet. Check again to continue.
+            We couldn&apos;t pick up your verified session yet. Check again to continue.
           </AlertDescription>
           <div className="mt-3">
             <Button
@@ -88,7 +114,7 @@ export function JoinInviteVerificationPanel({
       <Alert className="border-stone-200 bg-stone-50">
         <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
-        <AlertDescription>One moment while we pick up your verified phone session.</AlertDescription>
+        <AlertDescription>One moment while we pick up your session.</AlertDescription>
       </Alert>
     );
   }
@@ -109,73 +135,114 @@ export function JoinInviteVerificationPanel({
 export function JoinInviteBlockedAlert() {
   return (
     <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-      <AlertTitle>This hosted account needs support.</AlertTitle>
+      <AlertTitle>This account needs support.</AlertTitle>
       <AlertDescription>
-        This hosted account cannot continue from this invite right now. Contact support to restore access.
+        This account can&apos;t continue from this invite right now. Contact support and we&apos;ll help restore
+        access.
       </AlertDescription>
     </Alert>
   );
 }
 
-export function JoinInviteCheckoutButton({
-  billingReady,
-  pendingAction,
-  onCheckout,
+export function JoinInviteMessagingSetupPanel({
+  authenticated,
+  initialLinkedAccounts,
+  onRefreshStatus,
 }: {
-  billingReady: boolean;
-  pendingAction: "checkout" | "logout" | "share" | null;
-  onCheckout: () => Promise<void>;
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  onRefreshStatus: () => Promise<HostedInviteStatusPayload>;
 }) {
   return (
-    <Button type="button" onClick={onCheckout} disabled={pendingAction !== null || !billingReady} size="lg">
-      {pendingAction === "checkout"
-        ? "Opening checkout..."
-        : billingReady
-          ? "Continue to Apple Pay"
-          : "Billing is not configured yet"}
-    </Button>
-  );
-}
+    <div className="space-y-4">
+      <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+        <AlertTitle>Add a message channel before checkout</AlertTitle>
+        <AlertDescription>
+          Murph needs a phone number or Telegram connection before payment so the bot knows where to reach you right after signup.
+        </AlertDescription>
+      </Alert>
 
-export function JoinInviteActivatingPanel({ sharePreview }: { sharePreview: HostedSharePreview | null }) {
-  return (
-    <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-olive">
-      <div className="flex items-start gap-3">
-        <LoaderCircleIcon className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
-        <div className="space-y-1">
-          <p className="text-sm font-semibold">Payment received. We&apos;re setting up your account.</p>
-          <p className="text-sm leading-relaxed">
-            Keep this page open. Murph is finishing hosted activation now and will switch you through as soon as it&apos;s
-            ready.
-          </p>
-          {sharePreview ? (
-            <p className="text-sm leading-relaxed">We&apos;ll add your shared bundle after setup finishes.</p>
-          ) : null}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+          <HostedPhoneSettings
+            authenticated={authenticated}
+            autoOpen
+            initialLinkedAccounts={initialLinkedAccounts}
+            onLinked={async () => {
+              await onRefreshStatus();
+            }}
+          />
+        </div>
+        <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+          <HostedTelegramSettings
+            authenticated={authenticated}
+            initialLinkedAccounts={initialLinkedAccounts}
+            onSynced={async () => {
+              await onRefreshStatus();
+            }}
+          />
         </div>
       </div>
     </div>
   );
 }
 
+export function JoinInviteCheckoutButton({
+  billingReady,
+  checkoutPending,
+  onCheckout,
+}: {
+  billingReady: boolean;
+  checkoutPending: boolean;
+  onCheckout: () => Promise<void>;
+}) {
+  return (
+    <Button type="button" onClick={onCheckout} disabled={checkoutPending || !billingReady} size="lg">
+      {checkoutPending
+        ? "Opening checkout..."
+        : billingReady
+          ? "Continue to checkout"
+          : "Billing is not configured yet"}
+    </Button>
+  );
+}
+
 export function JoinInviteActivePanel({
+  activationPending,
+  murphPhoneNumber,
   pendingAction,
   shareImportState,
   sharePreview,
   onAcceptShare,
 }: {
-  pendingAction: "checkout" | "logout" | "share" | null;
+  activationPending: boolean;
+  murphPhoneNumber: string | null;
+  pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
   onAcceptShare: () => Promise<void>;
 }) {
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4">
-        <CheckCircleIcon className="h-6 w-6 shrink-0 text-olive" />
-        <p className="text-sm leading-relaxed text-olive">
-          You should receive a text message from Murph shortly. Just reply to start chatting.
-        </p>
-      </div>
+      {activationPending ? (
+        <div className="flex items-start gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-olive">
+          <LoaderCircleIcon className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}</p>
+            <p className="text-sm leading-relaxed">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}</p>
+            {sharePreview ? (
+              <p className="text-sm leading-relaxed">{JOIN_INVITE_ACTIVATION_PENDING_COPY.shareImportDescription}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4">
+          <CheckCircleIcon className="h-6 w-6 shrink-0 text-olive" />
+          <p className="text-sm leading-relaxed text-olive">
+            Murph should reach out shortly. Just reply there to start chatting.
+          </p>
+        </div>
+      )}
 
       <div>
         <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-olive">Things Murph can help with</p>
@@ -208,9 +275,63 @@ export function JoinInviteActivePanel({
         </div>
       ) : null}
 
-      <Button render={<Link href="/settings" />} nativeButton={false} variant="outline" size="lg">
-        Manage settings
+      <div className="flex flex-col items-start gap-3">
+        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
+        <Button
+          render={<Link href="/settings" />}
+          nativeButton={false}
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-sm font-medium text-stone-500 hover:text-stone-900"
+        >
+          Manage settings
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function JoinInviteMurphContactActions({
+  murphPhoneNumber,
+}: {
+  murphPhoneNumber: string | null;
+}) {
+  if (!murphPhoneNumber) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
+      <Button render={<a href={buildMurphSmsHref(murphPhoneNumber)} />} nativeButton={false} size="lg">
+        Text Murph
+      </Button>
+      <Button
+        render={<a download={MURPH_CONTACT_DOWNLOAD_FILENAME} href={buildMurphVcardHref(murphPhoneNumber)} />}
+        nativeButton={false}
+        variant="outline"
+        size="lg"
+      >
+        Add Murph to Contacts
       </Button>
     </div>
   );
+}
+
+function buildMurphSmsHref(phoneNumber: string): string {
+  return `sms:${phoneNumber}`;
+}
+
+function buildMurphVcardHref(phoneNumber: string): string {
+  return `data:text/vcard;charset=utf-8,${encodeURIComponent(buildMurphVcard(phoneNumber))}`;
+}
+
+function buildMurphVcard(phoneNumber: string): string {
+  return [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "FN:Murph",
+    `TEL;TYPE=CELL:${phoneNumber}`,
+    "END:VCARD",
+    "",
+  ].join("\r\n");
 }

@@ -370,7 +370,7 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
       "blood_oxygen",
       "session",
     ],
-    snapshotParser: "passthrough",
+    snapshotParser: "schema",
   },
   sourcePriorityHints: {
     defaultPriority: 85,
@@ -420,7 +420,7 @@ export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   },
   normalization: {
     metricFamilies: ["activity", "sleep", "recovery", "body", "respiration", "temperature"],
-    snapshotParser: "passthrough",
+    snapshotParser: "schema",
   },
   sourcePriorityHints: {
     defaultPriority: 80,

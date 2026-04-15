@@ -23,13 +23,14 @@
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
     "typecheck": "tsc -b tsconfig.typecheck.json --pretty false",
-    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
     "@murphai/core": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   }
 }

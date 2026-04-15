@@ -17,14 +17,12 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./device-providers": {
-      "types": "./dist/device-providers/index.d.ts",
-      "default": "./dist/device-providers/index.js"
     },
     "./device-providers/provider-descriptors": {
       "types": "./dist/device-providers/provider-descriptors.d.ts",
+      "import": "./dist/device-providers/provider-descriptors.js",
       "default": "./dist/device-providers/provider-descriptors.js"
     }
   },

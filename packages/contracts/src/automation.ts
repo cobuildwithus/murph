@@ -55,7 +55,7 @@ export const automationScheduleCronSchema = z
   .object({
     kind: z.literal("cron"),
     expression: z.string().min(1),
-    timeZone: timeZoneSchema(),
+    timeZone: timeZoneSchema().optional(),
   })
   .strict();
 
@@ -63,7 +63,7 @@ export const automationScheduleDailyLocalSchema = z
   .object({
     kind: z.literal("dailyLocal"),
     localTime: z.string().regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time."),
-    timeZone: timeZoneSchema(),
+    timeZone: timeZoneSchema().optional(),
   })
   .strict();
 
@@ -77,7 +77,6 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
 export const automationRouteSchema = z
   .object({
     channel: z.string().min(1),
-    deliverResponse: z.boolean(),
     deliveryTarget: z.string().min(1).nullable(),
     identityId: z.string().min(1).nullable(),
     participantId: z.string().min(1).nullable(),
@@ -114,7 +113,7 @@ export const automationScaffoldPayloadSchema = z
   .object({
     automationId: z.string().min(1).optional(),
     continuityPolicy: z.enum(automationContinuityPolicyValues).default("preserve"),
-    prompt: z.string().min(1),
+    instructions: z.string().min(1),
     route: automationRouteSchema,
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),

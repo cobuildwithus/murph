@@ -3,18 +3,19 @@ import type { Metadata } from "next";
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 export const metadata: Metadata = {
   title: "Murph hosted invite",
-  description: "Verify your phone and finish hosted Murph checkout.",
+  description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
   openGraph: {
     title: "Murph hosted invite",
-    description: "Verify your phone and finish hosted Murph checkout.",
+    description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
   },
   twitter: {
     card: "summary_large_image",
     title: "Murph hosted invite",
-    description: "Verify your phone and finish hosted Murph checkout.",
+    description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
   },
 };
 
@@ -25,14 +26,15 @@ export default async function JoinInvitePage(input: {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
+  const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
   const initialStatus = await buildHostedInvitePageData({
-    authenticatedMember: null,
+    authenticatedMember,
     inviteCode: decodedInviteCode,
   });
   const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
   const shareData = shareCode
     ? await buildHostedSharePageData({
-        authenticatedMember: null,
+        authenticatedMember,
         inviteCode: decodedInviteCode,
         shareCode,
       })
@@ -42,6 +44,8 @@ export default async function JoinInvitePage(input: {
     <main className="min-h-screen px-5 py-12 md:px-8">
       <div className="mx-auto max-w-3xl">
         <JoinInviteClient
+          authenticated={authenticated}
+          initialLinkedAccounts={linkedAccounts}
           inviteCode={decodedInviteCode}
           initialStatus={initialStatus}
           shareCode={shareCode}

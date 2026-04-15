@@ -10,6 +10,7 @@ import {
 
 import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
+import { commitAuditedCanonicalWrite } from "../audited-write.ts";
 import { VaultError } from "../errors.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.ts";
 import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
@@ -365,13 +366,19 @@ export async function updateExperiment(
     body: input.body ?? document.body,
   });
 
-  return runLoadedCanonicalWrite<UpdateExperimentResult>({
+  const result = await commitAuditedCanonicalWrite<UpdateExperimentResult>({
     vaultRoot: input.vaultRoot,
     operationType: "experiment_update",
     summary: `Update experiment ${nextAttributes.experimentId}`,
     occurredAt: new Date(),
+    audit: {
+      action: "experiment_update",
+      commandName: "core.updateExperiment",
+      summary: `Updated experiment ${nextAttributes.experimentId}.`,
+      targetIds: [nextAttributes.experimentId],
+    },
     mutate: async ({ batch }) => {
-      await stageMarkdownDocumentWrite(
+      const write = await stageMarkdownDocumentWrite(
         batch,
         {
           relativePath: input.relativePath,
@@ -384,14 +391,19 @@ export async function updateExperiment(
       );
 
       return {
-        experimentId: nextAttributes.experimentId,
-        slug: nextAttributes.slug,
-        relativePath: input.relativePath,
-        status: nextAttributes.status,
-        updated: true,
+        result: {
+          experimentId: nextAttributes.experimentId,
+          slug: nextAttributes.slug,
+          relativePath: input.relativePath,
+          status: nextAttributes.status,
+          updated: true,
+        },
+        changes: write.changes,
       };
     },
   });
+
+  return result.result;
 }
 
 async function appendExperimentLifecycleEvent(
@@ -438,13 +450,20 @@ async function appendExperimentLifecycleEvent(
     "occurredAt",
   );
 
-  return runLoadedCanonicalWrite<AppendExperimentLifecycleEventResult>({
+  const result = await commitAuditedCanonicalWrite<AppendExperimentLifecycleEventResult>({
     vaultRoot: input.vaultRoot,
     operationType: "experiment_lifecycle_event",
     summary: `Append ${input.phase} lifecycle event for ${document.attributes.experimentId}`,
     occurredAt,
+    audit: {
+      action: "experiment_lifecycle",
+      commandName:
+        input.phase === "checkpoint" ? "core.checkpointExperiment" : "core.stopExperiment",
+      summary: `Appended ${input.phase} lifecycle event for ${document.attributes.experimentId}.`,
+      targetIds: [document.attributes.experimentId, eventRecord.id],
+    },
     mutate: async ({ batch }) => {
-      await stageMarkdownDocumentWrite(
+      const write = await stageMarkdownDocumentWrite(
         batch,
         {
           relativePath: input.relativePath,
@@ -458,16 +477,27 @@ async function appendExperimentLifecycleEvent(
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
 
       return {
-        experimentId: document.attributes.experimentId,
-        slug: document.attributes.slug,
-        relativePath: input.relativePath,
-        status: nextAttributes.status,
-        eventId: eventRecord.id,
-        ledgerFile,
-        updated: true,
+        result: {
+          experimentId: document.attributes.experimentId,
+          slug: document.attributes.slug,
+          relativePath: input.relativePath,
+          status: nextAttributes.status,
+          eventId: eventRecord.id,
+          ledgerFile,
+          updated: true,
+        },
+        changes: [
+          ...write.changes,
+          {
+            path: ledgerFile,
+            op: "append",
+          },
+        ],
       };
     },
   });
+
+  return result.result;
 }
 
 export async function checkpointExperiment(

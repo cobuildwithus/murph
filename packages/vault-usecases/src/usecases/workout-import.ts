@@ -635,6 +635,12 @@ export async function importWorkoutCsv(input: {
     vaultRoot: input.vault,
     operationType: 'workout_import_csv',
     summary: `Import workout CSV ${path.basename(input.file)}`,
+    audit: {
+      action: 'workout_import_csv',
+      commandName: 'vaultUsecases.importWorkoutCsv',
+      summary: `Imported workout CSV ${path.basename(input.file)}.`,
+      targetIds: [importId],
+    },
     rawContents: [{
       targetRelativePath: rawFile,
       content: text,

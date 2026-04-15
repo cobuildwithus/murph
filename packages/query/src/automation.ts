@@ -47,7 +47,7 @@ export interface AutomationQueryRecord {
   tags: string[];
   createdAt: string;
   updatedAt: string;
-  prompt: string;
+  instructions: string;
   relativePath: string;
   markdown: string;
 }
@@ -95,6 +95,17 @@ function requireValidTimeZone(value: unknown, fieldName: string): string {
   }
 
   return timeZone;
+}
+
+function normalizeOptionalRecurringTimeZone(
+  value: unknown,
+  fieldName: string,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireValidTimeZone(value, fieldName);
 }
 
 function normalizeAutomationStatus(value: unknown): AutomationStatus {
@@ -146,10 +157,10 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       };
     }
     case "cron":
+      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
       return {
         kind,
         expression: requireStringValue(object.expression, "schedule.expression"),
-        timeZone: requireValidTimeZone(object.timeZone, "schedule.timeZone"),
       };
     case "dailyLocal": {
       const localTime = requireStringValue(object.localTime, "schedule.localTime");
@@ -157,10 +168,11 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
         throw new Error("schedule.localTime must use HH:MM format.");
       }
 
+      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
+
       return {
         kind,
         localTime,
-        timeZone: requireValidTimeZone(object.timeZone, "schedule.timeZone"),
       };
     }
   }
@@ -176,7 +188,6 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
   const object = value as Record<string, unknown>;
   return {
     channel: requireStringValue(object.channel, "route.channel"),
-    deliverResponse: object.deliverResponse === true,
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
@@ -197,13 +208,13 @@ function normalizeTags(value: unknown): string[] {
   )];
 }
 
-function normalizePrompt(body: string): string {
-  const prompt = body.replace(/\s+$/u, "");
-  if (!prompt.trim()) {
-    throw new Error("prompt body must contain text.");
+function normalizeInstructions(body: string): string {
+  const instructions = body.replace(/\s+$/u, "");
+  if (!instructions.trim()) {
+    throw new Error("instructions body must contain text.");
   }
 
-  return prompt;
+  return instructions;
 }
 
 function parseAutomationRecord(
@@ -234,7 +245,7 @@ function parseAutomationRecord(
     tags: normalizeTags(attributes.tags),
     createdAt: requireStringValue(attributes.createdAt, "createdAt"),
     updatedAt: requireStringValue(attributes.updatedAt, "updatedAt"),
-    prompt: normalizePrompt(parsed.body),
+    instructions: normalizeInstructions(parsed.body),
     relativePath,
     markdown,
   };
@@ -268,7 +279,7 @@ function matchesAutomationText(record: AutomationQueryRecord, text: string | und
       record.slug,
       record.title,
       record.summary,
-      record.prompt,
+      record.instructions,
       record.createdAt,
       record.updatedAt,
       record.status,

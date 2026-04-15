@@ -47,28 +47,14 @@ function normalizeOptionalLinqWebhookPort(
   return value
 }
 
-function assertImessageSupportedOnHost(
-  env: Pick<InboxAppEnvironment, 'getPlatform'>,
-  action: 'add' | 'enable',
-): void {
-  const platform = env.getPlatform()
-  if (platform === 'darwin') {
-    return
-  }
-
-  throw new VaultCliError(
-    'INBOX_IMESSAGE_UNAVAILABLE',
-    action === 'add'
-      ? 'The iMessage inbox connector requires macOS. Use Telegram, Linq, or email on Linux, or keep iMessage on a Mac host.'
-      : 'The iMessage inbox connector requires macOS and cannot be enabled on this host. Disable it here or run it from a Mac host.',
-    {
-      platform,
-    },
-  )
-}
-
 export function createInboxSourceOps(
-  env: InboxAppEnvironment,
+  env: Pick<
+    InboxAppEnvironment,
+    | 'enableAssistantAutoReplyChannel'
+    | 'loadInbox'
+    | 'provisionOrRecoverAgentmailInbox'
+    | 'tryResolveAgentmailInboxAddress'
+  >,
 ): Pick<
   InboxServices,
   'sourceAdd' | 'sourceList' | 'sourceRemove' | 'sourceSetEnabled'
@@ -77,10 +63,6 @@ export function createInboxSourceOps(
     async sourceAdd(input) {
       const paths = await ensureInitialized(env.loadInbox, input.vault)
       const config = await readConfig(paths)
-
-      if (input.source === 'imessage') {
-        assertImessageSupportedOnHost(env, 'add')
-      }
 
       if (config.connectors.some((connector) => connector.id === input.id)) {
         throw new VaultCliError(
@@ -159,8 +141,6 @@ export function createInboxSourceOps(
         enabled: true,
         accountId,
         options: {
-          includeOwnMessages:
-            input.source === 'imessage' ? input.includeOwn ?? undefined : undefined,
           backfillLimit: normalizeBackfillLimit(input.backfillLimit),
           emailAddress: input.source === 'email' ? emailAddress : undefined,
           linqWebhookHost: input.source === 'linq' ? linqWebhookHost ?? undefined : undefined,
@@ -174,9 +154,12 @@ export function createInboxSourceOps(
       sortConnectors(config)
       await writeConfig(paths, config)
 
-      if (input.enableAutoReply) {
-        await env.enableAssistantAutoReplyChannel(paths.absoluteVaultRoot, connector.source)
-      }
+      const autoReplyEnabled = input.enableAutoReply
+        ? await env.enableAssistantAutoReplyChannel(
+            paths.absoluteVaultRoot,
+            connector.source,
+          )
+        : undefined
 
       return {
         vault: paths.absoluteVaultRoot,
@@ -185,7 +168,7 @@ export function createInboxSourceOps(
         connectorCount: config.connectors.length,
         provisionedMailbox,
         reusedMailbox,
-        autoReplyEnabled: input.enableAutoReply ? true : undefined,
+        autoReplyEnabled,
       }
     },
 
@@ -238,10 +221,6 @@ export function createInboxSourceOps(
           'INBOX_SOURCE_NOT_FOUND',
           `Inbox source "${input.connectorId}" is not configured.`,
         )
-      }
-
-      if (connector.source === 'imessage' && input.enabled) {
-        assertImessageSupportedOnHost(env, 'enable')
       }
 
       connector.enabled = input.enabled

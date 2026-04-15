@@ -15,16 +15,9 @@ const runtimeMocks = vi.hoisted(() => ({
   runAssistantChatWithInk: vi.fn(),
 }))
 
-vi.mock('../src/assistant-chat-ink.js', async () => {
-  const actual = await vi.importActual<
-    typeof import('../src/assistant-chat-ink.js')
-  >('../src/assistant-chat-ink.js')
-
-  return {
-    ...actual,
-    runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
-  }
-})
+vi.mock('../src/assistant-chat-ink.js', () => ({
+  runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
+}))
 
 import {
   canUseAssistantDaemonForMessage,
@@ -37,7 +30,7 @@ import {
   resolveForegroundTerminalLogOptions,
 } from '../src/run-terminal-logging.js'
 
-const fetchMock = vi.fn(
+const fetchMock = vi.fn<typeof fetch>(
   async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     assert.equal(String(input), 'http://127.0.0.1:50242/message')
     assert.equal(init?.method, 'POST')
@@ -63,7 +56,7 @@ const fetchMock = vi.fn(
 )
 
 beforeAll(() => {
-  vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+  vi.stubGlobal('fetch', fetchMock)
 })
 
 afterAll(() => {
@@ -71,7 +64,7 @@ afterAll(() => {
 })
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-command-runtime-test',
   target: {
     adapter: 'codex-cli',
@@ -86,12 +79,15 @@ const TEST_SESSION = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-command-runtime',
     model: null,
     reasoningEffort: null,
     sandbox: null,
     approvalPolicy: null,
     profile: null,
     oss: false,
+    executionDriver: 'codex-cli',
+    resumeKind: 'codex-session',
   },
   providerBinding: null,
   alias: 'chat:test',

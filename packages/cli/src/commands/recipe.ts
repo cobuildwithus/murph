@@ -11,7 +11,7 @@ import {
   deleteRecipeRecord,
   editRecipeRecord,
 } from '@murphai/vault-usecases/records'
-import { registerRegistryDocEntityGroup } from './health-command-factory.js'
+import { registerRegistryDocEntityGroup } from './entity-command-groups.js'
 import {
   createEntityDeleteCommandConfig,
   createEntityEditCommandConfig,

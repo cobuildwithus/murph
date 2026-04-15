@@ -1,0 +1,10 @@
+{
+  "id": "memory-update",
+  "command": "vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents explicit canonical memory edits by record id."
+}

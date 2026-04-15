@@ -7,12 +7,12 @@ import {
 import {
   buildTelegramThreadId,
   extractTelegramMessage,
-  parseTelegramWebhookUpdate,
   summarizeTelegramUpdate,
   type TelegramFileBase,
   type TelegramPhotoSize,
   type TelegramUpdateLike,
 } from "@murphai/messaging-ingress/telegram-webhook";
+import { parseTelegramWebhookUpdate } from "@murphai/messaging-ingress/telegram-webhook-payload";
 
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";

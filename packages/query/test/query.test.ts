@@ -38,7 +38,6 @@ import {
   searchVault,
   searchVaultSafe,
   searchVaultRuntime,
-  summarizeCurrentOverviewProfile,
   summarizeDailySamples,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
@@ -52,9 +51,7 @@ import {
   normalizeCanonicalLinks,
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
-import { projectProfileSnapshotEntity } from "../src/health/projectors/profile.ts";
-import { ALL_QUERY_ENTITY_FAMILIES } from "../src/model.ts";
-import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
+import { ALL_QUERY_ENTITY_FAMILIES } from "../src/entity-families.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
 import {
@@ -872,10 +869,19 @@ test(
       assert.equal(documentRecord?.entityId, "doc_01JNV4DOC0000000000000001");
       assert.equal(documentRecord?.primaryLookupId, "doc_01JNV4DOC0000000000000001");
       assert.equal(documentRecord?.attributes.documentId, "doc_01JNV4DOC0000000000000001");
-      assert.equal(
-        documentRecord?.attributes.documentPath,
+      assert.deepEqual(documentRecord?.attributes.rawRefs, [
         "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
-      );
+      ]);
+      assert.deepEqual(documentRecord?.attributes.attachments, [
+        {
+          role: "source_document",
+          kind: "document",
+          relativePath: "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
+          mediaType: "application/pdf",
+          sha256: "3".repeat(64),
+          originalFileName: "lab-report.pdf",
+        },
+      ]);
       assert.equal(documentRecord?.attributes.mimeType, "application/pdf");
 
       const legacyJournal = getJournalEntry(vault, "2026-03-11");
@@ -939,7 +945,7 @@ test("readVault rejects explicit older vault format versions", async () => {
 
     await assert.rejects(
       () => readVault(vaultRoot),
-      (error) => hasErrorCode(error, "VAULT_UPGRADE_REQUIRED"),
+      (error) => hasErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -957,7 +963,7 @@ test("searchVaultRuntime rejects explicit newer vault format versions before reb
 
     await assert.rejects(
       () => searchVaultRuntime(vaultRoot, "lab report"),
-      (error) => hasErrorCode(error, "VAULT_UPGRADE_UNSUPPORTED"),
+      (error) => hasErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -1707,34 +1713,6 @@ test("searchVault includes sample rows when the caller scopes by sample record t
 
 test("overview selectors move cleanly onto the query read model", () => {
   const vault = createEmptyReadModel();
-  const goal = createRecord({
-    id: "goal_sleep_01",
-    recordType: "goal",
-    sourcePath: "bank/goals/protect-sleep.md",
-    title: "Protect sleep consistency",
-  });
-  const currentProfile = createRecord({
-    id: "profile_current_01",
-    recordType: "current_profile",
-    sourcePath: "bank/profile/current.md",
-    occurredAt: "2026-03-12T14:00:00Z",
-    title: "Current Profile",
-    body: "# Current Profile\n- Sleep steadier and the evening routine is holding.",
-    data: {},
-  });
-  const latestSnapshot = createRecord({
-    id: "psnap_01",
-    recordType: "profile_snapshot",
-    sourcePath: "ledger/profile-snapshots/2026/2026-03.jsonl",
-    occurredAt: "2026-03-12T13:55:00Z",
-    data: {
-      profile: {
-        goals: {
-          topGoalIds: ["goal_sleep_01"],
-        },
-      },
-    },
-  });
   const journalNewer = createRecord({
     id: "journal:2026-03-12",
     recordType: "journal",
@@ -1776,15 +1754,9 @@ test("overview selectors move cleanly onto the query read model", () => {
     body: "Finished and documented.",
   });
 
-  vault.currentProfile = currentProfile;
-  vault.profileSnapshots = [latestSnapshot];
-  vault.goals = [goal];
   vault.journalEntries = [journalOlder, journalNewer];
   vault.experiments = [completedExperiment, activeExperiment];
   vault.entities = [
-    goal,
-    currentProfile,
-    latestSnapshot,
     journalOlder,
     journalNewer,
     completedExperiment,
@@ -1795,26 +1767,14 @@ test("overview selectors move cleanly onto the query read model", () => {
   assert.deepEqual(
     buildOverviewMetrics(vault).map((metric) => [metric.label, metric.value]),
     [
-      ["entities", 7],
+      ["entities", 4],
       ["events", 0],
       ["samples", 0],
       ["journal days", 2],
       ["experiments", 2],
-      ["registries", 1],
+      ["registries", 0],
     ],
   );
-  assert.deepEqual(summarizeCurrentOverviewProfile(vault), {
-    id: "profile_current_01",
-    recordedAt: "2026-03-12T14:00:00Z",
-    summary: "Sleep steadier and the evening routine is holding.",
-    title: "Current Profile",
-    topGoals: [
-      {
-        id: "goal_sleep_01",
-        title: "Protect sleep consistency",
-      },
-    ],
-  });
   assert.deepEqual(
     summarizeRecentOverviewJournals(vault).map((entry) => ({
       date: entry.date,
@@ -1849,33 +1809,6 @@ test("overview selectors move cleanly onto the query read model", () => {
         title: "Completed Trial",
       },
     ],
-  );
-});
-
-test("profile snapshot query projections keep nested typed summary fields", () => {
-  const entity = projectProfileSnapshotEntity(
-    {
-      id: "psnap_01",
-      recordedAt: "2026-03-12T13:55:00Z",
-      source: "manual",
-      profile: {
-        narrative: {
-          summary: "Sleep steadier and the evening routine is holding.",
-        },
-        goals: {
-          topGoalIds: ["goal_sleep_01"],
-        },
-      },
-    },
-    "ledger/profile-snapshots/2026/2026-03.jsonl",
-  );
-
-  assert.ok(entity);
-  assert.equal(entity.title, "Sleep steadier and the evening routine is holding.");
-  assert.equal(entity.body, "Sleep steadier and the evening routine is holding.");
-  assert.equal(
-    profileSnapshotRecordFromEntity(entity)?.summary,
-    "Sleep steadier and the evening routine is holding.",
   );
 });
 
@@ -2017,7 +1950,7 @@ test("searchVaultSafe omits raw path terms and path fields by construction", () 
     title: "Quiet Probe",
     body: "Ordinary notes without the filename token.",
     data: {
-      documentPath: "raw/documents/path-only-token-probe.pdf",
+      rawRefs: ["raw/documents/path-only-token-probe.pdf"],
     },
   });
   const visible = createRecord({
@@ -2405,6 +2338,19 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     title: "Skip me too",
     data: {},
   });
+  const eventBlankOccurredAt = createRecord({
+    id: "evt_blank_occurred_at",
+    lookupIds: ["evt_blank_occurred_at"],
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "",
+    date: "2026-03-13",
+    kind: "",
+    stream: "glucose",
+    experimentSlug: "focus",
+    title: "Still skip me",
+    data: {},
+  });
   const sampleFallback = createSampleRecord({
     id: "smp_focus_01",
     occurredAt: null,
@@ -2437,7 +2383,12 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
   sampleFallback.occurredAt = null;
 
   vault.journalEntries = [journalFallback, journalMissingDate];
-  vault.events = [eventFallback, eventWrongStream, eventMissingDate];
+  vault.events = [
+    eventFallback,
+    eventWrongStream,
+    eventMissingDate,
+    eventBlankOccurredAt,
+  ];
   vault.samples = [sampleFallback, sampleOtherExperiment];
   vault.entities = [
     journalFallback,
@@ -2445,6 +2396,7 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     eventFallback,
     eventWrongStream,
     eventMissingDate,
+    eventBlankOccurredAt,
     sampleFallback,
     sampleOtherExperiment,
   ];
@@ -2786,8 +2738,17 @@ Light walk and early bedtime.
         note: "Eggs and avocado lunch.",
         tags: ["meal", "nutrition"],
         mealId: "meal_01JNV4MEAL00000000000001",
-        photoPaths: ["raw/meals/2026/03/meal_01JNV4MEAL00000000000001/photo-lunch.jpg"],
-        audioPaths: [],
+        rawRefs: ["raw/meals/2026/03/meal_01JNV4MEAL00000000000001/photo-lunch.jpg"],
+        attachments: [
+          {
+            role: "photo",
+            kind: "photo",
+            relativePath: "raw/meals/2026/03/meal_01JNV4MEAL00000000000001/photo-lunch.jpg",
+            mediaType: "image/jpeg",
+            sha256: "2".repeat(64),
+            originalFileName: "photo-lunch.jpg",
+          },
+        ],
       }),
       JSON.stringify({
         schemaVersion: "murph.event.v1",
@@ -2809,10 +2770,20 @@ Light walk and early bedtime.
         dayKey: "2026-03-12",
         source: "import",
         title: "Lab report",
-        relatedIds: ["doc_01JNV4DOC0000000000000001"],
+        links: [{ type: "related_to", targetId: "doc_01JNV4DOC0000000000000001" }],
+        rawRefs: ["raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf"],
+        attachments: [
+          {
+            role: "source_document",
+            kind: "document",
+            relativePath:
+              "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
+            mediaType: "application/pdf",
+            sha256: "3".repeat(64),
+            originalFileName: "lab-report.pdf",
+          },
+        ],
         documentId: "doc_01JNV4DOC0000000000000001",
-        documentPath:
-          "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
         mimeType: "application/pdf",
       }),
       "",
@@ -3294,10 +3265,10 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
   try {
     await rebuildQueryProjection(vaultRoot);
-    const legacyDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
 
     try {
-      legacyDatabase.exec(`
+      staleDatabase.exec(`
         PRAGMA user_version = 2;
         CREATE TABLE IF NOT EXISTS query_lookup_ids (
           lookup_id TEXT NOT NULL,
@@ -3307,19 +3278,19 @@ test("searchVaultRuntime discards unsupported local stores before serving result
           PRIMARY KEY (lookup_id, entity_id)
         );
       `);
-      legacyDatabase
+      staleDatabase
         .prepare(`
           INSERT INTO query_meta (key, value)
           VALUES ('schema_version', ?)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `)
-        .run("murph.query-projection.v2");
+        .run("murph.query-projection.unsupported");
     } finally {
-      legacyDatabase.close();
+      staleDatabase.close();
     }
 
     const statusBefore = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(statusBefore.schemaVersion, "murph.query-projection.v2");
+    assert.equal(statusBefore.schemaVersion, "murph.query-projection.unsupported");
     assert.equal(statusBefore.fresh, false);
 
     const searchResult = await searchVaultRuntime(vaultRoot, "lab report", {
@@ -3335,14 +3306,14 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
     try {
       assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
-      const legacyLookupTable = reopened
+      const staleLookupTable = reopened
         .prepare(`
           SELECT name
           FROM sqlite_master
           WHERE type = 'table' AND name = 'query_lookup_ids'
         `)
         .get() as { name?: string } | undefined;
-      assert.equal(legacyLookupTable?.name ?? null, null);
+      assert.equal(staleLookupTable?.name ?? null, null);
     } finally {
       reopened.close();
     }

@@ -1,0 +1,73 @@
+import {
+  DEFAULT_WEB_HOST,
+  DEFAULT_WEB_PORT,
+  DEFAULT_WORKER_HOST,
+  DEFAULT_WORKER_PERSIST_DIR,
+  DEFAULT_WORKER_PORT,
+  DEFAULT_WORKER_PROTOCOL,
+} from "./constants.ts";
+import type { HostedLocalDevConfig } from "./types.ts";
+
+export function resolveHostedLocalDevConfig(
+  env: NodeJS.ProcessEnv,
+): HostedLocalDevConfig {
+  return {
+    skipPrismaMigrate: env.MURPH_DEV_SKIP_PRISMA_MIGRATE === "1",
+    skipVercelPull: env.MURPH_DEV_SKIP_VERCEL_PULL === "1",
+    webHost: env.MURPH_DEV_WEB_HOST?.trim() || DEFAULT_WEB_HOST,
+    webPort: parsePort(env.MURPH_DEV_WEB_PORT, DEFAULT_WEB_PORT, "MURPH_DEV_WEB_PORT"),
+    workerHost: env.MURPH_DEV_WORKER_HOST?.trim() || DEFAULT_WORKER_HOST,
+    workerPersistDir: env.MURPH_DEV_CF_PERSIST_DIR?.trim() || DEFAULT_WORKER_PERSIST_DIR,
+    workerPort: parsePort(env.MURPH_DEV_WORKER_PORT, DEFAULT_WORKER_PORT, "MURPH_DEV_WORKER_PORT"),
+    workerProtocol: parseWorkerProtocol(env.MURPH_DEV_WORKER_PROTOCOL),
+  };
+}
+
+export function parsePort(value: string | undefined, fallback: number, label: string): number {
+  if (!value?.trim()) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    throw new Error(`${label} must be a valid TCP port.`);
+  }
+
+  return parsed;
+}
+
+export function parseWorkerProtocol(value: string | undefined): "http" | "https" {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized) {
+    return DEFAULT_WORKER_PROTOCOL;
+  }
+
+  if (normalized !== "http" && normalized !== "https") {
+    throw new Error("MURPH_DEV_WORKER_PROTOCOL must be either http or https.");
+  }
+
+  return normalized;
+}
+
+export function printHelp(): void {
+  process.stdout.write(
+    [
+      "Run the local hosted Murph lane from the repo root.",
+      "",
+      "Usage:",
+      "  pnpm dev",
+      "",
+      "Optional environment overrides:",
+      "  MURPH_DEV_SKIP_VERCEL_PULL=1        Reuse the current shell env instead of pulling Vercel development env",
+      "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
+      "  MURPH_DEV_WEB_HOST=127.0.0.1        Hosted web listen host",
+      "  MURPH_DEV_WEB_PORT=3000             Hosted web listen port",
+      "  MURPH_DEV_WORKER_HOST=127.0.0.1     Cloudflare worker listen host",
+      "  MURPH_DEV_WORKER_PORT=8787          Cloudflare worker listen port",
+      "  MURPH_DEV_WORKER_PROTOCOL=http      Cloudflare local protocol (http or https)",
+      "  MURPH_DEV_CF_PERSIST_DIR=...        Wrangler local persistence directory",
+      "",
+    ].join("\n"),
+  );
+}

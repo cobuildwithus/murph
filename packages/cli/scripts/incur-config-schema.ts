@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -14,15 +14,57 @@ const distEntryPath = path.join(packageDir, 'dist', 'index.js')
 const incurBinPath = path.join(packageDir, 'node_modules', 'incur', 'dist', 'bin.js')
 
 export const configSchemaPath = path.join(packageDir, 'config.schema.json')
+export const incurGeneratedTypesPath = path.join(packageDir, 'src', 'incur.generated.ts')
 
-export async function generateIncurConfigSchema(): Promise<string> {
+interface GeneratedIncurOutputs {
+  configSchema: string
+  types: string
+}
+
+interface IncurGenerationOptions {
+  rebuildCli?: boolean
+}
+
+interface GeneratedIncurArtifacts {
+  generatedTypesPath: string
+  generatedConfigSchemaPath: string
+}
+
+export async function generateIncurConfigSchema(
+  options: IncurGenerationOptions = {},
+): Promise<string> {
+  return (await generateIncurArtifacts(options)).configSchema
+}
+
+export async function generateIncurTypes(
+  options: IncurGenerationOptions = {},
+): Promise<string> {
+  return (await generateIncurArtifacts(options)).types
+}
+
+export async function generateIncurArtifacts(
+  options: IncurGenerationOptions = {},
+): Promise<GeneratedIncurOutputs> {
+  return withGeneratedIncurArtifacts(
+    options,
+    async ({ generatedConfigSchemaPath, generatedTypesPath }) => ({
+      configSchema: await readFile(generatedConfigSchemaPath, 'utf8'),
+      types: await readFile(generatedTypesPath, 'utf8'),
+    }),
+  )
+}
+
+async function withGeneratedIncurArtifacts<T>(
+  options: IncurGenerationOptions,
+  run: (artifacts: GeneratedIncurArtifacts) => Promise<T>,
+): Promise<T> {
   if (!existsSync(incurBinPath)) {
     throw new Error(
-      'Missing local incur binary. Run pnpm install --frozen-lockfile before generating the CLI config schema.',
+      'Missing local incur binary. Run pnpm install --frozen-lockfile before generating CLI artifacts.',
     )
   }
 
-  if (!existsSync(distEntryPath)) {
+  if ((options.rebuildCli ?? true) || !existsSync(distEntryPath)) {
     await execFileAsync('pnpm', ['build'], {
       cwd: packageDir,
       env: process.env,
@@ -56,7 +98,10 @@ export async function generateIncurConfigSchema(): Promise<string> {
       },
     )
 
-    return await readFile(generatedConfigSchemaPath, 'utf8')
+    return await run({
+      generatedTypesPath,
+      generatedConfigSchemaPath,
+    })
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }

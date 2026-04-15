@@ -10,10 +10,9 @@ import {
   parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook,
 } from "./telegram";
-import { findHostedMemberByTelegramUserId } from "./hosted-member-routing-store";
+import { lookupHostedMemberRoutingByTelegramUserId } from "./hosted-member-routing-store";
 import {
   createHostedWebhookDispatchSideEffect,
-  type HostedWebhookDispatchSideEffect,
   type HostedWebhookPlan,
   type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
@@ -24,16 +23,6 @@ export type HostedOnboardingTelegramWebhookResponse = {
   ok: true;
   reason?: string;
 };
-
-type HostedOnboardingTelegramWebhookPlan =
-  | {
-      desiredSideEffects: [];
-      response: HostedOnboardingTelegramWebhookResponse;
-    }
-  | {
-      desiredSideEffects: [HostedWebhookDispatchSideEffect];
-      response: HostedOnboardingTelegramWebhookResponse;
-    };
 
 export async function planHostedOnboardingTelegramWebhook(input: {
   prisma: HostedWebhookReceiptPersistenceClient;
@@ -57,10 +46,11 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
 
-  const existingMember = await findHostedMemberByTelegramUserId({
+  const existingMemberLookup = await lookupHostedMemberRoutingByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
   });
+  const existingMember = existingMemberLookup?.core ?? null;
 
   if (!existingMember) {
     return buildIgnoredTelegramWebhookPlan("unlinked-telegram");
@@ -100,7 +90,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
 function buildIgnoredTelegramWebhookPlan(
   reason: string,
-): HostedOnboardingTelegramWebhookPlan {
+): HostedWebhookPlan<HostedOnboardingTelegramWebhookResponse> {
   return {
     desiredSideEffects: [],
     response: {

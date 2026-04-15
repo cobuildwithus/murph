@@ -4,7 +4,14 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
+  deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
+  finishHostedOnboardingTiming: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
+  startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
+    baseDetails,
+    startedAtMs: 0,
+    step,
+  })),
 }));
 
 vi.mock("next/server", async () => {
@@ -19,6 +26,19 @@ vi.mock("next/server", async () => {
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingLinqWebhook: mocks.handleHostedOnboardingLinqWebhook,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/logging")>(
+    "@/src/lib/hosted-onboarding/logging",
+  );
+
+  return {
+    ...actual,
+    deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
+    finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+    startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
+  };
+});
 
 type HostedOnboardingLinqRouteModule = typeof import("../app/api/hosted-onboarding/linq/webhook/route");
 
@@ -61,6 +81,42 @@ describe("hosted onboarding Linq webhook route", () => {
       signal: request.signal,
       timestamp: "1711278000",
     });
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-onboarding.route.linq-webhook",
+      expect.objectContaining({
+        signaturePresent: true,
+        signalAbortedAtStart: false,
+        timestampPresent: true,
+      }),
+    );
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-onboarding.route.linq-webhook.read-body",
+      expect.objectContaining({
+        signalAbortedAtStart: false,
+      }),
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.route.linq-webhook.read-body",
+      }),
+      "completed",
+      expect.objectContaining({
+        rawBodyBytes: JSON.stringify({ ok: true }).length,
+        signalAbortedAfterRead: false,
+      }),
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.route.linq-webhook",
+      }),
+      "completed",
+      expect.objectContaining({
+        duplicate: false,
+        rawBodyBytes: JSON.stringify({ ok: true }).length,
+        reason: null,
+        signalAbortedBeforeReturn: false,
+      }),
+    );
   });
 
   it("maps in-progress receipt retries to a retryable 503 response", async () => {

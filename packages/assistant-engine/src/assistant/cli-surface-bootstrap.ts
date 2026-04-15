@@ -11,7 +11,7 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
 
 const assistantCliSurfaceBootstrapSchemaVersion =
-  'murph.assistant-cli-surface-bootstrap.v2'
+  'murph.assistant-cli-surface-bootstrap.v1'
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
 const assistantCliSurfaceBootstrapFamilyIndexEntryLimit = 8
 const assistantCliSurfaceBootstrapOptionalOptionLimit = 4
@@ -28,6 +28,7 @@ export function buildAssistantCliSurfaceBootstrapDocId(sessionId: string): strin
 
 export async function resolveAssistantCliSurfaceBootstrapContext(input: {
   cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   sessionId: string
   vault: string
   workingDirectory?: string | null
@@ -47,6 +48,7 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
 
   const contract = await loadAssistantCliSurfaceContract({
     cliEnv: input.cliEnv,
+    executionContext: input.executionContext,
     vault: input.vault,
     workingDirectory: input.workingDirectory,
   })
@@ -108,8 +110,7 @@ async function readPersistedAssistantCliSurfaceContract(
       return contract.trim()
     }
 
-    const summary = value.summary
-    return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : null
+    return null
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -121,6 +122,7 @@ async function readPersistedAssistantCliSurfaceContract(
 
 async function loadAssistantCliSurfaceContract(input: {
   cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
@@ -143,6 +145,7 @@ async function loadAssistantCliSurfaceContract(input: {
 
 async function generateAssistantCliSurfaceContract(input: {
   cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
@@ -150,6 +153,7 @@ async function generateAssistantCliSurfaceContract(input: {
     const manifest = await readAssistantCliLlmsManifest({
       cliEnv: input.cliEnv,
       detail: 'full',
+      executionContext: input.executionContext,
       vault: input.vault,
       workingDirectory: input.workingDirectory,
     })
@@ -160,6 +164,7 @@ async function generateAssistantCliSurfaceContract(input: {
     const manifest = await readAssistantCliLlmsManifest({
       cliEnv: input.cliEnv,
       detail: 'compact',
+      executionContext: input.executionContext,
       vault: input.vault,
       workingDirectory: input.workingDirectory,
     })
@@ -213,7 +218,7 @@ function renderAssistantCliSurfaceContract(
   const groupedCommands = groupAssistantCliManifestCommands(commands)
   const lines = [
     'Murph CLI Contract:',
-    'Canonical executor: `murph.cli.run`. Pass only the tokens after `vault-cli`.',
+    'Canonical executor: `vault.cli.run`. Pass only the tokens after `vault-cli`.',
     sourceDetail === 'full'
       ? 'This block is compiled automatically from `vault-cli --llms-full --format json` at session bootstrap.'
       : 'This block is compiled automatically from `vault-cli --llms --format json` at session bootstrap because the full manifest was unavailable.',
@@ -373,6 +378,10 @@ function renderAssistantCliOptionValueSuffix(
 
   if (schema.type === 'integer' || schema.type === 'number') {
     return `=${schema.type}`
+  }
+
+  if (schema.type === 'string') {
+    return '=string'
   }
 
   return ''
