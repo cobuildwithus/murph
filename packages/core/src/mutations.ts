@@ -55,6 +55,7 @@ import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts"
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
+import { normalizeUniqueTextList } from "./bank/shared.ts";
 import {
   defaultTimeZone,
   normalizeTimeZone,
@@ -125,6 +126,7 @@ interface AddMealInput {
   note?: string;
   photoPath?: string;
   audioPath?: string;
+  ingredients?: string[];
   nutrition?: MealNutrition;
   source?: string;
 }
@@ -1514,17 +1516,20 @@ export async function addMeal({
   note,
   photoPath,
   audioPath,
+  ingredients,
   nutrition,
   source = "manual",
 }: AddMealInput): Promise<AddMealResult> {
   const vault = await loadVault({ vaultRoot });
   const normalizedNote =
     typeof note === "string" && note.trim().length > 0 ? note.trim() : undefined;
+  const normalizedIngredients = normalizeUniqueTextList(ingredients, "ingredients");
+  const normalizedNutrition = normalizeMealNutrition(nutrition, "nutrition");
 
-  if (!photoPath && !audioPath && !normalizedNote) {
+  if (!photoPath && !audioPath && !normalizedNote && !normalizedIngredients && !normalizedNutrition) {
     throw new VaultError(
       "VAULT_MEAL_CONTENT_REQUIRED",
-      "Meal imports require at least one of photoPath, audioPath, or note.",
+      "Meal imports require at least one of photoPath, audioPath, note, ingredients, or nutrition.",
     );
   }
 
@@ -1577,7 +1582,8 @@ export async function addMeal({
     rawRefs: pendingAttachmentState.rawRefs,
     fields: {
       mealId,
-      nutrition: normalizeMealNutrition(nutrition, "nutrition"),
+      ingredients: normalizedIngredients,
+      nutrition: normalizedNutrition,
     },
   });
   return runCanonicalWrite({

@@ -554,15 +554,47 @@ describe('assistant CLI tool capability seam', () => {
       'inbox.promote.journal',
       'inbox.promote.experimentNote',
     ])
-    for (const tool of inboxTools) {
-      await executeBoundTool(tool, {
-        captureId: 'cap_123',
-      })
+    const promotedMealNutrition = {
+      totals: {
+        calories: 180,
+        carbsGrams: 33,
+      },
+      provenance: {
+        source: 'estimated',
+        confidence: 'medium',
+        sourceDetail: 'Estimated from the photo and note.',
+      },
     }
+    await executeTool(inboxTools, 'inbox.promote.meal', {
+      captureId: 'cap_123',
+      note: 'Only ate the sweet potatoes and green beans.',
+      occurredAt: '2026-04-08T12:15:00Z',
+      source: 'manual',
+      ingredients: ['sweet potatoes', 'green beans'],
+      nutrition: promotedMealNutrition,
+    })
+    await executeTool(inboxTools, 'inbox.promote.document', {
+      captureId: 'cap_123',
+    })
+    await executeTool(inboxTools, 'inbox.promote.journal', {
+      captureId: 'cap_123',
+    })
+    await executeTool(inboxTools, 'inbox.promote.experimentNote', {
+      captureId: 'cap_123',
+    })
     expect(inboxCalls).toEqual([
       {
         name: 'promoteMeal',
-        input: { captureId: 'cap_123', requestId: 'req_123', vault: vaultRoot },
+        input: {
+          captureId: 'cap_123',
+          note: 'Only ate the sweet potatoes and green beans.',
+          occurredAt: '2026-04-08T12:15:00Z',
+          source: 'manual',
+          ingredients: ['sweet potatoes', 'green beans'],
+          nutrition: promotedMealNutrition,
+          requestId: 'req_123',
+          vault: vaultRoot,
+        },
       },
       {
         name: 'promoteDocument',
@@ -628,9 +660,37 @@ describe('assistant CLI tool capability seam', () => {
       audio: 'raw/inbox/captures/cap_123/attachments/1/audio.m4a',
       note: 'Post-workout meal',
       occurredAt: '2026-04-08T10:00:00Z',
+      source: 'manual',
+      ingredients: ['salmon', 'rice'],
+      nutrition: {
+        totals: {
+          calories: 620,
+          proteinGrams: 36,
+          carbsGrams: 58,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'high',
+          sourceDetail: 'Recovered from the photo and note.',
+        },
+      },
     })
     await executeTool(writeTools, 'vault.meal.add', {
       photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
+    })
+    await executeTool(writeTools, 'vault.meal.add', {
+      ingredients: ['banana', 'almond butter'],
+      nutrition: {
+        totals: {
+          calories: 210,
+          fatGrams: 10,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'medium',
+          sourceDetail: 'Recovered from the message.',
+        },
+      },
     })
     await executeTool(writeTools, 'vault.meal.add', {
       note: 'Black coffee after lunch',
@@ -640,7 +700,12 @@ describe('assistant CLI tool capability seam', () => {
       executeTool(writeTools, 'vault.meal.add', {
         note: '   ',
       }),
-    ).rejects.toThrow('Provide at least one of photo, audio, or note.')
+    ).rejects.toThrow('Provide at least one of photo, audio, note, ingredients, or nutrition.')
+    await expect(
+      executeTool(writeTools, 'vault.meal.add', {
+        nutrition: {},
+      }),
+    ).rejects.toThrow('Provide at least one of photo, audio, note, ingredients, or nutrition.')
     await executeTool(writeTools, 'vault.journal.ensure', {
       date: '2026-04-08',
     })
@@ -700,8 +765,45 @@ describe('assistant CLI tool capability seam', () => {
     })
     expect(findCall(coreCalls, 'addMeal')).toMatchObject({
       audio: path.join(vaultRoot, 'raw/inbox/captures/cap_123/attachments/1/audio.m4a'),
+      ingredients: ['salmon', 'rice'],
       photo: path.join(vaultRoot, 'raw/inbox/captures/cap_123/attachments/1/photo.jpg'),
+      source: 'manual',
     })
+    expect(findCall(coreCalls, 'addMeal')).toMatchObject({
+      nutrition: {
+        totals: {
+          calories: 620,
+          proteinGrams: 36,
+          carbsGrams: 58,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'high',
+          sourceDetail: 'Recovered from the photo and note.',
+        },
+      },
+    })
+    const mealAddCalls = coreCalls
+      .filter((candidate) => candidate.name === 'addMeal')
+      .map((candidate) => candidate.input as Record<string, unknown>)
+    expect(mealAddCalls[2]).toMatchObject({
+      ingredients: ['banana', 'almond butter'],
+      nutrition: {
+        totals: {
+          calories: 210,
+          fatGrams: 10,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'medium',
+          sourceDetail: 'Recovered from the message.',
+        },
+      },
+      requestId: 'req_123',
+      vault: vaultRoot,
+    })
+    expect(mealAddCalls[2]).not.toHaveProperty('photo')
+    expect(mealAddCalls[2]).not.toHaveProperty('audio')
     expect(findLastCall(coreCalls, 'addMeal')).toMatchObject({
       note: 'Black coffee after lunch',
       occurredAt: '2026-04-08T14:30:00Z',

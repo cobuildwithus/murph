@@ -445,6 +445,8 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       audio?: string
       note?: string
       occurredAt?: string
+      source?: ImporterSource
+      ingredients?: string[]
       nutrition?: MealNutrition
     },
   ): Promise<MealAddResult>
@@ -934,6 +936,8 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     audioPath?: string
     note?: string
     occurredAt?: string
+    source?: ImporterSource
+    ingredients?: string[]
     nutrition?: MealNutrition
   }): Promise<{
     mealId: string
@@ -941,6 +945,9 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
       id: string
       occurredAt?: string | null
       note?: string | null
+      source?: ImporterSource | null
+      ingredients?: string[]
+      nutrition?: MealNutrition
     }
     manifestPath: string
     photo: {
@@ -1037,14 +1044,18 @@ export interface ImportersRuntime {
     vaultRoot: string
     occurredAt?: string
     note?: string
+    source?: ImporterSource
+    ingredients?: string[]
     nutrition?: MealNutrition
-    source?: string
   }): Promise<{
     mealId: string
     event: {
       id: string
       occurredAt?: string | null
       note?: string | null
+      source?: ImporterSource | null
+      ingredients?: string[]
+      nutrition?: MealNutrition
     }
     photo: {
       relativePath: string

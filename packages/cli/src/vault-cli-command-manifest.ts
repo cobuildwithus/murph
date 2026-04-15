@@ -393,7 +393,8 @@ export const vaultCliCommandDescriptors = [
     leafCommands: [
       {
         path: ['meal', 'add'],
-        description: 'Record one meal from raw photo/audio artifacts or a freeform note.',
+        description:
+          'Record one meal from simple media/text flags or a structured JSON payload.',
       },
       {
         path: ['meal', 'show'],

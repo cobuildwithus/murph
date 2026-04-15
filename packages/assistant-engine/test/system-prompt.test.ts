@@ -73,9 +73,12 @@ describe('buildAssistantSystemPrompt', () => {
     expect(prompt).toContain(
       'try hard to capture the full ingredient or component list, serving size or per-item amounts, dose units, and calories for future reference',
     )
+    expect(prompt).toContain(
+      'Use structured meal ingredients and nutrition fields when you can support them',
+    )
     expect(prompt).toContain('inspect any attached labels, menus, or photos first')
     expect(prompt).toContain(
-      'use available web lookup to recover likely ingredients, calories, or serving amounts before writing',
+      'use available web lookup to recover likely ingredients, calories, serving amounts, or nutrition provenance before writing',
     )
     expect(prompt).toContain('Mark uncertainty plainly instead of inventing exact values.')
   })

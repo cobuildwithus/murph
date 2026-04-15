@@ -310,24 +310,18 @@ test("device sync service fails closed when stored token integrity validation fa
   });
   assert.ok(updated);
 
-  service.queueManualReconcile(stored.id);
-  await service.runWorkerOnce();
+  const reconcile = service.queueManualReconcile(stored.id);
+  const processedJob = await service.runWorkerOnce();
 
-  const failedJob = service.store.database.prepare(`
-    select
-      status,
-      last_error_code as lastErrorCode,
-      last_error_message as lastErrorMessage
-    from device_job
-    where account_id = ?
-    order by created_at desc, id desc
-    limit 1
-  `).get(stored.id) as { lastErrorCode?: string; lastErrorMessage?: string; status?: string } | undefined;
+  const failedJob = processedJob ? service.store.getJobById(processedJob.id) : null;
+  const queuedManualJob = service.store.getJobById(reconcile.job.id);
   const reauthorizationAccount = service.store.getAccountById(stored.id);
 
+  assert.equal(processedJob?.id, reconcile.job.id);
   assert.equal(failedJob?.status, "dead");
   assert.equal(failedJob?.lastErrorCode, "ACCOUNT_TOKEN_DECRYPT_FAILED");
   assert.match(failedJob?.lastErrorMessage ?? "", /failed integrity validation/u);
+  assert.equal(queuedManualJob?.status, "dead");
   assert.equal(reauthorizationAccount?.status, "reauthorization_required");
 
   service.close();

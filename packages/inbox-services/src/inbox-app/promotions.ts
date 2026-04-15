@@ -95,8 +95,8 @@ export function createInboxPromotionOps(
           const audioAttachment = capture.attachments.find(isStoredAudioAttachment)
           const result = await prepared.core.addMeal({
             vaultRoot: paths.absoluteVaultRoot,
-            occurredAt: capture.occurredAt,
-            note: capture.text ?? undefined,
+            occurredAt: input.occurredAt ?? capture.occurredAt,
+            note: input.note ?? capture.text ?? undefined,
             photoPath: await resolvePromotionAttachmentFilePath(
               paths.absoluteVaultRoot,
               capture,
@@ -110,7 +110,9 @@ export function createInboxPromotionOps(
                     audioAttachment,
                   )
                 : undefined,
-            source: 'import',
+            source: input.source ?? 'import',
+            ingredients: input.ingredients,
+            nutrition: input.nutrition,
           })
 
           return {

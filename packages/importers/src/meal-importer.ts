@@ -1,9 +1,11 @@
+import { type MealNutrition, mealNutritionSchema } from "@murphai/contracts";
 import { z } from "zod";
 
 import { assertCanonicalWritePort } from "./core-port.ts";
 import type { MealImportPayload } from "./core-port.ts";
 import {
   inspectFileAsset,
+  optionalStringListSchema,
   optionalTimestampSchema,
   optionalTrimmedStringSchema,
   parseInputObject,
@@ -17,6 +19,8 @@ export interface MealImportInput {
   occurredAt?: string | number | Date;
   note?: string;
   source?: string;
+  ingredients?: string[];
+  nutrition?: MealNutrition;
 }
 
 export interface ImporterExecutionOptions {
@@ -31,8 +35,21 @@ const mealImportInputSchema = z
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
     source: optionalTrimmedStringSchema("source"),
+    ingredients: optionalStringListSchema("ingredients"),
+    nutrition: mealNutritionSchema.optional(),
   })
   .passthrough();
+
+function hasMealNutritionContent(nutrition: MealNutrition | undefined): boolean {
+  if (!nutrition) {
+    return false;
+  }
+
+  return Boolean(
+    (nutrition.totals && Object.keys(nutrition.totals).length > 0)
+    || (nutrition.provenance && Object.keys(nutrition.provenance).length > 0),
+  );
+}
 
 export async function prepareMealImport(input: unknown): Promise<MealImportPayload> {
   const request = parseInputObject(
@@ -40,9 +57,12 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
     "meal import input",
     mealImportInputSchema,
   );
-  if (!request.photoPath && !request.audioPath && !request.note) {
+  const hasIngredients = request.ingredients.length > 0;
+  const hasNutrition = hasMealNutritionContent(request.nutrition);
+
+  if (!request.photoPath && !request.audioPath && !request.note && !hasIngredients && !hasNutrition) {
     throw new TypeError(
-      "meal import input requires at least one of photoPath, audioPath, or note",
+      "meal import input requires at least one of photoPath, audioPath, note, ingredients, or nutrition",
     );
   }
 
@@ -60,6 +80,8 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
     occurredAt: request.occurredAt,
     note: request.note,
     source: request.source,
+    ingredients: hasIngredients ? request.ingredients : undefined,
+    nutrition: hasNutrition ? request.nutrition : undefined,
   });
 }
 

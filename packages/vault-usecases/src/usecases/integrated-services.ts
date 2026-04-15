@@ -157,9 +157,11 @@ function createIntegratedCoreServices(
       audio?: string
       note?: string
       occurredAt?: string
+      source?: "manual" | "import" | "device" | "derived"
+      ingredients?: string[]
       nutrition?: import('@murphai/contracts').MealNutrition
     }) {
-      const { vault, photo, audio, note, occurredAt, nutrition } = input
+      const { vault, photo, audio, note, occurredAt, source, ingredients, nutrition } = input
       const { core } = await loadIntegratedRuntime()
       const result = await core.addMeal({
         vaultRoot: vault,
@@ -167,6 +169,8 @@ function createIntegratedCoreServices(
         audioPath: audio,
         note,
         occurredAt,
+        source,
+        ingredients,
         nutrition,
       })
 
@@ -180,6 +184,9 @@ function createIntegratedCoreServices(
         audioPath: result.audio?.relativePath ?? null,
         manifestFile: result.manifestPath,
         note: result.event.note ?? note ?? null,
+        source: result.event.source ?? null,
+        ingredients: result.event.ingredients ?? null,
+        nutrition: result.event.nutrition ?? null,
       }
     },
     async createExperiment(input: CommandContext & {

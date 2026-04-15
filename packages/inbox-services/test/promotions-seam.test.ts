@@ -1207,6 +1207,21 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         }),
       ],
     }),
+    createCapture('capture-meal-overrides', {
+      text: 'meal override fallback',
+      attachments: [
+        createAttachment({
+          ordinal: 1,
+          kind: 'image',
+          storedPath: 'raw/inbox/email/capture-meal-overrides/attachments/photo.jpg',
+        }),
+        createAttachment({
+          ordinal: 2,
+          kind: 'audio',
+          storedPath: 'raw/inbox/email/capture-meal-overrides/attachments/audio.m4a',
+        }),
+      ],
+    }),
     createCapture('capture-document-created', {
       text: ' document note ',
       attachments: [
@@ -1260,6 +1275,16 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     paths.absoluteVaultRoot,
     'raw/inbox/email/capture-meal-created/attachments/audio.m4a',
     'new meal audio',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-meal-overrides/attachments/photo.jpg',
+    'override meal photo',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-meal-overrides/attachments/audio.m4a',
+    'override meal audio',
   )
   await writeTextFile(
     paths.absoluteVaultRoot,
@@ -1376,9 +1401,54 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   })
   assert.equal(createdMeal.created, true)
   const createdMealCall = mealCalls.at(-1)
+  assert.equal(createdMealCall?.note, 'meal created')
   assert.equal(createdMealCall?.source, 'import')
   assert.match(createdMealCall?.photoPath ?? '', /capture-meal-created\/attachments\/photo\.jpg$/)
   assert.match(createdMealCall?.audioPath ?? '', /capture-meal-created\/attachments\/audio\.m4a$/)
+
+  const overriddenNutrition = {
+    totals: {
+      calories: 180,
+      carbsGrams: 33,
+      fiberGrams: 7,
+    },
+    provenance: {
+      source: 'estimated',
+      confidence: 'medium',
+      sourceDetail: 'Recovered from the photo and note.',
+    },
+  } as const
+  const overriddenMeal = await ops.promoteMeal({
+    vault: paths.absoluteVaultRoot,
+    captureId: 'capture-meal-overrides',
+    requestId: null,
+    note: 'Only ate the sweet potatoes and green beans.',
+    occurredAt: '2026-04-08T12:15:00.000Z',
+    source: 'manual',
+    ingredients: ['sweet potatoes', 'green beans'],
+    nutrition: overriddenNutrition,
+  })
+  assert.equal(overriddenMeal.created, true)
+  const overriddenMealCall = mealCalls.at(-1)
+  assert.equal(
+    overriddenMealCall?.note,
+    'Only ate the sweet potatoes and green beans.',
+  )
+  assert.equal(overriddenMealCall?.occurredAt, '2026-04-08T12:15:00.000Z')
+  assert.equal(overriddenMealCall?.source, 'manual')
+  assert.deepEqual(overriddenMealCall?.ingredients, [
+    'sweet potatoes',
+    'green beans',
+  ])
+  assert.deepEqual(overriddenMealCall?.nutrition, overriddenNutrition)
+  assert.match(
+    overriddenMealCall?.photoPath ?? '',
+    /capture-meal-overrides\/attachments\/photo\.jpg$/,
+  )
+  assert.match(
+    overriddenMealCall?.audioPath ?? '',
+    /capture-meal-overrides\/attachments\/audio\.m4a$/,
+  )
 
   const createdDocument = await ops.promoteDocument({
     vault: paths.absoluteVaultRoot,

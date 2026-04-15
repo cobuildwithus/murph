@@ -639,6 +639,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
   const mealAdd = await getGroupCommandRun<{
     options: {
       vault?: string
+      input?: string
       photo?: string
       audio?: string
       note?: string
@@ -646,6 +647,33 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
       source?: string
     }
   }>(cli, 'meal', 'add')
+
+  const addMealMock = vi.fn(async (input: Record<string, unknown>) => ({
+    mealId: 'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    event: {
+      id: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1',
+      occurredAt: null,
+      note: 'Normalized direct meal note',
+      source: 'derived' as const,
+      ingredients: ['salmon', 'rice'],
+      nutrition: {
+        totals: {
+          calories: 690,
+        },
+        provenance: {
+          source: 'estimated' as const,
+        },
+      },
+    },
+    photo:
+      typeof input.photoPath === 'string'
+        ? {
+            relativePath: 'raw/meals/meal-direct-photo.jpg',
+          }
+        : null,
+    audio: null,
+    manifestPath: 'raw/meals/meal_01JNV422Y2M5ZBV64ZP4N1DRB1/manifest.json',
+  }))
 
   const fakeImporters: ImportersRuntime = {
     async importDocument() {
@@ -660,21 +688,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
         },
       }
     },
-    async addMeal() {
-      return {
-        mealId: 'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
-        event: {
-          id: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1',
-          occurredAt: null,
-          note: null,
-        },
-        photo: {
-          relativePath: 'raw/meals/meal-direct-photo.jpg',
-        },
-        audio: null,
-        manifestPath: 'raw/meals/meal_01JNV422Y2M5ZBV64ZP4N1DRB1/manifest.json',
-      }
-    },
+    addMeal: addMealMock,
     async importCsvSamples() {
       return {
         count: 0,
@@ -712,4 +726,66 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     },
   })
   assert.equal(typeof mealResult, 'object')
+
+  const mealPayloadPath = await writeFixtureFile(
+    parentRoot,
+    'meal.json',
+    JSON.stringify({
+      note: 'Structured payload note',
+      source: 'manual',
+      ingredients: ['salmon', 'rice'],
+      nutrition: {
+        totals: {
+          calories: 690,
+        },
+        provenance: {
+          source: 'estimated',
+        },
+      },
+    }),
+  )
+
+  const structuredMealResult = await mealAdd({
+    options: {
+      vault: vaultRoot,
+      input: `@${mealPayloadPath}`,
+      note: 'Flag override note',
+      source: 'derived',
+    },
+  })
+  assert.deepEqual(structuredMealResult, {
+    vault: vaultRoot,
+    mealId: 'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    lookupId: 'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    occurredAt: null,
+    photoPath: null,
+    audioPath: null,
+    manifestFile: 'raw/meals/meal_01JNV422Y2M5ZBV64ZP4N1DRB1/manifest.json',
+    note: 'Normalized direct meal note',
+    source: 'derived',
+    ingredients: ['salmon', 'rice'],
+    nutrition: {
+      totals: {
+        calories: 690,
+      },
+      provenance: {
+        source: 'estimated',
+      },
+    },
+  })
+  assert.deepEqual(addMealMock.mock.calls.at(-1)?.[0], {
+    vaultRoot,
+    note: 'Flag override note',
+    source: 'derived',
+    ingredients: ['salmon', 'rice'],
+    nutrition: {
+      totals: {
+        calories: 690,
+      },
+      provenance: {
+        source: 'estimated',
+      },
+    },
+  })
 })

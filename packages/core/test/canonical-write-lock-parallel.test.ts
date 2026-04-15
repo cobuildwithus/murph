@@ -7,10 +7,12 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, test } from "vitest";
 
+import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.js";
 import { initializeVault } from "../src/index.ts";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const workspaceSourceImportExecOptions = createWorkspaceSourceImportExecOptions(packageDir, process.env);
 const cleanupPaths: string[] = [];
 
 afterEach(async () => {
@@ -60,10 +62,10 @@ test("acquireCanonicalWriteLock waits across processes instead of failing immedi
     process.stdout.write(JSON.stringify({ waitedMs }));
   `);
 
-  const holder = spawnPnpmTsx(holderScript, [vaultRoot]);
+  const holder = spawnTsxProcess(holderScript, [vaultRoot]);
   const holderExitPromise = waitForChild(holder);
   await waitForStdoutLine(holder, "locked");
-  const waiter = await runPnpmTsx(waiterScript, [vaultRoot]);
+  const waiter = await runTsxProcess(waiterScript, [vaultRoot]);
   const holderExit = await holderExitPromise;
 
   assert.equal(holderExit.code, 0);
@@ -120,8 +122,8 @@ test("parallel meal and workout writes complete without a canonical write lock f
   `);
 
   const [meal, workout] = await Promise.all([
-    runPnpmTsx(mealScript, [vaultRoot]),
-    runPnpmTsx(workoutScript, [vaultRoot]),
+    runTsxProcess(mealScript, [vaultRoot]),
+    runTsxProcess(workoutScript, [vaultRoot]),
   ]);
 
   assert.equal(meal.code, 0);
@@ -138,15 +140,18 @@ async function writeTsxScript(parent: string, name: string, source: string): Pro
   return filePath;
 }
 
-function spawnPnpmTsx(scriptPath: string, args: string[]) {
-  return spawn(pnpmCommand, ["exec", "tsx", scriptPath, ...args], {
-    cwd: repoRoot,
-    env: process.env,
+function spawnTsxProcess(scriptPath: string, args: string[]) {
+  return spawn(process.execPath, ["--import", "tsx/esm", scriptPath, ...args], {
+    cwd: workspaceSourceImportExecOptions.cwd,
+    env: {
+      ...process.env,
+      ...workspaceSourceImportExecOptions.env,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
-async function runPnpmTsx(
+async function runTsxProcess(
   scriptPath: string,
   args: string[],
 ): Promise<{
@@ -154,33 +159,53 @@ async function runPnpmTsx(
   stderr: string;
   stdout: string;
 }> {
-  const child = spawnPnpmTsx(scriptPath, args);
+  const child = spawnTsxProcess(scriptPath, args);
   return await waitForChild(child);
 }
 
 async function waitForStdoutLine(
-  child: ReturnType<typeof spawnPnpmTsx>,
+  child: ReturnType<typeof spawnTsxProcess>,
   expected: string,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+
     child.once("error", reject);
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
-      if (chunk.includes(expected)) {
+      stdout += chunk;
+      if (stdout.includes(expected)) {
         resolve();
       }
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
-      if (chunk.trim().length > 0) {
-        reject(new Error(chunk.trim()));
+      stderr += chunk;
+    });
+    child.once("close", (code) => {
+      if (!stdout.includes(expected)) {
+        const stderrMessage = stderr.trim();
+        const stdoutMessage = stdout.trim();
+        reject(
+          new Error(
+            [
+              `Process exited before emitting expected stdout line: ${expected}`,
+              `code=${String(code)}`,
+              stdoutMessage.length > 0 ? `stdout=${stdoutMessage}` : null,
+              stderrMessage.length > 0 ? `stderr=${stderrMessage}` : null,
+            ]
+              .filter((value): value is string => value !== null)
+              .join("\n"),
+          ),
+        );
       }
     });
   });
 }
 
 async function waitForChild(
-  child: ReturnType<typeof spawnPnpmTsx>,
+  child: ReturnType<typeof spawnTsxProcess>,
 ): Promise<{
   code: number | null;
   stderr: string;

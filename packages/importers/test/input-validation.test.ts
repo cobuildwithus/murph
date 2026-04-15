@@ -151,6 +151,15 @@ test("prepareMealImport and assessment import reject invalid typed fields with s
 
   await assert.rejects(
     () =>
+      prepareMealImport({
+        photoPath,
+        ingredients: ["rice", 42],
+      }),
+    /ingredients must be an array of strings when provided/,
+  );
+
+  await assert.rejects(
+    () =>
       prepareAssessmentResponseImport({
         filePath: assessmentPath,
         importedAt: true,
