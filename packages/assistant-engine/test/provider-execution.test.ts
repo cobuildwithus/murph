@@ -263,7 +263,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       })
 
       return {
-        webSearch: tool({
+        'web.search': tool({
           description: 'Mock web search tool',
           execute: async () => ({}),
           inputSchema: z.object({
@@ -452,11 +452,13 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       system: 'You are concise.',
       timeout: 600000,
       tools: expect.objectContaining({
-        webSearch: expect.objectContaining({
+        web_search: expect.objectContaining({
           description: 'Mock web search tool',
         }),
       }),
     })
+    expect(providerMocks.generateText.mock.calls[0]?.[0]?.tools).not.toHaveProperty('web.search')
+    expect(providerMocks.generateText.mock.calls[0]?.[0]?.tools).not.toHaveProperty('perplexity_search')
     expect(onEvent).toHaveBeenCalledTimes(3)
     expect(onEvent).toHaveBeenNthCalledWith(
       1,
@@ -832,7 +834,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
 
     expect(providerMocks.generateText).toHaveBeenCalledWith({
       abortSignal: undefined,
-      maxRetries: 0,
+      maxRetries: 2,
       messages: [
         {
           content: 'Use the gateway',
@@ -848,15 +850,8 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
           store: false,
         },
       },
-      stopWhen: {
-        count: 8,
-        kind: 'step-count',
-      },
       system: undefined,
       timeout: 600000,
-      tools: expect.objectContaining({
-        web_search: expect.any(Object),
-      }),
     })
   })
 })

@@ -63,12 +63,7 @@ export function isAssistantProviderCapacityError(error: unknown): boolean {
     typeof (error as { code?: unknown }).code === 'string'
       ? (error as { code: string }).code.toUpperCase()
       : ''
-  const providerFailure =
-    code.startsWith('ASSISTANT_') ||
-    message.includes('codex cli failed') ||
-    message.includes('assistant provider')
-
-  return providerFailure && (
+  const hasCapacitySignal =
     code.includes('RATE') ||
     code.includes('LIMIT') ||
     code.includes('QUOTA') ||
@@ -77,6 +72,28 @@ export function isAssistantProviderCapacityError(error: unknown): boolean {
     message.includes('quota') ||
     message.includes('too many requests') ||
     message.includes('purchase more credits') ||
+    message.includes('please check your plan and billing details') ||
     message.includes('try again at ')
+
+  if (!hasCapacitySignal) {
+    return false
+  }
+
+  const providerFailure =
+    code.startsWith('ASSISTANT_') ||
+    message.includes('codex cli failed') ||
+    message.includes('assistant provider')
+
+  if (providerFailure) {
+    return true
+  }
+
+  // Some hosted upstreams bubble raw quota/rate-limit text without Murph-specific
+  // wrapping or error codes. Treat those as capacity failures so automation holds
+  // the cursor and retries instead of silently dropping the capture.
+  return (
+    code.length === 0 ||
+    code === 'UNKNOWN' ||
+    message.includes('you exceeded your current quota')
   )
 }
