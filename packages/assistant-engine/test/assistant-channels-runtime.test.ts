@@ -123,6 +123,7 @@ describe('assistant channels runtime seam', () => {
     expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.canAutoReply(groupCapture)).toContain(
       'direct chats',
     )
+    expect(ASSISTANT_CHANNEL_ADAPTERS.linq.supportsIdempotencyKey).toBe(true)
     expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply(groupCapture)).toContain(
       'direct chats',
     )
