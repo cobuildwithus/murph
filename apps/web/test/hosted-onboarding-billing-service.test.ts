@@ -150,7 +150,7 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
-  it("creates a fresh Stripe Checkout Session keyed only by member metadata", async () => {
+  it("creates a fresh Stripe Checkout Session with automatic tax and customer address updates", async () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireHostedInviteForAuthentication.mockResolvedValue(makeInvite());
     const prisma = makePrisma();
@@ -180,9 +180,15 @@ describe("createHostedBillingCheckout", () => {
     );
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        automatic_tax: {
+          enabled: true,
+        },
         cancel_url: "https://join.example.test/join/invite-code/cancel?share=share_123",
         client_reference_id: "member_123",
         customer: "cus_123",
+        customer_update: {
+          address: "auto",
+        },
         metadata: {
           memberId: "member_123",
         },
@@ -245,7 +251,13 @@ describe("createHostedBillingCheckout", () => {
     });
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        automatic_tax: {
+          enabled: true,
+        },
         customer: "cus_existing",
+        customer_update: {
+          address: "auto",
+        },
       }),
     );
   });
