@@ -78,7 +78,7 @@ afterEach(async () => {
   }
 });
 
-test("HostedExistingAccountSignInDialog opens the shared sign-in panel with phone and email methods", async () => {
+test("HostedExistingAccountSignInDialog opens the shared sign-in panel with phone, Telegram, and email methods", async () => {
   const { button, cleanup, container } = await renderClientComponent(
     createElement(HostedExistingAccountSignInDialog),
   );
@@ -93,12 +93,12 @@ test("HostedExistingAccountSignInDialog opens the shared sign-in panel with phon
 
   expect(container.textContent).toContain("Sign in to Murph");
   expect(container.textContent).toContain(
-    "Use your phone number or email address to get a sign-in code.",
+    "Use your phone number, email address, or Telegram to sign in.",
   );
   expect(container.querySelector('[data-hosted-auth-panel-intent="signin"]')).toBeTruthy();
-  expect(container.querySelector('[data-hosted-auth-panel-methods="phone,email"]')).toBeTruthy();
+  expect(container.querySelector('[data-hosted-auth-panel-methods="phone,telegram,email"]')).toBeTruthy();
   expect(mocks.hostedAuthPanel).toHaveBeenCalledWith({
     intent: "signin",
-    methods: ["phone", "email"],
+    methods: ["phone", "telegram", "email"],
   });
 });
