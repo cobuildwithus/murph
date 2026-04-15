@@ -11,6 +11,16 @@ const allowedSourceArtifacts = new Set([
   "apps/web/postcss.config.mjs",
   "apps/web/eslint.config.mjs",
 ]);
+const skippedSourceArtifactDirectoryNames = new Set([
+  "dist",
+  "node_modules",
+  "coverage",
+  ".next",
+  ".next-dev",
+  ".next-smoke",
+  ".deploy",
+  ".wrangler",
+]);
 const blockedTrackedArtifactDirectoryNames = new Set([
   "dist",
   ".next",
@@ -122,14 +132,7 @@ async function scanPath(relativePath: string, offenders: string[]): Promise<void
     const entryRelativePath = path.posix.join(relativePath, entry.name);
 
     if (entry.isDirectory()) {
-      if (
-        entry.name === "dist" ||
-        entry.name === "node_modules" ||
-        entry.name === "coverage" ||
-        entry.name === ".next" ||
-        entry.name === ".next-dev" ||
-        entry.name === ".next-smoke"
-      ) {
+      if (shouldSkipSourceArtifactDirectory(entry.name)) {
         continue;
       }
 
@@ -174,6 +177,10 @@ export function isAllowedDeclarationArtifactContents(
 ): boolean {
   const expectedContents = allowedDeclarationArtifacts.get(relativePath);
   return expectedContents?.includes(contents) ?? false;
+}
+
+export function shouldSkipSourceArtifactDirectory(name: string): boolean {
+  return skippedSourceArtifactDirectoryNames.has(name);
 }
 
 export function isBlockedTrackedEnvArtifactPath(filePath: string): boolean {
