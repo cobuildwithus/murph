@@ -7,7 +7,9 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = ["packages", "apps", "e2e"] as const;
-const generatedArtifactDirectories = [
+export const generatedArtifactDirectories = [
+  "apps/cloudflare/.deploy/.deploy",
+  "apps/cloudflare/.deploy/dry-run",
   "apps/cloudflare/.deploy/smoke-dist",
 ] as const;
 const sourceExtensions = [".ts", ".tsx", ".mts", ".cts"] as const;
