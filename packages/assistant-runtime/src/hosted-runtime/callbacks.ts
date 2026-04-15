@@ -93,18 +93,26 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
-  await dispatchAssistantOutboxIntent({
-    dependencies: {
-      sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
-        input.effectsPort.sendEmail(request),
-    },
-    dispatchHooks: createHostedAssistantDeliveryDispatchHooks({
-      effectsPort: input.effectsPort,
+  try {
+    await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
+          input.effectsPort.sendEmail(request),
+      },
+      dispatchHooks: createHostedAssistantDeliveryDispatchHooks({
+        effectsPort: input.effectsPort,
+        userId: input.userId,
+      }),
+      intentId: input.assistantDeliveryEffect.effectId,
+      vault: input.vaultRoot,
+    });
+  } catch (error) {
+    throw attachHostedAssistantDeliveryDispatchDetails(error, {
+      effectId: input.assistantDeliveryEffect.effectId,
+      fingerprint: input.assistantDeliveryEffect.fingerprint,
       userId: input.userId,
-    }),
-    intentId: input.assistantDeliveryEffect.effectId,
-    vault: input.vaultRoot,
-  });
+    });
+  }
 }
 
 function createHostedAssistantDeliveryDispatchHooks(input: {
@@ -329,6 +337,7 @@ function createHostedAssistantDeliveryConfirmationPendingError(input: {
     retryable: true;
     status: null;
   };
+  details: Record<string, boolean | null | string>;
   deliveryMayHaveSucceeded: true;
   retryable: true;
 } {
@@ -344,6 +353,7 @@ function createHostedAssistantDeliveryConfirmationPendingError(input: {
       status: null;
     };
     cause?: unknown;
+    details: Record<string, boolean | null | string>;
     deliveryMayHaveSucceeded: true;
     retryable: true;
   };
@@ -352,6 +362,14 @@ function createHostedAssistantDeliveryConfirmationPendingError(input: {
   error.context = {
     retryable: true,
     status: null,
+  };
+  error.details = {
+    assistantDeliveryBoundary: "hosted_runtime_finalize",
+    deliveryMayHaveSucceeded: true,
+    effectId: input.effectId,
+    failureDomain: "confirmation_pending",
+    retryable: true,
+    userId: input.userId,
   };
   error.deliveryMayHaveSucceeded = true;
   error.retryable = true;
@@ -381,6 +399,7 @@ function createHostedAssistantDeliveryJournalError(
     retryable: true;
     status: number | null;
   };
+  details: Record<string, boolean | null | string>;
   retryable: true;
 } {
   const effectId = input.method === "PUT" ? input.record.effectId : input.sideEffect.effectId;
@@ -395,6 +414,7 @@ function createHostedAssistantDeliveryJournalError(
       status: number | null;
     };
     cause?: unknown;
+    details: Record<string, boolean | null | string>;
     retryable: true;
   };
 
@@ -403,9 +423,45 @@ function createHostedAssistantDeliveryJournalError(
     retryable: true,
     status,
   };
+  error.details = {
+    assistantDeliveryBoundary: "hosted_runtime_finalize",
+    effectId,
+    failureDomain: "journal",
+    journalMethod: input.method,
+    retryable: true,
+    status: status === null ? null : String(status),
+    userId: input.userId,
+  };
   error.retryable = true;
   if (cause !== undefined) {
     error.cause = cause;
   }
+  return error;
+}
+
+function attachHostedAssistantDeliveryDispatchDetails(
+  error: unknown,
+  input: {
+    effectId: string;
+    fingerprint: string;
+    userId: string;
+  },
+): unknown {
+  if (!error || typeof error !== "object") {
+    return error;
+  }
+
+  const existingDetails = "details" in error && error.details && typeof error.details === "object"
+    ? error.details as Record<string, unknown>
+    : null;
+  Object.assign(error, {
+    details: {
+      ...(existingDetails ?? {}),
+      assistantDeliveryBoundary: "hosted_runtime_finalize",
+      effectFingerprint: input.fingerprint,
+      effectId: input.effectId,
+      userId: input.userId,
+    },
+  });
   return error;
 }

@@ -26,7 +26,10 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_API_TOKEN_REQUIRED',
+      error.code === 'LINQ_API_TOKEN_REQUIRED' &&
+      error.context?.operation === 'typing_start' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'configuration',
   )
 
   const originalFetch = globalThis.fetch
@@ -44,7 +47,10 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_UNAVAILABLE',
+      error.code === 'LINQ_UNAVAILABLE' &&
+      error.context?.operation === 'typing_start' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'configuration',
   )
 
   vi.stubGlobal('fetch', originalFetch)
@@ -67,6 +73,9 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message === 'temporarily down' &&
+      error.context?.operation === 'typing_stop' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
       error.context?.retryable === false &&
       error.context?.status === 503,
   )

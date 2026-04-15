@@ -97,4 +97,51 @@ describe("hosted Linq webhook transport", () => {
       homeRecipientPhone: "+15555550200",
     });
   });
+
+  it("logs safe structured Linq side-effect details when delivery fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValue(Object.assign(
+      new Error("send failed"),
+      {
+        code: "LINQ_SEND_FAILED",
+        details: {
+          failureStage: "http",
+          status: 502,
+        },
+        retryable: true,
+      },
+    ));
+    const handlers = createHostedWebhookReceiptHandlers();
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "daily_quota",
+    });
+
+    try {
+      await expect(
+        handlers.performSideEffect(effect, {
+          prisma: {} as never,
+        }),
+      ).rejects.toThrow("send failed");
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted Linq side-effect delivery failed.",
+        expect.objectContaining({
+          effectId: effect.effectId,
+          failureStage: "http",
+          hasIdempotencyKey: true,
+          hasReplyToMessageId: true,
+          operation: "send_message",
+          provider: "linq",
+          retryable: true,
+          status: 502,
+          template: "daily_quota",
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });

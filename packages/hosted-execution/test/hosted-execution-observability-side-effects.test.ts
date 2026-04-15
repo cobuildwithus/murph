@@ -331,6 +331,11 @@ describe("hosted execution observability", () => {
     const error = Object.assign(new Error("Top level detail"), {
       cause: "authorization: Bearer abc123",
       code: "E_RUNTIME_SECRET",
+      context: {
+        operation: "send_message",
+        provider: "linq",
+        retryable: true,
+      },
       details: {
         token: "secret-token",
         nested: {
@@ -353,6 +358,9 @@ describe("hosted execution observability", () => {
       nested: {
         email: "[redacted-email]",
       },
+      operation: "send_message",
+      provider: "linq",
+      retryable: true,
       stackPreview: [
         "at first (<REDACTED_PATH>)",
         "at second (<REDACTED_PATH>)",

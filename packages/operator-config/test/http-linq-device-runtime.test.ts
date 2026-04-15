@@ -360,6 +360,9 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'transport' &&
       error.context?.retryable === false &&
       error.context?.timedOut === false,
   )
@@ -405,6 +408,9 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'create_webhook_subscription' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
       error.context?.retryable === true &&
       error.context?.status === 429 &&
       error.message === 'rate limited',
@@ -516,6 +522,9 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message === 'Linq request GET /phone_numbers failed with HTTP 408.' &&
+      error.context?.operation === 'list_phone_numbers' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
       error.context?.retryable === true &&
       error.context?.status === 408,
   )
@@ -546,6 +555,11 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message ===
         'Linq request POST /chats/chat-123/messages timed out after 30000ms.' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.hasIdempotencyKey === false &&
+      error.context?.hasReplyToMessageId === false &&
       error.context?.retryable === false &&
       error.context?.timedOut === true &&
       error.context?.timeoutMs === 30000 &&

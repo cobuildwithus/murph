@@ -1274,8 +1274,13 @@ test('sendLinqMessage falls back to raw Linq error text when the error body is n
       assert.equal((error as VaultCliError).code, 'LINQ_API_REQUEST_FAILED')
       assert.equal((error as VaultCliError).message, 'Plain Linq failure')
       assert.deepEqual((error as VaultCliError).context, {
+        failureStage: 'http',
+        hasIdempotencyKey: false,
+        hasReplyToMessageId: false,
         method: 'POST',
+        operation: 'send_message',
         path: '/chats/chat_123/messages',
+        provider: 'linq',
         retryable: false,
         status: 400,
       })

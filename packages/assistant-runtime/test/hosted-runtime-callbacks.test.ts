@@ -442,6 +442,13 @@ describe("hosted runtime callbacks", () => {
       }),
     ).rejects.toMatchObject({
       code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      details: expect.objectContaining({
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        deliveryMayHaveSucceeded: true,
+        effectId: "intent_123",
+        failureDomain: "confirmation_pending",
+        userId: "member_123",
+      }),
       deliveryMayHaveSucceeded: true,
       retryable: true,
     });
@@ -527,6 +534,12 @@ describe("hosted runtime callbacks", () => {
       }),
     ).rejects.toMatchObject({
       code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      details: expect.objectContaining({
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        effectId: "intent_123",
+        failureDomain: "confirmation_pending",
+        userId: "member_123",
+      }),
       deliveryMayHaveSucceeded: true,
       retryable: true,
     });
@@ -768,8 +781,22 @@ describe("hosted runtime callbacks", () => {
       cause: expect.objectContaining({
         cause: journalError,
         code: "HOSTED_SIDE_EFFECT_JOURNAL_FAILED",
+        details: expect.objectContaining({
+          assistantDeliveryBoundary: "hosted_runtime_finalize",
+          effectId: "intent_123",
+          failureDomain: "journal",
+          journalMethod: "PUT",
+          userId: "member_123",
+        }),
       }),
       code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      details: expect.objectContaining({
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        deliveryMayHaveSucceeded: true,
+        effectId: "intent_123",
+        failureDomain: "confirmation_pending",
+        userId: "member_123",
+      }),
       deliveryMayHaveSucceeded: true,
       retryable: true,
     });
