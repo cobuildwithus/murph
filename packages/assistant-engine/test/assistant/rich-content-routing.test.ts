@@ -7,7 +7,6 @@ import type { AssistantUserMessageContentPart } from '../../src/model-harness.js
 import type { ResolvedAssistantFailoverRoute } from '../../src/assistant/failover.js'
 import {
   assistantRouteSupportsRichUserMessageContent,
-  assistantRoutesSupportRichUserMessageContent,
   hasAssistantRichUserMessageContent,
   prioritizeAssistantRoutesForRichUserMessageContent,
   resolveAssistantRouteUserMessageContent,
@@ -57,10 +56,6 @@ describe('rich-content-routing', () => {
 
     expect(assistantRouteSupportsRichUserMessageContent(codexRoute)).toBe(false)
     expect(assistantRouteSupportsRichUserMessageContent(openAiRoute)).toBe(true)
-    expect(
-      assistantRoutesSupportRichUserMessageContent([codexRoute, openAiRoute]),
-    ).toBe(true)
-    expect(assistantRoutesSupportRichUserMessageContent([codexRoute])).toBe(false)
 
     expect(
       resolveAssistantRouteUserMessageContent({

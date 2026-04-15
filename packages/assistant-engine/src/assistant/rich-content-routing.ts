@@ -8,12 +8,6 @@ export function hasAssistantRichUserMessageContent(
   return (userMessageContent ?? []).some((part) => part.type !== 'text')
 }
 
-export function assistantRoutesSupportRichUserMessageContent(
-  routes: readonly ResolvedAssistantFailoverRoute[],
-): boolean {
-  return routes.some((route) => assistantRouteSupportsRichUserMessageContent(route))
-}
-
 export function prioritizeAssistantRoutesForRichUserMessageContent(input: {
   routes: readonly ResolvedAssistantFailoverRoute[]
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined

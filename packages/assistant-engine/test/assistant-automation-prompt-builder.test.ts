@@ -422,7 +422,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     )
   })
 
-  it('requests rich user message content when only multimodal evidence remains', async () => {
+  it('prepares multimodal user message content when only attachment evidence remains', async () => {
     promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
       createAttachmentBundle(),
     ])
@@ -452,16 +452,18 @@ describe('prepareAssistantAutoReplyInput', () => {
       prompt: expect.stringContaining(
         'No parsed attachment text is available. Use attached image or PDF evidence if present.',
       ),
-      requiresRichUserMessageContent: true,
       userMessageContent,
     })
   })
 
-  it('keeps rich content optional when capture text already exists', async () => {
+  it('keeps multimodal evidence alongside capture text when rich input is available', async () => {
+    const userMessageContent = createRichUserMessageContent(
+      'Attachment image 1 (lunch.png).',
+    )
     promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
-      inputMode: 'text-only',
-      userMessageContent: null,
+      inputMode: 'multimodal',
+      userMessageContent,
     })
 
     const result = await prepareAssistantAutoReplyInput(
@@ -478,8 +480,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining('Message text:\nSummarize this incoming message.'),
-      requiresRichUserMessageContent: false,
-      userMessageContent: null,
+      userMessageContent,
     })
   })
 })
