@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Outfit, Geist } from "next/font/google";
+import { Fraunces, DM_Sans, DM_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
@@ -11,17 +11,27 @@ import {
 } from "@/src/lib/hosted-onboarding/landing";
 
 import "./globals.css";
-import { cn } from "@/lib/utils";
+import { cn } from "@/src/lib/utils";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  weight: ["400", "600"],
+});
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
+
+const dmMono = DM_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  weight: ["400"],
+});
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 const SUPPORT_EMAIL = "support@withmurph.ai";
-
-const outfit = Outfit({
-  subsets: ["latin"],
-  display: "swap",
-});
 
 const metadataBase = resolveMetadataBase();
 
@@ -36,12 +46,12 @@ export default function RootLayout(input: { children: React.ReactNode }) {
   const privyClientId = resolveHostedPrivyClientId();
 
   return (
-    <html lang="en" className={cn("font-sans", geist.variable)}>
-      <body className={outfit.className}>
+    <html lang="en" className={cn(fraunces.variable, dmSans.variable, dmMono.variable)}>
+      <body className="bg-background text-foreground font-sans antialiased">
         <Providers privyAppId={privyAppId} privyClientId={privyClientId}>
           <div className="flex min-h-screen flex-col">
             <div className="flex-1">{input.children}</div>
-            <footer className="border-t border-stone-200 bg-cream-dark/60">
+            <footer id="global-footer" className="border-t border-stone-200 bg-cream-dark/60">
               <div className="mx-auto flex max-w-7xl flex-col gap-3 px-6 py-5 text-sm text-stone-500 md:px-12 lg:flex-row lg:items-center lg:justify-between lg:px-16">
                 <p className="max-w-2xl leading-relaxed">
                   Murph is open source and licensed under Apache 2.0.

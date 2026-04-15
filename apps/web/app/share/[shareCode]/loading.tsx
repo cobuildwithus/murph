@@ -1,6 +1,6 @@
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/src/components/ui/badge";
+import { Card, CardContent, CardHeader } from "@/src/components/ui/card";
+import { Skeleton } from "@/src/components/ui/skeleton";
 
 export default function HostedShareLoading() {
   return (

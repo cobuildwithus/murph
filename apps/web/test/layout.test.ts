@@ -7,14 +7,19 @@ import { test } from "vitest";
 import { vi } from "vitest";
 
 vi.mock("next/font/google", () => ({
-  Outfit() {
+  Fraunces() {
     return {
-      className: "font-outfit",
+      variable: "font-fraunces",
     };
   },
-  Geist() {
+  DM_Sans() {
     return {
-      variable: "font-geist",
+      variable: "font-dm-sans",
+    };
+  },
+  DM_Mono() {
+    return {
+      variable: "font-dm-mono",
     };
   },
 }));
