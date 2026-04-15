@@ -39,6 +39,7 @@ export interface HostedUserKeyAuditRecord {
 }
 
 export interface HostedUserKeyStore {
+  hasManagedUserCryptoEnvelope(userId: string): Promise<boolean>;
   ensureManagedUserCryptoEnvelope(
     userId: string,
     options?: { reason?: string },
@@ -88,6 +89,15 @@ export function createHostedUserKeyStore(input: {
   });
 
   return {
+    async hasManagedUserCryptoEnvelope(userId) {
+      return (await readStoredHostedUserRootKeyEnvelope({
+        bucket: input.bucket,
+        envelopeEncryptionKey: input.envelopeEncryptionKey,
+        envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
+        envelopeEncryptionKeysById,
+        userId,
+      })) !== null;
+    },
     async ensureManagedUserCryptoEnvelope(userId, options = {}) {
       const resolved = await resolveHostedUserRootKeyEnvelope({
         auditLog: input.auditLog ?? null,
