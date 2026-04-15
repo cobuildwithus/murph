@@ -135,6 +135,7 @@ describe("hosted Linq webhook transport", () => {
           hasReplyToMessageId: true,
           operation: "send_message",
           provider: "linq",
+          errorMessage: "send failed",
           retryable: true,
           status: 502,
           template: "daily_quota",

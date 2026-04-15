@@ -158,6 +158,12 @@ function buildHostedLinqSideEffectLogDetails(
     template: effect.payload.template,
     ...sanitizeHostedOnboardingStructuredLogDetails({
       errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+            ? error
+            : null,
       errorName: error instanceof Error ? error.name : null,
       ...(nestedDetails ?? {}),
     }),
