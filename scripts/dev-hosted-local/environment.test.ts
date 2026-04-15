@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertLocalWorkerOidcEnvironment,
   buildHostedLocalDevOverrides,
+  buildWranglerEnvFileText,
   buildWranglerVarArgs,
   mergeCloudflareLocalEnv,
   parseEnvText,
@@ -140,5 +141,24 @@ describe("buildWranglerVarArgs", () => {
       "--var",
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
     ]);
+  });
+});
+
+describe("buildWranglerEnvFileText", () => {
+  it("includes worker secrets and defaults the runner env profiles", () => {
+    expect(
+      buildWranglerEnvFileText({
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        LINQ_API_TOKEN: "linq-secret",
+      }),
+    ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,hosted-email,linq,mapbox,telegram"');
+    expect(
+      buildWranglerEnvFileText({
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        LINQ_API_TOKEN: "linq-secret",
+      }),
+    ).toContain('LINQ_API_TOKEN="linq-secret"');
   });
 });

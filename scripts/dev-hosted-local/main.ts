@@ -1,13 +1,21 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 import { resolveHostedLocalDevConfig } from "./config.ts";
-import { DEFAULT_DATABASE_URL, repoRoot, webDir } from "./constants.ts";
+import {
+  cloudflareDevVarsPath,
+  DEFAULT_DATABASE_URL,
+  repoRoot,
+  webDir,
+} from "./constants.ts";
 import {
   buildHostedLocalDevOverrides,
+  buildWranglerEnvFileText,
+  buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
+  readOptionalSimpleEnvFile,
   readSimpleEnvFile,
   requireEnvValue,
   resolveCloudflareLocalEnv,
@@ -45,7 +53,14 @@ export async function main(): Promise<void> {
 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-dev-env-"));
   const pulledEnvPath = path.join(tempDir, ".env.local");
+  const workerEnvPath = path.join(tempDir, "cloudflare-worker.env");
+  const workerDevVarsPath = path.join(tempDir, "cloudflare-worker.dev.vars");
+  const workerDevVarsBackupPath = path.join(tempDir, "cloudflare-worker.dev.vars.backup");
+  const workerConfigPath = path.join(repoRoot, "apps", "cloudflare", ".wrangler", "local-dev.generated.json");
+  const repoEnvPath = path.join(repoRoot, ".env");
   const initialEnv = { ...process.env } satisfies NodeJS.ProcessEnv;
+  let restoreCloudflareDevVars = false;
+  let hadExistingCloudflareDevVars = false;
 
   try {
     if (!config.skipVercelPull) {
@@ -56,8 +71,10 @@ export async function main(): Promise<void> {
       });
     }
 
+    const repoEnv = await readOptionalSimpleEnvFile(repoEnvPath);
     const pulledEnv = config.skipVercelPull ? {} : await readSimpleEnvFile(pulledEnvPath);
     const vercelEnv: NodeJS.ProcessEnv = {
+      ...repoEnv,
       ...initialEnv,
       ...pulledEnv,
     };
@@ -82,6 +99,30 @@ export async function main(): Promise<void> {
       ...runtimeEnv,
       ...cloudflareDevVars,
     };
+    const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
+    await writeFile(workerEnvPath, workerEnvText, "utf8");
+    await writeFile(workerDevVarsPath, workerEnvText, "utf8");
+    await mkdir(path.dirname(workerConfigPath), { recursive: true });
+    await writeFile(
+      workerConfigPath,
+      `${JSON.stringify(buildWranglerLocalDevConfig(workerRuntimeEnv), null, 2)}\n`,
+      "utf8",
+    );
+    try {
+      await rename(cloudflareDevVarsPath, workerDevVarsBackupPath);
+      hadExistingCloudflareDevVars = true;
+    } catch (error) {
+      if (
+        typeof error !== "object"
+        || error === null
+        || !("code" in error)
+        || error.code !== "ENOENT"
+      ) {
+        throw error;
+      }
+    }
+    restoreCloudflareDevVars = true;
+    await symlink(workerDevVarsPath, cloudflareDevVarsPath);
 
     requireEnvValue(
       "DATABASE_URL",
@@ -124,11 +165,15 @@ export async function main(): Promise<void> {
         config.workerHost,
         "--port",
         String(config.workerPort),
+        "--config",
+        workerConfigPath,
         "--local-protocol",
         config.workerProtocol,
         "--persist-to",
         config.workerPersistDir,
-        ...buildWranglerVarArgs(cloudflareDevVars),
+        "--env-file",
+        workerEnvPath,
+        ...buildWranglerVarArgs(workerRuntimeEnv),
       ], workerRuntimeEnv),
       spawnChildProcess("web", "pnpm", [
         "--dir",
@@ -217,6 +262,13 @@ export async function main(): Promise<void> {
 
     throw new Error(`${exited.name} exited with code ${exited.child.exitCode ?? "unknown"}.`);
   } finally {
+    if (restoreCloudflareDevVars) {
+      await rm(cloudflareDevVarsPath, { force: true });
+      if (hadExistingCloudflareDevVars) {
+        await rename(workerDevVarsBackupPath, cloudflareDevVarsPath);
+      }
+    }
+    await rm(workerConfigPath, { force: true });
     await rm(tempDir, { force: true, recursive: true });
   }
 }

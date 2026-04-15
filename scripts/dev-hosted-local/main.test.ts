@@ -24,8 +24,12 @@ const waitForFirstChildExit = vi.fn<() => Promise<NamedChildProcess>>();
 const waitForHealthyHttpEndpoint = vi.fn(async () => {});
 
 vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
+  rename: vi.fn(async () => {}),
   rm: vi.fn(async () => {}),
+  symlink: vi.fn(async () => {}),
+  writeFile: vi.fn(async () => {}),
 }));
 
 vi.mock("./config.ts", () => ({
@@ -36,7 +40,12 @@ vi.mock("./environment.ts", () => ({
   buildHostedLocalDevOverrides: vi.fn(() => ({
     HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
   })),
+  buildWranglerEnvFileText: vi.fn(() => 'HOSTED_WEB_BASE_URL="http://127.0.0.1:3000"'),
+  buildWranglerLocalDevConfig: vi.fn(() => ({ name: "murph-hosted" })),
   buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000"]),
+  readOptionalSimpleEnvFile: vi.fn(async () => ({
+    HOSTED_ASSISTANT_PROVIDER: "venice",
+  })),
   readSimpleEnvFile: vi.fn(async () => ({})),
   requireEnvValue: vi.fn(),
   resolveCloudflareLocalEnv: vi.fn(async () => ({
@@ -112,15 +121,20 @@ describe("hosted local dev main", () => {
         "127.0.0.1",
         "--port",
         "8787",
+        "--config",
+        expect.stringContaining("apps/cloudflare/.wrangler/local-dev.generated.json"),
         "--local-protocol",
         "http",
         "--persist-to",
         ".wrangler/state/dev-root",
+        "--env-file",
+        "/tmp/murph-dev-env-test/cloudflare-worker.env",
         "--var",
         "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000",
       ],
       expect.objectContaining({
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_ASSISTANT_PROVIDER: "venice",
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
     );

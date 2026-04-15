@@ -1,6 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
+} from "../../apps/cloudflare/scripts/deploy-automation/worker-optional-vars.ts";
+
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 
 export const repoRoot = path.resolve(scriptsDir, "..", "..");
@@ -28,6 +32,7 @@ export const HEALTH_REQUEST_TIMEOUT_MS = 20_000;
 export const HOSTED_WEB_DEV_DIST_DIR = ".next-dev";
 export const HOSTED_WEB_SMOKE_DIST_DIR = ".next-smoke";
 export const WRANGLER_VAR_ALLOWLIST = [
+  ...HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
   "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
