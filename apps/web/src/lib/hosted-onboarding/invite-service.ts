@@ -1,6 +1,7 @@
 import {
   type HostedInvite,
   type HostedMember,
+  type HostedMemberRouting,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -219,6 +220,69 @@ export async function requireHostedInviteForAuthentication(
   now: Date,
 ) {
   const invite = await findHostedInviteByCode(inviteCode, prisma);
+
+  if (!invite) {
+    throw hostedOnboardingError({
+      code: "INVITE_NOT_FOUND",
+      message: "That Murph invite link is no longer valid.",
+      httpStatus: 404,
+    });
+  }
+
+  if (invite.expiresAt <= now) {
+    throw hostedOnboardingError({
+      code: "INVITE_EXPIRED",
+      message: "That Murph invite link has expired. Text the number again for a fresh link.",
+      httpStatus: 410,
+    });
+  }
+
+  return invite;
+}
+
+export interface HostedInviteBillingCheckoutSnapshot {
+  expiresAt: Date;
+  inviteCode: string;
+  member: {
+    billingStatus: HostedMember["billingStatus"];
+    id: string;
+    identity: {
+      phoneLookupKey: string | null;
+    } | null;
+    routing: HostedMemberRouting | null;
+    suspendedAt: Date | null;
+  };
+  memberId: string;
+}
+
+export async function requireHostedInviteForBillingCheckout(
+  inviteCode: string,
+  prisma: PrismaClient | Prisma.TransactionClient,
+  now: Date,
+): Promise<HostedInviteBillingCheckoutSnapshot> {
+  const invite = await prisma.hostedInvite.findUnique({
+    where: {
+      inviteCode,
+    },
+    select: {
+      expiresAt: true,
+      inviteCode: true,
+      memberId: true,
+      member: {
+        select: {
+          billingStatus: true,
+          id: true,
+          identity: {
+            select: {
+              phoneLookupKey: true,
+            },
+          },
+          routing: true,
+          suspendedAt: true,
+        },
+      },
+    },
+  });
 
   if (!invite) {
     throw hostedOnboardingError({

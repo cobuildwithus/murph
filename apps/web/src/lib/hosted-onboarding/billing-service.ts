@@ -13,7 +13,7 @@ import {
   bindHostedMemberStripeCustomerIdIfMissing,
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
-import { requireHostedInviteForAuthentication } from "./invite-service";
+import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
 import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
@@ -49,7 +49,7 @@ export async function createHostedBillingCheckout(
 
   try {
     const auth = await resolveHostedBillingCheckoutAuth(input);
-    const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
+    const invite = await requireHostedInviteForBillingCheckout(input.inviteCode, prisma, now);
 
     if (auth.member.id !== invite.memberId) {
       throw hostedOnboardingError({
@@ -183,9 +183,6 @@ async function ensureHostedStripeCustomer(input: {
   try {
     if (currentStripeCustomerId) {
       customerPath = "existing";
-      await input.stripe.customers.update(currentStripeCustomerId, {
-        metadata: customerMetadata,
-      });
       finishHostedOnboardingTiming(timing, "completed", {
         customerPath,
       });
@@ -210,9 +207,6 @@ async function ensureHostedStripeCustomer(input: {
 
     if (billingRef?.stripeCustomerId) {
       customerPath = billingRef.stripeCustomerId === customer.id ? "created" : "raced-existing";
-      await input.stripe.customers.update(billingRef.stripeCustomerId, {
-        metadata: customerMetadata,
-      });
       finishHostedOnboardingTiming(timing, "completed", {
         customerPath,
       });
