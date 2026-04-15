@@ -13,7 +13,7 @@ const lifecycleConfigPath = path.join(appDir, "r2-bundles-lifecycle.json");
 const configuredBuckets = resolveHostedLifecycleBucketNames(process.env);
 
 for (const bucketName of configuredBuckets) {
-  console.log(`Applying transient lifecycle rules to R2 bucket ${bucketName}...`);
+  console.log(`Applying execution-transient lifecycle rules to R2 bucket ${bucketName}...`);
   await runWranglerLogged(
     buildHostedLifecycleWranglerArgs({
       bucketName,
@@ -26,5 +26,5 @@ for (const bucketName of configuredBuckets) {
 }
 
 console.log(
-  `Applied transient lifecycle rules from ${path.relative(process.cwd(), lifecycleConfigPath) || path.basename(lifecycleConfigPath)}.`,
+  `Applied execution-transient lifecycle rules from ${path.relative(process.cwd(), lifecycleConfigPath) || path.basename(lifecycleConfigPath)}.`,
 );

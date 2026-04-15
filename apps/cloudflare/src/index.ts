@@ -1,18 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
-import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import {
+  buildHostedExecutionAssistantCronTickDispatch,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import type {
-  HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution/outbox-payload";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
+  type HostedExecutionDispatchStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -24,15 +21,6 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
-import {
-  type GatewayFetchAttachmentsInput,
-  type GatewayGetConversationInput,
-  type GatewayListConversationsInput,
-  type GatewayPollEventsInput,
-  type GatewayListOpenPermissionsInput,
-  type GatewayReadMessagesInput,
-  type GatewayRespondToPermissionInput,
-} from "@murphai/gateway-core";
 
 import {
   verifyHostedExecutionVercelOidcRequest,
@@ -48,31 +36,16 @@ export { RunnerContainer } from "./runner-container.ts";
 import type { HostedExecutionContainerNamespaceLike } from "./runner-container.ts";
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
-import { type HostedUserEnvUpdate } from "./user-env.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
 } from "./user-runner.ts";
-import { handleGatewayRoute } from "./worker-routes/gateway.ts";
-import {
-  handleEventStatusRoute,
-  handleManualRunRoute,
-  handlePendingUsageRoute,
-  handlePendingUsageUsersRoute,
-  handleSharePackRoute,
-  handleStatusRoute,
-  handleUserCryptoContextRoute,
-  handleUserDeviceSyncRuntimeRoute,
-  handleUserDispatchPayloadRoute,
-  handleUserEmailAddressRoute,
-  handleUserEnvRoute,
-  handleUserStoredDispatchRoute,
-} from "./worker-routes/internal-user.ts";
 import {
   asWorkerStringEnvironment,
 } from "./worker-contracts.ts";
 import {
   decodeRouteParam,
+  readCachedOptionalJsonObject,
   readCachedRequestText,
   resolveUserRunnerStub,
   type UserRunnerDurableObjectStubLike,
@@ -150,115 +123,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     methods: ["GET"],
     wrongMethodResponse: "method-not-allowed",
   },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleUserEnvRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/env$/u),
-    methods: ["GET", "PUT", "DELETE"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleUserDeviceSyncRuntimeRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/device-sync\/runtime$/u),
-    methods: ["GET", "POST"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleUserCryptoContextRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/crypto-context$/u),
-    methods: ["PUT"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleSharePackRoute(context, params.userId, params.shareId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/shares\/(?<shareId>[^/]+)\/pack$/u),
-    methods: ["PUT", "DELETE"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleUserEmailAddressRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/email-address$/u),
-    methods: ["GET"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleUserDispatchPayloadRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/dispatch-payload$/u),
-    methods: ["PUT", "DELETE"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleUserStoredDispatchRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/dispatch-payload\/dispatch$/u),
-    methods: ["POST"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    async handle(context) {
-      return handlePendingUsageUsersRoute(context);
-    },
-    match: matchExactPath("/internal/usage/pending-users"),
-    methods: ["GET"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handlePendingUsageRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/usage\/pending$/u),
-    methods: ["GET", "DELETE"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleGatewayRoute(context, params.userId, params.resource);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/gateway\/(?<resource>conversations\/list|conversations\/get|messages\/read|messages\/send|attachments\/fetch|events\/poll|events\/wait|permissions\/list-open|permissions\/respond)$/u),
-    methods: ["POST"],
-    wrongMethodResponse: "method-not-allowed",
-  },
 ];
 
 export default {
@@ -307,10 +171,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.bootstrapUser(userId);
   }
 
-  async provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }> {
-    return this.runner.provisionManagedUserCrypto(userId);
-  }
-
   async getDeviceSyncRuntimeSnapshot(input: {
     request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
@@ -323,38 +183,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.applyDeviceSyncRuntimeUpdates(input);
   }
 
-  async putPendingUsage(input: {
-    usage: readonly Record<string, unknown>[];
-  }): Promise<HostedRuntimeUsageRecordResponse> {
-    return this.runner.putPendingUsage(input);
-  }
-
-  async readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]> {
-    return this.runner.readPendingUsage(input);
-  }
-
-  async deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void> {
-    return this.runner.deletePendingUsage(input);
-  }
-
-  async deleteStoredDispatchPayload(input: {
-    payload: HostedExecutionOutboxPayload;
-  }): Promise<void> {
-    return this.runner.deleteStoredDispatchPayload(input);
-  }
-
-  async dispatchStoredPayload(input: {
-    payload: HostedExecutionOutboxPayload;
-  }): Promise<HostedExecutionDispatchResult> {
-    return this.runner.dispatchStoredPayload(input);
-  }
-
-  async storeDispatchPayload(input: {
-    dispatch: HostedExecutionDispatchRequest;
-  }): Promise<HostedExecutionOutboxPayload> {
-    return this.runner.storeDispatchPayload(input);
-  }
-
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     return this.runner.dispatch(input);
   }
@@ -363,54 +191,14 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.dispatchWithOutcome(input);
   }
 
-  async gatewayListConversations(input?: GatewayListConversationsInput) {
-    return this.runner.gatewayListConversations(input);
-  }
-
-  async gatewayGetConversation(input: GatewayGetConversationInput) {
-    return this.runner.gatewayGetConversation(input);
-  }
-
-  async gatewayReadMessages(input: GatewayReadMessagesInput) {
-    return this.runner.gatewayReadMessages(input);
-  }
-
-  async gatewayFetchAttachments(input: GatewayFetchAttachmentsInput) {
-    return this.runner.gatewayFetchAttachments(input);
-  }
-
-  async gatewayPollEvents(input?: GatewayPollEventsInput) {
-    return this.runner.gatewayPollEvents(input);
-  }
-
-  async gatewayListOpenPermissions(input?: GatewayListOpenPermissionsInput) {
-    return this.runner.gatewayListOpenPermissions(input);
-  }
-
-  async gatewayRespondToPermission(input: GatewayRespondToPermissionInput) {
-    return this.runner.gatewayRespondToPermission(input);
-  }
-
   async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
   }
 
   async getEventStatus(input: {
     eventId: string;
-  }) {
+  }): Promise<HostedExecutionDispatchStatus | null> {
     return this.runner.getEventStatus(input);
-  }
-
-  async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {
-    return this.runner.getUserEnvStatus();
-  }
-
-  async updateUserEnv(update: HostedUserEnvUpdate): Promise<CloudflareHostedUserEnvStatus> {
-    return this.runner.updateUserEnv(update);
-  }
-
-  async clearUserEnv(): Promise<CloudflareHostedUserEnvStatus> {
-    return this.runner.clearUserEnv();
   }
 
   async fetch(): Promise<Response> {
@@ -504,6 +292,45 @@ async function handleDispatchRoute(context: WorkerRouteContext): Promise<Respons
   return result.event.state === "backpressured" ? json(result, 429) : json(result);
 }
 
+async function handleManualRunRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  await readCachedOptionalJsonObject(context);
+  const userId = decodeRouteParam(encodedUserId);
+  const dispatch = buildHostedExecutionAssistantCronTickDispatch({
+    eventId: `manual:${Date.now()}`,
+    occurredAt: new Date().toISOString(),
+    reason: "manual",
+    userId,
+  });
+  const status = await (await resolveUserRunnerStub(context.env, userId)).dispatch(dispatch);
+
+  return isBackpressuredStatus(status, dispatch.eventId)
+    ? json(status, 429)
+    : json(status);
+}
+
+async function handleStatusRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await stub.status());
+}
+
+async function handleEventStatusRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+  encodedEventId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const eventId = decodeRouteParam(encodedEventId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await stub.getEventStatus({ eventId }));
+}
+
 function requireBoundInternalRouteUser(
   context: Pick<WorkerRouteContext, "request">,
   params: RouteParams,
@@ -587,4 +414,11 @@ function classifyPublicRouteError(error: unknown): { error: string; status: numb
     return { error: "Invalid request.", status: 400 };
   }
   return { error: "Internal error.", status: 500 };
+}
+
+function isBackpressuredStatus(
+  status: HostedExecutionUserStatus,
+  eventId: string,
+): boolean {
+  return (status.backpressuredEventIds ?? []).includes(eventId);
 }

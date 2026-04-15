@@ -24,7 +24,7 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
-import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
+import { readHostedDeviceSyncRuntimeClientIfConfigured } from "./runtime-client";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 
 export class HostedDeviceSyncPublicIngressService {
@@ -42,54 +42,65 @@ export class HostedDeviceSyncPublicIngressService {
       hooks: {
         onConnectionEstablished: async ({ account, connection, now, provider }) => {
           const userId = await this.requireHostedConnectionOwnerId(account.id);
-          const runtimeClient = requireHostedDeviceSyncRuntimeClient();
+          const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
           const metadata = sanitizeStoredDeviceSyncMetadata(connection.metadata ?? {});
-          const tokenBundle = {
-            accessToken: connection.tokens.accessToken,
-            accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
-            keyVersion: this.context.env.encryptionKeyVersion,
-            refreshToken: connection.tokens.refreshToken ?? null,
-            tokenVersion: 1,
-          } as const;
-
-          await runtimeClient.applyDeviceSyncRuntimeUpdates(userId, {
-            occurredAt: now,
-            updates: [
-              {
-                connectionId: account.id,
-                connection: {
-                  displayName: account.displayName,
-                  metadata,
-                  scopes: account.scopes,
-                  status: account.status,
-                },
-                localState: {
-                  lastErrorCode: account.lastErrorCode,
-                  lastErrorMessage: account.lastErrorMessage,
-                  lastSyncCompletedAt: account.lastSyncCompletedAt,
-                  lastSyncErrorAt: account.lastSyncErrorAt,
-                  lastSyncStartedAt: account.lastSyncStartedAt,
-                  lastWebhookAt: account.lastWebhookAt,
-                  nextReconcileAt: account.nextReconcileAt,
-                },
-                seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-                  account: {
-                    ...account,
-                    accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt,
-                    metadata,
-                  },
-                  externalAccountId: connection.externalAccountId,
-                  tokenBundle,
-                }),
-                tokenBundle,
-              },
-            ],
-          });
-          await this.context.store.syncDurableConnectionState({
+          const storedAccount = await this.context.store.getStoredConnectionAccountForUser(userId, account.id);
+          const tokenBundle = storedAccount
+            ? {
+              accessToken: storedAccount.accessToken,
+              accessTokenExpiresAt: storedAccount.accessTokenExpiresAt ?? null,
+              keyVersion: storedAccount.keyVersion,
+              refreshToken: storedAccount.refreshToken,
+              tokenVersion: storedAccount.tokenVersion,
+            }
+            : {
+              accessToken: connection.tokens.accessToken,
+              accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
+              keyVersion: this.context.env.encryptionKeyVersion,
+              refreshToken: connection.tokens.refreshToken ?? null,
+              tokenVersion: 1,
+            } as const;
+          const projectionAccount = storedAccount ?? {
             ...account,
             accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt,
             metadata,
-          });
+          };
+
+          if (runtimeClient) {
+            try {
+              await runtimeClient.applyDeviceSyncRuntimeUpdates(userId, {
+                occurredAt: now,
+                updates: [
+                  {
+                    connectionId: account.id,
+                    connection: {
+                      displayName: account.displayName,
+                      metadata,
+                      scopes: account.scopes,
+                      status: account.status,
+                    },
+                    localState: {
+                      lastErrorCode: account.lastErrorCode,
+                      lastErrorMessage: account.lastErrorMessage,
+                      lastSyncCompletedAt: account.lastSyncCompletedAt,
+                      lastSyncErrorAt: account.lastSyncErrorAt,
+                      lastSyncStartedAt: account.lastSyncStartedAt,
+                      lastWebhookAt: account.lastWebhookAt,
+                      nextReconcileAt: account.nextReconcileAt,
+                    },
+                    seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
+                      account: projectionAccount,
+                      externalAccountId: connection.externalAccountId,
+                      tokenBundle,
+                    }),
+                    tokenBundle,
+                  },
+                ],
+              });
+            } catch (error) {
+              console.warn(`Hosted device-sync runtime projection write failed for connection ${account.id}.`, error);
+            }
+          }
 
           await handleHostedDeviceSyncConnectionEstablished({
             account,

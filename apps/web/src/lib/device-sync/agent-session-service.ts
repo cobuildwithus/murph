@@ -1,7 +1,5 @@
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 import {
-  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
-  findHostedExecutionDeviceSyncRuntimeApplyEntry,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -20,21 +18,17 @@ import {
 } from "../hosted-agent-sessions";
 import {
   buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
-  buildHostedPublicDeviceSyncAccount,
-  composeHostedRuntimeDeviceSyncAccount,
-  findHostedDeviceSyncRuntimeConnection,
-  requireHostedDeviceSyncRuntimeTokenBundle,
+  requireHostedDeviceSyncStoredTokenBundle,
 } from "./internal-runtime";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
-  hostedConnectionRecordArgs,
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
-  mapHostedConnectionRecord,
+  type HostedStoredDeviceSyncAccount,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
-import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
+import { readHostedDeviceSyncRuntimeClientIfConfigured } from "./runtime-client";
 import { parseInteger, toIsoTimestamp } from "./shared";
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
@@ -128,17 +122,11 @@ export class HostedDeviceSyncAgentSessionService {
   }> {
     const now = toIsoTimestamp(new Date());
     const connection = await this.requireOwnedConnection(session.userId, connectionId);
+    const storedAccount = await this.store.getStoredConnectionAccountForUser(session.userId, connectionId);
     const tokenBundle = buildTokenExport(
-      requireHostedDeviceSyncRuntimeTokenBundle({
+      requireHostedDeviceSyncStoredTokenBundle({
         connectionId,
-        runtimeConnection: findHostedDeviceSyncRuntimeConnection(
-          await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(session.userId, {
-            connectionId,
-            includeSecrets: true,
-            provider: connection.provider,
-          }),
-          connectionId,
-        ),
+        storedTokenBundle: buildStoredTokenBundle(storedAccount),
         userId: session.userId,
       }),
       now,
@@ -182,7 +170,9 @@ export class HostedDeviceSyncAgentSessionService {
           id: connectionId,
           userId: session.userId,
         },
-        ...hostedConnectionRecordArgs,
+        select: {
+          id: true,
+        },
       });
 
       if (!record) {
@@ -194,26 +184,23 @@ export class HostedDeviceSyncAgentSessionService {
         });
       }
 
-      const staticConnection = mapHostedConnectionRecord(record);
-      const runtimeSnapshot = await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(
-        session.userId,
-        {
-          connectionId,
-          includeSecrets: true,
-          provider: staticConnection.provider,
-        },
-      );
-      const runtimeConnection = findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, connectionId);
-      const currentConnection = buildHostedPublicDeviceSyncAccount({
-        record: staticConnection,
-        runtimeConnection,
-      });
-      const currentExternalAccountId = runtimeConnection?.connection.externalAccountId ?? null;
-      const currentTokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
+      const currentAccount = await this.store.getStoredConnectionAccountForUser(session.userId, connectionId, tx);
+      const currentTokenBundle = requireHostedDeviceSyncStoredTokenBundle({
         connectionId,
-        runtimeConnection,
+        storedTokenBundle: buildStoredTokenBundle(currentAccount),
         userId: session.userId,
       });
+
+      if (!currentAccount) {
+        throw deviceSyncError({
+          code: "CONNECTION_SECRET_MISSING",
+          message: "Hosted device-sync connection no longer has a stored token bundle.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+
+      const currentConnection = currentAccount;
 
       if (
         typeof options.expectedTokenVersion === "number" &&
@@ -273,22 +260,10 @@ export class HostedDeviceSyncAgentSessionService {
         };
       }
 
-      if (!currentExternalAccountId) {
-        throw deviceSyncError({
-          code: "RUNTIME_STATE_CONFLICT",
-          message: `Hosted device-sync runtime is missing provider identity for connection ${connectionId}.`,
-          retryable: true,
-          httpStatus: 409,
-        });
-      }
-
       const provider = requireHostedDeviceSyncProvider(this.registry, currentConnection.provider);
       const refreshResult = await this.refreshProviderTokensWithStatusHandling({
         tx,
-        account: composeHostedRuntimeDeviceSyncAccount({
-          connection: currentConnection,
-          tokenBundle: currentTokenBundle,
-        }),
+        account: currentAccount,
         currentTokenBundle,
         provider,
         now,
@@ -301,82 +276,67 @@ export class HostedDeviceSyncAgentSessionService {
 
       const nextTokens = refreshResult.tokens;
       const nextRefreshToken = nextTokens.refreshToken ?? currentTokenBundle.refreshToken;
-      await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(session.userId, {
-        occurredAt: now,
-        updates: [
-          {
-            connection: {
-              status: "active",
-            },
-            connectionId,
-            localState: {
-              clearError: true,
-            },
-            observedTokenVersion: currentTokenBundle.tokenVersion,
-            seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-              account: {
-                ...currentConnection,
-                accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
-                lastErrorCode: null,
-                lastErrorMessage: null,
-                lastSyncErrorAt: null,
-                status: "active",
-              },
-              externalAccountId: currentExternalAccountId,
-              localState: {
-                lastErrorCode: null,
-                lastErrorMessage: null,
-                lastSyncErrorAt: null,
-              },
-              tokenBundle: {
-                accessToken: nextTokens.accessToken,
-                accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
-                keyVersion: currentTokenBundle.keyVersion,
-                refreshToken: nextRefreshToken ?? null,
-                tokenVersion: currentTokenBundle.tokenVersion,
-              },
-            }),
-            tokenBundle: {
-              accessToken: nextTokens.accessToken,
-              accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
-              keyVersion: currentTokenBundle.keyVersion,
-              refreshToken: nextRefreshToken ?? null,
-              tokenVersion: currentTokenBundle.tokenVersion,
-            },
-          },
-        ],
-      });
-      const refreshedSnapshot = await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(
-        session.userId,
-        {
-          connectionId,
-          includeSecrets: true,
-          provider: staticConnection.provider,
-        },
-      );
-      const refreshedRuntimeConnection = findHostedDeviceSyncRuntimeConnection(refreshedSnapshot, connectionId);
-      const refreshedTokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
-        connectionId,
-        runtimeConnection: refreshedRuntimeConnection,
-        userId: session.userId,
-      });
-      assertHostedDeviceSyncRuntimeRefreshApplied({
-        connectionId,
-        expectedTokenBundle: {
-          accessToken: nextTokens.accessToken,
-          accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
-          keyVersion: currentTokenBundle.keyVersion,
-          refreshToken: nextRefreshToken ?? null,
-        },
-        refreshedTokenBundle,
-      });
-      const tokenVersionChanged = refreshedTokenBundle.tokenVersion !== currentTokenBundle.tokenVersion;
-      const tokenBundle = buildTokenExport(refreshedTokenBundle, now);
-      const nextConnection = buildHostedPublicDeviceSyncAccount({
-        record: staticConnection,
-        runtimeConnection: refreshedRuntimeConnection,
-      });
+      const nextStoredTokenBundle = {
+        accessToken: nextTokens.accessToken,
+        accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
+        keyVersion: currentTokenBundle.keyVersion,
+        refreshToken: nextRefreshToken ?? null,
+        tokenVersion: currentTokenBundle.tokenVersion + 1,
+      };
+      const tokenVersionChanged = nextStoredTokenBundle.tokenVersion !== currentTokenBundle.tokenVersion;
+      const tokenBundle = buildTokenExport(nextStoredTokenBundle, now);
+      const nextConnection: PublicDeviceSyncAccount = {
+        ...currentConnection,
+        accessTokenExpiresAt: nextStoredTokenBundle.accessTokenExpiresAt,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncErrorAt: null,
+        status: "active",
+        updatedAt: now,
+      };
       await this.store.syncDurableConnectionState(nextConnection, tx);
+      await this.store.persistStoredConnectionTokenBundle({
+        connectionId,
+        externalAccountId: currentConnection.externalAccountId,
+        provider: currentConnection.provider,
+        tokenBundle: nextStoredTokenBundle,
+        tx,
+      });
+
+      const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
+
+      if (runtimeClient) {
+        try {
+          await runtimeClient.applyDeviceSyncRuntimeUpdates(session.userId, {
+            occurredAt: now,
+            updates: [
+              {
+                connection: {
+                  status: "active",
+                },
+                connectionId,
+                localState: {
+                  clearError: true,
+                },
+                observedTokenVersion: currentTokenBundle.tokenVersion,
+                seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
+                  account: nextConnection,
+                  externalAccountId: currentConnection.externalAccountId,
+                  localState: {
+                    lastErrorCode: null,
+                    lastErrorMessage: null,
+                    lastSyncErrorAt: null,
+                  },
+                  tokenBundle: nextStoredTokenBundle,
+                }),
+                tokenBundle: nextStoredTokenBundle,
+              },
+            ],
+          });
+        } catch (error) {
+          console.warn(`Hosted device-sync runtime projection write failed for token refresh ${connectionId}.`, error);
+        }
+      }
 
       return {
         status: "success",
@@ -496,7 +456,7 @@ export class HostedDeviceSyncAgentSessionService {
   }
 
   private async requireOwnedConnection(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount> {
-    const connection = await this.store.getRuntimeConnectionForUser(userId, connectionId);
+    const connection = await this.store.getConnectionForUser(userId, connectionId);
 
     if (!connection) {
       throw deviceSyncError({
@@ -516,7 +476,7 @@ export class HostedDeviceSyncAgentSessionService {
 
   private async refreshProviderTokensWithStatusHandling(input: {
     tx: HostedPrismaTransactionClient;
-    account: DeviceSyncAccount;
+    account: HostedStoredDeviceSyncAccount;
     currentTokenBundle: {
       accessToken: string;
       accessTokenExpiresAt: string | null;
@@ -547,61 +507,6 @@ export class HostedDeviceSyncAgentSessionService {
           status: error.accountStatus,
         };
 
-        const applyResponse = await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(input.userId, {
-          occurredAt: input.now,
-          updates: [
-            {
-              connection: {
-                status: error.accountStatus,
-              },
-              connectionId: input.account.id,
-              localState: {
-                lastErrorCode: sanitizedErrorCode,
-                lastErrorMessage: sanitizedErrorMessage,
-                lastSyncErrorAt: input.now,
-                ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
-              },
-              observedTokenVersion: input.currentTokenBundle.tokenVersion,
-              seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-                account: seedAccount,
-                externalAccountId: input.account.externalAccountId,
-                localState: {
-                  lastErrorCode: sanitizedErrorCode,
-                  lastErrorMessage: sanitizedErrorMessage,
-                  lastSyncErrorAt: input.now,
-                  ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
-                },
-                tokenBundle: error.accountStatus === "disconnected"
-                  ? null
-                  : { ...input.currentTokenBundle },
-              }),
-              ...(error.accountStatus === "disconnected" ? { tokenBundle: null } : {}),
-            },
-          ],
-        });
-        const appliedUpdate = findHostedExecutionDeviceSyncRuntimeApplyEntry(
-          applyResponse,
-          input.account.id,
-        );
-
-        if (
-          !appliedUpdate
-          || appliedUpdate.status === "missing"
-          || !didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(appliedUpdate)
-          || appliedUpdate.connection?.status !== error.accountStatus
-          || (
-            error.accountStatus === "disconnected"
-            && appliedUpdate.tokenUpdate === "skipped_version_mismatch"
-          )
-        ) {
-          throw deviceSyncError({
-            code: "RUNTIME_STATE_CONFLICT",
-            message: `Hosted device-sync runtime did not persist the ${error.accountStatus} state for connection ${input.account.id}.`,
-            retryable: true,
-            httpStatus: 409,
-          });
-        }
-
         await this.store.createSignal({
           userId: input.userId,
           connectionId: input.account.id,
@@ -617,6 +522,56 @@ export class HostedDeviceSyncAgentSessionService {
           tx: input.tx,
         });
         await this.store.syncDurableConnectionState(seedAccount, input.tx);
+        await this.store.persistStoredConnectionTokenBundle({
+          connectionId: input.account.id,
+          externalAccountId: input.account.externalAccountId,
+          provider: input.account.provider,
+          tokenBundle: error.accountStatus === "disconnected"
+            ? null
+            : { ...input.currentTokenBundle },
+          tx: input.tx,
+        });
+
+        const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
+
+        if (runtimeClient) {
+          try {
+            await runtimeClient.applyDeviceSyncRuntimeUpdates(input.userId, {
+              occurredAt: input.now,
+              updates: [
+                {
+                  connection: {
+                    status: error.accountStatus,
+                  },
+                  connectionId: input.account.id,
+                  localState: {
+                    lastErrorCode: sanitizedErrorCode,
+                    lastErrorMessage: sanitizedErrorMessage,
+                    lastSyncErrorAt: input.now,
+                    ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
+                  },
+                  observedTokenVersion: input.currentTokenBundle.tokenVersion,
+                  seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
+                    account: seedAccount,
+                    externalAccountId: input.account.externalAccountId,
+                    localState: {
+                      lastErrorCode: sanitizedErrorCode,
+                      lastErrorMessage: sanitizedErrorMessage,
+                      lastSyncErrorAt: input.now,
+                      ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
+                    },
+                    tokenBundle: error.accountStatus === "disconnected"
+                      ? null
+                      : { ...input.currentTokenBundle },
+                  }),
+                  ...(error.accountStatus === "disconnected" ? { tokenBundle: null } : {}),
+                },
+              ],
+            });
+          } catch (runtimeError) {
+            console.warn(`Hosted device-sync runtime projection write failed for ${input.account.id}.`, runtimeError);
+          }
+        }
       }
 
       return {
@@ -647,36 +602,26 @@ function buildTokenExport(
   };
 }
 
-function assertHostedDeviceSyncRuntimeRefreshApplied(input: {
-  connectionId: string;
-  expectedTokenBundle: {
-    accessToken: string;
-    accessTokenExpiresAt: string | null;
-    keyVersion: string;
-    refreshToken: string | null;
-  };
-  refreshedTokenBundle: {
-    accessToken: string;
-    accessTokenExpiresAt: string | null;
-    keyVersion: string;
-    refreshToken: string | null;
-  };
-}): void {
-  if (
-    input.refreshedTokenBundle.accessToken === input.expectedTokenBundle.accessToken
-    && input.refreshedTokenBundle.accessTokenExpiresAt === input.expectedTokenBundle.accessTokenExpiresAt
-    && input.refreshedTokenBundle.keyVersion === input.expectedTokenBundle.keyVersion
-    && input.refreshedTokenBundle.refreshToken === input.expectedTokenBundle.refreshToken
-  ) {
-    return;
+function buildStoredTokenBundle(
+  account: HostedStoredDeviceSyncAccount | null,
+): {
+  accessToken: string;
+  accessTokenExpiresAt: string | null;
+  keyVersion: string;
+  refreshToken: string | null;
+  tokenVersion: number;
+} | null {
+  if (!account) {
+    return null;
   }
 
-  throw deviceSyncError({
-    code: "RUNTIME_STATE_CONFLICT",
-    message: `Hosted device-sync runtime did not persist the refreshed token bundle for connection ${input.connectionId}.`,
-    retryable: true,
-    httpStatus: 409,
-  });
+  return {
+    accessToken: account.accessToken,
+    accessTokenExpiresAt: account.accessTokenExpiresAt ?? null,
+    keyVersion: account.keyVersion,
+    refreshToken: account.refreshToken,
+    tokenVersion: account.tokenVersion,
+  };
 }
 
 

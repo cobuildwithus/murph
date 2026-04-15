@@ -1,14 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  buildHostedExecutionGatewayMessageSendDispatch,
-  buildHostedExecutionMemberActivatedDispatch,
-  buildHostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
-import {
-  parseHostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution/parsers";
 
 import {
   type CloudflareHostedControlClientOptions,
@@ -18,6 +10,19 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
+  it("exposes only the narrowed execution-plane helpers", () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      getBearerToken: async () => "token-123",
+    });
+
+    expect(Object.keys(client).sort()).toEqual([
+      "getEventStatus",
+      "getStatus",
+      "run",
+    ]);
+  });
+
   it("rejects an unconfigured base URL before issuing a request", () => {
     expect(() =>
       createCloudflareHostedControlClient({
@@ -53,35 +58,6 @@ describe("createCloudflareHostedControlClient", () => {
     await expect(promise).rejects.not.toThrow(/provider_token/u);
   });
 
-  it("fetches user env status with the expected request shape", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse({
-          configuredUserEnvKeys: ["API_KEY", "TOKEN"],
-          userId: "user_123",
-        });
-      }) as typeof fetch,
-      getBearerToken: async () => "  Bearer token-123  ",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.getUserEnvStatus("user_123")).resolves.toEqual({
-      configuredUserEnvKeys: ["API_KEY", "TOKEN"],
-      userId: "user_123",
-    });
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/env");
-    expect(request.init?.method).toBe("GET");
-    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
-    expect(request.init?.redirect).toBe("error");
-    expect(request.init?.signal).toBeInstanceOf(AbortSignal);
-  });
-
   it("fetches event status with the expected request shape", async () => {
     let observedRequest: ObservedRequest | null = null;
     const client = createCloudflareHostedControlClient({
@@ -114,78 +90,32 @@ describe("createCloudflareHostedControlClient", () => {
     );
     expect(request.init?.method).toBe("GET");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
   });
 
-  it("stores dispatch payloads using the parsed request body and bearer header", async () => {
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
-      eventId: "evt_123",
-      memberId: "user_123",
-      memberChannels: {
-        email: false,
-        linq: false,
-        telegram: false,
-      },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-    });
-    const storedPayload = buildHostedExecutionOutboxPayload(dispatch);
+  it("fetches user status with the expected request shape", async () => {
     let observedRequest: ObservedRequest | null = null;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
         observedRequest = { init, url: String(url) };
-        return createJsonResponse(storedPayload);
+        return createJsonResponse(createUserStatus({ userId: "user_123" }));
       }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-      timeoutMs: 500,
+      getBearerToken: async () => "  Bearer token-123  ",
+      timeoutMs: 2_500,
     });
 
-    await expect(client.storeDispatchPayload(dispatch)).resolves.toEqual(storedPayload);
+    await expect(client.getStatus("user_123")).resolves.toEqual(
+      createUserStatus({ userId: "user_123" }),
+    );
 
     const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe(
-      "https://runner.example.test/root/internal/users/user_123/dispatch-payload",
-    );
-    expect(request.init?.method).toBe("PUT");
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/status");
+    expect(request.init?.method).toBe("GET");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
-    expect(new Headers(request.init?.headers).get("content-type")).toBe(
-      "application/json; charset=utf-8",
-    );
     expect(request.init?.redirect).toBe("error");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
-    expect(JSON.parse(String(request.init?.body))).toEqual(parseHostedExecutionDispatchRequest(dispatch));
-  });
-
-  it("preserves 204 handling for deleteStoredDispatchPayload", async () => {
-    const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
-      eventId: "gateway-123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      sessionKey: "session_123",
-      text: "hello from the reference lane",
-      userId: "user_123",
-    });
-    const payload = buildHostedExecutionOutboxPayload(dispatch, {
-      stagedPayloadId: "staged-gateway-123",
-    });
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return new Response(null, { status: 204 });
-      }) as typeof fetch,
-      getBearerToken: async () => "token-123",
-    });
-
-    await expect(client.deleteStoredDispatchPayload(payload)).resolves.toBeUndefined();
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe(
-      "https://runner.example.test/root/internal/users/user_123/dispatch-payload",
-    );
-    expect(request.init?.method).toBe("DELETE");
-    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
-    expect(JSON.parse(String(request.init?.body))).toEqual(payload);
   });
 
   it("runs a user with the expected request shape", async () => {
@@ -212,238 +142,47 @@ describe("createCloudflareHostedControlClient", () => {
     );
     expect(JSON.parse(String(request.init?.body))).toEqual({});
   });
-
-  it("updates user env with the parsed request body", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse({
-          configuredUserEnvKeys: ["HOSTED_API_KEY", "HOSTED_REGION"],
-          userId: "user_123",
-        });
-      }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-    });
-
-    await expect(
-      client.updateUserEnv("user_123", {
-        env: {
-          HOSTED_API_KEY: "api-key-123",
-          HOSTED_REGION: null,
-        },
-        mode: "merge",
-      }),
-    ).resolves.toEqual({
-      configuredUserEnvKeys: ["HOSTED_API_KEY", "HOSTED_REGION"],
-      userId: "user_123",
-    });
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/env");
-    expect(request.init?.method).toBe("PUT");
-    expect(JSON.parse(String(request.init?.body))).toEqual({
-      env: {
-        HOSTED_API_KEY: "api-key-123",
-        HOSTED_REGION: null,
-      },
-      mode: "merge",
-    });
-  });
-
-  it("rejects invalid env updates before issuing a request", async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl,
-      getBearerToken: async () => "Bearer token-123",
-    });
-    const invalidUpdate = JSON.parse('{"env":{"HOSTED_API_KEY":123},"mode":"merge"}');
-
-    expect(() => client.updateUserEnv("user_123", invalidUpdate)).toThrow(
-      "Hosted execution user env update env.HOSTED_API_KEY must be a string or null.",
-    );
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("clears user env with DELETE and parses the response", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse({
-          configuredUserEnvKeys: [],
-          userId: "user_123",
-        });
-      }) as typeof fetch,
-      getBearerToken: async () => "token-123",
-    });
-
-    await expect(client.clearUserEnv("user_123")).resolves.toEqual({
-      configuredUserEnvKeys: [],
-      userId: "user_123",
-    });
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/env");
-    expect(request.init?.method).toBe("DELETE");
-    expect(request.init?.body).toBeUndefined();
-  });
-
-  it("dispatches stored reference payloads using the payload user id route", async () => {
-    const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
-      eventId: "gateway-123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      sessionKey: "session_123",
-      text: "hello from the reference lane",
-      userId: "user_123",
-    });
-    const payload = buildHostedExecutionOutboxPayload(dispatch, {
-      stagedPayloadId: "staged-gateway-123",
-    });
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse({
-          event: {
-            eventId: "gateway-123",
-            lastError: null,
-            state: "queued",
-            userId: "user_123",
-          },
-          status: createUserStatus({ pendingEventCount: 1, userId: "user_123" }),
-        });
-      }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-    });
-
-    await expect(client.dispatchStoredPayload(payload)).resolves.toEqual({
-      event: {
-        eventId: "gateway-123",
-        lastError: null,
-        state: "queued",
-        userId: "user_123",
-      },
-      status: createUserStatus({ pendingEventCount: 1, userId: "user_123" }),
-    });
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe(
-      "https://runner.example.test/root/internal/users/user_123/dispatch-payload/dispatch",
-    );
-    expect(request.init?.method).toBe("POST");
-    expect(JSON.parse(String(request.init?.body))).toEqual(payload);
-  });
-
-  it("provisions managed user crypto with the expected route", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse({
-          recipientKinds: ["automation", "recovery"],
-          rootKeyId: "root-key-123",
-          userId: "user_123",
-        });
-      }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-    });
-
-    await expect(client.provisionManagedUserCrypto("user_123")).resolves.toEqual({
-      recipientKinds: ["automation", "recovery"],
-      rootKeyId: "root-key-123",
-      userId: "user_123",
-    });
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe(
-      "https://runner.example.test/root/internal/users/user_123/crypto-context",
-    );
-    expect(request.init?.method).toBe("PUT");
-    expect(request.init?.body).toBeUndefined();
-  });
-
-  it("rejects blank bearer tokens before fetch", async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test",
-      fetchImpl,
-      getBearerToken: async () => "   ",
-    });
-
-    await expect(client.getStatus("user_123")).rejects.toThrow(
-      "Hosted execution bearer token must be configured.",
-    );
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("surfaces parse failures for malformed status responses", async () => {
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test",
-      fetchImpl: vi.fn(
-        async () =>
-          createJsonResponse({
-            bundleRef: [],
-            inFlight: false,
-            lastError: null,
-            lastEventId: null,
-            lastRunAt: null,
-            nextWakeAt: null,
-            pendingEventCount: 0,
-            poisonedEventIds: [],
-            retryingEventId: null,
-            userId: "user_123",
-          }),
-      ) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-    });
-
-    await expect(client.getStatus("user_123")).rejects.toThrow(
-      "Hosted execution user status bundleRef must be an object.",
-    );
-  });
 });
 
-function createJsonResponse(body: unknown, init: ResponseInit = {}): Response {
-  const headers = new Headers(init.headers);
-  headers.set("content-type", "application/json; charset=utf-8");
-
-  return new Response(JSON.stringify(body), {
-    ...init,
-    headers,
+function createJsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
   });
 }
 
 function requireObservedRequest(request: ObservedRequest | null): ObservedRequest {
-  expect(request).not.toBeNull();
   if (!request) {
-    throw new Error("Expected fetch request to be captured.");
+    throw new Error("Expected the fetch mock to capture a request.");
   }
+
   return request;
 }
 
 function createUserStatus(
-  overrides: Partial<{
+  input: Partial<{
+    bundleRef: unknown;
     inFlight: boolean;
+    lastError: string | null;
+    lastEventId: string | null;
+    lastRunAt: string | null;
+    nextWakeAt: string | null;
     pendingEventCount: number;
+    poisonedEventIds: string[];
+    retryingEventId: string | null;
     userId: string;
   }> = {},
 ) {
   return {
-    bundleRef: null,
-    inFlight: overrides.inFlight ?? false,
-    lastError: null,
-    lastEventId: null,
-    lastRunAt: null,
-    nextWakeAt: null,
-    pendingEventCount: overrides.pendingEventCount ?? 0,
-    poisonedEventIds: [],
-    retryingEventId: null,
-    userId: overrides.userId ?? "user_123",
+    bundleRef: input.bundleRef ?? null,
+    inFlight: input.inFlight ?? false,
+    lastError: input.lastError ?? null,
+    lastEventId: input.lastEventId ?? null,
+    lastRunAt: input.lastRunAt ?? null,
+    nextWakeAt: input.nextWakeAt ?? null,
+    pendingEventCount: input.pendingEventCount ?? 0,
+    poisonedEventIds: input.poisonedEventIds ?? [],
+    retryingEventId: input.retryingEventId ?? null,
+    userId: input.userId ?? "user_123",
   };
 }

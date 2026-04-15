@@ -241,14 +241,8 @@ describe("hosted webhook receipt transitions", () => {
     const stagedEffect = {
       ...dispatchEffect,
       payload: {
-        dispatchRef: {
-          eventId: "evt_123",
-          eventKind: "linq.message.received" as const,
-          occurredAt: "2026-03-26T12:00:00.000Z",
-          userId: "member_123",
-        },
-        stagedPayloadId: "dispatch/staged-linq-123",
-        storage: "reference" as const,
+        dispatch: dispatchEffect.payload.dispatch,
+        storage: "inline" as const,
       },
     };
 
@@ -262,10 +256,9 @@ describe("hosted webhook receipt transitions", () => {
       throw new Error("Expected a hosted execution dispatch side effect.");
     }
 
-    assert.equal(persistedEffect.payload.storage, "reference");
-    assert.equal("phoneLookupKey" in persistedEffect.payload, false);
-    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(persistedEffect.payload);
-    assert.equal(rebuiltDispatch, null);
+    assert.equal(persistedEffect.payload.storage, "inline");
+    assert.equal("phoneLookupKey" in persistedEffect.payload.dispatch.event, false);
+    assert.deepEqual(buildHostedWebhookDispatchFromPayload(persistedEffect.payload), persistedEffect.payload.dispatch);
   });
 
   it("fails closed when a persisted Linq side effect is missing the new typed payload columns", () => {

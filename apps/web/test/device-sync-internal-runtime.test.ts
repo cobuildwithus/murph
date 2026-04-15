@@ -40,49 +40,25 @@ describe("device-sync hosted runtime helpers", () => {
   it("requires a token bundle when composing a Cloudflare-backed runtime account", async () => {
     const {
       composeHostedRuntimeDeviceSyncAccount,
-      requireHostedDeviceSyncRuntimeTokenBundle,
+      requireHostedDeviceSyncStoredTokenBundle,
     } = await import(
       "@/src/lib/device-sync/internal-runtime"
     );
 
-    expect(() => requireHostedDeviceSyncRuntimeTokenBundle({
+    expect(() => requireHostedDeviceSyncStoredTokenBundle({
       connectionId: "dsc_123",
-      runtimeConnection: null,
+      storedTokenBundle: null,
       userId: "user-123",
-    })).toThrow("Hosted device-sync connection no longer has an escrowed token bundle.");
+    })).toThrow("Hosted device-sync connection no longer has a stored token bundle.");
 
-    const tokenBundle = requireHostedDeviceSyncRuntimeTokenBundle({
+    const tokenBundle = requireHostedDeviceSyncStoredTokenBundle({
       connectionId: "dsc_123",
-      runtimeConnection: {
-        connection: {
-          accessTokenExpiresAt: null,
-          connectedAt: "2026-03-26T12:00:00.000Z",
-          createdAt: "2026-03-26T12:00:00.000Z",
-          displayName: "Oura",
-          externalAccountId: "oura_alice",
-          id: "dsc_123",
-          metadata: { source: "oauth" },
-          provider: "oura",
-          scopes: ["heartrate"],
-          status: "active",
-          updatedAt: "2026-03-26T12:00:00.000Z",
-        },
-        localState: {
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSyncCompletedAt: null,
-          lastSyncErrorAt: null,
-          lastSyncStartedAt: null,
-          lastWebhookAt: null,
-          nextReconcileAt: null,
-        },
-        tokenBundle: {
-          accessToken: "access-token",
-          accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
-          keyVersion: "v1",
-          refreshToken: "refresh-token",
-          tokenVersion: 3,
-        },
+      storedTokenBundle: {
+        accessToken: "access-token",
+        accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
+        keyVersion: "v1",
+        refreshToken: "refresh-token",
+        tokenVersion: 3,
       },
       userId: "user-123",
     });
@@ -260,20 +236,25 @@ describe("device-sync hosted runtime helpers", () => {
 
     expect(buildHostedPublicDeviceSyncAccount({
       record: {
+        accessTokenExpiresAt: null,
+        displayName: null,
+        externalAccountId: "oura_alice",
         id: "dsc_123",
-        userId: "user-123",
-        provider: "oura",
-        status: "active",
         connectedAt: "2026-03-26T12:00:00.000Z",
+        createdAt: "2026-03-26T12:00:00.000Z",
         lastWebhookAt: null,
         lastSyncStartedAt: null,
         lastSyncCompletedAt: null,
         lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
         lastErrorCode: "refresh_token=db-secret",
         lastErrorMessage: errorText,
+        metadata: {},
         nextReconcileAt: null,
-        createdAt: "2026-03-26T12:00:00.000Z",
+        provider: "oura",
+        scopes: [],
+        status: "active",
         updatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "user-123",
       },
     })).toMatchObject({
       lastErrorCode: "refresh_token=[redacted]",

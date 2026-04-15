@@ -16,6 +16,7 @@ import {
 import {
   buildHostedExecutionRuntimePlatform,
 } from "./runtime-platform.ts";
+import { readHostedExecutionEnvironment } from "./env.ts";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
@@ -67,10 +68,13 @@ export async function runHostedExecutionJob(
 ): Promise<HostedAssistantRuntimeJobResult> {
   hostedExecutionRunStartHookForTests?.();
   const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
+  const environment = readHostedExecutionEnvironment();
   const runtimePlatform = buildHostedExecutionRuntimePlatform({
     boundUserId: input.request.dispatch.event.userId,
     commitTimeoutMs: runtime.commitTimeoutMs,
     internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
+    webCallbackSigning: environment.webCallbackSigning,
+    webControlBaseUrl: process.env.HOSTED_WEB_BASE_URL ?? null,
   });
 
   if (hostedExecutionRunModeForTests === "in-process") {

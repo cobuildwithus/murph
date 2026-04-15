@@ -33,8 +33,6 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "GROQ_API_KEY",
   "HF_TOKEN",
-  "HOSTED_USER_VERIFIED_EMAIL",
-  "HOSTED_USER_VERIFIED_EMAIL_VERIFIED_AT",
   "HUGGINGFACEHUB_API_TOKEN",
   "HUGGINGFACE_API_KEY",
   "HUGGING_FACE_HUB_TOKEN",
@@ -160,8 +158,8 @@ export function isHostedUserEnvKeyAllowed(
     ...parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
   ]);
 
-  // Hosted per-user env is allowed to carry per-user credentials and identity hints,
-  // but never executable selectors or process-control variables that steer the runner.
+  // Hosted per-user env is a runner-secret seam only. Product facts and
+  // process-control variables must stay out of this payload.
   return allowedKeys.has(key);
 }
 

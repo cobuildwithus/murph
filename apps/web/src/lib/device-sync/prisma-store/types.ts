@@ -44,7 +44,7 @@ export interface HostedSignalRecord {
 
 export type HostedTokenAuditAction = "token_exported" | "token_refreshed";
 
-export type HostedTokenAuditChannel = "agent_export" | "agent_refresh" | "internal_runtime_snapshot";
+export type HostedTokenAuditChannel = "agent_export" | "agent_refresh";
 export type HostedTokenAuditRefreshOutcome =
   | "performed"
   | "skipped_fresh"

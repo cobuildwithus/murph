@@ -169,27 +169,26 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
+  const existingDispatch = await input.prisma.executionOutbox.findUnique({
+    where: {
+      eventId: activationEventId,
+    },
+    select: {
+      eventId: true,
+    },
+  });
 
   if (
     input.skipIfBillingAlreadyActive &&
     currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
-    const existingDispatch = await input.prisma.executionOutbox.findUnique({
-      where: {
-        eventId: activationEventId,
-      },
-      select: {
-        eventId: true,
-      },
-    });
-
-    return existingDispatch
-      ? {
-          activated: false,
-          hostedExecutionEventId: existingDispatch.eventId,
-          memberId: currentMember.core.id,
-        }
-      : buildHostedInactiveMemberActivationResult(currentMember.core.id);
+    if (existingDispatch) {
+      return {
+        activated: false,
+        hostedExecutionEventId: existingDispatch.eventId,
+        memberId: currentMember.core.id,
+      };
+    }
   }
 
   const entitlement = deriveHostedEntitlement({
@@ -201,11 +200,13 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     return buildHostedInactiveMemberActivationResult(currentMember.core.id);
   }
 
-  await updateHostedMemberCoreState({
-    billingStatus: HostedBillingStatus.active,
-    memberId: currentMember.core.id,
-    prisma: input.prisma,
-  });
+  if (currentMember.core.billingStatus !== HostedBillingStatus.active) {
+    await updateHostedMemberCoreState({
+      billingStatus: HostedBillingStatus.active,
+      memberId: currentMember.core.id,
+      prisma: input.prisma,
+    });
+  }
 
   const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
     member: currentMember,

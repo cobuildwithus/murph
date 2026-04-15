@@ -141,7 +141,6 @@ describe("hosted Stripe RevNet reconciliation", () => {
     });
     expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
       memberId: "member_123",
-      onUnconfirmed: "disable",
     });
     expect(mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx).toHaveBeenCalledWith({
       emailLinked: false,

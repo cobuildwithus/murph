@@ -11,15 +11,15 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   requireActivePrivyMemberAuth: vi.fn(),
-  syncHostedVerifiedEmailToHostedExecution: vi.fn(),
+  upsertHostedMemberEmailAuthorization: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  syncHostedVerifiedEmailToHostedExecution: mocks.syncHostedVerifiedEmailToHostedExecution,
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  upsertHostedMemberEmailAuthorization: mocks.upsertHostedMemberEmailAuthorization,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -76,17 +76,14 @@ describe("settings email sync route", () => {
         id: "did:privy:user_123",
       },
     });
-    mocks.syncHostedVerifiedEmailToHostedExecution.mockResolvedValue({
-      emailAddress: "user@example.com",
-      verifiedAt: "2025-03-27T09:10:00.000Z",
-    });
+    mocks.upsertHostedMemberEmailAuthorization.mockResolvedValue({});
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
     });
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
   });
 
-  it("verifies the server-side Privy cookie-backed session and syncs the verified email into hosted user env", async () => {
+  it("verifies the server-side Privy cookie-backed session and writes canonical verified-email facts", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
         body: JSON.stringify({
@@ -100,10 +97,17 @@ describe("settings email sync route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.syncHostedVerifiedEmailToHostedExecution).toHaveBeenCalledWith({
-      emailAddress: "user@example.com",
-      userId: "member_123",
-      verifiedAt: "2025-03-27T08:30:00.000Z",
+    expect(mocks.upsertHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      directPublicSender: {
+        address: "user@example.com",
+        authorizedAt: new Date("2025-03-27T08:30:00.000Z"),
+      },
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      verifiedEmail: {
+        address: "user@example.com",
+        verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
+      },
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
       emailLinked: true,
@@ -119,7 +123,7 @@ describe("settings email sync route", () => {
       emailAddress: "user@example.com",
       ok: true,
       runTriggered: true,
-      verifiedAt: "2025-03-27T09:10:00.000Z",
+      verifiedAt: "2025-03-27T08:30:00.000Z",
     });
   });
 
@@ -132,10 +136,17 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.syncHostedVerifiedEmailToHostedExecution).toHaveBeenCalledWith({
-      emailAddress: "user@example.com",
-      userId: "member_123",
-      verifiedAt: "2025-03-27T08:30:00.000Z",
+    expect(mocks.upsertHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      directPublicSender: {
+        address: "user@example.com",
+        authorizedAt: new Date("2025-03-27T08:30:00.000Z"),
+      },
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      verifiedEmail: {
+        address: "user@example.com",
+        verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
+      },
     });
   });
 
@@ -154,7 +165,7 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.syncHostedVerifiedEmailToHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_MEMBER_NOT_FOUND",
@@ -188,7 +199,7 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.syncHostedVerifiedEmailToHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_EMAIL_NOT_READY",
@@ -237,7 +248,7 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.syncHostedVerifiedEmailToHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_MEMBER_SUSPENDED",
@@ -262,7 +273,7 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.syncHostedVerifiedEmailToHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_ACCESS_REQUIRED",

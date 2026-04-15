@@ -4,13 +4,9 @@ import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-me
 
 const mocks = vi.hoisted(() => ({
   enqueueHostedExecutionOutbox: vi.fn(),
-  hasHostedVerifiedEmailUserEnv: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  hasHostedVerifiedEmailUserEnv: mocks.hasHostedVerifiedEmailUserEnv,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -24,6 +20,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
+    readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
     readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
   };
 });
@@ -47,13 +44,13 @@ import {
 describe("hosted onboarding member channel sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.hasHostedVerifiedEmailUserEnv.mockResolvedValue(false);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
   });
 
-  it("treats a verified Privy email as authoritative without consulting hosted env status", async () => {
+  it("treats a verified Privy email as authoritative without consulting canonical email authorization", async () => {
     await expect(
       resolveHostedMemberEmailLinked({
         linkedAccounts: [
@@ -64,73 +61,48 @@ describe("hosted onboarding member channel sync", () => {
           },
         ],
         memberId: "member_123",
-        onUnconfirmed: "retry",
       }),
     ).resolves.toBe(true);
 
-    expect(mocks.hasHostedVerifiedEmailUserEnv).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
   });
 
-  it("falls back to hosted verified-email env state when the current session has no verified email yet", async () => {
-    mocks.hasHostedVerifiedEmailUserEnv.mockResolvedValue(true);
+  it("falls back to the canonical hosted member email authorization slice when the session has no verified email", async () => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "user@example.com",
+        lookupKey: "email:user@example.com",
+        verifiedAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
 
     await expect(
       resolveHostedMemberEmailLinked({
         linkedAccounts: [],
         memberId: "member_123",
-        onUnconfirmed: "retry",
       }),
     ).resolves.toBe(true);
 
-    expect(mocks.hasHostedVerifiedEmailUserEnv).toHaveBeenCalledWith("member_123");
-  });
-
-  it("fails with a retryable conflict when hosted email status cannot be confirmed", async () => {
-    mocks.hasHostedVerifiedEmailUserEnv.mockResolvedValue(null);
-
-    await expect(
-      resolveHostedMemberEmailLinked({
-        linkedAccounts: [],
-        memberId: "member_123",
-        onUnconfirmed: "retry",
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_EMAIL_SYNC_STATUS_UNAVAILABLE",
-      httpStatus: 409,
-      retryable: true,
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: expect.anything(),
     });
   });
 
-  it("treats activation email as disabled when hosted email status is temporarily unavailable", async () => {
-    mocks.hasHostedVerifiedEmailUserEnv.mockResolvedValue(null);
-
+  it("returns false when neither the session nor the canonical email authorization slice has a verified email", async () => {
     await expect(
       resolveHostedMemberEmailLinked({
         linkedAccounts: [],
         memberId: "member_123",
-        onUnconfirmed: "disable",
       }),
     ).resolves.toBe(false);
 
-    expect(mocks.hasHostedVerifiedEmailUserEnv).toHaveBeenCalledWith("member_123");
-  });
-
-  it("treats a verified Privy email as authoritative during activation without consulting hosted env status", async () => {
-    await expect(
-      resolveHostedMemberEmailLinked({
-        linkedAccounts: [
-          {
-            address: "user@example.com",
-            latest_verified_at: 1743064200,
-            type: "email",
-          },
-        ],
-        memberId: "member_123",
-        onUnconfirmed: "disable",
-      }),
-    ).resolves.toBe(true);
-
-    expect(mocks.hasHostedVerifiedEmailUserEnv).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: expect.anything(),
+    });
   });
 
   it("enqueues an occurrence-scoped member.channels.updated dispatch with the resolved channel snapshot", async () => {

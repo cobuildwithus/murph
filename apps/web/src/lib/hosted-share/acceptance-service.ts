@@ -1,4 +1,9 @@
-import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
+import {
+  Prisma,
+  type HostedMember,
+  type HostedShareLink,
+  type PrismaClient,
+} from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import {
@@ -11,8 +16,11 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   buildHostedShareAcceptanceDispatch,
   buildHostedShareAcceptanceEventId,
+  finalizeHostedShareAcceptance,
   hashHostedShareCode,
   normalizeOptionalString,
+  readHostedShareDispatchState,
+  releaseHostedShareAcceptance,
   requireHostedShareLink,
 } from "./shared";
 import type { AcceptHostedShareResult } from "./types";
@@ -67,7 +75,7 @@ export async function acceptHostedShareLink(input: {
   const claim = await prisma.$transaction(async (tx) => {
     await lockHostedShareLinkRow(tx, codeHash);
 
-    const latest = await requireHostedShareLink(shareCode, tx);
+    let latest = await requireHostedShareLink(shareCode, tx);
 
     if (latest.expiresAt <= now) {
       throw hostedOnboardingError({
@@ -90,6 +98,20 @@ export async function acceptHostedShareLink(input: {
         message: "That share link has already been used.",
         httpStatus: 409,
       });
+    }
+
+    const reconciliation = await reconcileHostedShareClaim({
+      latest,
+      memberId,
+      tx,
+    });
+    latest = reconciliation.record;
+
+    if (reconciliation.outcome === "alreadyImported") {
+      return {
+        outcome: "alreadyImported" as const,
+        record: latest,
+      };
     }
 
     if (latest.acceptedByMemberId && latest.acceptedByMemberId !== memberId) {
@@ -175,4 +197,87 @@ async function lockHostedShareLinkRow(
   codeHash: string,
 ): Promise<void> {
   await tx.$queryRaw`select 1 from "hosted_share_link" where "code_hash" = ${codeHash} for update`;
+}
+
+async function reconcileHostedShareClaim(input: {
+  latest: HostedShareLink;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<
+  | {
+      outcome: "alreadyImported";
+      record: HostedShareLink;
+    }
+  | {
+      outcome: "continue";
+      record: HostedShareLink;
+    }
+> {
+  const { latest, memberId, tx } = input;
+
+  if (latest.acceptedByMemberId !== memberId || latest.consumedAt || !latest.lastEventId) {
+    return {
+      outcome: "continue",
+      record: latest,
+    };
+  }
+
+  const dispatchState = await readHostedShareDispatchState({
+    eventId: latest.lastEventId,
+    memberId,
+    prisma: tx,
+  });
+
+  if (dispatchState === "completed") {
+    await finalizeHostedShareAcceptance({
+      eventId: latest.lastEventId,
+      memberId,
+      prisma: tx,
+      shareId: latest.id,
+    });
+
+    return {
+      outcome: "alreadyImported",
+      record: await requireHostedShareLinkById(tx, latest.id),
+    };
+  }
+
+  if (dispatchState === "poisoned") {
+    await releaseHostedShareAcceptance({
+      eventId: latest.lastEventId,
+      memberId,
+      prisma: tx,
+      shareId: latest.id,
+    });
+
+    return {
+      outcome: "continue",
+      record: await requireHostedShareLinkById(tx, latest.id),
+    };
+  }
+
+  return {
+    outcome: "continue",
+    record: latest,
+  };
+}
+async function requireHostedShareLinkById(
+  prisma: Prisma.TransactionClient,
+  shareId: string,
+): Promise<HostedShareLink> {
+  const record = await prisma.hostedShareLink.findUnique({
+    where: {
+      id: shareId,
+    },
+  });
+
+  if (!record) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SHARE_NOT_FOUND",
+      message: "That share link is not valid.",
+      httpStatus: 404,
+    });
+  }
+
+  return record;
 }

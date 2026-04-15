@@ -7,10 +7,6 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
-  deleteHostedStoredDispatchPayloadBestEffort as deleteHostedStoredDispatchPayloadBestEffortFromControl,
-  maybeStageHostedExecutionDispatchPayload,
-} from "../hosted-execution/control";
-import {
   type HostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
 } from "../hosted-execution/outbox-payload";
@@ -39,44 +35,20 @@ export function createHostedWebhookDispatchSideEffectPayload(
 export async function stageHostedWebhookDispatchSideEffectPayload(
   payload: HostedWebhookDispatchSideEffectPayload,
 ): Promise<HostedWebhookStoredDispatchSideEffectPayload> {
-  if (payload.storage === "reference") {
-    const storedPayload = readHostedWebhookStoredDispatchSideEffectPayload(payload);
-
-    if (storedPayload) {
-      return storedPayload;
-    }
-
-    throw hostedOnboardingError({
-      code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_INVALID",
-      message: "Hosted webhook dispatch side effects must keep a valid staged payload envelope.",
-      httpStatus: 500,
-      retryable: false,
-    });
+  if (payload.storage !== "pending") {
+    return payload;
   }
 
-  const stagedPayload = await maybeStageHostedExecutionDispatchPayload(payload.dispatch);
-  const storedPayload = readHostedWebhookStoredDispatchSideEffectPayload(stagedPayload);
-
-  if (storedPayload) {
-    return storedPayload;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_REF_REQUIRED",
-    message: `Hosted webhook dispatch ${payload.dispatch.eventId} requires a staged Cloudflare payload id.`,
-    httpStatus: 500,
-    retryable: false,
-  });
+  return {
+    dispatch: parseHostedExecutionDispatchRequest(payload.dispatch),
+    storage: "inline",
+  };
 }
 
 export function readHostedWebhookStoredDispatchSideEffectPayload(
   value: unknown,
 ): HostedWebhookStoredDispatchSideEffectPayload | null {
-  const payload = readHostedExecutionOutboxPayload(value as Prisma.InputJsonValue | Prisma.JsonValue | null);
-
-  return payload?.storage === "reference"
-    ? payload
-    : null;
+  return readHostedExecutionOutboxPayload(value as Prisma.InputJsonValue | Prisma.JsonValue | null);
 }
 
 export function requireHostedWebhookStoredDispatchSideEffectPayload(
@@ -100,10 +72,13 @@ export function requireHostedWebhookStoredDispatchSideEffectPayload(
 export function buildHostedWebhookDispatchFromPayload(
   payload: HostedWebhookDispatchSideEffectPayload,
 ): HostedExecutionDispatchRequest | null {
-  return payload.storage === "pending"
-    ? parseHostedExecutionDispatchRequest(payload.dispatch)
-    : null;
+  if (payload.storage === "pending" || payload.storage === "inline") {
+    return parseHostedExecutionDispatchRequest(payload.dispatch);
+  }
+
+  return null;
 }
 
-export const deleteHostedStoredDispatchPayloadBestEffort =
-  deleteHostedStoredDispatchPayloadBestEffortFromControl;
+export async function deleteHostedStoredDispatchPayloadBestEffort(
+  _payload?: HostedWebhookStoredDispatchSideEffectPayload,
+): Promise<void> {}

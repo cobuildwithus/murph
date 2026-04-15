@@ -5,6 +5,7 @@ import type {
   HostedWebhookDispatchSideEffect,
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookReceiptErrorState,
+  HostedWebhookReceiptLocalSideEffect,
   HostedWebhookReceiptState,
   HostedWebhookReceiptStatus,
   HostedWebhookRevnetIssuanceSideEffect,
@@ -31,7 +32,7 @@ export function claimHostedWebhookReceipt(input: {
 
 export function queueHostedWebhookReceiptSideEffects(
   currentState: HostedWebhookReceiptState,
-  desiredSideEffects: readonly HostedWebhookSideEffect[],
+  desiredSideEffects: readonly HostedWebhookReceiptLocalSideEffect[],
   input: {
     plannedAt: string;
   },

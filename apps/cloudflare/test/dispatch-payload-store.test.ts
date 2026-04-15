@@ -3,11 +3,9 @@ import {
   buildHostedExecutionDeviceSyncWakeDispatch,
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
-import {
-  buildHostedExecutionDispatchRef,
-} from "@murphai/hosted-execution/dispatch-ref";
 
 import {
+  buildHostedExecutionDispatchRef,
   createHostedExecutionDispatchPayloadStore,
 } from "../src/dispatch-payload-store.ts";
 import type { R2BucketLike } from "../src/bundle-store.ts";
@@ -74,7 +72,7 @@ describe("hosted dispatch payload store", () => {
     expect(payload.stagedPayloadId).toBeTruthy();
     expect(bucket.objects.size).toBe(1);
     await expect(store.readStoredDispatch(payload)).resolves.toEqual(dispatch);
-    await store.deleteStoredDispatchPayload(payload);
+    await store.deleteStoredPayloadEnvelope(payload);
     expect(bucket.deleted).toEqual([payload.stagedPayloadId]);
   });
 
@@ -150,7 +148,7 @@ describe("hosted dispatch payload store", () => {
       "Hosted dispatch payload envelope is invalid.",
     );
     expect(store.readStoredDispatchRef(legacyPayload)).toBeNull();
-    await expect(store.deleteStoredDispatchPayload(legacyPayload)).resolves.toBeUndefined();
+    await expect(store.deleteStoredPayloadEnvelope(legacyPayload)).resolves.toBeUndefined();
   });
 
   it("treats missing staged payload probes as absent instead of failing", async () => {

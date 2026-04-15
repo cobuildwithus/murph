@@ -140,7 +140,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
       linkedAccounts: undefined,
       memberId: "member_123",
-      onUnconfirmed: "disable",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction).toHaveBeenCalledWith(

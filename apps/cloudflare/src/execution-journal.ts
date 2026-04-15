@@ -32,6 +32,8 @@ import {
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 import { sameStructuredJsonValue } from "./structured-json.js";
 
+// Execution journals are recovery evidence for restore/finalize flows. They are
+// not a second owner for product lifecycle semantics.
 export interface HostedExecutionRunnerCommitRequest {
   bundleRef: HostedExecutionBundleRef | null;
 }

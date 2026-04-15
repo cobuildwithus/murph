@@ -1,16 +1,6 @@
-import {
-  buildHostedExecutionDispatchRef,
-  type HostedExecutionDispatchRef,
-} from "@murphai/hosted-execution/dispatch-ref";
-import {
-  buildHostedExecutionOutboxPayload,
-  readHostedExecutionOutboxPayload,
-  resolveHostedExecutionOutboxPayloadStorage,
-  type HostedExecutionOutboxPayload,
-  type HostedExecutionReferenceOutboxPayload,
-} from "@murphai/hosted-execution/outbox-payload";
 import type {
   HostedExecutionDispatchRequest,
+  HostedExecutionEventKind,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionDispatchRequest,
@@ -27,6 +17,70 @@ import {
 } from "./crypto.js";
 import { stringifyStructuredJson } from "./structured-json.js";
 
+const HOSTED_EXECUTION_EVENT_KINDS = [
+  "member.activated",
+  "member.channels.updated",
+  "linq.message.received",
+  "telegram.message.received",
+  "email.message.received",
+  "assistant.cron.tick",
+  "device-sync.wake",
+  "vault.share.accepted",
+  "gateway.message.send",
+] as const satisfies readonly HostedExecutionEventKind[];
+
+const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS = [
+  "linq.message.received",
+  "telegram.message.received",
+  "email.message.received",
+  "device-sync.wake",
+  "gateway.message.send",
+] as const satisfies readonly HostedExecutionEventKind[];
+
+const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(HOSTED_EXECUTION_EVENT_KINDS);
+const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
+  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
+);
+const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
+  "eventId",
+  "eventKind",
+  "occurredAt",
+  "userId",
+]);
+const HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
+  "dispatch",
+  "storage",
+]);
+const HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
+  "dispatchRef",
+  "stagedPayloadId",
+  "storage",
+]);
+
+export type HostedExecutionOutboxPayloadStorage = "inline" | "reference";
+
+export interface HostedExecutionDispatchRef {
+  eventId: string;
+  eventKind: HostedExecutionEventKind;
+  occurredAt: string;
+  userId: string;
+}
+
+export interface HostedExecutionInlineOutboxPayload {
+  dispatch: HostedExecutionDispatchRequest;
+  storage: "inline";
+}
+
+export interface HostedExecutionReferenceOutboxPayload {
+  dispatchRef: HostedExecutionDispatchRef;
+  stagedPayloadId: string;
+  storage: "reference";
+}
+
+export type HostedExecutionOutboxPayload =
+  | HostedExecutionInlineOutboxPayload
+  | HostedExecutionReferenceOutboxPayload;
+
 export type HostedExecutionDispatchPayloadRef = Pick<
   HostedExecutionReferenceOutboxPayload,
   "stagedPayloadId"
@@ -34,7 +88,7 @@ export type HostedExecutionDispatchPayloadRef = Pick<
 
 export interface HostedDispatchPayloadStore {
   deleteDispatchPayload(ref: HostedExecutionDispatchPayloadRef): Promise<void>;
-  deleteStoredDispatchPayload(payloadJson: unknown): Promise<void>;
+  deleteStoredPayloadEnvelope(payloadJson: unknown): Promise<void>;
   readDispatchPayload(
     ref: HostedExecutionDispatchPayloadRef,
   ): Promise<HostedExecutionDispatchRequest | null>;
@@ -63,7 +117,7 @@ export function createHostedDispatchPayloadStore(input: {
       await input.bucket.delete(ref.stagedPayloadId);
     },
 
-    async deleteStoredDispatchPayload(payloadJson) {
+    async deleteStoredPayloadEnvelope(payloadJson) {
       const payload = readStoredDispatchPayloadEnvelope(payloadJson);
 
       if (!payload || payload.storage !== "reference") {
@@ -221,3 +275,194 @@ export function resolveHostedRunnerDispatchPayloadStorage(
 }
 
 export const createHostedExecutionDispatchPayloadStore = createHostedDispatchPayloadStore;
+
+export function buildHostedExecutionDispatchRef(
+  dispatch: HostedExecutionDispatchRequest,
+): HostedExecutionDispatchRef {
+  return {
+    eventId: dispatch.eventId,
+    eventKind: dispatch.event.kind,
+    occurredAt: dispatch.occurredAt,
+    userId: dispatch.event.userId,
+  };
+}
+
+export function buildHostedExecutionOutboxPayload(
+  dispatch: HostedExecutionDispatchRequest,
+  options: {
+    stagedPayloadId?: string | null;
+    storage?: HostedExecutionOutboxPayloadStorage | "auto";
+  } = {},
+): HostedExecutionOutboxPayload {
+  const normalizedDispatch = parseHostedExecutionDispatchRequest(dispatch);
+  const storage = resolveHostedExecutionOutboxPayloadStorage(
+    normalizedDispatch,
+    options.storage ?? "auto",
+  );
+
+  if (storage === "inline") {
+    return {
+      dispatch: normalizedDispatch,
+      storage,
+    };
+  }
+
+  const stagedPayloadId = requireText(
+    options.stagedPayloadId,
+    `Hosted execution ${normalizedDispatch.event.kind} reference payloads require a staged payload id.`,
+  );
+
+  return {
+    dispatchRef: buildHostedExecutionDispatchRef(normalizedDispatch),
+    stagedPayloadId,
+    storage,
+  };
+}
+
+export function readHostedExecutionOutboxPayload(
+  payloadJson: unknown,
+): HostedExecutionOutboxPayload | null {
+  const payloadObject = toObject(payloadJson);
+
+  switch (readText(payloadObject.storage)) {
+    case "inline":
+      return readHostedExecutionInlineOutboxPayload(payloadObject);
+    case "reference":
+      return readHostedExecutionReferenceOutboxPayload(payloadObject);
+    default:
+      return null;
+  }
+}
+
+export function resolveHostedExecutionOutboxPayloadStorage(
+  dispatch: HostedExecutionDispatchRequest,
+  requested: HostedExecutionOutboxPayloadStorage | "auto",
+): HostedExecutionOutboxPayloadStorage {
+  const canonicalStorage = resolveHostedExecutionCanonicalOutboxPayloadStorage(dispatch.event.kind);
+
+  if (requested !== "auto") {
+    if (canonicalStorage !== requested) {
+      throw new TypeError(
+        `Hosted execution ${dispatch.event.kind} outbox payloads must use ${canonicalStorage} storage.`,
+      );
+    }
+
+    return requested;
+  }
+
+  return canonicalStorage;
+}
+
+function resolveHostedExecutionCanonicalOutboxPayloadStorage(
+  eventKind: HostedExecutionEventKind,
+): HostedExecutionOutboxPayloadStorage {
+  if (HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(eventKind)) {
+    return "reference";
+  }
+
+  if (HOSTED_EXECUTION_EVENT_KIND_SET.has(eventKind)) {
+    return "inline";
+  }
+
+  throw new TypeError(`Unsupported hosted execution event kind: ${eventKind}`);
+}
+
+function readHostedExecutionInlineOutboxPayload(
+  payloadObject: Record<string, unknown>,
+): HostedExecutionInlineOutboxPayload | null {
+  if (!hasOnlyAllowedKeys(payloadObject, HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS)) {
+    return null;
+  }
+
+  try {
+    return {
+      dispatch: parseHostedExecutionDispatchRequest(payloadObject.dispatch),
+      storage: "inline",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readHostedExecutionReferenceOutboxPayload(
+  payloadObject: Record<string, unknown>,
+): HostedExecutionReferenceOutboxPayload | null {
+  if (!hasOnlyAllowedKeys(payloadObject, HOSTED_EXECUTION_REFERENCE_OUTBOX_PAYLOAD_KEYS)) {
+    return null;
+  }
+
+  const dispatchRef = readHostedExecutionDispatchRef(payloadObject);
+  if (!dispatchRef || !HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(dispatchRef.eventKind)) {
+    return null;
+  }
+
+  const stagedPayloadId = readText(payloadObject.stagedPayloadId);
+  if (!stagedPayloadId) {
+    return null;
+  }
+
+  return {
+    dispatchRef,
+    stagedPayloadId,
+    storage: "reference",
+  };
+}
+
+function readHostedExecutionDispatchRef(value: unknown): HostedExecutionDispatchRef | null {
+  const payloadObject = toObject(value);
+  const nestedRef = toObject(payloadObject.dispatchRef);
+  const source = readText(payloadObject.storage) === "reference" ? nestedRef : payloadObject;
+
+  if (!hasOnlyAllowedKeys(source, HOSTED_EXECUTION_DISPATCH_REF_KEYS)) {
+    return null;
+  }
+
+  const eventId = readText(source.eventId);
+  const eventKind = readHostedExecutionEventKind(source.eventKind);
+  const occurredAt = readText(source.occurredAt);
+  const userId = readText(source.userId);
+
+  if (!eventId || !eventKind || !occurredAt || !userId) {
+    return null;
+  }
+
+  return {
+    eventId,
+    eventKind,
+    occurredAt,
+    userId,
+  };
+}
+
+function readHostedExecutionEventKind(value: unknown): HostedExecutionEventKind | null {
+  return typeof value === "string" && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
+    ? value as HostedExecutionEventKind
+    : null;
+}
+
+function readText(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function requireText(value: unknown, errorMessage: string): string {
+  const text = readText(value);
+
+  if (text === null) {
+    throw new TypeError(errorMessage);
+  }
+
+  return text;
+}
+
+function toObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function hasOnlyAllowedKeys(
+  value: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+): boolean {
+  return Object.keys(value).every((key) => allowedKeys.has(key));
+}

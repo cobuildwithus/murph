@@ -6,10 +6,6 @@ import { assertContract, sharePackSchema, type SharePack } from "@murphai/contra
 
 import { getPrisma } from "../prisma";
 import {
-  deleteHostedSharePackObject,
-  writeHostedSharePackObject,
-} from "./pack-store";
-import {
   issueHostedInviteForPhone,
 } from "../hosted-onboarding/invite-service";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
@@ -29,6 +25,7 @@ import {
   requireHostedSharePublicBaseUrl,
   serializeHostedSharePreview,
   hashHostedShareCode,
+  upsertHostedSharePayload,
 } from "./shared";
 import type {
   CreateHostedShareLinkResult,
@@ -65,31 +62,22 @@ export async function createHostedShareLink(input: {
     inviteCode = invite.invite.inviteCode;
   }
 
-  await writeHostedSharePackObject({
-    ownerUserId: input.senderMemberId,
-    pack,
-    shareId,
-  });
+  await prisma.$transaction(async (tx) => {
+    await tx.hostedShareLink.create({
+      data: {
+        id: shareId,
+        codeHash: hashHostedShareCode(shareCode),
+        senderMemberId: input.senderMemberId,
+        previewJson: serializeHostedSharePreview(preview),
+        expiresAt: hostedShareExpiresAt(input.expiresInHours),
+      },
+    });
 
-  await prisma.hostedShareLink.create({
-    data: {
-      id: shareId,
-      codeHash: hashHostedShareCode(shareCode),
-      senderMemberId: input.senderMemberId,
-      previewJson: serializeHostedSharePreview(preview),
-      expiresAt: hostedShareExpiresAt(input.expiresInHours),
-    },
-  }).catch(async (error) => {
-    try {
-      await deleteHostedSharePackObject({ ownerUserId: input.senderMemberId, shareId });
-    } catch (cleanupError) {
-      console.error(
-        `Hosted share ${shareId} cleanup failed after Postgres write error.`,
-        cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-      );
-    }
-
-    throw error;
+    await upsertHostedSharePayload({
+      pack,
+      prisma: tx,
+      shareId,
+    });
   });
 
   const shareUrl = buildHostedShareUrl({

@@ -5,9 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserStatusPath,
-  buildCloudflareHostedControlUserStoredDispatchPath,
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
   buildHostedExecutionMemberActivatedDispatch,
@@ -17,8 +15,8 @@ import {
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution/parsers";
 import {
-  buildHostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution/outbox-payload";
+  HOSTED_EXECUTION_DISPATCH_PATH,
+} from "@murphai/hosted-execution/routes";
 
 import { runSmokeHostedDeploy } from "../scripts/smoke-hosted-deploy.shared.js";
 import { repoRoot } from "../vitest.shared.js";
@@ -132,14 +130,10 @@ describe("hosted local end-to-end", () => {
   });
 
   it("bootstraps a member and completes a follow-up manual run through the live local stack", async () => {
-    await sendControlRequest(buildCloudflareHostedControlUserCryptoContextPath(userId), {
-      method: "PUT",
-    });
-
     const activationResponse = await sendControlRequest(
-      buildCloudflareHostedControlUserStoredDispatchPath(userId),
+      HOSTED_EXECUTION_DISPATCH_PATH,
       {
-        body: JSON.stringify(buildHostedExecutionOutboxPayload(activationDispatch)),
+        body: JSON.stringify(activationDispatch),
         headers: {
           "content-type": "application/json; charset=utf-8",
         },

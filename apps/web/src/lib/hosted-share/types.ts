@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type { SharePack } from "@murphai/contracts";
 
 export type HostedSharePageStage = "invalid" | "expired" | "signin" | "ready" | "processing" | "consumed";
 export type HostedShareKind = "food" | "protocol" | "recipe";
@@ -35,6 +36,12 @@ export interface CreateHostedShareLinkResult {
   shareCode: string;
   shareUrl: string;
   url: string;
+}
+
+export interface HostedSharePayloadState {
+  pack: SharePack;
+  payloadSchema: string;
+  shareId: string;
 }
 
 export interface AcceptHostedShareResult {

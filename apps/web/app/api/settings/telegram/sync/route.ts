@@ -59,7 +59,6 @@ export const POST = withJsonError(async (request: Request) => {
     ? await resolveHostedMemberEmailLinked({
       linkedAccounts: auth.linkedAccounts,
       memberId: auth.member.id,
-      onUnconfirmed: "retry",
     })
     : false;
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {

@@ -9,7 +9,9 @@ export function resolveHostedLifecycleBucketNames(source: EnvSource = process.en
   ].filter((value): value is string => value !== null))];
 
   if (bucketNames.length === 0) {
-    throw new Error("CF_BUNDLES_BUCKET or CF_BUNDLES_PREVIEW_BUCKET must be configured.");
+    throw new Error(
+      "CF_BUNDLES_BUCKET or CF_BUNDLES_PREVIEW_BUCKET must be configured to apply execution-transient lifecycle rules.",
+    );
   }
 
   return bucketNames;

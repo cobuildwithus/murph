@@ -1,13 +1,13 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
-  markHostedWebhookDispatchEffectQueued,
   markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,
   recordHostedWebhookReceipt,
   updateHostedWebhookReceiptClaim,
 } from "./webhook-receipt-store";
+import { buildHostedWebhookDispatchFromPayload } from "./webhook-receipt-dispatch";
 import {
   getHostedWebhookSideEffect,
   markHostedWebhookReceiptSideEffectSent,
@@ -20,6 +20,7 @@ import type {
   HostedWebhookPlan,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptHandlers,
+  HostedWebhookReceiptLocalSideEffect,
   HostedWebhookResponsePayload,
   HostedWebhookReceiptSideEffectDrainError,
 } from "./webhook-receipt-types";
@@ -54,18 +55,23 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
       const activeClaim = claimedReceipt;
       const plannedResult = await runHostedWebhookReceiptTransaction(input.prisma, async (transaction) => {
         const plan = await input.plan(transaction);
+        const {
+          dispatchSideEffects,
+          receiptSideEffects,
+        } = partitionHostedWebhookPlanSideEffects(plan.desiredSideEffects);
 
-        let nextClaim = await queueHostedWebhookReceiptSideEffects({
-          claimedReceipt: activeClaim,
-          desiredSideEffects: plan.desiredSideEffects,
+        await enqueueHostedWebhookDispatches({
+          dispatchSideEffects,
           eventId: input.eventId,
+          handlers: input.handlers,
           prisma: transaction,
           source: input.source,
         });
-        nextClaim = await queueHostedWebhookDispatchSideEffects({
-          claimedReceipt: nextClaim,
+
+        const nextClaim = await queueHostedWebhookReceiptSideEffects({
+          claimedReceipt: activeClaim,
+          desiredSideEffects: receiptSideEffects,
           eventId: input.eventId,
-          handlers: input.handlers,
           prisma: transaction,
           source: input.source,
         });
@@ -180,44 +186,32 @@ export async function continueHostedWebhookReceipt(input: {
   }
 }
 
-async function queueHostedWebhookDispatchSideEffects(input: {
-  claimedReceipt: HostedWebhookReceiptClaim;
+async function enqueueHostedWebhookDispatches(input: {
+  dispatchSideEffects: readonly HostedWebhookDispatchSideEffect[];
   eventId: string;
   handlers: HostedWebhookReceiptHandlers;
   prisma: Prisma.TransactionClient;
   source: string;
-}): Promise<HostedWebhookReceiptClaim> {
-  let currentClaim = input.claimedReceipt;
+}): Promise<void> {
+  for (const sideEffect of input.dispatchSideEffects) {
+    const dispatch = buildHostedWebhookDispatchFromPayload(sideEffect.payload);
 
-  for (const sideEffect of currentClaim.state.sideEffects) {
-    if (sideEffect.kind !== "hosted_execution_dispatch" || sideEffect.status !== "pending") {
-      continue;
+    if (!dispatch) {
+      throw hostedOnboardingError({
+        code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_INVALID",
+        httpStatus: 500,
+        message: `Hosted webhook dispatch side effect ${sideEffect.effectId} must resolve to an inline outbox dispatch.`,
+        retryable: false,
+      });
     }
 
-    const startedAt = new Date().toISOString();
-    currentClaim = await updateHostedWebhookReceiptClaim({
-      claimedReceipt: currentClaim,
+    await input.handlers.enqueueDispatch({
+      dispatch,
       eventId: input.eventId,
-      mutate: (currentState) =>
-        startHostedWebhookReceiptSideEffect(currentState, sideEffect.effectId, startedAt),
-      prisma: input.prisma,
-      source: input.source,
-    });
-    currentClaim = await markHostedWebhookDispatchEffectQueued({
-      claimedReceipt: currentClaim,
-      dispatchEffect: getHostedWebhookSideEffect(
-        currentClaim.state,
-        sideEffect.effectId,
-      ) as HostedWebhookDispatchSideEffect,
-      enqueueDispatchEffect: input.handlers.enqueueDispatchEffect,
-      eventId: input.eventId,
-      prisma: input.prisma,
-      sentAt: new Date().toISOString(),
+      prismaOrTransaction: input.prisma,
       source: input.source,
     });
   }
-
-  return currentClaim;
 }
 
 async function runHostedWebhookReceiptTransaction<TResult>(
@@ -261,16 +255,15 @@ async function drainHostedWebhookReceiptSideEffects(input: {
 
     try {
       if (effect.kind === "hosted_execution_dispatch") {
-        currentClaim = await markHostedWebhookDispatchEffectQueued({
-          claimedReceipt: currentClaim,
-          dispatchEffect: effect,
-          enqueueDispatchEffect: input.handlers.enqueueDispatchEffect,
-          eventId: input.eventId,
-          prisma: input.prisma,
-          sentAt: new Date().toISOString(),
-          source: input.source,
-        });
-        continue;
+        throw new ReceiptSideEffectDrainError(
+          currentClaim,
+          hostedOnboardingError({
+            code: "HOSTED_WEBHOOK_RECEIPT_DISPATCH_LEGACY",
+            httpStatus: 500,
+            message: `Hosted webhook receipt ${input.eventId} still stores a legacy dispatch side effect.`,
+            retryable: false,
+          }),
+        );
       }
 
       let result;
@@ -368,9 +361,31 @@ function readHostedWebhookReceiptDrainError(
 function hasDeferredHostedWebhookSideEffects(
   claimedReceipt: HostedWebhookReceiptClaim,
 ): boolean {
-  return claimedReceipt.state.sideEffects.some(
-    (effect) => effect.kind !== "hosted_execution_dispatch",
-  );
+  return claimedReceipt.state.sideEffects.length > 0;
+}
+
+function partitionHostedWebhookPlanSideEffects(
+  sideEffects: HostedWebhookPlan<HostedWebhookResponsePayload>["desiredSideEffects"],
+): {
+  dispatchSideEffects: HostedWebhookDispatchSideEffect[];
+  receiptSideEffects: HostedWebhookReceiptLocalSideEffect[];
+} {
+  const dispatchSideEffects: HostedWebhookDispatchSideEffect[] = [];
+  const receiptSideEffects: HostedWebhookReceiptLocalSideEffect[] = [];
+
+  for (const sideEffect of sideEffects) {
+    if (sideEffect.kind === "hosted_execution_dispatch") {
+      dispatchSideEffects.push(sideEffect);
+      continue;
+    }
+
+    receiptSideEffects.push(sideEffect);
+  }
+
+  return {
+    dispatchSideEffects,
+    receiptSideEffects,
+  };
 }
 
 function buildHostedWebhookSideEffectDeliveryUncertainError(
