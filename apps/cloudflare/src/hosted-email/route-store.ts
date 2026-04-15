@@ -1,7 +1,6 @@
 /**
- * Hosted email route storage owns the encrypted R2 record layout for stable
- * per-user aliases and verified-sender indexes. Routing orchestration can use
- * this store without also carrying record codecs or object-key derivation.
+ * Hosted email route storage owns the encrypted R2 record layout for reply
+ * aliases only. Public-sender authority is no longer a Cloudflare-owned seam.
  */
 
 import type { R2BucketLike } from "../bundle-store.ts";
@@ -20,26 +19,11 @@ export interface HostedEmailUserRouteRecord {
   userId: string;
 }
 
-export interface HostedEmailVerifiedSenderRouteRecord {
-  identityId: string;
-  schema: "murph.hosted-email-verified-sender-route.v1";
-  senderHash: string;
-  userId: string;
-}
-
 export interface HostedEmailRouteStore {
-  deleteVerifiedSenderRoute(senderKey: string): Promise<void>;
   readUserRoute(aliasKey: string): Promise<HostedEmailUserRouteRecord | null>;
-  readVerifiedSenderRoute(senderKey: string): Promise<HostedEmailVerifiedSenderRouteRecord | null>;
   writeUserRoute(input: {
     aliasKey: string;
     identityId: string;
-    userId: string;
-  }): Promise<void>;
-  writeVerifiedSenderRoute(input: {
-    identityId: string;
-    senderHash: string;
-    senderKey: string;
     userId: string;
   }): Promise<void>;
 }
@@ -52,7 +36,6 @@ interface HostedEmailRouteStoreInput {
 }
 
 const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v1";
-const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA = "murph.hosted-email-verified-sender-route.v1";
 
 export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): HostedEmailRouteStore {
   return {
@@ -77,32 +60,6 @@ export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): 
       });
     },
 
-    async readVerifiedSenderRoute(senderKey) {
-      const objectKey = await hostedEmailVerifiedSenderRouteObjectKey(input.cryptoKey, senderKey);
-      return readEncryptedR2Json({
-        aad: buildHostedStorageAad({
-          key: objectKey,
-          purpose: "email-route",
-          routeKind: "verified-sender",
-          senderKey,
-        }),
-        bucket: input.bucket,
-        cryptoKey: input.cryptoKey,
-        cryptoKeysById: input.cryptoKeysById,
-        expectedKeyId: input.cryptoKeyId,
-        key: objectKey,
-        parse(value) {
-          return parseHostedEmailVerifiedSenderRouteRecord(value);
-        },
-        scope: "email-route",
-      });
-    },
-
-    async deleteVerifiedSenderRoute(senderKey) {
-      const objectKey = await hostedEmailVerifiedSenderRouteObjectKey(input.cryptoKey, senderKey);
-      await input.bucket.delete?.(objectKey);
-    },
-
     async writeUserRoute(writeInput) {
       const objectKey = await hostedEmailUserRouteObjectKey(input.cryptoKey, writeInput.aliasKey);
       await writeEncryptedR2Json({
@@ -124,29 +81,6 @@ export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): 
         } satisfies HostedEmailUserRouteRecord,
       });
     },
-
-    async writeVerifiedSenderRoute(writeInput) {
-      const objectKey = await hostedEmailVerifiedSenderRouteObjectKey(input.cryptoKey, writeInput.senderKey);
-      await writeEncryptedR2Json({
-        aad: buildHostedStorageAad({
-          key: objectKey,
-          purpose: "email-route",
-          routeKind: "verified-sender",
-          senderKey: writeInput.senderKey,
-        }),
-        bucket: input.bucket,
-        cryptoKey: input.cryptoKey,
-        key: objectKey,
-        keyId: input.cryptoKeyId,
-        scope: "email-route",
-        value: {
-          identityId: writeInput.identityId,
-          schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
-          senderHash: writeInput.senderHash,
-          userId: writeInput.userId,
-        } satisfies HostedEmailVerifiedSenderRouteRecord,
-      });
-    },
   };
 }
 
@@ -161,20 +95,6 @@ async function hostedEmailUserRouteObjectKey(rootKey: Uint8Array, aliasKey: stri
   return `hosted-email/users/${routeSegment}.json`;
 }
 
-async function hostedEmailVerifiedSenderRouteObjectKey(
-  rootKey: Uint8Array,
-  senderKey: string,
-): Promise<string> {
-  const routeSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "email-route",
-    value: `verified-sender:${senderKey}`,
-  });
-
-  return `hosted-email/verified-senders/${routeSegment}.json`;
-}
-
 function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRecord {
   const record = requireHostedEmailRouteRecordObject(value, "Hosted email user route");
   if (record.schema !== HOSTED_EMAIL_USER_ROUTE_SCHEMA) {
@@ -185,31 +105,6 @@ function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRe
     identityId: requireHostedEmailRecordString(record.identityId, "Hosted email user route identityId"),
     schema: HOSTED_EMAIL_USER_ROUTE_SCHEMA,
     userId: requireHostedEmailRecordString(record.userId, "Hosted email user route userId"),
-  };
-}
-
-function parseHostedEmailVerifiedSenderRouteRecord(
-  value: unknown,
-): HostedEmailVerifiedSenderRouteRecord {
-  const record = requireHostedEmailRouteRecordObject(value, "Hosted email verified sender route");
-  if (record.schema !== HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA) {
-    throw new TypeError("Hosted email verified sender route schema is invalid.");
-  }
-
-  return {
-    identityId: requireHostedEmailRecordString(
-      record.identityId,
-      "Hosted email verified sender route identityId",
-    ),
-    userId: requireHostedEmailRecordString(
-      record.userId,
-      "Hosted email verified sender route userId",
-    ),
-    schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
-    senderHash: requireHostedEmailRecordString(
-      record.senderHash,
-      "Hosted email verified sender route senderHash",
-    ),
   };
 }
 

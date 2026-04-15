@@ -2,7 +2,10 @@ import {
   HostedBillingStatus,
   Prisma,
 } from "@prisma/client";
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHostedLinqChatLookupKey,
@@ -826,7 +829,7 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
-    expect(receiptCalls).toHaveLength(4);
+    expect(receiptCalls).toHaveLength(2);
     expect(receiptCalls[0]?.data).toEqual(
       expect.objectContaining({
         attemptCount: 1,
@@ -857,25 +860,7 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          create: expect.objectContaining({
-            attemptCount: 1,
-            dispatchPayloadJson: expect.objectContaining({
-              dispatchRef: expect.objectContaining({
-                eventId: "evt_123",
-                eventKind: "linq.message.received",
-                userId: "member_123",
-              }),
-              stagedPayloadId: expect.stringContaining("/member_123/evt_123.json"),
-            }),
-            kind: "hosted_execution_dispatch",
-            status: "pending",
-          }),
-        }),
-      ]),
-    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
@@ -1279,7 +1264,7 @@ describe("hosted onboarding webhook retry safety", () => {
     });
   });
 
-  it("fails dispatch queueing after three stale compare-and-swap misses", async () => {
+  it("does not retry receipt compare-and-swap dispatch queueing for active-member webhooks", async () => {
     const startedReceiptPayload = buildWebhookReceiptPayload({
       attemptCount: 1,
       attemptId: "attempt-1",
@@ -1332,50 +1317,25 @@ describe("hosted onboarding webhook retry safety", () => {
         signature: null,
         timestamp: null,
       }),
-    ).rejects.toMatchObject({
-      code: "WEBHOOK_RECEIPT_UPDATE_FAILED",
-      httpStatus: 503,
-      retryable: true,
+    ).resolves.toMatchObject({
+      ok: true,
+      reason: "dispatched-active-member",
     });
 
     const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
-    const dispatchQueueCalls = receiptCalls.slice(2, 5);
-    expect(dispatchQueueCalls).toHaveLength(3);
-    for (const call of dispatchQueueCalls) {
-      expect(call).toEqual(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            eventId: "evt_123",
-            source: "linq",
-            version: expect.any(Number),
-          }),
-          data: expect.objectContaining({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            completedAt: null,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            lastErrorName: null,
-            lastErrorRetryable: null,
-            version: {
-              increment: 1,
-            },
-          }),
-        }),
-      );
-    }
-    expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(3);
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(receiptCalls).toHaveLength(2);
+    expect(prisma.hostedWebhookReceipt.findUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          completedAt: null,
-          lastErrorCode: "WEBHOOK_RECEIPT_UPDATE_FAILED",
-          lastErrorName: "HostedOnboardingError",
-          lastErrorRetryable: true,
-          plannedAt: null,
-          status: "failed",
+          completedAt: expect.any(Date),
+          lastErrorCode: null,
+          lastErrorName: null,
+          lastErrorRetryable: null,
+          plannedAt: expect.any(Date),
+          status: "completed",
         }),
       }),
     );
@@ -2318,7 +2278,11 @@ function buildDispatchSideEffect(input: {
   sentAt?: unknown;
   status: "pending" | "sent";
 }) {
-  const occurredAt = input.occurredAt ?? "2026-03-26T12:00:00.000Z";
+  const occurredAt =
+    typeof input.occurredAt === "string"
+      ? input.occurredAt
+      : "2026-03-26T12:00:00.000Z";
+  const phoneLookupKey = createHostedPhoneLookupKey("+15550000000");
   const linqEvent = {
     api_version: "v3",
     created_at: occurredAt,
@@ -2372,6 +2336,10 @@ function buildDispatchSideEffect(input: {
     trace_id: null,
   };
 
+  if (!phoneLookupKey) {
+    throw new Error("Expected Linq phone lookup key.");
+  }
+
   return {
     attemptCount: input.attemptCount ?? 0,
     effectId: input.effectId ?? `dispatch:${input.eventId}`,
@@ -2379,14 +2347,14 @@ function buildDispatchSideEffect(input: {
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
     payload: {
-      dispatchRef: {
+      dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
         eventId: input.eventId,
-        eventKind: "linq.message.received",
+        linqEvent,
         occurredAt,
+        phoneLookupKey,
         userId: "member_123",
-      },
-      stagedPayloadId: `transient/dispatch-payloads/member_123/${input.eventId}.json`,
-      storage: "reference",
+      }),
+      storage: "inline",
     },
     result: input.status === "sent" ? { dispatched: true } : null,
     sentAt:
@@ -3202,13 +3170,7 @@ function createStagedPayload(
   dispatch: HostedExecutionDispatchRequest,
 ) {
   return {
-    dispatchRef: {
-      eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
-      occurredAt: dispatch.occurredAt,
-      userId: dispatch.event.userId,
-    },
-    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    storage: "reference" as const,
+    dispatch,
+    storage: "inline" as const,
   };
 }

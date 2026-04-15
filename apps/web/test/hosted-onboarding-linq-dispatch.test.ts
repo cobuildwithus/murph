@@ -243,24 +243,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          create: expect.objectContaining({
-            dispatchPayloadJson: expect.objectContaining({
-              dispatchRef: expect.objectContaining({
-                eventId: "evt_123",
-                eventKind: "linq.message.received",
-                userId: "member_123",
-              }),
-              stagedPayloadId: expect.stringContaining("/member_123/evt_123.json"),
-            }),
-            kind: "hosted_execution_dispatch",
-            status: "pending",
-          }),
-        }),
-      ]),
-    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -469,23 +452,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          create: expect.objectContaining({
-            dispatchPayloadJson: expect.objectContaining({
-              dispatchRef: expect.objectContaining({
-                eventId: "evt_123",
-                eventKind: "linq.message.received",
-                userId: "member_123",
-              }),
-            }),
-            kind: "hosted_execution_dispatch",
-            status: "pending",
-          }),
-        }),
-      ]),
-    );
+    expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -622,21 +589,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          create: expect.objectContaining({
-            dispatchPayloadJson: expect.objectContaining({
-              dispatchRef: expect.objectContaining({
-                occurredAt: "2026-03-26T12:00:05.000Z",
-              }),
-            }),
-            kind: "hosted_execution_dispatch",
-            status: "pending",
-          }),
-        }),
-      ]),
-    );
+    expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:05.000Z",
@@ -1693,14 +1646,8 @@ function createStagedPayload(
   dispatch: HostedExecutionDispatchRequest,
 ) {
   return {
-    dispatchRef: {
-      eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
-      occurredAt: dispatch.occurredAt,
-      userId: dispatch.event.userId,
-    },
-    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    storage: "reference" as const,
+    dispatch,
+    storage: "inline" as const,
   };
 }
 

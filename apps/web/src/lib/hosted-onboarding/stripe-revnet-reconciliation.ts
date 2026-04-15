@@ -91,7 +91,6 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       await activateHostedMemberFromConfirmedRevnetIssuanceTx({
         emailLinked: await resolveHostedMemberEmailLinked({
           memberId: issuance.memberId,
-          onUnconfirmed: "disable",
         }),
         member,
         occurredAt: new Date().toISOString(),

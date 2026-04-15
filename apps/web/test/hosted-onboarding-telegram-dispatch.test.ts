@@ -924,14 +924,8 @@ function createStagedPayload(
   dispatch: HostedExecutionDispatchRequest,
 ) {
   return {
-    dispatchRef: {
-      eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
-      occurredAt: dispatch.occurredAt,
-      userId: dispatch.event.userId,
-    },
-    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    storage: "reference" as const,
+    dispatch,
+    storage: "inline" as const,
   };
 }
 

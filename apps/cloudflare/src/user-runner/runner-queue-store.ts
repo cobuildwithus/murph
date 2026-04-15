@@ -3,7 +3,7 @@ import {
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   summarizeHostedExecutionErrorCode,
-  type HostedExecutionEventDispatchStatus,
+  type HostedExecutionDispatchStatus,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
@@ -166,7 +166,7 @@ export class RunnerQueueStore {
 
   async readEventDispatchStatus(
     eventId: string,
-  ): Promise<HostedExecutionEventDispatchStatus | null> {
+  ): Promise<HostedExecutionDispatchStatus | null> {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
     return this.readEventDispatchStatusSync(eventId);
@@ -987,7 +987,7 @@ export class RunnerQueueStore {
 
   private readEventDispatchStatusSync(
     eventId: string,
-  ): HostedExecutionEventDispatchStatus | null {
+  ): HostedExecutionDispatchStatus | null {
     const userId = this.tryResolveUserIdSync();
     if (!userId) {
       return null;

@@ -285,9 +285,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           forwardedEnv: {
             OPENAI_API_KEY: "secret",
           },
-          userEnv: {
-            HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
-          },
+          userEnv: {},
         },
       },
       {
@@ -319,7 +317,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
       {
         envOverrides: {
-          HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
           OPENAI_API_KEY: "secret",
         },
         operatorHomeRoot: "/tmp/operator-home",
@@ -358,10 +355,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           sharePackAttached: false,
           userEnvCategories: {
             modelCredentialConfigured: false,
-            verifiedEmailPresent: true,
           },
-          userEnvKeyCount: 1,
-          verifiedEmailPresent: true,
+          userEnvKeyCount: 0,
         }),
         message: "Hosted runtime starting.",
         phase: "runtime.starting",

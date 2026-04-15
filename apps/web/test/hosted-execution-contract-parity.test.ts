@@ -15,22 +15,15 @@ import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionEventKind,
 } from "@murphai/hosted-execution";
+
 import {
   buildHostedExecutionDispatchRef,
   readHostedExecutionDispatchRef,
-} from "@murphai/hosted-execution/dispatch-ref";
-
-import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
+  serializeHostedExecutionOutboxPayload,
+} from "@/src/lib/hosted-execution/outbox-payload";
 
 describe("hosted execution contract parity", () => {
   it("keeps builder, parser, and app-local outbox serialization aligned for every event kind", () => {
-    const referenceKinds = new Set<HostedExecutionEventKind>([
-      "device-sync.wake",
-      "email.message.received",
-      "gateway.message.send",
-      "linq.message.received",
-      "telegram.message.received",
-    ]);
     const dispatchBuilders: Record<HostedExecutionEventKind, () => HostedExecutionDispatchRequest> = {
       "assistant.cron.tick": () => buildHostedExecutionAssistantCronTickDispatch({
         eventId: "evt_cron",
@@ -135,19 +128,17 @@ describe("hosted execution contract parity", () => {
     for (const kind of HOSTED_EXECUTION_EVENT_KINDS) {
       const dispatch = dispatchBuilders[kind]();
       const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
-      const payload = serializeHostedExecutionOutboxPayload(dispatch, {
-        ...(referenceKinds.has(kind) ? { stagedPayloadId: `staged-${dispatch.eventId}` } : {}),
-      });
+      const payload = serializeHostedExecutionOutboxPayload(dispatch);
       const parsedDispatchRef = readHostedExecutionDispatchRef(payload);
 
       expect(dispatch.event.kind).toBe(kind);
       expect(parseHostedExecutionEvent(dispatch.event)).toEqual(dispatch.event);
-      expect(payload.storage).toBe(referenceKinds.has(kind) ? "reference" : "inline");
+      expect(payload.storage).toBe("inline");
       expect(dispatchRef.eventKind).toBe(kind);
       expect(dispatchRef.eventId).toBe(dispatch.eventId);
       expect(dispatchRef.occurredAt).toBe(dispatch.occurredAt);
       expect(dispatchRef.userId).toBe(dispatch.event.userId);
-      expect(parsedDispatchRef).toEqual(payload.storage === "reference" ? dispatchRef : null);
+      expect(parsedDispatchRef).toBeNull();
     }
   });
 });

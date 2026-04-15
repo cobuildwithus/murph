@@ -4,7 +4,6 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedSharePageData: vi.fn(),
-  drainHostedPendingAiUsageImports: vi.fn(),
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
   drainHostedOnboardingWebhookReceipts: vi.fn(),
@@ -22,10 +21,6 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutbox: mocks.drainHostedExecutionOutbox,
   pruneHostedExecutionOutbox: mocks.pruneHostedExecutionOutbox,
-}));
-
-vi.mock("@/src/lib/hosted-execution/usage", () => ({
-  drainHostedPendingAiUsageImports: mocks.drainHostedPendingAiUsageImports,
 }));
 
 vi.mock("@/src/lib/hosted-execution/stripe-metering", () => ({
@@ -104,11 +99,6 @@ describe("hosted execution async routes", () => {
       failed: 0,
       metered: 1,
       skipped: 1,
-    });
-    mocks.drainHostedPendingAiUsageImports.mockResolvedValue({
-      failedUsers: 0,
-      imported: 2,
-      scannedUsers: 3,
     });
     mocks.drainHostedOnboardingWebhookReceipts.mockResolvedValue([
       {
@@ -201,7 +191,7 @@ describe("hosted execution async routes", () => {
     });
   });
 
-  it("returns the hosted pending-usage import and Stripe metering cron summaries", async () => {
+  it("returns the hosted Stripe metering cron summary", async () => {
     const response = await hostedExecutionUsageCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/usage/cron"),
     );
@@ -210,14 +200,8 @@ describe("hosted execution async routes", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledTimes(1);
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.drainHostedPendingAiUsageImports).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
-      imported: {
-        failedUsers: 0,
-        imported: 2,
-        scannedUsers: 3,
-      },
       metered: {
         configured: true,
         failed: 0,
@@ -254,33 +238,6 @@ describe("hosted execution async routes", () => {
       failed: 1,
       pruned: 2,
       skipped: 1,
-    });
-  });
-
-  it("continues Stripe metering even when pending-usage import throws", async () => {
-    mocks.drainHostedPendingAiUsageImports.mockRejectedValue(new Error("worker unavailable"));
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const response = await hostedExecutionUsageCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron"),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.drainHostedPendingAiUsageImports).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
-    expect(consoleError).toHaveBeenCalledWith(
-      "Hosted pending AI usage import failed.",
-      "worker unavailable",
-    );
-    await expect(response.json()).resolves.toEqual({
-      importError: "worker unavailable",
-      imported: null,
-      metered: {
-        configured: true,
-        failed: 0,
-        metered: 1,
-        skipped: 1,
-      },
     });
   });
 

@@ -8,6 +8,8 @@ export interface HostedEmailCapabilities {
   senderIdentity: string | null;
 }
 
+export const HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID = "hosted-email-public-route";
+
 export function readHostedEmailCapabilities(
   source: EnvSource = process.env,
 ): HostedEmailCapabilities {

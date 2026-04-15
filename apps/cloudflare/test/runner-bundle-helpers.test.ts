@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 import {
@@ -16,11 +15,9 @@ import {
 } from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
-import { resolveHostedEmailIngressRoute } from "../src/hosted-email/routes.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
-import { RunnerUserEnvService } from "../src/user-runner/runner-user-env.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
@@ -134,16 +131,6 @@ describe("hosted bundle reads", () => {
 
 describe("RunnerBundleSync", () => {
   const bundleKey = Uint8Array.from({ length: 32 }, () => 9);
-  const hostedEmailConfig = {
-    apiBaseUrl: "https://api.cloudflare.com/client/v4",
-    cloudflareAccountId: null,
-    cloudflareApiToken: null,
-    defaultSubject: "Murph update",
-    domain: "mail.example.test",
-    fromAddress: "assistant@mail.example.test",
-    localPart: "assistant",
-    signingSecret: "email-secret",
-  };
 
   it("fails closed when durable bundle refs point at missing R2 objects", async () => {
     const bucket = createBucketStore();
@@ -191,115 +178,6 @@ describe("RunnerBundleSync", () => {
     await expect(bundleSync.readBundlesForRunner()).rejects.toThrow(
       `Hosted vault bundle ${missingRef.key} is missing from R2.`,
     );
-  });
-
-  it("syncs, moves, clears, and conflict-checks the public sender verified-owner index", async () => {
-    const bucket = createBucketStore();
-
-    const firstUserEnv = new RunnerUserEnvService(
-      bucket.api,
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-      {},
-      hostedEmailConfig,
-    );
-    const secondUserEnv = new RunnerUserEnvService(
-      bucket.api,
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-      {},
-      hostedEmailConfig,
-    );
-
-    await firstUserEnv.updateUserEnv("member_123", {
-      env: createHostedVerifiedEmailUserEnv({
-        address: "owner@example.test",
-      }),
-      mode: "replace",
-    });
-
-    await expect(resolveHostedEmailIngressRoute({
-      bucket: bucket.api,
-      config: hostedEmailConfig,
-      envelopeFrom: "owner@example.test",
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "owner@example.test",
-      key: bundleKey,
-      keyId: "v1",
-      to: hostedEmailConfig.fromAddress,
-    })).resolves.toMatchObject({
-      routeAddress: hostedEmailConfig.fromAddress,
-      userId: "member_123",
-    });
-
-    await firstUserEnv.updateUserEnv("member_123", {
-      env: createHostedVerifiedEmailUserEnv({
-        address: "new-owner@example.test",
-      }),
-      mode: "replace",
-    });
-
-    await expect(resolveHostedEmailIngressRoute({
-      bucket: bucket.api,
-      config: hostedEmailConfig,
-      envelopeFrom: "owner@example.test",
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "owner@example.test",
-      key: bundleKey,
-      keyId: "v1",
-      to: hostedEmailConfig.fromAddress,
-    })).resolves.toBeNull();
-    await expect(resolveHostedEmailIngressRoute({
-      bucket: bucket.api,
-      config: hostedEmailConfig,
-      envelopeFrom: "new-owner@example.test",
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "new-owner@example.test",
-      key: bundleKey,
-      keyId: "v1",
-      to: hostedEmailConfig.fromAddress,
-    })).resolves.toMatchObject({
-      userId: "member_123",
-    });
-
-    await expect(secondUserEnv.updateUserEnv("member_456", {
-      env: createHostedVerifiedEmailUserEnv({
-        address: "new-owner@example.test",
-      }),
-      mode: "replace",
-    })).rejects.toThrow("Hosted verified email sender route is already assigned to a different user.");
-
-    await firstUserEnv.updateUserEnv("member_123", {
-      env: {},
-      mode: "replace",
-    });
-
-    await expect(resolveHostedEmailIngressRoute({
-      bucket: bucket.api,
-      config: hostedEmailConfig,
-      envelopeFrom: "new-owner@example.test",
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "new-owner@example.test",
-      key: bundleKey,
-      keyId: "v1",
-      to: hostedEmailConfig.fromAddress,
-    })).resolves.toBeNull();
   });
 });
 

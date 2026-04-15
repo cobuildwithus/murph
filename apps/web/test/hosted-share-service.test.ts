@@ -1,45 +1,14 @@
 import { HostedBillingStatus, type ExecutionOutbox } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
-import {
-  type HostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution";
-import type {
-  HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution/outbox-payload";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const shareHarness = vi.hoisted(() => ({
   drainHostedExecutionOutboxBestEffort: vi.fn(),
+  getEventStatus: vi.fn(),
   issueHostedInviteForPhone: vi.fn(),
-  sharePacks: new Map<string, SharePack>(),
-  stagedPayloads: [] as HostedExecutionDispatchRequest[],
+  readHostedExecutionControlClientIfConfigured: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-share/pack-store", () => ({
-  deleteHostedSharePackObject: async ({ ownerUserId, shareId }: { ownerUserId: string; shareId: string }) => {
-    shareHarness.sharePacks.delete(`${ownerUserId}:${shareId}`);
-  },
-  writeHostedSharePackObject: async ({
-    ownerUserId,
-    pack,
-    shareId,
-  }: {
-    ownerUserId: string;
-    pack: SharePack;
-    shareId: string;
-  }) => {
-    shareHarness.sharePacks.set(`${ownerUserId}:${shareId}`, pack);
-    return pack;
-  },
-}));
-
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  deleteHostedStoredDispatchPayloadBestEffort: async () => {},
-  maybeStageHostedExecutionDispatchPayload: async (dispatch: HostedExecutionDispatchRequest) => {
-    shareHarness.stagedPayloads.push(dispatch);
-    return createStagedPayload(dispatch);
-  },
-}));
 vi.mock("@/src/lib/hosted-execution/outbox", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
     "@/src/lib/hosted-execution/outbox",
@@ -54,6 +23,9 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => {
     throw new Error("Unexpected getPrisma call in hosted-share-service.test.ts");
   }),
+}));
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured: shareHarness.readHostedExecutionControlClientIfConfigured,
 }));
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(
@@ -118,31 +90,17 @@ function buildPack(): SharePack {
   };
 }
 
-function createStagedPayload(
-  dispatch: HostedExecutionDispatchRequest,
-): HostedExecutionOutboxPayload {
-  return {
-    dispatchRef: {
-      eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
-      occurredAt: dispatch.occurredAt,
-      userId: dispatch.event.userId,
-    },
-    stagedPayloadId: `transient/dispatch-payloads/${dispatch.event.userId}/${dispatch.eventId}.json`,
-    storage: "reference",
-  };
-}
-
 describe("hosted share service", () => {
   beforeEach(() => {
     shareHarness.drainHostedExecutionOutboxBestEffort.mockReset();
     shareHarness.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    shareHarness.getEventStatus.mockReset();
     shareHarness.issueHostedInviteForPhone.mockReset();
     shareHarness.issueHostedInviteForPhone.mockRejectedValue(
       new Error("Unexpected invite issuance in hosted share service test."),
     );
-    shareHarness.sharePacks.clear();
-    shareHarness.stagedPayloads = [];
+    shareHarness.readHostedExecutionControlClientIfConfigured.mockReset();
+    shareHarness.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
     originalHostedOnboardingPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
     originalHostedContactPrivacyCurrentKeyVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
     originalHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
@@ -219,7 +177,8 @@ describe("hosted share service", () => {
     });
     expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeGreaterThan(23 * 60 * 60 * 1000);
     expect((prisma.rows[0]?.expiresAt?.getTime() ?? 0) - startedAt).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5_000);
-    expect(shareHarness.sharePacks.get(`member_sender:${prisma.rows[0]?.id ?? ""}`)).toEqual(buildPack());
+    expect(prisma.hostedSharePayloadRows).toHaveLength(1);
+    expect(prisma.hostedSharePayloadRows[0]?.shareId).toBe(prisma.rows[0]?.id);
   });
 
   it("issues a hosted invite when a recipient phone number is provided", async () => {
@@ -325,8 +284,6 @@ describe("hosted share service", () => {
     expect(finalizedPageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
 
-    shareHarness.sharePacks.delete(`member_sender:${prisma.rows[0]?.id ?? ""}`);
-
     const consumedWithoutPackPageData = await buildHostedSharePageData({
       authenticatedMember: {
         billingStatus: HostedBillingStatus.active,
@@ -350,15 +307,13 @@ describe("hosted share service", () => {
     });
   });
 
-  it("builds hosted share page preview metadata from Postgres even when the Cloudflare pack is gone", async () => {
+  it("builds hosted share page preview metadata from Postgres without any Cloudflare share-pack dependency", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
-
-    shareHarness.sharePacks.delete(`member_sender:${prisma.rows[0]?.id ?? ""}`);
 
     const pageData = await buildHostedSharePageData({
       prisma: prisma as never,
@@ -403,15 +358,13 @@ describe("hosted share service", () => {
     expect(shareHarness.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
   });
 
-  it("accepts the share even when the Cloudflare-backed pack is already missing at claim time", async () => {
+  it("accepts the share from the web-owned payload without a Cloudflare pack seam", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
-
-    shareHarness.sharePacks.delete(`member_sender:${prisma.rows[0]?.id ?? ""}`);
 
     await expect(acceptHostedShareLink({
       member: {
@@ -427,7 +380,6 @@ describe("hosted share service", () => {
     });
 
     expect(prisma.outboxRows).toHaveLength(1);
-    expect(shareHarness.stagedPayloads).toHaveLength(0);
     expect(shareHarness.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
       eventIds: [
         prisma.rows[0]?.lastEventId ?? "",
@@ -460,7 +412,6 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.acceptedByMemberId).toBe("member_123");
     expect(prisma.rows[0]?.consumedAt).toBeNull();
     expect(prisma.outboxRows).toHaveLength(1);
-    expect(shareHarness.stagedPayloads).toHaveLength(0);
 
     const retried = await acceptHostedShareLink({
       member: {
@@ -476,7 +427,6 @@ describe("hosted share service", () => {
     expect(retried.pending).toBe(true);
     expect(prisma.outboxRows).toHaveLength(1);
     expect(prisma.outboxRows[0]?.eventId).toBe(prisma.rows[0]?.lastEventId);
-    expect(shareHarness.stagedPayloads).toHaveLength(0);
     expect(shareHarness.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(2);
 
     await finalizeHostedShareAcceptance({
@@ -499,6 +449,121 @@ describe("hosted share service", () => {
     expect(finalized.alreadyImported).toBe(true);
     expect(finalized.imported).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
+  });
+
+  it("reconciles a processing share from Cloudflare event status when the local outbox row is still queued", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    });
+
+    prisma.outboxRows[0]!.status = "dispatched";
+    prisma.outboxRows[0]!.dispatchState = "queued";
+    shareHarness.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      getEventStatus: shareHarness.getEventStatus,
+    });
+    shareHarness.getEventStatus.mockResolvedValue({
+      eventId: prisma.rows[0]?.lastEventId ?? "",
+      lastError: null,
+      state: "completed",
+      userId: "member_123",
+    });
+
+    await expect(acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      alreadyImported: true,
+      imported: true,
+      pending: false,
+    });
+
+    await expect(buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      stage: "consumed",
+    });
+    expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
+    expect(shareHarness.getEventStatus).toHaveBeenCalledWith(
+      "member_123",
+      prisma.rows[0]?.lastEventId ?? "",
+    );
+  });
+
+  it("releases a processing share when Cloudflare reports the acceptance event poisoned before local outbox catches up", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    });
+
+    prisma.outboxRows[0]!.status = "dispatched";
+    prisma.outboxRows[0]!.dispatchState = "queued";
+    shareHarness.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      getEventStatus: shareHarness.getEventStatus,
+    });
+    shareHarness.getEventStatus.mockResolvedValue({
+      eventId: prisma.rows[0]?.lastEventId ?? "",
+      lastError: "runner failed",
+      state: "poisoned",
+      userId: "member_123",
+    });
+
+    await expect(buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      share: {
+        acceptedByCurrentMember: false,
+      },
+      stage: "ready",
+    });
+    expect(prisma.rows[0]).toMatchObject({
+      acceptedAt: null,
+      acceptedByMemberId: null,
+      consumedAt: null,
+      consumedByMemberId: null,
+      lastEventId: null,
+    });
   });
 
   it("ignores stale release and finalize callbacks after the share is reaccepted", async () => {
@@ -624,7 +689,7 @@ describe("hosted share service", () => {
     });
 
     expect(prisma.rows).toHaveLength(0);
-    expect(shareHarness.sharePacks.size).toBe(0);
+    expect(prisma.hostedSharePayloadRows).toHaveLength(0);
   });
 
   it("rejects hosted share creation for suspended senders", async () => {
@@ -648,7 +713,7 @@ describe("hosted share service", () => {
     });
 
     expect(prisma.rows).toHaveLength(0);
-    expect(shareHarness.sharePacks.size).toBe(0);
+    expect(prisma.hostedSharePayloadRows).toHaveLength(0);
   });
 
 });
@@ -668,6 +733,14 @@ type HostedShareRow = {
   updatedAt: Date;
 };
 
+type HostedSharePayloadRow = {
+  createdAt: Date;
+  payloadEncrypted: string;
+  payloadSchema: string;
+  shareId: string;
+  updatedAt: Date;
+};
+
 type HostedShareMemberRow = {
   billingStatus: HostedBillingStatus;
   id: string;
@@ -678,6 +751,7 @@ function createHostedSharePrisma(input?: {
   hostedMembers?: HostedShareMemberRow[];
 }) {
   const rows: HostedShareRow[] = [];
+  const hostedSharePayloadRows: HostedSharePayloadRow[] = [];
   const outboxRows: ExecutionOutbox[] = [];
   const hostedMembers = input?.hostedMembers ?? [
     {
@@ -688,6 +762,7 @@ function createHostedSharePrisma(input?: {
   ];
   const prismaLike = {
     hostedMembers,
+    hostedSharePayloadRows,
     rows,
     outboxRows,
     hostedMember: {
@@ -776,6 +851,36 @@ function createHostedSharePrisma(input?: {
           throw new Error("row missing");
         }
         Object.assign(row, data, { updatedAt: new Date() });
+        return row;
+      },
+    },
+    hostedSharePayload: {
+      findUnique: async ({ where }: { where: { shareId: string } }) =>
+        hostedSharePayloadRows.find((row) => row.shareId === where.shareId) ?? null,
+      upsert: async ({
+        create,
+        update,
+        where,
+      }: {
+        create: HostedSharePayloadRow;
+        update: Pick<HostedSharePayloadRow, "payloadEncrypted" | "payloadSchema">;
+        where: { shareId: string };
+      }) => {
+        const existing = hostedSharePayloadRows.find((row) => row.shareId === where.shareId);
+
+        if (existing) {
+          existing.payloadEncrypted = update.payloadEncrypted;
+          existing.payloadSchema = update.payloadSchema;
+          existing.updatedAt = new Date();
+          return existing;
+        }
+
+        const row: HostedSharePayloadRow = {
+          ...create,
+          createdAt: create.createdAt ?? new Date(),
+          updatedAt: create.updatedAt ?? new Date(),
+        };
+        hostedSharePayloadRows.push(row);
         return row;
       },
     },

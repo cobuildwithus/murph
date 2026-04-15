@@ -10,8 +10,6 @@ import {
 
 import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
-import { formatHostedExecutionSafeLogError } from "./logging";
-import { requireHostedPendingUsageClient } from "./pending-usage-client";
 
 export interface ImportHostedAiUsageResult {
   recordedIds: string[];
@@ -259,66 +257,13 @@ export async function importHostedAiUsageRecords(input: {
   };
 }
 
-export interface HostedPendingAiUsageImportDrainResult {
-  imported: number;
-  failedUsers: number;
-  scannedUsers: number;
-}
-
-export async function drainHostedPendingAiUsageImports(input: {
-  limitPerUser?: number;
-  prisma?: PrismaClient;
-} = {}): Promise<HostedPendingAiUsageImportDrainResult> {
-  const prisma = input.prisma ?? getPrisma();
-  const client = requireHostedPendingUsageClient();
-  const dirtyUserIds = await client.getPendingUsageDirtyUsers();
-
-  let imported = 0;
-  let failedUsers = 0;
-
-  for (const userId of dirtyUserIds) {
-    try {
-      const usage = await client.getPendingUsage(userId, input.limitPerUser ?? 200);
-
-      if (usage.length === 0) {
-        await client.deletePendingUsage(userId, []);
-        continue;
-      }
-
-      const result = await importHostedAiUsageRecords({
-        prisma,
-        trustedUserId: userId,
-        usage,
-      });
-
-      if (result.recordedIds.length > 0) {
-        await client.deletePendingUsage(userId, result.recordedIds);
-      }
-
-      imported += result.recordedIds.length;
-    } catch (error) {
-      failedUsers += 1;
-      console.error(
-        "Failed to import hosted pending AI usage for one user.",
-        formatHostedExecutionSafeLogError(error),
-      );
-    }
-  }
-
-  return {
-    failedUsers,
-    imported,
-    scannedUsers: dirtyUserIds.length,
-  };
-}
-
 function requireHostedAiUsageMemberId(
   record: AssistantUsageRecord,
   trustedUserId: string | null,
 ): string {
   if (!record.memberId) {
     throw new TypeError(
-      `Hosted AI usage ${record.usageId} is missing memberId and cannot be imported into the hosted control plane.`,
+      `Hosted AI usage ${record.usageId} is missing memberId and cannot be imported into the hosted usage ledger.`,
     );
   }
 

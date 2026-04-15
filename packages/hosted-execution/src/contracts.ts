@@ -43,21 +43,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
 export type HostedExecutionEventKind =
   (typeof HOSTED_EXECUTION_EVENT_KINDS)[number];
 
-export const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS = [
-  "linq.message.received",
-  "telegram.message.received",
-  "email.message.received",
-  "device-sync.wake",
-  "gateway.message.send",
-] as const satisfies readonly HostedExecutionEventKind[];
-
-export const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS = [
-  "member.activated",
-  "member.channels.updated",
-  "assistant.cron.tick",
-  "vault.share.accepted",
-] as const satisfies readonly HostedExecutionEventKind[];
-
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -234,27 +219,25 @@ export interface HostedExecutionUserStatus {
   userId: string;
 }
 
-export const HOSTED_EXECUTION_EVENT_DISPATCH_STATES = [
+export const HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES = [
   "queued",
-  "duplicate_pending",
-  "duplicate_consumed",
   "backpressured",
   "completed",
   "poisoned",
 ] as const;
 
-export type HostedExecutionEventDispatchState =
-  (typeof HOSTED_EXECUTION_EVENT_DISPATCH_STATES)[number];
+export type HostedExecutionDispatchLifecycleState =
+  (typeof HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES)[number];
 
-export interface HostedExecutionEventDispatchStatus {
+export interface HostedExecutionDispatchStatus {
   eventId: string;
   lastError: string | null;
-  state: HostedExecutionEventDispatchState;
+  state: HostedExecutionDispatchLifecycleState;
   userId: string;
 }
 
 export interface HostedExecutionDispatchResult {
-  event: HostedExecutionEventDispatchStatus;
+  event: HostedExecutionDispatchStatus;
   status: HostedExecutionUserStatus;
 }
 
@@ -283,92 +266,5 @@ export type HostedExecutionDeviceSyncRuntimeConnectionSnapshot =
 export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
   DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse;
 
-export interface HostedExecutionDispatchOutcomeStatusSnapshot {
-  lastError: string | null;
-  state: HostedExecutionEventDispatchState;
-}
-
 export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
   "Hosted execution dispatch is not configured.";
-
-export function resolveHostedExecutionDispatchOutcome(input: {
-  eventId: string;
-  initialStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
-  nextStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
-  userId: string;
-}): HostedExecutionEventDispatchStatus {
-  const currentStatus = input.nextStatus ?? input.initialStatus;
-
-  if (input.nextStatus?.state === "poisoned") {
-    return {
-      eventId: input.eventId,
-      lastError: input.nextStatus.lastError,
-      state: "poisoned",
-      userId: input.userId,
-    };
-  }
-
-  if (input.nextStatus?.state === "backpressured") {
-    return {
-      eventId: input.eventId,
-      lastError: input.nextStatus.lastError,
-      state: "backpressured",
-      userId: input.userId,
-    };
-  }
-
-  if (
-    input.initialStatus?.state === "completed"
-    || input.initialStatus?.state === "duplicate_consumed"
-  ) {
-    return {
-      eventId: input.eventId,
-      lastError: currentStatus?.lastError ?? input.initialStatus.lastError,
-      state: "duplicate_consumed",
-      userId: input.userId,
-    };
-  }
-
-  if (
-    input.initialStatus?.state === "queued"
-    || input.initialStatus?.state === "duplicate_pending"
-  ) {
-    return {
-      eventId: input.eventId,
-      lastError: currentStatus?.lastError ?? input.initialStatus.lastError,
-      state: "duplicate_pending",
-      userId: input.userId,
-    };
-  }
-
-  if (
-    input.nextStatus?.state === "completed"
-    || input.nextStatus?.state === "duplicate_consumed"
-  ) {
-    return {
-      eventId: input.eventId,
-      lastError: input.nextStatus.lastError,
-      state: "completed",
-      userId: input.userId,
-    };
-  }
-
-  return {
-    eventId: input.eventId,
-    lastError: currentStatus?.lastError ?? null,
-    state: "queued",
-    userId: input.userId,
-  };
-}
-
-export function resolveHostedExecutionDispatchOutcomeState(input: {
-  initialStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
-  nextStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
-}): HostedExecutionDispatchResult["event"]["state"] {
-  return resolveHostedExecutionDispatchOutcome({
-    eventId: "__hosted-dispatch-outcome__",
-    initialStatus: input.initialStatus,
-    nextStatus: input.nextStatus,
-    userId: "__hosted-dispatch-outcome__",
-  }).state;
-}

@@ -13,6 +13,14 @@ export async function handleHostedShareAcceptedDispatch(input: {
   sharePack: HostedExecutionRunnerSharePack;
   vaultRoot: string;
 }): Promise<HostedDispatchEffect> {
+  if (input.sharePack.ownerUserId !== input.dispatch.event.share.ownerUserId) {
+    throw new TypeError("Hosted share pack ownerUserId must match the canonical share reference.");
+  }
+
+  if (input.sharePack.shareId !== input.dispatch.event.share.shareId) {
+    throw new TypeError("Hosted share pack shareId must match the canonical share reference.");
+  }
+
   const pack = input.sharePack.pack;
 
   return {

@@ -7,24 +7,27 @@ import type {
   HostedExecutionEventKind,
 } from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS,
-  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
+  HOSTED_EXECUTION_EVENT_KINDS,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedExecutionDispatchRef as buildSharedHostedExecutionDispatchRef,
-  readHostedExecutionDispatchRef as readSharedHostedExecutionDispatchRef,
-  type HostedExecutionDispatchRef as SharedHostedExecutionDispatchRef,
-} from "@murphai/hosted-execution/dispatch-ref";
-import {
-  buildHostedExecutionOutboxPayload as buildSharedHostedExecutionOutboxPayload,
-  readHostedExecutionOutboxPayload as readSharedHostedExecutionOutboxPayload,
-  readHostedExecutionStagedPayloadId as readSharedHostedExecutionStagedPayloadId,
-  type HostedExecutionOutboxPayload as SharedHostedExecutionOutboxPayload,
-  type HostedExecutionOutboxPayloadStorage,
-} from "@murphai/hosted-execution/outbox-payload";
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
 
-export type HostedExecutionDispatchRef = SharedHostedExecutionDispatchRef;
-export type HostedExecutionOutboxPayload = SharedHostedExecutionOutboxPayload;
+export type HostedExecutionOutboxPayloadStorage = "inline";
+
+export interface HostedExecutionDispatchRef {
+  eventId: string;
+  eventKind: HostedExecutionEventKind;
+  occurredAt: string;
+  userId: string;
+}
+
+export interface HostedExecutionInlineOutboxPayload {
+  dispatch: HostedExecutionDispatchRequest;
+  storage: "inline";
+}
+
+export type HostedExecutionOutboxPayload = HostedExecutionInlineOutboxPayload;
 
 interface HostedExecutionPrunedInlineOutboxPayload {
   dispatchRef: HostedExecutionDispatchRef;
@@ -33,21 +36,10 @@ interface HostedExecutionPrunedInlineOutboxPayload {
   storage: "pruned";
 }
 
-interface HostedExecutionPrunedReferenceOutboxPayload {
-  dispatchRef: HostedExecutionDispatchRef;
-  schema: typeof HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA;
-  storage: "pruned";
-}
-
 const HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA =
   "murph.hosted-execution-inline-outbox-payload-pruned.v1";
-const HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA =
-  "murph.hosted-execution-reference-outbox-payload-pruned.v1";
-const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
-  HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS,
-);
-const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
-  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
+const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
+  HOSTED_EXECUTION_EVENT_KINDS,
 );
 const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
   "eventId",
@@ -55,14 +47,13 @@ const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
   "occurredAt",
   "userId",
 ]);
+const HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
+  "dispatch",
+  "storage",
+]);
 const HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
   "dispatchRef",
   "payloadHash",
-  "schema",
-  "storage",
-]);
-const HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
-  "dispatchRef",
   "schema",
   "storage",
 ]);
@@ -70,7 +61,12 @@ const HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
 export function buildHostedExecutionDispatchRef(
   dispatch: HostedExecutionDispatchRequest,
 ): HostedExecutionDispatchRef {
-  return buildSharedHostedExecutionDispatchRef(dispatch);
+  return {
+    eventId: dispatch.eventId,
+    eventKind: dispatch.event.kind,
+    occurredAt: dispatch.occurredAt,
+    userId: dispatch.event.userId,
+  };
 }
 
 export function serializeHostedExecutionOutboxPayload(
@@ -80,80 +76,108 @@ export function serializeHostedExecutionOutboxPayload(
     storage?: HostedExecutionOutboxPayloadStorage | "auto";
   } = {},
 ): Prisma.InputJsonObject {
-  return toPrismaInputJsonObject(buildSharedHostedExecutionOutboxPayload(dispatch, options));
+  if (options.stagedPayloadId !== undefined && options.stagedPayloadId !== null) {
+    throw new TypeError("Hosted execution outbox payloads no longer support staged payload refs.");
+  }
+
+  if (options.storage && options.storage !== "auto" && options.storage !== "inline") {
+    throw new TypeError("Hosted execution outbox payloads must use inline storage.");
+  }
+
+  return toPrismaInputJsonObject({
+    dispatch: parseHostedExecutionDispatchRequest(dispatch),
+    storage: "inline",
+  } satisfies HostedExecutionInlineOutboxPayload);
 }
 
 export function summarizeHostedExecutionOutboxPayload(
   payload: HostedExecutionOutboxPayload,
 ): Prisma.InputJsonObject {
-  if (payload.storage === "inline") {
-    return toPrismaInputJsonObject({
-      dispatchRef: buildSharedHostedExecutionDispatchRef(payload.dispatch),
-      payloadHash: hashHostedExecutionOutboxPayload(payload),
-      schema: HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA,
-      storage: "pruned",
-    } satisfies HostedExecutionPrunedInlineOutboxPayload);
-  }
-
   return toPrismaInputJsonObject({
-    dispatchRef: payload.dispatchRef,
-    schema: HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA,
+    dispatchRef: buildHostedExecutionDispatchRef(payload.dispatch),
+    payloadHash: hashHostedExecutionOutboxPayload(payload),
+    schema: HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA,
     storage: "pruned",
-  } satisfies HostedExecutionPrunedReferenceOutboxPayload);
+  } satisfies HostedExecutionPrunedInlineOutboxPayload);
 }
 
 export function areHostedExecutionOutboxPayloadsEquivalent(
   existingPayloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
   expectedPayloadJson: Prisma.InputJsonValue,
 ): boolean {
-  const existingPayload = readSharedHostedExecutionOutboxPayload(existingPayloadJson);
-  const expectedPayload = readSharedHostedExecutionOutboxPayload(expectedPayloadJson);
+  const existingPayload = readHostedExecutionOutboxPayload(existingPayloadJson);
+  const expectedPayload = readHostedExecutionOutboxPayload(expectedPayloadJson);
 
   if (existingPayload && expectedPayload) {
-    return areFullHostedExecutionOutboxPayloadsEquivalent(existingPayload, expectedPayload);
+    return isDeepStrictEqual(existingPayload.dispatch, expectedPayload.dispatch);
   }
 
   const prunedInlinePayload = readHostedExecutionPrunedInlineOutboxPayload(existingPayloadJson);
 
-  if (prunedInlinePayload && expectedPayload?.storage === "inline") {
-    return prunedInlinePayload.payloadHash === hashHostedExecutionOutboxPayload(expectedPayload)
+  return Boolean(
+    prunedInlinePayload
+      && expectedPayload
+      && prunedInlinePayload.payloadHash === hashHostedExecutionOutboxPayload(expectedPayload)
       && areHostedExecutionDispatchRefsEquivalent(
         prunedInlinePayload.dispatchRef,
-        buildSharedHostedExecutionDispatchRef(expectedPayload.dispatch),
-      );
-  }
-
-  const prunedReferencePayload = readHostedExecutionPrunedReferenceOutboxPayload(
-    existingPayloadJson,
-  );
-
-  return Boolean(
-    prunedReferencePayload
-      && expectedPayload?.storage === "reference"
-      && areHostedExecutionDispatchRefsEquivalent(
-        prunedReferencePayload.dispatchRef,
-        expectedPayload.dispatchRef,
+        buildHostedExecutionDispatchRef(expectedPayload.dispatch),
       ),
   );
-}
-
-export function readHostedExecutionStagedPayloadId(value: unknown): string | null {
-  return readSharedHostedExecutionStagedPayloadId(value);
 }
 
 export function readHostedExecutionDispatchRef(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
 ): HostedExecutionDispatchRef | null {
-  return readSharedHostedExecutionDispatchRef(payloadJson)
-    ?? readHostedExecutionPrunedInlineOutboxPayload(payloadJson)?.dispatchRef
-    ?? readHostedExecutionPrunedReferenceOutboxPayload(payloadJson)?.dispatchRef
-    ?? null;
+  const inlinePayload = readHostedExecutionOutboxPayload(payloadJson);
+
+  return readHostedExecutionPrunedInlineOutboxPayload(payloadJson)?.dispatchRef
+    ?? (inlinePayload ? buildHostedExecutionDispatchRef(inlinePayload.dispatch) : null);
 }
 
 export function readHostedExecutionOutboxPayload(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
 ): HostedExecutionOutboxPayload | null {
-  return readSharedHostedExecutionOutboxPayload(payloadJson);
+  const payloadObject = toHostedExecutionObject(payloadJson);
+
+  if (readHostedExecutionText(payloadObject.storage) !== "inline") {
+    return null;
+  }
+
+  if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS)) {
+    return null;
+  }
+
+  try {
+    return {
+      dispatch: parseHostedExecutionDispatchRequest(payloadObject.dispatch),
+      storage: "inline",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function resolveHostedExecutionOutboxPayloadEventId(
+  payload: HostedExecutionOutboxPayload,
+): string {
+  return payload.dispatch.eventId;
+}
+
+export function resolveHostedExecutionOutboxPayloadUserId(
+  payload: HostedExecutionOutboxPayload,
+): string {
+  return payload.dispatch.event.userId;
+}
+
+export function resolveHostedExecutionOutboxPayloadStorage(
+  _dispatch: HostedExecutionDispatchRequest,
+  requested: HostedExecutionOutboxPayloadStorage | "auto",
+): HostedExecutionOutboxPayloadStorage {
+  if (requested !== "auto" && requested !== "inline") {
+    throw new TypeError("Hosted execution outbox payloads must use inline storage.");
+  }
+
+  return "inline";
 }
 
 function readHostedExecutionPrunedInlineOutboxPayload(
@@ -184,32 +208,6 @@ function readHostedExecutionPrunedInlineOutboxPayload(
   };
 }
 
-function readHostedExecutionPrunedReferenceOutboxPayload(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): HostedExecutionPrunedReferenceOutboxPayload | null {
-  const record = toHostedExecutionObject(payloadJson);
-
-  if (
-    readHostedExecutionText(record.storage) !== "pruned"
-    || readHostedExecutionText(record.schema) !== HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA
-    || !hasOnlyHostedExecutionKeys(record, HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_KEYS)
-  ) {
-    return null;
-  }
-
-  const dispatchRef = readHostedExecutionReferenceDispatchRef(record.dispatchRef);
-
-  if (!dispatchRef) {
-    return null;
-  }
-
-  return {
-    dispatchRef,
-    schema: HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA,
-    storage: "pruned",
-  };
-}
-
 function readHostedExecutionInlineDispatchRef(value: unknown): HostedExecutionDispatchRef | null {
   const record = toHostedExecutionObject(value);
 
@@ -219,30 +217,6 @@ function readHostedExecutionInlineDispatchRef(value: unknown): HostedExecutionDi
 
   const eventId = readHostedExecutionText(record.eventId);
   const eventKind = readHostedExecutionInlineEventKind(record.eventKind);
-  const occurredAt = readHostedExecutionText(record.occurredAt);
-  const userId = readHostedExecutionText(record.userId);
-
-  if (!eventId || !eventKind || !occurredAt || !userId) {
-    return null;
-  }
-
-  return {
-    eventId,
-    eventKind,
-    occurredAt,
-    userId,
-  };
-}
-
-function readHostedExecutionReferenceDispatchRef(value: unknown): HostedExecutionDispatchRef | null {
-  const record = toHostedExecutionObject(value);
-
-  if (!hasOnlyHostedExecutionKeys(record, HOSTED_EXECUTION_DISPATCH_REF_KEYS)) {
-    return null;
-  }
-
-  const eventId = readHostedExecutionText(record.eventId);
-  const eventKind = readHostedExecutionReferenceEventKind(record.eventKind);
   const occurredAt = readHostedExecutionText(record.occurredAt);
   const userId = readHostedExecutionText(record.userId);
 
@@ -287,14 +261,7 @@ function stableSortValue(value: unknown): unknown {
 
 function readHostedExecutionInlineEventKind(value: unknown): HostedExecutionEventKind | null {
   return typeof value === "string"
-    && HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
-    ? value as HostedExecutionEventKind
-    : null;
-}
-
-function readHostedExecutionReferenceEventKind(value: unknown): HostedExecutionEventKind | null {
-  return typeof value === "string"
-    && HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
+    && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
     ? value as HostedExecutionEventKind
     : null;
 }
@@ -303,26 +270,6 @@ function readHostedExecutionText(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0
     ? value
     : null;
-}
-
-function areFullHostedExecutionOutboxPayloadsEquivalent(
-  left: HostedExecutionOutboxPayload,
-  right: HostedExecutionOutboxPayload,
-): boolean {
-  if (left.storage !== right.storage) {
-    return false;
-  }
-
-  if (left.storage === "inline" && right.storage === "inline") {
-    return isDeepStrictEqual(left.dispatch, right.dispatch);
-  }
-
-  if (left.storage === "reference" && right.storage === "reference") {
-    return areHostedExecutionDispatchRefsEquivalent(left.dispatchRef, right.dispatchRef)
-      && left.stagedPayloadId === right.stagedPayloadId;
-  }
-
-  return false;
 }
 
 function areHostedExecutionDispatchRefsEquivalent(

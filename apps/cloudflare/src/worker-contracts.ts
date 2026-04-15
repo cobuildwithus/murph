@@ -1,56 +1,21 @@
 import type {
-  GatewayFetchAttachmentsInput,
-  GatewayGetConversationInput,
-  GatewayListConversationsInput,
-  GatewayAttachment,
-  GatewayConversation,
-  GatewayListConversationsResult,
-  GatewayListOpenPermissionsInput,
-  GatewayPermissionRequest,
-  GatewayPollEventsInput,
-  GatewayPollEventsResult,
-  GatewayReadMessagesInput,
-  GatewayReadMessagesResult,
-  GatewayRespondToPermissionInput,
-} from "@murphai/gateway-core";
-import type {
-  HostedExecutionBundleRef,
-} from "@murphai/hosted-execution/contracts";
-import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
-import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 
 import type { R2BucketLike } from "./bundle-store.ts";
-import type {
-  HostedExecutionCommitPayload,
-} from "./execution-journal.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
-  provisionManagedUserCrypto?(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
-  gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
-  gatewayGetConversation?(input: GatewayGetConversationInput): Promise<GatewayConversation | null>;
-  gatewayListConversations?(input?: GatewayListConversationsInput): Promise<GatewayListConversationsResult>;
-  gatewayListOpenPermissions?(input?: GatewayListOpenPermissionsInput): Promise<GatewayPermissionRequest[]>;
-  gatewayPollEvents?(input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult>;
-  gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
-  gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
   applyDeviceSyncRuntimeUpdates?(input: {
     request: HostedExecutionDeviceSyncRuntimeApplyRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   getDeviceSyncRuntimeSnapshot?(input: {
     request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  putPendingUsage?(input: {
-    usage: readonly Record<string, unknown>[];
-  }): Promise<HostedRuntimeUsageRecordResponse>;
-  readPendingUsage?(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
-  deletePendingUsage?(input: { usageIds: readonly string[] }): Promise<void>;
 }
 
 export interface WorkerUserRunnerNamespaceLike<

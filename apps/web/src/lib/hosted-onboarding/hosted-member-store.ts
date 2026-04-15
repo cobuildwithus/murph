@@ -1,9 +1,18 @@
 /**
  * Owns the core hosted_member row plus composed reads over the specialized
- * identity, routing, and billing store slices without flattening them back into
- * one wide row.
+ * identity, routing, billing, and email-authorization store slices without
+ * flattening them back into one wide row.
  */
-import { type HostedMember, Prisma } from "@prisma/client";
+import {
+  type HostedMember,
+  Prisma,
+} from "@prisma/client";
+
+import { createHostedEmailLookupKey } from "./contact-privacy";
+import {
+  decryptHostedWebNullableString,
+  encryptHostedWebNullableString,
+} from "../hosted-web/encryption";
 
 import {
   type HostedMemberStripeBillingRefSnapshot,
@@ -19,6 +28,11 @@ import {
 } from "./hosted-member-routing-store";
 import { type HostedOnboardingReadClient } from "./shared";
 
+const HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD =
+  "hosted-member-email-authorization.verified-email";
+const HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD =
+  "hosted-member-email-authorization.direct-public-sender";
+
 const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   billingStatus: true,
   createdAt: true,
@@ -27,9 +41,51 @@ const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>(
   updatedAt: true,
 });
 
+const hostedMemberEmailAuthorizationStateSelect =
+  Prisma.validator<Prisma.HostedMemberEmailAuthorizationSelect>()({
+    directPublicSenderAddressEncrypted: true,
+    directPublicSenderAuthorizedAt: true,
+    directPublicSenderLookupKey: true,
+    memberId: true,
+    verifiedEmailAddressEncrypted: true,
+    verifiedEmailLookupKey: true,
+    verifiedEmailVerifiedAt: true,
+  });
+
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
+
+export interface HostedMemberVerifiedEmailFact {
+  address: string;
+  lookupKey: string;
+  verifiedAt: Date;
+}
+
+export interface HostedMemberDirectPublicSenderAuthorizationFact {
+  address: string;
+  authorizedAt: Date;
+  lookupKey: string;
+}
+
+export interface HostedMemberEmailAuthorizationState {
+  directPublicSender: HostedMemberDirectPublicSenderAuthorizationFact | null;
+  memberId: string;
+  verifiedEmail: HostedMemberVerifiedEmailFact | null;
+}
+
+export interface HostedMemberEmailAuthorizationWriteInput {
+  directPublicSender?: {
+    address: string;
+    authorizedAt: Date;
+  } | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  verifiedEmail?: {
+    address: string;
+    verifiedAt: Date;
+  } | null;
+}
 
 /**
  * Billing orchestration should depend on the core+billing slice instead of the
@@ -42,6 +98,7 @@ export interface HostedMemberBillingSnapshot {
 }
 
 export interface HostedMemberSnapshot extends HostedMemberBillingSnapshot {
+  emailAuthorization?: HostedMemberEmailAuthorizationState | null;
   identity: HostedMemberIdentityState | null;
   routing: HostedMemberRoutingStateSnapshot | null;
 }
@@ -103,6 +160,64 @@ export async function readHostedMemberBillingSnapshot(input: {
   );
 }
 
+export async function readHostedMemberEmailAuthorization(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberEmailAuthorizationState | null> {
+  const record = await input.prisma.hostedMemberEmailAuthorization.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: hostedMemberEmailAuthorizationStateSelect,
+  });
+
+  return record ? projectHostedMemberEmailAuthorizationState(record) : null;
+}
+
+export async function readHostedMemberIdByAuthorizedDirectPublicSenderAddress(input: {
+  address: string | null | undefined;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  const lookupKey = createHostedEmailLookupKey(input.address);
+
+  if (!lookupKey) {
+    return null;
+  }
+
+  const record = await input.prisma.hostedMemberEmailAuthorization.findUnique({
+    where: {
+      directPublicSenderLookupKey: lookupKey,
+    },
+    select: {
+      directPublicSenderAuthorizedAt: true,
+      memberId: true,
+    },
+  });
+
+  return record?.directPublicSenderAuthorizedAt
+    ? record.memberId
+    : null;
+}
+
+export async function upsertHostedMemberEmailAuthorization(
+  input: HostedMemberEmailAuthorizationWriteInput,
+): Promise<HostedMemberEmailAuthorizationState> {
+  if (input.verifiedEmail === undefined && input.directPublicSender === undefined) {
+    throw new TypeError("Hosted member email authorization updates require at least one fact.");
+  }
+
+  const record = await input.prisma.hostedMemberEmailAuthorization.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: buildHostedMemberEmailAuthorizationCreateData(input),
+    update: buildHostedMemberEmailAuthorizationUpdateData(input),
+    select: hostedMemberEmailAuthorizationStateSelect,
+  });
+
+  return projectHostedMemberEmailAuthorizationState(record);
+}
+
 export async function readHostedMemberSnapshot(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -113,6 +228,9 @@ export async function readHostedMemberSnapshot(input: {
     },
     include: {
       billingRef: true,
+      emailAuthorization: {
+        select: hostedMemberEmailAuthorizationStateSelect,
+      },
       identity: true,
       routing: true,
     },
@@ -125,6 +243,9 @@ export async function readHostedMemberSnapshot(input: {
   const identity = memberRecord.identity
     ? projectHostedMemberIdentityState(memberRecord.identity)
     : null;
+  const emailAuthorization = memberRecord.emailAuthorization
+    ? projectHostedMemberEmailAuthorizationState(memberRecord.emailAuthorization)
+    : undefined;
   const routing = memberRecord.routing
     ? projectHostedMemberRoutingState(memberRecord.routing)
     : null;
@@ -137,6 +258,7 @@ export async function readHostedMemberSnapshot(input: {
 
   return composeHostedMemberSnapshot(billing.core, {
     billingRef: billing.billingRef,
+    emailAuthorization,
     identity,
     routing,
   });
@@ -188,6 +310,7 @@ export function composeHostedMemberSnapshot(
   core: HostedMemberCoreState,
   input: {
     billingRef: HostedMemberStripeBillingRefSnapshot | null;
+    emailAuthorization?: HostedMemberEmailAuthorizationState | null;
     identity: HostedMemberIdentityState | null;
     routing: HostedMemberRoutingStateSnapshot | null;
   },
@@ -195,8 +318,60 @@ export function composeHostedMemberSnapshot(
   return {
     billingRef: input.billingRef,
     core,
+    ...(input.emailAuthorization !== undefined
+      ? {
+          emailAuthorization: input.emailAuthorization,
+        }
+      : {}),
     identity: input.identity,
     routing: input.routing,
+  };
+}
+
+export function projectHostedMemberEmailAuthorizationState(
+  record: {
+    directPublicSenderAddressEncrypted: string | null;
+    directPublicSenderAuthorizedAt: Date | null;
+    directPublicSenderLookupKey: string | null;
+    memberId: string;
+    verifiedEmailAddressEncrypted: string | null;
+    verifiedEmailLookupKey: string | null;
+    verifiedEmailVerifiedAt: Date | null;
+  },
+): HostedMemberEmailAuthorizationState {
+  const verifiedEmailAddress = decryptHostedWebNullableString({
+    field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
+    memberId: record.memberId,
+    value: record.verifiedEmailAddressEncrypted,
+  });
+  const directPublicSenderAddress = decryptHostedWebNullableString({
+    field: HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD,
+    memberId: record.memberId,
+    value: record.directPublicSenderAddressEncrypted,
+  });
+
+  return {
+    directPublicSender:
+      directPublicSenderAddress
+      && record.directPublicSenderLookupKey
+      && record.directPublicSenderAuthorizedAt
+        ? {
+            address: directPublicSenderAddress,
+            authorizedAt: record.directPublicSenderAuthorizedAt,
+            lookupKey: record.directPublicSenderLookupKey,
+          }
+        : null,
+    memberId: record.memberId,
+    verifiedEmail:
+      verifiedEmailAddress
+      && record.verifiedEmailLookupKey
+      && record.verifiedEmailVerifiedAt
+        ? {
+            address: verifiedEmailAddress,
+            lookupKey: record.verifiedEmailLookupKey,
+            verifiedAt: record.verifiedEmailVerifiedAt,
+          }
+        : null,
   };
 }
 
@@ -212,5 +387,93 @@ function projectHostedMemberCoreState(
     id: member.id,
     suspendedAt: member.suspendedAt,
     updatedAt: member.updatedAt,
+  };
+}
+
+function buildHostedMemberEmailAuthorizationCreateData(
+  input: HostedMemberEmailAuthorizationWriteInput,
+): Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput {
+  const data = buildHostedMemberEmailAuthorizationMutationData(input);
+  return {
+    ...data,
+    memberId: input.memberId,
+  };
+}
+
+function buildHostedMemberEmailAuthorizationUpdateData(
+  input: HostedMemberEmailAuthorizationWriteInput,
+): Prisma.HostedMemberEmailAuthorizationUncheckedUpdateInput {
+  return buildHostedMemberEmailAuthorizationMutationData(input);
+}
+
+function buildHostedMemberEmailAuthorizationMutationData(
+  input: HostedMemberEmailAuthorizationWriteInput,
+): Omit<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput, "memberId"> {
+  const data: Omit<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput, "memberId"> = {};
+
+  if (input.verifiedEmail !== undefined) {
+    const fact = buildHostedMemberEmailFactColumns({
+      address: input.verifiedEmail?.address ?? null,
+      field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
+      memberId: input.memberId,
+      occurredAt: input.verifiedEmail?.verifiedAt ?? null,
+      label: "Hosted verified email",
+    });
+
+    data.verifiedEmailLookupKey = fact.lookupKey;
+    data.verifiedEmailAddressEncrypted = fact.addressEncrypted;
+    data.verifiedEmailVerifiedAt = fact.occurredAt;
+  }
+
+  if (input.directPublicSender !== undefined) {
+    const fact = buildHostedMemberEmailFactColumns({
+      address: input.directPublicSender?.address ?? null,
+      field: HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD,
+      memberId: input.memberId,
+      occurredAt: input.directPublicSender?.authorizedAt ?? null,
+      label: "Hosted direct-public sender authorization",
+    });
+
+    data.directPublicSenderLookupKey = fact.lookupKey;
+    data.directPublicSenderAddressEncrypted = fact.addressEncrypted;
+    data.directPublicSenderAuthorizedAt = fact.occurredAt;
+  }
+
+  return data;
+}
+
+function buildHostedMemberEmailFactColumns(input: {
+  address: string | null;
+  field: string;
+  label: string;
+  memberId: string;
+  occurredAt: Date | null;
+}) {
+  if (input.address === null) {
+    return {
+      addressEncrypted: null,
+      lookupKey: null,
+      occurredAt: null,
+    };
+  }
+
+  const lookupKey = createHostedEmailLookupKey(input.address);
+
+  if (!lookupKey) {
+    throw new TypeError(`${input.label} must be a valid email address.`);
+  }
+
+  if (!input.occurredAt) {
+    throw new TypeError(`${input.label} must include a timestamp.`);
+  }
+
+  return {
+    addressEncrypted: encryptHostedWebNullableString({
+      field: input.field,
+      memberId: input.memberId,
+      value: input.address,
+    }),
+    lookupKey,
+    occurredAt: input.occurredAt,
   };
 }

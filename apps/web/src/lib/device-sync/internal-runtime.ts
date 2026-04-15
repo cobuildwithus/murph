@@ -11,16 +11,19 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDeviceSyncRuntimeConnectionSeed,
-  HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 
 export interface HostedStaticDeviceSyncConnectionRecord {
+  accessTokenExpiresAt: string | null;
   id: string;
   userId: string;
   provider: string;
+  displayName: string | null;
+  externalAccountId: string | null;
+  metadata: Record<string, unknown>;
+  scopes: string[];
   status: DeviceSyncAccountStatus;
   connectedAt: string;
   lastWebhookAt: string | null;
@@ -53,27 +56,18 @@ interface HostedPublicDeviceSyncAccountFallback {
   updatedAt?: string | null;
 }
 
-const DEFAULT_MISSING_RUNTIME_STATUS: DeviceSyncAccountStatus = "reauthorization_required";
-
-export function findHostedDeviceSyncRuntimeConnection(
-  snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  connectionId: string,
-): HostedExecutionDeviceSyncRuntimeConnectionSnapshot | null {
-  return snapshot.connections.find((entry) => entry.connection.id === connectionId) ?? null;
-}
-
-export function requireHostedDeviceSyncRuntimeTokenBundle(input: {
+export function requireHostedDeviceSyncStoredTokenBundle(input: {
   connectionId: string;
-  runtimeConnection: HostedExecutionDeviceSyncRuntimeConnectionSnapshot | null;
+  storedTokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
   userId: string;
 }): HostedExecutionDeviceSyncRuntimeTokenBundle {
-  if (input.runtimeConnection?.tokenBundle) {
-    return input.runtimeConnection.tokenBundle;
+  if (input.storedTokenBundle) {
+    return input.storedTokenBundle;
   }
 
   throw deviceSyncError({
     code: "CONNECTION_SECRET_MISSING",
-    message: "Hosted device-sync connection no longer has an escrowed token bundle.",
+    message: "Hosted device-sync connection no longer has a stored token bundle.",
     retryable: false,
     httpStatus: 409,
     details: {
@@ -99,40 +93,11 @@ export function composeHostedRuntimeDeviceSyncAccount(input: {
 
 export function buildHostedPublicDeviceSyncAccount(input: {
   record: HostedStaticDeviceSyncConnectionRecord;
-  runtimeConnection?: HostedExecutionDeviceSyncRuntimeConnectionSnapshot | null;
   fallback?: HostedPublicDeviceSyncAccountFallback;
-  missingRuntimeStatus?: DeviceSyncAccountStatus;
 }): PublicDeviceSyncAccount {
-  const runtimeConnection = input.runtimeConnection ?? null;
-
-  if (runtimeConnection) {
-    assertHostedRuntimeConnectionMatchesRecord(input.record, runtimeConnection);
-
-    return {
-      externalAccountId: runtimeConnection.connection.externalAccountId,
-      id: input.record.id,
-      provider: input.record.provider,
-      displayName: runtimeConnection.connection.displayName ?? input.fallback?.displayName ?? null,
-      status: runtimeConnection.connection.status,
-      scopes: [...runtimeConnection.connection.scopes],
-      accessTokenExpiresAt: runtimeConnection.connection.accessTokenExpiresAt ?? null,
-      metadata: sanitizeStoredDeviceSyncMetadata(runtimeConnection.connection.metadata),
-      connectedAt: runtimeConnection.connection.connectedAt,
-      lastWebhookAt: runtimeConnection.localState.lastWebhookAt,
-      lastSyncStartedAt: runtimeConnection.localState.lastSyncStartedAt,
-      lastSyncCompletedAt: runtimeConnection.localState.lastSyncCompletedAt,
-      lastSyncErrorAt: runtimeConnection.localState.lastSyncErrorAt,
-      lastErrorCode: sanitizeHostedRuntimeErrorCode(runtimeConnection.localState.lastErrorCode),
-      lastErrorMessage: sanitizeHostedRuntimeErrorText(runtimeConnection.localState.lastErrorMessage),
-      nextReconcileAt: runtimeConnection.localState.nextReconcileAt,
-      createdAt: runtimeConnection.connection.createdAt,
-      updatedAt: runtimeConnection.connection.updatedAt ?? runtimeConnection.connection.createdAt,
-    } satisfies PublicDeviceSyncAccount;
-  }
-
   const fallback = input.fallback ?? {};
   const externalAccountId = normalizeHostedExternalAccountId(
-    fallback.externalAccountId,
+    input.record.externalAccountId ?? fallback.externalAccountId,
     input.record.id,
   );
 
@@ -140,11 +105,13 @@ export function buildHostedPublicDeviceSyncAccount(input: {
     externalAccountId,
     id: input.record.id,
     provider: input.record.provider,
-    displayName: fallback.displayName ?? null,
-    status: fallback.status ?? input.record.status ?? input.missingRuntimeStatus ?? DEFAULT_MISSING_RUNTIME_STATUS,
-    scopes: fallback.scopes ? [...fallback.scopes] : [],
-    accessTokenExpiresAt: fallback.accessTokenExpiresAt ?? null,
-    metadata: sanitizeStoredDeviceSyncMetadata(fallback.metadata ?? {}),
+    displayName: input.record.displayName ?? fallback.displayName ?? null,
+    status: fallback.status ?? input.record.status,
+    scopes: input.record.scopes.length > 0 ? [...input.record.scopes] : fallback.scopes ? [...fallback.scopes] : [],
+    accessTokenExpiresAt: input.record.accessTokenExpiresAt ?? fallback.accessTokenExpiresAt ?? null,
+    metadata: sanitizeStoredDeviceSyncMetadata(
+      Object.keys(input.record.metadata).length > 0 ? input.record.metadata : fallback.metadata ?? {},
+    ),
     connectedAt: fallback.connectedAt ?? input.record.connectedAt,
     lastWebhookAt: fallback.lastWebhookAt ?? input.record.lastWebhookAt,
     lastSyncStartedAt: fallback.lastSyncStartedAt ?? input.record.lastSyncStartedAt,
@@ -197,25 +164,6 @@ export function buildHostedDeviceSyncRuntimeSeedFromPublicAccount(input: {
     },
     tokenBundle: input.tokenBundle ? { ...input.tokenBundle } : null,
   } satisfies HostedExecutionDeviceSyncRuntimeConnectionSeed;
-}
-
-function assertHostedRuntimeConnectionMatchesRecord(
-  record: HostedStaticDeviceSyncConnectionRecord,
-  runtimeConnection: HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
-): void {
-  if (
-    runtimeConnection.connection.id === record.id
-    && runtimeConnection.connection.provider === record.provider
-  ) {
-    return;
-  }
-
-  throw deviceSyncError({
-    code: "RUNTIME_STATE_CONFLICT",
-    message: `Hosted device-sync runtime returned mismatched connection metadata for ${record.id}.`,
-    retryable: true,
-    httpStatus: 409,
-  });
 }
 
 function normalizeHostedExternalAccountId(

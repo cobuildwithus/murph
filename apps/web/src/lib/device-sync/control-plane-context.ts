@@ -2,6 +2,7 @@ import { deviceSyncError, type DeviceSyncRegistry } from "@murphai/device-syncd/
 
 import { getPrisma } from "../prisma";
 import { readHostedDeviceSyncEnvironment, type HostedDeviceSyncEnvironment } from "./env";
+import { createHostedSecretCodec } from "./crypto";
 import { createHostedDeviceSyncRegistry } from "./providers";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 
@@ -29,6 +30,11 @@ export function createHostedDeviceSyncControlPlaneContext(
     env,
     registry: createHostedDeviceSyncRegistry(env),
     store: new PrismaDeviceSyncControlPlaneStore({
+      codec: createHostedSecretCodec({
+        key: env.encryptionKey,
+        keyVersion: env.encryptionKeyVersion,
+        keysByVersion: env.encryptionKeysByVersion,
+      }),
       providerAccountBlindIndexKey: env.encryptionKey,
       prisma: getPrisma(),
     }),

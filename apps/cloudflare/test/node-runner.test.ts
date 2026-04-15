@@ -943,13 +943,10 @@ describe("runHostedExecutionJob", () => {
             rawMessageKey: "raw_email_123",
             userId: "member_email_fetch",
           },
-	          eventId: "evt_email_fetch",
-	          occurredAt: "2026-03-26T12:05:00.000Z",
-	        },
-	        userEnv: {
-	          HOSTED_USER_VERIFIED_EMAIL: "alice@example.test",
-	        },
-	      });
+          eventId: "evt_email_fetch",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
 
       expect(result.result.summary).toContain("Persisted hosted email capture");
       expect(requests).toEqual(["GET /messages/raw_email_123"]);
@@ -1015,22 +1012,19 @@ describe("runHostedExecutionJob", () => {
         resultsBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
-	      const result = await runHostedExecutionJob({
-	        bundles: activation.bundles,
-	        dispatch: {
-	          event: {
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
             identityId: "assistant@mail.example.test",
             kind: "email.message.received",
             rawMessageKey: "raw_email_alias",
             userId: "member_email_alias",
           },
-	          eventId: "evt_email_alias",
-	          occurredAt: "2026-03-26T12:05:00.000Z",
-	        },
-	        userEnv: {
-	          HOSTED_USER_VERIFIED_EMAIL: "alice@example.test",
-	        },
-	      });
+          eventId: "evt_email_alias",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-alias-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({

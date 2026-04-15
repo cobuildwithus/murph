@@ -49,7 +49,7 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   const platform = createHostedRuntimePlatformStub();
   const forwardedEnv = { OPENAI_API_KEY: "secret" };
   const resolvedConfig = createHostedRuntimeResolvedConfig();
-  const userEnv = { HOSTED_USER_VERIFIED_EMAIL: "user@example.com" };
+  const userEnv = { ANTHROPIC_API_KEY: "anthropic-secret" };
 
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {

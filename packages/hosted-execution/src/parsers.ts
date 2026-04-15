@@ -10,9 +10,10 @@ import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef }
 
 import type {
   HostedExecutionAssistantCronTickEvent,
+  HostedExecutionDispatchLifecycleState,
+  HostedExecutionDispatchStatus,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
-  HostedExecutionEventDispatchStatus,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchResult,
@@ -22,7 +23,6 @@ import type {
   HostedExecutionGatewayMessageSendEvent,
   HostedExecutionMemberActivatedEvent,
   HostedExecutionTelegramMessageReceivedEvent,
-  HostedExecutionEventDispatchState,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerSharePack,
   HostedExecutionRunnerResult,
@@ -34,10 +34,6 @@ import {
   type HostedExecutionBundlePayload,
   type HostedExecutionBundleRefState,
 } from "./bundles.ts";
-import {
-  readHostedExecutionOutboxPayload,
-  type HostedExecutionOutboxPayload,
-} from "./outbox-payload.ts";
 import type {
   HostedExecutionRunContext,
   HostedExecutionRunStatus,
@@ -74,16 +70,6 @@ export function parseHostedExecutionDispatchRequest(value: unknown): HostedExecu
     eventId: requireString(record.eventId, "Hosted execution dispatch request eventId"),
     occurredAt: requireString(record.occurredAt, "Hosted execution dispatch request occurredAt"),
   };
-}
-
-export function parseHostedExecutionOutboxPayload(value: unknown): HostedExecutionOutboxPayload {
-  const payload = readHostedExecutionOutboxPayload(value);
-
-  if (!payload) {
-    throw new TypeError("Hosted execution outbox payload is invalid.");
-  }
-
-  return payload;
 }
 
 export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {
@@ -156,14 +142,14 @@ export function parseHostedExecutionDispatchResult(value: unknown): HostedExecut
   const record = requireObject(value, "Hosted execution dispatch result");
 
   return {
-    event: parseHostedExecutionEventDispatchStatus(record.event),
+    event: parseHostedExecutionDispatchStatus(record.event),
     status: parseHostedExecutionUserStatus(record.status),
   };
 }
 
-export function parseHostedExecutionEventDispatchStatus(
+export function parseHostedExecutionDispatchStatus(
   value: unknown,
-): HostedExecutionEventDispatchStatus {
+): HostedExecutionDispatchStatus {
   const event = requireObject(value, "Hosted execution dispatch status");
 
   return {
@@ -172,7 +158,7 @@ export function parseHostedExecutionEventDispatchStatus(
       event.lastError,
       "Hosted execution dispatch status lastError",
     ),
-    state: parseHostedExecutionEventDispatchState(event.state),
+    state: parseHostedExecutionDispatchLifecycleState(event.state),
     userId: requireString(event.userId, "Hosted execution dispatch status userId"),
   };
 }
@@ -572,15 +558,13 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
   return parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse(value);
 }
 
-function parseHostedExecutionEventDispatchState(
+function parseHostedExecutionDispatchLifecycleState(
   value: unknown,
-): HostedExecutionEventDispatchState {
+): HostedExecutionDispatchLifecycleState {
   const state = requireString(value, "Hosted execution dispatch result event state");
 
   if (
     state === "queued"
-    || state === "duplicate_pending"
-    || state === "duplicate_consumed"
     || state === "backpressured"
     || state === "completed"
     || state === "poisoned"
@@ -588,5 +572,5 @@ function parseHostedExecutionEventDispatchState(
     return state;
   }
 
-  throw new TypeError(`Unsupported hosted execution event dispatch state: ${state}`);
+  throw new TypeError(`Unsupported hosted execution dispatch lifecycle state: ${state}`);
 }

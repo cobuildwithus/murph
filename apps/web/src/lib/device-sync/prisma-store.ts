@@ -33,6 +33,7 @@ import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 export {
   hostedConnectionRecordArgs,
   mapHostedConnectionRecord,
+  type HostedStoredDeviceSyncAccount,
   type HostedConnectionRecord,
 } from "./prisma-store/connections";
 export { generateHostedAgentBearerToken } from "./prisma-store/agent-sessions";
@@ -64,6 +65,7 @@ export class PrismaDeviceSyncControlPlaneStore
     this.prisma = input.prisma;
     this.oauthSessions = new PrismaHostedOAuthSessionStore(this.prisma);
     this.connections = new PrismaHostedConnectionStore({
+      codec: input.codec,
       prisma: this.prisma,
       providerAccountBlindIndexKey: input.providerAccountBlindIndexKey,
     });
@@ -135,12 +137,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionForUser(userId, connectionId);
   }
 
-  async listRuntimeConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
-    return this.connections.listRuntimeConnectionsForUser(userId);
-  }
-
-  async getRuntimeConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
-    return this.connections.getRuntimeConnectionForUser(userId, connectionId);
+  async getStoredConnectionAccountForUser(
+    userId: string,
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ) {
+    return this.connections.getStoredConnectionAccountForUser(userId, connectionId, tx);
   }
 
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
@@ -153,6 +155,22 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {
     return this.connections.syncDurableConnectionState(account, tx);
+  }
+
+  async persistStoredConnectionTokenBundle(input: {
+    connectionId: string;
+    externalAccountId?: string | null;
+    provider: string;
+    tokenBundle: {
+      accessToken: string;
+      accessTokenExpiresAt: string | null;
+      keyVersion: string;
+      refreshToken: string | null;
+      tokenVersion: number;
+    } | null;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<void> {
+    return this.connections.persistStoredConnectionTokenBundle(input);
   }
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {

@@ -46,15 +46,9 @@ import {
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
-  clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
-  getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
   status(): Promise<HostedExecutionUserStatus>;
-  updateUserEnv(update: { env: Record<string, string | null>; mode: "merge" | "replace" }): Promise<{
-    configuredUserEnvKeys: string[];
-    userId: string;
-  }>;
 }
 
 const describe = baseDescribe.sequential;
@@ -166,85 +160,6 @@ describe("cloudflare worker runtime suite", () => {
         retryingEventId: null,
         userId,
       });
-    });
-  });
-
-  it("supports direct Durable Object user-env updates inside the Workers runtime", async () => {
-    const userId = "member_control";
-    await resolveHostedUserCryptoContext(userId);
-    const stub = getUserRunnerStub(userId);
-    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
-
-    await expect(stub.updateUserEnv({
-      env: {
-        OPENAI_API_KEY: "test-key",
-      },
-      mode: "merge",
-    })).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId,
-    });
-
-    await expect(stub.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId,
-    });
-    await expect(stub.clearUserEnv()).resolves.toEqual({
-      configuredUserEnvKeys: [],
-      userId,
-    });
-  });
-
-  it("returns empty hosted user-env status for an unactivated user in the Workers runtime", async () => {
-    const userId = "member_control_unactivated";
-    const stub = getUserRunnerStub(userId);
-    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
-
-    await expect(stub.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: [],
-      userId,
-    });
-  });
-
-  it("bootstraps managed crypto on first hosted user-env write in the Workers runtime", async () => {
-    const userId = "member_control_first_write";
-    const stub = getUserRunnerStub(userId);
-    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
-
-    await expect(stub.updateUserEnv({
-      env: {
-        OPENAI_API_KEY: "first-key",
-      },
-      mode: "merge",
-    })).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId,
-    });
-    await expect(stub.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId,
-    });
-  });
-
-  it("accepts canonical hosted user env keys through direct Durable Object RPC", async () => {
-    const userId = "member_control_env_reject";
-    await resolveHostedUserCryptoContext(userId);
-    const stub = getUserRunnerStub(userId);
-    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
-
-    await expect(stub.updateUserEnv({
-      env: {
-        OPENAI_API_KEY: "sk-user",
-      },
-      mode: "merge",
-    })).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId,
-    });
-
-    await expect(stub.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId,
     });
   });
 

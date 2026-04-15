@@ -18,8 +18,6 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/cloudflare-hosted-control/client": "./src/client.ts",
-  "@murphai/cloudflare-hosted-control/contracts": "./src/contracts.ts",
-  "@murphai/cloudflare-hosted-control/parsers": "./src/parsers.ts",
   "@murphai/cloudflare-hosted-control/routes": "./src/routes.ts",
   "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
 } as const;

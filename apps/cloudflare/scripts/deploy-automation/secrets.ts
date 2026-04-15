@@ -8,7 +8,6 @@ export {
 } from "./worker-secret-names.ts";
 
 import { normalizeOptionalString, requireConfiguredString } from "./shared.ts";
-
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 export function buildHostedWorkerSecretsPayload(

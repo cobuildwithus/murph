@@ -7,6 +7,7 @@ import type {
   HostedExecutionRunnerSharePack,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import { parseHostedExecutionRunnerSharePack } from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
@@ -44,13 +45,8 @@ import {
   COMMITTED_RESULT_FRESH_WINDOW_MS,
   computeRetryDelayMs,
   toUserStatus,
-  type PendingDispatchRecord,
   type RunnerStateRecord,
 } from "./types.js";
-import {
-  applyHostedBusinessOutcomeIfNeeded as applyRunnerBusinessOutcomeIfNeeded,
-  releaseHostedWebShareClaim,
-} from "../runner-outbound/business-outcomes.ts";
 import {
   RunnerCommitRecovery,
   isCommittedResultFinalized,
@@ -60,7 +56,7 @@ import { RunnerBundleSync } from "./runner-bundle-sync.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
 import { RunnerScheduler } from "./runner-scheduler.js";
 import { RunnerUserEnvService } from "./runner-user-env.js";
-import { createHostedShareStore } from "../share-store.js";
+import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 
 export type HostedExecutionDispatchProgressRecord =
   Pick<HostedExecutionDispatchRequest, "eventId">
@@ -88,9 +84,9 @@ interface RunnerDispatchProcessorDependencies {
   bucket: R2BucketLike;
   ensureRunnerStores(userId?: string): Promise<RunnerUserStores>;
   env: HostedExecutionEnvironment;
+  hostedWebBaseUrl: string | null;
   queueStore: RunnerQueueStore;
   readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>>;
-  readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>>;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   scheduler: RunnerScheduler;
@@ -388,42 +384,24 @@ export class RunnerDispatchProcessor {
         }
 
         if (isMissingHostedSharePackError(error) && nextPending.dispatch.event.kind === "vault.share.accepted") {
-          try {
-            await releaseHostedWebShareClaim({
-              callbackSigning: this.dependencies.env.webCallbackSigning,
-              dispatch: nextPending.dispatch,
-              env: this.dependencies.readWorkerStringEnvSource(),
-              reason: error.message,
-            });
-
-            const failure = await this.dependencies.queueStore.reschedulePendingFailure({
-              error,
-              eventId: nextPending.dispatch.eventId,
-              maxEventAttempts: 1,
-              retryDelayMs: this.dependencies.env.retryDelayMs,
-            });
-            record = failure.record;
-            record = await this.dependencies.scheduler.syncNextWake();
-            record = await this.advanceRunPhase({
-              dispatch: nextPending.dispatch,
-              error,
-              level: "error",
-              message: "Hosted share claim was released after the Cloudflare pack was missing.",
-              phase: "poisoned",
-              run,
-            });
-            await this.deleteTransientDispatchDataBestEffort(nextPending.dispatch);
-            continue;
-          } catch (releaseError) {
-            record = await this.advanceRunPhase({
-              dispatch: nextPending.dispatch,
-              error: releaseError,
-              level: "warn",
-              message: "Hosted share claim release callback failed; retrying the dispatch.",
-              phase: "retry.scheduled",
-              run,
-            });
-          }
+          const failure = await this.dependencies.queueStore.reschedulePendingFailure({
+            error,
+            eventId: nextPending.dispatch.eventId,
+            maxEventAttempts: 1,
+            retryDelayMs: this.dependencies.env.retryDelayMs,
+          });
+          record = failure.record;
+          record = await this.dependencies.scheduler.syncNextWake();
+          record = await this.advanceRunPhase({
+            dispatch: nextPending.dispatch,
+            error,
+            level: "error",
+            message: "Hosted share import is awaiting web reconciliation after the Cloudflare pack was missing.",
+            phase: "poisoned",
+            run,
+          });
+          await this.deleteTransientDispatchDataBestEffort(nextPending.dispatch);
+          continue;
         }
 
         const failure = await this.dependencies.queueStore.reschedulePendingFailure({
@@ -583,12 +561,8 @@ export class RunnerDispatchProcessor {
             "VENICE_API_KEY",
             "XAI_API_KEY",
           ]),
-          verifiedEmailPresent: typeof userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
-            && userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
         },
         userEnvKeyCount: Object.keys(userEnv).length,
-        verifiedEmailPresent: typeof userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
-          && userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
       },
       dispatch,
       message: "Hosted runner prepared container invocation.",
@@ -639,39 +613,36 @@ export class RunnerDispatchProcessor {
     ownerUserId: string;
     shareId: string;
   }): Promise<HostedExecutionRunnerSharePack> {
-    const ownerCrypto = await createHostedUserKeyStore({
-      automationRecipientKeyId: this.dependencies.env.automationRecipientKeyId,
-      automationRecipientPrivateKey: this.dependencies.env.automationRecipientPrivateKey,
-      automationRecipientPrivateKeysById: this.dependencies.env.automationRecipientPrivateKeysById,
-      automationRecipientPublicKey: this.dependencies.env.automationRecipientPublicKey,
-      bucket: this.dependencies.bucket,
-      envelopeEncryptionKey: this.dependencies.env.platformEnvelopeKey,
-      envelopeEncryptionKeyId: this.dependencies.env.platformEnvelopeKeyId,
-      envelopeEncryptionKeysById: this.dependencies.env.platformEnvelopeKeysById,
-      recoveryRecipientKeyId: this.dependencies.env.recoveryRecipientKeyId,
-      recoveryRecipientPublicKey: this.dependencies.env.recoveryRecipientPublicKey,
-      teeAutomationRecipientKeyId: this.dependencies.env.teeAutomationRecipientKeyId,
-      teeAutomationRecipientPublicKey: this.dependencies.env.teeAutomationRecipientPublicKey,
-    }).requireUserCryptoContext(input.ownerUserId, {
-      reason: "runner-share-pack-hydration",
-    });
-    const pack = await createHostedShareStore({
-      bucket: this.dependencies.bucket,
-      key: ownerCrypto.rootKey,
-      keyId: ownerCrypto.rootKeyId,
-      keysById: ownerCrypto.keysById,
-      ownerUserId: input.ownerUserId,
-    }).readSharePack(input.shareId);
+    const hostedWebBaseUrl = this.dependencies.hostedWebBaseUrl;
 
-    if (!pack) {
+    if (!hostedWebBaseUrl) {
+      throw new Error("HOSTED_WEB_BASE_URL must be configured for hosted share payload hydration.");
+    }
+
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: hostedWebBaseUrl,
+      boundUserId: input.ownerUserId,
+      callbackSigning: this.dependencies.env.webCallbackSigning,
+      method: "GET",
+      path: `/api/internal/hosted-execution/share/${encodeURIComponent(input.shareId)}/payload`,
+      timeoutMs: this.dependencies.env.runnerTimeoutMs,
+    });
+
+    if (response.status === 404) {
       throw createMissingHostedSharePackError(input);
     }
 
-    return {
-      ownerUserId: input.ownerUserId,
-      pack,
-      shareId: input.shareId,
-    };
+    if (!response.ok) {
+      throw new Error(`Hosted share payload read failed with HTTP ${response.status}.`);
+    }
+
+    try {
+      return parseHostedExecutionRunnerSharePack(JSON.parse(await response.text()) as unknown);
+    } catch (error) {
+      throw new Error("Hosted share payload read returned invalid JSON.", {
+        cause: error,
+      });
+    }
   }
 
   private async finalizeReturnedRunnerResult(input: {
@@ -743,9 +714,6 @@ export class RunnerDispatchProcessor {
     } | null = run === null ? null : { run },
   ): Promise<RunnerStateRecord> {
     const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(userId);
-    if (cleanupDispatch) {
-      await this.applyHostedBusinessOutcomeIfNeeded(cleanupDispatch);
-    }
     await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
     let record = await commitRecovery.applyCommittedDispatch(userId, committed, leaseOwner);
     record = await this.advanceRunPhase({
@@ -763,16 +731,6 @@ export class RunnerDispatchProcessor {
       await this.deleteTransientDispatchDataBestEffort(cleanupDispatch);
     }
     return record;
-  }
-
-  private async applyHostedBusinessOutcomeIfNeeded(
-    dispatch: HostedExecutionDispatchRequest,
-  ): Promise<void> {
-    await applyRunnerBusinessOutcomeIfNeeded({
-      callbackSigning: this.dependencies.env.webCallbackSigning,
-      dispatch,
-      env: this.dependencies.readWorkerStringEnvSource(),
-    });
   }
 
   private resolveRunContext(
@@ -908,7 +866,7 @@ function createMissingHostedSharePackError(input: {
   shareId: string;
 }): Error & { code: string } {
   const error = new Error(
-    `Hosted share pack ${input.ownerUserId}/${input.shareId} is missing from Cloudflare storage.`,
+    `Hosted share payload ${input.ownerUserId}/${input.shareId} is missing from the canonical web payload route.`,
   ) as Error & { code: string };
   error.code = "HOSTED_SHARE_PACK_NOT_FOUND";
   return error;

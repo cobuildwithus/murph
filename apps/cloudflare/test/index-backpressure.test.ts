@@ -107,7 +107,6 @@ async function seedFullRunnerQueue(
   userId: string,
 ): Promise<void> {
   await harness.durableObject.bootstrapUser(userId);
-  await harness.durableObject.provisionManagedUserCrypto(userId);
   const sql = harness.storage.state.storage.sql;
   if (!sql) {
     throw new Error("Test storage.sql is required.");

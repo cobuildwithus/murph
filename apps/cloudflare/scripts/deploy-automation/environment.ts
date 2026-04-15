@@ -11,7 +11,6 @@ import {
   normalizeOptionalString,
   requireConfiguredString,
 } from "./shared.ts";
-
 const DEFAULT_CONTAINER_INSTANCE_TYPE: NamedContainerInstanceType = "standard-1";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;

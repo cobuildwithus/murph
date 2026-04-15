@@ -54,7 +54,7 @@ describe("hosted dispatch payload store confidentiality", () => {
     expect([...bucket.objects.keys()]).toHaveLength(1);
     expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
 
-    await store.deleteStoredDispatchPayload(payloadJson);
+    await store.deleteStoredPayloadEnvelope(payloadJson);
     expect(bucket.deleted).toHaveLength(1);
   });
 
@@ -199,7 +199,7 @@ describe("hosted dispatch payload store confidentiality", () => {
     const payloadJson = await legacyStore.writeStoredDispatch(dispatch);
 
     await expect(rotatedStore.readStoredDispatch(payloadJson)).resolves.toEqual(dispatch);
-    await rotatedStore.deleteStoredDispatchPayload(payloadJson);
+    await rotatedStore.deleteStoredPayloadEnvelope(payloadJson);
 
     expect(bucket.deleted).toHaveLength(1);
   });

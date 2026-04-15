@@ -1,38 +1,39 @@
 /**
- * Hosted email routing now keeps orchestration plus verified-sender ownership
- * rules in one place, while encrypted R2 persistence, address formatting, and
- * HMAC token helpers live in dedicated modules.
+ * Hosted email routing keeps Cloudflare focused on reply-alias execution.
+ * Public-sender and verified-owner authorization stay web-owned and are only
+ * consulted through narrow signed callbacks.
  */
 
 import {
-  normalizeHostedEmailAddress,
-  resolveHostedEmailDirectSenderLookupAddress,
-} from "@murphai/runtime-state";
+  HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+} from "@murphai/hosted-execution/hosted-email";
 
 import type { R2BucketLike } from "../bundle-store.ts";
+import {
+  fetchHostedExecutionWebControlPlaneResponse,
+} from "../web-control-plane.ts";
+import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import type { HostedEmailConfig } from "./config.ts";
 import {
   formatHostedEmailAddress,
-  parseHostedEmailRouteCandidate,
   resolveHostedEmailRouteIdentity,
   isHostedEmailPublicSenderAddress,
+  parseHostedEmailRouteCandidate,
 } from "./route-addressing.ts";
 import {
   createHostedEmailRouteToken,
-  deriveHostedEmailVerifiedSenderHash,
-  deriveHostedEmailVerifiedSenderKey,
   deriveStableHostedEmailKey,
   parseHostedEmailRouteToken,
 } from "./route-crypto.ts";
 import {
   createHostedEmailRouteStore,
   type HostedEmailRouteStore,
-  type HostedEmailVerifiedSenderRouteRecord,
 } from "./route-store.ts";
 
 export { isHostedEmailPublicSenderAddress } from "./route-addressing.ts";
 
 export interface HostedEmailInboundRoute {
+  authorization: "direct-public-sender" | "verified-email";
   identityId: string;
   routeAddress: string;
   userId: string;
@@ -40,33 +41,35 @@ export interface HostedEmailInboundRoute {
 
 interface HostedEmailRouteStoreContext {
   bucket: R2BucketLike;
+  fetchImpl?: typeof fetch;
+  hasRepeatedHeaderFrom?: boolean;
+  headerFrom?: string | null;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlBaseUrl?: string | null;
 }
+
+const HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS = 1_500;
+const HOSTED_WEB_EMAIL_PUBLIC_ROUTE_PATH = "/api/internal/hosted-execution/email/public-route";
 
 export async function resolveHostedEmailIngressRoute(input: {
   bucket: R2BucketLike;
   config: HostedEmailConfig;
   envelopeFrom?: string | null;
+  fetchImpl?: typeof fetch;
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
   to: string;
+  webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlBaseUrl?: string | null;
 }): Promise<HostedEmailInboundRoute | null> {
   if (isHostedEmailPublicSenderAddress(input.to, input.config)) {
-    return resolveHostedEmailDirectSenderRoute({
-      bucket: input.bucket,
-      config: input.config,
-      envelopeFrom: input.envelopeFrom,
-      hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
-      headerFrom: input.headerFrom,
-      key: input.key,
-      keyId: input.keyId,
-      keysById: input.keysById,
-    });
+    return resolveHostedEmailPublicSenderIngressRoute(input);
   }
 
   return resolveHostedEmailInboundRoute({
@@ -77,91 +80,6 @@ export async function resolveHostedEmailIngressRoute(input: {
     keysById: input.keysById,
     to: input.to,
   });
-}
-
-export async function ensureHostedEmailVerifiedSenderRouteAvailable(input: {
-  bucket: R2BucketLike;
-  config: HostedEmailConfig;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-  userId: string;
-  verifiedEmailAddress?: string | null;
-}): Promise<void> {
-  const verifiedEmailAddress = normalizeHostedEmailAddress(input.verifiedEmailAddress);
-  const verifiedSenderConfig = resolveHostedEmailVerifiedSenderConfig(input.config);
-  if (!verifiedSenderConfig || !verifiedEmailAddress) {
-    return;
-  }
-
-  const store = createHostedEmailRoutingStore(input);
-  const routeState = await readHostedEmailVerifiedSenderRouteState({
-    secret: verifiedSenderConfig.signingSecret,
-    senderAddress: verifiedEmailAddress,
-    store,
-  });
-  assertHostedEmailVerifiedSenderRouteAssignable(routeState, input.userId);
-}
-
-export async function reconcileHostedEmailVerifiedSenderRoute(input: {
-  bucket: R2BucketLike;
-  config: HostedEmailConfig;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-  nextVerifiedEmailAddress?: string | null;
-  previousVerifiedEmailAddress?: string | null;
-  userId: string;
-}): Promise<void> {
-  const verifiedSenderConfig = resolveHostedEmailVerifiedSenderConfig(input.config);
-  if (!verifiedSenderConfig) {
-    return;
-  }
-
-  const previousVerifiedEmailAddress = normalizeHostedEmailAddress(input.previousVerifiedEmailAddress);
-  const nextVerifiedEmailAddress = normalizeHostedEmailAddress(input.nextVerifiedEmailAddress);
-  const store = createHostedEmailRoutingStore(input);
-
-  const previousVerifiedEmailAddressToDelete = previousVerifiedEmailAddress
-    && previousVerifiedEmailAddress !== nextVerifiedEmailAddress
-    ? previousVerifiedEmailAddress
-    : null;
-
-  if (!nextVerifiedEmailAddress) {
-    if (previousVerifiedEmailAddressToDelete) {
-      await deleteHostedEmailVerifiedSenderRoute({
-        secret: verifiedSenderConfig.signingSecret,
-        store,
-        userId: input.userId,
-        verifiedEmailAddress: previousVerifiedEmailAddressToDelete,
-      });
-    }
-    return;
-  }
-
-  const routeState = await readHostedEmailVerifiedSenderRouteState({
-    secret: verifiedSenderConfig.signingSecret,
-    senderAddress: nextVerifiedEmailAddress,
-    store,
-  });
-  assertHostedEmailVerifiedSenderRouteAssignable(routeState, input.userId);
-  if (!routeState.record) {
-    await store.writeVerifiedSenderRoute({
-      identityId: verifiedSenderConfig.publicSenderAddress,
-      senderHash: routeState.senderHash,
-      senderKey: routeState.senderKey,
-      userId: input.userId,
-    });
-  }
-
-  if (previousVerifiedEmailAddressToDelete) {
-    await deleteHostedEmailVerifiedSenderRoute({
-      secret: verifiedSenderConfig.signingSecret,
-      store,
-      userId: input.userId,
-      verifiedEmailAddress: previousVerifiedEmailAddressToDelete,
-    });
-  }
 }
 
 export async function createHostedEmailUserAddress(input: {
@@ -229,56 +147,62 @@ export async function resolveHostedEmailInboundRoute(input: {
   }
 
   return {
+    authorization: "verified-email",
     identityId: resolveHostedEmailRouteIdentity(record.identityId, input.config),
     routeAddress: candidate.address,
     userId: record.userId,
   };
 }
 
-async function resolveHostedEmailDirectSenderRoute(input: {
-  bucket: R2BucketLike;
-  config: HostedEmailConfig;
-  envelopeFrom?: string | null;
-  hasRepeatedHeaderFrom?: boolean;
-  headerFrom?: string | null;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-}): Promise<HostedEmailInboundRoute | null> {
-  const verifiedSenderConfig = resolveHostedEmailVerifiedSenderConfig(input.config);
-  if (!verifiedSenderConfig) {
+async function resolveHostedEmailPublicSenderIngressRoute(
+  input: HostedEmailRouteStoreContext & {
+    config: HostedEmailConfig;
+    envelopeFrom?: string | null;
+    to: string;
+  },
+): Promise<HostedEmailInboundRoute | null> {
+  if (!input.config.fromAddress || !input.webCallbackSigning || !input.webControlBaseUrl) {
     return null;
   }
 
-  const senderAddress = resolveHostedEmailDirectSenderLookupAddress({
-    envelopeFrom: input.envelopeFrom,
-    hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
-    headerFrom: input.headerFrom,
-  });
-  if (!senderAddress) {
+  try {
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.webControlBaseUrl,
+      body: JSON.stringify({
+        envelopeFrom: input.envelopeFrom ?? null,
+        hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom === true,
+        headerFrom: input.headerFrom ?? null,
+      }),
+      boundUserId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+      callbackSigning: input.webCallbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_EMAIL_PUBLIC_ROUTE_PATH,
+      timeoutMs: HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json() as { userId?: unknown };
+    const userId = typeof payload.userId === "string" && payload.userId.trim()
+      ? payload.userId.trim()
+      : null;
+
+    if (!userId) {
+      return null;
+    }
+
+    return {
+      authorization: "direct-public-sender",
+      identityId: resolveHostedEmailRouteIdentity(input.config.fromAddress, input.config),
+      routeAddress: input.to,
+      userId,
+    };
+  } catch {
     return null;
   }
-
-  const store = createHostedEmailRoutingStore(input);
-  const routeState = await readHostedEmailVerifiedSenderRouteState({
-    secret: verifiedSenderConfig.signingSecret,
-    senderAddress,
-    store,
-  });
-  if (!routeState.record || !routeState.matchesSenderHash) {
-    return null;
-  }
-
-  return {
-    identityId: verifiedSenderConfig.publicSenderAddress,
-    routeAddress: verifiedSenderConfig.publicSenderAddress,
-    userId: routeState.record.userId,
-  };
-}
-
-interface HostedEmailVerifiedSenderConfig {
-  publicSenderAddress: string;
-  signingSecret: string;
 }
 
 function createHostedEmailRoutingStore(input: HostedEmailRouteStoreContext): HostedEmailRouteStore {
@@ -288,79 +212,4 @@ function createHostedEmailRoutingStore(input: HostedEmailRouteStoreContext): Hos
     cryptoKeyId: input.keyId,
     cryptoKeysById: input.keysById,
   });
-}
-
-function resolveHostedEmailVerifiedSenderConfig(
-  config: HostedEmailConfig,
-): HostedEmailVerifiedSenderConfig | null {
-  const publicSenderAddress = normalizeHostedEmailAddress(config.fromAddress);
-  if (!publicSenderAddress || !config.signingSecret) {
-    return null;
-  }
-
-  return {
-    publicSenderAddress,
-    signingSecret: config.signingSecret,
-  };
-}
-
-async function deleteHostedEmailVerifiedSenderRoute(input: {
-  secret: string;
-  store: HostedEmailRouteStore;
-  userId: string;
-  verifiedEmailAddress: string;
-}): Promise<void> {
-  const routeState = await readHostedEmailVerifiedSenderRouteState({
-    secret: input.secret,
-    senderAddress: input.verifiedEmailAddress,
-    store: input.store,
-  });
-  const record = routeState.record;
-  if (!record || record.userId !== input.userId || !routeState.matchesSenderHash) {
-    return;
-  }
-
-  await input.store.deleteVerifiedSenderRoute(routeState.senderKey);
-}
-
-interface HostedEmailVerifiedSenderRouteState {
-  matchesSenderHash: boolean;
-  record: HostedEmailVerifiedSenderRouteRecord | null;
-  senderHash: string;
-  senderKey: string;
-}
-
-async function readHostedEmailVerifiedSenderRouteState(input: {
-  secret: string;
-  senderAddress: string;
-  store: HostedEmailRouteStore;
-}): Promise<HostedEmailVerifiedSenderRouteState> {
-  const senderHash = await deriveHostedEmailVerifiedSenderHash(input.secret, input.senderAddress);
-  const senderKey = await deriveHostedEmailVerifiedSenderKey(input.secret, input.senderAddress);
-  const record = await input.store.readVerifiedSenderRoute(senderKey);
-
-  return {
-    matchesSenderHash: record ? record.senderHash === senderHash : false,
-    record,
-    senderHash,
-    senderKey,
-  };
-}
-
-function assertHostedEmailVerifiedSenderRouteAssignable(
-  routeState: HostedEmailVerifiedSenderRouteState,
-  userId: string,
-): void {
-  const record = routeState.record;
-  if (!record) {
-    return;
-  }
-
-  if (!routeState.matchesSenderHash) {
-    throw new Error("Hosted verified email sender route is already assigned to a different sender hash.");
-  }
-
-  if (record.userId !== userId) {
-    throw new Error("Hosted verified email sender route is already assigned to a different user.");
-  }
 }

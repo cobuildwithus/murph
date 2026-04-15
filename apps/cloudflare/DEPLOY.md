@@ -1,141 +1,57 @@
-# Deploying the Cloudflare-hosted Murph execution plane
+# Deploying The Cloudflare Execution Plane
 
-This document is the concrete deploy path for the current hosted architecture:
+This document covers the narrow Cloudflare deploy surface for hosted execution.
 
-- `apps/web` stays the public onboarding, billing, auth, and webhook control plane.
-- `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and operator/internal control routes.
-- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, short idle warmth, and per-run env injection before running the one-shot Murph job inside an isolated child process, returning a committed-phase result for the Durable Object to persist before the resumed finalize phase replays outward effects.
+- `apps/web` remains the canonical owner of hosted product facts and lifecycle state.
+- `apps/cloudflare` owns execution coordination, encrypted runtime blobs, the native runner container, and the public/internal execution routes described in [README.md](./README.md).
 
-This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same filesystem-oriented runtime instead of inventing a second persistence model.
+## What The Deploy Flow Produces
 
-## What the deploy automation covers
+`pnpm --dir apps/cloudflare deploy:artifacts` renders:
 
-This repo now includes:
+- `apps/cloudflare/.deploy/wrangler.generated.jsonc`
+- `apps/cloudflare/.deploy/worker-secrets.json`
+- `apps/cloudflare/.deploy/runner-bundle/`
 
-- `Dockerfile.cloudflare-hosted-runner`
-- `apps/cloudflare/.dockerignore`
-- `apps/cloudflare/r2-bundles-lifecycle.json`
-- generated deploy artifacts under `apps/cloudflare/.deploy/`
-- a prebuilt runner bundle under `apps/cloudflare/.deploy/runner-bundle/` that the Docker image copies directly during deploy
-- a manual GitHub Actions deploy workflow at `.github/workflows/deploy-cloudflare-hosted.yml`
-- a deploy helper that drives a direct Worker deploy through the rendered config and secrets payload
-- scripts to render:
-  - `wrangler.generated.jsonc`
-  - `worker-secrets.json`
-- an R2 lifecycle helper that applies the checked-in transient cleanup rules to the configured bundles buckets
-- explicit Wrangler observability config for Workers Logs and Workers Traces with zero-sampling defaults until operators opt in
-- checked-in and generated Wrangler config that declares the four required runtime secrets through Wrangler's experimental `secrets.required` support
-- a smoke-test script that verifies worker health and, when configured with a user id, triggers one manual hosted run and waits for queue drain, `lastRunAt` advance, and durable bundle refs
+That rendered surface is then used by:
 
-The deploy artifact contract is intentionally narrow:
+- `pnpm --dir apps/cloudflare r2:lifecycle:apply`
+- `pnpm --dir apps/cloudflare deploy:worker`
+- `pnpm --dir apps/cloudflare deploy:smoke`
 
-- deploy-only helpers live under `apps/cloudflare/scripts/**`; runtime worker/container code stays under `apps/cloudflare/src/**`
-- `apps/cloudflare` assembles the runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`
-- the prepared bundle is a runtime leaf artifact, not a deploy scratch directory: assembly strips deploy-only docs plus build metadata such as lockfiles, declaration files, sourcemaps, and `.tsbuildinfo`
-- the hosted `vault-cli` surface comes from the real installed `@murphai/murph` package inside that bundle, while hosted execution behavior still runs through `@murphai/assistant-runtime`
-- `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside that bundle under `.deploy/`, but they are deploy inputs, not container image contents
-- Wrangler now sets `image_build_context` to the `apps/cloudflare` directory, so Docker uploads the app-local container contract instead of the whole repo during deploys
-- `Dockerfile.cloudflare-hosted-runner` stays copy-only for app code: it copies the prepared runner bundle into `/app` from `.deploy/runner-bundle` inside that app-local build context and starts `dist/container-entrypoint.js`
-- bundle assembly no longer depends on `pnpm deploy --legacy` or a post-bundle workspace repair install
+Direct `wrangler deploy` is the normal path. The lower-level version helper still exists for recovery work, but it is not the primary rollout contract.
 
-## What it does not automate yet
+## One-Time Cloudflare Setup
 
-- real Cloudflare account provisioning
-- bucket creation
-- post-deploy application-level smoke scenarios beyond one manual `/run`
-- broader hosted side-effect hardening beyond the current hosted assistant outbox path
+Before the first deploy:
 
-## Prerequisites
+1. Create the Worker service and the two R2 buckets used for encrypted hosted bundles.
+2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
+3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-Before your first deploy, you still need to do four one-time setup tasks in Cloudflare:
+The checked-in lifecycle file only backstops execution-transient blobs:
 
-1. Create a Workers Paid account.
-2. Create the R2 buckets that will hold the encrypted hosted bundles.
-3. Apply the repo's transient-object lifecycle rules to those buckets:
-   - `transient/execution-journal/` expires after 6 hours
-   - `transient/dispatch-payloads/` expires after 6 hours
-   - `transient/side-effects/` expires after 6 hours
-   - `transient/share-packs/` expires after 24 hours
-   - `transient/hosted-email/messages/` expires after 1 hour
-   - `transient/assistant-usage/` and `transient/assistant-usage-dirty/` keep their 7 day backstops because hosted-web import still consumes them asynchronously
-4. Decide the public Worker URL you want to use:
-   - a `*.workers.dev` URL, or
-   - a custom domain.
+- `transient/execution-journal/` expires after 6 hours
+- `transient/dispatch-payloads/` expires after 6 hours
+- `transient/side-effects/` expires after 6 hours
+- `transient/hosted-email/messages/` expires after 1 hour
 
-The current worker stores only encrypted bundle blobs in R2 and only small coordination state in Durable Object storage.
+Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-env blobs, and execution-time device-sync runtime mirrors.
 
-Cloudflare-specific deploy constraints still apply:
+## Required GitHub Environment Vars
 
-- first deploys must use `wrangler deploy`; `wrangler versions upload` cannot create the service for the first time
-- Durable Object migrations must use `wrangler deploy`; version uploads do not support DO migrations
-
-## Required GitHub environment variables and secrets
-
-Use the configured GitHub `production` environment for the manual workflow. If you later add a real staging target, update the workflow inputs and create the matching GitHub environment before advertising it.
-
-The workflow is parameterized by `workflow_dispatch.environment`, and the deploy job is attached to that GitHub environment so environment-scoped values stay isolated. The manual workflow currently offers only `production` so it cannot create deploy records for a nonexistent staging environment.
-
-### Required environment variables
-
-Set these in the selected GitHub environment as variables:
+Set these in the selected GitHub environment as vars:
 
 - `CF_WORKER_NAME`
 - `CF_BUNDLES_BUCKET`
 - `CF_BUNDLES_PREVIEW_BUCKET`
-- `CF_PUBLIC_BASE_URL` for deploys that run the post-deploy smoke step; the GitHub workflow now fails early with a clear error when `deploy_worker=true` and this value is unset
+- `CF_PUBLIC_BASE_URL`
+- `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
+- `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 
-Optional tuning variables:
+`CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy.
 
-- `CF_PLATFORM_ENVELOPE_KEY_ID` (default `v1`; metadata for the active platform envelope key id)
-- `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
-- `CF_CONTAINER_INSTANCE_TYPE` (default `standard-1`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
-- `CF_CONTAINER_MAX_INSTANCES` (default `50`)
-- `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
-- `CF_MAX_EVENT_ATTEMPTS` (default `3`)
-- `CF_RETRY_DELAY_MS` (default `30000`)
-- `CF_RUNNER_TIMEOUT_MS` (default `120000`)
-- `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` (default `120000`)
-- `CF_TRACE_HEAD_SAMPLING_RATE` (default `1`)
-- `CF_ALLOWED_USER_ENV_KEYS`
-- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` (optional override; deploy automation defaults to `device-sync,hosted-email,linq,mapbox,telegram` when unset)
-- `HOSTED_ASSISTANT_PROVIDER`, `HOSTED_ASSISTANT_MODEL`, and the rest of the `HOSTED_ASSISTANT_*` seed vars when you want hosted member activation to persist one explicit platform-managed assistant profile into `~/.murph/config.json` instead of relying on runtime fallback
-
-Keep both observability sampling knobs at `0` unless you are intentionally collecting a bounded debug window.
-
-Optional non-secret worker variables:
-
-- `DEVICE_SYNC_PUBLIC_BASE_URL`
-- `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID`
-- `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL`
-- `HOSTED_EMAIL_DEFAULT_SUBJECT`
-- `HOSTED_EMAIL_DOMAIN`
-- `HOSTED_EMAIL_FROM_ADDRESS`
-- `HOSTED_EMAIL_LOCAL_PART`
-
-
-Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
-
-- `HOSTED_ASSISTANT_API_KEY_ENV` points at the env var name to read for the active hosted assistant profile. Keep the actual secret in Worker secrets or the encrypted per-user env object, not in the hosted config document.
-- `LINQ_API_BASE_URL`
-- `TELEGRAM_BOT_USERNAME`
-- `TELEGRAM_API_BASE_URL`
-- `TELEGRAM_FILE_BASE_URL`
-- `FFMPEG_COMMAND`
-- `WHISPER_MODEL_PATH`
-- `WHISPER_COMMAND`
-
-For Venice as the platform default hosted assistant, set these GitHub environment variables:
-
-- `HOSTED_ASSISTANT_PROVIDER=venice`
-- `HOSTED_ASSISTANT_MODEL=openai-gpt-54`
-- `HOSTED_ASSISTANT_REASONING_EFFORT=medium`
-
-You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
-
-The default container image already installs `ffmpeg`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. `WHISPER_MODEL_PATH` now follows the selected `WHISPER_MODEL_FILE` build arg instead of always pointing at the base model path. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`, installs the real `@murphai/murph` package there so the image gets the standard `vault-cli` bin on `PATH`, and leaves `wrangler.generated.jsonc` plus `worker-secrets.json` outside the image as deploy-only inputs. Only set those vars in Worker config when you want to override the baked defaults.
-
-### Required environment secrets
+## Required GitHub Environment Secrets
 
 Set these in the selected GitHub environment as secrets:
 
@@ -147,227 +63,159 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
-Set these in the selected GitHub environment as vars:
+The callback-signing key remains part of the required worker secret surface because the runtime still imports the signer for narrow web-bound execution proxying. It is no longer documented as a broad lifecycle or correctness callback seam.
 
-- `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
-- `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
-- `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` (optional, defaults to `production`)
+## Optional Vars
+
+Core execution tuning:
+
+- `CF_PLATFORM_ENVELOPE_KEY_ID` defaults to `v1`
+- `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
+- `CF_CONTAINER_INSTANCE_TYPE` defaults to `standard-1`
+- `CF_CONTAINER_MAX_INSTANCES` defaults to `50`
+- `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
+- `CF_RETRY_DELAY_MS` defaults to `30000`
+- `CF_RUNNER_TIMEOUT_MS` defaults to `120000`
+- `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
+- `CF_ALLOWED_USER_ENV_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` in the rendered worker config
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant,parsers,web` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS`
+- `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
+
+Observability:
+
+- `CF_LOG_HEAD_SAMPLING_RATE` defaults to `1`
+- `CF_TRACE_HEAD_SAMPLING_RATE` defaults to `1`
+
+Narrow signed web proxy:
+
 - `HOSTED_WEB_BASE_URL`
+- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 
-Optional secrets for staged rotation:
+Hosted assistant config:
+
+- `HOSTED_ASSISTANT_PROVIDER`
+- `HOSTED_ASSISTANT_MODEL`
+- `HOSTED_ASSISTANT_API_KEY_ENV`
+- the rest of the `HOSTED_ASSISTANT_*` profile vars when you want activation-time seeding of the platform-managed hosted assistant profile
+
+Opt-in runtime integrations and tool overrides:
+
+- `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID`
+- `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL`
+- `HOSTED_EMAIL_DEFAULT_SUBJECT`
+- `HOSTED_EMAIL_DOMAIN`
+- `HOSTED_EMAIL_FROM_ADDRESS`
+- `HOSTED_EMAIL_LOCAL_PART`
+- `MURPH_WEB_FETCH_ENABLED`
+- `MURPH_WEB_SEARCH_PROVIDER`
+- `MURPH_WEB_SEARCH_MAX_RESULTS`
+- `MURPH_WEB_SEARCH_TIMEOUT_MS`
+- `LINQ_API_BASE_URL`
+- `TELEGRAM_API_BASE_URL`
+- `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_FILE_BASE_URL`
+- `FFMPEG_COMMAND`
+- `WHISPER_COMMAND`
+- `WHISPER_MODEL_PATH`
+
+## Optional Secrets
+
+Key rotation and future envelope lanes:
 
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`
-- `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` (only when you are enabling the future enclave-only automation recipient)
+- `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 
-Optional hosted email bridge secrets:
+Hosted assistant provider secrets:
+
+- any provider key referenced by `HOSTED_ASSISTANT_API_KEY_ENV`
+- supported examples include `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `VENICE_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY`
+
+Opt-in execution integrations:
 
 - `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
-
-`apps/web/README.md` is the canonical operator doc for hosted public-origin precedence and Cloudflare callback-key alignment. This deploy guide only lists the Worker-side envs that must match that hosted-web contract.
-
-The checked-in scaffold and rendered deploy config declare the Cloudflare callback signing key, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` fails early when any of them are missing from the Worker. The lower-level version-upload path inherits the same rendered secret contract when operators intentionally use that manual recovery lane.
-
-The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. For Cloudflare-owned callbacks back into `apps/web`, configure the matching Worker-side private key in `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` and keep `HOSTED_WEB_BASE_URL` plus the active callback key id aligned with the hosted-web contract documented in `apps/web/README.md`. The outer native container shell may now stay warm per user for a short idle TTL, but the worker still injects a supervisor-only runner control token into that shell, rotates the per-run outbound proxy token after every run, rejects concurrent internal run requests, keeps the actual Murph execution one-shot inside an isolated child process, and exits the warm shell fail-closed if any unexpected processes survive after cleanup.
-
-- missing `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG` or `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME` makes bearer-authenticated web dispatch/control requests fail closed
-- missing or misaligned hosted-web callback config (`HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, `HOSTED_WEB_BASE_URL`, or the active callback key id) breaks Cloudflare-owned callback routes into `apps/web`
-- missing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` prevents encrypted hosted storage from decrypting
-- missing automation recipient JWKs prevents the worker from unwrapping managed per-user root keys
-- missing recovery recipient public JWK prevents explicit managed-user provisioning from succeeding
-- changing `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY` or `CF_PLATFORM_ENVELOPE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` for decrypt-by-`keyId`, but semantic-ID hosted objects also need a rewrite to the new canonical path because the worker no longer probes older root-key-derived locations; missing keyring entries still fail closed on `keyId` mismatch
-- rotating the automation unwrap key in place requires staging older private JWKs in `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON` until existing envelopes are migrated
-
-### Optional provider/runtime secrets
-
-Add whichever hosted features you actually want the containerized runner to support globally:
-
-- `DEVICE_SYNC_SECRET` only when hosted device-sync runtime sync is enabled; this is the runner's token-bundle codec secret, not the local daemon `DEVICE_SYNC_CONTROL_TOKEN`
-- `WHOOP_CLIENT_ID`
-- `WHOOP_CLIENT_SECRET`
-- `OURA_CLIENT_ID`
-- `OURA_CLIENT_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`
 - `MAPBOX_ACCESS_TOKEN`
 - `TELEGRAM_BOT_TOKEN`
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `GOOGLE_API_KEY`
-- `GOOGLE_GENERATIVE_AI_API_KEY`
-- `OPENROUTER_API_KEY`
-- `VENICE_API_KEY`
-- `TOGETHER_API_KEY`
-- `GROQ_API_KEY`
-- `XAI_API_KEY`
-- `MISTRAL_API_KEY`
+- `BRAVE_API_KEY` when `MURPH_WEB_SEARCH_PROVIDER=brave`
 
-Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; the worker keeps a fixed public sender identity, new outbound mail reuses one stable per-user reply alias instead of writing fresh per-thread routes, registered members can initiate new threads by emailing that fixed public sender address once their verified email has been synced into hosted execution, and ingress still re-authorizes the verified owner before raw-message persistence or hosted dispatch. `MAPBOX_ACCESS_TOKEN` is optional and only needed when you want hosted route estimation through `vault-cli route estimate`. `AGENTMAIL_*` is intentionally not part of the hosted deploy surface. `DEVICE_SYNC_CONTROL_TOKEN` is part of the local daemon contract and is not a Cloudflare worker deploy input. `TELEGRAM_WEBHOOK_SECRET` belongs to `apps/web` on Vercel for hosted Telegram webhook verification and is not part of the Cloudflare worker secret set.
+The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
-## Local dry run before touching production
+## Local Validation And Artifact Render
 
 From the repo root:
 
 ```bash
 corepack pnpm install --frozen-lockfile
-corepack pnpm --dir apps/cloudflare verify
+corepack pnpm --dir apps/cloudflare typecheck
 ```
 
-If you want the faster Node-only loop or just the Workers-runtime lane locally, run:
-
-```bash
-pnpm --dir apps/cloudflare test
-pnpm --dir apps/cloudflare test:workers
-```
-
-Render the generated deploy artifacts from your shell environment:
+Render deploy artifacts with the minimum execution-plane env:
 
 ```bash
 export CF_WORKER_NAME=hosted-runner-staging
 export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
-export CF_CONTAINER_INSTANCE_TYPE=standard-1
-export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=...
-export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=...
-export HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production
+export CF_PUBLIC_BASE_URL=https://hosted-runner-staging.example.workers.dev
+export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=your-team
+export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=your-project
 export HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...
-export HOSTED_WEB_BASE_URL=https://your-web.example.com
+export HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK=...
 export HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=...
-export HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=...
-export HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=...
-export HOSTED_EMAIL_DOMAIN=mail.example.test
-export HOSTED_EMAIL_LOCAL_PART=assistant
-export HOSTED_EMAIL_SIGNING_SECRET=...
-export CF_RUNNER_TIMEOUT_MS=120000
-export CF_LOG_HEAD_SAMPLING_RATE=1
-export CF_TRACE_HEAD_SAMPLING_RATE=1
 
-pnpm --dir apps/cloudflare r2:lifecycle:apply
+pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:config:render
 pnpm --dir apps/cloudflare deploy:secrets:render
+pnpm --dir apps/cloudflare runner:bundle
 ```
 
-You should now have:
-
-- `apps/cloudflare/.deploy/wrangler.generated.jsonc`
-- `apps/cloudflare/.deploy/worker-secrets.json`
-- `apps/cloudflare/.deploy/runner-bundle/`
-
-`pnpm --dir apps/cloudflare r2:lifecycle:apply` reads `CF_BUNDLES_BUCKET` and `CF_BUNDLES_PREVIEW_BUCKET` from your environment and applies the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` rules to whichever of those buckets are configured. The Wrangler command requires Cloudflare auth with R2 write access.
-
-## Deploying the worker manually
-
-If you want to stage manually before GitHub Actions:
-
-### Direct deploy path
-
-Use a direct deploy for first deploys, Durable Object migrations, and the normal hosted operator path:
+When you need to backstop lifecycle rules locally or in CI:
 
 ```bash
-pnpm --dir apps/cloudflare worker:deploy -- \
-  --config ./.deploy/wrangler.generated.jsonc \
-  --secrets-file ./.deploy/worker-secrets.json
+pnpm --dir apps/cloudflare r2:lifecycle:apply
 ```
 
-That script prepares the rendered deploy artifacts first, then runs `wrangler deploy`. `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. The deploy automation now prepares `apps/cloudflare/.deploy/runner-bundle/` first, sets the Docker build context to `apps/cloudflare`, and lets the Docker build copy the already-built runtime leaf artifact while `wrangler.generated.jsonc` and `worker-secrets.json` remain sibling deploy inputs outside the image. Docker still needs to be available on the machine running that command.
+That command reads `CF_BUNDLES_BUCKET` and `CF_BUNDLES_PREVIEW_BUCKET` and applies the checked-in execution-transient rules to whichever of those buckets are configured.
 
-Use the deploy helper so the rendered config, prebuilt runner bundle, and secrets file stay aligned with the actual `wrangler deploy` call:
+## Deploy
+
+For the normal direct path:
 
 ```bash
-export HOSTED_EXECUTION_INCLUDE_SECRETS=true
-
-pnpm --dir apps/cloudflare deploy:worker -- --config ./.deploy/wrangler.generated.jsonc
+pnpm --dir apps/cloudflare deploy:worker
 ```
 
-The deploy helper writes a deployment result summary under `apps/cloudflare/.deploy/deployment-result.json`.
+That command:
 
-The deploy helper still retains the lower-level version/deployment split behind environment flags for manual recovery only. That is not the normal deploy story for first hosted launch, and it is intentionally omitted from the default package scripts.
+- renders the deploy config and worker secrets payload
+- assembles the runner bundle
+- deploys the Worker directly with Wrangler
 
-## Cleaning up old container images
+## Smoke
 
-Cloudflare's managed registry keeps old image tags until you delete them. If you deploy frequently with the hosted runner image, clean up stale tags periodically so the registry does not quietly accumulate garbage.
+`pnpm --dir apps/cloudflare deploy:smoke` validates only the surviving execution-plane surface:
 
-Start with a dry run:
+- `GET /`
+- `GET /health`
+- if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, `POST /internal/users/:userId/run`
+- if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, `GET /internal/users/:userId/status` until:
+  - `pendingEventCount=0`
+  - `inFlight=false`
+  - `lastRunAt` advances
+  - `bundleRef` is non-null
 
-```bash
-pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10
-```
+Optional smoke env:
 
-Then apply it once the plan looks correct:
+- `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` to target a non-default public Worker URL
+- `HOSTED_EXECUTION_SMOKE_USER_ID` to enable the manual run/status path
+- `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for manual run/status auth
+- `HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS`
+- `HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS`
+- `HOSTED_EXECUTION_SMOKE_VERSION_ID` only when intentionally smoke-testing a recovery deployment version override
 
-```bash
-pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10 --apply
-```
-
-Notes:
-
-- cleanup is intentionally explicit and operator-driven; the normal deploy path does not auto-delete images
-- the script keeps the newest tags per repository by reverse lexicographic tag order, so it works best with the default timestamp-style deploy tags
-- deleting an image tag that an older Worker version still references will break rollback to that version
-
-Then smoke test the deployed worker:
-
-```bash
-export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL=https://hosted-runner-staging.example.workers.dev
-export HOSTED_EXECUTION_SMOKE_USER_ID=member_test_123
-pnpm --dir apps/cloudflare deploy:smoke
-```
-
-If you do not want the script to trigger a manual hosted run, omit `HOSTED_EXECUTION_SMOKE_USER_ID`. The smoke helper now polls `GET /internal/users/:id/status` after `POST /run` and fails if the queue never drains, `lastRunAt` does not advance, or no durable bundle refs exist.
-
-## Using the GitHub Actions workflow
-
-The workflow expects the selected GitHub environment to supply `CF_WORKER_NAME`, `CF_BUNDLES_BUCKET`, `CF_BUNDLES_PREVIEW_BUCKET`, and `CF_PUBLIC_BASE_URL` for normal deploy-and-smoke runs. It now validates those variables before install/deploy work begins so a missing public URL fails with a direct message instead of surfacing later as a confusing smoke failure.
-
-The workflow is intentionally manual (`workflow_dispatch`) so you do not accidentally push a half-configured deploy.
-
-Open Actions, then `Deploy Cloudflare Hosted Execution`, and choose:
-
-- `environment`: currently `production` only; reintroduce additional options only after the matching GitHub environment is configured
-- `sync_worker_secrets`: whether to include the rendered Worker secrets file in the deploy command
-- `deploy_worker`: whether to actually deploy the Worker
-- `smoke_user_id`: optional hosted user id to trigger one manual `/run` smoke test
-
-The workflow does this in order:
-
-1. checks out the repo
-2. installs pnpm and Node 24.14.1 from `.nvmrc`
-3. installs workspace dependencies
-4. validates the required deploy environment
-5. renders the generated deploy artifacts
-6. runs the focused `apps/cloudflare verify` path against that prepared deploy state
-7. optionally runs a direct Worker deploy through the rendered config
-8. runs the worker health and smoke checks
-9. writes the deployed version list into the GitHub Actions step summary
-
-## First production deploy checklist
-
-Before the first real production deploy, confirm all of these are true:
-
-- Docker is running wherever `wrangler deploy` will execute
-- the Worker answers `GET /health`
-- local `wrangler dev` also has those two tokens set before you test protected control flows
-- `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` is set when you plan to run smoke checks against a non-default public Worker URL
-- `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `standard-1`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits
-- Workers Logs and Workers Traces are enabled and visible in the Cloudflare dashboard for the target Worker
-- the R2 bucket names in the generated config are correct
-- the platform envelope key is present and stable
-- one seeded hosted user can complete:
-  - manual `/run`
-  - a Linq inbound message
-  - a cron tick
-  - a device-sync wake
-
-The first deploy can take a few minutes before native container starts succeed reliably, because Cloudflare has to provision the image the first time.
-
-## What to do right after first deploy
-
-This deploy automation gets you to a real native-container first-hosted-deploy posture, but two production-hardening items still matter:
-
-1. keep widening direct scenario coverage for the hosted execution lane, especially real Cloudflare deploy smoke paths, rollback criteria, and first-deploy operational checks
-2. extend the current durable assistant outbox approach if other externally visible hosted side effects need the same replay-safe treatment
-
-Until those broader guarantees exist, treat the current lane as a direct deploy with focused operational smoke criteria rather than as a mature progressive-rollout system.
+If `HOSTED_EXECUTION_SMOKE_USER_ID` is unset, smoke stops after the public banner and health checks.

@@ -26,7 +26,6 @@ export * from "../assistant-usage.ts";
 export * from "../atomic-write.ts";
 export * from "../hosted-bundles.ts";
 export * from "../hosted-email.ts";
-export * from "../hosted-user-env.ts";
 export * from "../locks.ts";
 export * from "../loopback-control-plane.ts";
 export * from "./loopback-control-plane-auth.ts";
