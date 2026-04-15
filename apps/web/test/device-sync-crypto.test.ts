@@ -56,6 +56,29 @@ describe("hosted device-sync secret scoping", () => {
     }))).toThrow();
   });
 
+  it("rejects malformed structured ciphertext segments", () => {
+    const codec = createHostedSecretCodec({
+      key: Buffer.alloc(32, 5),
+      keyVersion: "v1",
+    });
+    const accessOptions = buildHostedConnectionTokenCipherOptions({
+      connectionId: "conn_3",
+      provider: "oura",
+      purpose: "device-sync-access-token",
+    });
+    const encrypted = codec.encrypt("access-secret", accessOptions);
+    const [prefix, keyVersion, ivText, tagText, ciphertextText] = encrypted.split(":");
+
+    expect(() => codec.decrypt(
+      `${prefix}:${keyVersion}:${ivText}=:${tagText}:${ciphertextText}`,
+      accessOptions,
+    )).toThrow("Encrypted hosted secret payload is malformed.");
+    expect(() => codec.decrypt(
+      `${encrypted}:junk`,
+      accessOptions,
+    )).toThrow("Encrypted hosted secret payload is malformed.");
+  });
+
   it("accepts 32-byte hex keys", () => {
     expect(decodeHostedEncryptionKey("00".repeat(32))).toHaveLength(32);
   });

@@ -233,6 +233,49 @@ describe("createHostedUserKeyStore", () => {
     expect(findHostedWrappedRootKeyRecipient(reconciled.envelope, "recovery")?.keyId).toBe("recovery:v1");
     expect(findHostedWrappedRootKeyRecipient(reconciled.envelope, "tee-automation")).toBeNull();
   });
+
+  it("rejects stored envelopes whose payload user does not match the requested user", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const automationKeys = await generateHostedUserRecipientKeyPair();
+    const recoveryKeys = await generateHostedUserRecipientKeyPair();
+    const store = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
+    });
+
+    await store.bootstrapManagedUserCryptoContext(USER_ID, {
+      reason: "test-bootstrap",
+    });
+
+    const objectKey = readOnlyObjectKey(bucket);
+    const storedEnvelope = await readStoredEnvelope(bucket, USER_ID);
+    await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        key: objectKey,
+        purpose: "root-key-envelope",
+        userId: USER_ID,
+      }),
+      bucket,
+      cryptoKey: PLATFORM_ENVELOPE_KEY,
+      key: objectKey,
+      keyId: PLATFORM_ENVELOPE_KEY_ID,
+      scope: "root-key-envelope",
+      value: {
+        ...storedEnvelope,
+        userId: "member_other_user",
+      },
+    });
+
+    await expect(
+      store.requireUserCryptoContext(USER_ID, { reason: "test-user-mismatch" }),
+    ).rejects.toThrow(/Hosted user root key envelope user mismatch/u);
+  });
 });
 
 async function readStoredEnvelope(bucket: MemoryEncryptedR2Bucket, userId: string) {

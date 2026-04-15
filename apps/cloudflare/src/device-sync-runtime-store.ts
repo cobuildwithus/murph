@@ -304,7 +304,7 @@ async function readStoredDeviceSyncRuntimeState(input: {
     expectedKeyId: input.keyId,
     key,
     parse(value) {
-      return parseStoredDeviceSyncRuntimeState(value);
+      return parseStoredDeviceSyncRuntimeState(value, input.userId);
     },
     scope: "device-sync-runtime",
   });
@@ -333,14 +333,25 @@ async function writeStoredDeviceSyncRuntimeState(input: {
   });
 }
 
-function parseStoredDeviceSyncRuntimeState(value: unknown): StoredDeviceSyncRuntimeState {
+function parseStoredDeviceSyncRuntimeState(
+  value: unknown,
+  expectedUserId?: string,
+): StoredDeviceSyncRuntimeState {
   const record = requireRecord(value, "Hosted device-sync runtime state");
 
-  return {
+  const parsed = {
     generatedAt: requireString(record.generatedAt, "Hosted device-sync runtime state.generatedAt"),
     schema: requireSchema(record.schema, "Hosted device-sync runtime state.schema"),
     snapshot: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(record.snapshot),
-  };
+  } satisfies StoredDeviceSyncRuntimeState;
+
+  if (expectedUserId && parsed.snapshot.userId !== expectedUserId) {
+    throw new Error(
+      `Hosted device-sync runtime state user mismatch: expected ${expectedUserId}, received ${parsed.snapshot.userId}.`,
+    );
+  }
+
+  return parsed;
 }
 
 function requireSchema(

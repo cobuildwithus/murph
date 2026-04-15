@@ -430,4 +430,41 @@ describe("createHostedDeviceSyncRuntimeStore", () => {
       "Hosted device-sync runtime state.schema must be murph.hosted-device-sync-runtime.v1.",
     );
   });
+
+  it("rejects stored snapshots whose payload user does not match the requested user", async () => {
+    const { bucket, key, keyId, store } = createRuntimeStoreHarness();
+    const userId = "user_runtime_owner";
+    const objectKey = `transient/device-sync-runtime/${await deriveHostedStorageOpaqueId({
+      length: 24,
+      rootKey: key,
+      scope: "device-sync-runtime-path",
+      value: `user:${userId}`,
+    })}.json`;
+
+    await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        key: objectKey,
+        purpose: "device-sync-runtime",
+        userId,
+      }),
+      bucket,
+      cryptoKey: key,
+      key: objectKey,
+      keyId,
+      scope: "device-sync-runtime",
+      value: {
+        generatedAt: "2026-04-05T00:00:00.000Z",
+        schema: "murph.hosted-device-sync-runtime.v1",
+        snapshot: {
+          connections: [],
+          generatedAt: "2026-04-05T00:00:00.000Z",
+          userId: "user_other_runtime_owner",
+        },
+      },
+    });
+
+    await expect(store.readSnapshot({ userId })).rejects.toThrow(
+      /Hosted device-sync runtime state user mismatch/u,
+    );
+  });
 });
