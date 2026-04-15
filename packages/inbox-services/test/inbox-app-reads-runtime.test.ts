@@ -19,6 +19,7 @@ import type {
   ParserRuntimeDrainResult,
   ParsersRuntimeModule,
   PollConnector,
+  PersistedCapture,
   RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
@@ -178,6 +179,41 @@ function createCapture(
   }
 }
 
+function createInboundCapture(
+  overrides: Partial<RuntimeCaptureRecordInput> &
+    Pick<RuntimeCaptureRecordInput, 'externalId' | 'occurredAt' | 'source' | 'text'>,
+): RuntimeCaptureRecordInput {
+  return {
+    accountId: 'bot',
+    actor: {
+      displayName: 'Inbox user',
+      id: 'actor-1',
+      isSelf: false,
+    },
+    attachments: [],
+    raw: {},
+    thread: {
+      id: 'thread-1',
+      isDirect: true,
+      title: 'Inbox thread',
+    },
+    ...overrides,
+  }
+}
+
+function createPersistedCapture(
+  overrides: Partial<PersistedCapture> = {},
+): PersistedCapture {
+  return {
+    captureId: 'capture-1',
+    createdAt: '2026-04-08T00:00:00.000Z',
+    deduped: false,
+    envelopePath: 'derived/inbox/capture-1/envelope.json',
+    eventId: 'event-1',
+    ...overrides,
+  }
+}
+
 function createRuntimeStore(input: {
   captures: RuntimeCaptureRecord[]
   jobs?: RuntimeAttachmentParseJobRecord[]
@@ -187,28 +223,63 @@ function createRuntimeStore(input: {
   const cursorStore = new Map<string, Record<string, unknown> | null>()
   const getKey = (source: string, accountId?: string | null) =>
     `${source}:${accountId ?? 'default'}`
-  const runtime: RuntimeStore = {
+  const runtime = {
+    claimNextAttachmentParseJob() {
+      return null
+    },
     close,
+    completeAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'succeeded',
+        },
+      }
+    },
+    databasePath: '/tmp/inboxd.sqlite',
+    enqueueDerivedJobs() {},
+    failAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'failed',
+        },
+      }
+    },
+    findByExternalId() {
+      return null
+    },
     getCapture(captureId) {
       return input.captures.find((capture) => capture.captureId === captureId) ?? null
     },
     getCursor(source, accountId) {
       return cursorStore.get(getKey(source, accountId)) ?? null
     },
-    listAttachmentParseJobs: input.jobs
-      ? (filters) => {
-          const limit = filters?.limit ?? input.jobs?.length ?? 0
-          return (input.jobs ?? [])
-            .filter((job) =>
-              filters?.attachmentId ? job.attachmentId === filters.attachmentId : true,
-            )
-            .filter((job) =>
-              filters?.captureId ? job.captureId === filters.captureId : true,
-            )
-            .filter((job) => (filters?.state ? job.state === filters.state : true))
-            .slice(0, limit)
-        }
-      : undefined,
+    listAttachmentParseJobs(filters) {
+      const jobs = input.jobs ?? []
+      const limit = filters?.limit ?? jobs.length
+      return jobs
+        .filter((job) =>
+          filters?.attachmentId ? job.attachmentId === filters.attachmentId : true,
+        )
+        .filter((job) =>
+          filters?.captureId ? job.captureId === filters.captureId : true,
+        )
+        .filter((job) => (filters?.state ? job.state === filters.state : true))
+        .slice(0, limit)
+    },
     listCaptures(filters) {
       const captures = input.captures.filter((capture) =>
         filters?.source ? capture.source === filters.source : true,
@@ -216,9 +287,9 @@ function createRuntimeStore(input: {
       const limit = filters?.limit ?? captures.length
       return captures.slice(0, limit)
     },
-    requeueAttachmentParseJobs: input.jobs
-      ? () => input.requeueCount ?? 1
-      : undefined,
+    requeueAttachmentParseJobs() {
+      return input.jobs ? (input.requeueCount ?? 1) : 0
+    },
     searchCaptures(filters) {
       return input.captures
         .filter((capture) =>
@@ -241,6 +312,23 @@ function createRuntimeStore(input: {
     setCursor(source, accountId, cursor) {
       cursorStore.set(getKey(source, accountId), cursor ?? null)
     },
+    upsertCaptureIndex() {
+      return 'capture-index'
+    },
+  } satisfies RuntimeStore & {
+    databasePath: string
+    enqueueDerivedJobs(input: { captureId: string; stored: unknown }): void
+    findByExternalId(
+      source: string,
+      accountId: string | null | undefined,
+      externalId: string,
+    ): PersistedCapture | null
+    upsertCaptureIndex(input: {
+      captureId: string
+      eventId: string
+      input: RuntimeCaptureRecordInput
+      stored: unknown
+    }): string
   }
 
   return {
@@ -558,7 +646,7 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
   assert.equal(searched.hits[0]?.promotions[0]?.target, 'document')
 })
 
-test('read ops report unsupported parse-status boundaries when the runtime omits parse jobs', async () => {
+test('read ops report empty parse-status state when no parse jobs exist yet', async () => {
   const paths = await createTempPaths()
   const capture = createCapture({
     attachments: [
@@ -586,16 +674,20 @@ test('read ops report unsupported parse-status boundaries when the runtime omits
 
   const ops = createInboxReadOps(env)
 
-  await assert.rejects(
-    () =>
-      ops.showAttachmentStatus({
-        attachmentId: 'attachment-doc',
-        requestId: null,
-        vault: paths.absoluteVaultRoot,
-      }),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
+  assert.deepEqual(
+    await ops.showAttachmentStatus({
+      attachmentId: 'attachment-doc',
+      requestId: null,
+      vault: paths.absoluteVaultRoot,
+    }),
+    {
+      attachmentId: 'attachment-doc',
+      captureId: capture.captureId,
+      currentState: null,
+      jobs: [],
+      parseable: true,
+      vault: paths.absoluteVaultRoot,
+    },
   )
 })
 
@@ -904,11 +996,16 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
     captures: [emittedCapture],
   })
   const processCapture = vi
-    .fn<
-      (capture: RuntimeCaptureRecordInput) => Promise<{ captureId?: string; deduped: boolean }>
-    >()
-    .mockResolvedValueOnce({ captureId: emittedCapture.captureId, deduped: false })
-    .mockResolvedValueOnce({ captureId: undefined, deduped: true })
+    .fn<(capture: RuntimeCaptureRecordInput) => Promise<PersistedCapture>>()
+    .mockResolvedValueOnce(
+      createPersistedCapture({ captureId: emittedCapture.captureId }),
+    )
+    .mockResolvedValueOnce(
+      createPersistedCapture({
+        captureId: 'capture-deduped',
+        deduped: true,
+      }),
+    )
   const pipeline = {
     close: vi.fn(),
     processCapture,
@@ -937,23 +1034,23 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
   connectorMocks.instantiateConnector.mockResolvedValue({
     accountId: 'bot',
     backfill: async (_cursor, emit) => {
-      await emit({
-        accountId: 'bot',
-        attachments: [],
-        externalId: 'external-imported',
-        occurredAt: emittedCapture.occurredAt,
-        source: 'telegram',
-        text: emittedCapture.text,
-      })
       await emit(
-        {
+        createInboundCapture({
           accountId: 'bot',
-          attachments: [],
+          externalId: 'external-imported',
+          occurredAt: emittedCapture.occurredAt,
+          source: 'telegram',
+          text: emittedCapture.text,
+        }),
+      )
+      await emit(
+        createInboundCapture({
+          accountId: 'bot',
           externalId: 'external-deduped',
           occurredAt: emittedCapture.occurredAt,
           source: 'telegram',
           text: 'deduped',
-        },
+        }),
         { marker: 'checkpoint' },
       )
       return { marker: 'next' }
@@ -1177,9 +1274,13 @@ test('runtime run writes failed daemon state when the daemon surface throws', as
       watch: true,
       webhooks: false,
     },
+    async backfill() {
+      return null
+    },
     id: connector.id,
     kind: 'poll',
     source: connector.source,
+    async watch() {},
   } satisfies PollConnector)
   linqRuntimeMocks.resolveLinqWebhookSecret.mockReturnValue('linq-secret')
 
@@ -1217,16 +1318,18 @@ test('runtime run instruments connector backfill/watch events and records daemon
   const inboxModule = createInboxModule({
     openInboxRuntime: vi.fn(async () => createRuntimeStore({ captures: [] }).runtime),
     runInboxDaemonWithParsers: vi.fn(async ({ connectors, signal }) => {
-      await connectors[0]?.backfill?.(null, async (capture: RuntimeCaptureRecordInput) => ({
-        captureId: capture.externalId,
-        deduped: capture.externalId === 'capture-deduped',
-      }))
+      await connectors[0]?.backfill(null, async (capture: RuntimeCaptureRecordInput) =>
+        createPersistedCapture({
+          captureId: capture.externalId,
+          deduped: capture.externalId === 'capture-deduped',
+        }),
+      )
       await connectors[0]?.watch?.(
         null,
-        async (capture: RuntimeCaptureRecordInput) => ({
-          captureId: capture.externalId,
-          deduped: false,
-        }),
+        async (capture: RuntimeCaptureRecordInput) =>
+          createPersistedCapture({
+            captureId: capture.externalId,
+          }),
         signal,
       )
     }),
@@ -1253,20 +1356,24 @@ test('runtime run instruments connector backfill/watch events and records daemon
   })
   connectorMocks.instantiateConnector.mockResolvedValue({
     async backfill(_cursor, emit) {
-      await emit({
-        accountId: 'bot',
-        externalId: 'capture-imported',
-        occurredAt: '2026-04-08T00:00:00.000Z',
-        source: 'telegram',
-        text: 'imported',
-      })
-      await emit({
-        accountId: 'bot',
-        externalId: 'capture-deduped',
-        occurredAt: '2026-04-08T00:01:00.000Z',
-        source: 'telegram',
-        text: 'deduped',
-      })
+      await emit(
+        createInboundCapture({
+          accountId: 'bot',
+          externalId: 'capture-imported',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'telegram',
+          text: 'imported',
+        }),
+      )
+      await emit(
+        createInboundCapture({
+          accountId: 'bot',
+          externalId: 'capture-deduped',
+          occurredAt: '2026-04-08T00:01:00.000Z',
+          source: 'telegram',
+          text: 'deduped',
+        }),
+      )
       return null
     },
     capabilities: {
@@ -1280,13 +1387,15 @@ test('runtime run instruments connector backfill/watch events and records daemon
     kind: 'poll',
     source: 'telegram',
     async watch(_cursor, emit) {
-      await emit({
-        accountId: 'bot',
-        externalId: 'capture-watch',
-        occurredAt: '2026-04-08T00:02:00.000Z',
-        source: 'telegram',
-        text: 'watch import',
-      })
+      await emit(
+        createInboundCapture({
+          accountId: 'bot',
+          externalId: 'capture-watch',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+          source: 'telegram',
+          text: 'watch import',
+        }),
+      )
     },
   } satisfies PollConnector)
   linqRuntimeMocks.resolveLinqWebhookSecret.mockReturnValue('linq-secret')
@@ -1379,9 +1488,13 @@ test('runtime run respects provided abort signals and records signal shutdown me
       watch: true,
       webhooks: false,
     },
+    async backfill() {
+      return null
+    },
     id: connector.id,
     kind: 'poll',
     source: connector.source,
+    async watch() {},
   } satisfies PollConnector)
   linqRuntimeMocks.resolveLinqWebhookSecret.mockReturnValue('linq-secret')
 

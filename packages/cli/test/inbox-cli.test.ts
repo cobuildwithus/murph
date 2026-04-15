@@ -64,6 +64,7 @@ test('formatInboxRunEventForTerminal redacts actor, thread, and text previews by
       ],
       occurredAt: '2026-03-25T08:00:00.000Z',
       source: 'email',
+      raw: {},
       text: 'Follow up about the lab results tomorrow morning.',
       thread: {
         id: 'thread-person@example.test',
@@ -101,6 +102,7 @@ test('formatInboxRunEventForTerminal only includes verbose capture details when 
       ],
       occurredAt: '2026-03-25T08:00:00.000Z',
       source: 'email',
+      raw: {},
       text: 'Follow up about the lab results tomorrow morning.',
       thread: {
         id: 'thread-person@example.test',
@@ -189,12 +191,51 @@ function createFakeEmailDriver(): EmailDriver {
 function createFakeInboxRuntimeModule(input?: {
   rebuiltCaptureCount?: number
 }): InboxRuntimeModule {
-  const runtime: RuntimeStore = {
+  const runtime = {
+    claimNextAttachmentParseJob() {
+      return null
+    },
     close() {},
+    completeAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-03-13T08:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'succeeded',
+        },
+      }
+    },
+    databasePath: '/tmp/inboxd.sqlite',
+    enqueueDerivedJobs() {},
+    failAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-03-13T08:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'failed',
+        },
+      }
+    },
+    findByExternalId() {
+      return null
+    },
     getCursor() {
       return null
     },
     setCursor() {},
+    listAttachmentParseJobs() {
+      return []
+    },
     listCaptures(filters?: { limit?: number }) {
       const total = input?.rebuiltCaptureCount ?? 0
       const limit = filters?.limit ?? total
@@ -231,6 +272,32 @@ function createFakeInboxRuntimeModule(input?: {
     getCapture() {
       return null
     },
+    requeueAttachmentParseJobs() {
+      return 0
+    },
+    upsertCaptureIndex() {
+      return 'capture-index'
+    },
+  } satisfies RuntimeStore & {
+    databasePath: string
+    enqueueDerivedJobs(input: { captureId: string; stored: unknown }): void
+    findByExternalId(
+      source: string,
+      accountId: string | null | undefined,
+      externalId: string,
+    ): {
+      captureId: string
+      createdAt: string
+      deduped: boolean
+      envelopePath: string
+      eventId: string
+    } | null
+    upsertCaptureIndex(input: {
+      captureId: string
+      eventId: string
+      input: RuntimeCaptureRecordInput
+      stored: unknown
+    }): string
   }
 
   return {
@@ -242,7 +309,13 @@ function createFakeInboxRuntimeModule(input?: {
       return {
         runtime,
         async processCapture() {
-          return { deduped: false }
+          return {
+            captureId: 'capture-created',
+            createdAt: '2026-03-13T08:00:03.000Z',
+            deduped: false,
+            envelopePath: 'raw/inbox/telegram/bot/capture-created/envelope.json',
+            eventId: 'event-created',
+          }
         },
         close() {},
       }
@@ -306,6 +379,9 @@ function createFakeInboxRuntimeModule(input?: {
           backfill: false,
           watch: true,
           webhooks: true,
+        },
+        async backfill() {
+          return null
         },
         async watch() {},
         async close() {},

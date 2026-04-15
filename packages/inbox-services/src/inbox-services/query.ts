@@ -100,7 +100,21 @@ export function toCliAttachment(attachment: RuntimeAttachmentRecord) {
     transcriptText: attachment.transcriptText ?? null,
     derivedPath: attachment.derivedPath ?? null,
     parserProviderId: attachment.parserProviderId ?? null,
-    parseState: attachment.parseState ?? null,
+    parseState: normalizeAttachmentParseState(attachment.parseState),
+  }
+}
+
+function normalizeAttachmentParseState(
+  value: RuntimeAttachmentRecord['parseState'],
+): 'pending' | 'running' | 'succeeded' | 'failed' | null {
+  switch (value) {
+    case 'pending':
+    case 'running':
+    case 'succeeded':
+    case 'failed':
+      return value
+    default:
+      return null
   }
 }
 

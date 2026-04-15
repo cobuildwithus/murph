@@ -83,7 +83,7 @@ function instrumentConnectorForRunEvents(
       let deduped = 0
 
       try {
-        const nextCursor = await connector.backfill?.(
+        const nextCursor = await connector.backfill(
           cursor,
           async (capture, checkpoint) => {
             const persisted = await emit(capture, checkpoint)
@@ -126,7 +126,7 @@ function instrumentConnectorForRunEvents(
       })
 
       try {
-        return await connector.watch?.(
+        return await connector.watch(
           cursor,
           async (capture, checkpoint) => {
             const persisted = await emit(capture, checkpoint)
@@ -256,7 +256,7 @@ export function createInboxRuntimeOps(
 
       try {
         const state = input.state ?? 'failed'
-        const count = runtime.requeueAttachmentParseJobs?.({
+        const count = runtime.requeueAttachmentParseJobs({
           attachmentId: input.attachmentId ?? undefined,
           captureId: input.captureId ?? undefined,
           state,
@@ -264,7 +264,7 @@ export function createInboxRuntimeOps(
 
         return {
           vault: paths.absoluteVaultRoot,
-          count: count ?? 0,
+          count,
           filters: {
             ...(input.captureId ? { captureId: input.captureId } : {}),
             ...(input.attachmentId ? { attachmentId: input.attachmentId } : {}),
@@ -317,7 +317,7 @@ export function createInboxRuntimeOps(
         const cursorAccountId = runtimeNamespaceAccountId(connectorConfig)
         let cursor = runtime.getCursor(connector.source, cursorAccountId)
 
-        const nextCursor = await connector.backfill?.(
+        const nextCursor = await connector.backfill(
           cursor,
           async (capture, checkpoint) => {
             const persisted = await pipeline.processCapture(capture)
@@ -325,7 +325,7 @@ export function createInboxRuntimeOps(
               dedupedCount += 1
             } else {
               importedCount += 1
-              if (parserService && persisted.captureId) {
+              if (parserService) {
                 parseResults = parseResults.concat(
                   await parserService.drain({
                     captureId: persisted.captureId,

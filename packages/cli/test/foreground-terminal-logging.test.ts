@@ -34,6 +34,7 @@ function createCapture(
     },
     text: 'Need a follow-up on tonight’s routine and supplements.',
     attachments: [],
+    raw: {},
     ...overrides,
   }
 }
