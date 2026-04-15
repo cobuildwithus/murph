@@ -27,6 +27,7 @@ const runnerMocks = vi.hoisted(() => ({
   listAssistantTranscriptEntries: vi.fn(),
   maybeThrowInjectedAssistantFault: vi.fn(),
   normalizeAssistantExecutionContext: vi.fn(),
+  normalizeNullableString: vi.fn(),
   readAssistantFailoverState: vi.fn(),
   recordAssistantDiagnosticEvent: vi.fn(),
   recordAssistantFailoverRouteFailure: vi.fn(),
@@ -82,6 +83,7 @@ vi.mock('../src/assistant/vault-overview.ts', () => ({
 
 vi.mock('../src/assistant/shared.ts', () => ({
   errorMessage: runnerMocks.errorMessage,
+  normalizeNullableString: runnerMocks.normalizeNullableString,
 }))
 
 vi.mock('../src/assistant/cli-surface-bootstrap.ts', () => ({
@@ -203,6 +205,16 @@ describe('executeProviderTurnWithRecovery', () => {
       .mockImplementation((error: unknown) =>
         error instanceof Error ? error.message : String(error),
       )
+    runnerMocks.normalizeNullableString
+      .mockReset()
+      .mockImplementation((value: string | null | undefined) => {
+        if (typeof value !== 'string') {
+          return null
+        }
+
+        const trimmed = value.trim()
+        return trimmed.length > 0 ? trimmed : null
+      })
     runnerMocks.executeAssistantProviderTurnAttempt.mockReset()
     runnerMocks.getAssistantFailoverCooldownUntil.mockReset().mockReturnValue(null)
     runnerMocks.isAssistantFailoverRouteCoolingDown.mockReset().mockReturnValue(false)
@@ -350,6 +362,7 @@ describe('executeProviderTurnWithRecovery', () => {
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
         firstTurnCheckIn: true,
+        modelBehaviorProfile: 'default',
         turnTrigger: null,
         vaultOverview:
           'Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
@@ -390,6 +403,46 @@ describe('executeProviderTurnWithRecovery', () => {
       expect.objectContaining({
         kind: 'provider.failover.applied',
         level: 'warn',
+      }),
+    )
+  })
+
+  it('passes the GPT-5 agentic model behavior profile into conversation prompts for GPT-5 routes', async () => {
+    const route = createRoute({
+      providerOptions: {
+        model: 'openai/gpt-5.4',
+      },
+      routeId: 'route-gpt5',
+    })
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-gpt5',
+        response: 'GPT-5 route answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        channel: 'chat',
+        prompt: 'Log this symptom',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: true,
+        firstTurnCheckInEligible: false,
+      }),
+      resolvedSession: createAssistantSession(),
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-gpt5-profile',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+    })
+    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelBehaviorProfile: 'gpt5-agentic',
       }),
     )
   })

@@ -20,6 +20,7 @@ function buildPrompt(
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
     firstTurnCheckIn: false,
+    modelBehaviorProfile: 'default',
     turnTrigger,
     vaultOverview: null,
   })
