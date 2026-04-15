@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalEmitWarning = process.emitWarning;
 const SQLITE_WARNING_FILTER_FLAG = Symbol.for("murph.sqliteExperimentalWarningFilterInstalled");
+const SQLITE_WARNING_FILTER_INCLUDES_FLAG = Symbol.for(
+  "murph.sqliteExperimentalWarningFilterInstalled.includes",
+);
 type ProcessWithSqliteWarningFilterFlag = NodeJS.Process & {
   [SQLITE_WARNING_FILTER_FLAG]?: boolean;
+  [SQLITE_WARNING_FILTER_INCLUDES_FLAG]?: boolean;
 };
 
 describe("runtime-state sqlite warning filter", () => {
@@ -11,11 +15,13 @@ describe("runtime-state sqlite warning filter", () => {
     vi.clearAllMocks();
     vi.resetModules();
     delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_FLAG];
+    delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
   });
 
   afterEach(() => {
     process.emitWarning = originalEmitWarning;
     delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_FLAG];
+    delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
     vi.doUnmock("node:module");
   });
 
@@ -54,6 +60,7 @@ describe("runtime-state sqlite warning filter", () => {
   it("detects Error-based sqlite warnings and installs idempotently", async () => {
     const {
       installSqliteExperimentalWarningFilter,
+      installSqliteExperimentalWarningFilterWithOptions,
       isSqliteExperimentalWarning,
     } = await import("../src/sqlite-warning-filter.ts");
 
@@ -79,12 +86,35 @@ describe("runtime-state sqlite warning filter", () => {
         [{ type: "ExperimentalWarning" }],
       ),
     ).toBe(true);
+    expect(
+      isSqliteExperimentalWarning(
+        "SQLite is an experimental feature and might change at any time (extra context)",
+        ["ExperimentalWarning"],
+      ),
+    ).toBe(false);
+    expect(
+      isSqliteExperimentalWarning(
+        "SQLite is an experimental feature and might change at any time (extra context)",
+        ["ExperimentalWarning"],
+        { matchMode: "includes" },
+      ),
+    ).toBe(true);
 
     installSqliteExperimentalWarningFilter();
     const wrappedEmitWarning = process.emitWarning;
     installSqliteExperimentalWarningFilter();
 
     expect(process.emitWarning).toBe(wrappedEmitWarning);
+
+    installSqliteExperimentalWarningFilterWithOptions({
+      matchMode: "includes",
+    });
+    const includesWrappedEmitWarning = process.emitWarning;
+    installSqliteExperimentalWarningFilterWithOptions({
+      matchMode: "includes",
+    });
+
+    expect(process.emitWarning).toBe(includesWrappedEmitWarning);
   });
 
   it("installs the sqlite warning filter before requiring node:sqlite", async () => {

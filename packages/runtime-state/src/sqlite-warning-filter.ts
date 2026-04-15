@@ -4,10 +4,14 @@ type ProcessEmitWarningRestArgs = Parameters<typeof process.emitWarning> extends
 ]
   ? Rest
   : never;
+export type SqliteExperimentalWarningMatchMode = "exact" | "includes";
 type WarningTypeOption = { type: string };
 type WarningDetails = {
   message: string;
   type: string;
+};
+type SqliteExperimentalWarningFilterOptions = {
+  matchMode?: SqliteExperimentalWarningMatchMode;
 };
 
 const SQLITE_EXPERIMENTAL_WARNING_MESSAGE =
@@ -15,21 +19,29 @@ const SQLITE_EXPERIMENTAL_WARNING_MESSAGE =
 const SQLITE_WARNING_FILTER_FLAG = Symbol.for("murph.sqliteExperimentalWarningFilterInstalled");
 
 type ProcessWithSqliteWarningFilterFlag = NodeJS.Process & {
-  [SQLITE_WARNING_FILTER_FLAG]?: boolean;
+  [key: symbol]: boolean | undefined;
 };
 
 export function installSqliteExperimentalWarningFilter(): void {
-  const processWithFlag = process as ProcessWithSqliteWarningFilterFlag;
+  installSqliteExperimentalWarningFilterWithOptions();
+}
 
-  if (processWithFlag[SQLITE_WARNING_FILTER_FLAG] === true) {
+export function installSqliteExperimentalWarningFilterWithOptions(
+  options: SqliteExperimentalWarningFilterOptions = {},
+): void {
+  const processWithFlag = process as ProcessWithSqliteWarningFilterFlag;
+  const matchMode = options.matchMode ?? "exact";
+  const filterFlag = getSqliteWarningFilterFlag(matchMode);
+
+  if (processWithFlag[filterFlag] === true) {
     return;
   }
 
-  processWithFlag[SQLITE_WARNING_FILTER_FLAG] = true;
+  processWithFlag[filterFlag] = true;
   const originalEmitWarning = process.emitWarning.bind(process);
 
   process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-    if (isSqliteExperimentalWarning(warning, args)) {
+    if (isSqliteExperimentalWarning(warning, args, options)) {
       return;
     }
 
@@ -43,13 +55,24 @@ export function installSqliteExperimentalWarningFilter(): void {
 export function isSqliteExperimentalWarning(
   warning: string | Error,
   args: readonly unknown[],
+  options: SqliteExperimentalWarningFilterOptions = {},
 ): boolean {
   const warningDetails = readWarningDetails(warning, args);
+  const matchMode = options.matchMode ?? "exact";
 
   return (
     warningDetails.type === "ExperimentalWarning" &&
-    warningDetails.message === SQLITE_EXPERIMENTAL_WARNING_MESSAGE
+    matchesSqliteExperimentalWarningMessage(warningDetails.message, matchMode)
   );
+}
+
+function matchesSqliteExperimentalWarningMessage(
+  message: string,
+  matchMode: SqliteExperimentalWarningMatchMode,
+): boolean {
+  return matchMode === "includes"
+    ? message.includes(SQLITE_EXPERIMENTAL_WARNING_MESSAGE)
+    : message === SQLITE_EXPERIMENTAL_WARNING_MESSAGE;
 }
 
 function readWarningDetails(
@@ -85,4 +108,12 @@ function isWarningOptionsWithType(value: unknown): value is WarningTypeOption {
     "type" in value &&
     typeof value.type === "string"
   );
+}
+
+function getSqliteWarningFilterFlag(
+  matchMode: SqliteExperimentalWarningMatchMode,
+): symbol {
+  return matchMode === "includes"
+    ? Symbol.for("murph.sqliteExperimentalWarningFilterInstalled.includes")
+    : SQLITE_WARNING_FILTER_FLAG;
 }

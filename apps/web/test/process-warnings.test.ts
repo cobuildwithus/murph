@@ -1,15 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalEmitWarning = process.emitWarning;
+const SQLITE_WARNING_FILTER_FLAG = Symbol.for("murph.sqliteExperimentalWarningFilterInstalled");
+const SQLITE_WARNING_FILTER_INCLUDES_FLAG = Symbol.for(
+  "murph.sqliteExperimentalWarningFilterInstalled.includes",
+);
+type ProcessWithSqliteWarningFilterFlag = NodeJS.Process & {
+  [SQLITE_WARNING_FILTER_FLAG]?: boolean;
+  [SQLITE_WARNING_FILTER_INCLUDES_FLAG]?: boolean;
+};
 
 describe("hosted web warning filters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_FLAG];
+    delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
   });
 
   afterEach(() => {
     process.emitWarning = originalEmitWarning;
+    delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_FLAG];
+    delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
   });
 
   it("suppresses the repeated SQLite experimental warning without hiding other warnings", async () => {
@@ -25,6 +37,10 @@ describe("hosted web warning filters", () => {
 
     process.emitWarning(
       "SQLite is an experimental feature and might change at any time",
+      "ExperimentalWarning",
+    );
+    process.emitWarning(
+      "SQLite is an experimental feature and might change at any time (extra context)",
       "ExperimentalWarning",
     );
     process.emitWarning(

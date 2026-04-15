@@ -13,6 +13,14 @@ import {
 } from "../src/cli-entry.ts";
 
 const originalEmitWarning = process.emitWarning;
+const SQLITE_WARNING_FILTER_FLAG = Symbol.for("murph.sqliteExperimentalWarningFilterInstalled");
+const SQLITE_WARNING_FILTER_INCLUDES_FLAG = Symbol.for(
+  "murph.sqliteExperimentalWarningFilterInstalled.includes",
+);
+type ProcessWithSqliteWarningFilterFlag = NodeJS.Process & {
+  [SQLITE_WARNING_FILTER_FLAG]?: boolean;
+  [SQLITE_WARNING_FILTER_INCLUDES_FLAG]?: boolean;
+};
 const mockedCliEntryModules = [
   "../src/vault-cli.js",
   "@murphai/operator-config/operator-config",
@@ -53,6 +61,8 @@ afterEach(() => {
     vi.doUnmock(moduleId);
   }
   process.emitWarning = originalEmitWarning;
+  delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_FLAG];
+  delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
 });
 
 test("loadCliEnvFiles attempts .env.local before .env and skips missing files", () => {
@@ -120,9 +130,13 @@ test("installSqliteExperimentalWarningFilter suppresses SQLite experimental warn
   installSqliteExperimentalWarningFilter();
 
   process.emitWarning(
-    Object.assign(new Error("SQLite is an experimental feature and might change"), {
+    Object.assign(new Error("SQLite is an experimental feature and might change at any time"), {
       name: "ExperimentalWarning",
     }),
+  );
+  process.emitWarning(
+    "SQLite is an experimental feature and might change at any time (extra context)",
+    "ExperimentalWarning",
   );
   process.emitWarning("Different experimental warning", "ExperimentalWarning");
   process.emitWarning("Plain runtime warning", "Warning");
