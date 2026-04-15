@@ -35,6 +35,7 @@ export function requireHostedSharePackClient(): HostedSharePackClient {
       await requester.requestJson({
         allowNotFound: true,
         body: undefined,
+        boundUserId: userId,
         label: "delete share pack",
         method: "DELETE",
         parse: () => undefined,
@@ -44,6 +45,7 @@ export function requireHostedSharePackClient(): HostedSharePackClient {
     async putSharePack(userId, shareId, pack) {
       const response = await requester.requestJson({
         body: JSON.stringify(parseHostedExecutionSharePack(pack)),
+        boundUserId: userId,
         label: "share pack write",
         method: "PUT",
         parse: parseHostedExecutionSharePack,

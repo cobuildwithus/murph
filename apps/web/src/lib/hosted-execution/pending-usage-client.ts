@@ -34,6 +34,7 @@ export function requireHostedPendingUsageClient(): HostedPendingUsageClient {
     async deletePendingUsage(userId, usageIds) {
       await requester.requestJson({
         body: JSON.stringify({ usageIds: [...usageIds] }),
+        boundUserId: userId,
         label: "delete pending usage",
         method: "DELETE",
         parse: () => undefined,
@@ -46,6 +47,7 @@ export function requireHostedPendingUsageClient(): HostedPendingUsageClient {
         : null;
 
       const response = await requester.requestJson({
+        boundUserId: userId,
         label: "pending usage",
         method: "GET",
         parse: parsePendingUsageRecords,

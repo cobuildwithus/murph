@@ -317,6 +317,9 @@ describe("hosted execution coverage gaps", () => {
     expect(new Headers(observedRequest.init?.headers).get("authorization")).toBe(
       "Bearer token-123",
     );
+    expect(new Headers(observedRequest.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
+      "user_123",
+    );
     expect(new Headers(observedRequest.init?.headers).get("content-type")).toBe(
       "application/json; charset=utf-8",
     );

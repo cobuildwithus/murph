@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockedModules = vi.hoisted(() => {
-  const requestJson = vi.fn(async () => null);
+  const requestJson = vi.fn<(input: unknown) => Promise<unknown | null>>(async () => null);
 
   return {
     createHostedExecutionVercelOidcBearerTokenProvider: vi.fn(() => async () => "token_123"),
@@ -24,31 +24,38 @@ vi.mock("@/src/lib/hosted-execution/request-client", () => ({
   createHostedExecutionWebJsonRequester: mockedModules.createHostedExecutionWebJsonRequester,
 }));
 
-const { requireHostedSharePackClient } = await import("../src/lib/hosted-share/pack-client");
+const { requireHostedDeviceSyncRuntimeClient } = await import("../src/lib/device-sync/runtime-client");
 
-describe("requireHostedSharePackClient", () => {
+describe("requireHostedDeviceSyncRuntimeClient", () => {
   beforeEach(() => {
     mockedModules.createHostedExecutionVercelOidcBearerTokenProvider.mockReset().mockReturnValue(async () => "token_123");
     mockedModules.createHostedExecutionWebJsonRequester.mockReset().mockReturnValue({
       requestJson: mockedModules.requestJson,
     });
     mockedModules.readHostedExecutionControlBaseUrl.mockReset().mockReturnValue("https://control.example.test");
-    mockedModules.requestJson.mockReset().mockResolvedValue(null);
+    mockedModules.requestJson.mockReset().mockResolvedValue({
+      connections: [],
+      generatedAt: "2026-04-15T00:00:00.000Z",
+      userId: "owner_123",
+    });
   });
 
-  it("treats delete as idempotent when the share pack is already gone", async () => {
-    const client = requireHostedSharePackClient();
+  it("requests secret-bearing snapshots only when includeSecrets is explicitly enabled", async () => {
+    const client = requireHostedDeviceSyncRuntimeClient();
 
-    await client.deleteSharePack("owner_123", "share_123");
+    await client.getDeviceSyncRuntimeSnapshot("owner_123", {
+      connectionId: "conn_123",
+      includeSecrets: true,
+      provider: "oura",
+    });
 
     expect(mockedModules.requestJson).toHaveBeenCalledWith({
-      allowNotFound: true,
-      body: undefined,
       boundUserId: "owner_123",
-      label: "delete share pack",
-      method: "DELETE",
+      label: "device-sync runtime snapshot",
+      method: "GET",
       parse: expect.any(Function),
-      path: "/internal/users/owner_123/shares/share_123/pack",
+      path: "/internal/users/owner_123/device-sync/runtime",
+      search: "connectionId=conn_123&provider=oura&includeSecrets=true",
     });
   });
 });

@@ -134,6 +134,7 @@ export class HostedDeviceSyncAgentSessionService {
         runtimeConnection: findHostedDeviceSyncRuntimeConnection(
           await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(session.userId, {
             connectionId,
+            includeSecrets: true,
             provider: connection.provider,
           }),
           connectionId,
@@ -198,6 +199,7 @@ export class HostedDeviceSyncAgentSessionService {
         session.userId,
         {
           connectionId,
+          includeSecrets: true,
           provider: staticConnection.provider,
         },
       );
@@ -348,6 +350,7 @@ export class HostedDeviceSyncAgentSessionService {
         session.userId,
         {
           connectionId,
+          includeSecrets: true,
           provider: staticConnection.provider,
         },
       );
