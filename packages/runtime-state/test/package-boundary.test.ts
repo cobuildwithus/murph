@@ -31,6 +31,8 @@ describe("@murphai/runtime-state package boundary", () => {
     };
 
     expect(runtimeStateNode.generateUlid).toBeTypeOf("function");
+    expect(runtimeStateNode.installSqliteExperimentalWarningFilter).toBeTypeOf("function");
+    expect(runtimeStateNode.isSqliteExperimentalWarning).toBeTypeOf("function");
     expect(runtimeStateNode.openSqliteRuntimeDatabase).toBeTypeOf("function");
     expect(runtimeStateNode.resolveRuntimePaths).toBeTypeOf("function");
     expect(runtimeStateNode.snapshotHostedExecutionContext).toBeTypeOf("function");

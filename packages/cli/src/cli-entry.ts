@@ -1,6 +1,7 @@
 import path from 'node:path'
 import type { Cli } from 'incur'
 
+import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -11,16 +12,6 @@ export interface MurphCliRunOptions {
 
 type SuccessfulSetupContext = import('@murphai/setup-cli/setup-cli').SuccessfulSetupContext
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
-type ProcessEmitWarningRestArgs = Parameters<typeof process.emitWarning> extends [
-  unknown,
-  ...infer Rest,
-]
-  ? Rest
-  : never
-
-const SQLITE_EXPERIMENTAL_WARNING_MESSAGE = 'SQLite is an experimental feature'
-
-let sqliteExperimentalWarningFilterInstalled = false
 
 export async function runMurphCliEntrypoint(
   argv: string[] = process.argv.slice(2),
@@ -242,50 +233,11 @@ export function loadCliEnvFiles(cwd = process.cwd()): void {
 }
 
 export function installSqliteExperimentalWarningFilter(): void {
-  if (sqliteExperimentalWarningFilterInstalled) {
-    return
-  }
-
-  sqliteExperimentalWarningFilterInstalled = true
-  const originalEmitWarning = process.emitWarning.bind(process)
-
-  process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-    if (isSqliteExperimentalWarning(warning, args)) {
-      return
-    }
-
-    return originalEmitWarning(
-      warning as Parameters<typeof process.emitWarning>[0],
-      ...(args as ProcessEmitWarningRestArgs),
-    )
-  }) as typeof process.emitWarning
+  installSqliteExperimentalWarningFilterWithOptions({
+    matchMode: 'includes',
+  })
 }
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
-}
-
-function isSqliteExperimentalWarning(
-  warning: string | Error,
-  args: readonly unknown[],
-): boolean {
-  return (
-    resolveWarningType(warning, args) === 'ExperimentalWarning' &&
-    resolveWarningMessage(warning).includes(SQLITE_EXPERIMENTAL_WARNING_MESSAGE)
-  )
-}
-
-function resolveWarningMessage(warning: string | Error): string {
-  return typeof warning === 'string' ? warning : warning.message
-}
-
-function resolveWarningType(
-  warning: string | Error,
-  args: readonly unknown[],
-): string {
-  if (typeof args[0] === 'string') {
-    return args[0]
-  }
-
-  return warning instanceof Error ? warning.name : ''
 }
