@@ -1,8 +1,5 @@
 import { importSharePackIntoVault } from "@murphai/core";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
-import {
-  restoreHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import type {
   ConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
@@ -131,4 +128,8 @@ export type HostedWorkspaceArtifactMaterializer = (
 ) => Promise<void>;
 
 export type HostedDispatchEvent = HostedExecutionDispatchRequest["event"];
-export type HostedRestoredExecutionContext = Awaited<ReturnType<typeof restoreHostedExecutionContext>>;
+export interface HostedRestoredExecutionContext {
+  assistantStateRoot: string;
+  operatorHomeRoot: string;
+  vaultRoot: string;
+}
