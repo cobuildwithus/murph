@@ -145,6 +145,27 @@ test("buildPublicDeviceSyncErrorPayload exposes only safe numeric status details
   });
 });
 
+test("buildPublicDeviceSyncErrorPayload redacts secret-bearing error text", () => {
+  const payload = buildPublicDeviceSyncErrorPayload(
+    new DeviceSyncError({
+      code: "OURA_API_REQUEST_FAILED",
+      message:
+        "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
+      retryable: true,
+      httpStatus: 502,
+    }),
+  );
+
+  assert.deepEqual(payload, {
+    error: {
+      code: "OURA_API_REQUEST_FAILED",
+      message: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+      retryable: true,
+      details: undefined,
+    },
+  });
+});
+
 test("renderCallbackHtml escapes title and body content", () => {
   const html = renderCallbackHtml({
     title: `Connected <script>alert("x")</script>`,

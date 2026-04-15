@@ -1424,7 +1424,7 @@ describe("cloudflare worker routes", () => {
     expect(dispatchedEvent.userId).toBe("member_123");
     expect(dispatchedEvent.identityId).toBe("assistant@mail.example.test");
     expect("threadTarget" in dispatchedEvent).toBe(false);
-    expect(dispatchedEvent.rawMessageKey).toMatch(/^[0-9a-f]{32}$/u);
+    expect(dispatchedEvent.rawMessageKey).toMatch(/^[0-9a-f]{40}$/u);
     expect(dispatch.eventId).toBe(`email:${dispatchedEvent.rawMessageKey}`);
 
     const readResponse = await callRunnerOutbound(
@@ -1583,7 +1583,7 @@ describe("cloudflare worker routes", () => {
       event: expect.objectContaining({
         identityId: "assistant@mail.example.test",
         kind: "email.message.received",
-        rawMessageKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+        rawMessageKey: expect.stringMatching(/^[0-9a-f]{40}$/u),
         selfAddress: "assistant@mail.example.test",
         userId: "member_123",
       }),
@@ -1855,7 +1855,7 @@ describe("cloudflare worker routes", () => {
       event: expect.objectContaining({
         identityId: "assistant@mail.example.test",
         kind: "email.message.received",
-        rawMessageKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+        rawMessageKey: expect.stringMatching(/^[0-9a-f]{40}$/u),
         selfAddress: threadTarget.replyAliasAddress,
         userId: "member_123",
       }),

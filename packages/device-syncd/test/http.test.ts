@@ -1378,6 +1378,36 @@ test("device sync http handler renders callback errors when no returnTo is avail
   assert.match(body, /The user canceled the OAuth flow\./u);
 });
 
+test("device sync http handler redacts secret-bearing callback error text before rendering html", async () => {
+  const response = await invokeHandler({
+    service: createStubService({
+      async handleOAuthCallback() {
+        throw new DeviceSyncError({
+          code: "OAUTH_CALLBACK_REJECTED",
+          message:
+            "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
+          retryable: false,
+          httpStatus: 400,
+          details: {
+            provider: "demo",
+          },
+        });
+      },
+    }),
+    method: "GET",
+    url: "/device-sync/oauth/demo/callback?state=state-1&error=access_denied",
+    surface: "public",
+  });
+
+  assert.equal(response.statusCode, 400);
+  const body = response.readText();
+  assert.match(body, /authorization=\[redacted\]/u);
+  assert.match(body, /refresh_token=\[redacted\]/u);
+  assert.match(body, /\[redacted\.jwt\]/u);
+  assert.doesNotMatch(body, /secret-token/u);
+  assert.doesNotMatch(body, /refresh-secret/u);
+});
+
 test("device sync http handler renders callback errors when returnTo is malformed", async () => {
   const response = await invokeHandler({
     service: createStubService({

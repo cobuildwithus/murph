@@ -1562,6 +1562,63 @@ test("device sync service string job failures still produce deterministic dead-j
   service.close();
 });
 
+test("device sync service redacts secret-bearing job failures before persistence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-error-redacted");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw new Error(
+            "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
+          );
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "secret-error",
+  });
+
+  await service.runWorkerOnce();
+  const storedAccount = service.store.getAccountById(connected.account.id);
+  const jobStatus = service.store.database.prepare(`
+    select status, last_error_code, last_error_message
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+  `).get(connected.account.id) as {
+    last_error_code: string | null;
+    last_error_message: string | null;
+    status: string;
+  };
+
+  assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
+  assert.equal(
+    storedAccount?.lastErrorMessage,
+    "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+  );
+  assert.equal(jobStatus.status, "dead");
+  assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
+  assert.equal(
+    jobStatus.last_error_message,
+    "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+  );
+
+  service.close();
+});
+
 test("device sync service logs non-error revoke failures but still disconnects locally", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-revoke-warning");
   const warnEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];

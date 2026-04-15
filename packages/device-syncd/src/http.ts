@@ -13,6 +13,7 @@ import {
   buildDeviceSyncCallbackSuccessRedirectLocation,
 } from "./callback-redirect.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 import { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "./types.ts";
@@ -773,7 +774,7 @@ function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: s
     error.httpStatus,
     renderCallbackHtml({
       title: `${formatProviderLabel(provider)} connection failed`,
-      body: error.message,
+      body: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
     }),
   );
 }
@@ -792,7 +793,7 @@ function sendError(response: ServerResponse, error: unknown): void {
     sendJson(response, 413, {
       error: {
         code: "PAYLOAD_TOO_LARGE",
-        message: error.message,
+        message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
       },
     });
     return;
@@ -802,7 +803,7 @@ function sendError(response: ServerResponse, error: unknown): void {
     sendJson(response, 400, {
       error: {
         code: "BAD_REQUEST",
-        message: error.message,
+        message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
       },
     });
     return;
@@ -827,7 +828,7 @@ export function buildPublicDeviceSyncErrorPayload(error: DeviceSyncError): {
   return {
     error: {
       code: error.code,
-      message: error.message,
+      message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
       retryable: error.retryable,
       details: buildPublicDeviceSyncErrorDetails(error.details),
     },

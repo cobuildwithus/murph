@@ -1,4 +1,5 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
   addMilliseconds,
   generateStateCode,
@@ -411,7 +412,9 @@ export class DeviceSyncPublicIngress {
         accountId: account.id,
         eventType: webhook.eventType,
         traceId,
-        error: error instanceof Error ? error.message : String(error),
+        error: sanitizeHostedRuntimeErrorText(
+          error instanceof Error ? error.message : String(error),
+        ) ?? "[redacted]",
       });
     }
 
@@ -487,7 +490,7 @@ function attachOAuthCallbackContext(
 
   return deviceSyncError({
     code: error.code,
-    message: error.message,
+    message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
     retryable: error.retryable,
     httpStatus: error.httpStatus,
     accountStatus: error.accountStatus,

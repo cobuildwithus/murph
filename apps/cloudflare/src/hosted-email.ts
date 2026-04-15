@@ -27,6 +27,8 @@ export {
 export { shouldRejectHostedEmailIngressFailure } from "./hosted-email/ingress-policy.ts";
 export { sendHostedEmailMessage } from "./hosted-email/transport.ts";
 
+const HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024;
+
 export interface HostedEmailWorkerRequest {
   headers?: Headers;
   from: string;
@@ -73,7 +75,11 @@ export async function writeHostedEmailRawMessage(input: {
   plaintext: Uint8Array;
   userId: string;
 }): Promise<string> {
-  const rawMessageKey = randomOpaqueToken(16);
+  const rawMessageKey = await deriveHostedEmailRawMessageKey(
+    input.key,
+    input.userId,
+    input.plaintext,
+  );
   const key = await hostedEmailRawMessageObjectKey(input.key, input.userId, rawMessageKey);
   await writeEncryptedR2Payload({
     aad: buildHostedStorageAad({
@@ -110,24 +116,37 @@ export async function deleteHostedEmailRawMessage(input: {
 
 export async function readHostedEmailMessageBytes(
   input: HostedEmailWorkerRequest["raw"],
+  options: {
+    maxBytes?: number;
+    rawSize?: number | null;
+  } = {},
 ): Promise<Uint8Array> {
+  const maxBytes = options.maxBytes ?? HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES;
+  assertHostedEmailMessageSize(options.rawSize ?? null, maxBytes);
+
   if (typeof input === "string") {
-    return new TextEncoder().encode(input);
+    const bytes = new TextEncoder().encode(input);
+    assertHostedEmailMessageSize(bytes.byteLength, maxBytes);
+    return bytes;
   }
 
   if (input instanceof Uint8Array) {
+    assertHostedEmailMessageSize(input.byteLength, maxBytes);
     return input;
   }
 
   if (input instanceof ArrayBuffer) {
-    return new Uint8Array(input);
+    const bytes = new Uint8Array(input);
+    assertHostedEmailMessageSize(bytes.byteLength, maxBytes);
+    return bytes;
   }
 
-  return await readHostedEmailReadableStream(input);
+  return await readHostedEmailReadableStream(input, maxBytes);
 }
 
 async function readHostedEmailReadableStream(
   stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
 ): Promise<Uint8Array> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
@@ -143,6 +162,18 @@ async function readHostedEmailReadableStream(
       if (value) {
         chunks.push(value);
         totalLength += value.byteLength;
+
+        if (totalLength > maxBytes) {
+          try {
+            await reader.cancel();
+          } catch {
+            // best-effort stream cleanup only
+          }
+
+          throw new RangeError(
+            `Hosted email message exceeded the maximum accepted size of ${maxBytes} bytes.`,
+          );
+        }
       }
     }
   } finally {
@@ -157,6 +188,32 @@ async function readHostedEmailReadableStream(
   }
 
   return combined;
+}
+
+function assertHostedEmailMessageSize(
+  size: number | null,
+  maxBytes: number,
+): void {
+  if (typeof size === "number" && Number.isFinite(size) && size > maxBytes) {
+    throw new RangeError(
+      `Hosted email message exceeded the maximum accepted size of ${maxBytes} bytes.`,
+    );
+  }
+}
+
+async function deriveHostedEmailRawMessageKey(
+  rootKey: Uint8Array,
+  userId: string,
+  plaintext: Uint8Array,
+): Promise<string> {
+  const plaintextHash = await sha256Hex(plaintext);
+
+  return await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "email-raw-id",
+    value: `message:${userId}:${plaintextHash}`,
+  });
 }
 
 async function hostedEmailRawMessageObjectKey(
@@ -180,8 +237,18 @@ async function hostedEmailRawMessageObjectKey(
   return `transient/hosted-email/messages/${userSegment}/${messageSegment}.eml`;
 }
 
-function randomOpaqueToken(bytes: number): string {
-  return [...crypto.getRandomValues(new Uint8Array(bytes))]
+async function sha256Hex(input: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      input.buffer.slice(
+        input.byteOffset,
+        input.byteOffset + input.byteLength,
+      ) as ArrayBuffer,
+    ),
+  );
+
+  return [...digest]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
