@@ -81,9 +81,10 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
   return dispatch;
 }
 
-export async function resolveHostedMemberChannelSyncEmailLinked(input: {
+export async function resolveHostedMemberEmailLinked(input: {
   linkedAccounts?: readonly PrivyLinkedAccountLike[];
   memberId: string;
+  onUnconfirmed: "disable" | "retry";
 }): Promise<boolean> {
   if (extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? []) !== null) {
     return true;
@@ -92,6 +93,10 @@ export async function resolveHostedMemberChannelSyncEmailLinked(input: {
   const emailLinked = await hasHostedVerifiedEmailUserEnv(input.memberId);
 
   if (emailLinked === null) {
+    if (input.onUnconfirmed === "disable") {
+      return false;
+    }
+
     throw hostedOnboardingError({
       code: "HOSTED_EMAIL_SYNC_STATUS_UNAVAILABLE",
       message:
@@ -102,17 +107,6 @@ export async function resolveHostedMemberChannelSyncEmailLinked(input: {
   }
 
   return emailLinked;
-}
-
-export async function resolveHostedMemberActivationEmailLinked(input: {
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
-  memberId: string;
-}): Promise<boolean> {
-  if (extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? []) !== null) {
-    return true;
-  }
-
-  return (await hasHostedVerifiedEmailUserEnv(input.memberId)) === true;
 }
 
 export function buildHostedMemberChannelsUpdatedEventId(input: {

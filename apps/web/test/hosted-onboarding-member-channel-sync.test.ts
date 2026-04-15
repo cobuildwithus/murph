@@ -41,8 +41,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 
 import {
   enqueueHostedMemberChannelsUpdatedTx,
-  resolveHostedMemberActivationEmailLinked,
-  resolveHostedMemberChannelSyncEmailLinked,
+  resolveHostedMemberEmailLinked,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
 
 describe("hosted onboarding member channel sync", () => {
@@ -56,7 +55,7 @@ describe("hosted onboarding member channel sync", () => {
 
   it("treats a verified Privy email as authoritative without consulting hosted env status", async () => {
     await expect(
-      resolveHostedMemberChannelSyncEmailLinked({
+      resolveHostedMemberEmailLinked({
         linkedAccounts: [
           {
             address: "user@example.com",
@@ -65,6 +64,7 @@ describe("hosted onboarding member channel sync", () => {
           },
         ],
         memberId: "member_123",
+        onUnconfirmed: "retry",
       }),
     ).resolves.toBe(true);
 
@@ -75,9 +75,10 @@ describe("hosted onboarding member channel sync", () => {
     mocks.hasHostedVerifiedEmailUserEnv.mockResolvedValue(true);
 
     await expect(
-      resolveHostedMemberChannelSyncEmailLinked({
+      resolveHostedMemberEmailLinked({
         linkedAccounts: [],
         memberId: "member_123",
+        onUnconfirmed: "retry",
       }),
     ).resolves.toBe(true);
 
@@ -88,9 +89,10 @@ describe("hosted onboarding member channel sync", () => {
     mocks.hasHostedVerifiedEmailUserEnv.mockResolvedValue(null);
 
     await expect(
-      resolveHostedMemberChannelSyncEmailLinked({
+      resolveHostedMemberEmailLinked({
         linkedAccounts: [],
         memberId: "member_123",
+        onUnconfirmed: "retry",
       }),
     ).rejects.toMatchObject({
       code: "HOSTED_EMAIL_SYNC_STATUS_UNAVAILABLE",
@@ -99,11 +101,14 @@ describe("hosted onboarding member channel sync", () => {
     });
   });
 
-  it("treats activation email as disabled when neither Privy nor hosted env can confirm it", async () => {
+  it("treats activation email as disabled when hosted email status is temporarily unavailable", async () => {
+    mocks.hasHostedVerifiedEmailUserEnv.mockResolvedValue(null);
+
     await expect(
-      resolveHostedMemberActivationEmailLinked({
+      resolveHostedMemberEmailLinked({
         linkedAccounts: [],
         memberId: "member_123",
+        onUnconfirmed: "disable",
       }),
     ).resolves.toBe(false);
 
@@ -112,7 +117,7 @@ describe("hosted onboarding member channel sync", () => {
 
   it("treats a verified Privy email as authoritative during activation without consulting hosted env status", async () => {
     await expect(
-      resolveHostedMemberActivationEmailLinked({
+      resolveHostedMemberEmailLinked({
         linkedAccounts: [
           {
             address: "user@example.com",
@@ -121,6 +126,7 @@ describe("hosted onboarding member channel sync", () => {
           },
         ],
         memberId: "member_123",
+        onUnconfirmed: "disable",
       }),
     ).resolves.toBe(true);
 

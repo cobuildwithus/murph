@@ -14,7 +14,7 @@ import { writeHostedMemberStripeBillingRefTx } from "./hosted-member-billing-sto
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
-import { resolveHostedMemberActivationEmailLinked } from "./member-channel-sync";
+import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import { normalizeNullableString } from "./shared";
 import {
   findMemberForStripeObject,
@@ -170,8 +170,9 @@ export async function applyStripeInvoicePaid(
 
   const activation = await activateHostedMemberForPositiveSourceTx({
     dispatchContext,
-    emailLinked: await resolveHostedMemberActivationEmailLinked({
+    emailLinked: await resolveHostedMemberEmailLinked({
       memberId: updatedMember.core.id,
+      onUnconfirmed: "disable",
     }),
     member: updatedMember,
     prisma,
