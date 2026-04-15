@@ -54,6 +54,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 import {
   activateHostedMemberForPositiveSource,
   activateHostedMemberFromConfirmedRevnetIssuance,
+  buildHostedMemberActivationFirstContact,
   runHostedMemberActivationPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/member-activation";
 
@@ -160,6 +161,73 @@ describe("hosted onboarding member activation", () => {
         sourceType: "hosted_revnet_issuance",
       }),
     );
+  });
+
+  it("emits Telegram first-contact without a Linq lookup for phone-less members", async () => {
+    const member = makeMemberSnapshot({
+      identity: {
+        phoneLookupKey: null,
+        phoneNumber: null,
+      },
+      routing: {
+        linqChatId: "chat_home_123",
+        linqRecipientPhone: null,
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqRecipientPhone: null,
+        telegramUserId: "telegram_user_123",
+        telegramUserLookupKey: "telegram_lookup_123",
+      },
+    });
+    mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+
+    await expect(
+      activateHostedMemberForPositiveSource({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_telegram",
+          sourceType: "stripe.invoice.paid",
+        },
+        member,
+        prisma: makeTransactionHarness() as never,
+      }),
+    ).resolves.toEqual({
+      activated: true,
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+      memberId: "member_123",
+      postCommitProvisionUserId: "member_123",
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+      dispatch: expect.objectContaining({
+        event: expect.objectContaining({
+          firstContact: {
+            channel: "telegram",
+            identityId: null,
+            threadId: "telegram_user_123",
+            threadIsDirect: true,
+          },
+        }),
+      }),
+      sourceId: "stripe:evt_telegram",
+      sourceType: "hosted_stripe_event",
+      tx: expect.anything(),
+    });
+  });
+
+  it("builds Telegram first contact even when the member has no Linq thread yet", () => {
+    expect(buildHostedMemberActivationFirstContact({
+      linqChatId: null,
+      phoneLookupKey: null,
+      telegramUserId: "telegram_user_456",
+    })).toEqual({
+      channel: "telegram",
+      identityId: null,
+      threadId: "telegram_user_456",
+      threadIsDirect: true,
+    });
   });
 
   it("returns the existing activation event when billing is already active and the outbox row exists", async () => {

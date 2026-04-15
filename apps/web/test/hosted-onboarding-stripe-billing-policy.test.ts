@@ -5,7 +5,7 @@ import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-me
 
 const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
-  readHostedMemberSnapshot: vi.fn(),
+  readHostedMemberBillingSnapshot: vi.fn(),
   retrieveStripeSubscription: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
   withHostedOnboardingTransaction: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
-    readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
+    readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
     updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
   };
 });
@@ -55,6 +55,7 @@ describe("hosted onboarding stripe billing policy", () => {
     vi.clearAllMocks();
 
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.retrieveStripeSubscription.mockResolvedValue({
       status: "active",
     });
@@ -75,7 +76,7 @@ describe("hosted onboarding stripe billing policy", () => {
       __tag: "tx",
     };
 
-    mocks.readHostedMemberSnapshot.mockImplementation(async ({ prisma }) => {
+    mocks.readHostedMemberBillingSnapshot.mockImplementation(async ({ prisma }) => {
       trace.push(prisma === transaction ? "locked-read" : "pre-lock-read");
       return makeMemberSnapshot({
         billingRef: {
@@ -142,7 +143,7 @@ describe("hosted onboarding stripe billing policy", () => {
     };
 
     let readCount = 0;
-    mocks.readHostedMemberSnapshot.mockImplementation(async ({ prisma }) => {
+    mocks.readHostedMemberBillingSnapshot.mockImplementation(async ({ prisma }) => {
       readCount += 1;
       trace.push(prisma === rootPrisma ? "pre-lock-read" : "locked-read");
 

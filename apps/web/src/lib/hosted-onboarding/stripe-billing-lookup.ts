@@ -4,9 +4,9 @@ import {
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
 } from "./hosted-member-billing-store";
 import {
-  composeHostedMemberSnapshot,
-  type HostedMemberSnapshot,
-  readHostedMemberSnapshot,
+  composeHostedMemberBillingSnapshot,
+  type HostedMemberBillingSnapshot,
+  readHostedMemberBillingSnapshot,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
 import { type HostedOnboardingPrismaClient } from "./shared";
@@ -22,9 +22,9 @@ export async function findMemberForStripeObject(input: {
   memberId: string | null;
   prisma: HostedOnboardingPrismaClient;
   subscriptionId: string | null;
-}): Promise<HostedMemberSnapshot | null> {
+}): Promise<HostedMemberBillingSnapshot | null> {
   if (input.memberId) {
-    const member = await readHostedMemberSnapshot({
+    const member = await readHostedMemberBillingSnapshot({
       memberId: input.memberId,
       prisma: input.prisma,
     });
@@ -35,7 +35,7 @@ export async function findMemberForStripeObject(input: {
   }
 
   if (input.clientReferenceId) {
-    const member = await readHostedMemberSnapshot({
+    const member = await readHostedMemberBillingSnapshot({
       memberId: input.clientReferenceId,
       prisma: input.prisma,
     });
@@ -52,11 +52,10 @@ export async function findMemberForStripeObject(input: {
     });
 
     if (billingLookup) {
-      return composeHostedMemberSnapshot(billingLookup.core, {
-        billingRef: billingLookup.billingRef,
-        identity: null,
-        routing: null,
-      });
+      return composeHostedMemberBillingSnapshot(
+        billingLookup.core,
+        billingLookup.billingRef,
+      );
     }
   }
 
@@ -67,11 +66,10 @@ export async function findMemberForStripeObject(input: {
     });
 
     if (billingLookup) {
-      return composeHostedMemberSnapshot(billingLookup.core, {
-        billingRef: billingLookup.billingRef,
-        identity: null,
-        routing: null,
-      });
+      return composeHostedMemberBillingSnapshot(
+        billingLookup.core,
+        billingLookup.billingRef,
+      );
     }
   }
 
@@ -84,7 +82,7 @@ export async function findMemberForStripeReversal(input: {
   paymentIntentId: string | null;
   prisma: HostedOnboardingPrismaClient;
   subscriptionId: string | null;
-}): Promise<HostedMemberSnapshot | null> {
+}): Promise<HostedMemberBillingSnapshot | null> {
   const directMember = await findMemberForStripeObject({
     clientReferenceId: null,
     customerId: input.customerId,
@@ -129,7 +127,7 @@ export async function findMemberForStripeReversal(input: {
   });
 
   return issuance?.member
-    ? readHostedMemberSnapshot({
+    ? readHostedMemberBillingSnapshot({
         memberId: issuance.member.id,
         prisma: input.prisma,
       })

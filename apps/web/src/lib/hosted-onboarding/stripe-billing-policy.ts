@@ -7,8 +7,8 @@ import {
   writeHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
 import {
-  type HostedMemberSnapshot,
-  readHostedMemberSnapshot,
+  type HostedMemberBillingSnapshot,
+  readHostedMemberBillingSnapshot,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
@@ -28,18 +28,18 @@ import {
 export async function updateHostedMemberStripeBillingIfFresh(input: {
   billingStatus: HostedBillingStatus;
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMemberSnapshot;
+  member: HostedMemberBillingSnapshot;
   prisma: HostedOnboardingPrismaClient;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   suspendedAtOverride?: Date | null;
-}): Promise<HostedMemberSnapshot | null> {
+}): Promise<HostedMemberBillingSnapshot | null> {
   const requiresCanonicalBillingStatus = requiresHostedCanonicalStripeBillingStatus(
     input.dispatchContext.sourceType,
   );
   const canonicalLookupMember =
     requiresCanonicalBillingStatus && !input.stripeSubscriptionId
-      ? (await readHostedMemberSnapshot({
+      ? (await readHostedMemberBillingSnapshot({
           memberId: input.member.core.id,
           prisma: input.prisma,
         })) ?? input.member
@@ -54,7 +54,7 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
   return withHostedOnboardingTransaction(input.prisma, async (tx) => {
     await lockHostedMemberRow(tx, input.member.core.id);
 
-    const currentMember = await readHostedMemberSnapshot({
+    const currentMember = await readHostedMemberBillingSnapshot({
       memberId: input.member.core.id,
       prisma: tx,
     });
@@ -84,7 +84,7 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
       stripeSubscriptionId: input.stripeSubscriptionId,
     });
 
-    return readHostedMemberSnapshot({
+    return readHostedMemberBillingSnapshot({
       memberId: currentMember.core.id,
       prisma: tx,
     });
@@ -92,7 +92,7 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
 }
 
 async function readHostedCanonicalStripeBillingStatus(input: {
-  member: HostedMemberSnapshot;
+  member: HostedMemberBillingSnapshot;
   stripeSubscriptionId?: string | null;
 }): Promise<HostedBillingStatus | null> {
   const subscriptionId =
@@ -109,7 +109,7 @@ async function readHostedCanonicalStripeBillingStatus(input: {
 
 export async function suspendHostedMemberForBillingReversal(input: {
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
-  member: HostedMemberSnapshot;
+  member: HostedMemberBillingSnapshot;
   prisma: HostedOnboardingPrismaClient;
   reason: string;
   stripeCustomerId?: string | null;
