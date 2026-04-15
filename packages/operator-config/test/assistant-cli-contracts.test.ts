@@ -207,8 +207,8 @@ describe('assistant CLI delivery contracts', () => {
     )
   })
 
-  it('drops the obsolete provider binding header bucket while still accepting it on read', () => {
-    expect(
+  it('rejects the obsolete provider binding header bucket', () => {
+    expect(() =>
       assistantSessionSecretsSchema.parse({
         schema: 'murph.assistant-session-secrets.v1',
         sessionId: 'sess_headers_roundtrip',
@@ -220,14 +220,7 @@ describe('assistant CLI delivery contracts', () => {
           'X-Old-Binding-Auth': 'Bearer oldsecret456',
         },
       }),
-    ).toEqual({
-      schema: 'murph.assistant-session-secrets.v1',
-      sessionId: 'sess_headers_roundtrip',
-      updatedAt: '2026-04-13T00:00:00.000Z',
-      providerHeaders: {
-        'X-Upstream-Auth': 'Bearer firstsecret123',
-      },
-    })
+    ).toThrow()
   })
 })
 
