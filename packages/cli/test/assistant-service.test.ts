@@ -1394,11 +1394,15 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
   )
   assert.doesNotMatch(
     outboundCall?.systemPrompt ?? '',
-    /mention relative file paths when practical/u,
+    /mention relative file paths, record ids, dates, or source details/u,
   )
   assert.match(
     localChatCall?.systemPrompt ?? '',
-    /mention relative file paths when practical/u,
+    /mention relative file paths, record ids, dates, or source details/u,
+  )
+  assert.match(
+    localChatCall?.systemPrompt ?? '',
+    /Otherwise, keep the reply natural and direct/u,
   )
 })
 
