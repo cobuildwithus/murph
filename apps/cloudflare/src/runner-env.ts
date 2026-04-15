@@ -1,8 +1,8 @@
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeResolvedConfig,
-} from "@murphai/assistant-runtime";
-import { readHostedRunnerCommitTimeoutMs } from "@murphai/assistant-runtime";
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import { readHostedRunnerCommitTimeoutMs } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   readConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";

@@ -2,7 +2,7 @@ import {
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
-} from "@murphai/assistant-runtime";
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedAssistantDeliveryRecord,
 } from "@murphai/hosted-execution/side-effects";

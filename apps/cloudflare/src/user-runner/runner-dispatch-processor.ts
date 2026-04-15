@@ -10,7 +10,7 @@ import type {
 import type {
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
-} from "@murphai/assistant-runtime";
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   emitHostedExecutionStructuredLog,
   formatHostedExecutionLogMessage,
