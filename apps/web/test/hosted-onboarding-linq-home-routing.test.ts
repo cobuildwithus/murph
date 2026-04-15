@@ -3,21 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
-  buildHostedLinqConversationHomeWelcome: vi.fn(() => "Welcome home"),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
-  createHostedLinqChat: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
   upsertHostedMemberHomeLinqBinding: vi.fn(),
+  upsertHostedMemberHomeLinqRecipientPhone: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBinding: mocks.upsertHostedMemberHomeLinqBinding,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
-  buildHostedLinqConversationHomeWelcome: mocks.buildHostedLinqConversationHomeWelcome,
-  createHostedLinqChat: mocks.createHostedLinqChat,
+  upsertHostedMemberHomeLinqRecipientPhone: mocks.upsertHostedMemberHomeLinqRecipientPhone,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -37,15 +32,12 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.createHostedLinqChat.mockResolvedValue({
-      chatId: "chat_created",
-      messageId: "msg_created",
-    });
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: [],
       linqMaxActiveMembersPerConversationPhone: null,
     });
     mocks.upsertHostedMemberHomeLinqBinding.mockResolvedValue(undefined);
+    mocks.upsertHostedMemberHomeLinqRecipientPhone.mockResolvedValue(undefined);
   });
 
   it("clears stale pending state when a durable home chat already exists", async () => {
@@ -58,14 +50,17 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
           pendingLinqRecipientPhone: "+15550100002",
         }),
         prisma: {} as never,
-        sourceEventId: "evt_123",
-        sourceType: "stripe_checkout",
       }),
     ).resolves.toEqual({
-      firstContactLinqChatId: "chat_home",
+      firstContact: {
+        channel: "linq",
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_home",
+        threadIsDirect: true,
+      },
     });
 
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBinding).toHaveBeenCalledWith({
       clearPending: true,
       linqChatId: "chat_home",
@@ -94,14 +89,17 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
           pendingLinqRecipientPhone: "+15550100001",
         }),
         prisma: {} as never,
-        sourceEventId: "evt_123",
-        sourceType: "stripe_checkout",
       }),
     ).resolves.toEqual({
-      firstContactLinqChatId: "chat_pending",
+      firstContact: {
+        channel: "linq",
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_pending",
+        threadIsDirect: true,
+      },
     });
 
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBinding).toHaveBeenCalledWith({
       clearPending: true,
       linqChatId: "chat_pending",
@@ -111,7 +109,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("returns the new pooled home chat as first contact when there is no usable pending Linq thread", async () => {
+  it("assigns the pooled home line without creating a Linq chat when there is no reusable pending thread", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15550100001", "+15550100002"],
       linqMaxActiveMembersPerConversationPhone: 3,
@@ -130,23 +128,20 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
           pendingLinqRecipientPhone: "+15550100001",
         }),
         prisma: {} as never,
-        sourceEventId: "evt_123",
-        sourceType: "stripe_checkout",
       }),
     ).resolves.toEqual({
-      firstContactLinqChatId: "chat_created",
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550100002",
+        identityId: "hbidx:phone:v1:test",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15551234567",
+      },
     });
 
-    expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
-      from: "+15550100002",
-      idempotencyKey: "member-activation-home:stripe_checkout:member_123:evt_123",
-      message: "Welcome home",
-      signal: undefined,
-      to: ["+15551234567"],
-    });
-    expect(mocks.upsertHostedMemberHomeLinqBinding).toHaveBeenCalledWith({
+    expect(mocks.upsertHostedMemberHomeLinqBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).toHaveBeenCalledWith({
       clearPending: true,
-      linqChatId: "chat_created",
       memberId: "member_123",
       prisma: {} as never,
       recipientPhone: "+15550100002",
@@ -161,15 +156,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
           pendingLinqRecipientPhone: null,
         }),
         prisma: {} as never,
-        sourceEventId: "evt_123",
-        sourceType: "stripe_checkout",
       }),
     ).rejects.toMatchObject({
       code: "LINQ_CONVERSATION_PHONE_REQUIRED",
       httpStatus: 500,
     });
 
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBinding).not.toHaveBeenCalled();
   });
 });

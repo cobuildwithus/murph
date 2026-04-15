@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
   composeHostedMemberSnapshot,
@@ -27,11 +28,13 @@ import {
   upsertHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
+  countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByTelegramUserId,
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBinding,
+  upsertHostedMemberHomeLinqRecipientPhone,
   upsertHostedMemberTelegramRoutingBinding,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
@@ -525,6 +528,104 @@ describe("hosted-member-store", () => {
 
     expect(updateMany).toHaveBeenCalledTimes(4);
     expect(upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("upserts a home Linq recipient phone without creating a home chat binding", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      hostedMemberRouting: {
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberHomeLinqRecipientPhone({
+      clearPending: true,
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      create: {
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+        memberId: "member_123",
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        telegramUserIdEncrypted: null,
+        telegramUserLookupKey: null,
+      },
+      update: {
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+      },
+    });
+  });
+
+  it("counts active home-line assignments by recipient phone even before a home chat is bound", async () => {
+    const homePhoneOne = "+15550100001";
+    const homePhoneTwo = "+15550100002";
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneOne),
+      },
+      {
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneOne),
+      },
+      {
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneTwo),
+      },
+    ]);
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      countHostedMemberHomeLinqBindingsByRecipientPhone({
+        prisma,
+        recipientPhones: [homePhoneOne, homePhoneTwo],
+      }),
+    ).resolves.toEqual(
+      new Map([
+        [homePhoneOne, 2],
+        [homePhoneTwo, 1],
+      ]),
+    );
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        linqRecipientPhoneLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:phone:v1:/u),
+            expect.stringMatching(/^hbidx:phone:v1:/u),
+          ]),
+        },
+        member: {
+          is: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+        },
+      },
+      select: {
+        linqRecipientPhoneLookupKey: true,
+      },
+    });
   });
 
   it("upserts Telegram bindings into the routing table", async () => {

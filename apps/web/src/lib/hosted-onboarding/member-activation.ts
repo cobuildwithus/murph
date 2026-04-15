@@ -89,11 +89,9 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
     const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
       member: input.member,
       prisma: input.prisma,
-      sourceEventId: input.sourceEventId,
-      sourceType: input.sourceType,
     });
     const dispatch = buildHostedMemberActivationDispatchForMember({
-      firstContactLinqChatId: linqRoute.firstContactLinqChatId,
+      firstContact: linqRoute.firstContact,
       member: input.member,
       occurredAt: input.occurredAt,
       sourceEventId: input.sourceEventId,
@@ -197,11 +195,9 @@ export async function activateHostedMemberForPositiveSource(input: {
       const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
         member: currentMember,
         prisma: tx,
-        sourceEventId: input.dispatchContext.sourceEventId,
-        sourceType: input.dispatchContext.sourceType,
       });
       const dispatch = buildHostedMemberActivationDispatchForMember({
-        firstContactLinqChatId: linqRoute.firstContactLinqChatId,
+        firstContact: linqRoute.firstContact,
         member: currentMember,
         occurredAt: input.dispatchContext.occurredAt,
         sourceEventId: input.dispatchContext.sourceEventId,
@@ -240,7 +236,9 @@ export async function activateHostedMemberForPositiveSource(input: {
 export function buildHostedMemberActivationDispatch(input: {
   firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
   linqChatId?: string | null;
+  linqRecipientPhone?: string | null;
   memberId: string;
+  memberPhoneNumber?: string | null;
   phoneLookupKey?: string | null;
   telegramUserId?: string | null;
   occurredAt: string;
@@ -249,11 +247,13 @@ export function buildHostedMemberActivationDispatch(input: {
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionMemberActivatedDispatch({
     eventId: buildHostedMemberActivationEventId(input),
-    firstContact: input.firstContact ?? buildHostedMemberActivationFirstContact({
+    firstContact: (input.firstContact ?? buildHostedMemberActivationFirstContact({
       linqChatId: input.linqChatId ?? null,
+      linqRecipientPhone: input.linqRecipientPhone ?? null,
+      memberPhoneNumber: input.memberPhoneNumber ?? null,
       phoneLookupKey: input.phoneLookupKey ?? null,
       telegramUserId: input.telegramUserId ?? null,
-    }),
+    })),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
   });
@@ -261,11 +261,15 @@ export function buildHostedMemberActivationDispatch(input: {
 
 export function buildHostedMemberActivationFirstContact(input: {
   linqChatId: string | null;
+  linqRecipientPhone?: string | null;
+  memberPhoneNumber?: string | null;
   phoneLookupKey: string | null;
   telegramUserId: string | null;
 }): HostedExecutionMemberActivatedEvent["firstContact"] {
   return resolveHostedMemberFirstContactTarget({
     linqChatId: input.linqChatId,
+    linqRecipientPhone: input.linqRecipientPhone ?? null,
+    memberPhoneNumber: input.memberPhoneNumber ?? null,
     messaging: resolveHostedMemberMessagingState({
       identity: {
         phoneLookupKey: input.phoneLookupKey,
@@ -308,12 +312,16 @@ export async function runHostedMemberActivationPostCommitEffects(input: {
 async function resolveHostedMemberActivationFirstContactLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: HostedOnboardingPrismaClient;
-  sourceEventId: string;
-  sourceType: string;
-}): Promise<{ firstContactLinqChatId: string | null }> {
+}): Promise<{ firstContact: HostedExecutionMemberActivatedEvent["firstContact"] }> {
   if (!input.member.identity?.phoneNumber) {
     return {
-      firstContactLinqChatId: input.member.routing?.linqChatId ?? null,
+      firstContact: buildHostedMemberActivationFirstContact({
+        linqChatId: input.member.routing?.linqChatId ?? null,
+        linqRecipientPhone: input.member.routing?.linqRecipientPhone ?? null,
+        memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
+        phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+        telegramUserId: input.member.routing?.telegramUserId ?? null,
+      }),
     };
   }
 
@@ -371,15 +379,16 @@ function buildHostedInactiveMemberActivationResult(
 }
 
 function buildHostedMemberActivationDispatchForMember(input: {
-  firstContactLinqChatId: string | null;
+  firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
   member: HostedMemberSnapshot;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedMemberActivationDispatch({
-    linqChatId: input.firstContactLinqChatId,
+    firstContact: input.firstContact,
     memberId: input.member.core.id,
+    memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
     phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
     telegramUserId: input.member.routing?.telegramUserId ?? null,
     occurredAt: input.occurredAt,

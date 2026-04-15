@@ -1,4 +1,9 @@
-import type { HostedExecutionMemberActivatedEvent } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionFirstContactTarget,
+  HostedExecutionMemberActivatedEvent,
+} from "@murphai/hosted-execution";
+
+import { normalizePhoneNumber } from "./phone";
 
 interface HostedMemberMessagingIdentitySlice {
   phoneLookupKey?: string | null;
@@ -15,6 +20,8 @@ export interface HostedMemberMessagingState {
   phoneLookupKey: string | null;
   telegramThreadId: string | null;
 }
+
+export type HostedMemberFirstContactTarget = HostedExecutionFirstContactTarget | null;
 
 export function resolveHostedMemberMessagingState(input: {
   identity: HostedMemberMessagingIdentitySlice | null;
@@ -43,14 +50,29 @@ export function isHostedMemberMessagingSetupRequired(input: {
 
 export function resolveHostedMemberFirstContactTarget(input: {
   linqChatId: string | null;
+  linqRecipientPhone?: string | null;
+  memberPhoneNumber?: string | null;
   messaging: HostedMemberMessagingState;
-}): HostedExecutionMemberActivatedEvent["firstContact"] {
+}): HostedMemberFirstContactTarget {
   if (input.linqChatId && input.messaging.phoneLookupKey) {
     return {
       channel: "linq",
       identityId: input.messaging.phoneLookupKey,
       threadId: input.linqChatId,
       threadIsDirect: true,
+    };
+  }
+
+  const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
+  const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
+
+  if (memberPhoneNumber && linqRecipientPhone && input.messaging.phoneLookupKey) {
+    return {
+      channel: "linq",
+      fromPhoneNumber: linqRecipientPhone,
+      identityId: input.messaging.phoneLookupKey,
+      kind: "linq-materialize-home-thread",
+      toPhoneNumber: memberPhoneNumber,
     };
   }
 

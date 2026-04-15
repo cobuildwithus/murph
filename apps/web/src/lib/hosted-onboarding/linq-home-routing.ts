@@ -2,29 +2,32 @@ import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBinding,
+  upsertHostedMemberHomeLinqRecipientPhone,
 } from "./hosted-member-routing-store";
-import {
-  buildHostedLinqConversationHomeWelcome,
-  createHostedLinqChat,
-} from "./linq";
 import { chooseHostedLinqConversationRecipientPhone } from "./linq-routing-policy";
+import {
+  resolveHostedMemberFirstContactTarget,
+  resolveHostedMemberMessagingState,
+} from "./messaging-state";
 import { normalizePhoneNumber } from "./phone";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { type HostedOnboardingPrismaClient } from "./shared";
 import { hostedOnboardingError } from "./errors";
+import type { HostedExecutionMemberActivatedEvent } from "@murphai/hosted-execution";
 
 export interface HostedMemberActivationLinqRouteResolution {
-  firstContactLinqChatId: string | null;
+  firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
 }
 
 export async function resolveHostedMemberActivationLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: HostedOnboardingPrismaClient;
-  signal?: AbortSignal;
-  sourceEventId: string;
-  sourceType: string;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
   const routing = input.member.routing;
+  const messaging = resolveHostedMemberMessagingState({
+    identity: input.member.identity,
+    routing,
+  });
 
   if (routing?.linqChatId) {
     if (routing.pendingLinqChatId) {
@@ -38,7 +41,10 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     }
 
     return {
-      firstContactLinqChatId: routing.linqChatId,
+      firstContact: resolveHostedMemberFirstContactTarget({
+        linqChatId: routing.linqChatId,
+        messaging,
+      }),
     };
   }
 
@@ -63,7 +69,10 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     });
 
     return {
-      firstContactLinqChatId: routing.pendingLinqChatId,
+      firstContact: resolveHostedMemberFirstContactTarget({
+        linqChatId: routing.pendingLinqChatId,
+        messaging,
+      }),
     };
   }
 
@@ -85,37 +94,20 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     });
   }
 
-  const createdChat = await createHostedLinqChat({
-    from: targetRecipientPhone,
-    idempotencyKey: buildHostedMemberActivationHomeChatIdempotencyKey({
-      memberId: input.member.core.id,
-      sourceEventId: input.sourceEventId,
-      sourceType: input.sourceType,
-    }),
-    message: buildHostedLinqConversationHomeWelcome(),
-    signal: input.signal,
-    to: [memberPhoneNumber],
-  });
-
-  if (!createdChat.chatId) {
-    throw hostedOnboardingError({
-      code: "LINQ_HOME_CHAT_MISSING",
-      message: "Linq home-line assignment did not return a chat id.",
-      httpStatus: 502,
-      retryable: true,
-    });
-  }
-
-  await upsertHostedMemberHomeLinqBinding({
+  await upsertHostedMemberHomeLinqRecipientPhone({
     clearPending: true,
-    linqChatId: createdChat.chatId,
     memberId: input.member.core.id,
     prisma: input.prisma,
     recipientPhone: targetRecipientPhone,
   });
 
   return {
-    firstContactLinqChatId: createdChat.chatId,
+    firstContact: resolveHostedMemberFirstContactTarget({
+      linqChatId: null,
+      linqRecipientPhone: targetRecipientPhone,
+      memberPhoneNumber,
+      messaging,
+    }),
   };
 }
 
@@ -143,12 +135,4 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
     preferredRecipientPhone,
     recipientPhones: environment.linqConversationPhoneNumbers,
   });
-}
-
-function buildHostedMemberActivationHomeChatIdempotencyKey(input: {
-  memberId: string;
-  sourceEventId: string;
-  sourceType: string;
-}): string {
-  return `member-activation-home:${input.sourceType}:${input.memberId}:${input.sourceEventId}`;
 }

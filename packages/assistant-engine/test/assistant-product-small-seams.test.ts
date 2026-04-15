@@ -1090,6 +1090,18 @@ describe('assistant product small seams', () => {
     turns.readReceipt.mockResolvedValueOnce({
       turnId: 'turn-receipt-2',
     })
+    const deliveredSession = createAssistantSession({
+      binding: {
+        ...baseSession.binding,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-2',
+        },
+        threadId: 'thread-2',
+      },
+      sessionId: baseSession.sessionId,
+      turnCount: 0,
+    })
     outbox.deliverMessage.mockResolvedValueOnce({
       delivery: {
         messageId: 'message-1',
@@ -1100,9 +1112,10 @@ describe('assistant product small seams', () => {
         intentId: 'intent-2',
       },
       kind: 'sent',
+      session: deliveredSession,
     })
     sessions.save.mockResolvedValueOnce({
-      ...baseSession,
+      ...deliveredSession,
       lastTurnAt: '2026-04-08T00:05:00.000Z',
       turnCount: 1,
       updatedAt: '2026-04-08T00:05:00.000Z',
@@ -1119,6 +1132,12 @@ describe('assistant product small seams', () => {
     ).resolves.toMatchObject({
       reason: 'sent',
       turnId: 'turn-receipt-2',
+    })
+    expect(sessions.save).toHaveBeenCalledWith({
+      ...deliveredSession,
+      lastTurnAt: '2026-04-08T00:05:00.000Z',
+      turnCount: 1,
+      updatedAt: '2026-04-08T00:05:00.000Z',
     })
     expect(finalizeAssistantTurnFromDeliveryOutcomeMock).toHaveBeenCalled()
 
@@ -1146,6 +1165,251 @@ describe('assistant product small seams', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_DELIVERY_FAILED',
     })
+  })
+
+  it('marks both actor and upgraded thread first-contact doc ids after Linq home-thread materialization', async () => {
+    const sessions = {
+      resolve: vi.fn(),
+      save: vi.fn(),
+    }
+    const transcripts = {
+      append: vi.fn().mockResolvedValue(undefined),
+      list: vi.fn().mockResolvedValue([]),
+    }
+    const turns = {
+      createReceipt: vi.fn(),
+      readReceipt: vi.fn().mockResolvedValue({
+        turnId: 'turn-receipt-materialized',
+      }),
+    }
+    const outbox = {
+      createIntent: vi.fn(),
+      deliverMessage: vi.fn(),
+    }
+    const status = {
+      refreshSnapshot: vi.fn().mockResolvedValue(undefined),
+    }
+    const hasAssistantSeenFirstContactMock = vi.fn().mockResolvedValue(false)
+    const markAssistantFirstContactSeenMock = vi.fn().mockResolvedValue(undefined)
+    const resolveAssistantFirstContactStateDocIdsMock = vi
+      .fn()
+      .mockReturnValueOnce(['actor-doc'])
+      .mockReturnValueOnce(['actor-doc', 'thread-doc'])
+    const finalizeAssistantTurnFromDeliveryOutcomeMock = vi
+      .fn()
+      .mockResolvedValue(undefined)
+    const welcomeModule = await loadFirstContactWelcomeModule({
+      createAssistantRuntimeStateService: () => ({
+        outbox,
+        sessions,
+        status,
+        transcripts,
+        turns,
+      }),
+      finalizeAssistantTurnFromDeliveryOutcome:
+        finalizeAssistantTurnFromDeliveryOutcomeMock,
+      firstContact: {
+        hasAssistantSeenFirstContact: hasAssistantSeenFirstContactMock,
+        markAssistantFirstContactSeen: markAssistantFirstContactSeenMock,
+        resolveAssistantFirstContactStateDocIds:
+          resolveAssistantFirstContactStateDocIdsMock,
+      },
+    })
+
+    const baseSession = createAssistantSession({
+      binding: {
+        actorId: '+15550001',
+        channel: 'linq',
+        conversationKey: 'conversation-1',
+        delivery: {
+          kind: 'participant',
+          target: '+15550001',
+        },
+        identityId: 'identity-1',
+        threadId: null,
+        threadIsDirect: true,
+      },
+      sessionId: 'session-materialized',
+      turnCount: 0,
+    })
+    const deliveredSession = createAssistantSession({
+      binding: {
+        ...baseSession.binding,
+        delivery: {
+          kind: 'thread',
+          target: 'chat-home-1',
+        },
+        threadId: 'chat-home-1',
+      },
+      sessionId: baseSession.sessionId,
+      turnCount: 0,
+    })
+    const savedSession = {
+      ...deliveredSession,
+      lastTurnAt: '2026-04-08T00:05:00.000Z',
+      turnCount: 1,
+      updatedAt: '2026-04-08T00:05:00.000Z',
+    }
+
+    sessions.resolve.mockResolvedValueOnce({
+      session: baseSession,
+    })
+    outbox.deliverMessage.mockResolvedValueOnce({
+      delivery: {
+        messageId: 'message-materialized',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        target: 'chat-home-1',
+      },
+      intent: {
+        intentId: 'intent-materialized',
+      },
+      kind: 'sent',
+      session: deliveredSession,
+    })
+    sessions.save.mockResolvedValueOnce(savedSession)
+
+    await expect(
+      welcomeModule.sendAssistantFirstContactWelcomeLocal({
+        channel: 'linq',
+        fromPhoneNumber: '+15550000',
+        identityId: 'identity-1',
+        kind: 'linq-materialize-home-thread',
+        toPhoneNumber: '+15550001',
+        vault: '/tmp/test-vault',
+      }),
+    ).resolves.toMatchObject({
+      reason: 'sent',
+      session: savedSession,
+      turnId: 'turn-receipt-materialized',
+    })
+
+    expect(finalizeAssistantTurnFromDeliveryOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstTurnCheckInInjected: true,
+        firstTurnCheckInStateDocIds: ['actor-doc', 'thread-doc'],
+      }),
+    )
+    expect(markAssistantFirstContactSeenMock).not.toHaveBeenCalled()
+  })
+
+  it('does not short-circuit existing participant-scoped Linq sessions before home-thread materialization', async () => {
+    const sessions = {
+      resolve: vi.fn(),
+      save: vi.fn(),
+    }
+    const transcripts = {
+      append: vi.fn().mockResolvedValue(undefined),
+      list: vi.fn().mockResolvedValue([]),
+    }
+    const turns = {
+      createReceipt: vi.fn(),
+      readReceipt: vi.fn().mockResolvedValue({
+        turnId: 'turn-receipt-existing-materialized',
+      }),
+    }
+    const outbox = {
+      createIntent: vi.fn(),
+      deliverMessage: vi.fn(),
+    }
+    const status = {
+      refreshSnapshot: vi.fn().mockResolvedValue(undefined),
+    }
+    const hasAssistantSeenFirstContactMock = vi.fn().mockResolvedValue(false)
+    const markAssistantFirstContactSeenMock = vi.fn().mockResolvedValue(undefined)
+    const resolveAssistantFirstContactStateDocIdsMock = vi
+      .fn()
+      .mockReturnValueOnce(['actor-doc'])
+      .mockReturnValueOnce(['actor-doc', 'thread-doc'])
+    const finalizeAssistantTurnFromDeliveryOutcomeMock = vi
+      .fn()
+      .mockResolvedValue(undefined)
+    const welcomeModule = await loadFirstContactWelcomeModule({
+      createAssistantRuntimeStateService: () => ({
+        outbox,
+        sessions,
+        status,
+        transcripts,
+        turns,
+      }),
+      finalizeAssistantTurnFromDeliveryOutcome:
+        finalizeAssistantTurnFromDeliveryOutcomeMock,
+      firstContact: {
+        hasAssistantSeenFirstContact: hasAssistantSeenFirstContactMock,
+        markAssistantFirstContactSeen: markAssistantFirstContactSeenMock,
+        resolveAssistantFirstContactStateDocIds:
+          resolveAssistantFirstContactStateDocIdsMock,
+      },
+    })
+
+    const baseSession = createAssistantSession({
+      binding: {
+        actorId: '+15550001',
+        channel: 'linq',
+        conversationKey: 'conversation-1',
+        delivery: {
+          kind: 'participant',
+          target: '+15550001',
+        },
+        identityId: 'identity-1',
+        threadId: null,
+        threadIsDirect: true,
+      },
+      sessionId: 'session-existing-materialized',
+      turnCount: 2,
+    })
+    const deliveredSession = createAssistantSession({
+      binding: {
+        ...baseSession.binding,
+        delivery: {
+          kind: 'thread',
+          target: 'chat-home-existing',
+        },
+        threadId: 'chat-home-existing',
+      },
+      sessionId: baseSession.sessionId,
+      turnCount: 2,
+    })
+    const savedSession = {
+      ...deliveredSession,
+      lastTurnAt: '2026-04-08T00:10:00.000Z',
+      turnCount: 3,
+      updatedAt: '2026-04-08T00:10:00.000Z',
+    }
+
+    sessions.resolve.mockResolvedValueOnce({
+      session: baseSession,
+    })
+    outbox.deliverMessage.mockResolvedValueOnce({
+      delivery: {
+        messageId: 'message-existing-materialized',
+        sentAt: '2026-04-08T00:10:00.000Z',
+        target: 'chat-home-existing',
+      },
+      intent: {
+        intentId: 'intent-existing-materialized',
+      },
+      kind: 'sent',
+      session: deliveredSession,
+    })
+    sessions.save.mockResolvedValueOnce(savedSession)
+
+    await expect(
+      welcomeModule.sendAssistantFirstContactWelcomeLocal({
+        channel: 'linq',
+        fromPhoneNumber: '+15550000',
+        identityId: 'identity-1',
+        kind: 'linq-materialize-home-thread',
+        toPhoneNumber: '+15550001',
+        vault: '/tmp/test-vault',
+      }),
+    ).resolves.toMatchObject({
+      reason: 'sent',
+      session: savedSession,
+      turnId: 'turn-receipt-existing-materialized',
+    })
+
+    expect(outbox.deliverMessage).toHaveBeenCalledTimes(1)
+    expect(markAssistantFirstContactSeenMock).not.toHaveBeenCalled()
   })
 
   it('reconciles recurring food auto-log jobs across remove, reuse, and recreate paths', async () => {

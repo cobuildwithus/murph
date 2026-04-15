@@ -66,12 +66,25 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
   kind: "member.activated";
 }
 
-export interface HostedExecutionFirstContactTarget {
+export interface HostedExecutionThreadFirstContactTarget {
   channel: "email" | "linq" | "telegram";
   identityId: string | null;
+  kind?: "thread";
   threadId: string;
   threadIsDirect: boolean;
 }
+
+export interface HostedExecutionLinqMaterializeHomeThreadFirstContactTarget {
+  channel: "linq";
+  fromPhoneNumber: string;
+  identityId: string;
+  kind: "linq-materialize-home-thread";
+  toPhoneNumber: string;
+}
+
+export type HostedExecutionFirstContactTarget =
+  | HostedExecutionThreadFirstContactTarget
+  | HostedExecutionLinqMaterializeHomeThreadFirstContactTarget;
 
 export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "linq.message.received";

@@ -3,6 +3,32 @@ import { describe, expect, it } from "vitest";
 import { parseHostedExecutionEvent } from "../src/parsers.ts";
 
 describe("parseHostedExecutionEvent", () => {
+  it("parses Linq first-contact targets that materialize a home thread on welcome delivery", () => {
+    expect(
+      parseHostedExecutionEvent({
+        firstContact: {
+          channel: "linq",
+          fromPhoneNumber: "+15550001111",
+          identityId: "hbidx:phone:v1:test",
+          kind: "linq-materialize-home-thread",
+          toPhoneNumber: "+15550002222",
+        },
+        kind: "member.activated",
+        userId: "user-1",
+      }),
+    ).toEqual({
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550001111",
+        identityId: "hbidx:phone:v1:test",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15550002222",
+      },
+      kind: "member.activated",
+      userId: "user-1",
+    });
+  });
+
   it("parses Telegram message events with attachment payloads", () => {
     expect(
       parseHostedExecutionEvent({
@@ -151,5 +177,21 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toThrow(/assistant\.cron\.tick reason/i);
+  });
+
+  it("rejects non-Linq channels for Linq home-thread materialization targets", () => {
+    expect(() =>
+      parseHostedExecutionEvent({
+        firstContact: {
+          channel: "email",
+          fromPhoneNumber: "+15550001111",
+          identityId: "assistant@example.com",
+          kind: "linq-materialize-home-thread",
+          toPhoneNumber: "+15550002222",
+        },
+        kind: "member.activated",
+        userId: "user-1",
+      }),
+    ).toThrow(/requires channel linq/i);
   });
 });

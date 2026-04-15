@@ -442,6 +442,44 @@ function parseHostedExecutionFirstContactTarget(
   value: unknown,
 ): HostedExecutionMemberActivatedEvent["firstContact"] {
   const record = requireObject(value, "Hosted execution member.activated firstContact");
+  const kind = record.kind === undefined
+    ? "thread"
+    : requireString(record.kind, "Hosted execution member.activated firstContact kind");
+
+  if (kind === "linq-materialize-home-thread") {
+    const channel = requireString(
+      record.channel,
+      "Hosted execution member.activated firstContact channel",
+    );
+
+    if (channel !== "linq") {
+      throw new TypeError(
+        "Hosted execution member.activated firstContact kind linq-materialize-home-thread requires channel linq.",
+      );
+    }
+
+    return {
+      channel,
+      fromPhoneNumber: requireString(
+        record.fromPhoneNumber,
+        "Hosted execution member.activated firstContact fromPhoneNumber",
+      ),
+      identityId: requireString(
+        record.identityId,
+        "Hosted execution member.activated firstContact identityId",
+      ),
+      kind,
+      toPhoneNumber: requireString(
+        record.toPhoneNumber,
+        "Hosted execution member.activated firstContact toPhoneNumber",
+      ),
+    };
+  }
+
+  if (kind !== "thread") {
+    throw new TypeError("Hosted execution member.activated firstContact kind is invalid.");
+  }
+
   const channel = requireString(
     record.channel,
     "Hosted execution member.activated firstContact channel",
@@ -459,6 +497,7 @@ function parseHostedExecutionFirstContactTarget(
           record.identityId,
           "Hosted execution member.activated firstContact identityId",
         ),
+    ...(record.kind === undefined ? {} : { kind }),
     threadId: requireString(
       record.threadId,
       "Hosted execution member.activated firstContact threadId",

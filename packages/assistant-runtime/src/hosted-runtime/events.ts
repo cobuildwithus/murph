@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionFirstContactTarget,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerSharePack,
 } from "@murphai/hosted-execution";
@@ -65,13 +66,9 @@ async function handleHostedDispatchEvent(input: {
   switch (dispatch.event.kind) {
     case "member.activated":
       if (dispatch.event.firstContact) {
-        await queueAssistantFirstContactWelcome({
-          channel: dispatch.event.firstContact.channel,
-          identityId: dispatch.event.firstContact.identityId,
-          threadId: dispatch.event.firstContact.threadId,
-          threadIsDirect: dispatch.event.firstContact.threadIsDirect,
-          vault: input.vaultRoot,
-        });
+        await queueAssistantFirstContactWelcome(
+          buildAssistantFirstContactWelcomeInput(dispatch.event.firstContact, input.vaultRoot),
+        );
       }
       return createNoopDispatchEffect();
     case "linq.message.received":
@@ -133,5 +130,30 @@ function createNoopDispatchEffect(): HostedDispatchEffect {
   return {
     shareImportResult: null,
     shareImportTitle: null,
+  };
+}
+
+function buildAssistantFirstContactWelcomeInput(
+  firstContact: HostedExecutionFirstContactTarget,
+  vault: string,
+): Parameters<typeof queueAssistantFirstContactWelcome>[0] {
+  if (firstContact.kind === "linq-materialize-home-thread") {
+    return {
+      channel: "linq",
+      fromPhoneNumber: firstContact.fromPhoneNumber,
+      identityId: firstContact.identityId,
+      kind: firstContact.kind,
+      toPhoneNumber: firstContact.toPhoneNumber,
+      vault,
+    };
+  }
+
+  return {
+    actorId: null,
+    channel: firstContact.channel,
+    identityId: firstContact.identityId,
+    threadId: firstContact.threadId,
+    threadIsDirect: firstContact.threadIsDirect,
+    vault,
   };
 }
