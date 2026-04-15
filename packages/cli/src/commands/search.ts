@@ -121,14 +121,23 @@ export function registerSearchCommands(
 
   search.command('query', {
     description:
-      'Search the shared local query projection when the target is fuzzy or remembered by phrase rather than exact id.',
-    args: emptyArgsSchema,
+      'Search the shared local query projection when the target is fuzzy or remembered by phrase rather than exact id. Provide the query either positionally or with `--text`.',
+    args: z.object({
+      query: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Positional search text. Required when `--text` is omitted; prefer this direct CLI form when searching by one remembered phrase.',
+        ),
+    }),
     options: withBaseOptions({
       text: z
         .string()
         .min(1)
+        .optional()
         .describe(
-          'Required search text to run across titles, notes, tags, ids, and record payloads.',
+          'Named search text alias. Required when the positional query is omitted; use this for explicit machine-oriented calls.',
         ),
       recordType: z
         .array(z.string().min(1))
@@ -166,31 +175,55 @@ export function registerSearchCommands(
     examples: [
       {
         description: 'Find prior mentions of magnesium across records and notes.',
+        args: {
+          query: 'magnesium',
+        },
         options: {
-          text: 'magnesium',
           vault: './vault',
         },
       },
       {
         description: 'Search only assessment, event, and protocol records for insulin sensitivity mentions.',
+        args: {
+          query: 'insulin sensitivity',
+        },
         options: {
-          text: 'insulin sensitivity',
           recordType: ['assessment', 'event', 'protocol'],
+          vault: './vault',
+        },
+      },
+      {
+        description: 'Use the explicit named text form when a caller prefers fully named options.',
+        options: {
+          text: 'sauna recovery',
           vault: './vault',
         },
       },
     ],
     hint:
-      'Use `search query` for fuzzy recall or remembered phrases. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology.',
+      'Use `search query <query>` for direct fuzzy recall, or `search query --text "<query>"` for explicit machine-oriented calls. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology.',
     output: searchResultSchema,
-    async run({ options }) {
+    async run({ args, options }) {
       const query = await loadQueryRuntime()
-      const text = options.text?.trim()
+      const positionalQuery = args.query?.trim()
+      const namedQuery = options.text?.trim()
+      const text = positionalQuery || namedQuery
 
       if (!text) {
         throw new VaultCliError(
           'invalid_query',
-          'Search text is required for `search query`.',
+          'Search text is required for `search query`. Use `search query <query>` or `search query --text "<query>"`.',
+        )
+      }
+
+      if (
+        positionalQuery &&
+        namedQuery &&
+        positionalQuery !== namedQuery
+      ) {
+        throw new VaultCliError(
+          'invalid_query',
+          'Positional search text and `--text` must match when both are provided.',
         )
       }
 

@@ -196,7 +196,7 @@ afterEach(() => {
   loadQueryRuntimeMock.mockReset()
 })
 
-test('search query normalizes repeatable filters and rejects blank text', async () => {
+test('search query accepts positional or named text, rejects blank text, and detects conflicts', async () => {
   loadQueryRuntimeMock.mockResolvedValue(createSearchRuntime())
   const cli = createSearchSliceCli()
 
@@ -213,6 +213,21 @@ test('search query normalizes repeatable filters and rejects blank text', async 
     throw new Error('Expected search query to reject blank search text.')
   }
   assert.equal(rejected.envelope.error.code, 'invalid_query')
+
+  const conflicting = await runSearchCli(cli, [
+    'search',
+    'query',
+    'magnesium',
+    '--text',
+    'sauna',
+    '--vault',
+    '/vaults/search',
+  ])
+  assert.equal(conflicting.envelope.ok, false)
+  if (conflicting.envelope.ok) {
+    throw new Error('Expected conflicting positional and named search text to be rejected.')
+  }
+  assert.equal(conflicting.envelope.error.code, 'invalid_query')
 
   const result = await runSearchCli<{
     filters: {
@@ -234,7 +249,6 @@ test('search query normalizes repeatable filters and rejects blank text', async 
   }>(cli, [
     'search',
     'query',
-    '--text',
     '  magnesium  ',
     '--record-type',
     'goal',
@@ -362,7 +376,6 @@ test('search query omits optional repeatable filters when none are provided', as
   }>(cli, [
     'search',
     'query',
-    '--text',
     'sleep quality',
     '--vault',
     '/vaults/search',

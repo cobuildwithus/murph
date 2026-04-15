@@ -121,7 +121,7 @@ vault-cli journal link <date> --vault <path> [--event-id <evt_*> ...] [--stream 
 vault-cli journal unlink <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--request-id <id>]
 vault-cli show <id> --vault <path> [--request-id <id>]
 vault-cli list --vault <path> [--record-type <type> ...] [--kind <kind>] [--status <status>] [--stream <stream> ...] [--tag <tag> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
-vault-cli search query --vault <path> --text <query> [--record-type <type> ...] [--kind <kind> ...] [--stream <stream> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--tag <tag> ...] [--limit <n>] [--request-id <id>]
+vault-cli search query <query> --vault <path> [--record-type <type> ...] [--kind <kind> ...] [--stream <stream> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--tag <tag> ...] [--limit <n>] [--request-id <id>]
 vault-cli query projection status --vault <path> [--request-id <id>]
 vault-cli query projection rebuild --vault <path> [--request-id <id>]
 vault-cli timeline --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--kind <kind> ...] [--stream <stream> ...] [--entry-type <type> ...] [--limit <n>] [--request-id <id>]
@@ -585,6 +585,8 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 ### `search query`
 
 `recordId` is the surfaced canonical read identity; `aliasIds` includes alternate read aliases such as the event id when that differs.
+
+The query text may be passed either positionally as `vault-cli search query <query>` or explicitly as `vault-cli search query --text <query>`.
 
 ```json
 {

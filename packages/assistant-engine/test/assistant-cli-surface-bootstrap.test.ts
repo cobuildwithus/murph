@@ -115,7 +115,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.doesNotMatch(contract, /Duplicate name/u)
 })
 
-test('buildAssistantCliSurfaceContract renders option signatures without suffixes for unknown or string option types', async () => {
+test('buildAssistantCliSurfaceContract renders explicit string option signatures when the schema provides them', async () => {
   const {
     buildAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
@@ -140,7 +140,7 @@ test('buildAssistantCliSurfaceContract renders option signatures without suffixe
   })
 
   assert.ok(contract)
-  assert.match(contract, /common --freeform, --label\./u)
+  assert.match(contract, /common --freeform, --label=string\./u)
 })
 
 test('buildAssistantCliSurfaceContract falls back to a truncated description-only contract for oversized manifests', async () => {

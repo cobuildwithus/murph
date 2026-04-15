@@ -284,7 +284,6 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
     }>([
       'search',
       'query',
-      '--text',
       'afternoon crash pasta',
       '--limit',
       '10',
@@ -305,6 +304,34 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
       requireData(result).hits.some((hit) => hit.recordType === 'sample'),
       false,
     )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('search query accepts matching positional and named text on the built CLI', async () => {
+  const fixture = await makeRetrievalFixture()
+
+  try {
+    const result = await runCli<{
+      query: string
+      total: number
+    }>([
+      'search',
+      'query',
+      'afternoon crash pasta',
+      '--text',
+      'afternoon crash pasta',
+      '--limit',
+      '10',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(result.ok, true)
+    assert.equal(result.meta?.command, 'search query')
+    assert.equal(requireData(result).query, 'afternoon crash pasta')
+    assert.equal(requireData(result).total, 2)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

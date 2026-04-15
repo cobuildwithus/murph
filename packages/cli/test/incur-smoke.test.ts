@@ -381,6 +381,12 @@ test('search query schema exposes retrieval-specific filters', async () => {
   const schema = JSON.parse(
     await runRawCli(['search', 'query', '--schema', '--format', 'json']),
   ) as {
+    args: {
+      properties: Record<string, {
+        description?: string
+      }>
+      required?: string[]
+    }
     options: {
       properties: Record<string, {
         description?: string
@@ -389,6 +395,8 @@ test('search query schema exposes retrieval-specific filters', async () => {
     }
   }
 
+  assert.equal('query' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal('text' in schema.options.properties, true)
   assert.equal('backend' in schema.options.properties, false)
   assert.equal('recordType' in schema.options.properties, true)
@@ -399,7 +407,7 @@ test('search query schema exposes retrieval-specific filters', async () => {
   assert.equal('entryType' in schema.options.properties, false)
   assert.match(
     String(schema.options.properties.text?.description ?? ''),
-    /Required search text/u,
+    /Named search text alias/u,
   )
   assert.match(
     String(schema.options.properties.recordType?.description ?? ''),
@@ -409,7 +417,7 @@ test('search query schema exposes retrieval-specific filters', async () => {
     String(schema.options.properties.recordType?.description ?? ''),
     /history/u,
   )
-  assert.deepEqual(schema.options.required, ['vault', 'text', 'limit'])
+  assert.deepEqual(schema.options.required, ['vault', 'limit'])
 })
 
 test('audit list schema describes its filters and sort controls', async () => {
@@ -1408,6 +1416,7 @@ test('full llms json manifest remains available for schema-rich commands', async
     await runRawCli(['--llms-full', '--format', 'json']),
   ) as {
     commands: Array<{
+      description?: string
       name: string
       options?: Record<string, unknown>
     }>
@@ -1428,6 +1437,13 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.equal(
     manifest.commands.some((command) => command.name === 'query projection status'),
     true,
+  )
+  const searchQueryCommand = manifest.commands.find(
+    (command) => command.name === 'search query',
+  )
+  assert.match(
+    String(searchQueryCommand?.description ?? ''),
+    /either positionally or with `--text`/u,
   )
 })
 
