@@ -4,8 +4,10 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
   encodeHostedExecutionSignedRequestPayload,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/auth";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HostedOnboardingError } from "../../src/lib/hosted-onboarding/errors";

@@ -4,7 +4,7 @@ import {
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {

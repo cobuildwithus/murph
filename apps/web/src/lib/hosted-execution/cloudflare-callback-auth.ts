@@ -1,8 +1,10 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  readHostedExecutionSignatureHeaders,
+} from "@murphai/hosted-execution/contracts";
+import {
   encodeHostedExecutionSignedRequestPayload,
-} from "@murphai/hosted-execution";
+  readHostedExecutionSignatureHeaders,
+} from "@murphai/hosted-execution/auth";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";

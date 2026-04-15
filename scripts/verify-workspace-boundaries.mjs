@@ -127,6 +127,15 @@ async function verifyWorkspacePackageExports(failures) {
       }
 
       if (
+        packageJson.name === "@murphai/cloudflare-hosted-control"
+        && exportKey === "."
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cloudflare-hosted-control should expose only its dedicated client/contracts/parsers/routes seams instead of a root umbrella barrel.`,
+        );
+      }
+
+      if (
         packageJson.name === "@murphai/murph"
         && exportKey === "./knowledge-cli-contracts"
       ) {
@@ -927,6 +936,48 @@ function verifyWorkspaceImportPolicy({
 
   if (
     (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "encodeHostedExecutionSignedRequestPayload",
+      "readHostedExecutionSignatureHeaders",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution callback-auth helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/auth so signed-request codecs stay on their dedicated auth surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HOSTED_EXECUTION_NONCE_HEADER",
+      "HOSTED_EXECUTION_SIGNATURE_HEADER",
+      "HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER",
+      "HOSTED_EXECUTION_TIMESTAMP_HEADER",
+      "HOSTED_EXECUTION_USER_ID_HEADER",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution callback-auth headers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/contracts so signed-request header names stay on the dedicated contract surface.`;
+  }
+
+  if (
+    sourceMember === "packages/inbox-services"
+    && specifier === "@murphai/inboxd"
+    && filePath.includes(`${path.sep}src${path.sep}`)
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "ConnectorRestartPolicy",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ConnectorRestartPolicy from ${JSON.stringify(specifier)}; use @murphai/inboxd/runtime so inbox-services runtime composition stays off the inboxd root barrel for daemon restart-policy typing.`;
+  }
+
+  if (
+    (
       sourceMember === "packages/cloudflare-hosted-control"
       || sourceMember === "apps/cloudflare"
       || sourceMember === "apps/web"
@@ -1254,10 +1305,16 @@ function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
   ];
 
   return importedAliases.some((alias) =>
-    new RegExp(
-      String.raw`\b${escapeRegExp(alias)}\s*\.\s*(?:${bindingPattern})\b`,
-      "u",
-    ).test(source),
+    (
+      new RegExp(
+        String.raw`\b${escapeRegExp(alias)}\s*\.\s*(?:${bindingPattern})\b`,
+        "u",
+      ).test(source)
+      || new RegExp(
+        String.raw`\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s*=\s*${escapeRegExp(alias)}\b`,
+        "u",
+      ).test(source)
+    ),
   );
 }
 

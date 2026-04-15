@@ -3,13 +3,15 @@ import { generateKeyPairSync } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionLinqMessageReceivedDispatch,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
-  buildHostedExecutionLinqMessageReceivedDispatch,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/parsers";
