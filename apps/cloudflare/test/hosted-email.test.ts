@@ -12,6 +12,11 @@ import {
 import { readEncryptedR2Json, writeEncryptedR2Json } from "../src/crypto.ts";
 import type { HostedEmailConfig } from "../src/hosted-email/config.ts";
 import {
+  readHostedEmailMessageBytes,
+  readHostedEmailRawMessage,
+  writeHostedEmailRawMessage,
+} from "../src/hosted-email.ts";
+import {
   createHostedEmailUserAddress,
   reconcileHostedEmailVerifiedSenderRoute,
   resolveHostedEmailIngressRoute,
@@ -89,6 +94,54 @@ describe("hosted email routing and transport", () => {
     expect(firstAddress).toBe(secondAddress);
     expect(putSpy).toHaveBeenCalledTimes(1);
     expect(bucket.objects).toEqual(objectSnapshot);
+  });
+
+  it("uses deterministic opaque ids for identical hosted raw-email retries", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const plaintext = new TextEncoder().encode("From: owner@example.com\r\n\r\nhello");
+
+    const firstKey = await writeHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      plaintext,
+      userId: "user_123",
+    });
+    const secondKey = await writeHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      plaintext,
+      userId: "user_123",
+    });
+
+    expect(firstKey).toMatch(/^[0-9a-f]{40}$/u);
+    expect(secondKey).toBe(firstKey);
+    await expect(readHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      rawMessageKey: firstKey,
+      userId: "user_123",
+    })).resolves.toEqual(plaintext);
+  });
+
+  it("fails closed when hosted raw-email inputs exceed the configured size bound", async () => {
+    await expect(readHostedEmailMessageBytes("abcdef", {
+      maxBytes: 5,
+    })).rejects.toThrow(/maximum accepted size/u);
+
+    const oversizedStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("abc"));
+        controller.enqueue(new TextEncoder().encode("def"));
+        controller.close();
+      },
+    });
+
+    await expect(readHostedEmailMessageBytes(oversizedStream, {
+      maxBytes: 5,
+    })).rejects.toThrow(/maximum accepted size/u);
   });
 
   it("routes direct mail to the fixed public sender through the synced verified owner index", async () => {

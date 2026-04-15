@@ -9,7 +9,8 @@ const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
 const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 512;
 const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
 const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
-const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu;
+const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
+  /\bBearer\s+(?=[A-Za-z0-9._~+/=-]{8,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/giu;
 const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
 const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;

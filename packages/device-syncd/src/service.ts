@@ -1,7 +1,8 @@
 import { createImporters } from "@murphai/importers";
 
-import { createSecretCodec } from "./crypto.ts";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./crypto.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
@@ -114,7 +115,13 @@ export class DeviceSyncService {
               displayName: record.displayName ?? null,
               status: record.status,
               scopes: record.scopes,
-              tokens: this.encryptTokens(record.tokens),
+              tokens: this.encryptTokens(
+                {
+                  externalAccountId: record.externalAccountId,
+                  provider: record.provider,
+                },
+                record.tokens,
+              ),
               metadata: record.metadata,
               connectedAt: record.connectedAt,
               nextReconcileAt: record.nextReconcileAt ?? null,
@@ -399,9 +406,10 @@ export class DeviceSyncService {
       }
     };
 
-    let currentAccount = this.toDecryptedAccount(storedAccount);
+    let currentAccount: DeviceSyncAccount;
 
     try {
+      currentAccount = this.toDecryptedAccount(storedAccount);
       const result = await provider.executeJob(
         {
           account: currentAccount,
@@ -419,7 +427,7 @@ export class DeviceSyncService {
             const refreshed = await provider.refreshTokens(currentAccount);
             const updated = this.store.updateAccountTokens(
               currentAccount.id,
-              this.encryptTokens(refreshed),
+              this.encryptTokens(currentAccount, refreshed),
               disconnectGeneration,
             );
 
@@ -561,18 +569,65 @@ export class DeviceSyncService {
     return {
       disconnectGeneration: account.disconnectGeneration,
       ...this.toInternalAccountRecord(account),
-      accessToken: account.accessTokenEncrypted ? this.codec.decrypt(account.accessTokenEncrypted) : "",
-      refreshToken: account.refreshTokenEncrypted ? this.codec.decrypt(account.refreshTokenEncrypted) : null,
+      accessToken: account.accessTokenEncrypted
+        ? this.decryptStoredToken(account, account.accessTokenEncrypted, "device-sync-access-token")
+        : "",
+      refreshToken: account.refreshTokenEncrypted
+        ? this.decryptStoredToken(account, account.refreshTokenEncrypted, "device-sync-refresh-token")
+        : null,
     };
   }
 
+  private decryptStoredToken(
+    account: Pick<StoredDeviceSyncAccount, "id" | "externalAccountId" | "provider">,
+    payload: string,
+    purpose: "device-sync-access-token" | "device-sync-refresh-token",
+  ): string {
+    try {
+      return this.codec.decrypt(
+        payload,
+        buildDeviceSyncTokenCipherOptions({
+          externalAccountId: account.externalAccountId,
+          provider: account.provider,
+          purpose,
+        }),
+      );
+    } catch {
+      const tokenLabel = purpose === "device-sync-access-token" ? "access" : "refresh";
+      throw deviceSyncError({
+        accountStatus: "reauthorization_required",
+        code: "ACCOUNT_TOKEN_DECRYPT_FAILED",
+        httpStatus: 409,
+        message: `Stored device sync ${tokenLabel} token for account ${account.id} failed integrity validation. Reconnect the account before retrying.`,
+        retryable: false,
+      });
+    }
+  }
+
   private encryptTokens(
+    account: Pick<StoredDeviceSyncAccount, "externalAccountId" | "provider">,
     tokens: ProviderAuthTokens,
   ): ProviderAuthTokens & { accessTokenEncrypted: string; refreshTokenEncrypted?: string | null } {
     return {
       ...tokens,
-      accessTokenEncrypted: this.codec.encrypt(tokens.accessToken),
-      refreshTokenEncrypted: tokens.refreshToken ? this.codec.encrypt(tokens.refreshToken) : null,
+      accessTokenEncrypted: this.codec.encrypt(
+        tokens.accessToken,
+        buildDeviceSyncTokenCipherOptions({
+          externalAccountId: account.externalAccountId,
+          provider: account.provider,
+          purpose: "device-sync-access-token",
+        }),
+      ),
+      refreshTokenEncrypted: tokens.refreshToken
+        ? this.codec.encrypt(
+          tokens.refreshToken,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: account.externalAccountId,
+            provider: account.provider,
+            purpose: "device-sync-refresh-token",
+          }),
+        )
+        : null,
     };
   }
 
@@ -624,7 +679,7 @@ function normalizeExecutionError(error: unknown): {
   if (isDeviceSyncError(error)) {
     return {
       code: error.code,
-      message: error.message,
+      message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
       retryable: error.retryable,
       accountStatus: error.accountStatus,
     };
@@ -633,14 +688,14 @@ function normalizeExecutionError(error: unknown): {
   if (error instanceof Error) {
     return {
       code: "SYNC_JOB_FAILED",
-      message: error.message,
+      message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
       retryable: false,
     };
   }
 
   return {
     code: "SYNC_JOB_FAILED",
-    message: String(error),
+    message: sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]",
     retryable: false,
   };
 }
@@ -649,11 +704,11 @@ function summarizeError(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
     return {
       name: error.name,
-      message: error.message,
+      message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
     };
   }
 
   return {
-    value: String(error),
+    value: sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]",
   };
 }

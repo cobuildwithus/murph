@@ -11,6 +11,7 @@ import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   resolveHostedDeviceSyncWakeContext,
+  sanitizeHostedRuntimeErrorText,
 } from "../src/hosted-runtime.ts";
 
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
@@ -246,6 +247,22 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       userId: "user_01",
     });
+  });
+
+  it("keeps plain bearer-token phrasing while still redacting token-like values", () => {
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+      ),
+    ).toBe(
+      "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+    );
+
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        "authorization=Bearer expired-session-token",
+      ),
+    ).toBe("authorization=[redacted]");
   });
 
   it("redacts secret-bearing error fields in runtime apply payloads and seeds", () => {

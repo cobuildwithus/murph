@@ -47,7 +47,21 @@ export async function handleHostedEmailIngress(
   }
 
   const config = readHostedEmailConfig(stringEnv);
-  const rawBytes = await readHostedEmailMessageBytes(message.raw);
+  let rawBytes: Uint8Array;
+
+  try {
+    rawBytes = await readHostedEmailMessageBytes(message.raw, {
+      rawSize: typeof message.rawSize === "number" ? message.rawSize : null,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      message.setReject?.("Hosted email message exceeded the maximum accepted size.");
+      return;
+    }
+
+    throw error;
+  }
+
   const parsedMessage = parseRawEmailMessage(rawBytes);
   const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
   const resolvedHeaderFrom = headerFrom.value ?? parsedMessage.from;

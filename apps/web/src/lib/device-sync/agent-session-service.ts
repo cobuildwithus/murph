@@ -2,6 +2,8 @@ import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public
 import {
   didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
   findHostedExecutionDeviceSyncRuntimeApplyEntry,
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
 } from "@murphai/device-syncd/hosted-runtime";
 
 import type {
@@ -530,10 +532,13 @@ export class HostedDeviceSyncAgentSessionService {
       };
     } catch (error) {
       if (isDeviceSyncError(error) && error.accountStatus) {
+        const sanitizedErrorCode = sanitizeHostedRuntimeErrorCode(error.code) ?? "TOKEN_REFRESH_FAILED";
+        const sanitizedErrorMessage =
+          sanitizeHostedRuntimeErrorText(error.message) ?? "Token refresh failed.";
         const seedAccount: PublicDeviceSyncAccount = {
           ...input.account,
-          lastErrorCode: error.code,
-          lastErrorMessage: error.message,
+          lastErrorCode: sanitizedErrorCode,
+          lastErrorMessage: sanitizedErrorMessage,
           lastSyncErrorAt: input.now,
           nextReconcileAt: error.accountStatus === "disconnected" ? null : input.account.nextReconcileAt,
           status: error.accountStatus,
@@ -548,8 +553,8 @@ export class HostedDeviceSyncAgentSessionService {
               },
               connectionId: input.account.id,
               localState: {
-                lastErrorCode: error.code,
-                lastErrorMessage: error.message,
+                lastErrorCode: sanitizedErrorCode,
+                lastErrorMessage: sanitizedErrorMessage,
                 lastSyncErrorAt: input.now,
                 ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
               },
@@ -558,8 +563,8 @@ export class HostedDeviceSyncAgentSessionService {
                 account: seedAccount,
                 externalAccountId: input.account.externalAccountId,
                 localState: {
-                  lastErrorCode: error.code,
-                  lastErrorMessage: error.message,
+                  lastErrorCode: sanitizedErrorCode,
+                  lastErrorMessage: sanitizedErrorMessage,
                   lastSyncErrorAt: input.now,
                   ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
                 },
@@ -602,8 +607,8 @@ export class HostedDeviceSyncAgentSessionService {
           occurredAt: input.now,
           reason: "token_refresh_failed",
           revokeWarning: {
-            code: error.code,
-            message: error.message,
+            code: sanitizedErrorCode,
+            message: sanitizedErrorMessage,
           },
           createdAt: input.now,
           tx: input.tx,
