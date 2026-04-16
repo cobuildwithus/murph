@@ -26,6 +26,7 @@
     "test": "pnpm typecheck && pnpm test:node",
     "test:node": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
     "test:e2e:local": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts --no-coverage",
+    "test:e2e:first-contact:local": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts --no-coverage",
     "test:workers": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.workers.config.ts --no-coverage",
     "verify": "bash scripts/verify-fast.sh",
     "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh",

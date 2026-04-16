@@ -1,0 +1,50 @@
+name: Cloudflare Hosted E2E
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/cloudflare-hosted-e2e.yml"
+      - "apps/cloudflare/**"
+      - "packages/assistant-engine/**"
+      - "packages/assistant-runtime/**"
+      - "packages/cloudflare-hosted-control/**"
+      - "packages/hosted-execution/**"
+      - "scripts/dev-hosted-local/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test
+  DEVICE_SYNC_ENCRYPTION_KEY: 0101010101010101010101010101010101010101010101010101010101010101
+  DEVICE_SYNC_ENCRYPTION_KEY_VERSION: v1
+  HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+  NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
+  PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+
+jobs:
+  first-contact-welcome:
+    name: First-contact welcome E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    concurrency:
+      group: cloudflare-hosted-e2e-${{ github.event.pull_request.number || github.ref || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused Cloudflare hosted E2E
+        run: pnpm --dir apps/cloudflare test:e2e:first-contact:local
