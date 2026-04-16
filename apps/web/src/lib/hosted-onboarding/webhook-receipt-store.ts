@@ -852,8 +852,8 @@ async function writeQueuedHostedWebhookDispatchEffect(input: {
     await input.enqueueDispatch({
       dispatch: input.dispatch,
       eventId: input.currentClaim.eventId,
-      prismaOrTransaction: transaction,
       source: input.currentClaim.source,
+      transaction,
     });
     return 1;
   });

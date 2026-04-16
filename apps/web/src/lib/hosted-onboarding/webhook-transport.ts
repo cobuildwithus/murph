@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
@@ -45,19 +45,7 @@ export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandle
 async function enqueueHostedWebhookDispatch(
   input: HostedWebhookDispatchEnqueueInput,
 ): Promise<void> {
-  if (isPrismaClient(input.prismaOrTransaction)) {
-    return input.prismaOrTransaction.$transaction((tx) =>
-      enqueueHostedWebhookDispatchWithTransaction(input, tx),
-    );
-  }
-
-  return enqueueHostedWebhookDispatchWithTransaction(input, input.prismaOrTransaction);
-}
-
-function isPrismaClient(
-  client: HostedWebhookReceiptPersistenceClient,
-): client is PrismaClient {
-  return "$transaction" in client && typeof client.$transaction === "function";
+  return enqueueHostedWebhookDispatchWithTransaction(input, input.transaction);
 }
 
 async function enqueueHostedWebhookDispatchWithTransaction(

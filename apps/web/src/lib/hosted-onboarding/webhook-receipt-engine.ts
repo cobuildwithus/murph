@@ -208,8 +208,8 @@ async function enqueueHostedWebhookDispatches(input: {
     await input.handlers.enqueueDispatch({
       dispatch,
       eventId: input.eventId,
-      prismaOrTransaction: input.prisma,
       source: input.source,
+      transaction: input.prisma,
     });
   }
 }
