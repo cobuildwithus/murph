@@ -130,7 +130,6 @@ function buildWakeDispatch(input: {
   };
   occurredAt: string;
   reason: "disconnected" | "reauthorization_required" | "webhook_hint";
-  runtimeSnapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse | null;
 }) {
   return {
     event: {
@@ -139,7 +138,6 @@ function buildWakeDispatch(input: {
       kind: "device-sync.wake" as const,
       provider: "demo" as const,
       reason: input.reason,
-      runtimeSnapshot: input.runtimeSnapshot,
       userId: "member_123",
     },
     eventId: "evt_device_sync_wake",
@@ -223,6 +221,22 @@ function buildEmptyRuntimeSnapshot(): HostedExecutionDeviceSyncRuntimeSnapshotRe
   };
 }
 
+function createSnapshotOnlyDeviceSyncPort(
+  snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+): HostedRuntimeDeviceSyncPort {
+  return {
+    async applyUpdates() {
+      throw new Error("applyUpdates should not be called during sync");
+    },
+    async createConnectLink() {
+      throw new Error("createConnectLink should not be called during sync");
+    },
+    async fetchSnapshot() {
+      return snapshot;
+    },
+  };
+}
+
 function requireApplyUpdatesRequest(
   request: ApplyUpdatesRequest | null,
 ): ApplyUpdatesRequest {
@@ -259,7 +273,7 @@ function readJobsForAccount(service: ReturnType<typeof createDeviceSyncService>,
 }
 
 describe("hosted device-sync runtime", () => {
-  test("sync returns an empty state when neither an inline snapshot nor a device-sync client is available", async () => {
+  test("sync returns an empty state when no device-sync client is available", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -273,7 +287,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       assert.equal(state.snapshot, null);
@@ -313,7 +326,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       assert.equal(fetchSnapshotCalls, 1);
@@ -392,7 +404,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       assert.equal(fetchSnapshotCalls, 1);
@@ -467,6 +478,7 @@ describe("hosted device-sync runtime", () => {
       });
 
       const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
         dispatch: {
           event: {
             connectionId: "hosted_conn_wake",
@@ -488,7 +500,6 @@ describe("hosted device-sync runtime", () => {
             kind: "device-sync.wake",
             provider: "demo",
             reason: "webhook_hint",
-            runtimeSnapshot: snapshot,
             userId: "member_123",
           },
           eventId: "evt_device_sync_wake",
@@ -496,7 +507,6 @@ describe("hosted device-sync runtime", () => {
         },
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       assert.equal(state.observedTokenVersions.get("hosted_conn_wake"), 4);
@@ -602,11 +612,10 @@ describe("hosted device-sync runtime", () => {
           },
           occurredAt: "2026-04-04T10:00:00.000Z",
           reason: "webhook_hint",
-          runtimeSnapshot: snapshot,
         }),
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -619,7 +628,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("device-sync disconnected wakes disconnect the mapped account and kill queued jobs without fetching a control-plane snapshot", async () => {
+  test("device-sync disconnected wakes disconnect the mapped account and kill queued jobs after refreshing the control-plane snapshot", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -671,14 +680,12 @@ describe("hosted device-sync runtime", () => {
           connectionId: "hosted_conn_disconnect_wake",
           occurredAt: "2026-04-06T09:10:00.000Z",
           reason: "disconnected",
-          runtimeSnapshot: snapshot,
         }),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
-      assert.equal(fetchSnapshotCalls, 0);
+      assert.equal(fetchSnapshotCalls, 1);
       const stored = service.store.getAccountById(connected.account.id);
       assert.equal(stored?.status, "disconnected");
 
@@ -718,15 +725,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
         dispatch: buildWakeDispatch({
           connectionId: "hosted_conn_reauth",
           occurredAt: "2026-04-06T09:10:00.000Z",
           reason: "reauthorization_required",
-          runtimeSnapshot: snapshot,
         }),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -791,7 +797,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -830,6 +835,7 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
         dispatch: buildWakeDispatch({
           connectionId: "hosted_conn_forward_next_reconcile",
           hint: {
@@ -837,11 +843,9 @@ describe("hosted device-sync runtime", () => {
           },
           occurredAt: "2026-04-04T10:00:00.000Z",
           reason: "webhook_hint",
-          runtimeSnapshot: snapshot,
         }),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -878,15 +882,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
         dispatch: buildWakeDispatch({
           connectionId: "hosted_conn_no_hint",
           occurredAt: "2026-04-04T10:00:00.000Z",
           reason: "webhook_hint",
-          runtimeSnapshot: snapshot,
         }),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -950,7 +953,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:11:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -1005,7 +1007,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       service.store.patchAccount(connected.account.id, {
@@ -1034,7 +1035,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -1086,7 +1086,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       service.store.patchAccount(connected.account.id, {
@@ -1115,7 +1114,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -1166,7 +1164,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       service.store.patchAccount(connected.account.id, {
@@ -1195,7 +1192,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -1246,7 +1242,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       service.store.patchAccount(connected.account.id, {
@@ -1275,7 +1270,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       const stored = service.store.getAccountById(connected.account.id);
@@ -1347,7 +1341,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-02T12:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_reconcile");
       assert.ok(localAccountId);
@@ -1407,7 +1400,6 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-        timeoutMs: null,
       });
 
       const request = requireApplyUpdatesRequest(appliedRequest);
@@ -1483,7 +1475,6 @@ describe("hosted device-sync runtime", () => {
           observedTokenVersions: new Map(),
           snapshot: null,
         },
-        timeoutMs: null,
       });
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -1500,7 +1491,6 @@ describe("hosted device-sync runtime", () => {
             externalAccountId: "demo-missing",
           }),
         },
-        timeoutMs: null,
       });
 
       assert.equal(applyUpdatesCalls, 0);
@@ -1549,7 +1539,6 @@ describe("hosted device-sync runtime", () => {
             externalAccountId: "demo-missing",
           }),
         },
-        timeoutMs: null,
       });
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
@@ -1598,7 +1587,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_disconnect_after_sync");
       assert.ok(localAccountId);
@@ -1611,7 +1599,6 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-        timeoutMs: null,
       });
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
@@ -1663,7 +1650,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_error_delta");
       assert.ok(localAccountId);
@@ -1682,7 +1668,6 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-        timeoutMs: null,
       });
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
@@ -1745,7 +1730,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_clear_tokens");
       assert.ok(localAccountId);
@@ -1763,7 +1747,6 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-        timeoutMs: null,
       });
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
@@ -1827,7 +1810,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_noop_reconcile");
       assert.ok(localAccountId);
@@ -1842,7 +1824,6 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-        timeoutMs: null,
       });
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
@@ -1893,7 +1874,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -1902,7 +1882,6 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-        timeoutMs: null,
       });
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
@@ -1964,7 +1943,6 @@ describe("hosted device-sync runtime", () => {
         dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
-        timeoutMs: null,
       });
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -1973,7 +1951,6 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-        timeoutMs: null,
       });
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {

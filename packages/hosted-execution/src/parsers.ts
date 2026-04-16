@@ -401,13 +401,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
               ),
             }),
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
-        ...(record.runtimeSnapshot === undefined
-          ? {}
-          : {
-              runtimeSnapshot: record.runtimeSnapshot === null
-                ? null
-                : parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(record.runtimeSnapshot),
-            }),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
     case "vault.share.accepted":

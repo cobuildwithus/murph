@@ -402,7 +402,6 @@ describe("hosted execution parsers coverage", () => {
         kind: "device-sync.wake",
         provider: "oura",
         reason: "webhook_hint",
-        runtimeSnapshot: null,
         userId: "user_123",
       });
 
@@ -467,7 +466,6 @@ describe("hosted execution parsers coverage", () => {
         kind: "device-sync.wake",
         provider: "oura",
         reason: "webhook_hint",
-        runtimeSnapshot: null,
         userId: "user_123",
       });
     });
@@ -493,13 +491,11 @@ describe("hosted execution parsers coverage", () => {
         hint: null,
         kind: "device-sync.wake",
         reason: "connected",
-        runtimeSnapshot: null,
         userId: "user_123",
       })).toEqual({
         hint: null,
         kind: "device-sync.wake",
         reason: "connected",
-        runtimeSnapshot: null,
         userId: "user_123",
       });
 

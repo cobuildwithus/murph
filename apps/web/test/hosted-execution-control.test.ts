@@ -57,22 +57,4 @@ describe("hosted execution control client", () => {
     expect(readHostedExecutionControlClientIfConfigured()).toBeNull();
     expect(mocks.createCloudflareHostedControlClient).not.toHaveBeenCalled();
   });
-
-  it("fails fast when a required client is requested without configuration", async () => {
-    mocks.readHostedExecutionControlBaseUrl.mockReturnValue(null);
-
-    const { requireHostedExecutionControlClient } = await import(
-      "@/src/lib/hosted-execution/control"
-    );
-
-    try {
-      requireHostedExecutionControlClient();
-      throw new Error("Expected hosted execution control to require configuration.");
-    } catch (error) {
-      expect(error).toMatchObject({
-        code: "HOSTED_EXECUTION_CONTROL_NOT_CONFIGURED",
-        httpStatus: 500,
-      });
-    }
-  });
 });

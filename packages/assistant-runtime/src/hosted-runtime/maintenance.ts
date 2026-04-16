@@ -355,7 +355,6 @@ export async function runHostedDeviceSyncPass(
           dispatch,
           secret,
           service,
-          timeoutMs,
         });
         controlPlaneSynced = true;
       } catch (error) {
@@ -378,7 +377,6 @@ export async function runHostedDeviceSyncPass(
           secret,
           service,
           state: syncState,
-          timeoutMs,
         });
       } catch (error) {
         if (failHardOnControlPlaneError) {
