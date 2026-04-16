@@ -11,7 +11,10 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 
-import { completeHostedPrivyAuth } from "./hosted-auth-completion";
+import {
+  completeHostedPrivyAuth,
+  type HostedPrivyClientSessionInput,
+} from "./hosted-auth-completion";
 import type { HostedAuthIntent } from "./hosted-auth-shared";
 import { toErrorMessage } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
@@ -31,6 +34,11 @@ export function HostedTelegramAuthButton({
   const { refreshUser, user } = useUser();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [redirectPending, setRedirectPending] = useState(false);
+  const authSession: HostedPrivyClientSessionInput = {
+    createWallet,
+    refreshUser,
+    user,
+  };
 
   const loading = state.status === "loading" || redirectPending;
 
@@ -42,10 +50,8 @@ export function HostedTelegramAuthButton({
     try {
       await login();
       const result = await completeHostedPrivyAuth({
-        createWallet,
         intent,
-        refreshUser,
-        user,
+        ...authSession,
       });
       window.location.assign(result.redirectUrl);
     } catch (error) {

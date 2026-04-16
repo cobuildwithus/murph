@@ -8,17 +8,20 @@ import { requestHostedBillingCheckout } from "./client-api";
 import { requestHostedPrivyCompletionWithRetry } from "./hosted-privy-auth-support";
 import type { HostedPhoneAuthIntent } from "./hosted-phone-auth-types";
 
-interface HostedAuthCompletionUser {
+export interface HostedAuthCompletionUser {
   linkedAccounts?: unknown;
 }
 
-interface HostedAuthCompletionInput {
+export interface HostedPrivyClientSessionInput {
   createWallet: () => Promise<unknown>;
-  intent: HostedPhoneAuthIntent;
-  inviteCode?: string | null;
   refreshUser?: () => Promise<HostedAuthCompletionUser | null>;
   requirePhone?: boolean;
   user: HostedAuthCompletionUser | null;
+}
+
+interface HostedAuthCompletionInput extends HostedPrivyClientSessionInput {
+  intent: HostedPhoneAuthIntent;
+  inviteCode?: string | null;
 }
 
 export interface HostedAuthCompletionResult {

@@ -13,7 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 
-import { completeHostedPrivyAuth } from "./hosted-auth-completion";
+import {
+  completeHostedPrivyAuth,
+  type HostedPrivyClientSessionInput,
+} from "./hosted-auth-completion";
 import {
   isValidEmailAddress,
   normalizeEmailAddress,
@@ -52,6 +55,11 @@ export function HostedEmailAuthButton({
     redirectPending;
   const disabled = !ready || loading;
   const showCodeEntry = pendingEmailAddress !== null;
+  const authSession: HostedPrivyClientSessionInput = {
+    createWallet,
+    refreshUser,
+    user,
+  };
 
   function handleOpen() {
     onActivate();
@@ -132,10 +140,8 @@ export function HostedEmailAuthButton({
     try {
       await loginWithCode({ code: submittedCode });
       const result = await completeHostedPrivyAuth({
-        createWallet,
         intent,
-        refreshUser,
-        user,
+        ...authSession,
       });
       window.location.assign(result.redirectUrl);
     } catch (error) {
