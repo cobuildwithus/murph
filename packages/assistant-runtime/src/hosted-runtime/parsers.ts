@@ -1,3 +1,6 @@
+import {
+  parseSerializableConfiguredDeviceSyncProviderConfigs,
+} from "@murphai/device-syncd/config";
 import type {
   HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution/contracts";
@@ -161,98 +164,7 @@ function parseConfiguredDeviceSyncProviderConfigs(
   value: unknown,
   label: string,
 ): HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"] {
-  const record = requireObject(value, label);
-
-  return {
-    ...(record.garmin === undefined
-      ? {}
-      : {
-          garmin: parseGarminDeviceSyncProviderConfig(record.garmin, `${label}.garmin`),
-        }),
-    ...(record.oura === undefined
-      ? {}
-      : {
-          oura: parseOuraDeviceSyncProviderConfig(record.oura, `${label}.oura`),
-        }),
-    ...(record.whoop === undefined
-      ? {}
-      : {
-          whoop: parseWhoopDeviceSyncProviderConfig(record.whoop, `${label}.whoop`),
-        }),
-  };
-}
-
-function parseGarminDeviceSyncProviderConfig(
-  value: unknown,
-  label: string,
-): NonNullable<HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"]["garmin"]> {
-  const record = requireSerializableProviderConfigRecord(value, label);
-
-  return {
-    apiBaseUrl: parseOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
-    authBaseUrl: parseOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
-    backfillDays: parseOptionalNumber(record.backfillDays, `${label}.backfillDays`),
-    clientId: requireString(record.clientId, `${label}.clientId`),
-    clientSecret: requireString(record.clientSecret, `${label}.clientSecret`),
-    reconcileDays: parseOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
-    reconcileIntervalMs: parseOptionalNumber(
-      record.reconcileIntervalMs,
-      `${label}.reconcileIntervalMs`,
-    ),
-    requestTimeoutMs: parseOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
-    tokenBaseUrl: parseOptionalString(record.tokenBaseUrl, `${label}.tokenBaseUrl`),
-  };
-}
-
-function parseOuraDeviceSyncProviderConfig(
-  value: unknown,
-  label: string,
-): NonNullable<HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"]["oura"]> {
-  const record = requireSerializableProviderConfigRecord(value, label);
-
-  return {
-    apiBaseUrl: parseOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
-    authBaseUrl: parseOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
-    backfillDays: parseOptionalNumber(record.backfillDays, `${label}.backfillDays`),
-    clientId: requireString(record.clientId, `${label}.clientId`),
-    clientSecret: requireString(record.clientSecret, `${label}.clientSecret`),
-    reconcileDays: parseOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
-    reconcileIntervalMs: parseOptionalNumber(
-      record.reconcileIntervalMs,
-      `${label}.reconcileIntervalMs`,
-    ),
-    requestTimeoutMs: parseOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
-    scopes: parseOptionalStringArray(record.scopes, `${label}.scopes`),
-    webhookTimestampToleranceMs: parseOptionalNumber(
-      record.webhookTimestampToleranceMs,
-      `${label}.webhookTimestampToleranceMs`,
-    ),
-  };
-}
-
-function parseWhoopDeviceSyncProviderConfig(
-  value: unknown,
-  label: string,
-): NonNullable<HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"]["whoop"]> {
-  const record = requireSerializableProviderConfigRecord(value, label);
-
-  return {
-    backfillDays: parseOptionalNumber(record.backfillDays, `${label}.backfillDays`),
-    baseUrl: parseOptionalString(record.baseUrl, `${label}.baseUrl`),
-    clientId: requireString(record.clientId, `${label}.clientId`),
-    clientSecret: requireString(record.clientSecret, `${label}.clientSecret`),
-    reconcileDays: parseOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
-    reconcileIntervalMs: parseOptionalNumber(
-      record.reconcileIntervalMs,
-      `${label}.reconcileIntervalMs`,
-    ),
-    requestTimeoutMs: parseOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
-    scopes: parseOptionalStringArray(record.scopes, `${label}.scopes`),
-    webhookTimestampToleranceMs: parseOptionalNumber(
-      record.webhookTimestampToleranceMs,
-      `${label}.webhookTimestampToleranceMs`,
-    ),
-  };
+  return parseSerializableConfiguredDeviceSyncProviderConfigs(value, label);
 }
 
 function parseHostedAssistantRuntimeResume(
@@ -315,25 +227,6 @@ function parseStringRecord(value: unknown, label: string): Record<string, string
   return parsed;
 }
 
-function parseOptionalString(value: unknown, label: string): string | undefined {
-  return value === undefined ? undefined : requireString(value, label);
-}
-
-function parseOptionalNumber(value: unknown, label: string): number | undefined {
-  return value === undefined ? undefined : requireNumber(value, label);
-}
-
-function parseOptionalStringArray(value: unknown, label: string): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array of strings.`);
-  }
-
-  return value.map((entry, index) => requireString(entry, `${label}[${index}]`));
-}
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -343,18 +236,6 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function requireSerializableProviderConfigRecord(
-  value: unknown,
-  label: string,
-): Record<string, unknown> {
-  const record = requireObject(value, label);
-
-  if (record.fetchImpl !== undefined) {
-    throw new TypeError(`${label}.fetchImpl is not supported in serialized runtime config.`);
-  }
-
-  return record;
-}
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {

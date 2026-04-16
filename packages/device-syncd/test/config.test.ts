@@ -5,9 +5,15 @@ import { Writable } from "node:stream";
 import { test } from "vitest";
 
 import {
+  cloneSerializableConfiguredDeviceSyncProviderConfigs,
+  configuredDeviceSyncProviderKeys,
   createConsoleDeviceSyncLogger,
   createConfiguredDeviceSyncRegistry,
+  hasConfiguredDeviceSyncProviderConfigs,
+  listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
+  parseSerializableConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncProviderConfigs,
   readConfiguredOuraDeviceSyncProviderConfig,
 } from "../src/config.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
@@ -56,7 +62,7 @@ test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () =
 
   assert.deepEqual(
     providers.map((provider) => provider.provider),
-    ["whoop", "oura"],
+    ["oura", "whoop"],
   );
 });
 
@@ -74,7 +80,7 @@ test("loadDeviceSyncEnvironment supports Garmin, WHOOP, and Oura together", () =
 
   assert.deepEqual(
     providers.map((provider) => provider.provider),
-    ["garmin", "whoop", "oura"],
+    ["garmin", "oura", "whoop"],
   );
 });
 
@@ -90,7 +96,189 @@ test("createConfiguredDeviceSyncRegistry assembles the configured providers in d
 
   assert.deepEqual(
     registry.list().map((provider) => provider.provider),
-    ["garmin", "whoop", "oura"],
+    ["garmin", "oura", "whoop"],
+  );
+});
+
+test("configuredDeviceSyncProviderKeys follow the shared descriptor order", () => {
+  assert.deepEqual(configuredDeviceSyncProviderKeys, ["garmin", "oura", "whoop"]);
+});
+
+test("shared provider-config helpers preserve descriptor order and report presence", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    WHOOP_CLIENT_ID: "whoop-client-id",
+    WHOOP_CLIENT_SECRET: "whoop-client-secret",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+  });
+
+  assert.equal(hasConfiguredDeviceSyncProviderConfigs({}), false);
+  assert.equal(hasConfiguredDeviceSyncProviderConfigs(configs), true);
+  assert.deepEqual(listConfiguredDeviceSyncProviderNames(configs), ["oura", "whoop"]);
+});
+
+test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only runtime fields", () => {
+  const cloned = cloneSerializableConfiguredDeviceSyncProviderConfigs({
+    garmin: {
+      clientId: "garmin-client-id",
+      clientSecret: "garmin-client-secret",
+      fetchImpl: fetch,
+    },
+    oura: {
+      clientId: "oura-client-id",
+      clientSecret: "oura-client-secret",
+      fetchImpl: fetch,
+      scopes: ["daily", "heartrate"],
+      webhookVerificationToken: "verify-token-for-tests",
+    },
+    whoop: {
+      clientId: "whoop-client-id",
+      clientSecret: "whoop-client-secret",
+      fetchImpl: fetch,
+      scopes: ["read:profile"],
+    },
+  });
+
+  assert.deepEqual(cloned, {
+    garmin: {
+      clientId: "garmin-client-id",
+      clientSecret: "garmin-client-secret",
+    },
+    oura: {
+      clientId: "oura-client-id",
+      clientSecret: "oura-client-secret",
+      scopes: ["daily", "heartrate"],
+    },
+    whoop: {
+      clientId: "whoop-client-id",
+      clientSecret: "whoop-client-secret",
+      scopes: ["read:profile"],
+    },
+  });
+});
+
+test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted runtime subset", () => {
+  const parsed = parseSerializableConfiguredDeviceSyncProviderConfigs(
+    {
+      garmin: {
+        apiBaseUrl: "https://garmin.example.test",
+        authBaseUrl: "https://garmin-auth.example.test",
+        backfillDays: 14,
+        clientId: "garmin-client-id",
+        clientSecret: "garmin-client-secret",
+        reconcileDays: 7,
+        reconcileIntervalMs: 3_600_000,
+        requestTimeoutMs: 30_000,
+        tokenBaseUrl: "https://garmin-token.example.test",
+      },
+      oura: {
+        apiBaseUrl: "https://oura.example.test",
+        authBaseUrl: "https://oura-auth.example.test",
+        backfillDays: 21,
+        clientId: "oura-client-id",
+        clientSecret: "oura-client-secret",
+        reconcileDays: 7,
+        reconcileIntervalMs: 7_200_000,
+        requestTimeoutMs: 30_000,
+        scopes: ["daily", "heartrate"],
+        webhookTimestampToleranceMs: 60_000,
+      },
+      whoop: {
+        backfillDays: 30,
+        baseUrl: "https://whoop.example.test",
+        clientId: "whoop-client-id",
+        clientSecret: "whoop-client-secret",
+        reconcileDays: 14,
+        reconcileIntervalMs: 10_800_000,
+        requestTimeoutMs: 30_000,
+        scopes: ["read:profile", "read:sleep"],
+        webhookTimestampToleranceMs: 120_000,
+      },
+    },
+    "runtime.providerConfigs",
+  );
+
+  assert.deepEqual(parsed, {
+    garmin: {
+      apiBaseUrl: "https://garmin.example.test",
+      authBaseUrl: "https://garmin-auth.example.test",
+      backfillDays: 14,
+      clientId: "garmin-client-id",
+      clientSecret: "garmin-client-secret",
+      reconcileDays: 7,
+      reconcileIntervalMs: 3_600_000,
+      requestTimeoutMs: 30_000,
+      tokenBaseUrl: "https://garmin-token.example.test",
+    },
+    oura: {
+      apiBaseUrl: "https://oura.example.test",
+      authBaseUrl: "https://oura-auth.example.test",
+      backfillDays: 21,
+      clientId: "oura-client-id",
+      clientSecret: "oura-client-secret",
+      reconcileDays: 7,
+      reconcileIntervalMs: 7_200_000,
+      requestTimeoutMs: 30_000,
+      scopes: ["daily", "heartrate"],
+      webhookTimestampToleranceMs: 60_000,
+    },
+    whoop: {
+      backfillDays: 30,
+      baseUrl: "https://whoop.example.test",
+      clientId: "whoop-client-id",
+      clientSecret: "whoop-client-secret",
+      reconcileDays: 14,
+      reconcileIntervalMs: 10_800_000,
+      requestTimeoutMs: 30_000,
+      scopes: ["read:profile", "read:sleep"],
+      webhookTimestampToleranceMs: 120_000,
+    },
+  });
+});
+
+test("parseSerializableConfiguredDeviceSyncProviderConfigs rejects unknown providers and runtime-only fields", () => {
+  assert.throws(
+    () =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          fitbit: {
+            clientId: "fitbit-client-id",
+            clientSecret: "fitbit-client-secret",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    /runtime\.providerConfigs\.fitbit is not a supported device-sync provider config/u,
+  );
+
+  assert.throws(
+    () =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          oura: {
+            clientId: "oura-client-id",
+            clientSecret: "oura-client-secret",
+            fetchImpl: "not-serializable",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    /runtime\.providerConfigs\.oura\.fetchImpl is not supported in serialized runtime config/u,
+  );
+
+  assert.throws(
+    () =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          whoop: {
+            clientId: "whoop-client-id",
+            clientSecret: "whoop-client-secret",
+            scopes: ["read:profile", ""],
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    /runtime\.providerConfigs\.whoop\.scopes\[1\] must be a non-empty string/u,
   );
 });
 

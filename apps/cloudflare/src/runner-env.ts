@@ -4,6 +4,8 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { readHostedRunnerCommitTimeoutMs } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  cloneSerializableConfiguredDeviceSyncProviderConfigs,
+  hasConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 import {
@@ -58,7 +60,9 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
 export function buildHostedRunnerResolvedConfig(
   forwardedEnv: Readonly<Record<string, string>>,
 ): HostedAssistantRuntimeResolvedConfig {
-  const providerConfigs = readConfiguredDeviceSyncProviderConfigs(forwardedEnv);
+  const providerConfigs = cloneSerializableConfiguredDeviceSyncProviderConfigs(
+    readConfiguredDeviceSyncProviderConfigs(forwardedEnv),
+  );
   const emailCapabilities = readHostedEmailCapabilities(forwardedEnv);
   const deviceSyncPublicBaseUrl = normalizeEnvString(forwardedEnv.DEVICE_SYNC_PUBLIC_BASE_URL);
   // This codec secret protects hosted device-sync token bundles inside the runner.
@@ -81,12 +85,6 @@ export function buildHostedRunnerResolvedConfig(
           }
         : null,
   };
-}
-
-function hasConfiguredDeviceSyncProviderConfigs(
-  value: ReturnType<typeof readConfiguredDeviceSyncProviderConfigs>,
-): boolean {
-  return value.garmin !== undefined || value.oura !== undefined || value.whoop !== undefined;
 }
 
 function normalizeEnvString(value: string | undefined): string | null {

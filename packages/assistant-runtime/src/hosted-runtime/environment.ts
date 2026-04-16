@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { cloneSerializableConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
+
 import type {
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
@@ -59,41 +61,11 @@ function cloneHostedAssistantRuntimeResolvedConfig(
     },
     deviceSync: input?.deviceSync
       ? {
-          providerConfigs: cloneConfiguredDeviceSyncProviderConfigs(input.deviceSync.providerConfigs),
+          providerConfigs: cloneSerializableConfiguredDeviceSyncProviderConfigs(input.deviceSync.providerConfigs),
           publicBaseUrl: input.deviceSync.publicBaseUrl,
           secret: input.deviceSync.secret,
         }
       : null,
-  };
-}
-
-function cloneConfiguredDeviceSyncProviderConfigs(
-  input: NonNullable<HostedAssistantRuntimeResolvedConfig["deviceSync"]>["providerConfigs"],
-): NonNullable<HostedAssistantRuntimeResolvedConfig["deviceSync"]>["providerConfigs"] {
-  return {
-    ...(input.garmin
-      ? {
-          garmin: {
-            ...input.garmin,
-          },
-        }
-      : {}),
-    ...(input.oura
-      ? {
-          oura: {
-            ...input.oura,
-            ...(input.oura.scopes ? { scopes: [...input.oura.scopes] } : {}),
-          },
-        }
-      : {}),
-    ...(input.whoop
-      ? {
-          whoop: {
-            ...input.whoop,
-            ...(input.whoop.scopes ? { scopes: [...input.whoop.scopes] } : {}),
-          },
-        }
-      : {}),
   };
 }
 

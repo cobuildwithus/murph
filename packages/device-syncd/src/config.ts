@@ -32,13 +32,25 @@ export interface LoadedDeviceSyncEnvironment {
   http: DeviceSyncHttpConfig;
 }
 
-export interface ConfiguredDeviceSyncProviderConfigs {
-  garmin?: GarminDeviceSyncProviderConfig;
-  oura?: OuraDeviceSyncProviderConfig;
-  whoop?: WhoopDeviceSyncProviderConfig;
+export interface ConfiguredDeviceSyncProviderConfigByKey {
+  garmin: GarminDeviceSyncProviderConfig;
+  oura: OuraDeviceSyncProviderConfig;
+  whoop: WhoopDeviceSyncProviderConfig;
 }
 
+export type ConfiguredDeviceSyncProviderKey = keyof ConfiguredDeviceSyncProviderConfigByKey;
+export type ConfiguredDeviceSyncProviderConfigs = Partial<ConfiguredDeviceSyncProviderConfigByKey>;
+
 type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
+
+type ConfiguredDeviceSyncProviderConfigHandler<
+  TKey extends ConfiguredDeviceSyncProviderKey,
+> = {
+  create(config: ConfiguredDeviceSyncProviderConfigByKey[TKey]): DeviceSyncProvider;
+  read(env: DeviceSyncEnvSource): ConfiguredDeviceSyncProviderConfigByKey[TKey] | null;
+  clone(config: ConfiguredDeviceSyncProviderConfigByKey[TKey]): ConfiguredDeviceSyncProviderConfigByKey[TKey];
+  parseSerializable(value: unknown, label: string): ConfiguredDeviceSyncProviderConfigByKey[TKey];
+};
 
 const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
   "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
@@ -142,7 +154,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
 
   if (providers.length === 0) {
     throw new TypeError(
-      "No device sync providers are configured. Set Garmin, WHOOP, and/or Oura client credentials before starting device-syncd.",
+      "No device sync providers are configured. Set at least one supported device provider client credential pair before starting device-syncd.",
     );
   }
 
@@ -209,20 +221,15 @@ export function createConfiguredDeviceSyncProvidersFromConfigs(
   configs: ConfiguredDeviceSyncProviderConfigs,
 ): DeviceSyncProvider[] {
   const providers: DeviceSyncProvider[] = [];
-  const garminConfig = configs.garmin;
-  const whoopConfig = configs.whoop;
-  const ouraConfig = configs.oura;
 
-  if (garminConfig) {
-    providers.push(createGarminDeviceSyncProvider(garminConfig));
-  }
+  for (const provider of listConfiguredDeviceSyncProviderNames(configs)) {
+    const config = configs[provider];
 
-  if (whoopConfig) {
-    providers.push(createWhoopDeviceSyncProvider(whoopConfig));
-  }
+    if (!config) {
+      continue;
+    }
 
-  if (ouraConfig) {
-    providers.push(createOuraDeviceSyncProvider(ouraConfig));
+    providers.push(createConfiguredDeviceSyncProviderFromConfig(provider, config));
   }
 
   return providers;
@@ -239,15 +246,73 @@ export function createConfiguredDeviceSyncRegistryFromConfigs(
 export function readConfiguredDeviceSyncProviderConfigs(
   env: DeviceSyncEnvSource,
 ): ConfiguredDeviceSyncProviderConfigs {
-  const garmin = readConfiguredGarminDeviceSyncProviderConfig(env);
-  const oura = readConfiguredOuraDeviceSyncProviderConfig(env);
-  const whoop = readConfiguredWhoopDeviceSyncProviderConfig(env);
+  const configs: ConfiguredDeviceSyncProviderConfigs = {};
 
-  return {
-    ...(garmin ? { garmin } : {}),
-    ...(oura ? { oura } : {}),
-    ...(whoop ? { whoop } : {}),
-  };
+  for (const provider of configuredDeviceSyncProviderKeys) {
+    const config = configuredDeviceSyncProviderConfigHandlers[provider].read(env);
+
+    if (config) {
+      configs[provider] = config as never;
+    }
+  }
+
+  return configs;
+}
+
+export function hasConfiguredDeviceSyncProviderConfigs(
+  configs: ConfiguredDeviceSyncProviderConfigs,
+): boolean {
+  return listConfiguredDeviceSyncProviderNames(configs).length > 0;
+}
+
+export function listConfiguredDeviceSyncProviderNames(
+  configs: ConfiguredDeviceSyncProviderConfigs,
+): ConfiguredDeviceSyncProviderKey[] {
+  return configuredDeviceSyncProviderKeys.filter((provider) => configs[provider] !== undefined);
+}
+
+// Hosted runner envelopes keep only the serializable runtime subset of provider config.
+// Provider-owned admin secrets such as webhook verification tokens stay on the control plane.
+export function cloneSerializableConfiguredDeviceSyncProviderConfigs(
+  configs: ConfiguredDeviceSyncProviderConfigs,
+): ConfiguredDeviceSyncProviderConfigs {
+  const cloned: ConfiguredDeviceSyncProviderConfigs = {};
+
+  for (const provider of listConfiguredDeviceSyncProviderNames(configs)) {
+    const config = configs[provider];
+
+    if (!config) {
+      continue;
+    }
+
+    cloned[provider] = cloneSerializableConfiguredDeviceSyncProviderConfig(provider, config) as never;
+  }
+
+  return cloned;
+}
+
+export function parseSerializableConfiguredDeviceSyncProviderConfigs(
+  value: unknown,
+  label: string,
+): ConfiguredDeviceSyncProviderConfigs {
+  const record = requireSerializableConfiguredDeviceSyncProviderConfigsRecord(value, label);
+  const configs: ConfiguredDeviceSyncProviderConfigs = {};
+
+  for (const provider of configuredDeviceSyncProviderKeys) {
+    const providerValue = record[provider];
+
+    if (providerValue === undefined) {
+      continue;
+    }
+
+    configs[provider] = parseSerializableConfiguredDeviceSyncProviderConfig(
+      provider,
+      providerValue,
+      `${label}.${provider}`,
+    ) as never;
+  }
+
+  return configs;
 }
 
 export function readConfiguredGarminDeviceSyncProviderConfig(
@@ -331,6 +396,240 @@ export function readConfiguredOuraDeviceSyncProviderConfig(
     requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
     webhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
   };
+}
+
+const configuredDeviceSyncProviderConfigHandlers: {
+  [TKey in ConfiguredDeviceSyncProviderKey]: ConfiguredDeviceSyncProviderConfigHandler<TKey>;
+} = {
+  garmin: {
+    create: createGarminDeviceSyncProvider,
+    read: readConfiguredGarminDeviceSyncProviderConfig,
+    clone: cloneGarminDeviceSyncProviderConfig,
+    parseSerializable: parseSerializableGarminDeviceSyncProviderConfig,
+  },
+  oura: {
+    create: createOuraDeviceSyncProvider,
+    read: readConfiguredOuraDeviceSyncProviderConfig,
+    clone: cloneOuraDeviceSyncProviderConfig,
+    parseSerializable: parseSerializableOuraDeviceSyncProviderConfig,
+  },
+  whoop: {
+    create: createWhoopDeviceSyncProvider,
+    read: readConfiguredWhoopDeviceSyncProviderConfig,
+    clone: cloneWhoopDeviceSyncProviderConfig,
+    parseSerializable: parseSerializableWhoopDeviceSyncProviderConfig,
+  },
+};
+
+export const configuredDeviceSyncProviderKeys = Object.freeze(
+  Object.keys(configuredDeviceSyncProviderConfigHandlers) as ConfiguredDeviceSyncProviderKey[],
+);
+
+function createConfiguredDeviceSyncProviderFromConfig(
+  provider: ConfiguredDeviceSyncProviderKey,
+  config: ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey],
+): DeviceSyncProvider {
+  const handler = configuredDeviceSyncProviderConfigHandlers[provider] as ConfiguredDeviceSyncProviderConfigHandler<ConfiguredDeviceSyncProviderKey>;
+  return handler.create(config);
+}
+
+function cloneSerializableConfiguredDeviceSyncProviderConfig(
+  provider: ConfiguredDeviceSyncProviderKey,
+  config: ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey],
+): ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey] {
+  const handler = configuredDeviceSyncProviderConfigHandlers[provider] as ConfiguredDeviceSyncProviderConfigHandler<ConfiguredDeviceSyncProviderKey>;
+  return handler.clone(config);
+}
+
+function parseSerializableConfiguredDeviceSyncProviderConfig(
+  provider: ConfiguredDeviceSyncProviderKey,
+  value: unknown,
+  label: string,
+): ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey] {
+  const handler = configuredDeviceSyncProviderConfigHandlers[provider] as ConfiguredDeviceSyncProviderConfigHandler<ConfiguredDeviceSyncProviderKey>;
+  return handler.parseSerializable(value, label);
+}
+
+function cloneGarminDeviceSyncProviderConfig(
+  config: GarminDeviceSyncProviderConfig,
+): GarminDeviceSyncProviderConfig {
+  const { fetchImpl: _fetchImpl, ...serializableConfig } = config;
+
+  return {
+    ...serializableConfig,
+  };
+}
+
+function cloneOuraDeviceSyncProviderConfig(
+  config: OuraDeviceSyncProviderConfig,
+): OuraDeviceSyncProviderConfig {
+  const {
+    fetchImpl: _fetchImpl,
+    webhookVerificationToken: _webhookVerificationToken,
+    ...serializableConfig
+  } = config;
+
+  return {
+    ...serializableConfig,
+    ...(config.scopes ? { scopes: [...config.scopes] } : {}),
+  };
+}
+
+function cloneWhoopDeviceSyncProviderConfig(
+  config: WhoopDeviceSyncProviderConfig,
+): WhoopDeviceSyncProviderConfig {
+  const { fetchImpl: _fetchImpl, ...serializableConfig } = config;
+
+  return {
+    ...serializableConfig,
+    ...(config.scopes ? { scopes: [...config.scopes] } : {}),
+  };
+}
+
+function parseSerializableGarminDeviceSyncProviderConfig(
+  value: unknown,
+  label: string,
+): GarminDeviceSyncProviderConfig {
+  const record = requireSerializableProviderConfigRecord(value, label);
+
+  return {
+    apiBaseUrl: parseSerializableOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
+    authBaseUrl: parseSerializableOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
+    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
+    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
+    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
+    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
+    reconcileIntervalMs: parseSerializableOptionalNumber(
+      record.reconcileIntervalMs,
+      `${label}.reconcileIntervalMs`,
+    ),
+    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
+    tokenBaseUrl: parseSerializableOptionalString(record.tokenBaseUrl, `${label}.tokenBaseUrl`),
+  };
+}
+
+function parseSerializableOuraDeviceSyncProviderConfig(
+  value: unknown,
+  label: string,
+): OuraDeviceSyncProviderConfig {
+  const record = requireSerializableProviderConfigRecord(value, label);
+
+  return {
+    apiBaseUrl: parseSerializableOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
+    authBaseUrl: parseSerializableOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
+    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
+    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
+    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
+    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
+    reconcileIntervalMs: parseSerializableOptionalNumber(
+      record.reconcileIntervalMs,
+      `${label}.reconcileIntervalMs`,
+    ),
+    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
+    scopes: parseSerializableOptionalStringArray(record.scopes, `${label}.scopes`),
+    webhookTimestampToleranceMs: parseSerializableOptionalNumber(
+      record.webhookTimestampToleranceMs,
+      `${label}.webhookTimestampToleranceMs`,
+    ),
+  };
+}
+
+function parseSerializableWhoopDeviceSyncProviderConfig(
+  value: unknown,
+  label: string,
+): WhoopDeviceSyncProviderConfig {
+  const record = requireSerializableProviderConfigRecord(value, label);
+
+  return {
+    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
+    baseUrl: parseSerializableOptionalString(record.baseUrl, `${label}.baseUrl`),
+    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
+    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
+    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
+    reconcileIntervalMs: parseSerializableOptionalNumber(
+      record.reconcileIntervalMs,
+      `${label}.reconcileIntervalMs`,
+    ),
+    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
+    scopes: parseSerializableOptionalStringArray(record.scopes, `${label}.scopes`),
+    webhookTimestampToleranceMs: parseSerializableOptionalNumber(
+      record.webhookTimestampToleranceMs,
+      `${label}.webhookTimestampToleranceMs`,
+    ),
+  };
+}
+
+function requireSerializableConfiguredDeviceSyncProviderConfigsRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  const record = requireSerializableConfigObject(value, label);
+  const supportedProviders = new Set<string>(configuredDeviceSyncProviderKeys);
+
+  for (const key of Object.keys(record)) {
+    if (!supportedProviders.has(key)) {
+      throw new TypeError(`${label}.${key} is not a supported device-sync provider config.`);
+    }
+  }
+
+  return record;
+}
+
+function requireSerializableProviderConfigRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  const record = requireSerializableConfigObject(value, label);
+
+  if (record.fetchImpl !== undefined) {
+    throw new TypeError(`${label}.fetchImpl is not supported in serialized runtime config.`);
+  }
+
+  return record;
+}
+
+function requireSerializableConfigObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireSerializableString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function parseSerializableOptionalString(value: unknown, label: string): string | undefined {
+  return value === undefined ? undefined : requireSerializableString(value, label);
+}
+
+function parseSerializableOptionalNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function parseSerializableOptionalStringArray(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array of strings.`);
+  }
+
+  return value.map((entry, index) => requireSerializableString(entry, `${label}[${index}]`));
 }
 
 function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttpConfig, "publicHost" | "publicPort"> {
