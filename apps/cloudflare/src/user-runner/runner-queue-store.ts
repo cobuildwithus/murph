@@ -85,7 +85,7 @@ interface BundleRefSwapInput {
   nextBundleRef: RunnerStateRecord["bundleRef"];
 }
 
-interface LeaseOwnerInput {
+export interface RunnerLeaseOwnerInput {
   eventId: string;
   policy?: "matching-run" | "same-event";
   run: HostedExecutionRunContext | null;
@@ -319,7 +319,7 @@ export class RunnerQueueStore {
 
   async applyCommittedDispatch(
     committed: HostedExecutionCommittedResult,
-    leaseOwner: LeaseOwnerInput | null = null,
+    leaseOwner: RunnerLeaseOwnerInput | null = null,
   ): Promise<RunnerStateRecord> {
     await this.ready;
     await this.bootstrapUserFromCommittedResult(committed);
@@ -354,7 +354,7 @@ export class RunnerQueueStore {
 
   async syncCommittedBundles(
     committed: HostedExecutionCommittedResult,
-    leaseOwner: LeaseOwnerInput | null = null,
+    leaseOwner: RunnerLeaseOwnerInput | null = null,
   ): Promise<RunnerStateRecord> {
     await this.ready;
     await this.bootstrapUserFromCommittedResult(committed);
@@ -513,7 +513,7 @@ export class RunnerQueueStore {
 
   async rememberCommittedEvent(
     eventId: string,
-    leaseOwner: LeaseOwnerInput | null = null,
+    leaseOwner: RunnerLeaseOwnerInput | null = null,
   ): Promise<RunnerStateRecord> {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
@@ -623,6 +623,13 @@ export class RunnerQueueStore {
       applied: true,
       record: this.readStateFromMetaSync(meta),
     };
+  }
+
+  async hasActiveRunLease(owner: RunnerLeaseOwnerInput): Promise<boolean> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+
+    return this.hasActiveRunLeaseSync(this.requireMetaRowSync(), owner);
   }
 
   async syncNextWake(input: {
@@ -808,7 +815,7 @@ export class RunnerQueueStore {
     meta.active_run_started_at = null;
   }
 
-  private clearActiveRunLeaseSync(meta: RunnerMetaRow, owner: LeaseOwnerInput): void {
+  private clearActiveRunLeaseSync(meta: RunnerMetaRow, owner: RunnerLeaseOwnerInput): void {
     if (!meta.active_run_event_id) {
       meta.in_flight = 0;
       this.clearActiveRunMetaSync(meta);
@@ -835,6 +842,26 @@ export class RunnerQueueStore {
 
     meta.in_flight = 0;
     this.clearActiveRunMetaSync(meta);
+  }
+
+  private hasActiveRunLeaseSync(meta: RunnerMetaRow, owner: RunnerLeaseOwnerInput): boolean {
+    if (!meta.active_run_event_id) {
+      return false;
+    }
+
+    if (meta.active_run_event_id !== owner.eventId) {
+      return false;
+    }
+
+    if (owner.policy === "same-event") {
+      return true;
+    }
+
+    if (!owner.run) {
+      return false;
+    }
+
+    return sameHostedExecutionRun(this.readActiveRunContextSync(meta), owner.run);
   }
 
   private ensureCanonicalBundleSlotRowsSync(): void {

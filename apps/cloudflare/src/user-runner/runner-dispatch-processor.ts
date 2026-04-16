@@ -55,6 +55,7 @@ import {
 } from "./runner-commit-recovery.js";
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
+import type { RunnerLeaseOwnerInput } from "./runner-queue-store.js";
 import { RunnerScheduler } from "./runner-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
@@ -77,6 +78,7 @@ export interface RunnerUserStores {
 interface RunnerDispatchTransitionInput<T> {
   eventId: string;
   gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+  leaseOwner?: RunnerLeaseOwnerInput;
   run: (userId: string, stores: RunnerUserStores) => Promise<T>;
 }
 
@@ -324,6 +326,7 @@ export class RunnerDispatchProcessor {
           eventId: nextPending.dispatch.eventId,
           finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
           result: finalRunnerResult.result,
+          run,
         });
         const finalizedCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
           .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
@@ -394,6 +397,23 @@ export class RunnerDispatchProcessor {
             run,
           });
           continue;
+        }
+
+        if (error instanceof HostedExecutionObsoleteRunResultError) {
+          emitHostedExecutionStructuredLog({
+            component: "runner",
+            details: {
+              obsoleteRunId: error.runId,
+              runElapsedMs: computeHostedRunElapsedMs(run),
+            },
+            dispatch: nextPending.dispatch,
+            error,
+            level: "warn",
+            message: "Hosted runner returned a stale result for an obsolete run lease.",
+            phase: "dispatch.running",
+            run,
+          });
+          return toUserStatus(await this.dependencies.queueStore.readState());
         }
 
         if (error instanceof HostedExecutionConfigurationError) {
@@ -620,6 +640,10 @@ export class RunnerDispatchProcessor {
     return this.dependencies.applyHostedTransition({
       eventId: input.dispatch.eventId,
       gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
+      leaseOwner: {
+        eventId: input.dispatch.eventId,
+        run: input.run,
+      },
       run: async (userId, stores) => {
         return persistHostedExecutionCommit({
           bucket: this.dependencies.bucket,
@@ -680,10 +704,15 @@ export class RunnerDispatchProcessor {
     eventId: string;
     finalGatewayProjectionSnapshot: HostedExecutionFinalizePayload["gatewayProjectionSnapshot"];
     result: HostedAssistantRuntimeJobResult["result"];
+    run: HostedExecutionRunContext;
   }): Promise<HostedExecutionCommittedResult> {
     return this.dependencies.applyHostedTransition({
       eventId: input.eventId,
       gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
+      leaseOwner: {
+        eventId: input.eventId,
+        run: input.run,
+      },
       run: async (userId, stores) => {
         return persistHostedExecutionFinalBundles({
           bucket: this.dependencies.bucket,
@@ -874,6 +903,20 @@ export class RunnerDispatchProcessor {
     } catch {
       // Best-effort cleanup only; lifecycle TTL still backstops raw message deletion.
     }
+  }
+}
+
+export class HostedExecutionObsoleteRunResultError extends Error {
+  constructor(
+    readonly eventId: string,
+    readonly runId: string | null,
+  ) {
+    super(
+      runId
+        ? `Hosted runner result for event ${eventId} no longer owns active run ${runId}.`
+        : `Hosted runner result for event ${eventId} no longer owns the active run lease.`,
+    );
+    this.name = "HostedExecutionObsoleteRunResultError";
   }
 }
 

@@ -655,6 +655,43 @@ describe("RunnerQueueStore", () => {
     expect(synced.bundleRef).toEqual(committed.bundleRef);
   });
 
+  it("reports whether a transition still owns the active run lease", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_lease_owner",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    const claimed = await store.claimNextDuePendingDispatch(Date.now());
+    if (!claimed.run) {
+      throw new Error("Expected claimNextDuePendingDispatch to return an active run.");
+    }
+
+    await expect(store.hasActiveRunLease({
+      eventId: "evt_lease_owner",
+      run: claimed.run,
+    })).resolves.toBe(true);
+    await expect(store.hasActiveRunLease({
+      eventId: "evt_lease_owner",
+      run: {
+        ...claimed.run,
+        runId: "run_other",
+      },
+    })).resolves.toBe(false);
+    await expect(store.hasActiveRunLease({
+      eventId: "evt_lease_owner",
+      policy: "same-event",
+      run: null,
+    })).resolves.toBe(true);
+  });
+
   it("records a bounded run trace and derives stable error codes", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
