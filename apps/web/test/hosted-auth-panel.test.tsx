@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
+  Captcha() {
+    return createElement("div", { "data-privy-captcha": "mounted" });
+  },
   useCreateWallet() {
     return {
       createWallet: mocks.createWallet,
@@ -112,6 +115,7 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   expect(container.querySelector('[data-hosted-phone-auth="signup"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth-passive-consent="hidden"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth-suppressed="no"]')).toBeTruthy();
+  expect(container.querySelectorAll("[data-privy-captcha]").length).toBe(1);
   expect(telegramButton?.textContent).toContain("Telegram");
   expect(emailButton?.textContent).toContain("Email");
   expect(container.textContent).toContain("By signing up, you agree to our");
