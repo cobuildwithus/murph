@@ -49,11 +49,8 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return this.runner.dispatch(input);
   }
 
-  async dispatchWithOutcome(
-    input: HostedExecutionDispatchRequest,
-    stagedPayloadId?: string | null,
-  ): Promise<HostedExecutionDispatchResult> {
-    return this.runner.dispatchWithOutcome(input, stagedPayloadId ?? null);
+  async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
+    return this.runner.dispatchWithOutcome(input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -209,10 +206,7 @@ function getUserRunnerStub(userId: string) {
     env as {
       USER_RUNNER: {
         getByName(name: string): {
-          dispatchWithOutcome(
-            input: HostedExecutionDispatchRequest,
-            stagedPayloadId?: string | null,
-          ): Promise<HostedExecutionDispatchResult>;
+          dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
           status(): Promise<HostedExecutionUserStatus>;
         };
       };

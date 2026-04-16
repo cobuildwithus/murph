@@ -19,10 +19,7 @@ import type {
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
-  dispatchWithOutcome(
-    input: HostedExecutionDispatchRequest,
-    stagedPayloadId?: string | null,
-  ): Promise<HostedExecutionDispatchResult>;
+  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   getEventStatus(input: { eventId: string }): Promise<HostedExecutionDispatchStatus | null>;
   status(): Promise<HostedExecutionUserStatus>;
 }

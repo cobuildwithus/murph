@@ -11,7 +11,6 @@ import {
   deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
-import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import { HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER } from "../src/internal-hosts.ts";
@@ -306,35 +305,6 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
   });
 
-  it("drains legacy reference outbox payloads through the private compatibility dispatch route", async () => {
-    const stub = createUserRunnerStub();
-    const env = createWorkerEnv(stub);
-    const dispatch = createReferenceOnlyDispatch("evt_reference_123");
-    const crypto = await resolveHostedUserCryptoContextForTest(env, dispatch.event.userId);
-    const payloadStore = createHostedDispatchPayloadStore({
-      bucket: env.BUNDLES,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    });
-    const storedDispatch = await payloadStore.writeStoredDispatch(dispatch);
-
-    if (storedDispatch.storage !== "reference") {
-      throw new Error("Expected the compatibility payload store to emit reference storage.");
-    }
-
-    const response = await worker.fetch(
-      await createSignedJsonControlRequest("/internal/dispatch/legacy-reference", storedDispatch, {
-        boundUserId: dispatch.event.userId,
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
-    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch, storedDispatch.stagedPayloadId);
-  });
-
   it("rejects internal dispatch requests when the bound user header is missing or mismatched", async () => {
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_123");
@@ -358,6 +328,29 @@ describe("cloudflare worker routes", () => {
     await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the dispatch user.",
     });
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+  });
+
+  it("keeps the removed legacy-reference dispatch route hidden from OIDC callers", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await createSignedJsonControlRequest("/internal/dispatch/legacy-reference", {
+        dispatchRef: {
+          eventId: "evt_legacy",
+          eventKind: "gateway.message.send",
+          occurredAt: "2026-04-16T10:00:00.000Z",
+          userId: "member_123",
+        },
+        stagedPayloadId: "staged/evt_legacy",
+        storage: "reference",
+      }, {
+        boundUserId: "member_123",
+      }),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(404);
     expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
 
@@ -1280,21 +1273,6 @@ function createDispatch(eventId: string): HostedExecutionDispatchRequest {
   };
 }
 
-function createReferenceOnlyDispatch(eventId: string): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      clientRequestId: "req_123",
-      kind: "gateway.message.send",
-      replyToMessageId: "5001",
-      sessionKey: "gwcs_secret",
-      text: "Please keep this private.",
-      userId: "member_123",
-    },
-    eventId,
-    occurredAt: "2026-04-16T10:00:00.000Z",
-  };
-}
-
 function createOutboxDelivery() {
   return {
     channel: "telegram",
@@ -1426,7 +1404,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       retryingEventId: null,
       userId: input.event.userId,
     })),
-    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest, _stagedPayloadId?: string | null) =>
+    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
       buildDispatchResultFixture(input.event.userId, input.eventId)),
     getEventStatus: vi.fn(async (input: { eventId: string }) => ({
       acknowledgedAt: "2026-04-16T10:00:00.000Z",
