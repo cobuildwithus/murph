@@ -9,6 +9,8 @@ import {
   configuredDeviceSyncProviderKeys,
   createConsoleDeviceSyncLogger,
   createConfiguredDeviceSyncRegistry,
+  deviceSyncProviderRuntimeSecretEnvKeys,
+  deviceSyncProviderRuntimeVariableEnvKeys,
   hasConfiguredDeviceSyncProviderConfigs,
   listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
@@ -115,6 +117,41 @@ test("shared provider-config helpers preserve descriptor order and report presen
   assert.equal(hasConfiguredDeviceSyncProviderConfigs({}), false);
   assert.equal(hasConfiguredDeviceSyncProviderConfigs(configs), true);
   assert.deepEqual(listConfiguredDeviceSyncProviderNames(configs), ["oura", "whoop"]);
+});
+
+test("shared provider runtime env key lists stay aligned with the configured providers", () => {
+  assert.deepEqual(deviceSyncProviderRuntimeSecretEnvKeys, [
+    "GARMIN_CLIENT_ID",
+    "GARMIN_CLIENT_SECRET",
+    "OURA_CLIENT_ID",
+    "OURA_CLIENT_SECRET",
+    "WHOOP_CLIENT_ID",
+    "WHOOP_CLIENT_SECRET",
+  ]);
+  assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
+    "GARMIN_API_BASE_URL",
+    "GARMIN_AUTH_BASE_URL",
+    "GARMIN_BACKFILL_DAYS",
+    "GARMIN_RECONCILE_DAYS",
+    "GARMIN_RECONCILE_INTERVAL_MS",
+    "GARMIN_REQUEST_TIMEOUT_MS",
+    "GARMIN_TOKEN_BASE_URL",
+    "OURA_API_BASE_URL",
+    "OURA_AUTH_BASE_URL",
+    "OURA_BACKFILL_DAYS",
+    "OURA_RECONCILE_DAYS",
+    "OURA_RECONCILE_INTERVAL_MS",
+    "OURA_REQUEST_TIMEOUT_MS",
+    "OURA_SCOPES",
+    "OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
+    "WHOOP_BACKFILL_DAYS",
+    "WHOOP_BASE_URL",
+    "WHOOP_RECONCILE_DAYS",
+    "WHOOP_RECONCILE_INTERVAL_MS",
+    "WHOOP_REQUEST_TIMEOUT_MS",
+    "WHOOP_SCOPES",
+    "WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
+  ]);
 });
 
 test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only runtime fields", () => {
@@ -279,6 +316,21 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs rejects unknown provi
         "runtime.providerConfigs",
       ),
     /runtime\.providerConfigs\.whoop\.scopes\[1\] must be a non-empty string/u,
+  );
+
+  assert.throws(
+    () =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          oura: {
+            clientId: "oura-client-id",
+            clientSecret: "oura-client-secret",
+            webhookVerificationToken: "verify-token-for-tests",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    /runtime\.providerConfigs\.oura\.webhookVerificationToken is not supported in serialized runtime config/u,
   );
 });
 

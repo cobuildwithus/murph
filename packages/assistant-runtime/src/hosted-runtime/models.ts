@@ -1,7 +1,7 @@
 import { importSharePackIntoVault } from "@murphai/core";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import type {
-  ConfiguredDeviceSyncProviderConfigs,
+  SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 import type {
   HostedExecutionDispatchRequest,
@@ -23,7 +23,7 @@ export interface HostedAssistantRuntimeChannelCapabilities {
 }
 
 export interface HostedAssistantRuntimeDeviceSyncConfig {
-  providerConfigs: ConfiguredDeviceSyncProviderConfigs;
+  providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
   publicBaseUrl: string;
   secret: string;
 }

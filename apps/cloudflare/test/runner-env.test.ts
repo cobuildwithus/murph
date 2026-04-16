@@ -7,6 +7,13 @@ import {
   buildHostedRunnerResolvedConfig,
   filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
+import { readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
+import {
+  HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
+} from "../scripts/deploy-automation/worker-secret-names.ts";
+import {
+  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
+} from "../scripts/deploy-automation/worker-optional-vars.ts";
 
 describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking unrelated worker vars", () => {
@@ -83,16 +90,16 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("rewrites loopback runner callback urls to the local container host alias", () => {
+  it("rewrites only forwarded loopback runner callback urls to the local container host alias", () => {
     expect(buildHostedRunnerContainerEnv({
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "device-sync,linq",
       DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3000/api/device-sync",
+      GARMIN_CLIENT_ID: "garmin-client",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       LINQ_API_BASE_URL: "http://localhost:4011",
       TELEGRAM_API_BASE_URL: "https://telegram.example.test",
     })).toEqual({
-      DEVICE_SYNC_PUBLIC_BASE_URL: "http://host.docker.internal:3000/api/device-sync",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
@@ -315,6 +322,41 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       userEnv: {},
     });
   });
+
+  it("derives device-sync runtime config from the shared config source without forwarding raw provider env", () => {
+    const runtime = buildHostedRunnerJobRuntimeConfig({
+      configSource: {
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://murph.example/api/device-sync",
+        DEVICE_SYNC_SECRET: "runtime-codec-secret",
+        GARMIN_API_BASE_URL: "https://garmin.example",
+        GARMIN_CLIENT_ID: "garmin-client",
+        GARMIN_CLIENT_SECRET: "garmin-secret",
+        OURA_WEBHOOK_VERIFICATION_TOKEN: "control-plane-only",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      forwardedEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      runnerSecrets: {},
+    });
+
+    expect(runtime.forwardedEnv).toEqual({
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+    });
+    expect(runtime.resolvedConfig).toBeDefined();
+    expect(runtime.resolvedConfig?.channelCapabilities.telegramBotConfigured).toBe(true);
+    expect(runtime.resolvedConfig?.deviceSync).toEqual({
+      providerConfigs: {
+        garmin: {
+          apiBaseUrl: "https://garmin.example",
+          clientId: "garmin-client",
+          clientSecret: "garmin-secret",
+        },
+      },
+      publicBaseUrl: "https://murph.example/api/device-sync",
+      secret: "runtime-codec-secret",
+    });
+  });
 });
 
 describe("buildHostedRunnerResolvedConfig", () => {
@@ -367,5 +409,31 @@ describe("buildHostedRunnerResolvedConfig", () => {
         secret: "secret_123",
       },
     });
+  });
+});
+
+describe("hosted deploy automation device-sync surface", () => {
+  it("keeps device-sync outside the default child env profiles while reusing shared provider env key lists", () => {
+    const deployEnv = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_WORKER_NAME: "murph-runner",
+    });
+
+    expect(deployEnv.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
+      "hosted-email,linq,mapbox,telegram",
+    );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
+      expect.arrayContaining(["GARMIN_CLIENT_ID", "GARMIN_CLIENT_SECRET"]),
+    );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
+      expect.arrayContaining(["GARMIN_API_BASE_URL", "WHOOP_SCOPES"]),
+    );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
+      "OURA_WEBHOOK_VERIFICATION_TOKEN",
+    );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
+      "OURA_WEBHOOK_VERIFICATION_TOKEN",
+    );
   });
 });

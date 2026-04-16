@@ -260,5 +260,25 @@ describe("hosted runtime parser coverage", () => {
         },
       },
     })).toThrow(/fetchImpl is not supported in serialized runtime config/u);
+
+    expect(() => parseHostedAssistantRuntimeConfig({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: {
+          providerConfigs: {
+            oura: {
+              clientId: "oura-client",
+              clientSecret: "oura-secret",
+              webhookVerificationToken: "control-plane-only",
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "secret_123",
+        },
+      },
+    })).toThrow(/webhookVerificationToken is not supported in serialized runtime config/u);
   });
 });

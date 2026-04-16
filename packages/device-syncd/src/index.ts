@@ -18,6 +18,8 @@ export {
   createConfiguredDeviceSyncProvidersFromConfigs,
   createConsoleDeviceSyncLogger,
   configuredDeviceSyncProviderKeys,
+  deviceSyncProviderRuntimeSecretEnvKeys,
+  deviceSyncProviderRuntimeVariableEnvKeys,
   hasConfiguredDeviceSyncProviderConfigs,
   listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
@@ -32,6 +34,8 @@ export type {
   ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
   LoadedDeviceSyncEnvironment,
+  SerializableConfiguredDeviceSyncProviderConfigByKey,
+  SerializableConfiguredDeviceSyncProviderConfigs,
 } from "./config.ts";
 export { buildPublicDeviceSyncErrorPayload, startDeviceSyncHttpServer } from "./http.ts";
 export type { CreateDeviceSyncHttpServerInput } from "./http.ts";

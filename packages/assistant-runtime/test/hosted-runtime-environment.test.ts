@@ -73,6 +73,7 @@ test("hosted runtime config copies user and forwarded env maps", () => {
 
 test("hosted runtime config deep-clones resolved device-sync provider config", () => {
   const platform = createHostedRuntimePlatformStub();
+  const ouraScopes = ["daily", "sleep"];
   const resolvedConfig = createHostedRuntimeResolvedConfig({
     deviceSync: {
       providerConfigs: {
@@ -83,8 +84,9 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
         oura: {
           clientId: "oura-client",
           clientSecret: "oura-secret",
-          scopes: ["daily", "sleep"],
-        },
+          scopes: ouraScopes,
+          webhookVerificationToken: "control-plane-only",
+        } as never,
         whoop: {
           clientId: "whoop-client",
           clientSecret: "whoop-secret",
@@ -103,7 +105,34 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
     platform,
   );
 
-  assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
+  assert.deepEqual(
+    normalized.resolvedConfig.channelCapabilities,
+    resolvedConfig.channelCapabilities,
+  );
+  assert.equal(
+    normalized.resolvedConfig.deviceSync?.publicBaseUrl,
+    resolvedConfig.deviceSync?.publicBaseUrl,
+  );
+  assert.equal(
+    normalized.resolvedConfig.deviceSync?.secret,
+    resolvedConfig.deviceSync?.secret,
+  );
+  assert.deepEqual(
+    normalized.resolvedConfig.deviceSync?.providerConfigs.garmin,
+    resolvedConfig.deviceSync?.providerConfigs.garmin,
+  );
+  assert.deepEqual(
+    normalized.resolvedConfig.deviceSync?.providerConfigs.oura,
+    {
+      clientId: "oura-client",
+      clientSecret: "oura-secret",
+      scopes: ["daily", "sleep"],
+    },
+  );
+  assert.deepEqual(
+    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop,
+    resolvedConfig.deviceSync?.providerConfigs.whoop,
+  );
   assert.notEqual(normalized.resolvedConfig.deviceSync, resolvedConfig.deviceSync);
   assert.notEqual(
     normalized.resolvedConfig.deviceSync?.providerConfigs,
@@ -116,6 +145,17 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
   assert.notEqual(
     normalized.resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
     resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      normalized.resolvedConfig.deviceSync?.providerConfigs.oura ?? {},
+      "webhookVerificationToken",
+    ),
+    false,
+  );
+  assert.notEqual(
+    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
+    ouraScopes,
   );
 });
 
