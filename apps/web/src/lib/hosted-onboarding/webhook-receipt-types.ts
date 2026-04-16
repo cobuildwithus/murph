@@ -147,8 +147,8 @@ export type HostedWebhookReceiptPersistenceClient = PrismaClient | Prisma.Transa
 export type HostedWebhookDispatchEnqueueInput = {
   dispatch: HostedExecutionDispatchRequest;
   eventId: string;
-  prismaOrTransaction: HostedWebhookReceiptPersistenceClient;
   source: string;
+  transaction: Prisma.TransactionClient;
 };
 
 export type HostedWebhookReceiptHandlers = {
