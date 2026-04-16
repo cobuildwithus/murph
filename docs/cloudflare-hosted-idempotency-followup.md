@@ -11,6 +11,7 @@ This repo now has durable owner-specific idempotency lanes for every currently i
 - hosted one-shot runs now collect due outbound side effects before the durable commit and persist those side effects alongside the committed hosted result
 - hosted assistant replies still create durable assistant outbox intents during the one-shot run, but post-commit delivery now resumes from the committed side-effect journal instead of treating assistant sends as a separate special-case path
 - hosted side-effect sends are reconciled through a hosted delivery journal so later hosted wakes can mark already-recorded actions sent without re-sending them first
+- hosted non-idempotent assistant delivery now treats the hosted delivery journal as the authoritative recovery surface, keeps `pending` as an implicit no-record state, persists `sending`, `sent`, `failed`, and `failed_ambiguous` journal states, disables hosted fallback to persisted outbox delivery snapshots, and promotes stale non-idempotent `sending` records to terminal `failed_ambiguous` instead of retrying confirmation forever
 - Cloudflare-bound hosted execution dispatches from onboarding, hosted share acceptance, and hosted device-sync wakes now go through the shared Postgres `execution_outbox` instead of fire-and-forget dispatches
 - hosted onboarding webhook receipts now persist the planned response plus receipt-local side-effect state for Cloudflare dispatches and Linq or Telegram replies before send, transactionally queue hosted execution dispatches into `execution_outbox`, and reclaim expired processing leases so abandoned attempts can resume instead of burning the event
 - third-party webhook request paths now acknowledge after the durable receipt and `execution_outbox` enqueue complete; any immediate hosted-execution drain is only a non-blocking best-effort nudge, with cron recovery still owning retries
@@ -38,3 +39,9 @@ Anywhere hosted code gains a new externally visible side effect, it should follo
 5. When the upstream transport cannot offer stronger idempotency, keep the residual "send succeeded but sent marker write failed" edge explicit and narrow.
 
 The current hosted code already follows that rule through owner-specific durable lanes: the Cloudflare committed side-effect journal, the shared Postgres `execution_outbox`, the hosted webhook receipt side-effect journal, the hosted Stripe fact queue, and the invoice-owned RevNet issuance state. Any future hosted outward effect should extend one of those journaled patterns instead of reintroducing direct fire-and-forget sends.
+
+For hosted assistant delivery specifically:
+
+- idempotent transports may still redrive from pending journal state when their transport contract allows it
+- non-idempotent transports must never auto-resend once the journal enters `failed_ambiguous`
+- local outbox delivery snapshots remain useful execution residue, but they are no longer authoritative hosted recovery proof on their own

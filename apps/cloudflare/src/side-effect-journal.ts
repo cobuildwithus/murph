@@ -1,5 +1,7 @@
 import {
   parseHostedAssistantDeliveryRecord,
+  sameHostedAssistantDeliveryAttempt,
+  sameHostedAssistantDeliveryFailure,
   sameHostedAssistantDeliveryReceipt,
   sameHostedAssistantDeliverySideEffectIdentity,
   type HostedAssistantDeliveryRecord,
@@ -63,7 +65,7 @@ export function createHostedAssistantDeliveryJournalStore(
       }
 
       assertAssistantDeliveryQueryMatchesRecord(query, existing);
-      if (existing.state !== "prepared") {
+      if (existing.state !== "pending" && existing.state !== "sending") {
         return false;
       }
 
@@ -199,7 +201,22 @@ function mergeHostedAssistantDeliveryRecord(
   next: HostedAssistantDeliveryRecord,
 ): HostedAssistantDeliveryRecord {
   if (!existing) {
-    return next;
+    return next.state === "prepared"
+      ? {
+          ...next,
+          state: "sending",
+          attempt: {
+            channel: null,
+            idempotencyKey: null,
+            messageLength: null,
+            providerMessageId: null,
+            providerThreadId: null,
+            startedAt: next.recordedAt,
+            target: null,
+            targetKind: null,
+          },
+        }
+      : next;
   }
 
   if (!sameHostedAssistantDeliverySideEffectIdentity(existing, next)) {
@@ -209,7 +226,7 @@ function mergeHostedAssistantDeliveryRecord(
   }
 
   if (existing.state === "sent") {
-    if (next.state === "prepared") {
+    if (next.state !== "sent") {
       return existing;
     }
 
@@ -222,5 +239,50 @@ function mergeHostedAssistantDeliveryRecord(
     return existing;
   }
 
-  return next.state === "prepared" ? existing : next;
+  if (existing.state === "failed_ambiguous") {
+    if (
+      next.state === "failed_ambiguous"
+      && sameHostedAssistantDeliveryAttempt(existing.attempt, next.attempt)
+      && sameHostedAssistantDeliveryFailure(existing.failure, next.failure)
+    ) {
+      return existing;
+    }
+
+    return existing;
+  }
+
+  if (next.state === "prepared") {
+    return existing;
+  }
+
+  if (next.state === "pending") {
+    return existing;
+  }
+
+  if (existing.state === "pending") {
+    return next;
+  }
+
+  if (existing.state === "sending") {
+    if (next.state === "sending") {
+      return sameHostedAssistantDeliveryAttempt(existing.attempt, next.attempt)
+        ? existing
+        : next;
+    }
+
+    return next;
+  }
+
+  if (existing.state === "failed") {
+    if (next.state === "failed") {
+      return sameHostedAssistantDeliveryAttempt(existing.attempt, next.attempt)
+        && sameHostedAssistantDeliveryFailure(existing.failure, next.failure)
+        ? existing
+        : next;
+    }
+
+    return next;
+  }
+
+  return next;
 }

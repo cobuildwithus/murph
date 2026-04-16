@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedAssistantDeliveryFailedRecord,
   buildHostedAssistantDeliveryPreparedRecord,
+  buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
 
 const mocks = vi.hoisted(() => ({
+  createAssistantDeliveryAmbiguousError: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
@@ -27,6 +30,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 vi.mock("@murphai/assistant-engine", () => ({
+  createAssistantDeliveryAmbiguousError: mocks.createAssistantDeliveryAmbiguousError,
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
@@ -50,7 +54,13 @@ const HOSTED_RUN_CONTEXT = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.normalizeAssistantDeliveryError.mockImplementation((error: Error) => ({
+  mocks.createAssistantDeliveryAmbiguousError.mockImplementation((cause?: { code?: string | null; message?: string }) => ({
+    code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+    message: cause?.message ?? "ambiguous",
+    retryable: false,
+  }));
+  mocks.normalizeAssistantDeliveryError.mockImplementation((error: Error & { code?: string | null }) => ({
+    code: error.code ?? null,
     message: error.message,
   }));
 });
@@ -200,6 +210,11 @@ describe("hosted runtime callbacks", () => {
     ]);
 
     expect(observedDispatchHooks).toBeDefined();
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowPersistedDeliveryRecovery: false,
+      }),
+    );
   });
 
   it("emits a structured hosted log when a committed delivery stays retryable", async () => {
@@ -505,6 +520,57 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("reports terminal ambiguity as failed_ambiguous in hosted delivery outcomes", async () => {
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue({
+      deliveryError: {
+        code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        message: "Assistant outbound delivery could not be confirmed safely.",
+      },
+      intent: {
+        status: "failed",
+      },
+      session: null,
+    });
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_failed_ambiguous_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_failed_ambiguous",
+          effectId: "intent_failed_ambiguous",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(outcomes).toEqual([
+      {
+        deliveryChannel: null,
+        deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        deliveryErrorMessage: "Assistant outbound delivery could not be confirmed safely.",
+        deliveryStatus: "failed_ambiguous",
+        effectFingerprint: "dedupe_failed_ambiguous",
+        effectId: "intent_failed_ambiguous",
+        journalMethod: null,
+        journalStatus: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+  });
+
   it("emits a structured hosted log when post-commit dispatch throws a retry-classified error", async () => {
     const error = Object.assign(
       new Error("Linq request POST /chats failed with HTTP 429."),
@@ -623,7 +689,7 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("writes prepared and sent delivery records through the hosted side-effect journal hooks", async () => {
+  it("writes sending and sent delivery records through the hosted side-effect journal hooks", async () => {
     let observedDispatchHooks:
       | {
           prepareDispatchIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<void>;
@@ -631,10 +697,19 @@ describe("hosted runtime callbacks", () => {
         }
       | undefined;
     const writes: object[] = [];
-    const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
+    const sendingRecord = buildHostedAssistantDeliverySendingRecord({
+      attempt: {
+        channel: "email",
+        idempotencyKey: null,
+        messageLength: 13,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: "user@example.com",
+        targetKind: "explicit",
+      },
       dedupeKey: "dedupe_123",
       effectId: "intent_123",
-      recordedAt: "2026-04-08T00:00:00.000Z",
     });
     const sentRecord = buildHostedAssistantDeliverySentRecord({
       dedupeKey: "dedupe_123",
@@ -694,13 +769,16 @@ describe("hosted runtime callbacks", () => {
     assert.ok(observedDispatchHooks);
     await observedDispatchHooks.prepareDispatchIntent({
       intent: {
+        channel: "email",
         dedupeKey: "dedupe_123",
+        explicitTarget: "user@example.com",
         intentId: "intent_123",
         lastAttemptAt: "2026-04-08T00:00:00.000Z",
+        message: "hello there!!",
       },
       vault: "/tmp/vault",
     });
-    assert.deepEqual(writes[0], preparedRecord);
+    assert.deepEqual(writes[0], sendingRecord);
 
     const resolved = await observedDispatchHooks.resolveDeliveredIntent({
       intent: {
@@ -771,16 +849,31 @@ describe("hosted runtime callbacks", () => {
       assert.ok(observedDispatchHooks);
       await observedDispatchHooks.prepareDispatchIntent({
         intent: {
+          bindingDelivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          channel: "telegram",
           dedupeKey: "dedupe_123",
           intentId: "intent_123",
+          message: "fallback",
         },
         vault: "/tmp/vault",
       });
       assert.deepEqual(writes, [
-        buildHostedAssistantDeliveryPreparedRecord({
+        buildHostedAssistantDeliverySendingRecord({
+          attempt: {
+            channel: "telegram",
+            idempotencyKey: null,
+            messageLength: 8,
+            providerMessageId: null,
+            providerThreadId: null,
+            startedAt: "2026-04-08T02:03:04.000Z",
+            target: "thread_123",
+            targetKind: "thread",
+          },
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
-          recordedAt: "2026-04-08T02:03:04.000Z",
         }),
       ]);
 
@@ -798,7 +891,7 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it("clears prepared delivery records through the hosted side-effect journal hooks", async () => {
+  it("clears non-terminal delivery records through the hosted side-effect journal hooks", async () => {
     let observedDispatchHooks:
       | {
           clearPreparedIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<void>;
@@ -856,7 +949,7 @@ describe("hosted runtime callbacks", () => {
           journalMethod: "DELETE",
           retryable: true,
         }),
-        message: "Hosted assistant delivery clearing prepared journal intent.",
+        message: "Hosted assistant delivery clearing non-terminal journal intent.",
         phase: "side-effects.draining",
       }),
     );
@@ -1129,7 +1222,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("reconciles delivered intents from the local record when the journal is still prepared", async () => {
+  it("reconciles delivered intents from the local record only for idempotent hosted transports", async () => {
     let observedDispatchHooks:
       | {
           resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
@@ -1177,15 +1270,16 @@ describe("hosted runtime callbacks", () => {
     assert.ok(observedDispatchHooks);
     const resolved = await observedDispatchHooks.resolveDeliveredIntent({
       intent: {
+        channel: "linq",
         dedupeKey: "dedupe_123",
         delivery: {
-          channel: "email",
+          channel: "linq",
           messageLength: 5,
           providerMessageId: "provider_message_123",
-          providerThreadId: null,
+          providerThreadId: "chat_123",
           sentAt: "2026-04-08T00:01:00.000Z",
-          target: "user@example.com",
-          targetKind: "explicit",
+          target: "chat_123",
+          targetKind: "thread",
         },
         deliveryIdempotencyKey: "idem_fallback",
         intentId: "intent_123",
@@ -1194,27 +1288,27 @@ describe("hosted runtime callbacks", () => {
     });
 
     assert.deepEqual(resolved, {
-      channel: "email",
+      channel: "linq",
       idempotencyKey: "idem_fallback",
       messageLength: 5,
       providerMessageId: "provider_message_123",
-      providerThreadId: null,
+      providerThreadId: "chat_123",
       sentAt: "2026-04-08T00:01:00.000Z",
-      target: "user@example.com",
-      targetKind: "explicit",
+      target: "chat_123",
+      targetKind: "thread",
     });
     assert.deepEqual(writes, [
       buildHostedAssistantDeliverySentRecord({
         dedupeKey: "dedupe_123",
         delivery: {
-          channel: "email",
+          channel: "linq",
           idempotencyKey: "idem_fallback",
           messageLength: 5,
           providerMessageId: "provider_message_123",
-          providerThreadId: null,
+          providerThreadId: "chat_123",
           sentAt: "2026-04-08T00:01:00.000Z",
-          target: "user@example.com",
-          targetKind: "explicit",
+          target: "chat_123",
+          targetKind: "thread",
         },
         effectId: "intent_123",
       }),
@@ -1232,6 +1326,289 @@ describe("hosted runtime callbacks", () => {
         phase: "side-effects.draining",
       }),
     );
+  });
+
+  it("marks stale non-idempotent sending records as terminally ambiguous", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:03:30.000Z"));
+
+    try {
+      let observedDispatchHooks:
+        | {
+            resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+          }
+        | undefined;
+      const writes: object[] = [];
+      const sendingRecord = buildHostedAssistantDeliverySendingRecord({
+        attempt: {
+          channel: "telegram",
+          idempotencyKey: "assistant-outbox:intent_123",
+          messageLength: 2,
+          providerMessageId: null,
+          providerThreadId: null,
+          startedAt: "2026-04-08T00:00:00.000Z",
+          target: "thread_123",
+          targetKind: "thread",
+        },
+        dedupeKey: "dedupe_123",
+        effectId: "intent_123",
+      });
+
+      mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+        observedDispatchHooks = input.dispatchHooks;
+      });
+
+      await drainHostedCommittedAssistantDeliveriesAfterCommit({
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_terminal_ambiguity",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          async readAssistantDeliveryRecord() {
+            return sendingRecord;
+          },
+          async writeAssistantDeliveryRecord(record) {
+            writes.push(record);
+            return record;
+          },
+        }),
+        assistantDeliveryEffects: [
+          buildHostedAssistantDeliverySideEffect({
+            dedupeKey: "dedupe_123",
+            effectId: "intent_123",
+          }),
+        ],
+        vaultRoot: "/tmp/vault",
+      });
+
+      assert.ok(observedDispatchHooks);
+      await expect(
+        observedDispatchHooks.resolveDeliveredIntent({
+          intent: {
+            bindingDelivery: {
+              kind: "thread",
+              target: "thread_123",
+            },
+            channel: "telegram",
+            dedupeKey: "dedupe_123",
+            deliveryTransportIdempotent: false,
+            explicitTarget: null,
+            intentId: "intent_123",
+            lastAttemptAt: "2026-04-08T00:00:00.000Z",
+            message: "yo",
+          },
+          vault: "/tmp/vault",
+        }),
+      ).rejects.toMatchObject({
+        code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        retryable: false,
+      });
+
+      assert.deepEqual(writes, [
+        buildHostedAssistantDeliveryFailedRecord({
+          attempt: {
+            channel: "telegram",
+            idempotencyKey: "assistant-outbox:intent_123",
+            messageLength: 2,
+            providerMessageId: null,
+            providerThreadId: null,
+            startedAt: "2026-04-08T00:00:00.000Z",
+            target: "thread_123",
+            targetKind: "thread",
+          },
+          dedupeKey: "dedupe_123",
+          effectId: "intent_123",
+          failure: {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            failedAt: "2026-04-08T00:03:30.000Z",
+            message: "The hosted delivery journal remained in sending state past the confirmation grace window.",
+          },
+          state: "failed_ambiguous",
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats terminal journal ambiguity as authoritative over any local delivery snapshot", async () => {
+    let observedDispatchHooks:
+      | {
+          resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+        }
+      | undefined;
+    const ambiguousRecord = buildHostedAssistantDeliveryFailedRecord({
+      attempt: {
+        channel: "telegram",
+        idempotencyKey: "assistant-outbox:intent_123",
+        messageLength: 2,
+        providerMessageId: "provider_123",
+        providerThreadId: "thread_123",
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: "thread_123",
+        targetKind: "thread",
+      },
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+      failure: {
+        code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        failedAt: "2026-04-08T00:03:30.000Z",
+        message: "The hosted delivery journal remained in sending state past the confirmation grace window.",
+      },
+      state: "failed_ambiguous",
+    });
+    const writes: object[] = [];
+
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+      observedDispatchHooks = input.dispatchHooks;
+    });
+
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_terminal_authority",
+        occurredAt: "2026-04-08T00:04:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        async readAssistantDeliveryRecord() {
+          return ambiguousRecord;
+        },
+        async writeAssistantDeliveryRecord(record) {
+          writes.push(record);
+          return record;
+        },
+      }),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_123",
+          effectId: "intent_123",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    assert.ok(observedDispatchHooks);
+    await expect(
+      observedDispatchHooks.resolveDeliveredIntent({
+        intent: {
+          bindingDelivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          channel: "telegram",
+          dedupeKey: "dedupe_123",
+          delivery: {
+            channel: "telegram",
+            idempotencyKey: "assistant-outbox:intent_123",
+            messageLength: 2,
+            providerMessageId: "provider_123",
+            providerThreadId: "thread_123",
+            sentAt: "2026-04-08T00:00:10.000Z",
+            target: "thread_123",
+            targetKind: "thread",
+          },
+          deliveryTransportIdempotent: false,
+          explicitTarget: null,
+          intentId: "intent_123",
+          lastAttemptAt: "2026-04-08T00:00:00.000Z",
+          message: "yo",
+        },
+        vault: "/tmp/vault",
+      }),
+    ).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      retryable: false,
+    });
+    expect(writes).toEqual([]);
+  });
+
+  it("treats terminal journal failure as authoritative for non-idempotent recovery", async () => {
+    let observedDispatchHooks:
+      | {
+          resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+        }
+      | undefined;
+    const failedRecord = buildHostedAssistantDeliveryFailedRecord({
+      attempt: {
+        channel: "telegram",
+        idempotencyKey: "assistant-outbox:intent_123",
+        messageLength: 2,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: "thread_123",
+        targetKind: "thread",
+      },
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+      failure: {
+        code: "ASSISTANT_DELIVERY_FAILED",
+        failedAt: "2026-04-08T00:02:00.000Z",
+        message: "Telegram rejected the send.",
+      },
+      state: "failed",
+    });
+
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+      observedDispatchHooks = input.dispatchHooks;
+    });
+
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_terminal_failure",
+        occurredAt: "2026-04-08T00:03:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        async readAssistantDeliveryRecord() {
+          return failedRecord;
+        },
+      }),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_123",
+          effectId: "intent_123",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    assert.ok(observedDispatchHooks);
+    await expect(
+      observedDispatchHooks.resolveDeliveredIntent({
+        intent: {
+          bindingDelivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          channel: "telegram",
+          dedupeKey: "dedupe_123",
+          deliveryTransportIdempotent: false,
+          explicitTarget: null,
+          intentId: "intent_123",
+          lastAttemptAt: "2026-04-08T00:00:00.000Z",
+          message: "yo",
+        },
+        vault: "/tmp/vault",
+      }),
+    ).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_FAILED",
+      message: "Telegram rejected the send.",
+      retryable: false,
+    });
   });
 
   it("marks delivery confirmation pending when journal reconciliation fails after a local send", async () => {
@@ -1282,16 +1659,17 @@ describe("hosted runtime callbacks", () => {
     await expect(
       observedDispatchHooks.resolveDeliveredIntent({
         intent: {
+          channel: "linq",
           dedupeKey: "dedupe_123",
           delivery: {
-            channel: "email",
+            channel: "linq",
             idempotencyKey: "idem_123",
             messageLength: 5,
             providerMessageId: "provider_message_123",
-            providerThreadId: null,
+            providerThreadId: "chat_123",
             sentAt: "2026-04-08T00:01:00.000Z",
-            target: "user@example.com",
-            targetKind: "explicit",
+            target: "chat_123",
+            targetKind: "thread",
           },
           intentId: "intent_123",
         },
@@ -1372,16 +1750,17 @@ describe("hosted runtime callbacks", () => {
     assert.ok(observedDispatchHooks);
     const thrown = await observedDispatchHooks.resolveDeliveredIntent({
       intent: {
+        channel: "linq",
         dedupeKey: "dedupe_123",
         delivery: {
-          channel: "email",
+          channel: "linq",
           idempotencyKey: "idem_123",
           messageLength: 5,
           providerMessageId: "provider_message_123",
-          providerThreadId: null,
+          providerThreadId: "chat_123",
           sentAt: "2026-04-08T00:01:00.000Z",
-          target: "user@example.com",
-          targetKind: "explicit",
+          target: "chat_123",
+          targetKind: "thread",
         },
         intentId: "intent_123",
       },
@@ -1460,9 +1839,11 @@ describe("hosted runtime callbacks", () => {
     await expect(
       observedDispatchHooks.prepareDispatchIntent({
         intent: {
+          channel: "telegram",
           dedupeKey: "dedupe_123",
           intentId: "intent_123",
           lastAttemptAt: "2026-04-08T00:00:00.000Z",
+          message: "missing hooks",
         },
         vault: "/tmp/vault",
       }),

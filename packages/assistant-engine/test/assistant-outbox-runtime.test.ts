@@ -237,6 +237,63 @@ describe('assistant outbox runtime', () => {
     expect(retried.intent.nextAttemptAt).toBe('2026-04-08T02:22:00.000Z')
   })
 
+  it('can disable persisted delivery recovery when the caller requires journal-only reconciliation', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-hosted-reconcile-')
+
+    const seed = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-08T02:30:00.000Z',
+      explicitTarget: 'chat_123',
+      message: 'hosted recovery only',
+      sessionId: 'session-hosted-reconcile',
+      turnId: 'turn-hosted-reconcile',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...seed,
+      attemptCount: 1,
+      delivery: createDelivery({
+        idempotencyKey: 'idem-old',
+        providerMessageId: 'provider-old',
+        sentAt: '2026-04-08T02:31:00.000Z',
+        target: 'chat_123',
+        targetKind: 'explicit',
+      }),
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey: 'idem-old',
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T02:31:00.000Z',
+      lastError: createConfirmationPendingError(),
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T02:31:00.000Z',
+    })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey: 'idem-new',
+        providerMessageId: 'provider-new',
+        sentAt: '2026-04-08T02:32:00.000Z',
+        target: 'chat_123',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      allowPersistedDeliveryRecovery: false,
+      intentId: seed.intentId,
+      now: new Date('2026-04-08T02:45:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-new')
+  })
+
   it('delivers immediately, reuses sent dedupe hits, and supports queue-only mode', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-deliver-')
     const prepareDispatchIntent = vi.fn(async () => {})

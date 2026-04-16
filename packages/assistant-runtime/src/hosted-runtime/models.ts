@@ -88,6 +88,7 @@ export interface HostedCommittedExecutionState {
 export type HostedAssistantDeliveryOutcomeStatus =
   | "abandoned"
   | "failed"
+  | "failed_ambiguous"
   | "missing-result"
   | "pending"
   | "retryable"

@@ -34,6 +34,7 @@ import {
   resolveAssistantOutboxIntentPath,
 } from './outbox/intents.js'
 import {
+  createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
@@ -65,6 +66,7 @@ const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
 export type { AssistantChannelDelivery }
 export {
+  createAssistantDeliveryAmbiguousError,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   shouldDispatchAssistantOutboxIntent,
@@ -248,6 +250,7 @@ export async function listAssistantOutboxIntentsLocal(
 }
 
 export async function dispatchAssistantOutboxIntent(input: {
+  allowPersistedDeliveryRecovery?: boolean
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   force?: boolean
@@ -330,7 +333,10 @@ export async function dispatchAssistantOutboxIntent(input: {
         intent: dispatchIntent,
         vault: input.vault,
       })) ??
-      resolvePersistedAssistantOutboxDelivery(dispatchIntent)
+      resolvePersistedAssistantOutboxDelivery(
+        dispatchIntent,
+        input.allowPersistedDeliveryRecovery !== false,
+      )
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
         delivery: reconciledDelivery,
@@ -782,8 +788,10 @@ function buildAssistantOutboxDeliveredIntent(input: {
 
 function resolvePersistedAssistantOutboxDelivery(
   intent: AssistantOutboxIntent,
+  allowPersistedDeliveryRecovery: boolean,
 ): AssistantChannelDelivery | null {
   if (
+    !allowPersistedDeliveryRecovery ||
     !intent.deliveryConfirmationPending ||
     !intent.deliveryTransportIdempotent ||
     !intent.delivery

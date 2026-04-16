@@ -114,6 +114,25 @@ export function createAssistantDeliveryConfirmationPendingError(
   })
 }
 
+export function createAssistantDeliveryAmbiguousError(
+  cause?: unknown,
+): AssistantDeliveryError & { retryable: false } {
+  const detail = cause ? normalizeAssistantDeliveryError(cause).message : null
+  const preserveMessage = readStringProperty(cause, 'code') === 'ASSISTANT_DELIVERY_AMBIGUOUS'
+    && detail
+    ? detail
+    : null
+  return {
+    ...assistantDeliveryErrorSchema.parse({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      message: preserveMessage ?? (detail
+        ? `Assistant outbound delivery could not be confirmed safely and will not be resent automatically. ${detail}`
+        : 'Assistant outbound delivery could not be confirmed safely and will not be resent automatically.'),
+    }),
+    retryable: false,
+  }
+}
+
 function readAssistantOutboxRetryableFlag(error: unknown): boolean | null {
   const contextRetryable = readBooleanProperty(readRecord(error)?.context, 'retryable')
   if (contextRetryable !== null) {
