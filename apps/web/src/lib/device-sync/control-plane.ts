@@ -104,6 +104,14 @@ export class HostedDeviceSyncControlPlane {
     return this.connections.handleWebhook(provider);
   }
 
+  async readWebhookRawBody() {
+    return this.connections.readWebhookRawBody();
+  }
+
+  async handleWebhookWithRawBody(provider: string, rawBody: Buffer) {
+    return this.connections.handleWebhook(provider, rawBody);
+  }
+
   async disconnectConnection(userId: string, connectionId: string) {
     return this.connections.disconnectConnection(userId, connectionId);
   }

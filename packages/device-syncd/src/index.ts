@@ -7,11 +7,12 @@ export {
 } from "./callback-redirect.ts";
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";
 export { createDeviceSyncRegistry } from "./registry.ts";
-export { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
-export type { DeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
+export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
 export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService } from "./service.ts";
 export type { CreateDeviceSyncServiceInput } from "./service.ts";
 export {
+  createConfiguredDeviceSyncRegistry,
+  createConfiguredDeviceSyncRegistryFromConfigs,
   createConfiguredDeviceSyncProviders,
   createConfiguredDeviceSyncProvidersFromConfigs,
   createConsoleDeviceSyncLogger,
@@ -30,7 +31,7 @@ export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";
 export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
 export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
-export { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "./providers/oura.ts";
+export { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export {
   createOuraWebhookSubscriptionClient,

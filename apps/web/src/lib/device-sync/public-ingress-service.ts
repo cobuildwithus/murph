@@ -113,11 +113,9 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
-  async handleWebhook(provider: string): Promise<HandleWebhookResult> {
-    let rawBody: Buffer;
-
+  async readWebhookRawBody(): Promise<Buffer> {
     try {
-      rawBody = await readRawBodyBuffer(this.context.request, {
+      return await readRawBodyBuffer(this.context.request, {
         limitBytes: DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
       });
     } catch (error) {
@@ -132,8 +130,11 @@ export class HostedDeviceSyncPublicIngressService {
 
       throw error;
     }
+  }
 
-    return this.ingress.handleWebhook(provider, this.context.request.headers, rawBody);
+  async handleWebhook(provider: string, rawBody?: Buffer): Promise<HandleWebhookResult> {
+    const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
+    return this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody);
   }
 
   async disconnectConnection(userId: string, connectionId: string): Promise<{

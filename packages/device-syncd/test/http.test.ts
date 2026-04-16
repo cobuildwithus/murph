@@ -1524,10 +1524,13 @@ test("device sync http handler short-circuits public webhook POSTs when provider
     clientSecret: "oura-client-secret",
     webhookVerificationToken: "verify-token-for-tests",
   });
-  preflightProvider.webhookAdmin!.handleWebhookPreflight = async ({ method }) => {
+  let observedUrl: string | null = null;
+  preflightProvider.webhookAdmin!.handleWebhookPreflight = async ({ method, url }) => {
     if (method !== "POST") {
       return null;
     }
+
+    observedUrl = url.toString();
 
     return {
       status: 200,
@@ -1545,7 +1548,7 @@ test("device sync http handler short-circuits public webhook POSTs when provider
       },
     }),
     method: "POST",
-    url: "/device-sync/webhooks/oura",
+    url: "/device-sync/webhooks/oura?via=preflight",
     surface: "public",
     body: JSON.stringify({
       ok: true,
@@ -1553,6 +1556,10 @@ test("device sync http handler short-circuits public webhook POSTs when provider
   });
 
   assert.equal(response.statusCode, 200);
+  assert.equal(
+    observedUrl,
+    "https://sync.example.test/device-sync/webhooks/oura?via=preflight",
+  );
   assert.deepEqual(response.readJson(), {
     challenge: "demo-preflight-challenge",
   });

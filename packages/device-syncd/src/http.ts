@@ -340,7 +340,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     pattern: /^\/webhooks\/([^/]+)$/u,
     paramNames: ["provider"],
     surface: "public",
-    async handle({ request, response, service, bodyLimitBytes, params }) {
+    async handle({ request, response, service, bodyLimitBytes, params, url }) {
       const rawBody = await readRequestBody(request, bodyLimitBytes);
       const provider = params.provider ?? "";
       const headers = toFetchHeaders(request);
@@ -348,7 +348,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
         provider,
         registry: service.registry,
         method: request.method ?? "POST",
-        url: new URL(request.url ?? "/", `${service.publicBaseUrl}/`),
+        url,
         headers,
         rawBody,
       });
