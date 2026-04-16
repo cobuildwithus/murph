@@ -279,6 +279,75 @@ describe('assistant store seam', () => {
     })
   })
 
+  it('upgrades a direct actor-scoped session when a later direct thread id arrives', async () => {
+    const store = await loadActualStore()
+    const vaultRoot = await createVaultRoot('assistant-store-runtime-direct-upgrade-')
+
+    const created = await store.resolveAssistantSession({
+      actorId: '+15550001111',
+      channel: 'linq',
+      identityId: 'linq:member-1',
+      target: createTarget(),
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    expect(created).toMatchObject({
+      created: true,
+      session: {
+        binding: {
+          actorId: '+15550001111',
+          delivery: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+    })
+
+    const upgraded = await store.resolveAssistantSession({
+      actorId: '+15550001111',
+      channel: 'linq',
+      createIfMissing: false,
+      identityId: 'linq:member-1',
+      threadId: 'chat_123',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    expect(upgraded).toMatchObject({
+      created: false,
+      session: {
+        sessionId: created.session.sessionId,
+        binding: {
+          actorId: '+15550001111',
+          delivery: {
+            kind: 'thread',
+            target: 'chat_123',
+          },
+          threadId: 'chat_123',
+          threadIsDirect: true,
+        },
+      },
+    })
+
+    await expect(
+      store.resolveAssistantSession({
+        actorId: '+15550001111',
+        channel: 'linq',
+        createIfMissing: false,
+        identityId: 'linq:member-1',
+        threadId: 'chat_123',
+        threadIsDirect: true,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      created: false,
+      session: {
+        sessionId: created.session.sessionId,
+      },
+    })
+  })
+
   it('reports detailed not-found diagnostics for explicit session ids and distinguishes helper errors', async () => {
     const store = await loadActualStore()
     const vaultRoot = await createVaultRoot('assistant-store-runtime-missing-')

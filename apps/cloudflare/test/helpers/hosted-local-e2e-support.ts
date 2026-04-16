@@ -4,12 +4,15 @@ import { createServer as createNetServer } from "node:net";
 export async function startAssistantProviderStubServer(input: {
   messageText?: string;
   modelId?: string;
+  onRequestBody?: (body: string) => void;
+  resolveMessageText?: (body: string) => string;
 } = {}): Promise<ReturnType<typeof createServer>> {
   const messageText = input.messageText ?? "Got it - I saw your message and I'm here.";
   const modelId = input.modelId ?? "stub-openrouter-model";
 
   const server = createServer(async (request, response) => {
-    await readRequestBody(request);
+    const body = await readRequestBody(request);
+    input.onRequestBody?.(body);
 
     if (request.method === "GET" && request.url === "/v1/models") {
       writeJsonResponse(response, 200, {
@@ -23,6 +26,7 @@ export async function startAssistantProviderStubServer(input: {
     }
 
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
+      const responseText = input.resolveMessageText?.(body) ?? messageText;
       writeJsonResponse(response, 200, {
         id: "chatcmpl_stub_hosted_local_e2e",
         object: "chat.completion",
@@ -34,7 +38,7 @@ export async function startAssistantProviderStubServer(input: {
             finish_reason: "stop",
             message: {
               role: "assistant",
-              content: messageText,
+              content: responseText,
             },
           },
         ],

@@ -9,6 +9,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   createAssistantFoodAutoLogHooks,
+  type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import type { AssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
@@ -308,6 +309,27 @@ export async function readHostedAssistantExecutionDefaultTarget(): Promise<Assis
   return createAssistantModelTarget(
     resolveHostedAssistantProviderConfig(hostedAssistantConfig),
   );
+}
+
+export async function hydrateHostedExecutionDefaultTarget(
+  executionContext: AssistantExecutionContext,
+): Promise<AssistantExecutionContext> {
+  if (!executionContext.hosted || executionContext.hosted.defaultTarget) {
+    return executionContext;
+  }
+
+  const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
+  if (!defaultTarget) {
+    return executionContext;
+  }
+
+  return {
+    ...executionContext,
+    hosted: {
+      ...executionContext.hosted,
+      defaultTarget,
+    },
+  };
 }
 
 export async function reconcileHostedAssistantChannelState(

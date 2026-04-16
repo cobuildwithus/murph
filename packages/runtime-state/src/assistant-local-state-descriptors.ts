@@ -142,9 +142,9 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/diagnostics",
     "Assistant diagnostics snapshots and events are local observability residue only.",
   ),
-  defineMachineLocalAssistantFile(
+  definePortableAssistantFile(
     ".runtime/operations/assistant/indexes.json",
-    "Assistant local indexes are machine-local runtime repair metadata.",
+    "Assistant session alias and conversation indexes that keep hosted resume on the latest bound thread without a rebuild pass.",
   ),
   defineMachineLocalAssistantSubtree(
     ".runtime/operations/assistant/journals",

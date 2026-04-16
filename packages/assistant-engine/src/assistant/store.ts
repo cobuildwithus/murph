@@ -41,7 +41,7 @@ import {
   normalizeProviderOptions,
   createAssistantSessionId,
   redactAssistantDisplayPath,
-  resolveAssistantConversationLookupKey,
+  resolveAssistantConversationLookupKeys,
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store/paths.js'
@@ -93,7 +93,7 @@ export async function resolveAssistantSession(
       bindingPatch,
       lookupSource: 'session-id' as const,
     }
-    const conversationKey = resolveAssistantConversationLookupKey(input)
+    const conversationKeys = resolveAssistantConversationLookupKeys(input)
 
     if (sessionId) {
       const resolved = await loadAndPersistResolvedSession({
@@ -129,7 +129,7 @@ export async function resolveAssistantSession(
       }
     }
 
-    if (conversationKey) {
+    for (const conversationKey of conversationKeys) {
       const sessionId = indexes.conversationKeys[conversationKey]
       if (sessionId) {
         const resolved = await loadAndPersistResolvedSession({

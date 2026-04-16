@@ -331,6 +331,50 @@ describe('assistant store persistence seams', () => {
     )
   })
 
+  it('rebuilds missing index stores from durable sessions and prefers the newest duplicate conversation binding', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-missing-index-rebuild-')
+    await ensureAssistantState(paths)
+
+    const older = createSession({
+      alias: 'older-alias',
+      conversationKey: 'linq:user-1:thread-shared',
+      sessionId: 'session-older',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:01:00.000Z',
+    })
+    const newer = createSession({
+      alias: 'newer-alias',
+      conversationKey: 'linq:user-1:thread-shared',
+      sessionId: 'session-newer',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:02:00.000Z',
+    })
+
+    await writeAssistantSession(paths, older)
+    await writeAssistantSession(paths, newer)
+    await rm(paths.indexesPath, { force: true })
+
+    await expect(readAssistantIndexStore(paths)).resolves.toEqual({
+      version: 1,
+      aliases: {
+        'newer-alias': 'session-newer',
+        'older-alias': 'session-older',
+      },
+      conversationKeys: {
+        'linq:user-1:thread-shared': 'session-newer',
+      },
+    })
+
+    const runtimeEvents = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath)
+    expect(runtimeEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'indexes.rebuilt',
+        }),
+      ]),
+    )
+  })
+
   it('treats corrupted session files and corrupted session secret sidecars as missing when requested', async () => {
     const corruptedPaths = await createAssistantPaths(
       'assistant-store-persistence-corrupted-session-',

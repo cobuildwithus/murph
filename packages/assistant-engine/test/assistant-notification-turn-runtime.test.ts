@@ -119,6 +119,14 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
     ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
     persistAssistantTurnAndSession: vi.fn(async (input) => {
       persistedBeforeDelivery.push('persist')
       return savedSession
@@ -153,6 +161,8 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
     resolveAssistantExecutionDefaultTarget:
       mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
@@ -237,12 +247,12 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   assert.equal(result.session, savedSession)
   const firstResolvedNotificationSessionCall = (
     mocks.resolveAssistantSessionForMessage.mock.calls as Array<
-      Array<{ boundaryDefaultTarget?: unknown }>
+      Array<{ boundaryDefaultTarget?: unknown; defaults?: unknown }>
     >
   )[0]
   const firstResolvedNotificationSessionInput =
     firstResolvedNotificationSessionCall?.[0] as
-      | { boundaryDefaultTarget?: unknown }
+      | { boundaryDefaultTarget?: unknown; defaults?: unknown }
       | undefined
   assert.deepEqual(
     firstResolvedNotificationSessionInput?.boundaryDefaultTarget,
@@ -256,6 +266,23 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       providerName: 'Hosted Gateway',
       reasoningEffort: null,
       webSearch: null,
+    },
+  )
+  assert.deepEqual(
+    firstResolvedNotificationSessionInput?.defaults,
+    {
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'HOSTED_OPENAI_API_KEY',
+        endpoint: 'https://gateway.example.com/v1',
+        headers: null,
+        model: 'gpt-4.1-mini',
+        presetId: null,
+        providerName: 'Hosted Gateway',
+        reasoningEffort: null,
+        webSearch: null,
+      },
+      timezone: 'Australia/Sydney',
     },
   )
   assert.deepEqual(result.decision, {
@@ -304,6 +331,14 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
     ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
     prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
@@ -335,6 +370,8 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
     resolveAssistantExecutionDefaultTarget:
       mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
@@ -422,6 +459,14 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
     ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
     prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
@@ -453,6 +498,8 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
     resolveAssistantExecutionDefaultTarget:
       mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,

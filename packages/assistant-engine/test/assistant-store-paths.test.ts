@@ -70,6 +70,8 @@ test('binding locator helpers merge conversation defaults with explicit override
   assert.deepEqual(bindingPatchFromLocator(input), {
     actorId: 'contact:override',
     channel: 'telegram',
+    deliveryKind: 'thread',
+    deliveryTarget: 'chat-override',
     identityId: 'assistant:primary',
     threadId: 'chat-override',
     threadIsDirect: true,

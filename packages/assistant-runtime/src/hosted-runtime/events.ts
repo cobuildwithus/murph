@@ -10,7 +10,10 @@ import {
 } from "@murphai/assistant-engine/gateway-local-adapter";
 import { sendGatewayMessageLocal } from "@murphai/gateway-local";
 
-import { prepareHostedDispatchContext } from "./context.ts";
+import {
+  hydrateHostedExecutionDefaultTarget,
+  prepareHostedDispatchContext,
+} from "./context.ts";
 import { ingestHostedEmailMessage } from "./events/email.ts";
 import { ingestHostedLinqMessage } from "./events/linq.ts";
 import { handleHostedShareAcceptedDispatch } from "./events/share.ts";
@@ -20,10 +23,12 @@ import type {
   HostedDispatchExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 import { assertNever } from "./utils.ts";
 
 export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
+  executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
@@ -38,8 +43,12 @@ export async function executeHostedDispatchEvent(input: {
     input.runtimeEnv,
     input.runtime.resolvedConfig,
   );
+  const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
+    input.executionContext,
+  );
   const dispatchEffect = await handleHostedDispatchEvent({
     dispatch: input.dispatch,
+    executionContext: bootstrappedExecutionContext,
     runtime: input.runtime,
     sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
@@ -54,6 +63,7 @@ export async function executeHostedDispatchEvent(input: {
 
 async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
+  executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
@@ -67,7 +77,11 @@ async function handleHostedDispatchEvent(input: {
     case "member.activated":
       if (dispatch.event.firstContact) {
         await queueAssistantFirstContactWelcome(
-          buildAssistantFirstContactWelcomeInput(dispatch.event.firstContact, input.vaultRoot),
+          buildAssistantFirstContactWelcomeInput(
+            dispatch.event.firstContact,
+            input.executionContext,
+            input.vaultRoot,
+          ),
         );
       }
       return createNoopDispatchEffect();
@@ -137,11 +151,13 @@ function createNoopDispatchEffect(): HostedDispatchEffect {
 
 function buildAssistantFirstContactWelcomeInput(
   firstContact: HostedExecutionFirstContactTarget,
+  executionContext: AssistantExecutionContext,
   vault: string,
 ): Parameters<typeof queueAssistantFirstContactWelcome>[0] {
   if (firstContact.kind === "linq-materialize-home-thread") {
     return {
       channel: "linq",
+      executionContext,
       fromPhoneNumber: firstContact.fromPhoneNumber,
       identityId: firstContact.identityId,
       kind: firstContact.kind,
@@ -153,6 +169,7 @@ function buildAssistantFirstContactWelcomeInput(
   return {
     actorId: null,
     channel: firstContact.channel,
+    executionContext,
     identityId: firstContact.identityId,
     threadId: firstContact.threadId,
     threadIsDirect: firstContact.threadIsDirect,

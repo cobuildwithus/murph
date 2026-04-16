@@ -242,6 +242,7 @@ describe('assistant product small seams', () => {
 
     const threadTargetAudience = resolveAssistantConversationPolicy({
       message: {
+        conversation: null,
         deliverResponse: true,
         deliveryReplyToMessageId: null,
         deliveryTarget: null,
@@ -266,6 +267,47 @@ describe('assistant product small seams', () => {
       },
     })
     expect(threadTargetAudience.audience.effectiveThreadIsDirect).toBe(false)
+
+    const reboundDirectThreadAudience = resolveAssistantConversationPolicy({
+      message: {
+        conversation: {
+          channel: 'linq',
+          directness: 'direct',
+          identityId: 'identity-4',
+          participantId: 'actor-4',
+          threadId: 'chat-4',
+        },
+        deliverResponse: true,
+        deliveryReplyToMessageId: null,
+        deliveryTarget: null,
+        operatorAuthority: 'accepted-inbound-message',
+        sourceThreadId: null,
+        threadId: null,
+        threadIsDirect: null,
+      },
+      session: {
+        binding: {
+          actorId: 'actor-4',
+          channel: 'linq',
+          conversationKey: null,
+          delivery: {
+            kind: 'participant',
+            target: 'actor-4',
+          },
+          identityId: 'identity-4',
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+    })
+    expect(reboundDirectThreadAudience.audience).toMatchObject({
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-4',
+      },
+      threadId: 'chat-4',
+      threadIsDirect: true,
+    })
 
     expect(
       shouldExposeSensitiveHealthContext({
@@ -1238,6 +1280,13 @@ describe('assistant product small seams', () => {
       sessionId: 'session-linq-materialized',
       turnCount: 0,
     })
+    const hostedDefaultTarget = createAssistantModelTarget({
+      apiKeyEnv: 'HOSTED_OPENROUTER_API_KEY',
+      baseUrl: 'https://gateway.example.test/v1',
+      model: 'stub-openrouter-model',
+      provider: 'openai-compatible',
+      providerName: 'Hosted Stub Gateway',
+    })
     sessions.resolve.mockResolvedValueOnce({
       session: baseSession,
     })
@@ -1251,6 +1300,13 @@ describe('assistant product small seams', () => {
     await expect(
       welcomeModule.queueAssistantFirstContactWelcomeLocal({
         channel: 'linq',
+        executionContext: {
+          hosted: {
+            defaultTarget: hostedDefaultTarget,
+            memberId: 'member-123',
+            userEnvKeys: [],
+          },
+        },
         fromPhoneNumber: '+15550000',
         identityId: 'identity-1',
         kind: 'linq-materialize-home-thread',
@@ -1267,7 +1323,11 @@ describe('assistant product small seams', () => {
       channel: 'linq',
       identityId: 'identity-1',
       vault: '/tmp/test-vault',
-    }), null, expect.anything())
+    }), {
+      backend: hostedDefaultTarget,
+      identityId: null,
+      selfDeliveryTargets: null,
+    }, hostedDefaultTarget)
     expect(outbox.createIntent).toHaveBeenCalledWith(expect.objectContaining({
       bindingDelivery: {
         kind: 'participant',

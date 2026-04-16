@@ -11,11 +11,13 @@ import {
 
 const mocks = vi.hoisted(() => ({
   handleHostedShareAcceptedDispatch: vi.fn(),
+  hydrateHostedExecutionDefaultTarget: vi.fn(),
   prepareHostedDispatchContext: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
+  hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
   prepareHostedDispatchContext: mocks.prepareHostedDispatchContext,
 }));
 
@@ -56,6 +58,13 @@ import {
   createHostedRuntimeResolvedConfig,
 } from "./hosted-runtime-test-helpers.ts";
 
+const executionContext = {
+  hosted: {
+    memberId: "member_123",
+    userEnvKeys: [],
+  },
+} as const;
+
 function createRuntime() {
   return {
     commitTimeoutMs: null,
@@ -77,6 +86,7 @@ function createRuntime() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.prepareHostedDispatchContext.mockResolvedValue(null);
   mocks.handleHostedShareAcceptedDispatch.mockResolvedValue({
     shareImportResult: null,
@@ -103,6 +113,7 @@ describe("hosted runtime event coverage", () => {
 
     const result = await executeHostedDispatchEvent({
       dispatch,
+      executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
@@ -134,6 +145,7 @@ describe("hosted runtime event coverage", () => {
     await expect(
       executeHostedDispatchEvent({
         dispatch: cronDispatch,
+        executionContext,
         runtime,
         runtimeEnv: {},
         vaultRoot: "/tmp/assistant-runtime-events-coverage",
@@ -147,6 +159,7 @@ describe("hosted runtime event coverage", () => {
     await expect(
       executeHostedDispatchEvent({
         dispatch: wakeDispatch,
+        executionContext,
         runtime,
         runtimeEnv: {},
         vaultRoot: "/tmp/assistant-runtime-events-coverage",
@@ -185,6 +198,7 @@ describe("hosted runtime event coverage", () => {
 
     const result = await executeHostedDispatchEvent({
       dispatch,
+      executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       sharePack,
@@ -213,6 +227,7 @@ describe("hosted runtime event coverage", () => {
           eventId: "evt_unexpected",
           occurredAt: "2026-04-08T00:20:00.000Z",
         } as never,
+        executionContext,
         runtime: createRuntime(),
         runtimeEnv: {},
         vaultRoot: "/tmp/assistant-runtime-events-coverage",

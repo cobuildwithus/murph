@@ -26,7 +26,7 @@ import {
   drainHostedCommittedAssistantDeliveriesAfterCommit,
 } from "./callbacks.ts";
 import {
-  readHostedAssistantExecutionDefaultTarget,
+  hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
 import { executeHostedDispatchEvent } from "./events.ts";
 import { runHostedMaintenanceLoop } from "./maintenance.ts";
@@ -64,8 +64,12 @@ export async function executeHostedDispatchForCommit(input: {
     run: input.request.run ?? null,
   });
   const dispatchHandlersStartedAtMs = Date.now();
+  const dispatchExecutionContext = await resolveHostedMaintenanceExecutionContext(
+    input.executionContext,
+  );
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
+    executionContext: dispatchExecutionContext,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     sharePack: input.request.sharePack ?? null,
@@ -82,15 +86,14 @@ export async function executeHostedDispatchForCommit(input: {
     phase: "dispatch.running",
     run: input.request.run ?? null,
   });
-  const maintenanceExecutionContext = await resolveHostedMaintenanceExecutionContext(
-    input.executionContext,
-  );
   const maintenanceStartedAtMs = Date.now();
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer ?? null,
     deviceSyncPort: input.runtime.platform.deviceSyncPort,
     dispatch: input.request.dispatch,
-    executionContext: maintenanceExecutionContext,
+    executionContext: await resolveHostedMaintenanceExecutionContext(
+      dispatchExecutionContext,
+    ),
     requestId: input.request.dispatch.eventId,
     resolvedConfig: input.runtime.resolvedConfig,
     skipAssistantAutomation: input.request.dispatch.event.kind === "member.activated"
@@ -177,22 +180,7 @@ export async function executeHostedDispatchForCommit(input: {
 async function resolveHostedMaintenanceExecutionContext(
   executionContext: AssistantExecutionContext,
 ): Promise<AssistantExecutionContext> {
-  if (!executionContext.hosted || executionContext.hosted.defaultTarget) {
-    return executionContext;
-  }
-
-  const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
-  if (!defaultTarget) {
-    return executionContext;
-  }
-
-  return {
-    ...executionContext,
-    hosted: {
-      ...executionContext.hosted,
-      defaultTarget,
-    },
-  };
+  return hydrateHostedExecutionDefaultTarget(executionContext);
 }
 
 export async function completeHostedExecutionAfterCommit(input: {

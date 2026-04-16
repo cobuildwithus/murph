@@ -58,6 +58,24 @@ export function resolveAssistantConversationLookupKey(
   return resolveAssistantConversationKey(bindingInputFromLocator(input))
 }
 
+export function resolveAssistantConversationLookupKeys(
+  input: AssistantSessionLocator,
+): string[] {
+  const primary = bindingInputFromLocator(input)
+  const keys = [
+    resolveAssistantConversationKey(primary),
+  ]
+
+  if (primary.threadId !== null && primary.threadId !== undefined) {
+    keys.push(resolveAssistantConversationKey({
+      ...primary,
+      threadId: null,
+    }))
+  }
+
+  return [...new Set(keys.filter((key): key is string => key !== null))]
+}
+
 export function bindingInputFromLocator(
   input: AssistantSessionLocator,
 ): AssistantBindingPatch {
@@ -85,11 +103,42 @@ export function bindingPatchFromLocator(
   const patch: AssistantBindingPatch = {
     ...locator.bindingPatch,
   }
+  const directThreadDeliveryPatch = resolveDirectThreadDeliveryPatch({
+    channel: locator.conversation.channel ?? null,
+    threadId: locator.conversation.threadId ?? null,
+    threadIsDirect: locator.bindingFields.threadIsDirect,
+  })
+  if (directThreadDeliveryPatch) {
+    patch.deliveryKind = directThreadDeliveryPatch.deliveryKind
+    patch.deliveryTarget = directThreadDeliveryPatch.deliveryTarget
+  }
   if ('deliveryKind' in input) {
     patch.deliveryKind = input.deliveryKind ?? null
   }
 
   return patch
+}
+
+function resolveDirectThreadDeliveryPatch(input: {
+  channel: string | null
+  threadId: string | null
+  threadIsDirect: boolean | null
+}): Pick<AssistantBindingPatch, 'deliveryKind' | 'deliveryTarget'> | null {
+  if (input.threadId === null || input.threadIsDirect !== true) {
+    return null
+  }
+
+  switch (input.channel) {
+    case 'email':
+    case 'linq':
+    case 'telegram':
+      return {
+        deliveryKind: 'thread',
+        deliveryTarget: input.threadId,
+      }
+    default:
+      return null
+  }
 }
 
 export function normalizeProviderOptions(input: {

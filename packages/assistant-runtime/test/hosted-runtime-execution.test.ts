@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   executeHostedDispatchEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
+  hydrateHostedExecutionDefaultTarget: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
   readHostedAssistantExecutionDefaultTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
@@ -79,6 +80,8 @@ vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
+  hydrateHostedExecutionDefaultTarget:
+    mocks.hydrateHostedExecutionDefaultTarget,
   readHostedAssistantExecutionDefaultTarget:
     mocks.readHostedAssistantExecutionDefaultTarget,
 }));
@@ -186,6 +189,24 @@ beforeEach(() => {
     failed: 0,
     pending: 0,
   });
+  mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (executionContext) => {
+    if (executionContext.hosted?.defaultTarget) {
+      return executionContext;
+    }
+
+    const defaultTarget = await mocks.readHostedAssistantExecutionDefaultTarget();
+    if (!defaultTarget || !executionContext.hosted) {
+      return executionContext;
+    }
+
+    return {
+      ...executionContext,
+      hosted: {
+        ...executionContext.hosted,
+        defaultTarget,
+      },
+    };
+  });
   mocks.readHostedAssistantExecutionDefaultTarget.mockResolvedValue({
     adapter: "openai-compatible",
     apiKeyEnv: "OPENAI_API_KEY",
@@ -287,6 +308,24 @@ describe("executeHostedDispatchForCommit", () => {
         },
         eventId: "evt_123",
         occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      executionContext: {
+        hosted: {
+          defaultTarget: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "OPENAI_API_KEY",
+            endpoint: "https://api.openai.com/v1",
+            headers: null,
+            model: "gpt-4.1-mini",
+            presetId: null,
+            providerName: "OpenAI",
+            reasoningEffort: null,
+            webSearch: null,
+          },
+          issueDeviceConnectLink: expect.any(Function),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
       },
       runtime: expect.objectContaining({
         commitTimeoutMs: 45_000,

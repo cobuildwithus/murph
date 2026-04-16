@@ -36,8 +36,10 @@ interface ObservedTelegramRequest {
 type ObservedTelegramRequestMatcher = (request: ObservedTelegramRequest) => boolean;
 
 const userId = `member_local_telegram_reply_${Date.now()}`;
+const fastReplyUserId = `member_local_telegram_fast_reply_${Date.now()}`;
 const telegramBotToken = "telegram-local-test-token";
 const observedTelegramRequests: ObservedTelegramRequest[] = [];
+const observedAssistantProviderBodies: string[] = [];
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const debugE2E = process.env.MURPH_E2E_DEBUG_PROGRESS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
@@ -50,10 +52,17 @@ let assistantProviderServer: ReturnType<typeof createServer> | null = null;
 let assistantProviderBaseUrl = "";
 let localHarness: HostedLocalDevHarness | null = null;
 
+it("derives stable numeric suffixes from the full Telegram user id", () => {
+  expect(buildStableTelegramNumericSuffix("member_local_telegram_reply_20260408", 7)).not.toBe(
+    buildStableTelegramNumericSuffix("member_local_telegram_fast_reply_20260408", 7),
+  );
+});
+
 describe("hosted local Telegram auto-reply e2e", () => {
   beforeAll(async () => {
     logDebug("starting hosted local Telegram e2e setup");
     observedTelegramRequests.length = 0;
+    observedAssistantProviderBodies.length = 0;
     telegramServer = await startTelegramStubServer();
     telegramApiBaseUrl =
       `http://host.docker.internal:${requireBoundTcpPort(telegramServer, "Telegram stub")}`;
@@ -61,7 +70,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
     if (useAssistantProviderStub) {
       assistantProviderServer = await startAssistantProviderStubServer({
-        messageText: "I saw your Telegram message and I'm here.",
+        onRequestBody: (body) => {
+          observedAssistantProviderBodies.push(body);
+        },
+        resolveMessageText: resolveHostedTelegramAssistantReplyText,
       });
       assistantProviderBaseUrl =
         `http://host.docker.internal:${requireBoundTcpPort(assistantProviderServer, "assistant provider stub")}/v1`;
@@ -80,8 +92,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...hostedAssistantDevEnv,
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES:
-        process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES?.trim() || "telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRunnerEnvProfiles(
+        process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
+        "telegram",
+      ),
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
       MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
       MURPH_DEV_SKIP_WEB: "1",
@@ -178,6 +192,74 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
   }, 300_000);
 
+  it("keeps Telegram context when two replies arrive before hosted completion catches up", async () => {
+    const activationResult = await dispatchHostedEvent(buildActivationDispatch(fastReplyUserId), fastReplyUserId);
+    expect(activationResult.event).toMatchObject({
+      eventId: `member.activated:local:${fastReplyUserId}:evt_telegram_activation`,
+      lastError: null,
+      state: "completed",
+      userId: fastReplyUserId,
+    });
+
+    await requireHarness().waitForHostedCompletion(fastReplyUserId);
+
+    const expectedSendPath = `/bot${telegramBotToken}/sendMessage`;
+    const baselineSendCount = countObservedTelegramRequests(
+      expectedSendPath,
+      createTelegramSendMessageMatcher(fastReplyUserId),
+    );
+
+    const firstInboundResult = await dispatchHostedEvent(
+      buildInboundTelegramDispatch(fastReplyUserId, {
+        eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_name`,
+        messageId: `${buildTelegramMessageId(fastReplyUserId)}1`,
+        text: "U can call me Rocket Man",
+      }),
+      fastReplyUserId,
+    );
+    expect(firstInboundResult.event).toMatchObject({
+      eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_name`,
+      lastError: null,
+      state: "completed",
+      userId: fastReplyUserId,
+    });
+
+    const secondInboundResult = await dispatchHostedEvent(
+      buildInboundTelegramDispatch(fastReplyUserId, {
+        eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_goals`,
+        messageId: `${buildTelegramMessageId(fastReplyUserId)}2`,
+        text: "I want to build more strength, improve endurance, and get fitter overall.",
+      }),
+      fastReplyUserId,
+    );
+    expect(secondInboundResult.event).toMatchObject({
+      eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_goals`,
+      lastError: null,
+      state: "completed",
+      userId: fastReplyUserId,
+    });
+
+    await requireHarness().waitForHostedCompletion(fastReplyUserId);
+
+    const replyRequests = await waitForMatchingTelegramRequestCount({
+      expectedCount: baselineSendCount + 2,
+      expectedPath: expectedSendPath,
+      matchRequest: createTelegramSendMessageMatcher(fastReplyUserId),
+      userId: fastReplyUserId,
+    });
+    const replyTexts = replyRequests
+      .slice(-2)
+      .map((request) => parseObservedTelegramJson(request.body)?.text);
+
+    expect(replyTexts).toEqual([
+      "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?",
+      "Got you — stronger, fitter, faster, and more endurance.",
+    ]);
+    expect(observedAssistantProviderBodies.at(-1)).toContain("Rocket Man");
+    expect(observedAssistantProviderBodies.at(-1)).toContain("build more strength");
+    expect(observedAssistantProviderBodies.at(-1)).toContain("I’ll call you Rocket Man");
+  }, 300_000);
+
   async function dispatchHostedEvent(dispatch: object, nextUserId: string) {
     logDebug("POST /internal/dispatch", {
       eventId:
@@ -235,14 +317,23 @@ function buildActivationDispatch(nextUserId: string) {
   });
 }
 
-function buildInboundTelegramDispatch(nextUserId: string) {
+function buildInboundTelegramDispatch(
+  nextUserId: string,
+  overrides: {
+    eventId?: string;
+    messageId?: string;
+    text?: string;
+  } = {},
+) {
   return buildHostedExecutionTelegramMessageReceivedDispatch({
-    eventId: `telegram.message.received:local:${nextUserId}:evt_telegram_reply`,
+    eventId:
+      overrides.eventId
+      ?? `telegram.message.received:local:${nextUserId}:evt_telegram_reply`,
     occurredAt: new Date().toISOString(),
     telegramMessage: {
-      messageId: buildTelegramMessageId(nextUserId),
+      messageId: overrides.messageId ?? buildTelegramMessageId(nextUserId),
       schema: "murph.hosted-telegram-message.v1",
-      text: "yo",
+      text: overrides.text ?? "yo",
       threadId: buildTelegramThreadId(nextUserId),
     },
     userId: nextUserId,
@@ -261,12 +352,23 @@ function createTelegramTypingRequestMatcher(nextUserId: string): ObservedTelegra
 }
 
 function createTelegramSendMessageMatcher(nextUserId: string): ObservedTelegramRequestMatcher {
+  const expectedMessageIdPrefix = buildTelegramMessageId(nextUserId);
+
   return (request) => {
     const parsed = parseObservedTelegramJson(request.body);
+    const replyToMessageId =
+      parsed && "reply_to_message_id" in parsed
+        ? parsed.reply_to_message_id
+        : null;
+
     return Boolean(
       parsed
       && parsed.chat_id === buildTelegramThreadId(nextUserId)
-      && parsed.reply_to_message_id === Number.parseInt(buildTelegramMessageId(nextUserId), 10)
+      && (
+        typeof replyToMessageId === "number"
+          ? String(replyToMessageId).startsWith(expectedMessageIdPrefix)
+          : false
+      )
       && typeof parsed.text === "string"
       && parsed.text.length > 0,
     );
@@ -321,6 +423,35 @@ async function waitForTelegramRequest(input: {
   ].join("\n"));
 }
 
+async function waitForMatchingTelegramRequestCount(input: {
+  expectedCount: number;
+  expectedPath: string;
+  matchRequest?: ObservedTelegramRequestMatcher;
+  userId: string;
+}): Promise<ObservedTelegramRequest[]> {
+  const startedAt = Date.now();
+
+  while ((Date.now() - startedAt) < 60_000) {
+    const matching = observedTelegramRequests.filter((request) =>
+      isMatchingObservedTelegramRequest(request, input.expectedPath, input.matchRequest)
+    );
+    if (matching.length >= input.expectedCount) {
+      return matching;
+    }
+
+    await sleep(250);
+  }
+
+  const status = await requireHarness().readUserStatus(input.userId);
+  throw new Error([
+    `Timed out waiting for ${input.expectedCount} Telegram requests ${input.expectedPath} for ${input.userId}.`,
+    `observed requests: ${JSON.stringify(summarizeObservedTelegramRequests())}`,
+    `hosted status: ${JSON.stringify(status)}`,
+    `stdout tail: ${requireHarness().stdoutTail()}`,
+    `stderr tail: ${requireHarness().stderrTail()}`,
+  ].join("\n"));
+}
+
 function isMatchingObservedTelegramRequest(
   request: ObservedTelegramRequest,
   expectedPath: string,
@@ -351,6 +482,15 @@ function summarizeObservedTelegramRequests(): Array<{
     method: request.method,
     url: request.url,
   }));
+}
+
+function countObservedTelegramRequests(
+  expectedPath: string,
+  matchRequest?: ObservedTelegramRequestMatcher,
+): number {
+  return observedTelegramRequests.filter((request) =>
+    isMatchingObservedTelegramRequest(request, expectedPath, matchRequest)
+  ).length;
 }
 
 async function startTelegramStubServer(): Promise<ReturnType<typeof createServer>> {
@@ -425,7 +565,46 @@ function buildTelegramMessageId(nextUserId: string): string {
 }
 
 function buildStableTelegramNumericId(nextUserId: string, prefix: string): string {
-  const digits = nextUserId.replace(/\D/gu, "");
-  const suffix = digits.slice(-7).padStart(7, "0");
+  const suffix = buildStableTelegramNumericSuffix(nextUserId, 7);
   return `${prefix}${suffix}`;
+}
+
+function buildStableTelegramNumericSuffix(value: string, length: number): string {
+  let hash = 0;
+
+  for (const character of value) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 10_000_000;
+  }
+
+  return String(hash).padStart(length, "0").slice(-length);
+}
+
+function mergeRunnerEnvProfiles(
+  existingProfiles: string | undefined,
+  requiredProfile: string,
+): string {
+  const profiles = new Set(
+    String(existingProfiles ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+  profiles.add(requiredProfile);
+  return Array.from(profiles).join(",");
+}
+
+function resolveHostedTelegramAssistantReplyText(body: string): string {
+  if (body.includes("Rocket Man") && body.includes("build more strength")) {
+    if (body.includes("I’ll call you Rocket Man") || body.includes("I'll call you Rocket Man")) {
+      return "Got you — stronger, fitter, faster, and more endurance.";
+    }
+
+    return "What should I call you? And out of those, which ones matter most to you right now?";
+  }
+
+  if (body.includes("Rocket Man")) {
+    return "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
+  }
+
+  return "I saw your Telegram message and I'm here.";
 }
