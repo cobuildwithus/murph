@@ -5149,8 +5149,12 @@ test('scanAssistantAutoReplyOnce keeps photo-only multimodal content when Codex 
       PHOTO_ONLY_ATTACHMENT_BUFFER,
     )
     assert.equal(
+      providerCall?.userPrompt.includes('No parsed attachment text is available.'),
+      true,
+    )
+    assert.equal(
       providerCall?.userPrompt.includes(
-        'No parsed attachment text is available. Use attached image or PDF evidence if present.',
+        'Use attached image or PDF evidence if present, but do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
       ),
       true,
     )

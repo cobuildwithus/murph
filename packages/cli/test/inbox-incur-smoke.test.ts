@@ -63,6 +63,38 @@ test('inbox backfill schema exposes optional parser draining', async () => {
   assert.equal('parse' in schema.options.properties, true)
 })
 
+test('inbox attachment list schema exposes an optional limit', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['inbox', 'attachment', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+    }
+  }
+
+  assert.equal('limit' in schema.options.properties, true)
+})
+
+test('inbox source list schema exposes an optional limit', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['inbox', 'source', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+    }
+  }
+
+  assert.equal('limit' in schema.options.properties, true)
+})
+
+test('inbox attachment help surfaces inspect/status/decode wrappers', async () => {
+  const help = await runRawCli(['inbox', 'attachment', '--help'])
+
+  assert.match(help, /inspect/u)
+  assert.match(help, /status/u)
+  assert.match(help, /decode/u)
+})
+
 test('inbox help surfaces the first-pass operator commands', async () => {
   const help = await runRawCli(['inbox', '--help'])
 

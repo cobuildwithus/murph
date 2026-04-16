@@ -231,6 +231,7 @@ function buildInboxPlacementSystemPrompt(): string {
     'Prefer inbox.promote.* tools when a single capture-level promotion fits the evidence.',
     'Use broader vault.* tools only when the capture clearly contains structured data that should be written directly.',
     'When routing images or fallback PDF files are attached, treat them as raw evidence alongside the normalized text bundle.',
+    'Treat QR or barcode payloads as decoded only when they appear in normalized parsed text; otherwise you may inspect the raw image or PDF but must not describe parser output that is absent.',
     'Do not invent facts that are not present in the normalized bundle or clearly visible in attached routing images or PDFs.',
     'If the capture should not be written yet, return an empty actions array.',
     'Return JSON only.',

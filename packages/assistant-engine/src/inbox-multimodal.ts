@@ -252,7 +252,7 @@ function buildMetadataFragment(
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
       ? [
-          'automaticImageCodeScan: image attachments are automatically scanned for QR and barcode payloads during parsing; decoded values appear in extracted text when found',
+          'automaticImageCodeScan: if inbox parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
         ]
       : []),
     `routingImageEligible: ${String(routingImage.eligible)}`,

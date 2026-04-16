@@ -72,6 +72,7 @@ vault-cli food scaffold --vault <path> [--request-id <id>]
 vault-cli food upsert --vault <path> --input @file.json [--request-id <id>]
 vault-cli food rename <id> --vault <path> --title <title> [--slug <slug>] [--request-id <id>]
 vault-cli food schedule <title> --vault <path> --time <HH:MM> [--note <text>] [--slug <slug>] [--request-id <id>]
+vault-cli food unschedule <id> --vault <path> [--request-id <id>]
 vault-cli food show <id> --vault <path> [--request-id <id>]
 vault-cli food list --vault <path> [--status active|archived] [--limit <n>] [--request-id <id>]
 vault-cli recipe scaffold --vault <path> [--request-id <id>]
@@ -88,9 +89,10 @@ vault-cli document edit <id> --vault <path> [--input @patch.json] [--set <path=v
 vault-cli document show <id> --vault <path> [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
 vault-cli document manifest <id> --vault <path> [--request-id <id>]
-vault-cli meal add --vault <path> [--photo <path>] [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli meal add --vault <path> [--input @file.json|-] [--photo <path>] [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli meal edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal show <id> --vault <path> [--request-id <id>]
+vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
@@ -99,7 +101,6 @@ vault-cli workout format list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli workout format log <name> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--protocol-id <protocolId>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli intervention edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
-vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
 vault-cli meal manifest <id> --vault <path> [--request-id <id>]
 vault-cli samples add --vault <path> --input @file.json [--request-id <id>]
 vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
@@ -146,9 +147,13 @@ vault-cli supplement stop <protocolId> --vault <path> [--stopped-on <date>] [--r
 vault-cli supplement compound list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
 vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--request-id <id>]
-vault-cli inbox attachment list <captureId> --vault <path> [--request-id <id>]
+vault-cli inbox source list --vault <path> [--limit <n>] [--request-id <id>]
+vault-cli inbox attachment list <captureId> --vault <path> [--limit <n>] [--request-id <id>]
+vault-cli inbox attachment inspect <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment show <attachmentId> --vault <path> [--request-id <id>]
+vault-cli inbox attachment status <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment show-status <attachmentId> --vault <path> [--request-id <id>]
+vault-cli inbox attachment decode <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment parse <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment reparse <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox promote meal <captureId> --vault <path> [--request-id <id>]
@@ -159,7 +164,7 @@ vault-cli inbox model bundle <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--apply] [--request-id <id>]
 ```
 
-`vault-cli inbox model bundle` materializes the normalized routing bundle plus image-routing eligibility metadata. `vault-cli inbox model route` may attach supported stored routing images to the model request when the capture includes an eligible JPEG, PNG, WEBP, or GIF attachment.
+`vault-cli inbox attachment inspect` is the first-class attachment-content inspection surface. Normal inbox parsing already scans parseable image attachments for QR/barcode payloads and stores decoded text there when available. `vault-cli inbox attachment decode` is the explicit parser/decode trigger when existing extracted text is missing or a fresh parse is needed. `vault-cli inbox model bundle` materializes the normalized routing bundle plus image-routing eligibility metadata. `vault-cli inbox model route` may attach supported stored routing images to the model request when the capture includes an eligible JPEG, PNG, WEBP, or GIF attachment.
 
 For event-backed edit commands (`event`, `document`, `meal`, `workout`, `intervention`), changing `occurredAt` or `timeZone` without patching `dayKey` directly now requires `--day-key-policy keep|recompute`. This prevents silent stale-day retention and prevents legacy records without explicit `timeZone` provenance from silently materializing the vault default timezone into the saved record during edits.
 
@@ -193,13 +198,13 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `lifecycle`: `create | show | list | update | checkpoint | stop`
 - `dateAddressedDoc`: `ensure | show | list | append | link | unlink`
 - `derivedAdmin`: `stats | rebuild | materialize | prune | validate`
-- `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote | model bundle/route`
+- `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/inspect/show/status/show-status/decode/parse/reparse | promote | model bundle/route`
 - `deviceControl`: `provider list | connect | account list/show/reconcile/disconnect | daemon status/start/stop`
 
 ## Noun Composition
 
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `blood-test`, `provider`, `food`, and `event` are payload-CRUD nouns.
-- `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` adds the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals.
+- `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` / `food unschedule` add the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals or clearing that rule explicitly.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
 - `protocol` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
@@ -528,7 +533,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 - `provider show`, `food show`, `recipe show`, `event show`, `document show`, `meal show`, `samples show`, `experiment show`, `journal show`, `intake show`, `audit show`, and `vault show` all return the same direct `entity`-style payload shape used by generic `show`, with command-local lookup behavior where documented.
 - `provider list`, `food list`, `recipe list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export pack list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
 - `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, `intake raw`, and `export pack show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
-- `inbox attachment list|show|show-status|parse|reparse` expose runtime attachment inspection and parser queue control over `.runtime` plus `derived/inbox/**`; they do not mutate canonical vault records.
+- `inbox attachment list|inspect|show|status|show-status` expose runtime attachment inspection over `.runtime` plus `derived/inbox/**`, while `decode|parse|reparse` are explicit parser-control surfaces when current extracted text is missing or needs a fresh run; they do not mutate canonical vault records.
 
 ### `show`
 
@@ -726,7 +731,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `food upsert`, `food schedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
+- `provider upsert`, `food upsert`, `food schedule|unschedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.
