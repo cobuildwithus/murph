@@ -81,6 +81,11 @@ Prisma table for a normal addition. Its Postgres device-sync models stay
 provider-generic, and its route layer should keep using the shared
 `DeviceSyncPublicIngress` seam.
 
+Provider-readiness checkpoint:
+- a normal provider addition should stop at the descriptor, transport module, importer adapter, and one shared config/factory registration
+- generic hosted or local ingress should not gain provider-specific webhook secrets, provider-specific route branching, or provider-specific persistence tables
+- if a provider seems to need edits outside those seams, treat it as an architecture review instead of routine provider wiring
+
 ## Environment
 
 Required:
