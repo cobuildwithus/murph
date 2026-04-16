@@ -1,6 +1,6 @@
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
@@ -110,6 +110,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
     );
     mocks.runtimeEnv.telegramWebhookSecret = null;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
@@ -276,6 +280,86 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       limit: 1,
       prisma,
     });
+  });
+
+  it("bounds the inline dispatch wait before falling back to deferred recovery", async () => {
+    vi.useFakeTimers();
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 655,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+        }),
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    const deferred: Array<() => Promise<void>> = [];
+    mocks.drainHostedExecutionOutboxBestEffort
+      .mockImplementationOnce(() => new Promise<void>(() => {}))
+      .mockResolvedValueOnce(undefined);
+
+    const responsePromise = handleHostedOnboardingTelegramWebhook({
+      defer: (drain) => {
+        deferred.push(drain);
+      },
+      maxInlineDrainMs: 25,
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "hello",
+        },
+        update_id: 655,
+      }),
+      secretToken: "telegram-secret",
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(responsePromise).resolves.toMatchObject({
+      ok: true,
+      reason: "dispatched-active-member",
+    });
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "telegram:update:655",
+      ],
+      limit: 1,
+      prisma,
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(2);
   });
 
   it("accepts Telegram webhooks whose secret header is missing", async () => {
