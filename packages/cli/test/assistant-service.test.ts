@@ -1872,7 +1872,8 @@ test('sendAssistantMessage skips typing indicators for queue-only deliveries', a
     deliveryDispatchMode: 'queue-only',
   })
 
-  assert.equal(serviceMocks.getAssistantChannelAdapter.mock.calls.length, 0)
+  assert.equal(serviceMocks.getAssistantChannelAdapter.mock.calls.length, 1)
+  assert.equal(serviceMocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
 })
 
 test('sendAssistantMessage ignores typing indicator start failures', async () => {
