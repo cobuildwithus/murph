@@ -567,6 +567,12 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("3s");
   });
 
+  it("defaults the warm container idle TTL to five minutes", () => {
+    const { container } = createContainerDouble();
+
+    expect(container.sleepAfter).toBe("300s");
+  });
+
   it("uses the configured readiness timeout when cold-starting the container shell", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
