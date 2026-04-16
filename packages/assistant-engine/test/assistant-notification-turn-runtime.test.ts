@@ -235,8 +235,17 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   )
   assert.equal(result.response, 'Sanitized notification text')
   assert.equal(result.session, savedSession)
+  const firstResolvedNotificationSessionCall = (
+    mocks.resolveAssistantSessionForMessage.mock.calls as Array<
+      Array<{ boundaryDefaultTarget?: unknown }>
+    >
+  )[0]
+  const firstResolvedNotificationSessionInput =
+    firstResolvedNotificationSessionCall?.[0] as
+      | { boundaryDefaultTarget?: unknown }
+      | undefined
   assert.deepEqual(
-    mocks.resolveAssistantSessionForMessage.mock.calls[0]?.[0]?.boundaryDefaultTarget,
+    firstResolvedNotificationSessionInput?.boundaryDefaultTarget,
     {
       adapter: 'openai-compatible',
       apiKeyEnv: 'HOSTED_OPENAI_API_KEY',

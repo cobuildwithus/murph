@@ -69,8 +69,26 @@ async function removeStaleNextValidatorStub(routeTypesStubPath: string): Promise
     return;
   }
 
-  const validatorPath = routeTypesStubPath.replace(/routes\.d\.ts$/u, "validator.ts");
-  await rm(validatorPath, { force: true });
+  const candidateValidatorPaths = new Set<string>([
+    routeTypesStubPath.replace(/routes\.d\.ts$/u, "validator.ts"),
+  ]);
+
+  const workspaceRoot = extractWorkspaceRootFromRouteTypesPath(routeTypesStubPath);
+  if (workspaceRoot) {
+    candidateValidatorPaths.add(path.join(workspaceRoot, ".next", "types", "validator.ts"));
+  }
+
+  await Promise.all(
+    [...candidateValidatorPaths].map(async (validatorPath) => {
+      await rm(validatorPath, { force: true });
+    }),
+  );
+}
+
+function extractWorkspaceRootFromRouteTypesPath(routeTypesStubPath: string): string | null {
+  const normalizedPath = routeTypesStubPath.replace(/\\/g, "/");
+  const match = normalizedPath.match(/^(.*)\/\.next(?:-[^/]+)?\/.*\/routes\.d\.ts$/u);
+  return match?.[1] ?? null;
 }
 
 async function main(): Promise<void> {

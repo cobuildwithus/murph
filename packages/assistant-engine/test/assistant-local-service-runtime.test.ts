@@ -133,8 +133,17 @@ test('sendAssistantMessageLocal prefers the hosted execution default target when
       },
     },
   )
+  const firstResolvedMessageSessionCall = (
+    mocks.resolveAssistantMessageSession.mock.calls as Array<
+      Array<{ boundaryDefaultTarget?: unknown }>
+    >
+  )[0]
+  const firstResolvedMessageSessionInput =
+    firstResolvedMessageSessionCall?.[0] as
+      | { boundaryDefaultTarget?: unknown }
+      | undefined
   assert.deepEqual(
-    mocks.resolveAssistantMessageSession.mock.calls[0]?.[0]?.boundaryDefaultTarget,
+    firstResolvedMessageSessionInput?.boundaryDefaultTarget,
     hostedDefaultTarget,
   )
 })
