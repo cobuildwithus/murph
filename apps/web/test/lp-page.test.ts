@@ -89,3 +89,9 @@ test("LandingPage threads the server-side auth snapshot into the nav, hero, and 
     /data-landing-auth-actions-label="Start your first experiment"/,
   );
 });
+
+test("LandingPage metadata points crawlers at the root landing URL", async () => {
+  const { metadata } = await import("../app/lp/page");
+
+  expect(metadata.alternates?.canonical).toBe("/");
+});
