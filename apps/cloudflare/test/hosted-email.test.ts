@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
+import {
+  createHostedEmailThreadTarget,
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
+import { EmailMessage } from "cloudflare:email";
 
 import type { HostedEmailConfig } from "../src/hosted-email/config.ts";
 import {
@@ -34,9 +39,6 @@ vi.mock("../src/web-control-plane.ts", async () => {
 });
 
 const TEST_CONFIG: HostedEmailConfig = {
-  apiBaseUrl: "https://api.cloudflare.com/client/v4",
-  cloudflareAccountId: "acct_123",
-  cloudflareApiToken: "token_123",
   defaultSubject: "Murph update",
   domain: "mail.example.test",
   fromAddress: "assistant@mail.example.test",
@@ -195,22 +197,14 @@ describe("hosted email routing and transport", () => {
 
   it("sends outbound mail with the stable per-user reply alias and returns a thread target", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      result: {
-        delivered: ["owner@example.com"],
-      },
-      success: true,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
 
     const response = await sendHostedEmailMessage({
       bucket,
       config: TEST_CONFIG,
+      emailBinding,
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
       request: {
@@ -226,13 +220,119 @@ describe("hosted email routing and transport", () => {
     expect(threadTarget).not.toBeNull();
     expect(threadTarget?.replyAliasAddress).toMatch(/@mail\.example\.test$/u);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.cloudflare.com/client/v4/accounts/acct_123/email/sending/send_raw",
-      expect.objectContaining({
-        body: expect.stringContaining(threadTarget?.replyAliasAddress ?? ""),
-        method: "POST",
-      }),
-    );
+    expect(emailBinding.send).toHaveBeenCalledTimes(1);
+    const sentMessage = emailBinding.send.mock.calls[0]?.[0];
+    expect(sentMessage).toBeInstanceOf(EmailMessage);
+    expect(sentMessage).toMatchObject({
+      from: "assistant@mail.example.test",
+      to: "owner@example.com",
+    });
+    expect((sentMessage as { raw: string }).raw).toContain(threadTarget?.replyAliasAddress ?? "");
+  });
+
+  it("rejects participant-target sends on the hosted email bridge", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+
+    await expect(sendHostedEmailMessage({
+      bucket,
+      config: TEST_CONFIG,
+      emailBinding: {
+        send: vi.fn(async (_message: unknown) => undefined),
+      },
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      request: {
+        identityId: null,
+        message: "hello from murph",
+        target: "participant_123",
+        targetKind: "participant",
+      },
+      userId: "user_123",
+    })).rejects.toThrow(/participant delivery is not supported/u);
+  });
+
+  it("fans out thread-target sends across To and Cc recipients while preserving reply headers", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
+
+    const initial = await sendHostedEmailMessage({
+      bucket,
+      config: TEST_CONFIG,
+      emailBinding,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      request: {
+        identityId: null,
+        message: "first note",
+        target: "owner@example.com",
+        targetKind: "explicit",
+      },
+      userId: "user_123",
+    });
+    const initialThreadTarget = parseHostedEmailThreadTarget(initial.target);
+    expect(initialThreadTarget).not.toBeNull();
+
+    const threadedTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
+      cc: ["cc@example.com"],
+      lastMessageId: initialThreadTarget?.lastMessageId ?? "<prev@example.test>",
+      references: [initialThreadTarget?.lastMessageId ?? "<prev@example.test>"],
+      replyAliasAddress: initialThreadTarget?.replyAliasAddress ?? "assistant+reply@mail.example.test",
+      subject: initialThreadTarget?.subject ?? "Murph update",
+      to: initialThreadTarget?.to ?? ["owner@example.com"],
+    }));
+
+    await sendHostedEmailMessage({
+      bucket,
+      config: TEST_CONFIG,
+      emailBinding,
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      request: {
+        identityId: null,
+        message: "follow up",
+        target: threadedTarget,
+        targetKind: "thread",
+      },
+      userId: "user_123",
+    });
+
+    expect(emailBinding.send).toHaveBeenCalledTimes(3);
+    const followUpMessages = emailBinding.send.mock.calls.slice(1).map((call) => call[0] as {
+      raw: string;
+      to: string;
+    });
+    expect(followUpMessages.map((message) => message.to)).toEqual([
+      "owner@example.com",
+      "cc@example.com",
+    ]);
+    for (const message of followUpMessages) {
+      expect(message.raw).toContain(`Reply-To: ${initialThreadTarget?.replyAliasAddress}`);
+      expect(message.raw).toContain("In-Reply-To: ");
+      expect(message.raw).toContain("References: ");
+      expect(message.raw).toContain("Cc: cc@example.com");
+    }
+  });
+
+  it("rejects sender overrides when the caller tries to bypass the configured sender identity", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+
+    await expect(sendHostedEmailMessage({
+      bucket,
+      config: TEST_CONFIG,
+      emailBinding: {
+        send: vi.fn(async (_message: unknown) => undefined),
+      },
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      request: {
+        identityId: "other-sender@example.com",
+        message: "hello from murph",
+        target: "owner@example.com",
+        targetKind: "explicit",
+      },
+      userId: "user_123",
+    })).rejects.toThrow(/sender identity is config-owned/u);
   });
 });

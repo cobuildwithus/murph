@@ -1,0 +1,1 @@
+export const HOSTED_EMAIL_SEND_BINDING_NAME = "HOSTED_EMAIL" as const;

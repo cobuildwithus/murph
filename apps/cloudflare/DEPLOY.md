@@ -19,7 +19,7 @@ That rendered surface is then used by:
 - `pnpm --dir apps/cloudflare deploy:worker`
 - `pnpm --dir apps/cloudflare deploy:smoke`
 
-Direct `wrangler deploy` is the normal path. The lower-level version helper still exists for recovery work, but it is not the primary rollout contract.
+The rendered deploy helper path is the canonical rollout contract. The lower-level version helper still exists for recovery work, and the checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 
 ## One-Time Cloudflare Setup
 
@@ -101,8 +101,6 @@ Hosted assistant config:
 
 Opt-in runtime integrations and tool overrides:
 
-- `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID`
-- `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL`
 - `HOSTED_EMAIL_DEFAULT_SUBJECT`
 - `HOSTED_EMAIL_DOMAIN`
 - `HOSTED_EMAIL_FROM_ADDRESS`
@@ -119,6 +117,8 @@ Opt-in runtime integrations and tool overrides:
 - `WHISPER_COMMAND`
 - `WHISPER_MODEL_PATH`
 
+When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.
+
 ## Optional Secrets
 
 Key rotation and future envelope lanes:
@@ -134,7 +134,6 @@ Hosted assistant provider secrets:
 
 Opt-in execution integrations:
 
-- `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN`
 - `HOSTED_EMAIL_SIGNING_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`

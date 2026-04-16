@@ -61,8 +61,6 @@ describe("hosted deploy automation helpers", () => {
       CF_WORKER_NAME: "hosted-worker",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
-      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-      HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL: "https://api.cloudflare.com/client/v4",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
@@ -100,11 +98,22 @@ describe("hosted deploy automation helpers", () => {
       observability: {
         enabled: boolean;
         head_sampling_rate: number;
+        logs: {
+          enabled: boolean;
+          head_sampling_rate: number;
+          invocation_logs: boolean;
+          persist: boolean;
+        };
         traces: {
           enabled: boolean;
           head_sampling_rate: number;
+          persist: boolean;
         };
       };
+      send_email?: Array<{
+        allowed_sender_addresses?: string[];
+        name: string;
+      }>;
       vars: Record<string, string>;
       secrets?: { required?: string[] };
     };
@@ -161,12 +170,16 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
-    expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID).toBe("acct_123");
-    expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL).toBe("https://api.cloudflare.com/client/v4");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
     expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
+    expect(config.send_email).toEqual([
+      {
+        allowed_sender_addresses: ["assistant@mail.example.test"],
+        name: "HOSTED_EMAIL",
+      },
+    ]);
     expect(config.vars.HOSTED_WEB_BASE_URL).toBeUndefined();
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
@@ -255,7 +268,6 @@ describe("hosted deploy automation helpers", () => {
     expect(buildHostedWorkerSecretsPayload({
       AGENTMAIL_API_KEY: "agentmail-secret",
       BRAVE_API_KEY: "brave-key",
-      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",
@@ -270,7 +282,6 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
-      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",

@@ -48,6 +48,7 @@ Bindings:
 - `USER_RUNNER`
 - `RUNNER_CONTAINER`
 - `BUNDLES`
+- optional `HOSTED_EMAIL` native `send_email` binding for outbound hosted email
 
 Required worker secrets:
 
@@ -78,7 +79,10 @@ Optional execution vars and secrets:
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`, and `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` for staged key rotation or future envelope lanes
 - `HOSTED_ASSISTANT_*` config plus supported assistant provider API keys
-- opt-in runtime integrations such as `HOSTED_EMAIL_*`, `MURPH_WEB_*`, `LINQ_*`, `TELEGRAM_*`, `MAPBOX_ACCESS_TOKEN`, `FFMPEG_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH`
+- `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
+- opt-in runtime integrations such as `MURPH_WEB_*`, `LINQ_*`, `TELEGRAM_*`, `MAPBOX_ACCESS_TOKEN`, `FFMPEG_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH`
+
+When hosted email sender identity is configured, deploy automation renders an environment-specific native `HOSTED_EMAIL` send binding and constrains it with `allowed_sender_addresses` so outbound sender selection remains config-owned.
 
 The runtime always includes the minimal `assistant`, `parsers`, and `web` env profiles. Deploy automation layers `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default; device-sync stays opt-in and outside the standard cutover surface.
 
@@ -90,6 +94,6 @@ The runtime always includes the minimal `assistant`, `parsers`, and `web` env pr
 - `apps/cloudflare/.deploy/wrangler.generated.jsonc`
 - `apps/cloudflare/.deploy/worker-secrets.json`
 
-`wrangler deploy` is the normal cut. The lower-level version helper remains in-tree as a recovery-only path; it is not the primary deploy contract.
+`pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, and the hosted email send binding restrictions before upload. The lower-level version helper remains in-tree as a recovery-only path.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.

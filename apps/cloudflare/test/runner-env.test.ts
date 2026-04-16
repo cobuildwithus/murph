@@ -44,6 +44,9 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("forwards opt-in runner env profiles when configured", () => {
     expect(buildHostedRunnerContainerEnv({
+      HOSTED_EMAIL: {
+        send: async (_message: unknown) => undefined,
+      },
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
@@ -56,10 +59,27 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
-      HOSTED_EMAIL_SEND_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "true",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       NODE_ENV: "production",
       TELEGRAM_BOT_TOKEN: "telegram-token",
+    });
+  });
+
+  it("keeps hosted email send readiness false without the binding even when ingress config is present", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email",
+    })).toEqual({
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "production",
     });
   });
 

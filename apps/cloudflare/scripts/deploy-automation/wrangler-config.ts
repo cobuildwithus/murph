@@ -1,6 +1,9 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution/hosted-email";
+
+import { HOSTED_EMAIL_SEND_BINDING_NAME } from "../../src/hosted-email/constants.ts";
 import type { HostedDeployAutomationEnvironment } from "./environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./secrets.ts";
 
@@ -26,6 +29,8 @@ export function buildHostedWranglerDeployConfig(
   if (environment.allowedRunnerSecretKeys) {
     vars.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = environment.allowedRunnerSecretKeys;
   }
+
+  const sendEmailBindings = buildHostedEmailSendBindings(environment.workerVars);
 
   return {
     $schema: "../node_modules/wrangler/config-schema.json",
@@ -71,6 +76,11 @@ export function buildHostedWranglerDeployConfig(
         preview_bucket_name: environment.bundlesPreviewBucketName,
       },
     ],
+    ...(sendEmailBindings.length > 0
+      ? {
+          send_email: sendEmailBindings,
+        }
+      : {}),
     observability: {
       enabled: true,
       head_sampling_rate: environment.logHeadSamplingRate,
@@ -105,4 +115,21 @@ export function resolveCloudflareDeployPaths(baseDir = DEFAULT_DEPLOY_ROOT): {
     workerSecretsPath: path.join(deployDir, "worker-secrets.json"),
     wranglerConfigPath: path.join(deployDir, "wrangler.generated.jsonc"),
   };
+}
+
+function buildHostedEmailSendBindings(
+  workerVars: Readonly<Record<string, string>>,
+): Array<{
+  allowed_sender_addresses?: string[];
+  name: string;
+}> {
+  const senderIdentity = resolveHostedEmailSenderIdentity(workerVars);
+  if (!senderIdentity) {
+    return [];
+  }
+
+  return [{
+    allowed_sender_addresses: [senderIdentity],
+    name: HOSTED_EMAIL_SEND_BINDING_NAME,
+  }];
 }

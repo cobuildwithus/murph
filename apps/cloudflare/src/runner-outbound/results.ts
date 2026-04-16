@@ -13,8 +13,9 @@ import {
 } from "@murphai/hosted-execution/routes";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
+import { json, jsonError, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
+  HostedEmailSendValidationError,
   readHostedEmailConfig,
   readHostedEmailRawMessage,
   sendHostedEmailMessage,
@@ -131,20 +132,33 @@ async function handleRunnerEmailSendRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  const payload = await sendHostedEmailMessage({
-    bucket: input.bucket,
-    config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
-    key: input.environment.platformEnvelopeKey,
-    keyId: input.environment.platformEnvelopeKeyId,
-    keysById: input.environment.platformEnvelopeKeysById,
-    request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
-    userId: input.userId,
-  });
+  try {
+    const payload = await sendHostedEmailMessage({
+      bucket: input.bucket,
+      config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
+      emailBinding: input.env.HOSTED_EMAIL,
+      key: input.environment.platformEnvelopeKey,
+      keyId: input.environment.platformEnvelopeKeyId,
+      keysById: input.environment.platformEnvelopeKeysById,
+      request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
+      userId: input.userId,
+    });
 
-  return json({
-    ok: true,
-    target: payload.target,
-  });
+    return json({
+      ok: true,
+      target: payload.target,
+    });
+  } catch (error) {
+    if (
+      error instanceof HostedEmailSendValidationError
+      || error instanceof SyntaxError
+      || error instanceof TypeError
+    ) {
+      return jsonError(error.message, 400);
+    }
+
+    throw error;
+  }
 }
 
 async function handleRunnerAssistantDeliveryRequest(input: {

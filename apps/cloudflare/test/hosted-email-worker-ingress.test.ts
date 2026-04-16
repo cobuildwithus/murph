@@ -207,9 +207,6 @@ describe("hosted email worker ingress", () => {
 
 function createHostedEmailConfig() {
   return {
-    apiBaseUrl: "https://api.cloudflare.com/client/v4",
-    cloudflareAccountId: "acct_123",
-    cloudflareApiToken: "token_123",
     defaultSubject: "Murph update",
     domain: "mail.example.test",
     fromAddress: "assistant@mail.example.test",
@@ -221,8 +218,6 @@ function createHostedEmailConfig() {
 function createWorkerEnv(bucket: MemoryEncryptedR2Bucket) {
   return {
     BUNDLES: bucket,
-    HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-    HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "token_123",
     HOSTED_EMAIL_DOMAIN: "mail.example.test",
     HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
     HOSTED_EMAIL_LOCAL_PART: "assistant",
