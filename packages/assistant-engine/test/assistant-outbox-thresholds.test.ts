@@ -351,7 +351,7 @@ describe('assistant outbox thresholds', () => {
     expect(rename).toHaveBeenCalledOnce()
   })
 
-  it('treats explicit delivery-may-have-succeeded errors as confirmation-pending retries', async () => {
+  it('treats explicit delivery-may-have-succeeded errors as ambiguous retries', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => {
       throw Object.assign(new Error('socket closed after send'), {
         deliveryMayHaveSucceeded: true,
@@ -382,7 +382,7 @@ describe('assistant outbox thresholds', () => {
         code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
       },
       intent: {
-        deliveryConfirmationPending: true,
+        deliveryConfirmationPending: false,
         status: 'retryable',
       },
       session: null,

@@ -11,6 +11,8 @@ import {
 } from '../src/assistant/outbox.ts'
 import {
   rescheduleAssistantOutboxConfirmationRetry,
+  markAssistantOutboxIntentMirrorRetryable,
+  markAssistantOutboxIntentMirrorTerminal,
   updateAssistantOutboxAfterDispatchFailure,
 } from '../src/assistant/outbox/dispatch-state.ts'
 import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
@@ -35,6 +37,16 @@ async function createSendingIntent(input: {
   deliveryTransportIdempotent?: boolean
   vault: string
 }): Promise<Awaited<ReturnType<typeof saveAssistantOutboxIntent>>> {
+  await createAssistantTurnReceipt({
+    deliveryRequested: true,
+    prompt: 'hello from the outbox seam',
+    provider: 'openai-compatible',
+    providerModel: 'gpt-5.4',
+    sessionId: 'asst_outbox_test',
+    turnId: `turn_outbox_${input.attemptCount}`,
+    vault: input.vault,
+  })
+
   const created = await createAssistantOutboxIntent({
     message: 'hello from the outbox seam',
     sessionId: 'asst_outbox_test',
@@ -162,6 +174,90 @@ describe('assistant outbox dispatch-state', () => {
       expect(
         receipt?.timeline.filter((event) => event.kind === 'delivery.attempt.started'),
       ).toHaveLength(1)
+    })
+  })
+
+  it('records hosted mirror retryable failures with the next retry timestamp', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const failedAt = new Date('2030-04-13T00:12:00.000Z')
+
+      const retryable = await markAssistantOutboxIntentMirrorRetryable({
+        error: Object.assign(new Error('hosted mirror journal GET failed'), {
+          code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+          retryable: true,
+        }),
+        failedAt,
+        intent: sending,
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        vault,
+      })
+
+      expect(retryable.status).toBe('retryable')
+      expect(retryable.deliveryConfirmationPending).toBe(false)
+      expect(retryable.updatedAt).toBe('2030-04-13T00:12:00.000Z')
+      expect(retryable.nextAttemptAt).toBe('2030-04-13T00:12:30.000Z')
+      expect(retryable.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
+
+      const receipt = await readAssistantTurnReceipt(vault, sending.turnId)
+      expect(receipt?.status).toBe('deferred')
+      expect(receipt?.deliveryDisposition).toBe('retryable')
+      expect(receipt?.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
+      expect(receipt?.timeline.at(-1)).toMatchObject({
+        kind: 'delivery.retry-scheduled',
+        detail: 'hosted mirror journal GET failed',
+      })
+
+      const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
+      expect(diagnostics.counters.deliveriesRetryable).toBe(1)
+      expect(diagnostics.counters.outboxRetries).toBe(1)
+      expect(diagnostics.counters.deliveriesFailed).toBe(0)
+    })
+  })
+
+  it('records hosted mirror terminal failures without scheduling another retry', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 2,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const failedAt = new Date('2030-04-13T00:20:00.000Z')
+
+      const failed = await markAssistantOutboxIntentMirrorTerminal({
+        error: Object.assign(new Error('hosted mirror reconciliation refused the delivery'), {
+          code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+        }),
+        failedAt,
+        intent: sending,
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        status: 'abandoned',
+        vault,
+      })
+
+      expect(failed.status).toBe('abandoned')
+      expect(failed.deliveryConfirmationPending).toBe(false)
+      expect(failed.updatedAt).toBe('2030-04-13T00:20:00.000Z')
+      expect(failed.nextAttemptAt).toBeNull()
+      expect(failed.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
+
+      const receipt = await readAssistantTurnReceipt(vault, sending.turnId)
+      expect(receipt?.status).toBe('failed')
+      expect(receipt?.deliveryDisposition).toBe('failed')
+      expect(receipt?.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
+      expect(receipt?.timeline.at(-1)).toMatchObject({
+        kind: 'delivery.failed',
+        detail: 'hosted mirror reconciliation refused the delivery',
+      })
+
+      const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
+      expect(diagnostics.counters.deliveriesFailed).toBe(1)
+      expect(diagnostics.counters.deliveriesRetryable).toBe(0)
+      expect(diagnostics.counters.outboxRetries).toBe(0)
     })
   })
 

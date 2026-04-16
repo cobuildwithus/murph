@@ -4,11 +4,24 @@ import { gatewayDeliveryTargetKindValues } from "@murphai/gateway-core";
 
 import {
   buildHostedAssistantDeliveryEffect,
+  buildHostedAssistantDeliveryFailedRecord,
+  buildHostedAssistantDeliveryPendingRecord,
   buildHostedAssistantDeliveryPreparedRecord,
+  buildHostedAssistantDeliverySendingRecord,
+  buildHostedAssistantDeliverySentRecord,
   type HostedAssistantDeliveryPayload,
+  sameHostedAssistantDeliveryAttempt,
+  sameHostedAssistantDeliveryFailure,
+  sameHostedAssistantDeliveryReceipt,
+  sameHostedAssistantDeliverySideEffectIdentity,
+  sameHostedExecutionAssistantDelivery,
+  sameHostedExecutionSideEffectIdentity,
   hostedAssistantDeliveryTargetKindValues,
   parseHostedAssistantDeliveryRecord,
+  parseHostedAssistantDeliverySideEffect,
   parseHostedAssistantDeliverySideEffects,
+  parseHostedExecutionSideEffect,
+  parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
 } from "../src/side-effects.ts";
 
@@ -30,6 +43,49 @@ function createHostedAssistantDeliveryPayload(
     threadIsDirect: true,
     transportIdempotent: false,
     turnId: "turn-1",
+    ...overrides,
+  };
+}
+
+function createHostedAssistantDeliveryAttempt(
+  overrides: Partial<Parameters<typeof buildHostedAssistantDeliverySendingRecord>[0]["attempt"]> = {},
+) {
+  return {
+    channel: "telegram",
+    idempotencyKey: "assistant-outbox:intent-1",
+    messageLength: 27,
+    providerMessageId: "provider-message-1",
+    providerThreadId: "provider-thread-1",
+    startedAt: "2026-04-08T00:00:00.000Z",
+    target: "chat-1",
+    targetKind: "participant" as const,
+    ...overrides,
+  };
+}
+
+function createHostedAssistantDeliveryFailure(
+  overrides: Partial<Parameters<typeof buildHostedAssistantDeliveryFailedRecord>[0]["failure"]> = {},
+) {
+  return {
+    code: "ASSISTANT_DELIVERY_FAILED",
+    failedAt: "2026-04-08T00:00:10.000Z",
+    message: "delivery failed",
+    ...overrides,
+  };
+}
+
+function createHostedAssistantDeliveryReceipt(
+  overrides: Partial<Parameters<typeof buildHostedAssistantDeliverySentRecord>[0]["delivery"]> = {},
+) {
+  return {
+    channel: "telegram",
+    idempotencyKey: "assistant-outbox:intent-1",
+    messageLength: 27,
+    providerMessageId: "provider-message-1",
+    providerThreadId: "provider-thread-1",
+    sentAt: "2026-04-08T00:00:05.000Z",
+    target: "chat-1",
+    targetKind: "participant" as const,
     ...overrides,
   };
 }
@@ -118,5 +174,143 @@ describe("hosted assistant delivery contracts", () => {
         state: "prepared",
       })
     ).toThrow("intentId is no longer supported");
+  });
+
+  it("builds and parses pending, sending, sent, and failed records", () => {
+    const pending = buildHostedAssistantDeliveryPendingRecord({
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+    });
+    const sending = buildHostedAssistantDeliverySendingRecord({
+      attempt: createHostedAssistantDeliveryAttempt(),
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+    });
+    const sent = buildHostedAssistantDeliverySentRecord({
+      dedupeKey: "dedupe-1",
+      delivery: createHostedAssistantDeliveryReceipt(),
+      effectId: "intent-1",
+    });
+    const failed = buildHostedAssistantDeliveryFailedRecord({
+      attempt: createHostedAssistantDeliveryAttempt(),
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+      failure: createHostedAssistantDeliveryFailure(),
+    });
+    const ambiguous = buildHostedAssistantDeliveryFailedRecord({
+      attempt: createHostedAssistantDeliveryAttempt({
+        providerMessageId: null,
+        providerThreadId: null,
+      }),
+      dedupeKey: "dedupe-2",
+      effectId: "intent-2",
+      failure: createHostedAssistantDeliveryFailure({
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      }),
+      state: "failed_ambiguous",
+    });
+
+    expect(parseHostedAssistantDeliveryRecord(pending)).toEqual(pending);
+    expect(parseHostedAssistantDeliveryRecord(sending)).toEqual(sending);
+    expect(parseHostedAssistantDeliveryRecord(sent)).toEqual(sent);
+    expect(parseHostedAssistantDeliveryRecord(failed)).toEqual(failed);
+    expect(parseHostedAssistantDeliveryRecord(ambiguous)).toEqual(ambiguous);
+    expect(parseHostedExecutionSideEffectRecord(sent)).toEqual(sent);
+  });
+
+  it("upgrades legacy prepared records into sending records", () => {
+    const record = parseHostedAssistantDeliveryRecord({
+      effectId: "intent-legacy",
+      fingerprint: "dedupe-legacy",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "prepared",
+    });
+
+    expect(record).toEqual({
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      },
+      effectId: "intent-legacy",
+      fingerprint: "dedupe-legacy",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sending",
+    });
+  });
+
+  it("parses individual side effects and rejects unsupported kinds", () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+      payload: createHostedAssistantDeliveryPayload(),
+    });
+
+    expect(parseHostedAssistantDeliverySideEffect(effect)).toEqual(effect);
+    expect(parseHostedExecutionSideEffect(effect)).toEqual(effect);
+    expect(() =>
+      parseHostedExecutionSideEffect({
+        effectId: "intent-1",
+        fingerprint: "dedupe-1",
+        kind: "unsupported.kind",
+        payload: createHostedAssistantDeliveryPayload(),
+      }),
+    ).toThrow("Unsupported hosted execution side effect kind");
+  });
+
+  it("compares hosted side-effect identities, attempts, failures, and receipts", () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+      payload: createHostedAssistantDeliveryPayload(),
+    });
+    const sameEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+      payload: createHostedAssistantDeliveryPayload({
+        message: "changed payload is ignored for identity equality",
+      }),
+    });
+    const differentEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-2",
+      effectId: "intent-2",
+      payload: createHostedAssistantDeliveryPayload(),
+    });
+    const attempt = createHostedAssistantDeliveryAttempt();
+    const sameAttempt = createHostedAssistantDeliveryAttempt();
+    const differentAttempt = createHostedAssistantDeliveryAttempt({
+      providerThreadId: "provider-thread-2",
+    });
+    const failure = createHostedAssistantDeliveryFailure();
+    const sameFailure = createHostedAssistantDeliveryFailure();
+    const differentFailure = createHostedAssistantDeliveryFailure({
+      failedAt: "2026-04-08T00:01:00.000Z",
+    });
+    const receipt = createHostedAssistantDeliveryReceipt();
+    const sameReceipt = createHostedAssistantDeliveryReceipt();
+    const differentReceipt = createHostedAssistantDeliveryReceipt({
+      target: "chat-2",
+    });
+
+    expect(sameHostedAssistantDeliverySideEffectIdentity(effect, sameEffect)).toBe(true);
+    expect(sameHostedExecutionSideEffectIdentity(effect, sameEffect)).toBe(true);
+    expect(sameHostedAssistantDeliverySideEffectIdentity(effect, differentEffect)).toBe(false);
+    expect(sameHostedExecutionSideEffectIdentity(effect, differentEffect)).toBe(false);
+    expect(sameHostedAssistantDeliveryAttempt(attempt, sameAttempt)).toBe(true);
+    expect(sameHostedAssistantDeliveryAttempt(attempt, differentAttempt)).toBe(false);
+    expect(sameHostedAssistantDeliveryFailure(failure, sameFailure)).toBe(true);
+    expect(sameHostedAssistantDeliveryFailure(failure, differentFailure)).toBe(false);
+    expect(sameHostedAssistantDeliveryReceipt(receipt, sameReceipt)).toBe(true);
+    expect(sameHostedAssistantDeliveryReceipt(receipt, differentReceipt)).toBe(false);
+    expect(sameHostedExecutionAssistantDelivery(receipt, sameReceipt)).toBe(true);
+    expect(sameHostedExecutionAssistantDelivery(receipt, differentReceipt)).toBe(false);
   });
 });

@@ -410,7 +410,7 @@ test('drainAssistantOutbox keeps hosted journal failures retryable', async () =>
   }
 })
 
-test('drainAssistantOutbox keeps post-send hosted journal persistence failures retryable', async () => {
+test('drainAssistantOutbox only keeps post-send journal persistence failures retryable for the first follow-up attempt on non-idempotent channels', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-outbox-persist-retryable-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
@@ -486,7 +486,7 @@ test('drainAssistantOutbox keeps post-send hosted journal persistence failures r
 
     const intents = await listAssistantOutboxIntents(vaultRoot)
     assert.equal(intents[0]?.status, 'retryable')
-    assert.equal(intents[0]?.deliveryConfirmationPending, true)
+    assert.equal(intents[0]?.deliveryConfirmationPending, false)
     assert.equal(intents[0]?.delivery?.channel, 'telegram')
     assert.equal(intents[0]?.attemptCount, 1)
     const firstAttemptAt = intents[0]?.lastAttemptAt
@@ -503,42 +503,25 @@ test('drainAssistantOutbox keeps post-send hosted journal persistence failures r
     })
     assert.equal(secondDrain.attempted, 1)
     assert.equal(secondDrain.sent, 0)
-    assert.equal(secondDrain.failed, 0)
-    assert.equal(secondDrain.queued, 1)
+    assert.equal(secondDrain.failed, 1)
+    assert.equal(secondDrain.queued, 0)
     assert.equal(
       robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
-      1,
+      2,
     )
 
     const retriedIntents = await listAssistantOutboxIntents(vaultRoot)
-    assert.equal(retriedIntents[0]?.attemptCount, 1)
-    assert.equal(retriedIntents[0]?.lastAttemptAt, firstAttemptAt)
+    assert.equal(retriedIntents[0]?.status, 'failed')
+    assert.equal(retriedIntents[0]?.attemptCount, 2)
+    assert.notEqual(retriedIntents[0]?.lastAttemptAt, firstAttemptAt)
+    assert.equal(retriedIntents[0]?.delivery?.channel, 'telegram')
 
-    const reconciled = await drainAssistantOutbox({
-      dispatchHooks: {
-        async resolveDeliveredIntent({ intent }) {
-          assert.equal(intent.intentId, result.deliveryIntentId)
-          return {
-            channel: 'telegram',
-            idempotencyKey: intent.deliveryIdempotencyKey,
-            providerMessageId: null,
-            providerThreadId: null,
-            sentAt: new Date().toISOString(),
-            target: 'chat-1',
-            targetKind: 'thread',
-            messageLength: 'assistant reply'.length,
-          }
-        },
-      },
-      now: new Date(Date.now() + 180_000),
-      vault: vaultRoot,
-    })
-    assert.equal(reconciled.attempted, 1)
-    assert.equal(reconciled.sent, 1)
-    assert.equal(
-      robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
-      1,
-    )
+    const failedStatus = await getAssistantStatus(vaultRoot)
+    assert.equal(failedStatus.outbox.retryable, 0)
+    assert.equal(failedStatus.outbox.failed, 1)
+    assert.equal(failedStatus.outbox.sent, 0)
+    assert.equal(failedStatus.recentTurns[0]?.status, 'failed')
+    assert.equal(failedStatus.recentTurns[0]?.deliveryDisposition, 'failed')
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
