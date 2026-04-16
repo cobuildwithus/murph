@@ -47,7 +47,7 @@ test("LandingPage threads the server-side auth snapshot into the nav, hero, and 
   const markup = renderToStaticMarkup(await LandingPage());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(3);
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     1,
     {
@@ -72,6 +72,16 @@ test("LandingPage threads the server-side auth snapshot into the nav, hero, and 
     {
       authenticated: false,
       context: "footer",
+      showSignIn: false,
+      signupLabel: "Create your account",
+    },
+    undefined,
+  );
+  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
+    4,
+    {
+      authenticated: false,
+      context: "footer",
       signupLabel: "Start your first experiment",
     },
     undefined,
@@ -84,6 +94,8 @@ test("LandingPage threads the server-side auth snapshot into the nav, hero, and 
     markup,
     /data-landing-auth-actions-label="See what works for your body"/,
   );
+  assert.match(markup, /Ready to get more out of your wearable\?/);
+  assert.match(markup, /data-landing-auth-actions-label="Create your account"/);
   assert.match(
     markup,
     /data-landing-auth-actions-label="Start your first experiment"/,
@@ -94,4 +106,30 @@ test("LandingPage metadata points crawlers at the root landing URL", async () =>
   const { metadata } = await import("../app/lp/page");
 
   expect(metadata.alternates?.canonical).toBe("/");
+});
+
+test("LandingPage switches the mid-page CTA copy into account language for authenticated visitors", async () => {
+  vi.clearAllMocks();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+  });
+
+  const { default: LandingPage } = await import("../app/lp/page");
+
+  const markup = renderToStaticMarkup(await LandingPage());
+
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
+  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
+    3,
+    {
+      authenticated: true,
+      context: "footer",
+      showSignIn: false,
+      signupLabel: "Open settings",
+    },
+    undefined,
+  );
+  assert.match(markup, /You’re already set up\./);
+  assert.match(markup, /Subscription and billing/);
+  assert.doesNotMatch(markup, /Ready to get more out of your wearable\?/);
 });
