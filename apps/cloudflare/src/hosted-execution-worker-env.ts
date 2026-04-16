@@ -3,7 +3,7 @@ import {
 } from "@murphai/hosted-execution/env";
 
 export interface HostedExecutionWorkerEnvironment {
-  allowedUserEnvKeys: string | null;
+  allowedRunnerSecretKeys: string | null;
   automationRecipientKeyId: string;
   automationRecipientPrivateJwkJson: string;
   automationRecipientPrivateKeyringJson: string | null;
@@ -27,7 +27,7 @@ export function readHostedExecutionWorkerEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionWorkerEnvironment {
   return {
-    allowedUserEnvKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
+    allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
     automationRecipientKeyId: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID,
     ) ?? "automation:v1",

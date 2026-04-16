@@ -28,7 +28,7 @@ let hostedExecutionIsolatedRunnerForTests:
   | null = null;
 const hostedExecutionChildControlEnvKeys = new Set([
   "HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL",
-  "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
+  "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
   "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
 ]);
@@ -118,7 +118,7 @@ function buildHostedExecutionJobRuntime(
     commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
     forwardedEnv,
     resolvedConfig: requestedRuntime.resolvedConfig,
-    userEnv: requestedRuntime.userEnv ?? {},
+    runnerSecrets: requestedRuntime.userEnv ?? {},
   });
 }
 

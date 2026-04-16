@@ -1,21 +1,8 @@
-import type {
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
-  HostedExecutionDeviceSyncRuntimeApplyResponse,
-  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-} from "@murphai/device-syncd/hosted-runtime";
-
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
-  applyDeviceSyncRuntimeUpdates?(input: {
-    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
-  getDeviceSyncRuntimeSnapshot?(input: {
-    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
 }
 
 export interface WorkerUserRunnerNamespaceLike<
@@ -28,7 +15,7 @@ export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
   BUNDLES: R2BucketLike;
-  HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
+  HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_ASSISTANT_API_KEY_ENV?: string;
   HOSTED_ASSISTANT_APPROVAL_POLICY?: string;
   HOSTED_ASSISTANT_BASE_URL?: string;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHostedRunnerContainerEnv,
-  isHostedUserEnvKeyAllowed,
+  isHostedRunnerSecretKeyAllowed,
 } from "../src/hosted-env-policy.ts";
 
 describe("hosted assistant runner env policy", () => {
@@ -86,10 +86,10 @@ describe("hosted assistant runner env policy", () => {
     expect(env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
   });
 
-  it("never allows per-user env overrides to shadow hosted assistant bootstrap vars", () => {
-    expect(isHostedUserEnvKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
-    expect(isHostedUserEnvKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
-    expect(isHostedUserEnvKeyAllowed("OPENAI_API_KEY")).toBe(true);
-    expect(isHostedUserEnvKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
+  it("never allows runner-secret overrides to shadow hosted assistant bootstrap vars", () => {
+    expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedRunnerSecretKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
   });
 });

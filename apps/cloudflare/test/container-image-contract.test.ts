@@ -16,7 +16,7 @@ import {
 
 function createDeployEnvironment() {
   return {
-    allowedUserEnvKeys: null,
+    allowedRunnerSecretKeys: null,
     bundlesBucketName: "bundles",
     bundlesPreviewBucketName: "bundles-preview",
     platformEnvelopeKeyId: "v1",

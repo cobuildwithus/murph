@@ -56,7 +56,7 @@ import {
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
 import { RunnerScheduler } from "./runner-scheduler.js";
-import { RunnerUserEnvService } from "./runner-user-env.js";
+import { RunnerSecretsService } from "./runner-secrets.js";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 
 export type HostedExecutionDispatchProgressRecord =
@@ -70,7 +70,7 @@ export interface RunnerUserStores {
   commitRecovery: RunnerCommitRecovery;
   crypto: HostedUserCryptoContext;
   gatewayStore: HostedGatewayProjectionStore;
-  userEnv: RunnerUserEnvService;
+  runnerSecrets: RunnerSecretsService;
   userId: string;
 }
 
@@ -480,12 +480,12 @@ export class RunnerDispatchProcessor {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
-    const { bundleSync, userEnv: userEnvService } = await this.dependencies.ensureRunnerStores(
+    const { bundleSync, runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
       userId,
     );
-    const [bundleState, userEnv, sharePack] = await Promise.all([
+    const [bundleState, runnerSecrets, sharePack] = await Promise.all([
       this.dependencies.queueStore.readBundleMetaState(),
-      userEnvService.readUserEnv(userId),
+      runnerSecretsService.readRunnerSecrets(userId),
       dispatch.event.kind === "vault.share.accepted"
         ? this.readRunnerSharePack({
             ownerUserId: dispatch.event.share.ownerUserId,
@@ -508,7 +508,7 @@ export class RunnerDispatchProcessor {
       runtime: buildHostedRunnerJobRuntimeConfig({
         configSource: this.dependencies.readRunnerRuntimeConfigSource(),
         forwardedEnv,
-        userEnv,
+        runnerSecrets,
       }),
     };
 
@@ -566,8 +566,8 @@ export class RunnerDispatchProcessor {
         runElapsedMs: computeHostedRunElapsedMs(run),
         resumeFromCommit: Boolean(resume),
         sharePackAttached: Boolean(sharePack),
-        userEnvCategories: {
-          modelCredentialConfigured: hasAnyRunnerConfigKey(userEnv, [
+        runnerSecretsCategories: {
+          modelCredentialConfigured: hasAnyRunnerConfigKey(runnerSecrets, [
             "ANTHROPIC_API_KEY",
             "BRAVE_API_KEY",
             "CEREBRAS_API_KEY",
@@ -593,7 +593,7 @@ export class RunnerDispatchProcessor {
             "XAI_API_KEY",
           ]),
         },
-        userEnvKeyCount: Object.keys(userEnv).length,
+        runnerSecretKeyCount: Object.keys(runnerSecrets).length,
       },
       dispatch,
       message: "Hosted runner prepared container invocation.",

@@ -40,7 +40,7 @@ describe("cloudflare worker queue backpressure routes", () => {
   it("returns HTTP 429 when signed dispatch backpressures a full per-user queue", async () => {
     const harness = createUserRunnerDurableObject();
     await seedFullRunnerQueue(harness, "member_123");
-    await ensureManagedUserCryptoEnvelopeForTest(harness.env as never, "member_123");
+    await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
 
     const overflowResponse = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_overflow")),
@@ -60,12 +60,12 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("returns HTTP 429 for manual runs when the queue is already full", async () => {
+  it("keeps the removed manual-run route unavailable even when the queue is already full", async () => {
     const harness = createUserRunnerDurableObject({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
     await seedFullRunnerQueue(harness, "member_123");
-    await ensureManagedUserCryptoEnvelopeForTest(harness.env as never, "member_123");
+    await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
 
     const runResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
@@ -77,9 +77,9 @@ describe("cloudflare worker queue backpressure routes", () => {
       harness.env as never,
     );
 
-    expect(runResponse.status).toBe(429);
-    await expect(runResponse.json()).resolves.toMatchObject({
-      backpressuredEventIds: [expect.stringMatching(/^manual:/u)],
+    expect(runResponse.status).toBe(404);
+    await expect(runResponse.json()).resolves.toEqual({
+      error: "Not found",
     });
   });
 });
@@ -111,7 +111,7 @@ function createUserRunnerDurableObject(
   };
 }
 
-async function ensureManagedUserCryptoEnvelopeForTest(
+async function provisionManagedUserCryptoAtActivationForTest(
   env: ReturnType<typeof createUserRunnerDurableObject>["env"],
   userId: string,
 ): Promise<void> {
@@ -130,7 +130,7 @@ async function ensureManagedUserCryptoEnvelopeForTest(
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
   });
-  await store.ensureManagedUserCryptoEnvelope(userId);
+  await store.provisionManagedUserCryptoAtActivation(userId);
 }
 
 async function seedFullRunnerQueue(

@@ -273,93 +273,21 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("injects the path user id into manual run requests through direct RPC", async () => {
+  it("does not expose the removed manual-run route", async () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        body: JSON.stringify({ note: "manual" }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
         method: "POST",
       })),
       createWorkerEnv(stub),
     );
 
-    expect(response.status).toBe(200);
-    expect(stub.dispatch).toHaveBeenCalledTimes(1);
-    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: expect.stringMatching(/^manual:/u),
-    }));
-  });
-
-  it("accepts an empty manual run body and still injects the path user id", async () => {
-    const stub = createUserRunnerStub();
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        body: "",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(response.status).toBe(200);
-    expect(stub.dispatch).toHaveBeenCalledTimes(1);
-    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      event: expect.objectContaining({
-        userId: "member_123",
-      }),
-    }));
-  });
-
-  it("injects the route user into manual runs and returns 429 when the queue backpressures", async () => {
-    const stub = createUserRunnerStub({
-      dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
-        backpressuredEventIds: [input.eventId],
-        bundleRef: null,
-        inFlight: false,
-        lastError: null,
-        lastEventId: input.eventId,
-        lastRunAt: null,
-        nextWakeAt: null,
-        pendingEventCount: 1,
-        poisonedEventIds: [],
-        retryingEventId: null,
-        userId: input.event.userId,
-      })),
+    expect(response.status).toBe(404);
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
     });
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        body: JSON.stringify({ note: "manual" }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(response.status).toBe(429);
-    expect(stub.dispatch).toHaveBeenCalledTimes(1);
-    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      event: expect.objectContaining({
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      }),
-      eventId: expect.stringMatching(/^manual:/u),
-    }));
   });
 
   it("accepts OIDC bearer dispatches through the canonical internal dispatch route", async () => {
@@ -1111,17 +1039,17 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("returns method and auth errors on protected routes in the same order as before", async () => {
-    const unauthorizedRunResponse = await worker.fetch(
+  it("keeps removed manual-run paths absent while protected outbound routes preserve existing method ordering", async () => {
+    const removedRunResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/run", {
         method: "GET",
       }),
       createWorkerEnv(),
     );
 
-    expect(unauthorizedRunResponse.status).toBe(401);
-    await expect(unauthorizedRunResponse.json()).resolves.toEqual({
-      error: "Unauthorized",
+    expect(removedRunResponse.status).toBe(404);
+    await expect(removedRunResponse.json()).resolves.toEqual({
+      error: "Not found",
     });
 
     const wrongMethodOutboxResponse = await callRunnerOutbound(
@@ -1139,8 +1067,8 @@ describe("cloudflare worker routes", () => {
 
   it("returns 405 before bound-user validation on user-bound routes", async () => {
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        method: "GET",
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
+        method: "POST",
       }), {
         boundUserId: "member_other",
       }),
@@ -1155,7 +1083,7 @@ describe("cloudflare worker routes", () => {
 
   it("keeps malformed encoded route params behind existing auth and hidden-method boundaries", async () => {
     const controlResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/%E0%A4%A/run", {
+      new Request("https://runner.example.test/internal/users/%E0%A4%A/status", {
         method: "GET",
       }),
       createWorkerEnv(),
@@ -1423,7 +1351,7 @@ async function resolveHostedUserCryptoContextForTest(
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
   });
-  await store.ensureManagedUserCryptoEnvelope(userId);
+  await store.provisionManagedUserCryptoAtActivation(userId);
   return store.requireUserCryptoContext(userId);
 }
 

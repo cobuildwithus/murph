@@ -14,7 +14,7 @@ const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "WHISPER_MODEL_PATH",
 ] as const;
 
-const HOSTED_USER_ENV_PROCESS_CONTROL_KEYS = [
+const RUNNER_SECRET_PROCESS_CONTROL_KEYS = [
   "DYLD_INSERT_LIBRARIES",
   "DYLD_LIBRARY_PATH",
   "LD_LIBRARY_PATH",
@@ -23,7 +23,7 @@ const HOSTED_USER_ENV_PROCESS_CONTROL_KEYS = [
   "NODE_PATH",
 ] as const;
 
-const DEFAULT_ALLOWED_USER_ENV_KEYS = [
+const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [
   "ANTHROPIC_API_KEY",
   "BRAVE_API_KEY",
   "CEREBRAS_API_KEY",
@@ -49,9 +49,9 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "XAI_API_KEY",
 ] as const;
 
-const DISALLOWED_USER_ENV_KEYS = new Set([
+const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
-  ...HOSTED_USER_ENV_PROCESS_CONTROL_KEYS,
+  ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,
   "HOME",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
@@ -71,7 +71,7 @@ const DISALLOWED_USER_ENV_KEYS = new Set([
   "VAULT",
 ]);
 
-const DISALLOWED_USER_ENV_PREFIXES = [
+const DISALLOWED_RUNNER_SECRET_PREFIXES = [
   "AGENTMAIL_",
   "CF_",
   "HOSTED_ASSISTANT_",
@@ -142,24 +142,24 @@ const DEFAULT_RUNNER_ENV_PROFILE_NAMES = [
 type RunnerEnvProfileName = keyof typeof RUNNER_ENV_PROFILE_KEYS;
 type UnknownEnvSource = Readonly<Record<string, unknown>>;
 
-export function isHostedUserEnvKeyAllowed(
+export function isHostedRunnerSecretKeyAllowed(
   key: string,
   source: StringEnvSource = process.env,
 ): boolean {
-  if (DISALLOWED_USER_ENV_KEYS.has(key)) {
+  if (DISALLOWED_RUNNER_SECRET_KEYS.has(key)) {
     return false;
   }
 
-  if (DISALLOWED_USER_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+  if (DISALLOWED_RUNNER_SECRET_PREFIXES.some((prefix) => key.startsWith(prefix))) {
     return false;
   }
 
   const allowedKeys = new Set([
-    ...DEFAULT_ALLOWED_USER_ENV_KEYS,
-    ...parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
+    ...DEFAULT_ALLOWED_RUNNER_SECRET_KEYS,
+    ...parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
   ]);
 
-  // Hosted per-user env is a runner-secret seam only. Product facts and
+  // Hosted runner secrets are execution-only. Product facts and
   // process-control variables must stay out of this payload.
   return allowedKeys.has(key);
 }
@@ -233,7 +233,7 @@ function rewriteHostedRunnerLoopbackUrlForContainer(
   }
 }
 
-export function filterHostedRunnerUserEnv(
+export function filterHostedRunnerSecrets(
   env: Readonly<Record<string, string>>,
   source: StringEnvSource = process.env,
 ): Record<string, string> {
@@ -241,7 +241,7 @@ export function filterHostedRunnerUserEnv(
     Object.entries(env).filter(([key, value]) =>
       typeof value === "string"
       && value.length > 0
-      && isHostedUserEnvKeyAllowed(key, source)
+      && isHostedRunnerSecretKeyAllowed(key, source)
     ),
   );
 }

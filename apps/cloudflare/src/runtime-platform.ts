@@ -55,6 +55,15 @@ export function buildHostedExecutionRuntimePlatform(input: {
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
   const webControlBaseUrl = input.webControlBaseUrl ?? null;
   const webCallbackSigning = input.webCallbackSigning ?? null;
+  const hostedWebDeviceSyncPort = webControlBaseUrl && webCallbackSigning
+    ? createHostedWebDeviceSyncPort({
+        baseUrl: webControlBaseUrl,
+        boundUserId: input.boundUserId,
+        callbackSigning: webCallbackSigning,
+        fetchImpl,
+        timeoutMs,
+      })
+    : null;
 
   return {
     artifactStore: {
@@ -88,60 +97,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         assertHostedOk(response, `Hosted artifact upload ${sha256}`);
       },
     },
-    deviceSyncPort: {
-      async applyUpdates(runtimeInput) {
-        const payload = await fetchHostedJson({
-          body: {
-            ...(runtimeInput.occurredAt ? { occurredAt: runtimeInput.occurredAt } : {}),
-            updates: runtimeInput.updates,
-            userId: input.boundUserId,
-          },
-          description: "Hosted device-sync runtime apply",
-          fetchImpl,
-          method: "POST",
-          timeoutMs,
-          url: new URL(
-            HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.deviceSyncPort}/`,
-          ),
-        });
-
-        return parseHostedExecutionDeviceSyncRuntimeApplyResponse(payload);
-      },
-      async createConnectLink({ provider }) {
-        const payload = await fetchHostedJson({
-          description: `Hosted device-sync connect link ${provider}`,
-          fetchImpl,
-          method: "POST",
-          timeoutMs,
-          url: new URL(
-            buildHostedExecutionDeviceSyncConnectLinkPath(provider),
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.deviceSyncPort}/`,
-          ),
-        });
-
-        return parseHostedExecutionDeviceSyncConnectLinkResponse(payload);
-      },
-      async fetchSnapshot(runtimeInput = {}) {
-        const payload = await fetchHostedJson({
-          body: {
-            ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
-            ...(runtimeInput.provider ? { provider: runtimeInput.provider } : {}),
-            userId: input.boundUserId,
-          },
-          description: "Hosted device-sync runtime snapshot",
-          fetchImpl,
-          method: "POST",
-          timeoutMs,
-          url: new URL(
-            HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.deviceSyncPort}/`,
-          ),
-        });
-
-        return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(payload);
-      },
-    },
+    ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
     effectsPort: {
       async deletePreparedAssistantDelivery(sideEffect) {
         const url = createHostedAssistantDeliveryUrl(sideEffect);
@@ -373,6 +329,121 @@ function createHostedAssistantDeliveryUrl(input: {
   );
   url.searchParams.set("fingerprint", input.fingerprint);
   return url;
+}
+
+function createHostedWebDeviceSyncPort(input: {
+  baseUrl: string;
+  boundUserId: string;
+  callbackSigning: HostedWebCallbackSigningEnvironment;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+}) {
+  return {
+    async applyUpdates(runtimeInput: {
+      occurredAt?: string | null;
+      updates: unknown;
+    }) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        baseUrl: input.baseUrl,
+        body: {
+          ...(runtimeInput.occurredAt ? { occurredAt: runtimeInput.occurredAt } : {}),
+          updates: runtimeInput.updates,
+          userId: input.boundUserId,
+        },
+        boundUserId: input.boundUserId,
+        callbackSigning: input.callbackSigning,
+        description: "Hosted device-sync runtime apply",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+        timeoutMs: input.timeoutMs,
+      });
+
+      return parseHostedExecutionDeviceSyncRuntimeApplyResponse(payload);
+    },
+    async createConnectLink({ provider }: { provider: string }) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        baseUrl: input.baseUrl,
+        boundUserId: input.boundUserId,
+        callbackSigning: input.callbackSigning,
+        description: `Hosted device-sync connect link ${provider}`,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedExecutionDeviceSyncConnectLinkPath(provider),
+        timeoutMs: input.timeoutMs,
+      });
+
+      return parseHostedExecutionDeviceSyncConnectLinkResponse(payload);
+    },
+    async fetchSnapshot(runtimeInput: {
+      connectionId?: string | null;
+      provider?: string | null;
+    } = {}) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        baseUrl: input.baseUrl,
+        body: {
+          ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
+          ...(runtimeInput.provider ? { provider: runtimeInput.provider } : {}),
+          userId: input.boundUserId,
+        },
+        boundUserId: input.boundUserId,
+        callbackSigning: input.callbackSigning,
+        description: "Hosted device-sync runtime snapshot",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+        timeoutMs: input.timeoutMs,
+      });
+
+      return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(payload);
+    },
+  };
+}
+
+async function fetchHostedWebControlPlaneJson(input: {
+  baseUrl: string;
+  body?: Record<string, unknown>;
+  boundUserId: string;
+  callbackSigning: HostedWebCallbackSigningEnvironment;
+  description: string;
+  fetchImpl: typeof fetch;
+  path: string;
+  timeoutMs: number;
+}): Promise<unknown> {
+  const body = input.body === undefined ? undefined : JSON.stringify(input.body);
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body,
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: input.body === undefined ? "GET" : "POST",
+    path: input.path,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    const error = new Error(
+      detail.length > 0
+        ? `${input.description} failed with HTTP ${response.status}. ${detail}`
+        : `${input.description} failed with HTTP ${response.status}.`,
+    ) as Error & {
+      status: number;
+      statusCode: number;
+    };
+    error.status = response.status;
+    error.statusCode = response.status;
+    throw error;
+  }
+
+  const text = await response.text();
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
+  }
 }
 
 async function fetchHostedJson(input: {

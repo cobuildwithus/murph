@@ -9,7 +9,7 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 - Vercel OIDC-authenticated execution dispatch from `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
-- encrypted hosted workspace snapshots, externalized artifact blobs, encrypted runner-env blobs, and the execution-sidecar blobs needed to run and finalize hosted jobs in `BUNDLES`
+- encrypted hosted workspace snapshots, externalized artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run and finalize hosted jobs in `BUNDLES`
 
 ## What It Does Not Own
 
@@ -29,9 +29,8 @@ Internal execution routes:
 - `POST /internal/dispatch`
 - `GET /internal/users/:userId/status`
 - `GET /internal/users/:userId/events/:eventId/status`
-- `POST /internal/users/:userId/run`
 
-The supported worker HTTP surface stops at those four execution routes plus the public banner and health checks.
+The supported worker HTTP surface stops at those three execution routes plus the public banner and health checks.
 
 ## Storage Contract
 
@@ -40,7 +39,7 @@ The supported worker HTTP surface stops at those four execution routes plus the 
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: queue state, retries, in-flight markers, timestamps, and encrypted bundle references.
 - Lifecycle rules backstop only the short-lived `transient/execution-journal/`, `transient/dispatch-payloads/`, `transient/side-effects/`, and `transient/hosted-email/messages/` prefixes. `transient/dispatch-payloads/` is an internal queue spillover detail for encrypted pending dispatch envelopes, not a control-plane CRUD seam.
-- Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-env blobs, and execution-time device-sync mirrors.
+- Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-secrets blobs, and queue-local execution sidecars. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 
 ## Worker Contract
 
@@ -76,7 +75,7 @@ Defaulted worker vars:
 Optional execution vars and secrets:
 
 - `HOSTED_WEB_BASE_URL` and `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for the narrow signed web-proxy path
-- `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
+- `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`, and `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` for staged key rotation or future envelope lanes
 - `HOSTED_ASSISTANT_*` config plus supported assistant provider API keys
 - opt-in runtime integrations such as `HOSTED_EMAIL_*`, `MURPH_WEB_*`, `LINQ_*`, `TELEGRAM_*`, `MAPBOX_ACCESS_TOKEN`, `FFMPEG_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH`

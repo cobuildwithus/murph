@@ -10,7 +10,6 @@ import {
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
-import { handleRunnerDeviceSyncControlRequest } from "./runner-outbound/device-sync.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import {
   requireRunnerInternalProxyAuthorization,
@@ -65,16 +64,6 @@ export async function handleRunnerOutboundRequest(
         environment,
         request,
         sha256: match.groups.sha256,
-        userId,
-      });
-    }
-
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort) {
-      return handleRunnerDeviceSyncControlRequest({
-        env,
-        environment,
-        request,
-        url,
         userId,
       });
     }

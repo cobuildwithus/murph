@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { buildHostedExecutionRuntimePlatform } from "../src/runtime-platform.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 describe("buildHostedExecutionRuntimePlatform", () => {
   it("routes effects through the Cloudflare internal effects port and attaches the per-run proxy token", async () => {
@@ -62,7 +64,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect((request as Request).method).toBe("DELETE");
   });
 
-  it("binds device-sync requests to the hosted member id at the Cloudflare port seam", async () => {
+  it("binds device-sync runtime requests to the hosted member id at the signed web callback seam", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       const body = await request.json() as Record<string, unknown>;
@@ -83,9 +85,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+    }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test/app",
     });
 
     const snapshot = await platform.deviceSyncPort!.fetchSnapshot({
@@ -98,9 +105,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     if (!firstCall) {
       throw new Error("Expected the device-sync fetch to run.");
     }
-    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
-    expect(request).toBeInstanceOf(URL);
-    expect(String(request)).toBe("http://device-sync.worker/api/internal/device-sync/runtime/snapshot");
+    const [url, init] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/runtime/snapshot");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(headers.get("x-hosted-execution-signing-key-id")).toBe("v1");
+    expect(headers.get("x-hosted-execution-nonce")).toMatch(/^[a-f0-9]{32}$/u);
+    expect(headers.get("x-hosted-execution-timestamp")).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
   it("supports the assistant-delivery-specific journal method names", async () => {

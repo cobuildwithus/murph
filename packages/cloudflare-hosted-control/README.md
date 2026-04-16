@@ -4,4 +4,4 @@ Private Cloudflare-owned hosted execution-plane seam shared by `apps/web` and `a
 
 This package exists so the public `@murphai/hosted-execution` package can stay
 limited to shared dispatch transport while the Cloudflare-owned execution status
-and manual-run routes remain private and owner-scoped.
+routes remain private and owner-scoped.

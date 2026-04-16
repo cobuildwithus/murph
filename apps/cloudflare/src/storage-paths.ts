@@ -38,18 +38,18 @@ export async function hostedArtifactObjectKey(
   return `users/artifacts/${userSegment}/${artifactSegment}.artifact.bin`;
 }
 
-export async function hostedUserEnvObjectKey(
+export async function hostedRunnerSecretsObjectKey(
   rootKey: Uint8Array,
   userId: string,
 ): Promise<string> {
   const userSegment = await deriveHostedStorageOpaqueId({
     length: 24,
     rootKey,
-    scope: "user-env-path",
+    scope: "runner-secrets-path",
     value: `user:${userId}`,
   });
 
-  return `users/env/${userSegment}.json`;
+  return `users/runner-secrets/${userSegment}.json`;
 }
 
 export async function hostedExecutionJournalObjectKey(

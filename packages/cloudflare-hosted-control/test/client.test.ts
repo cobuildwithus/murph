@@ -19,7 +19,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "getEventStatus",
       "getStatus",
-      "run",
     ]);
   });
 
@@ -136,30 +135,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("runs a user with the expected request shape", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse(createUserStatus({ userId: "user_123" }));
-      }) as typeof fetch,
-      getBearerToken: async () => "token-123",
-      timeoutMs: 1_000,
-    });
-
-    await expect(client.run("user_123")).resolves.toEqual(createUserStatus({ userId: "user_123" }));
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/run");
-    expect(request.init?.method).toBe("POST");
-    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
-    expect(new Headers(request.init?.headers).get("content-type")).toBe(
-      "application/json; charset=utf-8",
-    );
-    expect(JSON.parse(String(request.init?.body))).toEqual({});
-  });
 });
 
 function createJsonResponse(value: unknown): Response {

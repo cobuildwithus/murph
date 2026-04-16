@@ -11,14 +11,12 @@ import {
 
 import {
   buildCloudflareHostedControlUserEventStatusPath,
-  buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
 
 export interface CloudflareHostedControlClient {
   getEventStatus(userId: string, eventId: string): Promise<HostedExecutionDispatchStatus | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
-  run(userId: string): Promise<HostedExecutionUserStatus>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -63,23 +61,6 @@ export function createCloudflareHostedControlClient(
         parse: parseHostedExecutionUserStatus,
         path: buildCloudflareHostedControlUserStatusPath(userId),
         request: { method: "GET" },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    run(userId) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "manual run",
-        parse: parseHostedExecutionUserStatus,
-        path: buildCloudflareHostedControlUserRunPath(userId),
-        request: {
-          body: JSON.stringify({}),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "POST",
-        },
         timeoutMs: options.timeoutMs,
       });
     },
