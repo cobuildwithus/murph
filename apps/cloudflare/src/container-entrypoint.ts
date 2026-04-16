@@ -583,6 +583,11 @@ function resolveHostedContainerInternalWorkerProxyUpstream(input: {
       `${HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV} must use http or https.`,
     );
   }
+  if (!isHostedContainerLocalProxyHostname(upstreamBaseUrl.hostname)) {
+    throw new TypeError(
+      `${HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV} must target a local loopback host.`,
+    );
+  }
 
   const upstreamUrl = new URL(input.path, ensureTrailingSlash(upstreamBaseUrl));
   upstreamUrl.search = input.search;
@@ -592,6 +597,13 @@ function resolveHostedContainerInternalWorkerProxyUpstream(input: {
     rewritten: true,
     url: upstreamUrl,
   };
+}
+
+function isHostedContainerLocalProxyHostname(value: string): boolean {
+  return value === "127.0.0.1"
+    || value === "localhost"
+    || value === "::1"
+    || value === "host.docker.internal";
 }
 
 function ensureTrailingSlash(value: URL): URL {

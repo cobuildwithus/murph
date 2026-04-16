@@ -326,6 +326,89 @@ describe("executeHostedDispatchForCommit", () => {
     assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
     assert.match(result.committedResult.result.summary, /Processed member activation/u);
   });
+
+  it("preserves an existing hosted execution default target during maintenance setup", async () => {
+    const existingDefaultTarget = {
+      adapter: "openai-compatible" as const,
+      apiKeyEnv: "CUSTOM_OPENAI_API_KEY",
+      endpoint: "https://example.test/v1",
+      headers: null,
+      model: "gpt-4.1-mini",
+      presetId: null,
+      providerName: "Custom OpenAI",
+      reasoningEffort: null,
+      webSearch: "murph" as const,
+    };
+
+    await executeHostedDispatchForCommit({
+      artifactMaterializer: vi.fn(),
+      executionContext: {
+        hosted: {
+          defaultTarget: existingDefaultTarget,
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_existing_default_target",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+      runtimeEnv: {
+        OPENAI_API_KEY: "secret",
+      },
+    });
+
+    expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: {
+          hosted: expect.objectContaining({
+            defaultTarget: existingDefaultTarget,
+          }),
+        },
+      }),
+    );
+  });
 });
 
 describe("completeHostedExecutionAfterCommit", () => {

@@ -166,7 +166,7 @@ export async function executeHostedDispatchForCommit(input: {
 async function resolveHostedMaintenanceExecutionContext(
   executionContext: AssistantExecutionContext,
 ): Promise<AssistantExecutionContext> {
-  if (!executionContext.hosted) {
+  if (!executionContext.hosted || executionContext.hosted.defaultTarget) {
     return executionContext;
   }
 

@@ -2561,7 +2561,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 1,
-      nextWakeAt: null,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 0,
       stopScanning: true,

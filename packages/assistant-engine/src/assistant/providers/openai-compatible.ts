@@ -1,6 +1,7 @@
-import { generateText, stepCountIs, type ToolSet } from 'ai'
+import { generateText, stepCountIs, tool, type ToolSet } from 'ai'
 import {
   resolveAssistantLanguageModel,
+  type AssistantModelSpec,
   type AssistantAiSdkToolEvent,
 } from '../../model-harness.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -38,6 +39,7 @@ import {
   supportsAnyAssistantRichUserMessageContent,
   type AssistantProviderDefinition,
 } from './types.js'
+import { z } from 'zod/v4'
 
 const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
 const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
@@ -175,6 +177,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     let executedToolCount = 0
     const tools = resolveOpenAiCompatibleAiSdkTools({
       input,
+      languageModelSpec,
       onToolEvent: (event) => {
         if (event.kind === 'started' && event.mode === 'apply') {
           executedToolCount += 1
@@ -285,9 +288,13 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
 function resolveOpenAiCompatibleAiSdkTools(input: {
   input: Parameters<AssistantProviderDefinition['executeTurn']>[0]
+  languageModelSpec: AssistantModelSpec
   onToolEvent: (event: AssistantAiSdkToolEvent) => void
   providerConfig: AssistantProviderConfig
-}): ToolSet | undefined {
+}) {
+  const useMurphWebSearch = shouldAssistantProviderUseMurphWebSearch(
+    input.providerConfig,
+  )
   const requestedNativeWebSearch =
     shouldAssistantProviderUseProviderWebSearch(input.providerConfig) ||
     shouldAssistantProviderUseGatewayWebSearch(input.providerConfig)
@@ -296,18 +303,39 @@ function resolveOpenAiCompatibleAiSdkTools(input: {
       input.input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
         onToolEvent: input.onToolEvent,
       }) ?? null,
-    // The current AI SDK generateText stack still throws on provider-defined
-    // tools before the provider adapter can handle them. Keep OpenAI-compatible
-    // turns on Murph-owned search until that upstream path is safe.
-    useMurphWebSearch:
-      shouldAssistantProviderUseMurphWebSearch(input.providerConfig) ||
-      requestedNativeWebSearch,
+    useMurphWebSearch,
   })
-  const tools: ToolSet = {
+  const tools = {
     ...remapOpenAiCompatibleToolNames(murphTools),
+  }
+  const nativeWebSearchTool =
+    requestedNativeWebSearch && !useMurphWebSearch
+      ? createOpenAiCompatibleNativeWebSearchTool({
+          languageModelSpec: input.languageModelSpec,
+        })
+      : null
+
+  if (nativeWebSearchTool) {
+    tools.web_search = nativeWebSearchTool
   }
 
   return Object.keys(tools).length > 0 ? tools : undefined
+}
+
+function createOpenAiCompatibleNativeWebSearchTool(input: {
+  languageModelSpec: AssistantModelSpec
+}) {
+  if (input.languageModelSpec.executionDriver !== 'responses') {
+    return null
+  }
+
+  return tool({
+    type: 'provider',
+    id: 'openai.web_search',
+    args: {},
+    description: 'Native OpenAI web search tool',
+    inputSchema: z.never(),
+  })
 }
 
 function filterOpenAiCompatibleMurphAiSdkTools(input: {

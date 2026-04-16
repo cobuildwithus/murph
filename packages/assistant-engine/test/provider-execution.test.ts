@@ -300,6 +300,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         presetId: 'openai',
         providerName: 'OpenAI',
         reasoningEffort: 'medium',
+        webSearch: 'murph',
       }),
       resumeProviderSessionId: 'resume-session-123',
       systemPrompt: 'You are concise.',
@@ -610,27 +611,15 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     const onTraceEvent = vi.fn()
     const toolCatalog: AssistantToolCatalog = {
       createAiSdkTools: vi.fn(
-        (
-          _mode: AssistantToolExecutionMode = 'preview',
-          callbacks: AssistantCreateAiSdkToolsOptions = {},
-        ) => {
-          callbacks.onToolEvent?.({
-            input: {},
-            kind: 'succeeded',
-            mode: 'apply',
-            tool: 'web.search',
-          })
-
-          return {
-            webSearch: tool({
-              description: 'Mock web search tool',
-              execute: async () => ({}),
-              inputSchema: z.object({
-                query: z.string().optional(),
-              }),
+        (_mode: AssistantToolExecutionMode = 'preview', _callbacks: AssistantCreateAiSdkToolsOptions = {}) => ({
+          webSearch: tool({
+            description: 'Mock web search tool',
+            execute: async () => ({}),
+            inputSchema: z.object({
+              query: z.string().optional(),
             }),
-          }
-        },
+          }),
+        }),
       ),
       executeCalls: vi.fn(),
       hasTool: vi.fn(),
@@ -661,27 +650,13 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       metadata: {
         activityLabels: [],
         executedToolCount: 0,
-        rawToolEvents: [
-          {
-            mode: 'apply',
-            sequence: 1,
-            tool: 'web.search',
-            type: 'assistant.tool.succeeded',
-          },
-        ],
+        rawToolEvents: [],
       },
       ok: true,
       result: {
         provider: 'openai-compatible',
         providerSessionId: 'response-openai-2',
-        rawEvents: [
-          {
-            mode: 'apply',
-            sequence: 1,
-            tool: 'web.search',
-            type: 'assistant.tool.succeeded',
-          },
-        ],
+        rawEvents: [],
         response: 'Finished tool work',
         stderr: '',
         stdout: '',
@@ -733,35 +708,13 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       system: undefined,
       timeout: 600000,
       tools: expect.objectContaining({
-        webSearch: expect.objectContaining({
-          description: 'Mock web search tool',
+        web_search: expect.objectContaining({
+          description: 'Native OpenAI web search tool',
         }),
       }),
     })
-    expect(onEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'tool-1',
-        kind: 'tool',
-        safeLabel: 'web.search',
-        state: 'completed',
-        text: 'Finished web.search.',
-      }),
-    )
-    expect(onTraceEvent).toHaveBeenCalledWith({
-      providerSessionId: null,
-      rawEvent: {
-        mode: 'apply',
-        sequence: 1,
-        tool: 'web.search',
-        type: 'assistant.tool.succeeded',
-      },
-      updates: [
-        {
-          kind: 'status',
-          text: 'Finished web.search.',
-        },
-      ],
-    })
+    expect(onEvent).not.toHaveBeenCalled()
+    expect(onTraceEvent).not.toHaveBeenCalled()
   })
 
   it('returns a failed provider result when generateText throws', async () => {
@@ -834,7 +787,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
 
     expect(providerMocks.generateText).toHaveBeenCalledWith({
       abortSignal: undefined,
-      maxRetries: 2,
+      maxRetries: 0,
       messages: [
         {
           content: 'Use the gateway',
@@ -850,8 +803,17 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
           store: false,
         },
       },
+      stopWhen: {
+        count: 8,
+        kind: 'step-count',
+      },
       system: undefined,
       timeout: 600000,
+      tools: {
+        web_search: expect.objectContaining({
+          description: 'Native OpenAI web search tool',
+        }),
+      },
     })
   })
 })

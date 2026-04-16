@@ -260,10 +260,7 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
         deliveryChannel: input.delivery.channel,
         deliveryStatus: "sent",
         failureDomain: "dispatch",
-        providerMessageId: input.delivery.providerMessageId ?? null,
-        providerThreadId: input.delivery.providerThreadId ?? null,
         retryable: false,
-        target: input.delivery.target,
         targetKind: input.delivery.targetKind,
       },
       userId: input.userId,
@@ -300,8 +297,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
     }),
     dispatch: input.dispatch,
     level: retryable ? "warn" : "error",
-    message: input.deliveryError?.message
-      ?? `Hosted assistant delivery finished with ${input.intentStatus} status during post-commit dispatch.`,
+    message: `Hosted assistant delivery finished with ${input.intentStatus} status during post-commit dispatch.`,
     phase: "side-effects.draining",
     userId: input.userId,
   });
