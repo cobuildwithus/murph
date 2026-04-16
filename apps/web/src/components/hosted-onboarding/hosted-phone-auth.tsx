@@ -7,6 +7,7 @@ import {
   HostedPhoneAuthScaffold,
 } from "./hosted-phone-auth-views";
 import { useHostedPhoneAuthController } from "./hosted-phone-auth-controller";
+import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthProps {
@@ -14,6 +15,7 @@ interface HostedPhoneAuthProps {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  renderCaptcha?: boolean;
   showPassiveConsentNotice?: boolean;
   suppressAuthenticatedSessionIssue?: boolean;
 }
@@ -23,6 +25,7 @@ export function HostedPhoneAuth({
   onCompleted,
   onLinked,
   onSignOut,
+  renderCaptcha = true,
   showPassiveConsentNotice = true,
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthProps) {
@@ -48,6 +51,7 @@ export function HostedPhoneAuth({
       onContinue={controller.handleContinueAuthenticated}
       onUseDifferentNumber={controller.handleLogout}
     >
+      {renderCaptcha ? <HostedPrivyCaptcha /> : null}
       <HostedPhoneAuthFlow
         {...controller.sharedFlowProps}
         showPassiveConsentNotice={showPassiveConsentNotice}

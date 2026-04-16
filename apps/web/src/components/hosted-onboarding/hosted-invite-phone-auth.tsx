@@ -23,6 +23,7 @@ import {
   HostedPhoneAuthFlow,
   HostedPhoneAuthScaffold,
 } from "./hosted-phone-auth-views";
+import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 
 interface InvitePhoneCodePayload {
   phoneNumber: string;
@@ -132,22 +133,28 @@ export function HostedInvitePhoneAuth({
       onUseDifferentNumber={controller.handleLogout}
     >
       {inviteShortcutActive && !inviteCodeAttempt ? (
-        <HostedInviteShortcutStep
-          disabled={controller.flowDisabled}
-          pendingAction={controller.pendingAction}
-          onSendCode={handleInviteSendCode}
-          onUseDifferentNumber={handleUseDifferentNumber}
-        />
+        <>
+          <HostedPrivyCaptcha />
+          <HostedInviteShortcutStep
+            disabled={controller.flowDisabled}
+            pendingAction={controller.pendingAction}
+            onSendCode={handleInviteSendCode}
+            onUseDifferentNumber={handleUseDifferentNumber}
+          />
+        </>
       ) : (
-        <HostedPhoneAuthFlow
-          {...controller.sharedFlowProps}
-          phoneFieldDescription="Enter the number that messaged Murph."
-          phoneFieldLabel="Phone number"
-          secondaryActionSize="sm"
-          showPassiveConsentNotice={false}
-          onResendCode={handleResendCode}
-          onUseDifferentNumber={handleUseDifferentNumber}
-        />
+        <>
+          <HostedPrivyCaptcha />
+          <HostedPhoneAuthFlow
+            {...controller.sharedFlowProps}
+            phoneFieldDescription="Enter the number that messaged Murph."
+            phoneFieldLabel="Phone number"
+            secondaryActionSize="sm"
+            showPassiveConsentNotice={false}
+            onResendCode={handleResendCode}
+            onUseDifferentNumber={handleUseDifferentNumber}
+          />
+        </>
       )}
     </HostedPhoneAuthScaffold>
   );

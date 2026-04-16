@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
+  Captcha() {
+    return React.createElement("div", { "data-privy-captcha": "mounted" });
+  },
   useCreateWallet() {
     return {
       createWallet: mocks.createWallet,
@@ -78,6 +81,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, />\+1</);
     assert.match(markup, /placeholder="\(201\) 555-0123"/);
     assert.match(markup, /name="phone-number"/);
+    assert.match(markup, /data-privy-captcha="mounted"/);
     assert.match(
       markup,
       /data-slot="input"[^>]*class="[^"]*\bh-11\b[^"]*\brounded-2xl\b[^"]*\bpx-4\b[^"]*\bpy-2\.5\b/,
@@ -135,6 +139,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
+    assert.doesNotMatch(markup, /data-privy-captcha="mounted"/);
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
@@ -150,6 +155,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /Send me a code/);
     assert.match(markup, /We&#x27;ll text a verification code to your phone\./);
     assert.match(markup, /Use a different number/);
+    assert.match(markup, /data-privy-captcha="mounted"/);
     assert.doesNotMatch(markup, /Phone number/);
     assert.doesNotMatch(markup, /Text me a code/);
     assert.doesNotMatch(markup, /\*\*\* 4567/);

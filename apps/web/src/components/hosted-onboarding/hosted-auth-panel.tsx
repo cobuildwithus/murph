@@ -10,6 +10,7 @@ import {
 } from "./hosted-auth-shared";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
+import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import { HostedTelegramAuthButton } from "./hosted-telegram-auth-button";
 
 type HostedAuthMethod = "phone" | "telegram" | "email";
@@ -36,11 +37,13 @@ export function HostedAuthPanel({
 
   return (
     <div className="space-y-4">
+      <HostedPrivyCaptcha />
       {includesPhone ? (
         <HostedPhoneAuth
           intent={intent}
           onCompleted={onCompleted}
           onSignOut={onSignOut}
+          renderCaptcha={false}
           showPassiveConsentNotice={false}
           suppressAuthenticatedSessionIssue={activeMethod !== null}
         />
