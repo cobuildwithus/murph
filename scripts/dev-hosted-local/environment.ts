@@ -1,8 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
+  cloudflareDir,
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
+  repoRoot,
   WRANGLER_VAR_ALLOWLIST,
 } from "./constants.ts";
 import {
@@ -218,7 +221,15 @@ export function buildWranglerEnvFileText(
 
 export function buildWranglerLocalDevConfig(
   source: Readonly<Record<string, string | undefined>>,
+  options: {
+    configDir?: string;
+    cloudflareAppDir?: string;
+    workspaceRoot?: string;
+  } = {},
 ): Record<string, unknown> {
+  const cloudflareAppDir = options.cloudflareAppDir ?? cloudflareDir;
+  const workspaceRoot = options.workspaceRoot ?? repoRoot;
+  const configDir = options.configDir ?? path.join(cloudflareAppDir, ".wrangler");
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: resolveWranglerEnvValue("HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS", source) ?? "3",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: resolveWranglerEnvValue("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID", source) ?? "v1",
@@ -244,14 +255,17 @@ export function buildWranglerLocalDevConfig(
 
   return {
     name: "murph-hosted",
-    main: "../src/index.ts",
+    main: toWranglerConfigRelativePath(configDir, path.join(cloudflareAppDir, "src", "index.ts")),
     compatibility_date: "2026-03-27",
     compatibility_flags: ["nodejs_compat"],
     containers: [
       {
         class_name: "RunnerContainer",
-        image: "../../../Dockerfile.cloudflare-hosted-runner",
-        image_build_context: "..",
+        image: toWranglerConfigRelativePath(
+          configDir,
+          path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
+        ),
+        image_build_context: toWranglerConfigRelativePath(configDir, cloudflareAppDir),
         instance_type: "standard-1",
         max_instances: 50,
       },
@@ -305,6 +319,14 @@ export function buildWranglerLocalDevConfig(
     },
     vars,
   };
+}
+
+function toWranglerConfigRelativePath(configDir: string, targetPath: string): string {
+  return toPosixPath(path.relative(configDir, targetPath)) || ".";
+}
+
+function toPosixPath(value: string): string {
+  return value.split(path.sep).join(path.posix.sep);
 }
 
 export async function readSimpleEnvFile(filePath: string): Promise<Record<string, string>> {

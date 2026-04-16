@@ -15,6 +15,15 @@ import {
   startHostedLocalDevHarness,
   type HostedLocalDevHarness,
 } from "./helpers/hosted-local-dev-harness.js";
+import {
+  readRequestBody,
+  requireBoundTcpPort,
+  resolveHostedAssistantLocalDevEnv,
+  shouldUseAssistantProviderStub,
+  startAssistantProviderStubServer,
+  stopHttpStubServer,
+  writeJsonResponse,
+} from "./helpers/hosted-local-e2e-support.js";
 
 interface ObservedLinqRequest {
   body: string;
@@ -58,19 +67,12 @@ describe("hosted local Linq first-contact e2e", () => {
     observedLinqRequests.length = 0;
     observedLinqChatIdsByRecipient.clear();
     linqServer = await startLinqStubServer();
-    const address = linqServer.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the Linq stub server to bind a TCP port.");
-    }
-    linqServerBaseUrl = `http://127.0.0.1:${address.port}`;
+    linqServerBaseUrl = `http://127.0.0.1:${requireBoundTcpPort(linqServer, "Linq stub")}`;
     logDebug("started Linq stub server", { linqServerBaseUrl });
     if (useAssistantProviderStub) {
       assistantProviderServer = await startAssistantProviderStubServer();
-      const providerAddress = assistantProviderServer.address();
-      if (!providerAddress || typeof providerAddress === "string") {
-        throw new Error("Expected the assistant provider stub server to bind a TCP port.");
-      }
-      assistantProviderBaseUrl = `http://host.docker.internal:${providerAddress.port}/v1`;
+      assistantProviderBaseUrl =
+        `http://host.docker.internal:${requireBoundTcpPort(assistantProviderServer, "assistant provider stub")}/v1`;
       logDebug("started assistant provider stub server", {
         assistantProviderBaseUrl,
       });
@@ -78,6 +80,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
       process.env,
       useAssistantProviderStub ? assistantProviderBaseUrl : null,
+      "Local hosted Linq e2e",
     );
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...devEnv,
@@ -108,8 +111,8 @@ describe("hosted local Linq first-contact e2e", () => {
     await localHarness?.stop();
     localHarness = null;
 
-    await stopLinqStubServer(linqServer);
-    await stopAssistantProviderStubServer(assistantProviderServer);
+    await stopHttpStubServer(linqServer);
+    await stopHttpStubServer(assistantProviderServer);
   });
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
@@ -532,155 +535,6 @@ async function startLinqStubServer(): Promise<ReturnType<typeof createServer>> {
   });
 
   return server;
-}
-
-async function stopLinqStubServer(server: ReturnType<typeof createServer> | null): Promise<void> {
-  if (!server) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  });
-}
-
-async function startAssistantProviderStubServer(): Promise<ReturnType<typeof createServer>> {
-  const server = createServer(async (request, response) => {
-    await readRequestBody(request);
-
-    if (request.method === "GET" && request.url === "/v1/models") {
-      writeJsonResponse(response, 200, {
-        data: [
-          {
-            id: "stub-openrouter-model",
-          },
-        ],
-      });
-      return;
-    }
-
-    if (request.method === "POST" && request.url === "/v1/chat/completions") {
-      writeJsonResponse(response, 200, {
-        id: "chatcmpl_stub_linq_reply",
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: "stub-openrouter-model",
-        choices: [
-          {
-            index: 0,
-            finish_reason: "stop",
-            message: {
-              role: "assistant",
-              content: "Got it — I saw your message and I’m here.",
-            },
-          },
-        ],
-        usage: {
-          prompt_tokens: 24,
-          completion_tokens: 11,
-          total_tokens: 35,
-        },
-      });
-      return;
-    }
-
-    writeJsonResponse(response, 404, {
-      error: `Unhandled assistant provider stub route: ${request.method ?? "GET"} ${request.url ?? "/"}`,
-    });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "0.0.0.0", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-
-  return server;
-}
-
-async function stopAssistantProviderStubServer(
-  server: ReturnType<typeof createServer> | null,
-): Promise<void> {
-  if (!server) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  });
-}
-
-async function readRequestBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-function writeJsonResponse(
-  response: ServerResponse,
-  statusCode: number,
-  payload: Record<string, unknown>,
-): void {
-  response.statusCode = statusCode;
-  response.setHeader("content-type", "application/json; charset=utf-8");
-  response.end(JSON.stringify(payload));
-}
-
-function resolveHostedAssistantLocalDevEnv(
-  source: NodeJS.ProcessEnv,
-  assistantProviderStubBaseUrl: string | null,
-): NodeJS.ProcessEnv {
-  if (assistantProviderStubBaseUrl) {
-    return {
-      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
-      HOSTED_ASSISTANT_BASE_URL: assistantProviderStubBaseUrl,
-      HOSTED_ASSISTANT_MODEL: "stub-openrouter-model",
-      HOSTED_ASSISTANT_PROVIDER: "openrouter",
-      HOSTED_ASSISTANT_PROVIDER_NAME: "local-openrouter-stub",
-      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
-      OPENAI_API_KEY: "stub-local-openrouter-key",
-    };
-  }
-
-  const provider = source.HOSTED_ASSISTANT_PROVIDER?.trim();
-  const model = source.HOSTED_ASSISTANT_MODEL?.trim();
-
-  if (provider && model) {
-    return {};
-  }
-
-  if (source.OPENAI_API_KEY?.trim()) {
-    return {
-      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
-    };
-  }
-
-  throw new Error(
-    [
-      "Local hosted Linq e2e requires explicit hosted assistant config.",
-      "Set HOSTED_ASSISTANT_PROVIDER and HOSTED_ASSISTANT_MODEL, or provide OPENAI_API_KEY for the local fallback profile.",
-    ].join(" "),
-  );
-}
-
-function shouldUseAssistantProviderStub(source: NodeJS.ProcessEnv): boolean {
-  const explicit = source.MURPH_E2E_STUB_ASSISTANT_PROVIDER?.trim();
-  if (explicit) {
-    return explicit !== "0";
-  }
-
-  return !(
-    source.HOSTED_ASSISTANT_PROVIDER?.trim()
-    && source.HOSTED_ASSISTANT_MODEL?.trim()
-  );
 }
 
 function requireObservedLinqChatId(nextUserId: string): string {

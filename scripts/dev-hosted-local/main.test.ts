@@ -131,7 +131,7 @@ describe("hosted local dev main", () => {
         "--port",
         "8787",
         "--config",
-        expect.stringContaining("apps/cloudflare/.wrangler/local-dev.generated.json"),
+        "/tmp/murph-dev-env-test/cloudflare-worker.local-dev.generated.json",
         "--local-protocol",
         "http",
         "--persist-to",
