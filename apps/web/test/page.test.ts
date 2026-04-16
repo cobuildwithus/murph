@@ -33,6 +33,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
+  resolveHostedInstallScriptUrl: () => "https://www.withmurph.ai/install.sh",
+}));
+
 vi.mock("../app/lp/auth-controls", () => ({
   LandingAuthActions: mocks.LandingAuthActions,
 }));
@@ -90,6 +94,12 @@ test("HomePage now renders the /lp landing page at the root route", async () => 
     markup,
     /data-root-landing-auth-actions-label="Start your first experiment"/,
   );
+  assert.match(markup, /Quick start/);
+  assert.match(
+    markup,
+    /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/,
+  );
+  assert.match(markup, /murph chat/);
 });
 
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {
