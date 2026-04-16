@@ -7,12 +7,6 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 
-import { buildHostedStorageAad } from "../src/crypto-context.ts";
-import {
-  decryptHostedBundle,
-  encryptHostedBundle,
-  type HostedCipherEnvelope,
-} from "../src/crypto.ts";
 import {
   mergeGatewayPermissionOverrides,
   readGatewayPermissionOverrides,
@@ -24,11 +18,6 @@ import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 
 const EMAIL_THREAD_SESSION_KEY =
   "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoxfQ";
-const GATEWAY_STATE_STORAGE_AAD = buildHostedStorageAad({
-  key: "gateway.state",
-  purpose: "gateway-store",
-  record: "state",
-});
 const TEST_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 const TEST_CRYPTO = {
   key: TEST_KEY,
@@ -131,7 +120,7 @@ describe("HostedGatewayProjectionStore", () => {
     });
   });
 
-  it("encrypts durable gateway state and round-trips conversation and message reads", async () => {
+  it("keeps gateway projections transient and round-trips conversation and message reads", async () => {
     const { store, values } = createStore();
 
     await store.applySnapshot({
@@ -181,15 +170,11 @@ describe("HostedGatewayProjectionStore", () => {
       }],
     });
 
-    const rawState = values.get("gateway.state") as HostedCipherEnvelope | undefined;
-    expect(rawState).toBeTruthy();
-    expect(rawState).toHaveProperty("ciphertext");
     expect(values.has("gateway.snapshot")).toBe(false);
     expect(values.has("gateway.events")).toBe(false);
     expect(values.has("gateway.next-cursor")).toBe(false);
     expect(values.has("gateway.permission-overrides")).toBe(false);
-    expect(JSON.stringify(rawState)).not.toContain("super secret preview");
-    expect(JSON.stringify(rawState)).not.toContain("super secret body");
+    expect(values.has("gateway.state")).toBe(false);
 
     const conversations = await store.listConversations();
     expect(conversations.conversations).toHaveLength(1);
@@ -309,179 +294,6 @@ describe("HostedGatewayProjectionStore", () => {
     expect(permissions).toHaveLength(0);
   });
 
-  it("serializes snapshot writes and permission responses so newer projections are not clobbered", async () => {
-    let releaseSnapshotWrite!: () => void;
-    let snapshotWriteBlocked = false;
-    let markSnapshotWriteBlocked!: () => void;
-    const snapshotWriteSeen = new Promise<void>((resolve) => {
-      markSnapshotWriteBlocked = resolve;
-    });
-    const { store } = createStore({
-      async onPut(key, value) {
-        if (key !== "gateway.state" || snapshotWriteBlocked) {
-          return;
-        }
-
-        const plaintext = await decryptHostedBundle({
-          aad: GATEWAY_STATE_STORAGE_AAD,
-          envelope: value as HostedCipherEnvelope,
-          expectedKeyId: TEST_CRYPTO.keyId,
-          key: TEST_CRYPTO.key,
-          keysById: TEST_CRYPTO.keysById,
-          scope: "gateway-store",
-        });
-        const record = JSON.parse(new TextDecoder().decode(plaintext)) as {
-          baseSnapshot?: {
-            conversations?: Array<{
-              lastMessagePreview?: string;
-            }>;
-          } | null;
-        };
-
-        if (
-          record.baseSnapshot?.conversations?.[0]?.lastMessagePreview === "newest message"
-        ) {
-          const releasePromise = new Promise<void>((resolve) => {
-            releaseSnapshotWrite = resolve;
-          });
-          snapshotWriteBlocked = true;
-          markSnapshotWriteBlocked();
-          await releasePromise;
-        }
-      },
-    });
-
-    await store.applySnapshot({
-      schema: "murph.gateway-projection-snapshot.v1",
-      generatedAt: "2026-03-30T21:00:00.000Z",
-      conversations: [{
-        schema: "murph.gateway-conversation.v1",
-        sessionKey: EMAIL_THREAD_SESSION_KEY,
-        title: "Thread",
-        titleSource: "thread-title",
-        lastMessagePreview: "older message",
-        lastActivityAt: "2026-03-30T21:00:00.000Z",
-        messageCount: 1,
-        canSend: true,
-        route: {
-          channel: "email",
-          identityId: "murph@example.com",
-          participantId: "contact:alex",
-          threadId: "thread-123",
-          directness: "direct",
-          reply: {
-            kind: "thread",
-            target: "thread-123",
-          },
-        },
-      }],
-      messages: [{
-        schema: "murph.gateway-message.v1",
-        messageId: "gwcm_old",
-        sessionKey: EMAIL_THREAD_SESSION_KEY,
-        direction: "inbound",
-        createdAt: "2026-03-30T21:00:00.000Z",
-        actorDisplayName: "Alex",
-        text: "older message",
-        attachments: [],
-      }],
-      permissions: [{
-        schema: "murph.gateway-permission-request.v1",
-        requestId: "perm_lock",
-        sessionKey: EMAIL_THREAD_SESSION_KEY,
-        action: "send-message",
-        description: "Need operator approval",
-        status: "open",
-        requestedAt: "2026-03-30T21:00:00.000Z",
-        resolvedAt: null,
-        note: null,
-      }],
-    });
-
-    const applyingSnapshot = store.applySnapshot({
-      schema: "murph.gateway-projection-snapshot.v1",
-      generatedAt: "2026-03-30T21:05:00.000Z",
-      conversations: [{
-        schema: "murph.gateway-conversation.v1",
-        sessionKey: EMAIL_THREAD_SESSION_KEY,
-        title: "Thread",
-        titleSource: "thread-title",
-        lastMessagePreview: "newest message",
-        lastActivityAt: "2026-03-30T21:05:00.000Z",
-        messageCount: 2,
-        canSend: true,
-        route: {
-          channel: "email",
-          identityId: "murph@example.com",
-          participantId: "contact:alex",
-          threadId: "thread-123",
-          directness: "direct",
-          reply: {
-            kind: "thread",
-            target: "thread-123",
-          },
-        },
-      }],
-      messages: [{
-        schema: "murph.gateway-message.v1",
-        messageId: "gwcm_new",
-        sessionKey: EMAIL_THREAD_SESSION_KEY,
-        direction: "inbound",
-        createdAt: "2026-03-30T21:05:00.000Z",
-        actorDisplayName: "Alex",
-        text: "newest message",
-        attachments: [],
-      }],
-      permissions: [{
-        schema: "murph.gateway-permission-request.v1",
-        requestId: "perm_lock",
-        sessionKey: EMAIL_THREAD_SESSION_KEY,
-        action: "send-message",
-        description: "Need operator approval",
-        status: "open",
-        requestedAt: "2026-03-30T21:00:00.000Z",
-        resolvedAt: null,
-        note: null,
-      }],
-    });
-
-    await snapshotWriteSeen;
-    const resolvingPermission = store.respondToPermission({
-      requestId: "perm_lock",
-      decision: "approve",
-      note: "approved after refresh",
-    });
-
-    if (!snapshotWriteBlocked) {
-      throw new Error("Expected the snapshot write lock to install a release callback.");
-    }
-    releaseSnapshotWrite();
-    await applyingSnapshot;
-    await resolvingPermission;
-
-    const conversation = await store.getConversation({
-      sessionKey: EMAIL_THREAD_SESSION_KEY,
-    });
-    const permissions = await store.listOpenPermissions({
-      sessionKey: EMAIL_THREAD_SESSION_KEY,
-    });
-    const events = await store.pollEvents({
-      cursor: 0,
-      kinds: ["permission.resolved"],
-      limit: 10,
-      sessionKey: EMAIL_THREAD_SESSION_KEY,
-    });
-
-    expect(conversation?.lastMessagePreview).toBe("newest message");
-    expect(permissions).toHaveLength(0);
-    expect(events.events).toHaveLength(1);
-    expect(events.events[0]).toMatchObject({
-      kind: "permission.resolved",
-      permissionRequestId: "perm_lock",
-      summary: "approved after refresh",
-    });
-  });
-
   it("keeps operator permission decisions applied across later runtime snapshots", async () => {
     const { store } = createStore();
 
@@ -590,35 +402,39 @@ describe("HostedGatewayProjectionStore", () => {
     expect(events.events).toHaveLength(1);
   });
 
-  it("fails closed when encrypted gateway state is malformed after decryption", async () => {
-    const encryptedInvalidState = await encryptHostedBundle({
-      aad: GATEWAY_STATE_STORAGE_AAD,
-      key: TEST_CRYPTO.key,
-      keyId: TEST_CRYPTO.keyId,
-      plaintext: new TextEncoder().encode(JSON.stringify({
-        baseSnapshot: null,
-        events: [],
-        nextCursor: 0,
-        permissionOverrides: [{
-          requestId: "perm_invalid",
-          status: "approved",
-        }],
-        schema: "murph.hosted-gateway-state.v1",
-      })),
-      scope: "gateway-store",
-    });
-    const { store } = createStore({
+  it("ignores legacy persisted gateway-state residue because the cache is DO-local only", async () => {
+    const { store, values } = createStore({
       initialValues: {
-        "gateway.state": encryptedInvalidState,
+        "gateway.state": { stale: true },
+        "gateway.permission-overrides": [{ requestId: "old" }],
       },
     });
 
-    await expect(store.listOpenPermissions()).rejects.toThrow(
-      "gateway.state storage is invalid.",
-    );
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-06T00:00:00.000Z",
+      conversations: [],
+      messages: [],
+      permissions: [{
+        schema: "murph.gateway-permission-request.v1",
+        requestId: "perm_fresh",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        action: "send-message",
+        description: "Need operator approval",
+        status: "open",
+        requestedAt: "2026-04-06T00:00:00.000Z",
+        resolvedAt: null,
+        note: null,
+      }],
+    });
+
+    expect(await store.listOpenPermissions()).toHaveLength(1);
+    expect(values.get("gateway.state")).toEqual({ stale: true });
   });
 
-  it("normalizes persisted permission overrides on read without rewriting equivalent state", async () => {
+  it("keeps permission decisions local to the live store instead of persisting a second authority", async () => {
+    const { state } = createState();
+    const store = new HostedGatewayProjectionStore(state, TEST_CRYPTO);
     const baseSnapshot = gatewayProjectionSnapshotSchema.parse({
       schema: "murph.gateway-projection-snapshot.v1",
       generatedAt: "2026-04-06T00:04:00.000Z",
@@ -649,50 +465,24 @@ describe("HostedGatewayProjectionStore", () => {
         }),
       ],
     });
-    const encryptedState = await encryptHostedBundle({
-      aad: GATEWAY_STATE_STORAGE_AAD,
-      key: TEST_CRYPTO.key,
-      keyId: TEST_CRYPTO.keyId,
-      plaintext: new TextEncoder().encode(JSON.stringify({
-        baseSnapshot,
-        events: [],
-        nextCursor: 0,
-        permissionOverrides: [
-          {
-            note: "",
-            requestId: "request-b",
-            resolvedAt: "2026-04-06T00:10:00.000Z",
-            status: "approved",
-          },
-          {
-            note: "kept",
-            requestId: "request-a",
-            resolvedAt: "2026-04-06T00:09:00.000Z",
-            status: "denied",
-          },
-        ],
-        schema: "murph.hosted-gateway-state.v1",
-      })),
-      scope: "gateway-store",
-    });
-    const writes: string[] = [];
-    const { store } = createStore({
-      initialValues: {
-        "gateway.state": encryptedState,
-      },
-      onPut(key) {
-        writes.push(key);
-      },
-    });
 
     expect(await store.listOpenPermissions()).toEqual([]);
-
     await store.applySnapshot(baseSnapshot);
+    await store.respondToPermission({
+      requestId: "request-b",
+      decision: "approve",
+      note: "local only",
+    });
 
-    expect(writes).toEqual([]);
+    expect(await store.listOpenPermissions()).toHaveLength(1);
+
+    const restartedStore = new HostedGatewayProjectionStore(state, TEST_CRYPTO);
+    await restartedStore.applySnapshot(baseSnapshot);
+
+    expect(await restartedStore.listOpenPermissions()).toHaveLength(2);
   });
 
-  it("does not rewrite durable state when an equivalent snapshot is replayed with reordered keys", async () => {
+  it("does not touch Durable Object storage when an equivalent snapshot is replayed with reordered keys", async () => {
     const writes: string[] = [];
     const { store } = createStore({
       onPut(key) {

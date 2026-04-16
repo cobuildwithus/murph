@@ -214,6 +214,57 @@ describe("drainHostedParserQueue", () => {
 });
 
 describe("runHostedAssistantAutomation", () => {
+  it("logs automation events emitted during the hosted pass", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        captureId: "capture_123",
+        details: "reply sent",
+        type: "capture.replied",
+      });
+      return {
+        nextWakeAt: "2026-04-08T01:15:00.000Z",
+        progressed: true,
+      };
+    });
+
+    await expect(
+      runHostedAssistantAutomation(
+        "/tmp/vault-root",
+        "req_123",
+        {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_automation_event",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+      ),
+    ).resolves.toEqual({
+      nextWakeAt: "2026-04-08T01:15:00.000Z",
+      progressed: true,
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          captureId: "capture_123",
+          details: "reply sent",
+          type: "capture.replied",
+        }),
+        message: "Hosted assistant automation event: capture.replied.",
+      }),
+    );
+  });
+
   it("treats missing inbox runtime state as a non-fatal bootstrap gap", async () => {
     mocks.runAssistantAutomationPass.mockRejectedValueOnce({
       code: "INBOX_NOT_INITIALIZED",
@@ -808,6 +859,60 @@ describe("runHostedMaintenanceLoop", () => {
         level: "warn",
         message:
           "Hosted assistant automation skipped because the saved hosted assistant config is invalid.",
+      }),
+    );
+  });
+
+  it("reports unready hosted assistant profiles with the active provider label", async () => {
+    const close = vi.fn();
+
+    mocks.readHostedAssistantRuntimeState.mockResolvedValue({
+      assistantConfigStatus: "hosted-env",
+      assistantConfigured: false,
+      assistantProvider: "openai-compatible",
+    });
+    mocks.openInboxRuntime.mockResolvedValue({
+      close,
+      getCapture: () => null,
+      listAttachmentParseJobs: () => [],
+    });
+    mocks.createInboxParserService.mockReturnValue({
+      drain: vi.fn(async () => []),
+    });
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => [],
+    });
+
+    await runHostedMaintenanceLoop({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_unready_automation",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_123",
+      resolvedConfig: {
+        deviceSync: null,
+      },
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted assistant automation skipped because the active hosted assistant profile (openai-compatible) is not ready.",
       }),
     );
   });

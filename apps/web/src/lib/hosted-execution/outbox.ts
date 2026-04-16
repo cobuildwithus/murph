@@ -295,7 +295,7 @@ async function processHostedExecutionOutboxRecord(
   record: ExecutionOutbox & { claimToken: string },
   nowIso: string,
 ): Promise<ExecutionOutbox> {
-  let payload = readHostedExecutionOutboxPayload(record.payloadJson);
+  const payload = readHostedExecutionOutboxPayload(record.payloadJson);
   let persistedPayloadJson = record.payloadJson as Prisma.InputJsonValue;
 
   try {

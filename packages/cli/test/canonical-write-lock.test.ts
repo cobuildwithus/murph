@@ -34,6 +34,14 @@ const vaultUsecasesQueryRuntimeModuleId = path.join(
   repoRoot,
   "packages/vault-usecases/src/query-runtime.ts",
 );
+const vaultUsecasesDistRuntimeImportModuleId = path.join(
+  repoRoot,
+  "packages/vault-usecases/dist/runtime-import.js",
+);
+const vaultUsecasesDistQueryRuntimeModuleId = path.join(
+  repoRoot,
+  "packages/vault-usecases/dist/query-runtime.js",
+);
 
 async function makeVaultRoot(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "murph-lock-test-"));
@@ -103,7 +111,13 @@ async function withCliUsecaseMocks<TResult>(options: {
   vi.doMock(vaultUsecasesRuntimeImportModuleId, () => ({
     loadRuntimeModule: async () => options.coreRuntime,
   }));
+  vi.doMock(vaultUsecasesDistRuntimeImportModuleId, () => ({
+    loadRuntimeModule: async () => options.coreRuntime,
+  }));
   vi.doMock(vaultUsecasesQueryRuntimeModuleId, () => ({
+    loadQueryRuntime: async () => options.queryRuntime,
+  }));
+  vi.doMock(vaultUsecasesDistQueryRuntimeModuleId, () => ({
     loadQueryRuntime: async () => options.queryRuntime,
   }));
 
@@ -118,7 +132,9 @@ async function withCliUsecaseMocks<TResult>(options: {
     vi.doUnmock("@murphai/vault-usecases/runtime");
     vi.doUnmock(vaultUsecasesRuntimeModuleId);
     vi.doUnmock(vaultUsecasesRuntimeImportModuleId);
+    vi.doUnmock(vaultUsecasesDistRuntimeImportModuleId);
     vi.doUnmock(vaultUsecasesQueryRuntimeModuleId);
+    vi.doUnmock(vaultUsecasesDistQueryRuntimeModuleId);
     vi.resetModules();
   }
 }

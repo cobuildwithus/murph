@@ -57,6 +57,7 @@ import {
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
 } from "../src/node-runner.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const describe = baseDescribe.sequential;
 const initialGlobalFetch = global.fetch;
@@ -287,11 +288,17 @@ function installHostedFetchBaseUrlProxy(input: {
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
   let previousHostedDeviceSyncEnv: Record<string, string | undefined> = {};
+  let previousHostedExecutionWorkerEnv: Record<string, string | undefined> = {};
 
   beforeEach(async () => {
     vi.restoreAllMocks();
     setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests("in-process");
+    const requiredWorkerEnv = Object.fromEntries(
+      Object.entries(createHostedExecutionTestEnv()).filter(([, value]) => typeof value === "string"),
+    ) as Record<string, string>;
+    previousHostedExecutionWorkerEnv = captureEnvVars(Object.keys(requiredWorkerEnv));
+    restoreEnvVars(requiredWorkerEnv);
     previousHostedDeviceSyncEnv = captureEnvVarsWithPrefixes(HOSTED_DEVICE_SYNC_ENV_PREFIXES);
     for (const key of Object.keys(previousHostedDeviceSyncEnv)) {
       restoreEnvVar(key, undefined);
@@ -310,6 +317,7 @@ describe("runHostedExecutionJob", () => {
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
     restoreEnvVars(previousHostedDeviceSyncEnv);
+    restoreEnvVars(previousHostedExecutionWorkerEnv);
     if (initialGlobalFetch) {
       global.fetch = initialGlobalFetch;
     } else {
@@ -1847,7 +1855,7 @@ describe("runHostedExecutionJob", () => {
 
   it("exports pending hosted AI usage through the worker proxy without exposing the internal web token", async () => {
     const previousHostedWebBaseUrl = process.env.HOSTED_WEB_BASE_URL;
-    delete process.env.HOSTED_WEB_BASE_URL;
+    process.env.HOSTED_WEB_BASE_URL = "https://usage.worker";
 
     const activation = await runHostedExecutionJob({
       bundles: {
@@ -1902,7 +1910,7 @@ describe("runHostedExecutionJob", () => {
       vaultRoot: restoredActivation.vaultRoot,
     });
     const fetchSpy = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      if (String(url) !== "http://usage.worker/api/internal/hosted-execution/usage/record") {
+      if (String(url) !== "https://usage.worker/api/internal/hosted-execution/usage/record") {
         throw new Error(`Unexpected fetch URL: ${String(url)}`);
       }
 
@@ -1945,9 +1953,9 @@ describe("runHostedExecutionJob", () => {
       });
 
       const [usageUrl, usageRequest] = fetchSpy.mock.calls[0] ?? [];
-      expect(String(usageUrl)).toBe("http://usage.worker/api/internal/hosted-execution/usage/record");
+      expect(String(usageUrl)).toBe("https://usage.worker/api/internal/hosted-execution/usage/record");
       expect((usageRequest as RequestInit | undefined)?.method).toBe("POST");
-      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("content-type")).toBe("application/json; charset=utf-8");
+      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("content-type")).toBe("application/json");
       const usageRequestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
       expect(typeof usageRequestInit?.body).toBe("string");
       expect(String(usageRequestInit?.body)).toContain("\"usageId\":\"turn_usage_proxy.attempt-1\"");

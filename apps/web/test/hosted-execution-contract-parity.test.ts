@@ -138,7 +138,7 @@ describe("hosted execution contract parity", () => {
       expect(dispatchRef.eventId).toBe(dispatch.eventId);
       expect(dispatchRef.occurredAt).toBe(dispatch.occurredAt);
       expect(dispatchRef.userId).toBe(dispatch.event.userId);
-      expect(parsedDispatchRef).toBeNull();
+      expect(parsedDispatchRef).toEqual(dispatchRef);
     }
   });
 });

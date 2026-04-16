@@ -40,7 +40,7 @@ describe("resolveSmokeWorkerBaseUrl", () => {
 
   it("keeps the configured-error text stable when no worker base URL env is set", () => {
     expect(() => resolveSmokeWorkerBaseUrl({})).toThrow(
-      "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL or HOSTED_EXECUTION_DISPATCH_URL must be configured.",
+      "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL, CF_PUBLIC_BASE_URL, or HOSTED_EXECUTION_DISPATCH_URL must be configured.",
     );
   });
 });
@@ -95,6 +95,12 @@ describe("runSmokeHostedDeploy", () => {
         url: String(url),
       });
 
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
       if (String(url).endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
@@ -145,6 +151,14 @@ describe("runSmokeHostedDeploy", () => {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
         },
         method: undefined,
+        url: "https://worker.example.test/",
+      },
+      {
+        body: undefined,
+        headers: {
+          "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
+        },
+        method: undefined,
         url: "https://worker.example.test/health",
       },
       {
@@ -189,6 +203,12 @@ describe("runSmokeHostedDeploy", () => {
         url: String(url),
       });
 
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     };
 
@@ -203,6 +223,10 @@ describe("runSmokeHostedDeploy", () => {
     expect(fetchCalls).toEqual([
       {
         headers: undefined,
+        url: "https://worker.example.test/",
+      },
+      {
+        headers: undefined,
         url: "https://worker.example.test/health",
       },
     ]);
@@ -210,6 +234,12 @@ describe("runSmokeHostedDeploy", () => {
 
   it("fails when the manual smoke run does not finish before the timeout", async () => {
     const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
       if (String(url).endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
@@ -246,6 +276,9 @@ describe("runSmokeHostedDeploy", () => {
   it("rejects timeout values with trailing non-digit characters", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), { status: 200 }),
+      )
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
 
     await expect(runSmokeHostedDeploy({
@@ -261,12 +294,18 @@ describe("runSmokeHostedDeploy", () => {
       "HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS must be a positive integer.",
     );
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("does not echo manual smoke control response bodies in thrown errors", async () => {
     const promise = runSmokeHostedDeploy({
       fetchImpl: async (url: RequestInfo | URL) => {
+        if (String(url).endsWith("/")) {
+          return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+            status: 200,
+          });
+        }
+
         if (String(url).endsWith("/health")) {
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
@@ -311,6 +350,12 @@ describe("runSmokeHostedDeploy", () => {
         method: init?.method,
         url: String(url),
       });
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
 
       if (String(url).endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -372,7 +417,15 @@ describe("runSmokeHostedDeploy", () => {
 
   it("fails with the OIDC-token error when manual smoke auth is unconfigured", async () => {
     await expect(runSmokeHostedDeploy({
-      fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      fetchImpl: async (url: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify(
+            String(url).endsWith("/")
+              ? { ok: true, service: "cloudflare-hosted-runner" }
+              : { ok: true },
+          ),
+          { status: 200 },
+        ),
       log() {},
       source: {
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",

@@ -204,24 +204,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
-    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          create: expect.objectContaining({
-            dispatchPayloadJson: expect.objectContaining({
-              dispatchRef: expect.objectContaining({
-                eventId: "telegram:update:321",
-                eventKind: "telegram.message.received",
-                userId: "member_telegram_123",
-              }),
-              stagedPayloadId: expect.stringContaining("/member_telegram_123/telegram:update:321.json"),
-            }),
-            kind: "hosted_execution_dispatch",
-            status: "pending",
-          }),
-        }),
-      ]),
-    );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
   });
 
   it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
