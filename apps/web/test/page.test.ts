@@ -100,7 +100,7 @@ test("HomePage now renders the /lp landing page at the root route", async () => 
     markup,
     /data-root-landing-auth-actions-label="See what works for your body"/,
   );
-  assert.match(markup, /Ready to get more out of your wearable\?/);
+  assert.match(markup, /Run one experiment\. See what changed\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Create your account"/);
   assert.match(
     markup,
@@ -142,5 +142,5 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
     undefined,
   );
   assert.match(markup, /You’re already set up\./);
-  assert.doesNotMatch(markup, /Ready to get more out of your wearable\?/);
+  assert.doesNotMatch(markup, /Run one experiment\. See what changed\./);
 });
