@@ -435,6 +435,58 @@ test("rebuildRuntimeFromVault restores deterministic raw inbox envelopes that ar
   runtime.close();
 });
 
+test("processCapture backfills missing parse jobs for a recovered capture that already exists in runtime", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-recovered-parse-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-recovered-parse-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const imagePath = await writeExternalFile(sourceRoot, "barcode.png", "image-bytes");
+  const inbound = createCapture({
+    externalId: "msg-recovered-parse",
+    occurredAt: "2026-03-13T11:10:00.000Z",
+    text: "Recovered parse job",
+    attachments: [
+      {
+        externalId: "att-recovered-image",
+        kind: "image",
+        mime: "image/png",
+        originalPath: imagePath,
+        fileName: "barcode.png",
+      },
+    ],
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2WA";
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId,
+    input: inbound,
+    storedAt: "2026-03-13T11:11:00.000Z",
+  });
+  const runtime = await openInboxRuntime({ vaultRoot });
+  runtime.upsertCaptureIndex({
+    captureId,
+    eventId,
+    input: inbound,
+    stored: persisted.stored,
+  });
+
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
+  assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, null);
+
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const replayed = await pipeline.processCapture(inbound);
+
+  assert.equal(replayed.deduped, true);
+  assert.equal(replayed.captureId, captureId);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 })[0]?.state, "pending");
+  assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "pending");
+
+  pipeline.close();
+});
+
 test("persistCanonicalInboxCapture rejects attachment writes that traverse vault symlinks", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-symlink-write-vault");
   const outsideRoot = await makeTempDirectory("murph-inbox-symlink-write-outside");
