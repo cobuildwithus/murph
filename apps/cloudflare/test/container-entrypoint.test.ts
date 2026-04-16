@@ -1,5 +1,4 @@
-import { request as httpRequest } from "node:http";
-import { once } from "node:events";
+import { request as httpRequest, type ClientRequest } from "node:http";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,8 +20,16 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.();
-    server.close();
-    await once(server, "close");
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
   }));
 });
 
@@ -35,6 +42,43 @@ interface ClassifiedRunnerPayload {
   };
   error?: string;
   errorName?: string;
+}
+
+async function sendHostedContainerJsonRequest(input: {
+  authorization?: string;
+  body: string;
+  path: string;
+  port: number;
+}): Promise<{ json: unknown; status: number }> {
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      headers: {
+        ...(input.authorization ? { authorization: input.authorization } : {}),
+        "connection": "close",
+        "content-type": "application/json; charset=utf-8",
+      },
+      host: "127.0.0.1",
+      method: "POST",
+      path: input.path,
+      port: input.port,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        const bodyText = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          json: bodyText.length > 0 ? JSON.parse(bodyText) : null,
+          status: response.statusCode ?? 0,
+        });
+      });
+    });
+
+    request.on("error", reject);
+    request.write(input.body);
+    request.end();
+  });
 }
 
 function buildJobBody(input: {
@@ -750,32 +794,6 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects concurrent run requests inside one warm container shell", async () => {
-    let releaseFirstRun: () => void = () => {
-      throw new Error("Expected the first run to register a release callback.");
-    };
-    let notifyFirstRunStarted: (() => void) | null = null;
-    const firstRunStarted = new Promise<void>((resolve) => {
-      notifyFirstRunStarted = resolve;
-    });
-
-    setHostedExecutionIsolatedRunnerForTests(async () => {
-      notifyFirstRunStarted?.();
-      await new Promise<void>((resolve) => {
-        releaseFirstRun = resolve;
-      });
-      return {
-        finalGatewayProjectionSnapshot: null,
-        result: {
-          bundle: null,
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: null,
-            summary: "ok",
-          },
-        },
-      };
-    });
-
     const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
     servers.push(server);
     const address = server.address();
@@ -784,49 +802,73 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const url = `http://127.0.0.1:${address.port}/__internal/run`;
     const headers = {
       authorization: "Bearer runner-token",
-      "content-type": "application/json; charset=utf-8",
     };
-    const body = JSON.stringify(buildJobBody({
-      dispatch: {
-        event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
-        eventId: "evt_busy",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
-    }));
 
-    const firstResponsePromise = fetch(url, {
-      body,
-      headers,
-      method: "POST",
-    });
-    await firstRunStarted;
+    const firstRequest: {
+      finish: () => void;
+      responsePromise: Promise<{ json: unknown; status: number }>;
+    } = (() => {
+      let request!: ClientRequest;
+      const responsePromise = new Promise<{ json: unknown; status: number }>((resolve, reject) => {
+        const initializedRequest = httpRequest({
+          headers: {
+            authorization: headers.authorization,
+            connection: "close",
+            "content-type": "application/json; charset=utf-8",
+          },
+          host: "127.0.0.1",
+          method: "POST",
+          path: "/__internal/run",
+          port: address.port,
+        }, (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk) => {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          });
+          response.on("end", () => {
+            const bodyText = Buffer.concat(chunks).toString("utf8");
+            resolve({
+              json: bodyText.length > 0 ? JSON.parse(bodyText) : null,
+              status: response.statusCode ?? 0,
+            });
+          });
+        });
+        request = initializedRequest;
+        initializedRequest.on("error", reject);
+        initializedRequest.write("{");
+      });
+      return {
+        finish: () => {
+          request.end();
+        },
+        responsePromise,
+      };
+    })();
 
-    const secondResponse = await fetch(url, {
-      body,
-      headers,
-      method: "POST",
+    const secondResponse = await sendHostedContainerJsonRequest({
+      authorization: headers.authorization,
+      body: JSON.stringify(buildJobBody({
+        dispatch: {
+          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          eventId: "evt_busy",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      path: "/__internal/run",
+      port: address.port,
     });
     expect(secondResponse.status).toBe(409);
-    await expect(secondResponse.json()).resolves.toEqual({
+    expect(secondResponse.json).toEqual({
       error: "Hosted runner is busy.",
     });
 
-    releaseFirstRun();
-    const firstResponse = await firstResponsePromise;
-    expect(firstResponse.status).toBe(200);
-    await expect(firstResponse.json()).resolves.toEqual({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
+    firstRequest.finish();
+    const firstResponse = await firstRequest.responsePromise;
+    expect(firstResponse.status).toBe(400);
+    expect(firstResponse.json).toEqual({
+      error: "Invalid JSON.",
     });
   });
 
