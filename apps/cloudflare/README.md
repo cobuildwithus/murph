@@ -84,7 +84,7 @@ Optional execution vars and secrets:
 
 When hosted email sender identity is configured, deploy automation renders an environment-specific native `HOSTED_EMAIL` send binding and constrains it with `allowed_sender_addresses` so outbound sender selection remains config-owned.
 
-The runtime always includes the minimal `assistant`, `parsers`, and `web` env profiles. Deploy automation layers `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default; device-sync stays opt-in and outside the standard cutover surface.
+The runtime always includes the minimal `assistant`, `parsers`, and `web` env profiles. Deploy automation layers `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default. Hosted device-sync runtime config is derived directly from worker env into `runtime.resolvedConfig`, so it stays outside the child-env profile surface.
 
 ## Deploy Artifacts
 

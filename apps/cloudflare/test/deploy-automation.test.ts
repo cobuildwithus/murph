@@ -199,7 +199,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "device-sync,hosted-email,linq,mapbox,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
       MURPH_WEB_FETCH_ENABLED: "true",
     });
   });
@@ -234,7 +234,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "device-sync,hosted-email,linq,mapbox,telegram",
+      "hosted-email,linq,mapbox,telegram",
     );
   });
 

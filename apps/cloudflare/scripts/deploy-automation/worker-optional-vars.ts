@@ -1,5 +1,10 @@
+import {
+  deviceSyncProviderRuntimeVariableEnvKeys,
+} from "@murphai/device-syncd/config";
+
 export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "DEVICE_SYNC_PUBLIC_BASE_URL",
+  ...deviceSyncProviderRuntimeVariableEnvKeys,
   "FFMPEG_COMMAND",
   "MURPH_WEB_FETCH_ENABLED",
   "HOSTED_EMAIL_DEFAULT_SUBJECT",

@@ -111,11 +111,17 @@ function buildHostedExecutionJobRuntime(
   const forwardedEnv = requestedRuntime.forwardedEnv === undefined
     ? buildHostedRunnerContainerEnv(process.env)
     : stripChildProcessControlEnvKeys(requestedRuntime.forwardedEnv);
+  const configSource = requestedRuntime.resolvedConfig
+    ? undefined
+    : requestedRuntime.forwardedEnv === undefined
+      ? process.env
+      : requestedRuntime.forwardedEnv;
 
   // The worker-owned runtime envelope is the source of truth when present.
   // The container only falls back to ambient env for local/manual callers that omit it entirely.
   return buildHostedRunnerJobRuntime({
     commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
+    configSource,
     forwardedEnv,
     resolvedConfig: requestedRuntime.resolvedConfig,
     runnerSecrets: requestedRuntime.userEnv ?? {},

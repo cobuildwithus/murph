@@ -83,6 +83,8 @@ const DISALLOWED_RUNNER_SECRET_PREFIXES = [
 export const HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV =
   "HOSTED_EXECUTION_RUNNER_ENV_PROFILES";
 
+// Hosted device-sync runtime config travels through resolvedConfig rather than
+// raw child-process env forwarding.
 const RUNNER_ENV_PROFILE_KEYS = {
   assistant: [
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
@@ -90,15 +92,6 @@ const RUNNER_ENV_PROFILE_KEYS = {
     "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
     "NODE_ENV",
     ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
-  ],
-  "device-sync": [
-    "DEVICE_SYNC_PUBLIC_BASE_URL",
-    // Current hosted runtime still needs the device-sync token-bundle codec secret.
-    "DEVICE_SYNC_SECRET",
-    "OURA_CLIENT_ID",
-    "OURA_CLIENT_SECRET",
-    "WHOOP_CLIENT_ID",
-    "WHOOP_CLIENT_SECRET",
   ],
   "hosted-email": [
     "HOSTED_EMAIL_DOMAIN",
@@ -200,8 +193,6 @@ export function buildHostedRunnerContainerEnv(
 }
 
 const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
-  "DEVICE_SYNC_PUBLIC_BASE_URL",
-  "HOSTED_WEB_BASE_URL",
   "LINQ_API_BASE_URL",
   "TELEGRAM_API_BASE_URL",
 ]);

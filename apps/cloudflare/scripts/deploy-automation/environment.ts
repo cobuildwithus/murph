@@ -15,8 +15,10 @@ const DEFAULT_CONTAINER_INSTANCE_TYPE: NamedContainerInstanceType = "standard-1"
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 1;
+// Device-sync stays worker-only and is serialized into resolvedConfig instead of
+// forwarding raw provider env into the hosted child runtime.
 const DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES =
-  "device-sync,hosted-email,linq,mapbox,telegram";
+  "hosted-email,linq,mapbox,telegram";
 const NAMED_CONTAINER_INSTANCE_TYPES = [
   "basic",
   "dev",

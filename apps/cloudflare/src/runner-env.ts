@@ -19,6 +19,7 @@ import {
 
 export function buildHostedRunnerJobRuntime(input: {
   commitTimeoutMs?: number | null;
+  configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   runnerSecrets?: Readonly<Record<string, string>>;
@@ -28,7 +29,9 @@ export function buildHostedRunnerJobRuntime(input: {
   return {
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null),
     forwardedEnv,
-    resolvedConfig: input.resolvedConfig ?? buildHostedRunnerResolvedConfig(forwardedEnv),
+    resolvedConfig:
+      input.resolvedConfig
+      ?? buildHostedRunnerResolvedConfig(input.configSource ?? forwardedEnv),
     userEnv: { ...(input.runnerSecrets ?? {}) },
   };
 }
@@ -51,6 +54,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
       configSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
       10,
     ),
+    configSource,
     forwardedEnv: input.forwardedEnv,
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: filterHostedRunnerSecrets(input.runnerSecrets, configSource),
@@ -58,21 +62,21 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
 }
 
 export function buildHostedRunnerResolvedConfig(
-  forwardedEnv: Readonly<Record<string, string>>,
+  configSource: Readonly<Record<string, string | undefined>>,
 ): HostedAssistantRuntimeResolvedConfig {
   const providerConfigs = cloneSerializableConfiguredDeviceSyncProviderConfigs(
-    readConfiguredDeviceSyncProviderConfigs(forwardedEnv),
+    readConfiguredDeviceSyncProviderConfigs(configSource),
   );
-  const emailCapabilities = readHostedEmailCapabilities(forwardedEnv);
-  const deviceSyncPublicBaseUrl = normalizeEnvString(forwardedEnv.DEVICE_SYNC_PUBLIC_BASE_URL);
+  const emailCapabilities = readHostedEmailCapabilities(configSource);
+  const deviceSyncPublicBaseUrl = normalizeEnvString(configSource.DEVICE_SYNC_PUBLIC_BASE_URL);
   // This codec secret protects hosted device-sync token bundles inside the runner.
   // It is distinct from the local daemon's DEVICE_SYNC_CONTROL_TOKEN contract.
-  const deviceSyncCodecSecret = normalizeEnvString(forwardedEnv.DEVICE_SYNC_SECRET);
+  const deviceSyncCodecSecret = normalizeEnvString(configSource.DEVICE_SYNC_SECRET);
 
   return {
     channelCapabilities: {
       emailSendReady: emailCapabilities.sendReady,
-      telegramBotConfigured: normalizeEnvString(forwardedEnv.TELEGRAM_BOT_TOKEN) !== null,
+      telegramBotConfigured: normalizeEnvString(configSource.TELEGRAM_BOT_TOKEN) !== null,
     },
     deviceSync:
       deviceSyncPublicBaseUrl
