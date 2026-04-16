@@ -215,16 +215,18 @@ function createCloudflareHostedRuntimeFetch(
   internalWorkerProxyToken: string | null,
   fetchImpl: typeof fetch,
 ): typeof fetch {
-  if (!internalWorkerProxyToken) {
-    return fetchImpl;
-  }
-
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(input, init);
     const url = new URL(request.url);
 
     if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-      return fetchImpl(request);
+      return input instanceof Request ? fetchImpl(input) : fetchImpl(input, init);
+    }
+
+    if (!internalWorkerProxyToken) {
+      return new Response("Hosted runner outbound proxy token is not configured.", {
+        status: 503,
+      });
     }
 
     const headers = new Headers(request.headers);

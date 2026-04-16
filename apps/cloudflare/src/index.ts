@@ -17,6 +17,10 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
+  createHostedDispatchPayloadStore,
+  readHostedExecutionOutboxPayload,
+} from "./dispatch-payload-store.ts";
+import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
   HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER,
 } from "./internal-hosts.ts";
@@ -46,6 +50,7 @@ import {
   decodeRouteParam,
   readCachedOptionalJsonObject,
   readCachedRequestText,
+  resolveHostedExecutionUserCryptoContext,
   resolveUserRunnerStub,
   type UserRunnerDurableObjectStubLike,
   type WorkerEnvironmentSource,
@@ -87,6 +92,14 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
       return handleDispatchRoute(context);
     },
     match: matchExactPath("/internal/dispatch"),
+    methods: ["POST"],
+  },
+  {
+    authorization: "vercel-oidc",
+    async handle(context) {
+      return handleLegacyReferenceDispatchRoute(context);
+    },
+    match: matchExactPath("/internal/dispatch/legacy-reference"),
     methods: ["POST"],
   },
   {
@@ -179,8 +192,11 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.dispatch(input);
   }
 
-  async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
-    return this.runner.dispatchWithOutcome(input);
+  async dispatchWithOutcome(
+    input: HostedExecutionDispatchRequest,
+    stagedPayloadId?: string | null,
+  ): Promise<HostedExecutionDispatchResult> {
+    return this.runner.dispatchWithOutcome(input, stagedPayloadId ?? null);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -281,6 +297,42 @@ async function handleDispatchRoute(context: WorkerRouteContext): Promise<Respons
   }
 
   const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatchWithOutcome(dispatch);
+  return result.event.state === "backpressured" ? json(result, 429) : json(result);
+}
+
+async function handleLegacyReferenceDispatchRoute(context: WorkerRouteContext): Promise<Response> {
+  const payload = readHostedExecutionOutboxPayload(await readCachedOptionalJsonObject(context));
+
+  if (!payload || payload.storage !== "reference") {
+    return json({
+      error: "Hosted execution legacy reference dispatch payload must use reference storage.",
+    }, 400);
+  }
+
+  const boundUserError = requireHostedExecutionBoundUserResponse(
+    context.request,
+    payload.dispatchRef.userId,
+    "Hosted execution bound user does not match the dispatch user.",
+  );
+
+  if (boundUserError) {
+    return boundUserError;
+  }
+
+  const crypto = await resolveHostedExecutionUserCryptoContext({
+    bucket: context.env.BUNDLES,
+    environment: context.environment,
+    userId: payload.dispatchRef.userId,
+  });
+  const payloadStore = createHostedDispatchPayloadStore({
+    bucket: context.env.BUNDLES,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+  });
+  const dispatch = await payloadStore.readStoredDispatch(payload);
+  const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId))
+    .dispatchWithOutcome(dispatch, payload.stagedPayloadId);
   return result.event.state === "backpressured" ? json(result, 429) : json(result);
 }
 

@@ -12,6 +12,7 @@ import {
 } from "vitest";
 
 import { createHostedBundleStore } from "../../src/bundle-store.js";
+import type { R2BucketLike } from "../../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.js";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
@@ -34,6 +35,9 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
   use: "sig",
 };
 
+import {
+  buildHostedExecutionDeviceSyncWakeDispatch,
+} from "@murphai/hosted-execution";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,
@@ -43,11 +47,15 @@ import type {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import { createHostedDispatchPayloadStore } from "../../src/dispatch-payload-store.ts";
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
-  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+  dispatchWithOutcome(
+    input: HostedExecutionDispatchRequest,
+    stagedPayloadId?: string | null,
+  ): Promise<HostedExecutionDispatchResult>;
   status(): Promise<HostedExecutionUserStatus>;
 }
 
@@ -117,6 +125,40 @@ describe("cloudflare worker runtime suite", () => {
     await expect(readBundleText(dispatch.event.userId, payload.status.bundleRef)).resolves.toBe(
       `vault:${dispatch.eventId}`,
     );
+  });
+
+  it("accepts signed legacy reference dispatches through the compatibility route in the Workers runtime", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+
+    const dispatch = createReferenceOnlyDispatch("evt_reference_runtime", "member_reference_runtime");
+    const crypto = await resolveHostedUserCryptoContext(dispatch.event.userId);
+    const payloadStore = createHostedDispatchPayloadStore({
+      bucket: (env as { BUNDLES: R2BucketLike }).BUNDLES,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    });
+    const storedDispatch = await payloadStore.writeStoredDispatch(dispatch);
+
+    if (storedDispatch.storage !== "reference") {
+      throw new Error("Expected the Workers runtime compatibility dispatch to use reference storage.");
+    }
+
+    const response = await worker.fetch(
+      await createSignedJsonControlRequest(
+        "/internal/dispatch/legacy-reference",
+        storedDispatch,
+        dispatch.event.userId,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as HostedExecutionDispatchResult;
+    expect(payload.event).toMatchObject({
+      eventId: "evt_reference_runtime",
+      userId: dispatch.event.userId,
+    });
   });
 
   it("keeps the removed internal events alias hidden in the Workers runtime", async () => {
@@ -209,6 +251,45 @@ function createDispatch(
   };
 }
 
+function createReferenceOnlyDispatch(
+  eventId: string,
+  userId: string,
+): HostedExecutionDispatchRequest {
+  return buildHostedExecutionDeviceSyncWakeDispatch({
+    connectionId: "conn_runtime_1",
+    eventId,
+    occurredAt: "2026-03-26T12:00:00.000Z",
+    provider: "oura",
+    reason: "webhook_hint",
+    userId,
+  });
+}
+
+async function createSignedJsonControlRequest(
+  path: string,
+  payload: unknown,
+  boundUserId: string,
+  input: {
+    aud?: string;
+    iss?: string;
+    sub?: string;
+  } = {},
+): Promise<Request> {
+  installOidcJwksFetch();
+  const request = new Request(`https://runner.example.test${path}`, {
+    body: JSON.stringify(payload),
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+  });
+  const headers = new Headers(request.headers);
+  headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, boundUserId);
+
+  return new Request(request, { headers });
+}
+
 async function createSignedDispatchRequest(
   path: string,
   dispatch: HostedExecutionDispatchRequest,
@@ -218,20 +299,7 @@ async function createSignedDispatchRequest(
     sub?: string;
   } = {},
 ): Promise<Request> {
-  installOidcJwksFetch();
-  const payload = JSON.stringify(dispatch);
-  const request = new Request(`https://runner.example.test${path}`, {
-    body: payload,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    method: "POST",
-  });
-  const headers = new Headers(request.headers);
-  headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
-  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, dispatch.event.userId);
-
-  return new Request(request, { headers });
+  return createSignedJsonControlRequest(path, dispatch, dispatch.event.userId, input);
 }
 
 function installOidcJwksFetch(delegate?: typeof fetch): void {

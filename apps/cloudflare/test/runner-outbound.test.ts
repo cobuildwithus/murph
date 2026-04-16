@@ -17,7 +17,7 @@ describe("handleRunnerOutboundRequest", () => {
     vi.restoreAllMocks();
   });
 
-  it("accepts internal worker proxy traffic when the artifact host mapping is present but the proxy header is missing", async () => {
+  it("rejects internal worker proxy traffic when the proxy header is missing", async () => {
     const response = await handleRunnerOutboundRequest(
       new Request(MISSING_ARTIFACT_URL, {
         method: "GET",
@@ -27,7 +27,10 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
   });
 
   it("rejects artifact host proxy traffic when the per-run proxy token does not match", async () => {

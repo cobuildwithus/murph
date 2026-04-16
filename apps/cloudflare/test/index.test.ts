@@ -11,6 +11,7 @@ import {
   deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
+import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import { HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER } from "../src/internal-hosts.ts";
@@ -303,6 +304,35 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+  });
+
+  it("drains legacy reference outbox payloads through the private compatibility dispatch route", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub);
+    const dispatch = createReferenceOnlyDispatch("evt_reference_123");
+    const crypto = await resolveHostedUserCryptoContextForTest(env, dispatch.event.userId);
+    const payloadStore = createHostedDispatchPayloadStore({
+      bucket: env.BUNDLES,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    });
+    const storedDispatch = await payloadStore.writeStoredDispatch(dispatch);
+
+    if (storedDispatch.storage !== "reference") {
+      throw new Error("Expected the compatibility payload store to emit reference storage.");
+    }
+
+    const response = await worker.fetch(
+      await createSignedJsonControlRequest("/internal/dispatch/legacy-reference", storedDispatch, {
+        boundUserId: dispatch.event.userId,
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch, storedDispatch.stagedPayloadId);
   });
 
   it("rejects internal dispatch requests when the bound user header is missing or mismatched", async () => {
@@ -1250,6 +1280,21 @@ function createDispatch(eventId: string): HostedExecutionDispatchRequest {
   };
 }
 
+function createReferenceOnlyDispatch(eventId: string): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      clientRequestId: "req_123",
+      kind: "gateway.message.send",
+      replyToMessageId: "5001",
+      sessionKey: "gwcs_secret",
+      text: "Please keep this private.",
+      userId: "member_123",
+    },
+    eventId,
+    occurredAt: "2026-04-16T10:00:00.000Z",
+  };
+}
+
 function createOutboxDelivery() {
   return {
     channel: "telegram",
@@ -1381,7 +1426,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       retryingEventId: null,
       userId: input.event.userId,
     })),
-    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
+    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest, _stagedPayloadId?: string | null) =>
       buildDispatchResultFixture(input.event.userId, input.eventId)),
     getEventStatus: vi.fn(async (input: { eventId: string }) => ({
       acknowledgedAt: "2026-04-16T10:00:00.000Z",
@@ -1432,9 +1477,9 @@ function buildDispatchResultFixture(userId: string, eventId: string) {
   };
 }
 
-async function createSignedDispatchRequest(
+async function createSignedJsonControlRequest(
   path: string,
-  dispatch: HostedExecutionDispatchRequest,
+  payload: unknown,
   input: {
     aud?: string;
     boundUserId?: string | null;
@@ -1449,14 +1494,32 @@ async function createSignedDispatchRequest(
     "content-type": "application/json; charset=utf-8",
   });
 
-  if (input.boundUserId !== null) {
-    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? dispatch.event.userId);
+  if (input.boundUserId !== null && input.boundUserId) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
   }
 
   return new Request(`https://runner.example.test${path}`, {
-    body: JSON.stringify(dispatch),
+    body: JSON.stringify(payload),
     headers,
     method: "POST",
+  });
+}
+
+async function createSignedDispatchRequest(
+  path: string,
+  dispatch: HostedExecutionDispatchRequest,
+  input: {
+    aud?: string;
+    boundUserId?: string | null;
+    iss?: string;
+    sub?: string;
+  } = {},
+): Promise<Request> {
+  return createSignedJsonControlRequest(path, dispatch, {
+    ...input,
+    boundUserId: Object.prototype.hasOwnProperty.call(input, "boundUserId")
+      ? input.boundUserId
+      : dispatch.event.userId,
   });
 }
 
