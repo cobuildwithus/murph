@@ -44,6 +44,44 @@ describe("HostedPhoneAuth", () => {
     });
   });
 
+  it("uses the Twilio-documented international region list for the real picker", async () => {
+    const {
+      HOSTED_PHONE_COUNTRY_OPTIONS,
+      getHostedPhoneCountryNotice,
+    } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-country-options"
+    );
+
+    assert.equal(HOSTED_PHONE_COUNTRY_OPTIONS.length, 217);
+    assert.deepEqual(
+      HOSTED_PHONE_COUNTRY_OPTIONS
+        .filter((option) => ["US", "GB", "CN", "KR", "BR", "CI"].includes(option.code))
+        .map((option) => option.code),
+      ["BR", "CN", "CI", "KR", "GB", "US"],
+    );
+    assert.equal(
+      HOSTED_PHONE_COUNTRY_OPTIONS.some((option) => option.code === "AX"),
+      false,
+    );
+    assert.equal(
+      HOSTED_PHONE_COUNTRY_OPTIONS.some((option) => option.code === "BQ"),
+      false,
+    );
+    assert.match(
+      getHostedPhoneCountryNotice("CN") ?? "",
+      /registered SMS template/i,
+    );
+    assert.match(
+      getHostedPhoneCountryNotice("SG") ?? "",
+      /sender setup/i,
+    );
+    assert.match(
+      getHostedPhoneCountryNotice("CA") ?? "",
+      /toll-free verification/i,
+    );
+    assert.equal(getHostedPhoneCountryNotice("US"), null);
+  });
+
   it("renders the real closed country picker as a button with +1 by default", async () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
@@ -54,7 +92,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /data-slot="combobox-trigger"/);
     assert.match(markup, />\+1</);
-    assert.match(markup, /placeholder="\((?:415|416)\) 555-(?:2671|0123)"/);
+    assert.match(markup, /placeholder="\(201\) 555-0123"/);
     assert.match(markup, /name="phone-number"/);
     assert.match(
       markup,
@@ -436,6 +474,22 @@ describe("HostedPhoneAuth", () => {
       {
         draftPhoneNumber: "+1 (404) 409-2523",
         normalizedPhoneNumber: "+14044092523",
+      },
+    );
+  });
+
+  it("normalizes a non-US submitted number against the selected Twilio-supported country", async () => {
+    const { resolveHostedPhoneSubmission } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+    assert.deepEqual(
+      resolveHostedPhoneSubmission({
+        countryDialCode: "+44",
+        draftPhoneNumber: "07400 123456",
+        submittedPhoneNumber: "07400 123456",
+      }),
+      {
+        draftPhoneNumber: "07400 123456",
+        normalizedPhoneNumber: "+447400123456",
       },
     );
   });
