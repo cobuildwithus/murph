@@ -1,24 +1,19 @@
 import {
-  ExecutionOutboxStatus,
   HostedBillingStatus,
   type PrismaClient,
   type Prisma,
 } from "@prisma/client";
-import {
-  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
-  type HostedExecutionDispatchLifecycleState,
-} from "@murphai/hosted-execution";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
+import {
+  isExecutionLifecycleTerminal,
+  readExecutionLifecycleState,
+} from "../hosted-execution/outbox";
 
 type HostedActivationProgressPrismaClient = PrismaClient | Prisma.TransactionClient;
 
 const HOSTED_MEMBER_ACTIVATION_EVENT_KIND = "member.activated";
 const HOSTED_MEMBER_ACTIVATION_STATUS_TIMEOUT_MS = 1_500;
-const HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET = new Set<HostedExecutionDispatchLifecycleState>(
-  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
-);
-const DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE: HostedExecutionDispatchLifecycleState = "queued";
 
 export async function isHostedMemberActivationPending(input: {
   billingStatus: HostedBillingStatus;
@@ -29,33 +24,17 @@ export async function isHostedMemberActivationPending(input: {
     return false;
   }
 
-  const activationOutbox = await input.prisma.executionOutbox.findFirst({
-    where: {
-      eventKind: HOSTED_MEMBER_ACTIVATION_EVENT_KIND,
-      userId: input.memberId,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-    select: {
-      dispatchState: true,
-      eventId: true,
-      status: true,
-    },
+  const activationOutbox = await readLatestHostedMemberActivationLifecycle({
+    memberId: input.memberId,
+    prisma: input.prisma,
   });
 
   if (!activationOutbox) {
     return false;
   }
 
-  const dispatchState = readHostedExecutionEventDispatchState(activationOutbox.dispatchState);
-
-  if (isHostedExecutionEventDispatchTerminal(dispatchState)) {
+  if (isExecutionLifecycleTerminal(activationOutbox.state)) {
     return false;
-  }
-
-  if (activationOutbox.status !== ExecutionOutboxStatus.dispatched) {
-    return true;
   }
 
   const controlClient = readHostedExecutionControlClientIfConfigured(
@@ -72,32 +51,34 @@ export async function isHostedMemberActivationPending(input: {
       activationOutbox.eventId,
     );
 
-    if (!eventStatus) {
-      return false;
-    }
-
-    return !isHostedExecutionEventDispatchTerminal(eventStatus.state);
+    return !isExecutionLifecycleTerminal(eventStatus?.state ?? activationOutbox.state);
   } catch {
     return true;
   }
 }
 
-function readHostedExecutionEventDispatchState(
-  value: string | null | undefined,
-): HostedExecutionDispatchLifecycleState {
-  if (
-    value
-    && HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET.has(value as HostedExecutionDispatchLifecycleState)
-  ) {
-    return value as HostedExecutionDispatchLifecycleState;
-  }
+async function readLatestHostedMemberActivationLifecycle(input: {
+  memberId: string;
+  prisma: HostedActivationProgressPrismaClient;
+}) {
+  const activationOutbox = await input.prisma.executionOutbox.findFirst({
+    where: {
+      eventKind: HOSTED_MEMBER_ACTIVATION_EVENT_KIND,
+      userId: input.memberId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      dispatchState: true,
+      eventId: true,
+    },
+  });
 
-  return DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE;
-}
-
-function isHostedExecutionEventDispatchTerminal(
-  state: HostedExecutionDispatchLifecycleState,
-): boolean {
-  return state === "completed"
-    || state === "poisoned";
+  return activationOutbox
+    ? {
+        eventId: activationOutbox.eventId,
+        state: readExecutionLifecycleState(activationOutbox.dispatchState),
+      }
+    : null;
 }

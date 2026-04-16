@@ -16,11 +16,9 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   buildHostedShareAcceptanceDispatch,
   buildHostedShareAcceptanceEventId,
-  finalizeHostedShareAcceptance,
   hashHostedShareCode,
   normalizeOptionalString,
-  readHostedShareDispatchState,
-  releaseHostedShareAcceptance,
+  reconcileHostedShareAcceptanceLifecycle,
   requireHostedShareLink,
 } from "./shared";
 import type { AcceptHostedShareResult } from "./types";
@@ -222,34 +220,21 @@ async function reconcileHostedShareClaim(input: {
     };
   }
 
-  const dispatchState = await readHostedShareDispatchState({
+  const lifecycleState = await reconcileHostedShareAcceptanceLifecycle({
     eventId: latest.lastEventId,
     memberId,
     prisma: tx,
+    shareId: latest.id,
   });
 
-  if (dispatchState === "completed") {
-    await finalizeHostedShareAcceptance({
-      eventId: latest.lastEventId,
-      memberId,
-      prisma: tx,
-      shareId: latest.id,
-    });
-
+  if (lifecycleState === "completed") {
     return {
       outcome: "alreadyImported",
       record: await requireHostedShareLinkById(tx, latest.id),
     };
   }
 
-  if (dispatchState === "poisoned") {
-    await releaseHostedShareAcceptance({
-      eventId: latest.lastEventId,
-      memberId,
-      prisma: tx,
-      shareId: latest.id,
-    });
-
+  if (lifecycleState === "poisoned") {
     return {
       outcome: "continue",
       record: await requireHostedShareLinkById(tx, latest.id),

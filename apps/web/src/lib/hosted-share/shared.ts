@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import {
-  ExecutionOutboxStatus,
   type HostedShareLink,
   type HostedSharePayload,
   type Prisma,
@@ -12,13 +11,16 @@ import {
   type SharePack,
 } from "@murphai/contracts";
 import {
-  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchLifecycleState,
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
+import {
+  isExecutionLifecycleTerminal,
+  readExecutionLifecycleStateFromOutbox,
+} from "../hosted-execution/outbox";
 import {
   requireHostedOnboardingPublicBaseUrl,
 } from "../hosted-onboarding/runtime";
@@ -40,10 +42,6 @@ const MAX_HOSTED_SHARE_TTL_HOURS = 24;
 const HOSTED_SHARE_CODE_BYTES = 24;
 export const HOSTED_SHARE_PAYLOAD_SCHEMA = "murph.hosted-share-payload.v1";
 const HOSTED_SHARE_PAYLOAD_FIELD = "hosted-share.payload";
-const DEFAULT_HOSTED_SHARE_DISPATCH_STATE: HostedExecutionDispatchLifecycleState = "queued";
-const HOSTED_SHARE_DISPATCH_STATE_SET = new Set<HostedExecutionDispatchLifecycleState>(
-  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
-);
 const HOSTED_SHARE_EVENT_STATUS_TIMEOUT_MS = 1_500;
 
 export function createHostedShareMinimalPreview(): HostedSharePreview {
@@ -280,18 +278,18 @@ export async function finalizeHostedShareAcceptance(input: {
   };
 }
 
-export async function readHostedShareDispatchState(input: {
+export async function readHostedShareExecutionLifecycleState(input: {
   eventId: string;
   memberId: string;
   prisma: HostedSharePrismaClient;
 }): Promise<HostedExecutionDispatchLifecycleState> {
-  const localState = await readHostedShareLocalDispatchState(input);
+  const state = await readExecutionLifecycleStateFromOutbox({
+    eventId: input.eventId,
+    prisma: input.prisma,
+  });
 
-  if (
-    isHostedShareDispatchTerminal(localState.dispatchState)
-    || localState.status !== ExecutionOutboxStatus.dispatched
-  ) {
-    return localState.dispatchState;
+  if (isExecutionLifecycleTerminal(state)) {
+    return state;
   }
 
   const controlClient = readHostedExecutionControlClientIfConfigured(
@@ -299,7 +297,7 @@ export async function readHostedShareDispatchState(input: {
   );
 
   if (!controlClient) {
-    return localState.dispatchState;
+    return state;
   }
 
   try {
@@ -308,10 +306,41 @@ export async function readHostedShareDispatchState(input: {
       input.eventId,
     );
 
-    return eventStatus?.state ?? localState.dispatchState;
+    return eventStatus?.state ?? state;
   } catch {
-    return localState.dispatchState;
+    return state;
   }
+}
+
+export async function reconcileHostedShareAcceptanceLifecycle(input: {
+  eventId: string;
+  memberId: string;
+  prisma: HostedSharePrismaClient;
+  shareId: string;
+}): Promise<HostedExecutionDispatchLifecycleState> {
+  const state = await readHostedShareExecutionLifecycleState({
+    eventId: input.eventId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  if (state === "completed") {
+    await finalizeHostedShareAcceptance({
+      eventId: input.eventId,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      shareId: input.shareId,
+    });
+  } else if (state === "poisoned") {
+    await releaseHostedShareAcceptance({
+      eventId: input.eventId,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      shareId: input.shareId,
+    });
+  }
+
+  return state;
 }
 
 export function generateHostedShareCode(): string {
@@ -530,64 +559,4 @@ function normalizeHostedSharePayloadSchema(value: string): string {
   }
 
   return value;
-}
-
-async function readHostedShareLocalDispatchState(input: {
-  eventId: string;
-  prisma: HostedSharePrismaClient;
-}): Promise<{
-  dispatchState: HostedExecutionDispatchLifecycleState;
-  status: ExecutionOutboxStatus | null;
-}> {
-  const outboxRows = (input.prisma as HostedSharePrismaClient & {
-    outboxRows?: Array<{
-      dispatchState?: string | null;
-      eventId: string;
-      status?: ExecutionOutboxStatus | null;
-    }>;
-  }).outboxRows;
-
-  if (outboxRows) {
-    const fallback = outboxRows.find((entry) => entry.eventId === input.eventId) ?? null;
-
-    return {
-      dispatchState: normalizeHostedShareDispatchState(fallback?.dispatchState),
-      status: fallback?.status ?? null,
-    };
-  }
-
-  const record = await input.prisma.executionOutbox.findFirst({
-    select: {
-      dispatchState: true,
-      status: true,
-    },
-    where: {
-      eventId: input.eventId,
-    },
-  });
-
-  return {
-    dispatchState: normalizeHostedShareDispatchState(record?.dispatchState),
-    status: record?.status ?? null,
-  };
-}
-
-function normalizeHostedShareDispatchState(
-  value: string | null | undefined,
-): HostedExecutionDispatchLifecycleState {
-  if (
-    value
-    && HOSTED_SHARE_DISPATCH_STATE_SET.has(value as HostedExecutionDispatchLifecycleState)
-  ) {
-    return value as HostedExecutionDispatchLifecycleState;
-  }
-
-  return DEFAULT_HOSTED_SHARE_DISPATCH_STATE;
-}
-
-function isHostedShareDispatchTerminal(
-  state: HostedExecutionDispatchLifecycleState,
-): boolean {
-  return state === "completed"
-    || state === "poisoned";
 }
