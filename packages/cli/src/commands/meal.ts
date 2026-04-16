@@ -34,6 +34,7 @@ import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
+import { commonListLimitOptionSchema } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const mealIngredientsSchema = z
@@ -64,6 +65,15 @@ type StructuredMealPayload = {
   ingredients?: string[]
   nutrition?: MealNutrition
 }
+
+const mealInputPayloadShapeDescription = [
+  'Structured payload object keys:',
+  '`photo` or `photoPath` for an optional meal photo path;',
+  '`audio` or `audioPath` for an optional audio note path;',
+  '`note`, `occurredAt`, and `source` for the saved event fields;',
+  '`ingredients` as a string array;',
+  '`nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams? }, provenance?: { source, confidence?, sourceDetail? } }`.',
+].join(' ')
 
 function formatSchemaIssues(
   issues: readonly { path: PropertyKey[]; message: string }[],
@@ -195,7 +205,9 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
       options: {
         input: inputFileOptionSchema
           .optional()
-          .describe('Optional structured meal payload in @file.json form or - for stdin.'),
+          .describe(
+            `Optional structured meal payload in @file.json form or - for stdin. ${mealInputPayloadShapeDescription} Explicit flags override payload fields.`,
+          ),
         photo: pathSchema
           .optional()
           .describe('Optional meal photo path.'),
@@ -294,11 +306,13 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
     },
     list: {
       description: 'List meal events with optional date bounds.',
+      limitOption: commonListLimitOptionSchema,
       output: listResultSchema,
       async run(input) {
         return listMealRecords({
           vault: input.vault,
           from: input.from,
+          limit: input.limit,
           to: input.to,
         })
       },

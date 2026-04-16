@@ -142,7 +142,7 @@ declare module 'incur' {
       'meal add': { args: {}; options: { vault: string; requestId?: string; input?: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
       'meal delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
-      'meal list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
+      'meal list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'meal manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal totals': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }

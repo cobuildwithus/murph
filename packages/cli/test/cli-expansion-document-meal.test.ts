@@ -252,6 +252,10 @@ test(
       String((mealAddSchema.options.properties.input as { description?: unknown }).description),
       /structured meal payload in @file\.json form or - for stdin/u,
     )
+    assert.match(
+      String((mealAddSchema.options.properties.input as { description?: unknown }).description),
+      /Structured payload object keys:.*ingredients.*nutrition/u,
+    )
     assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
 
     assert.equal('input' in mealEditSchema.options.properties, true)
@@ -262,9 +266,10 @@ test(
     assert.deepEqual(mealDeleteSchema.options.required, ['vault'])
 
     assert.equal('from' in mealListSchema.options.properties, true)
+    assert.equal('limit' in mealListSchema.options.properties, true)
     assert.equal('to' in mealListSchema.options.properties, true)
     assert.equal('kind' in mealListSchema.options.properties, false)
-    assert.deepEqual(mealListSchema.options.required, ['vault'])
+    assert.deepEqual(mealListSchema.options.required, ['vault', 'limit'])
     assert.equal('from' in mealTotalsSchema.options.properties, true)
     assert.equal('to' in mealTotalsSchema.options.properties, true)
     assert.deepEqual(mealTotalsSchema.options.required, ['vault'])
@@ -279,6 +284,8 @@ test('meal add help documents the structured payload path and override rule', as
   assert.match(help, /--input @meal\.json/u)
   assert.match(help, /Explicit flags override payload fields\./u)
   assert.match(help, /ingredients,\s+and nutrition/u)
+  assert.match(help, /Structured payload object keys:/u)
+  assert.match(help, /sourceDetail/u)
 })
 
 test.sequential(
@@ -734,6 +741,24 @@ test.sequential(
       assert.equal(
         requireData(listedMeals).items.some((item) => item.id === olderMeal.mealId),
         false,
+      )
+
+      const limitedMeals = await runSourceCli<ListEnvelope>([
+        'meal',
+        'list',
+        '--limit',
+        '1',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(limitedMeals.ok, true)
+      assert.equal(requireData(limitedMeals).filters.limit, 1)
+      assert.equal(requireData(limitedMeals).count, 1)
+      assert.equal(
+        [currentMeal.mealId, olderMeal.mealId].includes(
+          requireData(limitedMeals).items[0]?.id ?? '',
+        ),
+        true,
       )
 
       const manifest = await runSourceCli<ManifestEnvelope>([
