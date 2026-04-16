@@ -18,8 +18,14 @@ export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
 ] as const;
 
 export const hostedAssistantDeliveryRecordStateValues = [
-  "prepared",
+  "pending",
+  "sending",
   "sent",
+  "failed",
+  "failed_ambiguous",
+] as const;
+const hostedAssistantDeliveryLegacyRecordStateValues = [
+  "prepared",
 ] as const;
 
 export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES =
@@ -60,6 +66,23 @@ export interface HostedAssistantDeliveryReceipt {
 export type HostedAssistantDelivery = HostedAssistantDeliveryReceipt;
 export type HostedExecutionAssistantDelivery = HostedAssistantDeliveryReceipt;
 
+export interface HostedAssistantDeliveryAttempt {
+  channel: string | null;
+  idempotencyKey: string | null;
+  messageLength: number | null;
+  providerMessageId: string | null;
+  providerThreadId: string | null;
+  startedAt: string;
+  target: string | null;
+  targetKind: HostedAssistantDeliveryTargetKind | null;
+}
+
+export interface HostedAssistantDeliveryFailure {
+  code: string | null;
+  failedAt: string;
+  message: string;
+}
+
 interface HostedAssistantDeliveryRecordBase {
   effectId: string;
   fingerprint: string;
@@ -72,10 +95,35 @@ export interface HostedAssistantDeliveryPreparedRecord
   state: "prepared";
 }
 
+export interface HostedAssistantDeliveryPendingRecord
+  extends HostedAssistantDeliveryRecordBase {
+  state: "pending";
+}
+
+export interface HostedAssistantDeliverySendingRecord
+  extends HostedAssistantDeliveryRecordBase {
+  attempt: HostedAssistantDeliveryAttempt;
+  state: "sending";
+}
+
 export interface HostedAssistantDeliverySentRecord
   extends HostedAssistantDeliveryRecordBase {
   delivery: HostedAssistantDeliveryReceipt;
   state: "sent";
+}
+
+export interface HostedAssistantDeliveryFailedRecord
+  extends HostedAssistantDeliveryRecordBase {
+  attempt: HostedAssistantDeliveryAttempt;
+  failure: HostedAssistantDeliveryFailure;
+  state: "failed";
+}
+
+export interface HostedAssistantDeliveryAmbiguousFailureRecord
+  extends HostedAssistantDeliveryRecordBase {
+  attempt: HostedAssistantDeliveryAttempt;
+  failure: HostedAssistantDeliveryFailure;
+  state: "failed_ambiguous";
 }
 
 export type HostedAssistantDeliveryPreparedSideEffectRecord =
@@ -85,8 +133,12 @@ export type HostedAssistantDeliverySentSideEffectRecord =
   HostedAssistantDeliverySentRecord;
 
 export type HostedAssistantDeliveryRecord =
+  | HostedAssistantDeliveryPendingRecord
+  | HostedAssistantDeliverySendingRecord
   | HostedAssistantDeliveryPreparedRecord
-  | HostedAssistantDeliverySentRecord;
+  | HostedAssistantDeliverySentRecord
+  | HostedAssistantDeliveryFailedRecord
+  | HostedAssistantDeliveryAmbiguousFailureRecord;
 
 export type HostedExecutionSideEffectRecord = HostedAssistantDeliveryRecord;
 
@@ -104,6 +156,18 @@ export function buildHostedAssistantDeliverySideEffect(input: {
 export const buildHostedAssistantDeliveryEffect =
   buildHostedAssistantDeliverySideEffect;
 
+export function buildHostedAssistantDeliveryPendingRecord(input: {
+  dedupeKey: string;
+  effectId: string;
+  recordedAt: string;
+}): HostedAssistantDeliveryPendingRecord {
+  return {
+    ...buildHostedAssistantDeliverySideEffect(input),
+    recordedAt: requireString(input.recordedAt, "Hosted assistant pending side effect recordedAt"),
+    state: "pending",
+  };
+}
+
 export function buildHostedAssistantDeliveryPreparedRecord(input: {
   dedupeKey: string;
   effectId: string;
@@ -113,6 +177,23 @@ export function buildHostedAssistantDeliveryPreparedRecord(input: {
     ...buildHostedAssistantDeliverySideEffect(input),
     recordedAt: requireString(input.recordedAt, "Hosted assistant prepared side effect recordedAt"),
     state: "prepared",
+  };
+}
+
+export function buildHostedAssistantDeliverySendingRecord(input: {
+  attempt: HostedAssistantDeliveryAttempt;
+  dedupeKey: string;
+  effectId: string;
+}): HostedAssistantDeliverySendingRecord {
+  const attempt = parseHostedAssistantDeliveryAttempt(
+    input.attempt,
+    "Hosted assistant sending side effect attempt",
+  );
+  return {
+    ...buildHostedAssistantDeliverySideEffect(input),
+    attempt,
+    recordedAt: attempt.startedAt,
+    state: "sending",
   };
 }
 
@@ -129,6 +210,32 @@ export function buildHostedAssistantDeliverySentRecord(input: {
     ),
     recordedAt: input.delivery.sentAt,
     state: "sent",
+  };
+}
+
+export function buildHostedAssistantDeliveryFailedRecord(input: {
+  attempt: HostedAssistantDeliveryAttempt;
+  dedupeKey: string;
+  effectId: string;
+  failure: HostedAssistantDeliveryFailure;
+  state?: "failed" | "failed_ambiguous";
+}): HostedAssistantDeliveryFailedRecord | HostedAssistantDeliveryAmbiguousFailureRecord {
+  const attempt = parseHostedAssistantDeliveryAttempt(
+    input.attempt,
+    "Hosted assistant failed side effect attempt",
+  );
+  const failure = parseHostedAssistantDeliveryFailure(
+    input.failure,
+    "Hosted assistant failed side effect failure",
+  );
+  const state = input.state ?? "failed";
+
+  return {
+    ...buildHostedAssistantDeliverySideEffect(input),
+    attempt,
+    failure,
+    recordedAt: failure.failedAt,
+    state,
   };
 }
 
@@ -168,51 +275,7 @@ export function parseHostedExecutionSideEffects(value: unknown): HostedExecution
 export function parseHostedExecutionSideEffectRecord(
   value: unknown,
 ): HostedExecutionSideEffectRecord {
-  const record = requireObject(value, "Hosted execution side effect record");
-  const kind = requireHostedExecutionSideEffectKind(
-    record.kind,
-    "Hosted execution side effect record kind",
-  );
-
-  switch (kind) {
-    case HOSTED_ASSISTANT_DELIVERY_KIND: {
-      const baseRecord = {
-        effectId: requireHostedAssistantDeliveryEffectId(
-          record,
-          "Hosted assistant side effect record",
-        ),
-        fingerprint: requireString(
-          record.fingerprint,
-          "Hosted assistant side effect record fingerprint",
-        ),
-        kind,
-        recordedAt: requireString(
-          record.recordedAt,
-          "Hosted assistant side effect record recordedAt",
-        ),
-      };
-      const state = requireHostedExecutionSideEffectRecordState(
-        record.state,
-        "Hosted assistant side effect record state",
-      );
-
-      return state === "sent"
-        ? {
-            ...baseRecord,
-            delivery: parseHostedAssistantDeliveryReceipt(
-              record.delivery,
-              "Hosted assistant side effect record delivery",
-            ),
-            state,
-          }
-        : {
-            ...baseRecord,
-            state,
-          };
-    }
-    default:
-      throw new TypeError(`Unsupported hosted execution side effect record kind: ${kind}`);
-  }
+  return parseHostedAssistantDeliveryRecord(value);
 }
 
 export function parseHostedAssistantDeliverySideEffect(
@@ -280,19 +343,62 @@ export function parseHostedAssistantDeliveryRecord(
     ),
   };
 
-  return state === "sent"
-    ? {
+  if (state === "prepared") {
+    return {
+      ...baseRecord,
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: baseRecord.recordedAt,
+        target: null,
+        targetKind: null,
+      },
+      state: "sending",
+    };
+  }
+
+  switch (state) {
+    case "pending":
+      return {
+        ...baseRecord,
+        state,
+      };
+    case "sending":
+      return {
+        ...baseRecord,
+        attempt: parseHostedAssistantDeliveryAttempt(
+          record.attempt,
+          "Hosted assistant delivery record attempt",
+        ),
+        state,
+      };
+    case "sent":
+      return {
         ...baseRecord,
         delivery: parseHostedAssistantDeliveryReceipt(
           record.delivery,
           "Hosted assistant delivery record delivery",
         ),
         state,
-      }
-    : {
+      };
+    case "failed":
+    case "failed_ambiguous":
+      return {
         ...baseRecord,
+        attempt: parseHostedAssistantDeliveryAttempt(
+          record.attempt,
+          "Hosted assistant delivery record attempt",
+        ),
+        failure: parseHostedAssistantDeliveryFailure(
+          record.failure,
+          "Hosted assistant delivery record failure",
+        ),
         state,
       };
+  }
 }
 
 export function sameHostedExecutionSideEffectIdentity(
@@ -326,6 +432,33 @@ export function sameHostedAssistantDeliveryReceipt(
     && left.sentAt === right.sentAt
     && left.target === right.target
     && left.targetKind === right.targetKind
+  );
+}
+
+export function sameHostedAssistantDeliveryAttempt(
+  left: HostedAssistantDeliveryAttempt,
+  right: HostedAssistantDeliveryAttempt,
+): boolean {
+  return (
+    left.channel === right.channel
+    && left.idempotencyKey === right.idempotencyKey
+    && left.messageLength === right.messageLength
+    && left.providerMessageId === right.providerMessageId
+    && left.providerThreadId === right.providerThreadId
+    && left.startedAt === right.startedAt
+    && left.target === right.target
+    && left.targetKind === right.targetKind
+  );
+}
+
+export function sameHostedAssistantDeliveryFailure(
+  left: HostedAssistantDeliveryFailure,
+  right: HostedAssistantDeliveryFailure,
+): boolean {
+  return (
+    left.code === right.code
+    && left.failedAt === right.failedAt
+    && left.message === right.message
   );
 }
 
@@ -413,10 +546,10 @@ function requireHostedExecutionSideEffectRecordState(
 function requireHostedAssistantDeliveryRecordState(
   value: unknown,
   label: string,
-): HostedAssistantDeliveryRecordState {
+): HostedAssistantDeliveryRecordState | "prepared" {
   const state = requireString(value, label);
 
-  if (isHostedAssistantDeliveryRecordState(state)) {
+  if (isHostedAssistantDeliveryStoredRecordState(state)) {
     return state;
   }
 
@@ -445,6 +578,59 @@ export function isHostedAssistantDeliveryRecordState(
   value: string,
 ): value is HostedAssistantDeliveryRecordState {
   return (hostedAssistantDeliveryRecordStateValues as readonly string[]).includes(value);
+}
+
+function isHostedAssistantDeliveryStoredRecordState(
+  value: string,
+): value is HostedAssistantDeliveryRecordState | "prepared" {
+  return isHostedAssistantDeliveryRecordState(value)
+    || (hostedAssistantDeliveryLegacyRecordStateValues as readonly string[]).includes(value);
+}
+
+function parseHostedAssistantDeliveryAttempt(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryAttempt {
+  const record = requireObject(value, label);
+
+  return {
+    channel: requireNullableString(record.channel ?? null, `${label}.channel`),
+    idempotencyKey: requireNullableString(
+      record.idempotencyKey ?? null,
+      `${label}.idempotencyKey`,
+    ),
+    messageLength: requireNullableNonNegativeInteger(
+      record.messageLength ?? null,
+      `${label}.messageLength`,
+    ),
+    providerMessageId: requireNullableString(
+      record.providerMessageId ?? null,
+      `${label}.providerMessageId`,
+    ),
+    providerThreadId: requireNullableString(
+      record.providerThreadId ?? null,
+      `${label}.providerThreadId`,
+    ),
+    startedAt: requireString(record.startedAt, `${label}.startedAt`),
+    target: requireNullableString(record.target ?? null, `${label}.target`),
+    targetKind: requireNullableHostedExecutionAssistantDeliveryTargetKind(
+      record.targetKind ?? null,
+      `${label}.targetKind`,
+    ),
+  };
+}
+
+function parseHostedAssistantDeliveryFailure(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryFailure {
+  const record = requireObject(value, label);
+
+  return {
+    code: requireNullableString(record.code ?? null, `${label}.code`),
+    failedAt: requireString(record.failedAt, `${label}.failedAt`),
+    message: requireString(record.message, `${label}.message`),
+  };
 }
 
 function parseHostedAssistantDeliveryReceipt(
@@ -488,6 +674,14 @@ function requireNullableString(value: unknown, label: string): string | null {
   return requireString(value, label);
 }
 
+function requireNullableNonNegativeInteger(value: unknown, label: string): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireNonNegativeInteger(value, label);
+}
+
 function requireHostedExecutionAssistantDeliveryTargetKind(
   value: unknown,
   label: string,
@@ -501,4 +695,15 @@ function requireHostedExecutionAssistantDeliveryTargetKind(
   throw new TypeError(
     `Unsupported hosted execution assistant delivery target kind: ${targetKind}`,
   );
+}
+
+function requireNullableHostedExecutionAssistantDeliveryTargetKind(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryTargetKind | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireHostedExecutionAssistantDeliveryTargetKind(value, label);
 }

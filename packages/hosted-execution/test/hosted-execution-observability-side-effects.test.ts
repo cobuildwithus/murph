@@ -513,7 +513,7 @@ describe("hosted execution side-effects", () => {
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "unknown",
-    })).toThrow(/Unsupported hosted execution side effect record state: unknown/i);
+    })).toThrow(/Unsupported hosted assistant delivery record state: unknown/i);
 
     expect(() => buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
@@ -547,7 +547,7 @@ describe("hosted execution side-effects", () => {
       kind: "other",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "prepared",
-    })).toThrow(/Unsupported hosted execution side effect kind: other/i);
+    })).toThrow(/Unsupported hosted assistant delivery kind: other/i);
   });
 
   it("exposes assistant-delivery-specific aliases and guards", () => {
@@ -570,7 +570,23 @@ describe("hosted execution side-effects", () => {
       fingerprint: "dedupe_123",
       kind: "assistant.delivery",
     }]);
-    expect(parseHostedAssistantDeliveryRecord(preparedRecord)).toEqual(preparedRecord);
+    expect(parseHostedAssistantDeliveryRecord(preparedRecord)).toEqual({
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      },
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sending",
+    });
     expect(isHostedAssistantDeliveryKind(HOSTED_ASSISTANT_DELIVERY_KIND)).toBe(true);
     expect(isHostedAssistantDeliveryKind("other")).toBe(false);
     expect(() => parseHostedAssistantDeliveryRecord({

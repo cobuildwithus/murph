@@ -636,7 +636,7 @@ describe("cloudflare worker routes", () => {
       record: {
         effectId: "outbox_123",
         kind: "assistant.delivery",
-        state: "prepared",
+        state: "sending",
       },
     });
   });
@@ -683,7 +683,7 @@ describe("cloudflare worker routes", () => {
       record: {
         effectId: "outbox_local_proxy",
         kind: "assistant.delivery",
-        state: "prepared",
+        state: "sending",
       },
     });
   });
@@ -730,7 +730,7 @@ describe("cloudflare worker routes", () => {
       record: {
         effectId: "outbox_local_proxy_host",
         kind: "assistant.delivery",
-        state: "prepared",
+        state: "sending",
       },
     });
   });
@@ -777,7 +777,7 @@ describe("cloudflare worker routes", () => {
       record: {
         effectId: "outbox_local_proxy_alias",
         kind: "assistant.delivery",
-        state: "prepared",
+        state: "sending",
       },
     });
   });
@@ -841,7 +841,7 @@ describe("cloudflare worker routes", () => {
       record: {
         effectId: "outbox_missing_fingerprint",
         kind: "assistant.delivery",
-        state: "prepared",
+        state: "sending",
       },
     });
   });
@@ -883,7 +883,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("deletes only prepared side-effect reservations through the side-effects route", async () => {
+  it("deletes only non-terminal side-effect reservations through the side-effects route", async () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
@@ -956,7 +956,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("deletes prepared side-effect reservations even when the outbound bridge omits the fingerprint query", async () => {
+  it("deletes non-terminal side-effect reservations even when the outbound bridge omits the fingerprint query", async () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
@@ -1266,11 +1266,21 @@ function createPreparedSideEffectRecord(input: {
   fingerprint: string;
 }) {
   return {
+    attempt: {
+      channel: "telegram",
+      idempotencyKey: `assistant-outbox:${input.effectId}`,
+      messageLength: "Queued reply".length,
+      providerMessageId: null,
+      providerThreadId: null,
+      startedAt: "2026-03-26T12:00:05.000Z",
+      target: "thread_123",
+      targetKind: "thread" as const,
+    },
     effectId: input.effectId,
     fingerprint: input.fingerprint,
     kind: "assistant.delivery" as const,
     recordedAt: "2026-03-26T12:00:05.000Z",
-    state: "prepared" as const,
+    state: "sending" as const,
   };
 }
 

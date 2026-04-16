@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHostedAssistantDeliveryPreparedRecord,
+  buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
 } from "@murphai/hosted-execution/side-effects";
 
@@ -142,10 +143,10 @@ describe("createHostedAssistantDeliveryJournalStore", () => {
     })).resolves.toBe(false);
   });
 
-  it("promotes prepared records to sent and keeps sent delivery stable on duplicate writes", async () => {
+  it("promotes sending records to sent and keeps sent delivery stable on duplicate writes", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
-    const preparedRecord = createPreparedRecord({
+    const sendingRecord = createSendingRecord({
       effectId: "outbox_promote",
       fingerprint: "dedupe_promote",
     });
@@ -160,15 +161,15 @@ describe("createHostedAssistantDeliveryJournalStore", () => {
     });
 
     await expect(store.write({
-      record: preparedRecord,
+      record: sendingRecord,
       userId: "member_123",
-    })).resolves.toEqual(preparedRecord);
+    })).resolves.toEqual(sendingRecord);
     await expect(store.write({
       record: sentRecord,
       userId: "member_123",
     })).resolves.toEqual(sentRecord);
     await expect(store.write({
-      record: preparedRecord,
+      record: sendingRecord,
       userId: "member_123",
     })).resolves.toEqual(sentRecord);
   });
@@ -176,7 +177,7 @@ describe("createHostedAssistantDeliveryJournalStore", () => {
   it("rejects identity conflicts instead of aliasing mismatched records", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
-    const firstRecord = createPreparedRecord({
+    const firstRecord = createSendingRecord({
       effectId: "outbox_conflict",
       fingerprint: "dedupe_a",
     });
@@ -200,12 +201,41 @@ describe("createHostedAssistantDeliveryJournalStore", () => {
     })).rejects.toBeInstanceOf(HostedAssistantDeliveryConflictError);
   });
 
-  it("deletes only prepared reservations", async () => {
+  it("retains legacy prepared records as sending-compatible reads", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
     const preparedRecord = createPreparedRecord({
-      effectId: "outbox_prepared",
-      fingerprint: "dedupe_prepared",
+      effectId: "outbox_legacy_prepared",
+      fingerprint: "dedupe_legacy_prepared",
+    });
+    const store = createHostedAssistantDeliveryJournalStore({
+      bucket,
+      key,
+      keyId: "v1",
+    });
+
+    await store.write({
+      record: preparedRecord,
+      userId: "member_123",
+    });
+
+    await expect(store.read({
+      effectId: preparedRecord.effectId,
+      fingerprint: preparedRecord.fingerprint,
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      effectId: preparedRecord.effectId,
+      fingerprint: preparedRecord.fingerprint,
+      state: "sending",
+    });
+  });
+
+  it("deletes only non-terminal reservations", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const key = Buffer.alloc(32, 9);
+    const sendingRecord = createSendingRecord({
+      effectId: "outbox_sending",
+      fingerprint: "dedupe_sending",
     });
     const sentRecord = createSentRecord({
       effectId: "outbox_sent",
@@ -218,7 +248,7 @@ describe("createHostedAssistantDeliveryJournalStore", () => {
     });
 
     await store.write({
-      record: preparedRecord,
+      record: sendingRecord,
       userId: "member_123",
     });
     await store.write({
@@ -227,13 +257,13 @@ describe("createHostedAssistantDeliveryJournalStore", () => {
     });
 
     await expect(store.deletePrepared({
-      effectId: preparedRecord.effectId,
-      fingerprint: preparedRecord.fingerprint,
+      effectId: sendingRecord.effectId,
+      fingerprint: sendingRecord.fingerprint,
       userId: "member_123",
     })).resolves.toBe(true);
     await expect(store.read({
-      effectId: preparedRecord.effectId,
-      fingerprint: preparedRecord.fingerprint,
+      effectId: sendingRecord.effectId,
+      fingerprint: sendingRecord.fingerprint,
       userId: "member_123",
     })).resolves.toBeNull();
 
@@ -258,6 +288,26 @@ function createPreparedRecord(input: {
     dedupeKey: input.fingerprint,
     effectId: input.effectId,
     recordedAt: "2026-03-29T10:00:05.000Z",
+  });
+}
+
+function createSendingRecord(input: {
+  effectId: string;
+  fingerprint: string;
+}) {
+  return buildHostedAssistantDeliverySendingRecord({
+    attempt: {
+      channel: "telegram",
+      idempotencyKey: `assistant-outbox:${input.effectId}`,
+      messageLength: 12,
+      providerMessageId: null,
+      providerThreadId: null,
+      startedAt: "2026-03-29T10:00:05.000Z",
+      target: "thread_123",
+      targetKind: "thread",
+    },
+    dedupeKey: input.fingerprint,
+    effectId: input.effectId,
   });
 }
 

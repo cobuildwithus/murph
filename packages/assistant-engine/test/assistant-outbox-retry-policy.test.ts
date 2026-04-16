@@ -5,6 +5,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
+  createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
@@ -118,6 +119,18 @@ describe('assistant outbox retry policy', () => {
       code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
       message:
         'Assistant outbound delivery may have succeeded already and must be reconciled before resend. provider may still deliver',
+    })
+    expect(
+      createAssistantDeliveryAmbiguousError({
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+        message:
+          'Assistant outbound delivery could not be confirmed safely and will not be resent automatically. hosted journal stale',
+      }),
+    ).toEqual({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      message:
+        'Assistant outbound delivery could not be confirmed safely and will not be resent automatically. hosted journal stale',
+      retryable: false,
     })
   })
 
