@@ -72,18 +72,6 @@ export async function readExecutionLifecycleStateFromOutbox(input: {
   eventId: string;
   prisma: HostedExecutionOutboxLifecycleReader;
 }): Promise<HostedExecutionDispatchLifecycleState> {
-  const fallbackRows = (input.prisma as HostedExecutionOutboxLifecycleReader & {
-    outboxRows?: Array<{
-      dispatchState?: string | null;
-      eventId: string;
-    }>;
-  }).outboxRows;
-
-  if (fallbackRows) {
-    const fallback = fallbackRows.find((entry) => entry.eventId === input.eventId) ?? null;
-    return readExecutionLifecycleState(fallback?.dispatchState);
-  }
-
   const record = await input.prisma.executionOutbox.findUnique({
     select: {
       dispatchState: true,

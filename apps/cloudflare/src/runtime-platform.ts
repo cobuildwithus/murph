@@ -367,6 +367,7 @@ function createHostedWebDeviceSyncPort(input: {
         callbackSigning: input.callbackSigning,
         description: `Hosted device-sync connect link ${provider}`,
         fetchImpl: input.fetchImpl,
+        method: "POST",
         path: buildHostedExecutionDeviceSyncConnectLinkPath(provider),
         timeoutMs: input.timeoutMs,
       });
@@ -404,6 +405,7 @@ async function fetchHostedWebControlPlaneJson(input: {
   callbackSigning: HostedWebCallbackSigningEnvironment;
   description: string;
   fetchImpl: typeof fetch;
+  method?: "GET" | "POST";
   path: string;
   timeoutMs: number;
 }): Promise<unknown> {
@@ -414,7 +416,7 @@ async function fetchHostedWebControlPlaneJson(input: {
     boundUserId: input.boundUserId,
     callbackSigning: input.callbackSigning,
     fetchImpl: input.fetchImpl,
-    method: input.body === undefined ? "GET" : "POST",
+    method: input.method ?? (input.body === undefined ? "GET" : "POST"),
     path: input.path,
     timeoutMs: input.timeoutMs,
   });

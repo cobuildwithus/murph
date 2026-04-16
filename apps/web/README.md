@@ -279,6 +279,8 @@ Local-agent routes:
 Internal hosted maintenance and Cloudflare callback routes:
 
 - `POST /api/internal/device-sync/providers/:provider/connect-link`
+- `POST /api/internal/device-sync/runtime/snapshot`
+- `POST /api/internal/device-sync/runtime/apply`
 - `GET /api/internal/hosted-execution/outbox/cron`
 - `GET /api/internal/hosted-execution/share/:shareId/payload`
 - `GET /api/internal/hosted-execution/usage/cron`
@@ -287,8 +289,11 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-onboarding/webhook-receipts/cron`
 
 The old staged-payload and share-import completion/release callback routes are
-gone. Cloudflare no longer round-trips through hosted-web runtime snapshot/apply
-routes, share-pack CRUD, or a pending-usage store.
+gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
+share-pack CRUD, or a pending-usage store. It still uses narrow signed
+hosted-web callbacks for execution-time device-sync authority reads/writes,
+device connect-link starts, canonical hosted share payload reads, and direct
+hosted usage recording.
 
 ## Hosted onboarding and share routes
 
