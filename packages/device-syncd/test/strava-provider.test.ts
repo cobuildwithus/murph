@@ -1,6 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
+import { resolveStravaWebhookPreflightResponse } from "../src/providers/strava.ts";
+import type { DeviceSyncAccount } from "../src/types.ts";
+
+function buildStravaAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceSyncAccount {
+  return {
+    id: "connection-1",
+    provider: "strava",
+    externalAccountId: "123456",
+    status: "active",
+    accessToken: "token",
+    refreshToken: "refresh",
+    accessTokenExpiresAt: null,
+    connectedAt: "2026-04-16T00:00:00.000Z",
+    disconnectGeneration: 0,
+    displayName: "Runner",
+    metadata: {},
+    lastWebhookAt: null,
+    lastSyncStartedAt: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextReconcileAt: null,
+    scopes: ["activity:read"],
+    createdAt: "2026-04-16T00:00:00.000Z",
+    updatedAt: "2026-04-16T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 describe("Strava device-sync provider", () => {
   it("builds an OAuth connect URL with comma-delimited scopes", () => {
@@ -153,6 +182,155 @@ describe("Strava device-sync provider", () => {
     });
   });
 
+  it("fetches the athlete profile when the token response omits athlete details", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url === "https://www.strava.com/oauth/token") {
+        return new Response(JSON.stringify({
+          access_token: "access-token",
+          expires_in: 3600,
+          refresh_token: "refresh-token",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      if (url === "https://www.strava.com/api/v3/athlete") {
+        return new Response(JSON.stringify({
+          id: 54321,
+          username: "fallback-runner",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected Strava fetch: ${url}`);
+    });
+
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      fetchImpl,
+    });
+
+    await expect(
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
+          state: "state-token",
+          now: "2026-04-16T00:00:00.000Z",
+          grantedScopes: ["activity:read_all"],
+        },
+        "authorization-code",
+      ),
+    ).resolves.toMatchObject({
+      externalAccountId: "54321",
+      displayName: "fallback-runner",
+      scopes: ["activity:read_all"],
+    });
+  });
+
+  it("rejects authorization when neither the token response nor the athlete profile provides a stable id", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+
+        if (url === "https://www.strava.com/oauth/token") {
+          return new Response(JSON.stringify({
+            access_token: "access-token",
+            expires_in: 3600,
+            refresh_token: "refresh-token",
+          }), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        if (url === "https://www.strava.com/api/v3/athlete") {
+          return new Response(JSON.stringify({
+            username: "fallback-runner",
+          }), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch: ${url}`);
+      }),
+    });
+
+    await expect(
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
+          state: "state-token",
+          now: "2026-04-16T00:00:00.000Z",
+          grantedScopes: ["activity:read_all"],
+        },
+        "authorization-code",
+      ),
+    ).rejects.toMatchObject({
+      code: "STRAVA_ATHLETE_INVALID",
+    });
+  });
+
+  it("rejects authorization responses that do not grant an activity scope", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      fetchImpl: vi.fn(async () =>
+        new Response(JSON.stringify({
+          access_token: "access-token",
+          expires_in: 3600,
+          refresh_token: "refresh-token",
+          athlete: {
+            id: 12345,
+          },
+          scope: "read",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        })),
+    });
+
+    await expect(
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://murph.example.com/api/device-sync/oauth/strava/callback",
+          state: "state-token",
+          now: "2026-04-16T00:00:00.000Z",
+          grantedScopes: [],
+        },
+        "authorization-code",
+      ),
+    ).rejects.toMatchObject({
+      code: "STRAVA_ACTIVITY_SCOPE_REQUIRED",
+    });
+  });
+
   it("answers Strava webhook verification challenges through the provider-owned preflight seam", async () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "strava-client-id",
@@ -176,6 +354,54 @@ describe("Strava device-sync provider", () => {
         "hub.challenge": "challenge-value",
       },
     });
+  });
+
+  it("covers Strava webhook preflight validation failures and ignored methods", () => {
+    expect(
+      resolveStravaWebhookPreflightResponse({
+        method: "POST",
+        url: new URL("https://murph.example.com/api/device-sync/webhooks/strava"),
+        verifyToken: "verify-me",
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveStravaWebhookPreflightResponse({
+        method: "GET",
+        url: new URL("https://murph.example.com/api/device-sync/webhooks/strava"),
+        verifyToken: "verify-me",
+      }),
+    ).toBeNull();
+
+    expect(() =>
+      resolveStravaWebhookPreflightResponse({
+        method: "GET",
+        url: new URL(
+          "https://murph.example.com/api/device-sync/webhooks/strava?hub.mode=unsubscribe",
+        ),
+        verifyToken: "verify-me",
+      })
+    ).toThrow(/missing hub\.mode=subscribe or hub\.challenge/u);
+
+    expect(() =>
+      resolveStravaWebhookPreflightResponse({
+        method: "GET",
+        url: new URL(
+          "https://murph.example.com/api/device-sync/webhooks/strava?hub.mode=subscribe&hub.challenge=challenge-value&hub.verify_token=verify-me",
+        ),
+        verifyToken: null,
+      })
+    ).toThrow(/verification token is not configured/u);
+
+    expect(() =>
+      resolveStravaWebhookPreflightResponse({
+        method: "GET",
+        url: new URL(
+          "https://murph.example.com/api/device-sync/webhooks/strava?hub.mode=subscribe&hub.challenge=challenge-value&hub.verify_token=wrong",
+        ),
+        verifyToken: "verify-me",
+      })
+    ).toThrow(/did not include the configured verify token/u);
   });
 
   it("parses Strava activity webhook events into resource or delete jobs", async () => {
@@ -437,5 +663,403 @@ describe("Strava device-sync provider", () => {
     ).resolves.toEqual({});
 
     expect(importSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("executes backfill imports, refreshes tokens, and ignores non-activity resource jobs", async () => {
+    const importSnapshot = vi.fn(async () => undefined);
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url === "https://www.strava.com/oauth/token") {
+        return new Response(JSON.stringify({
+          access_token: "next-access-token",
+          expires_at: 1_776_297_600,
+          refresh_token: "next-refresh-token",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      if (url === "https://www.strava.com/api/v3/athlete") {
+        return new Response(JSON.stringify({
+          id: 123456,
+          username: "runner",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      if (url.startsWith("https://www.strava.com/api/v3/athlete/activities?")) {
+        return new Response(JSON.stringify([
+          {
+            id: 987654321,
+            name: "Morning Run",
+            sport_type: "Run",
+            start_date: "2026-04-15T06:00:00.000Z",
+            updated_at: "2026-04-15T06:31:00.000Z",
+            elapsed_time: 1800,
+            distance: 5000,
+          },
+        ]), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected Strava fetch: ${url}`);
+    });
+
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      fetchImpl,
+    });
+
+    const expiringAccount = buildStravaAccount({
+      accessTokenExpiresAt: "2026-04-16T00:05:00.000Z",
+    });
+
+    const refreshAccountTokens = vi.fn(async () => {
+      const refreshed = await provider.refreshTokens(expiringAccount);
+      return buildStravaAccount({
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken ?? expiringAccount.refreshToken,
+        accessTokenExpiresAt:
+          refreshed.accessTokenExpiresAt ?? expiringAccount.accessTokenExpiresAt,
+      });
+    });
+
+    await expect(
+      provider.executeJob(
+        {
+          account: expiringAccount,
+          now: "2026-04-16T00:00:00.000Z",
+          importSnapshot,
+          refreshAccountTokens,
+          logger: {},
+        },
+        {
+          id: "job-1",
+          accountId: "connection-1",
+          provider: "strava",
+          kind: "backfill",
+          payload: {
+            includeAthlete: true,
+            windowKind: "backfill",
+            windowStart: "2026-04-10T00:00:00.000Z",
+            windowEnd: "2026-04-16T00:00:00.000Z",
+          },
+          priority: 100,
+          attempts: 0,
+          maxAttempts: 5,
+          availableAt: "2026-04-16T00:00:00.000Z",
+          createdAt: "2026-04-16T00:00:00.000Z",
+          updatedAt: "2026-04-16T00:00:00.000Z",
+          status: "queued",
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          dedupeKey: null,
+          startedAt: null,
+          finishedAt: null,
+        },
+      ),
+    ).resolves.toEqual({});
+    expect(refreshAccountTokens).toHaveBeenCalled();
+
+    expect(importSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        athlete: expect.objectContaining({
+          id: 123456,
+          username: "runner",
+        }),
+        activities: [expect.objectContaining({ id: 987654321 })],
+      }),
+    );
+    importSnapshot.mockClear();
+
+    await expect(
+      provider.executeJob(
+        {
+          account: buildStravaAccount(),
+          now: "2026-04-16T00:00:00.000Z",
+          importSnapshot,
+          refreshAccountTokens: async () => {
+            throw new Error("not needed");
+          },
+          logger: {},
+        },
+        {
+          id: "job-2",
+          accountId: "connection-1",
+          provider: "strava",
+          kind: "resource",
+          payload: {
+            eventType: "athlete.update",
+            occurredAt: "2026-04-16T00:00:00.000Z",
+            resourceId: "123456",
+            resourceType: "athlete",
+          },
+          priority: 90,
+          attempts: 0,
+          maxAttempts: 5,
+          availableAt: "2026-04-16T00:00:00.000Z",
+          createdAt: "2026-04-16T00:00:00.000Z",
+          updatedAt: "2026-04-16T00:00:00.000Z",
+          status: "queued",
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          dedupeKey: null,
+          startedAt: null,
+          finishedAt: null,
+        },
+      ),
+    ).resolves.toEqual({});
+    expect(importSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("ensures Strava webhook subscriptions only when a verify token is configured and tolerates benign deauthorization responses", async () => {
+    const calls: Array<{ body?: string; method: string }> = [];
+    const providerWithoutToken = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      fetchImpl: vi.fn(async () => {
+        throw new Error("should not run without a verify token");
+      }),
+    });
+
+    await expect(
+      providerWithoutToken.webhookAdmin?.ensureSubscriptions?.({
+        publicBaseUrl: "https://murph.example.com",
+      }),
+    ).resolves.toBeUndefined();
+
+    const providerWithToken = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      webhookVerifyToken: "verify-me",
+      fetchImpl: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        calls.push({
+          method,
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+
+        if (method === "GET") {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        if (method === "POST") {
+          return new Response(JSON.stringify({
+            id: 77,
+            callback_url: "https://murph.example.com/webhooks/strava",
+          }), {
+            status: 201,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch method: ${method}`);
+      }),
+    });
+
+    await expect(
+      providerWithToken.webhookAdmin?.ensureSubscriptions?.({
+        publicBaseUrl: "https://murph.example.com",
+      }),
+    ).resolves.toBeUndefined();
+    expect(calls.map((call) => call.method)).toEqual(["GET", "POST"]);
+    expect(calls[1]?.body).toContain(
+      "callback_url=https%3A%2F%2Fmurph.example.com%2Fwebhooks%2Fstrava",
+    );
+
+    const revokeAccess = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      fetchImpl: vi.fn(async () => new Response("", { status: 404 })),
+    }).revokeAccess;
+
+    if (!revokeAccess) {
+      throw new TypeError("Strava provider must define revokeAccess.");
+    }
+
+    await expect(
+      revokeAccess(buildStravaAccount()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("imports delete jobs, validates malformed jobs and webhook payloads, and handles deauthorize edge cases", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "12345",
+      clientSecret: "secret",
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+
+        if (url.startsWith("https://www.strava.com/oauth/deauthorize")) {
+          return new Response(JSON.stringify({ message: "boom" }), {
+            status: 500,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch: ${url}`);
+      }),
+    });
+
+    const importSnapshot = vi.fn(async () => undefined);
+    const revokeAccess = provider.revokeAccess;
+
+    if (!revokeAccess) {
+      throw new TypeError("Strava provider must define revokeAccess.");
+    }
+
+    await expect(
+      provider.executeJob(
+        {
+          account: buildStravaAccount(),
+          now: "2026-04-16T00:00:00.000Z",
+          importSnapshot,
+          refreshAccountTokens: async () => {
+            throw new Error("not needed");
+          },
+          logger: {},
+        },
+        {
+          id: "job-1",
+          accountId: "connection-1",
+          provider: "strava",
+          kind: "delete",
+          payload: {
+            resourceId: "activity-123",
+          },
+          priority: 95,
+          attempts: 0,
+          maxAttempts: 5,
+          availableAt: "2026-04-16T00:00:00.000Z",
+          createdAt: "2026-04-16T00:00:00.000Z",
+          updatedAt: "2026-04-16T00:00:00.000Z",
+          status: "queued",
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          dedupeKey: null,
+          startedAt: null,
+          finishedAt: null,
+        },
+      ),
+    ).resolves.toEqual({});
+
+    expect(importSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deletions: [
+          expect.objectContaining({
+            resource_id: "activity-123",
+            resource_type: "activity",
+            source_event_type: "strava:activity:delete",
+          }),
+        ],
+      }),
+    );
+
+    await expect(
+      provider.executeJob(
+        {
+          account: buildStravaAccount(),
+          now: "2026-04-16T00:00:00.000Z",
+          importSnapshot,
+          refreshAccountTokens: async () => {
+            throw new Error("not needed");
+          },
+          logger: {},
+        },
+        {
+          id: "job-2",
+          accountId: "connection-1",
+          provider: "strava",
+          kind: "delete",
+          payload: {},
+          priority: 95,
+          attempts: 0,
+          maxAttempts: 5,
+          availableAt: "2026-04-16T00:00:00.000Z",
+          createdAt: "2026-04-16T00:00:00.000Z",
+          updatedAt: "2026-04-16T00:00:00.000Z",
+          status: "queued",
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          dedupeKey: null,
+          startedAt: null,
+          finishedAt: null,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "STRAVA_DELETE_JOB_INVALID",
+    });
+
+    await expect(
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers(),
+        rawBody: Buffer.from("{not-json"),
+        now: "2026-04-16T00:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({
+      code: "STRAVA_WEBHOOK_JSON_INVALID",
+    });
+
+    await expect(
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers(),
+        rawBody: Buffer.from(JSON.stringify({
+          aspect_type: "update",
+          object_type: "athlete",
+          owner_id: 12345,
+          object_id: 12345,
+          updates: {
+            authorized: true,
+          },
+        })),
+        now: "2026-04-16T00:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      eventType: "athlete.update",
+      jobs: [],
+    });
+
+    await expect(
+      revokeAccess(buildStravaAccount()),
+    ).rejects.toMatchObject({
+      code: "STRAVA_DEAUTHORIZE_FAILED",
+    });
   });
 });

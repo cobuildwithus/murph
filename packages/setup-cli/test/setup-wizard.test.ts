@@ -441,7 +441,7 @@ test('setup wizard public URL guidance recommends hosted web for wearables and k
       review,
       strategy: 'hosted',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura, but keep Linq on the local webhook path for now.',
+    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava, but keep Linq on the local webhook path for now.',
   )
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
@@ -467,7 +467,7 @@ test('setup wizard public URL guidance recommends a tunnel for Linq-only setups'
       review,
       strategy: 'hosted',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura, but keep Linq on the local webhook path for now.',
+    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava, but keep Linq on the local webhook path for now.',
   )
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
@@ -514,7 +514,7 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
       review,
       strategy: 'hosted',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura so callbacks stay on one stable public base.',
+    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
   )
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
@@ -522,6 +522,31 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
       strategy: 'tunnel',
     }),
     'Expose the local callback routes through a tunnel instead of setting up hosted `apps/web` first.',
+  )
+})
+
+test('setup wizard public URL guidance includes Strava callback and webhook targets', () => {
+  const review = buildSetupWizardPublicUrlReview({
+    channels: [],
+    wearables: ['strava'],
+    deviceSyncLocalBaseUrl: ' http://127.0.0.1:8788/base/ ',
+  })
+
+  assert.equal(review.enabled, true)
+  assert.equal(review.recommendedStrategy, 'hosted')
+  assert.deepEqual(
+    review.targets.map((target) => [target.label, target.url]),
+    [
+      ['Strava callback', 'http://127.0.0.1:8788/oauth/strava/callback'],
+      ['Strava webhook', 'http://127.0.0.1:8788/webhooks/strava'],
+    ],
+  )
+  assert.equal(
+    describeSetupWizardPublicUrlStrategyChoice({
+      review,
+      strategy: 'hosted',
+    }),
+    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
   )
 })
 
@@ -564,6 +589,7 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     await writeInput(' ')
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /Health data/u)
+    await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput(' ')
@@ -751,6 +777,7 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
     await writeInput(' ')
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /Health data/u)
+    await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput(' ')
