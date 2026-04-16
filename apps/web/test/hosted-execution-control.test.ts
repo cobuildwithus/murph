@@ -41,6 +41,7 @@ describe("hosted execution control client", () => {
 
     expect(client).not.toBeNull();
     expect(mocks.createCloudflareHostedControlClient).toHaveBeenCalledWith({
+      allowHttpLocalhost: true,
       baseUrl: "https://dispatch.example.test",
       getBearerToken: mocks.tokenProvider,
     });

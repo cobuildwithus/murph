@@ -121,7 +121,10 @@ import {
   deliverAssistantReply,
   finalizeAssistantTurnFromDeliveryOutcome,
 } from "../src/assistant/delivery-service.ts";
-import { normalizeAssistantExecutionContext } from "../src/assistant/execution-context.ts";
+import {
+  normalizeAssistantExecutionContext,
+  resolveAssistantExecutionDefaultTarget,
+} from "../src/assistant/execution-context.ts";
 import {
   resolveAssistantTurnRoutes,
   resolveAssistantTurnRoutesForMessage,
@@ -1130,10 +1133,15 @@ describe("assistant execution context normalization", () => {
   it("normalizes hosted context and preserves callable helpers only", () => {
     const issueDeviceConnectLink = vi.fn();
     const issueShareLink = vi.fn();
+    const defaultTarget = createAssistantModelTarget({
+      model: "gpt-5.4",
+      provider: "openai-compatible",
+    });
 
     expect(
       normalizeAssistantExecutionContext({
         hosted: {
+          defaultTarget,
           issueDeviceConnectLink,
           issueShareLink,
           memberId: " member-1 ",
@@ -1142,6 +1150,7 @@ describe("assistant execution context normalization", () => {
       })
     ).toEqual({
       hosted: {
+        defaultTarget,
         issueDeviceConnectLink,
         issueShareLink,
         memberId: "member-1",
@@ -1164,6 +1173,28 @@ describe("assistant execution context normalization", () => {
         userEnvKeys: [],
       },
     });
+  });
+
+  it("falls back to the provided target when no hosted default target exists", () => {
+    const fallbackTarget = createAssistantModelTarget({
+      model: "gpt-5.4-mini",
+      provider: "openai-compatible",
+    });
+    if (!fallbackTarget) {
+      throw new Error("expected fallback target");
+    }
+
+    expect(
+      resolveAssistantExecutionDefaultTarget({
+        executionContext: {
+          hosted: {
+            memberId: "member-plain",
+            userEnvKeys: [],
+          },
+        },
+        fallbackTarget,
+      }),
+    ).toEqual(fallbackTarget);
   });
 });
 

@@ -337,6 +337,74 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
   }
 })
 
+test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cursor without reading inbox state', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-explicit-cursor-'),
+  )
+
+  try {
+    await saveAssistantAutomationState(vaultRoot, {
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [],
+      updatedAt: '2026-04-10T00:00:00.000Z',
+    })
+
+    const list = async () => {
+      throw new Error('expected explicit cursor seeding to skip inbox lookup')
+    }
+    const explicitCursor = {
+      captureId: 'cap-explicit',
+      occurredAt: '2026-04-10T04:00:00.000Z',
+    }
+
+    const result = await reconcileManagedAssistantAutoReplyChannelsLocal({
+      desiredChannels: ['linq'],
+      inboxServices: { list },
+      latestCaptureCursor: explicitCursor,
+      vault: vaultRoot,
+    })
+
+    assert.equal(result.changed, true)
+    assert.deepEqual(result.state.autoReply, [
+      {
+        channel: 'linq',
+        cursor: explicitCursor,
+      },
+    ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('enableAssistantAutoReplyChannelLocal seeds a newly enabled channel and reports it as enabled', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-enable-new-'),
+  )
+
+  try {
+    await saveAssistantAutomationState(vaultRoot, {
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [],
+      updatedAt: '2026-04-10T00:00:00.000Z',
+    })
+
+    const enabled = await enableAssistantAutoReplyChannelLocal({
+      channel: 'email',
+      latestCaptureCursor: {
+        captureId: 'cap-email',
+        occurredAt: '2026-04-10T05:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+
+    assert.equal(enabled, true)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('reconcileAssistantAutoReplyState preserves existing cursors and seeds new channels', () => {
   const latestCursor = {
     captureId: 'cap-latest',

@@ -257,7 +257,7 @@ describe("hosted webhook receipt transitions", () => {
     }
 
     assert.equal(persistedEffect.payload.storage, "inline");
-    assert.equal("phoneLookupKey" in persistedEffect.payload.dispatch.event, false);
+    assert.equal("phoneLookupKey" in persistedEffect.payload.dispatch.event, true);
     assert.deepEqual(buildHostedWebhookDispatchFromPayload(persistedEffect.payload), persistedEffect.payload.dispatch);
   });
 

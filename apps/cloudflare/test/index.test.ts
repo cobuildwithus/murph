@@ -2,6 +2,7 @@ import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
@@ -31,6 +32,8 @@ import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 
 const describe = baseDescribe.sequential;
+const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
+const APP_DIR = path.resolve(TEST_DIR, "..");
 
 const RUNNER_PROXY_TOKEN = "runner-proxy-token";
 const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
@@ -61,8 +64,8 @@ describe("cloudflare worker routes", () => {
 
   it("keeps inbox email parsing isolated to the hosted email ingress module", async () => {
     const [workerSource, hostedEmailIngressSource] = await Promise.all([
-      readFile(path.resolve("apps/cloudflare/src/index.ts"), "utf8"),
-      readFile(path.resolve("apps/cloudflare/src/hosted-email/worker-ingress.ts"), "utf8"),
+      readFile(path.join(APP_DIR, "src/index.ts"), "utf8"),
+      readFile(path.join(APP_DIR, "src/hosted-email/worker-ingress.ts"), "utf8"),
     ]);
 
     expect(workerSource).not.toMatch(/from "@murphai\/inboxd";/u);

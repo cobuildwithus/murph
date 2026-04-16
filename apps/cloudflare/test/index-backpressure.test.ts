@@ -6,7 +6,14 @@ import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import {
+  createHostedUserKeyStore,
+} from "../src/user-key-store.ts";
 import { MAX_PENDING_EVENTS } from "../src/user-runner/types.js";
+import {
+  asWorkerStringEnvironment,
+} from "../src/worker-contracts.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
@@ -33,6 +40,7 @@ describe("cloudflare worker queue backpressure routes", () => {
   it("returns HTTP 429 when signed dispatch backpressures a full per-user queue", async () => {
     const harness = createUserRunnerDurableObject();
     await seedFullRunnerQueue(harness, "member_123");
+    await ensureManagedUserCryptoEnvelopeForTest(harness.env as never, "member_123");
 
     const overflowResponse = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_overflow")),
@@ -57,6 +65,7 @@ describe("cloudflare worker queue backpressure routes", () => {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
     await seedFullRunnerQueue(harness, "member_123");
+    await ensureManagedUserCryptoEnvelopeForTest(harness.env as never, "member_123");
 
     const runResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
@@ -100,6 +109,28 @@ function createUserRunnerDurableObject(
     },
     storage,
   };
+}
+
+async function ensureManagedUserCryptoEnvelopeForTest(
+  env: ReturnType<typeof createUserRunnerDurableObject>["env"],
+  userId: string,
+): Promise<void> {
+  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+  const store = createHostedUserKeyStore({
+    automationRecipientKeyId: environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: environment.automationRecipientPublicKey,
+    bucket: env.BUNDLES,
+    envelopeEncryptionKey: environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
 }
 
 async function seedFullRunnerQueue(

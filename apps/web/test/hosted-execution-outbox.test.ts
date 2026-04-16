@@ -92,7 +92,7 @@ describe("hosted execution outbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.delivery_failed);
-    expect(record?.lastError).toContain("no longer supported");
+    expect(record?.lastError).toContain("missing a dispatch payload");
   });
 });
 

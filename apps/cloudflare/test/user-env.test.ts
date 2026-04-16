@@ -319,7 +319,7 @@ describe("hosted user env helpers", () => {
       },
       mode: "merge",
     })).toThrow(
-      "Hosted execution user env update env.OPENAI_API_KEY must be a string or null.",
+      "Hosted user env request body field `env.OPENAI_API_KEY` must be a string or null.",
     );
   });
 

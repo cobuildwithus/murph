@@ -5,6 +5,7 @@ import {
   setHostedExecutionIsolatedRunnerForTests,
   setHostedExecutionRunModeForTests,
 } from "../src/node-runner.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 describe("runHostedExecutionJob abort forwarding", () => {
   const runHostedAssistantRuntimeJobIsolated = vi.fn();
@@ -13,6 +14,11 @@ describe("runHostedExecutionJob abort forwarding", () => {
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionIsolatedRunnerForTests(runHostedAssistantRuntimeJobIsolated);
     runHostedAssistantRuntimeJobIsolated.mockReset();
+    for (const [key, value] of Object.entries(createHostedExecutionTestEnv())) {
+      if (typeof value === "string") {
+        vi.stubEnv(key, value);
+      }
+    }
     runHostedAssistantRuntimeJobIsolated.mockResolvedValue({
       bundles: {
         agentState: null,
@@ -29,6 +35,7 @@ describe("runHostedExecutionJob abort forwarding", () => {
   afterEach(() => {
     setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests(null);
+    vi.unstubAllEnvs();
   });
 
   it("forwards abort signals into isolated hosted runs", async () => {

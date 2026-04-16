@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("hosted-member verified-email boundary", () => {
-  it("keeps email identity out of the hosted-member Prisma models", () => {
+  it("keeps verified-email persistence on the dedicated authorization owner table", () => {
     const schema = readFileSync(
       new URL("../prisma/schema.prisma", import.meta.url),
       "utf8",
@@ -15,8 +15,12 @@ describe("hosted-member verified-email boundary", () => {
       "HostedMemberRouting",
       "HostedMemberBillingRef",
     ]) {
-      expect(readPrismaModelBlock(schema, modelName)).not.toMatch(/\bemail\w*\b/iu);
+      expect(readPrismaScalarFieldLines(schema, modelName).join("\n")).not.toMatch(/\bemail\w*\b/iu);
     }
+
+    expect(readPrismaModelBlock(schema, "HostedMemberEmailAuthorization")).toMatch(
+      /\bverifiedEmailAddressEncrypted\b/u,
+    );
   });
 });
 
@@ -29,3 +33,33 @@ function readPrismaModelBlock(schema: string, modelName: string): string {
 
   return match[0];
 }
+
+function readPrismaScalarFieldLines(schema: string, modelName: string): string[] {
+  return readPrismaModelBlock(schema, modelName)
+    .split("\n")
+    .slice(1, -1)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("//") && !line.startsWith("@@"))
+    .filter((line) => {
+      const match = line.match(/^(\w+)\s+([A-Za-z][A-Za-z0-9_\[\]?]*)\b/u);
+
+      if (!match) {
+        return false;
+      }
+
+      const type = match[2].replace(/\?$/u, "");
+      return !match[2].endsWith("[]") && !HOSTED_MEMBER_RELATION_TYPES.has(type);
+    });
+}
+
+const HOSTED_MEMBER_RELATION_TYPES = new Set([
+  "HostedAiUsage",
+  "HostedInvite",
+  "HostedLinqDailyState",
+  "HostedMember",
+  "HostedMemberBillingRef",
+  "HostedMemberEmailAuthorization",
+  "HostedMemberIdentity",
+  "HostedMemberRouting",
+  "HostedRevnetIssuance",
+]);

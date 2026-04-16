@@ -54,6 +54,17 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
+  HostedMemberEmailAuthorization: [
+    'memberId String @unique @map("member_id")',
+    'verifiedEmailLookupKey String? @unique @map("verified_email_lookup_key")',
+    'verifiedEmailAddressEncrypted String? @map("verified_email_address_encrypted")',
+    'verifiedEmailVerifiedAt DateTime? @map("verified_email_verified_at")',
+    'directPublicSenderLookupKey String? @unique @map("direct_public_sender_lookup_key")',
+    'directPublicSenderAddressEncrypted String? @map("direct_public_sender_address_encrypted")',
+    'directPublicSenderAuthorizedAt DateTime? @map("direct_public_sender_authorized_at")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
 } as const;
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
@@ -62,6 +73,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedLinqDailyState",
   "HostedMember",
   "HostedMemberBillingRef",
+  "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
   "HostedRevnetIssuance",
@@ -83,10 +95,26 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedWebOwnerSlicesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604161130_hosted_web_owner_slices/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const deviceSyncRuntimeStateMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604161430_device_sync_web_owner_runtime_state/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "202604141730_hosted_member_identity_optional_phone",
+      "202604161130_hosted_web_owner_slices",
+      "202604161430_device_sync_web_owner_runtime_state",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
@@ -98,6 +126,24 @@ describe("hosted Prisma baseline migration", () => {
     expect(optionalPhoneMigrationSql).toContain('ALTER TABLE "hosted_member_identity"');
     expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "masked_phone_number_hint" DROP NOT NULL');
     expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "phone_lookup_key" DROP NOT NULL');
+    expect(hostedWebOwnerSlicesMigrationSql).toContain(
+      'CREATE TABLE "hosted_member_email_authorization"',
+    );
+    expect(hostedWebOwnerSlicesMigrationSql).toContain(
+      'CREATE TABLE "hosted_share_payload"',
+    );
+    expect(hostedWebOwnerSlicesMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_member_email_authorization_verified_email_lookup_key_key"',
+    );
+    expect(deviceSyncRuntimeStateMigrationSql).toContain(
+      'ALTER TABLE "device_connection"',
+    );
+    expect(deviceSyncRuntimeStateMigrationSql).toContain(
+      'ADD COLUMN "access_token_encrypted" TEXT',
+    );
+    expect(deviceSyncRuntimeStateMigrationSql).toContain(
+      'ADD COLUMN "refresh_token_encrypted" TEXT',
+    );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
     expect(baselineMigrationSql).toContain('"result_json" JSONB');

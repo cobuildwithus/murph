@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
 
 import {
+  buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionDeviceSyncWakeDispatch,
 } from "../src/builders.ts";
@@ -75,6 +78,34 @@ describe("hosted execution builders", () => {
       kind: "member.activated",
       userId: "user_123",
     });
+  });
+
+  it("copies member channel updates into a standalone dispatch", () => {
+    const memberChannels = {
+      email: true,
+      linq: false,
+      telegram: true,
+    } as const;
+    const dispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+      eventId: "member-channels-1",
+      memberChannels,
+      memberId: "user_123",
+      occurredAt,
+    });
+
+    expect(dispatch).toEqual({
+      event: {
+        kind: "member.channels.updated",
+        memberChannels,
+        userId: "user_123",
+      },
+      eventId: "member-channels-1",
+      occurredAt,
+    });
+    if (dispatch.event.kind !== "member.channels.updated") {
+      throw new Error("Expected a member.channels.updated event.");
+    }
+    expect(dispatch.event.memberChannels).not.toBe(memberChannels);
   });
 
   it("copies linq event objects and preserves explicit null message ids", () => {
@@ -192,6 +223,25 @@ describe("hosted execution builders", () => {
     });
   });
 
+  it("builds assistant cron tick dispatches directly", () => {
+    expect(
+      buildHostedExecutionAssistantCronTickDispatch({
+        eventId: "cron-1",
+        occurredAt,
+        reason: "manual",
+        userId: "user_123",
+      }),
+    ).toEqual({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "user_123",
+      },
+      eventId: "cron-1",
+      occurredAt,
+    });
+  });
+
   it("omits optional linq and device-sync fields when not provided and preserves explicit nulls when they are", () => {
     const linqDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
       eventId: "linq-2",
@@ -220,6 +270,29 @@ describe("hosted execution builders", () => {
       reason: "connected",
       runtimeSnapshot: null,
       userId: "user_123",
+    });
+  });
+
+  it("normalizes gateway message send nullable ids to null", () => {
+    expect(
+      buildHostedExecutionGatewayMessageSendDispatch({
+        eventId: "gateway-send-1",
+        occurredAt,
+        sessionKey: "session_123",
+        text: "hello from gateway",
+        userId: "user_123",
+      }),
+    ).toEqual({
+      event: {
+        clientRequestId: null,
+        kind: "gateway.message.send",
+        replyToMessageId: null,
+        sessionKey: "session_123",
+        text: "hello from gateway",
+        userId: "user_123",
+      },
+      eventId: "gateway-send-1",
+      occurredAt,
     });
   });
 });

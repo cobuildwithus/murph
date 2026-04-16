@@ -85,4 +85,56 @@ describe("handleHostedShareAcceptedDispatch", () => {
       await cleanup();
     }
   });
+
+  test("rejects share packs whose owner does not match the dispatch share reference", async () => {
+    const pack = buildSharePack();
+
+    await assert.rejects(
+      handleHostedShareAcceptedDispatch({
+        dispatch: {
+          event: {
+            kind: "vault.share.accepted",
+            share: {
+              ownerUserId: "member_sender",
+              shareId: "hshare_123",
+            },
+            userId: "member_123",
+          },
+        },
+        sharePack: {
+          ownerUserId: "member_other",
+          pack,
+          shareId: "hshare_123",
+        },
+        vaultRoot: "/tmp/vault-root",
+      }),
+      /ownerUserId must match the canonical share reference/,
+    );
+  });
+
+  test("rejects share packs whose share id does not match the dispatch share reference", async () => {
+    const pack = buildSharePack();
+
+    await assert.rejects(
+      handleHostedShareAcceptedDispatch({
+        dispatch: {
+          event: {
+            kind: "vault.share.accepted",
+            share: {
+              ownerUserId: "member_sender",
+              shareId: "hshare_123",
+            },
+            userId: "member_123",
+          },
+        },
+        sharePack: {
+          ownerUserId: "member_sender",
+          pack,
+          shareId: "hshare_other",
+        },
+        vaultRoot: "/tmp/vault-root",
+      }),
+      /shareId must match the canonical share reference/,
+    );
+  });
 });

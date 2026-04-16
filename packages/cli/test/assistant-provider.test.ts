@@ -12,6 +12,7 @@ const providerMocks = vi.hoisted(() => ({
     count,
     kind: 'stepCountIs',
   })),
+  tool: vi.fn((definition) => definition),
 }))
 
 const toolMocks = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ const promptMocks = vi.hoisted(() => ({
 vi.mock('ai', () => ({
   generateText: providerMocks.generateText,
   stepCountIs: providerMocks.stepCountIs,
+  tool: providerMocks.tool,
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-codex', () => ({
@@ -94,6 +96,8 @@ beforeEach(() => {
   providerMocks.generateText.mockReset()
   providerMocks.resolveAssistantLanguageModel.mockReset()
   providerMocks.stepCountIs.mockReset()
+  providerMocks.tool.mockReset()
+  providerMocks.tool.mockImplementation((definition) => definition)
   providerMocks.stepCountIs.mockImplementation((count: number) => ({
     count,
     kind: 'stepCountIs',
@@ -1083,7 +1087,14 @@ test('executeAssistantProviderTurn uses the prebuilt canonical assistant tool ca
     count: 8,
     kind: 'stepCountIs',
   })
-  assert.deepEqual(generateCall?.tools, aiSdkTools)
+  assert.deepEqual(generateCall?.tools, {
+    assistant_knowledge_list: { description: 'knowledge-list' },
+    assistant_knowledge_search: { description: 'knowledge' },
+    assistant_knowledge_upsert: { description: 'knowledge-upsert' },
+    assistant_selfTarget_list: { description: 'self-target' },
+    vault_fs_readText: { description: 'read-text' },
+    vault_show: { description: 'show' },
+  })
 })
 
 test('executeAssistantProviderTurn records tool raw-events and trace updates for OpenAI-compatible tool turns', async () => {
