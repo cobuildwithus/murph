@@ -5,7 +5,7 @@ export {
 } from "./hosted-onboarding/webhook-receipt-dispatch";
 export {
   buildHostedWebhookReceiptLeaseWriteData,
-  markHostedWebhookDispatchEffectQueued,
+  enqueueHostedWebhookDispatchSideEffects,
   markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,
@@ -13,7 +13,6 @@ export {
   updateHostedWebhookReceiptClaim,
 } from "./hosted-onboarding/webhook-receipt-store";
 export type {
-  HostedWebhookDispatchEnqueueInput,
   HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,

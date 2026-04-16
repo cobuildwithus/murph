@@ -38,7 +38,6 @@ describe("drainHostedOnboardingWebhookReceipts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createHostedWebhookReceiptHandlers.mockReturnValue({
-      enqueueDispatchEffect: vi.fn(),
       performSideEffect: vi.fn(),
     });
   });

@@ -3,7 +3,6 @@ export {
   runHostedWebhookWithReceipt,
 } from "./webhook-receipt-engine";
 export type {
-  HostedWebhookDispatchEnqueueInput,
   HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,

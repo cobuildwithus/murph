@@ -144,19 +144,11 @@ export type HostedWebhookSideEffectResult =
 
 export type HostedWebhookReceiptPersistenceClient = PrismaClient | Prisma.TransactionClient;
 
-export type HostedWebhookDispatchEnqueueInput = {
-  dispatch: HostedExecutionDispatchRequest;
-  eventId: string;
-  source: string;
-  transaction: Prisma.TransactionClient;
-};
-
 export type HostedWebhookReceiptHandlers = {
   afterSideEffectSent?: (input: {
     effect: HostedWebhookSideEffect;
     prisma: HostedWebhookReceiptPersistenceClient;
   }) => Promise<void>;
-  enqueueDispatch: (input: HostedWebhookDispatchEnqueueInput) => Promise<void>;
   performSideEffect: (
     effect: HostedWebhookSideEffect,
     options: {
