@@ -15,6 +15,7 @@ interface HostedPhoneAuthProps {
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   showPassiveConsentNotice?: boolean;
+  suppressAuthenticatedSessionIssue?: boolean;
 }
 
 export function HostedPhoneAuth({
@@ -23,12 +24,14 @@ export function HostedPhoneAuth({
   onLinked,
   onSignOut,
   showPassiveConsentNotice = true,
+  suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
     intent,
     onCompleted,
     onLinked,
     onSignOut,
+    suppressAuthenticatedSessionIssue,
   });
 
   return (

@@ -43,13 +43,19 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
-  HostedPhoneAuth(input: { intent?: string; showPassiveConsentNotice?: boolean }) {
+  HostedPhoneAuth(input: {
+    intent?: string;
+    showPassiveConsentNotice?: boolean;
+    suppressAuthenticatedSessionIssue?: boolean;
+  }) {
     return createElement(
       "div",
       {
         "data-hosted-phone-auth": input.intent ?? "signup",
         "data-hosted-phone-auth-passive-consent":
           input.showPassiveConsentNotice === false ? "hidden" : "shown",
+        "data-hosted-phone-auth-suppressed":
+          input.suppressAuthenticatedSessionIssue ? "yes" : "no",
       },
       "Hosted phone auth",
     );
@@ -105,6 +111,7 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
 
   expect(container.querySelector('[data-hosted-phone-auth="signup"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth-passive-consent="hidden"]')).toBeTruthy();
+  expect(container.querySelector('[data-hosted-phone-auth-suppressed="no"]')).toBeTruthy();
   expect(telegramButton?.textContent).toContain("Telegram");
   expect(emailButton?.textContent).toContain("Email");
   expect(container.textContent).toContain("By signing up, you agree to our");
@@ -113,6 +120,7 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
     telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
+  expect(container.querySelector('[data-hosted-phone-auth-suppressed="yes"]')).toBeTruthy();
   expect(container.textContent).toContain("Telegram popup closed");
   expect(container.querySelector('[role="alert"]')).toBeTruthy();
 
@@ -120,6 +128,7 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
     emailButton?.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
+  expect(container.querySelector('[data-hosted-phone-auth-suppressed="yes"]')).toBeTruthy();
   expect(container.textContent).not.toContain("Telegram popup closed");
   expect(container.querySelector('input[id="homepage-email-address"]')).toBeTruthy();
 
