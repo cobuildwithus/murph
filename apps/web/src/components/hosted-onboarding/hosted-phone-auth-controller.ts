@@ -52,6 +52,7 @@ interface HostedPhoneAuthControllerInput {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  suppressAuthenticatedSessionIssue?: boolean;
 }
 
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
@@ -77,6 +78,7 @@ export function useHostedPhoneAuthController({
   onCompleted,
   onLinked,
   onSignOut,
+  suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthControllerInput) {
   const { authenticated, logout, ready } = usePrivy();
   const { createWallet } = useCreateWallet();
@@ -116,27 +118,36 @@ export function useHostedPhoneAuthController({
     () => normalizeHostedPhoneVerificationCode(code),
     [code],
   );
-  const authenticatedSessionIssue = useMemo(
-    () =>
-      resolveHostedPrivyClientSessionIssue(
-        readHostedPrivyClientSessionState({ user }),
-      ),
-    [user],
-  );
+  const authenticatedSessionIssue = useMemo(() => {
+    if (suppressAuthenticatedSessionIssue) {
+      return null;
+    }
+
+    return resolveHostedPrivyClientSessionIssue(
+      readHostedPrivyClientSessionState({ user }),
+    );
+  }, [suppressAuthenticatedSessionIssue, user]);
 
   const flowDisabled = !ready || pendingAction !== null;
   const phoneEntrySendCodeDisabled = flowDisabled || !normalizedPhoneNumber;
   const showAuthenticatedLoadingState = authenticated && finalizationState !== "idle";
-  const showAuthenticatedManualResumeState = intent !== "link" && shouldShowHostedPrivyManualResumeState({
-    authenticated,
-    issue: authenticatedSessionIssue,
-    showAuthenticatedLoadingState,
-  });
-  const showAuthenticatedRestartState = intent !== "link" && shouldShowHostedPrivyRestartState({
-    authenticated,
-    issue: authenticatedSessionIssue,
-    showAuthenticatedLoadingState,
-  });
+  const allowAuthenticatedSessionStateUi = !suppressAuthenticatedSessionIssue;
+  const showAuthenticatedManualResumeState =
+    allowAuthenticatedSessionStateUi
+    && intent !== "link"
+    && shouldShowHostedPrivyManualResumeState({
+      authenticated,
+      issue: authenticatedSessionIssue,
+      showAuthenticatedLoadingState,
+    });
+  const showAuthenticatedRestartState =
+    allowAuthenticatedSessionStateUi
+    && intent !== "link"
+    && shouldShowHostedPrivyRestartState({
+      authenticated,
+      issue: authenticatedSessionIssue,
+      showAuthenticatedLoadingState,
+    });
   const authenticatedView = resolveHostedAuthenticatedPhoneAuthView({
     showAuthenticatedLoadingState,
     showAuthenticatedManualResumeState,

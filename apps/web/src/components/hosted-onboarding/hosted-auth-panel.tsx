@@ -42,6 +42,7 @@ export function HostedAuthPanel({
           onCompleted={onCompleted}
           onSignOut={onSignOut}
           showPassiveConsentNotice={false}
+          suppressAuthenticatedSessionIssue={activeMethod !== null}
         />
       ) : null}
 

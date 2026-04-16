@@ -276,6 +276,44 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
+  it("suppresses the phone-only restart banner while an alternate Privy method is active", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            id: "telegram-user-1",
+            telegramUserId: "telegram-user-1",
+            type: "telegram",
+            username: "murph_test",
+          },
+        ],
+      },
+    });
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const defaultMarkup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {}),
+    );
+    const suppressedMarkup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {
+        suppressAuthenticatedSessionIssue: true,
+      }),
+    );
+
+    assert.match(defaultMarkup, /This browser needs a fresh phone signup\./);
+    assert.match(defaultMarkup, /Your current Privy session is missing a verified phone number\./);
+    assert.doesNotMatch(suppressedMarkup, /This browser needs a fresh phone signup\./);
+    assert.doesNotMatch(suppressedMarkup, /You already started signup\./);
+    assert.match(suppressedMarkup, /Text me a code/);
+  });
+
   it("uses tall secondary actions for the public homepage code step", async () => {
     const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
