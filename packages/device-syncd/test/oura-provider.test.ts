@@ -4,7 +4,7 @@ import { test } from "vitest";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
-import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";
+import { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "../src/providers/oura.ts";
 import { OURA_DEFAULT_WEBHOOK_TARGETS } from "../src/providers/oura-webhooks.ts";
 import { subtractDays } from "../src/shared.ts";
 import { createJsonResponse, requireValue } from "./helpers.ts";
@@ -800,18 +800,25 @@ test("Oura provider accepts base64 webhook signatures and falls back to the requ
   });
 });
 
-test("Oura webhook verification challenge helper returns the challenge only for the configured token", () => {
-  const challenge = resolveOuraWebhookVerificationChallenge({
+test("Oura webhook preflight helper returns the challenge only for the configured token", () => {
+  const challenge = resolveOuraWebhookPreflightResponse({
+    method: "GET",
     url: new URL(
       "https://sync.example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
     ),
     verificationToken: "verify-token",
   });
 
-  assert.equal(challenge, "random-challenge");
+  assert.deepEqual(challenge, {
+    status: 200,
+    body: {
+      challenge: "random-challenge",
+    },
+  });
   assert.throws(
     () =>
-      resolveOuraWebhookVerificationChallenge({
+      resolveOuraWebhookPreflightResponse({
+        method: "GET",
         url: new URL(
           "https://sync.example.test/api/device-sync/webhooks/oura?verification_token=wrong&challenge=random-challenge",
         ),
@@ -823,40 +830,46 @@ test("Oura webhook verification challenge helper returns the challenge only for 
 
 test("Oura provider webhook admin no-ops without a verification token and reuses the shared subscription client when one is configured", async () => {
   const requests: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    requests.push(`${init?.method ?? "GET"} ${url}`);
+
+    if (url === "https://api.ouraring.com/v2/webhook/subscription" && (init?.method ?? "GET") === "GET") {
+      return createJsonResponse({
+        data: OURA_DEFAULT_WEBHOOK_TARGETS.map((target, index) => ({
+          id: `sub-${index + 1}`,
+          callback_url: "https://sync.example.test/device-sync/webhooks/oura",
+          event_type: target.eventType,
+          data_type: target.dataType,
+          expiration_time: "2030-01-01T00:00:00.000Z",
+        })),
+      });
+    }
+
+    throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+  };
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
-    fetchImpl: async (input, init) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      requests.push(`${init?.method ?? "GET"} ${url}`);
-
-      if (url === "https://api.ouraring.com/v2/webhook/subscription" && (init?.method ?? "GET") === "GET") {
-        return createJsonResponse({
-          data: OURA_DEFAULT_WEBHOOK_TARGETS.map((target, index) => ({
-            id: `sub-${index + 1}`,
-            callback_url: "https://sync.example.test/device-sync/webhooks/oura",
-            event_type: target.eventType,
-            data_type: target.dataType,
-            expiration_time: "2030-01-01T00:00:00.000Z",
-          })),
-        });
-      }
-
-      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
-    },
+    fetchImpl,
   });
   const webhookAdmin = requireValue(provider.webhookAdmin);
   const ensureSubscriptions = requireValue(webhookAdmin.ensureSubscriptions);
 
   await ensureSubscriptions({
     publicBaseUrl: "https://sync.example.test/device-sync",
-    verificationToken: "   ",
   });
   assert.deepEqual(requests, []);
 
-  await ensureSubscriptions({
+  const configuredEnsureSubscriptions = requireValue(createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl,
+    webhookVerificationToken: "verify-token-for-tests",
+  }).webhookAdmin?.ensureSubscriptions);
+
+  await configuredEnsureSubscriptions({
     publicBaseUrl: "https://sync.example.test/device-sync",
-    verificationToken: "verify-token-for-tests",
   });
 
   assert.deepEqual(requests, [
@@ -1355,9 +1368,10 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
+    webhookVerificationToken: "verify-token",
   });
   const webhookAdmin = requireValue(provider.webhookAdmin);
-  const resolveVerificationChallenge = requireValue(webhookAdmin.resolveVerificationChallenge);
+  const handleWebhookPreflight = requireValue(webhookAdmin.handleWebhookPreflight);
   const fallbackSnapshots: unknown[] = [];
 
   assert.equal(
@@ -1369,12 +1383,20 @@ test("Oura provider exposes the connect URL, forwards webhook verification throu
     }),
     "https://cloud.ouraring.com/oauth/authorize?client_id=oura-client-id&response_type=code&redirect_uri=https%3A%2F%2Fsync.example.test%2Fdevice-sync%2Foauth%2Foura%2Fcallback&scope=personal+workout&state=state-connect",
   );
-  assert.equal(
-    resolveVerificationChallenge({
+  assert.deepEqual(
+    handleWebhookPreflight({
+      method: "GET",
       url: new URL("https://sync.example.test/device-sync/webhooks/oura?verification_token=verify-token&challenge=challenge-123"),
-      verificationToken: "verify-token",
+      headers: new Headers(),
+      rawBody: Buffer.alloc(0),
+      now: "2026-03-16T10:00:00.000Z",
     }),
-    "challenge-123",
+    {
+      status: 200,
+      body: {
+        challenge: "challenge-123",
+      },
+    },
   );
 
   await provider.executeJob(

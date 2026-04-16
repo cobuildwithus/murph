@@ -83,11 +83,14 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `HOSTED_WEB_BASE_URL`
-- `OURA_WEBHOOK_VERIFICATION_TOKEN`
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+
+Optional Oura webhook-admin setting:
+
+- `OURA_WEBHOOK_VERIFICATION_TOKEN` when the hosted Oura provider should answer webhook preflight challenges and maintain Oura webhook subscriptions
 
 Hosted onboarding extras:
 

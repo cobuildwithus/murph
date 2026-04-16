@@ -6,6 +6,7 @@ import { test } from "vitest";
 
 import {
   createConsoleDeviceSyncLogger,
+  createConfiguredDeviceSyncRegistry,
   loadDeviceSyncEnvironment,
   readConfiguredOuraDeviceSyncProviderConfig,
 } from "../src/config.ts";
@@ -73,6 +74,22 @@ test("loadDeviceSyncEnvironment supports Garmin, WHOOP, and Oura together", () =
 
   assert.deepEqual(
     providers.map((provider) => provider.provider),
+    ["garmin", "whoop", "oura"],
+  );
+});
+
+test("createConfiguredDeviceSyncRegistry assembles the configured providers in descriptor order", () => {
+  const registry = createConfiguredDeviceSyncRegistry({
+    GARMIN_CLIENT_ID: "garmin-client-id",
+    GARMIN_CLIENT_SECRET: "garmin-client-secret",
+    WHOOP_CLIENT_ID: "whoop-client-id",
+    WHOOP_CLIENT_SECRET: "whoop-client-secret",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+  });
+
+  assert.deepEqual(
+    registry.list().map((provider) => provider.provider),
     ["garmin", "whoop", "oura"],
   );
 });
@@ -229,15 +246,14 @@ test("loadDeviceSyncEnvironment requires DEVICE_SYNC_VAULT_ROOT instead of the r
   );
 });
 
-test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification token on the HTTP config", () => {
-  const loaded = loadDeviceSyncEnvironment({
+test("readConfiguredOuraDeviceSyncProviderConfig keeps the optional webhook verification token on the provider config", () => {
+  const config = readConfiguredOuraDeviceSyncProviderConfig({
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
     OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",
-    ...createDeviceSyncEnv(),
   });
 
-  assert.equal(loaded.http.ouraWebhookVerificationToken, "verify-token-for-tests");
+  assert.equal(config?.webhookVerificationToken, "verify-token-for-tests");
 });
 
 test("readConfiguredOuraDeviceSyncProviderConfig trims scopes and parses integer overrides", () => {
@@ -262,6 +278,7 @@ test("readConfiguredOuraDeviceSyncProviderConfig trims scopes and parses integer
     reconcileDays: 7,
     reconcileIntervalMs: 60000,
     webhookTimestampToleranceMs: 120000,
+    webhookVerificationToken: undefined,
     requestTimeoutMs: 5000,
   });
 });

@@ -8,12 +8,10 @@ import { createBearerRequest, createJsonPostRequest, createRouteContext } from "
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  deviceSyncEnv: {
-    ouraWebhookVerificationToken: "verify-token" as string | null,
-  },
   exportTokenBundle: vi.fn(),
-  handleWebhook: vi.fn(),
+  handleWebhookWithRawBody: vi.fn(),
   listSignals: vi.fn(),
+  readWebhookRawBody: vi.fn(),
   refreshTokenBundle: vi.fn(),
   requireAgentSession: vi.fn(),
   webhookRegistry: {
@@ -45,12 +43,11 @@ describe("hosted device-sync agent and webhook routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.deviceSyncEnv.ouraWebhookVerificationToken = "verify-token";
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      env: mocks.deviceSyncEnv,
       exportTokenBundle: mocks.exportTokenBundle,
-      handleWebhook: mocks.handleWebhook,
+      handleWebhookWithRawBody: mocks.handleWebhookWithRawBody,
       listSignals: mocks.listSignals,
+      readWebhookRawBody: mocks.readWebhookRawBody,
       registry: mocks.webhookRegistry,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
@@ -75,11 +72,13 @@ describe("hosted device-sync agent and webhook routes", () => {
         },
       ],
     });
+    mocks.readWebhookRawBody.mockResolvedValue(Buffer.from('{"event":"sleep.updated"}', "utf8"));
     mocks.webhookRegistry.get.mockImplementation((provider: string) =>
-      provider === "oura"
+      provider === "oura" || provider === "oura/legacy"
         ? createOuraDeviceSyncProvider({
             clientId: "oura-client-id",
             clientSecret: "oura-client-secret",
+            webhookVerificationToken: "verify-token",
           })
         : undefined
     );
@@ -200,21 +199,71 @@ describe("hosted device-sync agent and webhook routes", () => {
   });
 
   it("decodes encoded webhook provider params before calling the control plane", async () => {
-    mocks.handleWebhook.mockResolvedValue({
+    mocks.handleWebhookWithRawBody.mockResolvedValue({
       ok: true,
     });
 
     const response = await webhookRoute.POST(
-      new Request("https://example.test/api/device-sync/webhooks/oura%2Flegacy", {
+      new Request("https://example.test/api/device-sync/webhooks/%6Fura", {
         method: "POST",
       }),
-      createRouteContext({ provider: "oura%2Flegacy" }),
+      createRouteContext({ provider: "%6Fura" }),
     );
 
     expect(response.status).toBe(202);
-    expect(mocks.handleWebhook).toHaveBeenCalledWith("oura/legacy");
+    expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
+    expect(mocks.handleWebhookWithRawBody).toHaveBeenCalledWith(
+      "oura",
+      Buffer.from('{"event":"sleep.updated"}', "utf8"),
+    );
     await expect(response.json()).resolves.toEqual({
       ok: true,
+    });
+  });
+
+  it("short-circuits hosted webhook POSTs when provider preflight returns a response", async () => {
+    const preflightProvider = createOuraDeviceSyncProvider({
+      clientId: "oura-client-id",
+      clientSecret: "oura-client-secret",
+      webhookVerificationToken: "verify-token",
+    });
+    preflightProvider.webhookAdmin!.handleWebhookPreflight = async ({ method }) => {
+      if (method !== "POST") {
+        return null;
+      }
+
+      return {
+        status: 200,
+        body: {
+          challenge: "demo-preflight-challenge",
+        },
+      };
+    };
+
+    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
+      provider === "oura"
+        ? preflightProvider
+        : provider === "oura" || provider === "oura/legacy"
+          ? createOuraDeviceSyncProvider({
+              clientId: "oura-client-id",
+              clientSecret: "oura-client-secret",
+              webhookVerificationToken: "verify-token",
+            })
+          : undefined
+    );
+
+    const response = await webhookRoute.POST(
+      new Request("https://example.test/api/device-sync/webhooks/oura", {
+        method: "POST",
+      }),
+      createRouteContext({ provider: "oura" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
+    expect(mocks.handleWebhookWithRawBody).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      challenge: "demo-preflight-challenge",
     });
   });
 
@@ -237,7 +286,14 @@ describe("hosted device-sync agent and webhook routes", () => {
   });
 
   it("keeps hosted webhook verification missing-token behavior aligned with the shared Oura helper", async () => {
-    mocks.deviceSyncEnv.ouraWebhookVerificationToken = null;
+    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
+      provider === "oura"
+        ? createOuraDeviceSyncProvider({
+            clientId: "oura-client-id",
+            clientSecret: "oura-client-secret",
+          })
+        : undefined
+    );
 
     const response = await webhookRoute.GET(
       new Request(

@@ -66,15 +66,7 @@ vi.mock("@/src/lib/device-sync/env", () => ({
     encryptionKey: "01234567890123456789012345678901",
     encryptionKeyVersion: "v1",
     isProduction: false,
-    ouraWebhookVerificationToken: "verify-token-for-tests",
     publicBaseUrl: "https://control.example.test/api/device-sync",
-    providers: {
-      whoop: null,
-      oura: {
-        clientId: "oura-client-id",
-        clientSecret: "oura-client-secret",
-      },
-    },
   })),
 }));
 
@@ -83,30 +75,14 @@ function createHostedEnv(overrides: Partial<{
   encryptionKey: string;
   encryptionKeyVersion: string;
   isProduction: boolean;
-  ouraWebhookVerificationToken: string | null;
   publicBaseUrl: string | null;
-  providers: {
-    whoop: null;
-    oura: {
-      clientId: string;
-      clientSecret: string;
-    } | null;
-  };
 }> = {}) {
   return {
     allowedReturnOrigins: [],
     encryptionKey: "01234567890123456789012345678901",
     encryptionKeyVersion: "v1",
     isProduction: false,
-    ouraWebhookVerificationToken: "verify-token-for-tests",
     publicBaseUrl: "https://control.example.test/api/device-sync",
-    providers: {
-      whoop: null,
-      oura: {
-        clientId: "oura-client-id",
-        clientSecret: "oura-client-secret",
-      },
-    },
     ...overrides,
   };
 }
@@ -798,7 +774,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
     );
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
       publicBaseUrl: "https://control.example.test/api/device-sync",
-      verificationToken: "verify-token-for-tests",
     });
   });
 

@@ -43,7 +43,6 @@ export interface DeviceSyncHttpConfig {
   controlToken?: string;
   publicHost?: string;
   publicPort?: number;
-  ouraWebhookVerificationToken?: string;
 }
 
 export interface DeviceSyncHttpListenerAddress {
@@ -198,18 +197,28 @@ export interface DeviceSyncIngressWebhook {
   resourceCategory?: string | null;
 }
 
-export interface ProviderWebhookAdminChallengeContext {
+export interface DeviceSyncWebhookPreflightResponse {
+  status: number;
+  body: string | number | boolean | null | Record<string, unknown> | readonly unknown[];
+  headers?: Record<string, string>;
+}
+
+export interface ProviderWebhookPreflightContext {
+  method: string;
   url: URL;
-  verificationToken: string | null;
+  headers: Headers;
+  rawBody: Buffer;
+  now: string;
 }
 
 export interface ProviderWebhookAdminEnsureContext {
   publicBaseUrl: string;
-  verificationToken: string | null;
 }
 
 export interface ProviderWebhookAdminCapability {
-  resolveVerificationChallenge?(context: ProviderWebhookAdminChallengeContext): string | null;
+  handleWebhookPreflight?(
+    context: ProviderWebhookPreflightContext,
+  ): DeviceSyncWebhookPreflightResponse | null | Promise<DeviceSyncWebhookPreflightResponse | null>;
   ensureSubscriptions?(context: ProviderWebhookAdminEnsureContext): Promise<void>;
 }
 

@@ -27,6 +27,7 @@ import { createDeviceSyncRegistry } from "../src/registry.ts";
 import { withIncomingHeader } from "./helpers.ts";
 
 import type { DeviceSyncService } from "../src/service.ts";
+import type { DeviceSyncProvider } from "../src/types.ts";
 
 const CONTROL_TOKEN = "control-token-for-tests";
 const CONTROL_AUTHORIZATION = `Bearer ${CONTROL_TOKEN}`;
@@ -1442,6 +1443,7 @@ test("device sync http handler serves the Oura webhook verification challenge on
         createOuraDeviceSyncProvider({
           clientId: "oura-client-id",
           clientSecret: "oura-client-secret",
+          webhookVerificationToken: "verify-token-for-tests",
         }),
       ]),
     }),
@@ -1450,7 +1452,6 @@ test("device sync http handler serves the Oura webhook verification challenge on
     surface: "public",
     config: {
       controlToken: CONTROL_TOKEN,
-      ouraWebhookVerificationToken: "verify-token-for-tests",
     },
   });
 
@@ -1467,6 +1468,7 @@ test("device sync http handler returns the shared Oura mismatch error on the pub
         createOuraDeviceSyncProvider({
           clientId: "oura-client-id",
           clientSecret: "oura-client-secret",
+          webhookVerificationToken: "verify-token-for-tests",
         }),
       ]),
     }),
@@ -1475,7 +1477,6 @@ test("device sync http handler returns the shared Oura mismatch error on the pub
     surface: "public",
     config: {
       controlToken: CONTROL_TOKEN,
-      ouraWebhookVerificationToken: "verify-token-for-tests",
     },
   });
 
@@ -1517,9 +1518,98 @@ test("device sync http handler returns the shared Oura missing-token error on th
   });
 });
 
+test("device sync http handler short-circuits public webhook POSTs when provider preflight returns a response", async () => {
+  const preflightProvider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    webhookVerificationToken: "verify-token-for-tests",
+  });
+  preflightProvider.webhookAdmin!.handleWebhookPreflight = async ({ method }) => {
+    if (method !== "POST") {
+      return null;
+    }
+
+    return {
+      status: 200,
+      body: {
+        challenge: "demo-preflight-challenge",
+      },
+    };
+  };
+
+  const response = await invokeHandler({
+    service: createStubService({
+      registry: createDeviceSyncRegistry([preflightProvider]),
+      async handleWebhook() {
+        throw new Error("demo-preflight provider webhook parsing should not run after preflight.");
+      },
+    }),
+    method: "POST",
+    url: "/device-sync/webhooks/oura",
+    surface: "public",
+    body: JSON.stringify({
+      ok: true,
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.readJson(), {
+    challenge: "demo-preflight-challenge",
+  });
+});
+
 function createStubService(overrides: Partial<DeviceSyncService> = {}): DeviceSyncService {
+  const demoProvider = {
+    provider: "demo",
+    descriptor: {
+      provider: "demo",
+      displayName: "Demo",
+      transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+      oauth: {
+        callbackPath: "/oauth/demo/callback",
+        defaultScopes: ["offline", "read:data"],
+      },
+      webhook: {
+        path: "/webhooks/demo",
+        deliveryMode: "resource",
+        supportsAdmin: true,
+      },
+      sync: {
+        windows: {
+          backfillDays: 1,
+          reconcileDays: 1,
+          reconcileIntervalMs: 60_000,
+        },
+        jobKinds: ["backfill"],
+        supportsRemoteDisconnect: false,
+        supportsTokenRefresh: false,
+      },
+      normalization: {
+        metricFamilies: ["sleep"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 1,
+        metricFamilies: {},
+      },
+    },
+    buildConnectUrl() {
+      return "https://provider.test/oauth?state=state_demo_01";
+    },
+    async exchangeAuthorizationCode() {
+      throw new Error("createStubService demo provider should not exchange authorization codes in HTTP tests.");
+    },
+    async refreshTokens() {
+      throw new Error("createStubService demo provider should not refresh tokens in HTTP tests.");
+    },
+    async executeJob() {
+      throw new Error("createStubService demo provider should not execute jobs in HTTP tests.");
+    },
+  } satisfies DeviceSyncProvider;
+
   return {
     publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([demoProvider]),
     describeProviders() {
       return [
         {
