@@ -5,11 +5,34 @@ import { gatewayDeliveryTargetKindValues } from "@murphai/gateway-core";
 import {
   buildHostedAssistantDeliveryEffect,
   buildHostedAssistantDeliveryPreparedRecord,
+  type HostedAssistantDeliveryPayload,
   hostedAssistantDeliveryTargetKindValues,
   parseHostedAssistantDeliveryRecord,
   parseHostedAssistantDeliverySideEffects,
   parseHostedExecutionSideEffects,
 } from "../src/side-effects.ts";
+
+function createHostedAssistantDeliveryPayload(
+  overrides: Partial<HostedAssistantDeliveryPayload> = {},
+): HostedAssistantDeliveryPayload {
+  return {
+    actorId: "actor-1",
+    bindingDeliveryKind: "participant",
+    bindingDeliveryTarget: "chat-1",
+    channel: "telegram",
+    explicitTarget: null,
+    idempotencyKey: "assistant-outbox:intent-1",
+    identityId: "identity-1",
+    message: "hello from hosted execution",
+    replyToMessageId: null,
+    sessionId: "session-1",
+    threadId: "thread-1",
+    threadIsDirect: true,
+    transportIdempotent: false,
+    turnId: "turn-1",
+    ...overrides,
+  };
+}
 
 describe("hosted assistant delivery contracts", () => {
   it("reuses gateway-owned delivery target kinds", () => {
@@ -21,6 +44,7 @@ describe("hosted assistant delivery contracts", () => {
       effectId: "intent-1",
       fingerprint: "dedupe-1",
       kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
     }];
 
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
@@ -31,6 +55,7 @@ describe("hosted assistant delivery contracts", () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-1",
       effectId: "intent-1",
+      payload: createHostedAssistantDeliveryPayload(),
     });
     const record = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe-1",
@@ -42,6 +67,7 @@ describe("hosted assistant delivery contracts", () => {
       effectId: "intent-1",
       fingerprint: "dedupe-1",
       kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
     });
     expect(record).toEqual({
       effectId: "intent-1",

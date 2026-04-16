@@ -114,6 +114,22 @@ const deliveryEffects = [
     effectId: "intent_123",
     fingerprint: "dedupe_123",
     kind: "assistant.delivery" as const,
+    payload: {
+      actorId: "actor_123",
+      bindingDeliveryKind: "participant" as const,
+      bindingDeliveryTarget: "chat_123",
+      channel: "telegram",
+      explicitTarget: null,
+      idempotencyKey: "assistant-outbox:intent_123",
+      identityId: "identity_123",
+      message: "hello from hosted",
+      replyToMessageId: null,
+      sessionId: "session_123",
+      threadId: "thread_123",
+      threadIsDirect: true,
+      transportIdempotent: false,
+      turnId: "turn_123",
+    },
   },
 ];
 const committedExecution: HostedCommittedExecutionState = {

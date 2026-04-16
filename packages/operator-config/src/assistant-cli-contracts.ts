@@ -569,10 +569,6 @@ export const assistantTurnReceiptSchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
-const assistantOutboxDeliveryStateAuthoritySchema = z.enum([
-  'local',
-  'hosted-journal',
-])
 
 export const assistantOutboxIntentSchema = z
   .object({
@@ -599,7 +595,6 @@ export const assistantOutboxIntentSchema = z
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
-    deliveryStateAuthority: assistantOutboxDeliveryStateAuthoritySchema.default('local'),
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
@@ -1377,9 +1372,6 @@ export type AssistantTurnEventKind =
   (typeof assistantTurnEventKindValues)[number]
 export type AssistantOutboxIntentStatus =
   (typeof assistantOutboxIntentStatusValues)[number]
-export type AssistantOutboxDeliveryStateAuthority = z.infer<
-  typeof assistantOutboxDeliveryStateAuthoritySchema
->
 export type AssistantCronScheduleKind = AutomationScheduleKind
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
 export type AssistantCronRunStatus =

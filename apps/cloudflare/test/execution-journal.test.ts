@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { HostedAssistantDeliveryPayload } from "@murphai/hosted-execution/side-effects";
+
 import type { R2BucketLike } from "../src/bundle-store.js";
 import {
   persistHostedExecutionCommit,
@@ -43,6 +45,72 @@ function createBaseCommit(bucket: InMemoryR2Bucket) {
 
 function encodeBundle(label: string): string {
   return Buffer.from(label, "utf8").toString("base64");
+}
+
+function createAssistantDeliveryPayload(
+  overrides: Partial<HostedAssistantDeliveryPayload> = {},
+): HostedAssistantDeliveryPayload {
+  return {
+    actorId: "actor_123",
+    bindingDeliveryKind: "participant",
+    bindingDeliveryTarget: "chat_123",
+    channel: "telegram",
+    explicitTarget: null,
+    idempotencyKey: "assistant-outbox:intent_123",
+    identityId: "identity_123",
+    message: "hello from execution journal",
+    replyToMessageId: null,
+    sessionId: "session_123",
+    threadId: "thread_123",
+    threadIsDirect: true,
+    transportIdempotent: false,
+    turnId: "turn_123",
+    ...overrides,
+  };
+}
+
+function createAssistantDeliveryEffect(input: {
+  effectId: string;
+  fingerprint: string;
+  payload?: Partial<HostedAssistantDeliveryPayload>;
+}) {
+  return {
+    effectId: input.effectId,
+    fingerprint: input.fingerprint,
+    kind: "assistant.delivery" as const,
+    payload: createAssistantDeliveryPayload({
+      idempotencyKey: `assistant-outbox:${input.effectId}`,
+      sessionId: `session_${input.effectId}`,
+      turnId: `turn_${input.effectId}`,
+      ...input.payload,
+    }),
+  };
+}
+
+function createAssistantDeliveryEffectSummary(input: {
+  effectId: string;
+  fingerprint: string;
+  payload?: Partial<HostedAssistantDeliveryPayload>;
+}) {
+  const effect = createAssistantDeliveryEffect(input);
+  return {
+    effectId: effect.effectId,
+    fingerprint: effect.fingerprint,
+    payload: {
+      actorId: effect.payload.actorId,
+      bindingDeliveryKind: effect.payload.bindingDeliveryKind,
+      bindingDeliveryTarget: effect.payload.bindingDeliveryTarget,
+      channel: effect.payload.channel,
+      idempotencyKey: effect.payload.idempotencyKey,
+      identityId: effect.payload.identityId,
+      message: effect.payload.message,
+      sessionId: effect.payload.sessionId,
+      threadId: effect.payload.threadId,
+      threadIsDirect: effect.payload.threadIsDirect,
+      transportIdempotent: effect.payload.transportIdempotent,
+      turnId: effect.payload.turnId,
+    },
+  };
 }
 
 afterEach(() => {
@@ -162,16 +230,14 @@ describe("persistHostedExecutionCommit", () => {
       ...baseCommit,
       payload: {
         assistantDeliveryEffects: [
-          {
+          createAssistantDeliveryEffect({
             effectId: "outbox_b",
             fingerprint: "fingerprint-b",
-            kind: "assistant.delivery",
-          },
-          {
+          }),
+          createAssistantDeliveryEffect({
             effectId: "outbox_a",
             fingerprint: "fingerprint-a",
-            kind: "assistant.delivery",
-          },
+          }),
         ],
         bundle: null,
         result: {
@@ -187,16 +253,14 @@ describe("persistHostedExecutionCommit", () => {
         ...baseCommit,
         payload: {
           assistantDeliveryEffects: [
-            {
+            createAssistantDeliveryEffect({
               effectId: "outbox_a",
               fingerprint: "fingerprint-a",
-              kind: "assistant.delivery",
-            },
-            {
+            }),
+            createAssistantDeliveryEffect({
               effectId: "outbox_b",
               fingerprint: "fingerprint-b",
-              kind: "assistant.delivery",
-            },
+            }),
           ],
           bundle: null,
           result: {
@@ -223,11 +287,10 @@ describe("persistHostedExecutionCommit", () => {
       ...baseCommit,
       payload: {
         assistantDeliveryEffects: [
-          {
+          createAssistantDeliveryEffect({
             effectId: "outbox_original",
             fingerprint: "fingerprint-stable",
-            kind: "assistant.delivery",
-          },
+          }),
         ],
         bundle: null,
         result: {
@@ -243,11 +306,15 @@ describe("persistHostedExecutionCommit", () => {
         ...baseCommit,
         payload: {
           assistantDeliveryEffects: [
-            {
+            createAssistantDeliveryEffect({
               effectId: "outbox_regenerated",
               fingerprint: "fingerprint-stable",
-              kind: "assistant.delivery",
-            },
+              payload: {
+                idempotencyKey: "assistant-outbox:outbox_original",
+                sessionId: "session_outbox_original",
+                turnId: "turn_outbox_original",
+              },
+            }),
           ],
           bundle: null,
           result: {
@@ -274,16 +341,14 @@ describe("persistHostedExecutionCommit", () => {
       ...baseCommit,
       payload: {
         assistantDeliveryEffects: [
-          {
+          createAssistantDeliveryEffect({
             effectId: "outbox_b",
             fingerprint: "fingerprint-b",
-            kind: "assistant.delivery",
-          },
-          {
+          }),
+          createAssistantDeliveryEffect({
             effectId: "outbox_a",
             fingerprint: "fingerprint-a",
-            kind: "assistant.delivery",
-          },
+          }),
         ],
         bundle: null,
         result: {
@@ -299,16 +364,14 @@ describe("persistHostedExecutionCommit", () => {
         ...baseCommit,
         payload: {
           assistantDeliveryEffects: [
-            {
+            createAssistantDeliveryEffect({
               effectId: "outbox_a",
               fingerprint: "fingerprint-a",
-              kind: "assistant.delivery",
-            },
-            {
+            }),
+            createAssistantDeliveryEffect({
               effectId: "outbox_b",
               fingerprint: "fingerprint-b-updated",
-              kind: "assistant.delivery",
-            },
+            }),
           ],
           bundle: null,
           result: {
@@ -342,21 +405,45 @@ describe("persistHostedExecutionCommit", () => {
       details: {
         existingAssistantDeliveryCount: 2,
         existingAssistantDeliveriesInOrder: [
-          { effectId: "outbox_b", fingerprint: "fingerprint-b" },
-          { effectId: "outbox_a", fingerprint: "fingerprint-a" },
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_b",
+            fingerprint: "fingerprint-b",
+          }),
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_a",
+            fingerprint: "fingerprint-a",
+          }),
         ],
         existingAssistantDeliveriesSorted: [
-          { effectId: "outbox_a", fingerprint: "fingerprint-a" },
-          { effectId: "outbox_b", fingerprint: "fingerprint-b" },
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_a",
+            fingerprint: "fingerprint-a",
+          }),
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_b",
+            fingerprint: "fingerprint-b",
+          }),
         ],
         incomingAssistantDeliveryCount: 2,
         incomingAssistantDeliveriesInOrder: [
-          { effectId: "outbox_a", fingerprint: "fingerprint-a" },
-          { effectId: "outbox_b", fingerprint: "fingerprint-b-updated" },
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_a",
+            fingerprint: "fingerprint-a",
+          }),
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_b",
+            fingerprint: "fingerprint-b-updated",
+          }),
         ],
         incomingAssistantDeliveriesSorted: [
-          { effectId: "outbox_a", fingerprint: "fingerprint-a" },
-          { effectId: "outbox_b", fingerprint: "fingerprint-b-updated" },
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_a",
+            fingerprint: "fingerprint-a",
+          }),
+          createAssistantDeliveryEffectSummary({
+            effectId: "outbox_b",
+            fingerprint: "fingerprint-b-updated",
+          }),
         ],
         mismatch: "assistant_delivery_effects",
         sortedAssistantDeliveriesMatch: false,
@@ -366,6 +453,51 @@ describe("persistHostedExecutionCommit", () => {
       message: "Hosted duplicate durable commit payload diverged from the existing commit.",
       phase: "failed",
     });
+  });
+
+  it("rejects duplicate commits when assistant delivery payloads diverge under the same identity", async () => {
+    const bucket = new InMemoryR2Bucket();
+    const baseCommit = createBaseCommit(bucket);
+
+    await persistHostedExecutionCommit({
+      ...baseCommit,
+      payload: {
+        assistantDeliveryEffects: [
+          createAssistantDeliveryEffect({
+            effectId: "outbox_payload",
+            fingerprint: "fingerprint-stable",
+            payload: { message: "first payload" },
+          }),
+        ],
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
+      },
+    });
+
+    await expect(
+      persistHostedExecutionCommit({
+        ...baseCommit,
+        payload: {
+          assistantDeliveryEffects: [
+            createAssistantDeliveryEffect({
+              effectId: "outbox_payload",
+              fingerprint: "fingerprint-stable",
+              payload: { message: "changed payload" },
+            }),
+          ],
+          bundle: null,
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "ok",
+          },
+        },
+      }),
+    ).rejects.toThrow(/assistant deliveries do not match the existing durable commit/i);
   });
 });
 

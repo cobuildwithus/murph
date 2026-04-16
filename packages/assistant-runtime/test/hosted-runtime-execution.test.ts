@@ -95,6 +95,27 @@ import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
 const committedBundle = Uint8Array.from([4, 5, 6]);
+const hostedDeliveryEffect = {
+  effectId: "intent_123",
+  fingerprint: "dedupe_123",
+  kind: "assistant.delivery" as const,
+  payload: {
+    actorId: "actor_123",
+    bindingDeliveryKind: "participant" as const,
+    bindingDeliveryTarget: "chat_123",
+    channel: "telegram",
+    explicitTarget: null,
+    idempotencyKey: "assistant-outbox:intent_123",
+    identityId: "identity_123",
+    message: "hello from hosted",
+    replyToMessageId: null,
+    sessionId: "session_123",
+    threadId: "thread_123",
+    threadIsDirect: true,
+    transportIdempotent: false,
+    turnId: "turn_123",
+  },
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -115,11 +136,7 @@ beforeEach(() => {
     bundle: Uint8Array.from([9, 9, 9]),
   });
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
-    {
-      effectId: "intent_123",
-      fingerprint: "dedupe_123",
-      kind: "assistant.delivery",
-    },
+    hostedDeliveryEffect,
   ]);
   mocks.exportGatewayProjectionSnapshotLocal.mockResolvedValue({
     schema: "murph.gateway-projection-snapshot.v1",
@@ -316,11 +333,7 @@ describe("executeHostedDispatchForCommit", () => {
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith("/tmp/vault-root");
     assert.deepEqual(result.committedAssistantDeliveryEffects, [
-      {
-        effectId: "intent_123",
-        fingerprint: "dedupe_123",
-        kind: "assistant.delivery",
-      },
+      hostedDeliveryEffect,
     ]);
     assert.equal(result.committedResult.result.eventsHandled, 1);
     assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
@@ -457,11 +470,7 @@ describe("completeHostedExecutionAfterCommit", () => {
           },
         },
         committedAssistantDeliveryEffects: [
-          {
-            effectId: "intent_123",
-            fingerprint: "dedupe_123",
-            kind: "assistant.delivery",
-          },
+          hostedDeliveryEffect,
         ],
       },
       dispatch: {
@@ -529,11 +538,7 @@ describe("completeHostedExecutionAfterCommit", () => {
       },
       effectsPort: expect.any(Object),
       assistantDeliveryEffects: [
-        {
-          effectId: "intent_123",
-          fingerprint: "dedupe_123",
-          kind: "assistant.delivery",
-        },
+        hostedDeliveryEffect,
       ],
       vaultRoot: "/tmp/vault-root",
     });

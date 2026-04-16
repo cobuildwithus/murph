@@ -10,20 +10,34 @@ import {
   buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
   parseHostedAssistantDeliveryEffects,
+  type HostedAssistantDeliveryPayload,
   type HostedAssistantDeliveryRecord,
   type HostedAssistantDeliveryAttempt,
   type HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution/side-effects";
 import {
+  type AssistantOutboxDispatchPayload,
+  beginAssistantOutboxIntentMirrorDispatch,
   createAssistantDeliveryAmbiguousError,
-  dispatchAssistantOutboxIntent,
+  errorImpliesAssistantDeliveryMayHaveSucceeded,
+  isAssistantOutboxRetryableError,
   listAssistantOutboxIntents,
+  markAssistantOutboxIntentMirrorRetryableById,
+  markAssistantOutboxIntentMirrorTerminalById,
+  markAssistantOutboxIntentSentById,
   normalizeAssistantDeliveryError,
+  saveAssistantSession,
+  sendAssistantOutboxPayload,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
-  type AssistantOutboxDispatchHooks,
 } from "@murphai/assistant-engine";
-import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts";
+import type {
+  AssistantOutboxIntent,
+  AssistantSession,
+} from "@murphai/operator-config/assistant-cli-contracts";
+import {
+  assistantChannelDeliverySchema,
+} from "@murphai/operator-config/assistant-cli-contracts";
 
 import type {
   HostedCommittedExecutionState,
@@ -82,6 +96,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       buildHostedAssistantDeliveryEffect({
         dedupeKey: intent.dedupeKey,
         effectId: intent.intentId,
+        payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
       }),
     );
 }
@@ -129,81 +144,32 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
     lastMethod: null,
     lastStatus: null,
   };
+  let attempt: HostedAssistantDeliveryAttempt | null = null;
+  let deliveryMayHaveSucceeded = false;
   try {
-    const dispatched = await dispatchAssistantOutboxIntent({
-      allowPersistedDeliveryRecovery: false,
-      dependencies: {
-        sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
-          input.effectsPort.sendEmail(request),
-      },
-      deliveryStateAuthority: "hosted-journal",
-      dispatchHooks: createHostedAssistantDeliveryDispatchHooks({
-        effectsPort: input.effectsPort,
-        journalTrace,
-        userId: input.userId,
-      }),
-      intentId: input.assistantDeliveryEffect.effectId,
-      vault: input.vaultRoot,
-    });
-
-    if (!dispatched || typeof dispatched !== "object" || !("intent" in dispatched)) {
-      emitHostedExecutionStructuredLog({
-        component: "assistant-delivery",
-        details: buildHostedAssistantDeliveryDetails({
-          effectFingerprint: input.assistantDeliveryEffect.fingerprint,
-          effectId: input.assistantDeliveryEffect.effectId,
-          extra: {
-            deliveryStatus: "missing-result",
-            failureDomain: "dispatch",
-            retryable: true,
-          },
-          userId: input.userId,
-        }),
-        dispatch: input.dispatch,
-        level: "warn",
-        message: "Hosted assistant delivery dispatch returned no result.",
-        phase: "side-effects.draining",
-        userId: input.userId,
-      });
-      return buildHostedAssistantDeliveryOutcome({
-        deliveryStatus: "missing-result",
-        effect: input.assistantDeliveryEffect,
-        journalTrace,
-        retryable: true,
-      });
-    }
-
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: buildHostedAssistantDeliveryDetails({
-        effectFingerprint: input.assistantDeliveryEffect.fingerprint,
-        effectId: input.assistantDeliveryEffect.effectId,
-        extra: {
-          dispatchedIntentStatus: dispatched.intent.status,
-          deliveryErrorCode: dispatched.deliveryError?.code ?? null,
-          deliveryErrorMessage: dispatched.deliveryError?.message ?? null,
-          retryable: dispatched.intent.status === "pending"
-            || dispatched.intent.status === "retryable"
-            || dispatched.intent.status === "sending",
-        },
-        userId: input.userId,
-      }),
-      dispatch: input.dispatch,
-      level: dispatched.intent.status === "sent" ? "info" : "warn",
-      message: "Hosted assistant delivery dispatch finished.",
-      phase: "side-effects.draining",
+    const existingRecord = await callHostedAssistantDeliveryJournal({
+      effectsPort: input.effectsPort,
+      journalTrace,
+      method: "GET",
+      sideEffect: input.assistantDeliveryEffect,
       userId: input.userId,
     });
 
-    if (dispatched.intent.status === "sent" && dispatched.intent.delivery) {
+    if (existingRecord?.state === "sent") {
+      await syncHostedAssistantDeliverySentMirror({
+        delivery: buildAssistantChannelDeliveryFromHostedReceipt(existingRecord.delivery),
+        effect: input.assistantDeliveryEffect,
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
       emitHostedAssistantDeliveryDispatchSuccess({
-        delivery: dispatched.intent.delivery,
+        delivery: buildAssistantChannelDeliveryFromHostedReceipt(existingRecord.delivery),
         dispatch: input.dispatch,
         effect: input.assistantDeliveryEffect,
         userId: input.userId,
       });
       return buildHostedAssistantDeliveryOutcome({
-        delivery: dispatched.intent.delivery,
+        delivery: buildAssistantChannelDeliveryFromHostedReceipt(existingRecord.delivery),
         deliveryStatus: "sent",
         effect: input.assistantDeliveryEffect,
         journalTrace,
@@ -211,37 +177,308 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       });
     }
 
-    if (dispatched.intent.status !== "sent") {
-      const deliveryStatus = dispatched.intent.status === "failed"
-        && dispatched.deliveryError?.code === "ASSISTANT_DELIVERY_AMBIGUOUS"
-        ? "failed_ambiguous"
-        : dispatched.intent.status;
+    if (existingRecord?.state === "failed_ambiguous") {
+      const ambiguousError = createAssistantDeliveryAmbiguousError(existingRecord.failure);
+      await syncHostedAssistantDeliveryTerminalMirror({
+        effect: input.assistantDeliveryEffect,
+        error: ambiguousError,
+        status: "abandoned",
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
       emitHostedAssistantDeliveryDispatchOutcome({
-        deliveryError: dispatched.deliveryError,
+        deliveryError: ambiguousError,
+        deliveryStatus: "failed_ambiguous",
         dispatch: input.dispatch,
         effect: input.assistantDeliveryEffect,
-        intentStatus: dispatched.intent.status,
+        retryable: false,
         userId: input.userId,
       });
       return buildHostedAssistantDeliveryOutcome({
-        deliveryErrorCode: dispatched.deliveryError?.code ?? null,
-        deliveryErrorMessage: dispatched.deliveryError?.message ?? null,
-        deliveryStatus,
+        deliveryErrorCode: ambiguousError.code,
+        deliveryErrorMessage: ambiguousError.message,
+        deliveryStatus: "failed_ambiguous",
         effect: input.assistantDeliveryEffect,
         journalTrace,
-        retryable: dispatched.intent.status === "pending"
-          || dispatched.intent.status === "retryable"
-          || dispatched.intent.status === "sending",
+        retryable: false,
       });
     }
 
+    if (
+      existingRecord?.state === "failed"
+      && !isHostedDeliveryTransportIdempotent(input.assistantDeliveryEffect)
+    ) {
+      const failedError = Object.assign(new Error(existingRecord.failure.message), {
+        code: existingRecord.failure.code,
+      });
+      await syncHostedAssistantDeliveryTerminalMirror({
+        effect: input.assistantDeliveryEffect,
+        error: failedError,
+        status: "failed",
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError: {
+          code: existingRecord.failure.code,
+          message: existingRecord.failure.message,
+        },
+        deliveryStatus: "failed",
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        retryable: false,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: existingRecord.failure.code,
+        deliveryErrorMessage: existingRecord.failure.message,
+        deliveryStatus: "failed",
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable: false,
+      });
+    }
+
+    if (
+      existingRecord?.state === "sending"
+      && !isHostedSendingRecordStale(existingRecord)
+    ) {
+      await syncHostedAssistantDeliverySendingMirror({
+        effect: input.assistantDeliveryEffect,
+        startedAt: existingRecord.attempt.startedAt,
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError: null,
+        deliveryStatus: "sending",
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        retryable: true,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryStatus: "sending",
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable: true,
+      });
+    }
+
+    if (
+      existingRecord?.state === "sending"
+      && isHostedSendingRecordStale(existingRecord)
+      && !isHostedDeliveryTransportIdempotent(input.assistantDeliveryEffect)
+    ) {
+      const ambiguousError = createAssistantDeliveryAmbiguousError({
+        code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        message:
+          "The hosted delivery journal remained in sending state past the confirmation grace window.",
+      });
+      await persistHostedAssistantDeliveryAmbiguousRecord({
+        attempt: existingRecord.attempt,
+        effectsPort: input.effectsPort,
+        journalTrace,
+        effect: input.assistantDeliveryEffect,
+        reason: ambiguousError,
+        userId: input.userId,
+      });
+      await syncHostedAssistantDeliveryTerminalMirror({
+        effect: input.assistantDeliveryEffect,
+        error: ambiguousError,
+        status: "abandoned",
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError: ambiguousError,
+        deliveryStatus: "failed_ambiguous",
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        retryable: false,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: ambiguousError.code,
+        deliveryErrorMessage: ambiguousError.message,
+        deliveryStatus: "failed_ambiguous",
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable: false,
+      });
+    }
+
+    attempt = buildHostedAssistantDeliveryAttemptFromEffect(
+      input.assistantDeliveryEffect,
+      new Date().toISOString(),
+    );
+    await callHostedAssistantDeliveryJournal({
+      effectsPort: input.effectsPort,
+      journalTrace,
+      method: "PUT",
+      record: buildHostedAssistantDeliverySendingRecord({
+        attempt,
+        dedupeKey: input.assistantDeliveryEffect.fingerprint,
+        effectId: input.assistantDeliveryEffect.effectId,
+      }),
+      userId: input.userId,
+    });
+    await syncHostedAssistantDeliverySendingMirror({
+      effect: input.assistantDeliveryEffect,
+      startedAt: attempt.startedAt,
+      userId: input.userId,
+      vaultRoot: input.vaultRoot,
+    });
+
+    const delivered = await sendAssistantOutboxPayload({
+      dependencies: {
+        sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
+          input.effectsPort.sendEmail(request),
+      },
+      payload: buildAssistantOutboxDispatchPayload(input.assistantDeliveryEffect.payload),
+      vault: input.vaultRoot,
+    });
+    const delivery = assistantChannelDeliverySchema.parse({
+      ...delivered.delivery,
+      idempotencyKey:
+        delivered.delivery.idempotencyKey
+        ?? input.assistantDeliveryEffect.payload.idempotencyKey,
+    });
+    deliveryMayHaveSucceeded = true;
+
+    await callHostedAssistantDeliveryJournal({
+      effectsPort: input.effectsPort,
+      journalTrace,
+      method: "PUT",
+      record: buildHostedAssistantDeliverySentRecord({
+        dedupeKey: input.assistantDeliveryEffect.fingerprint,
+        delivery: {
+          ...delivery,
+          idempotencyKey:
+            delivery.idempotencyKey
+            ?? input.assistantDeliveryEffect.payload.idempotencyKey,
+        },
+        effectId: input.assistantDeliveryEffect.effectId,
+      }),
+      userId: input.userId,
+    });
+    await syncHostedAssistantDeliverySentMirror({
+      delivery,
+      effect: input.assistantDeliveryEffect,
+      userId: input.userId,
+      vaultRoot: input.vaultRoot,
+    });
+    if (delivered.session) {
+      await bestEffortSaveHostedAssistantDeliverySession({
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        session: delivered.session,
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
+    }
+
+    emitHostedAssistantDeliveryDispatchSuccess({
+      delivery,
+      dispatch: input.dispatch,
+      effect: input.assistantDeliveryEffect,
+      userId: input.userId,
+    });
     return buildHostedAssistantDeliveryOutcome({
-      deliveryStatus: "missing-result",
+      delivery,
+      deliveryStatus: "sent",
       effect: input.assistantDeliveryEffect,
       journalTrace,
-      retryable: true,
+      retryable: false,
     });
   } catch (error) {
+    const deliveryError = normalizeAssistantDeliveryError(error);
+    const retryable = deliveryMayHaveSucceeded
+      ? isHostedDeliveryTransportIdempotent(input.assistantDeliveryEffect)
+      : isAssistantOutboxRetryableError(error);
+    const ambiguousNonIdempotent = attempt
+      && (deliveryMayHaveSucceeded || errorImpliesAssistantDeliveryMayHaveSucceeded(error))
+      && !isHostedDeliveryTransportIdempotent(input.assistantDeliveryEffect)
+      && !isHostedAssistantDeliveryJournalFailure(error);
+
+    if (attempt && ambiguousNonIdempotent) {
+      const ambiguousError = createAssistantDeliveryAmbiguousError(error);
+      await persistHostedAssistantDeliveryAmbiguousRecord({
+        attempt,
+        effectsPort: input.effectsPort,
+        journalTrace,
+        effect: input.assistantDeliveryEffect,
+        reason: ambiguousError,
+        userId: input.userId,
+      });
+      await syncHostedAssistantDeliveryTerminalMirror({
+        effect: input.assistantDeliveryEffect,
+        error: ambiguousError,
+        status: "abandoned",
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError: ambiguousError,
+        deliveryStatus: "failed_ambiguous",
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        retryable: false,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: ambiguousError.code,
+        deliveryErrorMessage: ambiguousError.message,
+        deliveryStatus: "failed_ambiguous",
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable: false,
+      });
+    }
+
+    if (attempt && !isHostedAssistantDeliveryJournalFailure(error)) {
+      await persistHostedAssistantDeliveryFailureRecord({
+        attempt,
+        effectsPort: input.effectsPort,
+        error: deliveryError,
+        journalTrace,
+        effect: input.assistantDeliveryEffect,
+        userId: input.userId,
+      });
+      if (retryable) {
+        await syncHostedAssistantDeliveryRetryableMirror({
+          effect: input.assistantDeliveryEffect,
+          error,
+          userId: input.userId,
+          vaultRoot: input.vaultRoot,
+        });
+      } else {
+        await syncHostedAssistantDeliveryTerminalMirror({
+          effect: input.assistantDeliveryEffect,
+          error,
+          status: "failed",
+          userId: input.userId,
+          vaultRoot: input.vaultRoot,
+        });
+      }
+      const deliveryStatus = retryable ? "retryable" : "failed";
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError,
+        deliveryStatus,
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        retryable,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: deliveryError.code,
+        deliveryErrorMessage: deliveryError.message,
+        deliveryStatus,
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable,
+      });
+    }
     const enrichedError = attachHostedAssistantDeliveryDispatchDetails(error, {
       effectId: input.assistantDeliveryEffect.effectId,
       fingerprint: input.assistantDeliveryEffect.fingerprint,
@@ -297,18 +534,12 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
 
 function emitHostedAssistantDeliveryDispatchOutcome(input: {
   deliveryError: { code: string | null; message: string } | null;
+  deliveryStatus: "failed" | "failed_ambiguous" | "retryable" | "sending";
   dispatch: HostedExecutionDispatchRequest;
   effect: HostedAssistantDeliveryEffect;
-  intentStatus: "abandoned" | "failed" | "pending" | "retryable" | "sending";
+  retryable: boolean;
   userId: string;
 }): void {
-  const deliveryStatus = input.intentStatus === "failed"
-    && input.deliveryError?.code === "ASSISTANT_DELIVERY_AMBIGUOUS"
-    ? "failed_ambiguous"
-    : input.intentStatus;
-  const retryable = input.intentStatus === "pending"
-    || input.intentStatus === "retryable"
-    || input.intentStatus === "sending";
   emitHostedExecutionStructuredLog({
     component: "assistant-delivery",
     details: buildHostedAssistantDeliveryDetails({
@@ -317,261 +548,16 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
       extra: {
         deliveryErrorCode: input.deliveryError?.code ?? null,
         deliveryErrorMessage: input.deliveryError?.message ?? null,
-        deliveryStatus,
+        deliveryStatus: input.deliveryStatus,
         failureDomain: "dispatch",
-        retryable,
+        retryable: input.retryable,
       },
       userId: input.userId,
     }),
     dispatch: input.dispatch,
-    level: retryable ? "warn" : "error",
-    message: `Hosted assistant delivery finished with ${deliveryStatus} status during post-commit dispatch.`,
+    level: input.retryable ? "warn" : "error",
+    message: `Hosted assistant delivery finished with ${input.deliveryStatus} status during post-commit dispatch.`,
     phase: "side-effects.draining",
-    userId: input.userId,
-  });
-}
-
-function createHostedAssistantDeliveryDispatchHooks(input: {
-  effectsPort: HostedRuntimeEffectsPort;
-  journalTrace: HostedAssistantDeliveryJournalTrace;
-  userId: string;
-}): AssistantOutboxDispatchHooks {
-  return {
-    clearPreparedIntent: async ({ intent }: {
-      intent: AssistantOutboxIntent;
-      vault: string;
-    }) => {
-      emitHostedExecutionStructuredLog({
-        component: "assistant-delivery",
-        details: buildHostedAssistantDeliveryDetails({
-          effectId: intent.intentId,
-          extra: {
-            journalMethod: "DELETE",
-            retryable: true,
-          },
-          userId: input.userId,
-        }),
-        message: "Hosted assistant delivery clearing non-terminal journal intent.",
-        phase: "side-effects.draining",
-        userId: input.userId,
-      });
-      await callHostedAssistantDeliveryJournal({
-        effectsPort: input.effectsPort,
-        journalTrace: input.journalTrace,
-        method: "DELETE",
-        sideEffect: buildHostedAssistantDeliveryEffect({
-          dedupeKey: intent.dedupeKey,
-          effectId: intent.intentId,
-        }),
-        userId: input.userId,
-      });
-    },
-    persistDeliveredIntent: async ({ delivery, intent }: {
-      delivery: AssistantChannelDelivery;
-      intent: AssistantOutboxIntent;
-      vault: string;
-    }) => {
-      emitHostedExecutionStructuredLog({
-        component: "assistant-delivery",
-        details: buildHostedAssistantDeliveryDetails({
-          effectId: intent.intentId,
-          extra: {
-            deliveryChannel: delivery.channel,
-            journalMethod: "PUT",
-            retryable: false,
-            targetKind: delivery.targetKind,
-          },
-          userId: input.userId,
-        }),
-        message: "Hosted assistant delivery persisting sent journal record.",
-        phase: "side-effects.draining",
-        userId: input.userId,
-      });
-      await persistHostedAssistantDeliveryRecord({
-        delivery,
-        effectsPort: input.effectsPort,
-        intent,
-        userId: input.userId,
-      });
-    },
-    prepareDispatchIntent: async ({ intent }: {
-      intent: AssistantOutboxIntent;
-      vault: string;
-    }) => {
-      emitHostedExecutionStructuredLog({
-        component: "assistant-delivery",
-        details: buildHostedAssistantDeliveryDetails({
-          effectId: intent.intentId,
-          extra: {
-            deliveryChannel: intent.channel ?? "unknown",
-            journalMethod: "PUT",
-            journalRecordState: "sending",
-            retryable: true,
-          },
-          userId: input.userId,
-        }),
-        message: "Hosted assistant delivery persisting sending journal record.",
-        phase: "side-effects.draining",
-        userId: input.userId,
-      });
-      await callHostedAssistantDeliveryJournal({
-        effectsPort: input.effectsPort,
-        journalTrace: input.journalTrace,
-        method: "PUT",
-        record: buildHostedAssistantDeliverySendingRecord({
-          attempt: buildHostedAssistantDeliveryAttemptFromIntent(intent),
-          dedupeKey: intent.dedupeKey,
-          effectId: intent.intentId,
-        }),
-        userId: input.userId,
-      });
-    },
-    resolveDeliveredIntent: async ({ intent }: {
-      intent: AssistantOutboxIntent;
-      vault: string;
-    }) => {
-      emitHostedExecutionStructuredLog({
-        component: "assistant-delivery",
-        details: buildHostedAssistantDeliveryDetails({
-          effectId: intent.intentId,
-          extra: {
-            journalMethod: "GET",
-            retryable: true,
-          },
-          userId: input.userId,
-        }),
-        message: "Hosted assistant delivery reconciling journal state.",
-        phase: "side-effects.draining",
-        userId: input.userId,
-      });
-      const sideEffect = buildHostedAssistantDeliveryEffect({
-        dedupeKey: intent.dedupeKey,
-        effectId: intent.intentId,
-      });
-      const record = await callHostedAssistantDeliveryJournal({
-        effectsPort: input.effectsPort,
-        journalTrace: input.journalTrace,
-        method: "GET",
-        sideEffect,
-        userId: input.userId,
-      });
-
-      if (!record) {
-        return null;
-      }
-
-      if (record.state === "sent") {
-        emitHostedExecutionStructuredLog({
-          component: "assistant-delivery",
-          details: buildHostedAssistantDeliveryDetails({
-            effectId: intent.intentId,
-            extra: {
-              deliveryChannel: record.delivery.channel,
-              journalRecordState: record.state,
-              retryable: false,
-              targetKind: record.delivery.targetKind,
-            },
-            userId: input.userId,
-          }),
-          message: "Hosted assistant delivery journal already recorded a sent outcome.",
-          phase: "side-effects.draining",
-          userId: input.userId,
-        });
-        return {
-          channel: record.delivery.channel,
-          idempotencyKey: record.delivery.idempotencyKey,
-          messageLength: record.delivery.messageLength,
-          providerMessageId: record.delivery.providerMessageId ?? null,
-          providerThreadId: record.delivery.providerThreadId ?? null,
-          sentAt: record.delivery.sentAt,
-          target: record.delivery.target,
-          targetKind: record.delivery.targetKind,
-        } satisfies AssistantChannelDelivery;
-      }
-
-      if (record.state === "failed_ambiguous") {
-        throw createAssistantDeliveryAmbiguousError(record.failure);
-      }
-
-      if (!isHostedDeliveryTransportIdempotent(intent)) {
-        return handleHostedNonIdempotentJournalRecord({
-          effectsPort: input.effectsPort,
-          intent,
-          journalTrace: input.journalTrace,
-          record,
-          userId: input.userId,
-        });
-      }
-
-      const localDelivery = readLocallyRecordedAssistantDelivery(intent);
-      if (localDelivery) {
-        try {
-          await persistHostedAssistantDeliveryRecord({
-            delivery: localDelivery,
-            effectsPort: input.effectsPort,
-            intent,
-            userId: input.userId,
-          });
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "assistant-delivery",
-            details: buildHostedAssistantDeliveryDetails({
-              effectId: intent.intentId,
-              extra: {
-                journalRecordState: record.state,
-                localDeliveryPresent: "true",
-                retryable: true,
-              },
-              userId: input.userId,
-            }),
-            error,
-            level: "warn",
-            message: "Hosted assistant delivery reconciliation could not persist the local send.",
-            phase: "side-effects.draining",
-            userId: input.userId,
-          });
-          throw createHostedAssistantDeliveryConfirmationPendingError({
-            cause: error,
-            effectId: intent.intentId,
-            userId: input.userId,
-          });
-        }
-
-        return localDelivery;
-      }
-
-      return null;
-    },
-  };
-}
-
-async function persistHostedAssistantDeliveryRecord(input: {
-  delivery: AssistantChannelDelivery;
-  effectsPort: HostedRuntimeEffectsPort;
-  intent: Pick<AssistantOutboxIntent, "dedupeKey" | "intentId">;
-  userId: string;
-}): Promise<void> {
-  if (!input.delivery.idempotencyKey) {
-    throw new Error(
-      "Hosted assistant delivery side effects require a non-empty idempotencyKey.",
-    );
-  }
-
-  await callHostedAssistantDeliveryJournal({
-    effectsPort: input.effectsPort,
-    journalTrace: {
-      lastMethod: null,
-      lastStatus: null,
-    },
-    method: "PUT",
-    record: buildHostedAssistantDeliverySentRecord({
-      dedupeKey: input.intent.dedupeKey,
-      delivery: {
-        ...input.delivery,
-        idempotencyKey: input.delivery.idempotencyKey,
-      },
-      effectId: input.intent.intentId,
-    }),
     userId: input.userId,
   });
 }
@@ -579,7 +565,7 @@ async function persistHostedAssistantDeliveryRecord(input: {
 async function persistHostedAssistantDeliveryAmbiguousRecord(input: {
   attempt: HostedAssistantDeliveryAttempt;
   effectsPort: HostedRuntimeEffectsPort;
-  intent: AssistantOutboxIntent;
+  effect: HostedAssistantDeliveryEffect;
   journalTrace: HostedAssistantDeliveryJournalTrace;
   reason: ReturnType<typeof createAssistantDeliveryAmbiguousError>;
   userId: string;
@@ -590,8 +576,8 @@ async function persistHostedAssistantDeliveryAmbiguousRecord(input: {
     method: "PUT",
     record: buildHostedAssistantDeliveryFailedRecord({
       attempt: input.attempt,
-      dedupeKey: input.intent.dedupeKey,
-      effectId: input.intent.intentId,
+      dedupeKey: input.effect.fingerprint,
+      effectId: input.effect.effectId,
       failure: {
         code: input.reason.code,
         failedAt: new Date().toISOString(),
@@ -603,162 +589,133 @@ async function persistHostedAssistantDeliveryAmbiguousRecord(input: {
   });
 }
 
-async function handleHostedNonIdempotentJournalRecord(input: {
+async function persistHostedAssistantDeliveryFailureRecord(input: {
+  attempt: HostedAssistantDeliveryAttempt;
   effectsPort: HostedRuntimeEffectsPort;
-  intent: AssistantOutboxIntent;
+  error: { code: string | null; message: string };
   journalTrace: HostedAssistantDeliveryJournalTrace;
-  record: HostedAssistantDeliveryRecord;
+  effect: HostedAssistantDeliveryEffect;
   userId: string;
-}): Promise<AssistantChannelDelivery | null> {
-  if (input.record.state === "failed_ambiguous") {
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: buildHostedAssistantDeliveryDetails({
-        effectId: input.intent.intentId,
-        extra: {
-          journalRecordState: input.record.state,
-          retryable: false,
-        },
-        userId: input.userId,
-      }),
-      level: "error",
-      message: "Hosted assistant delivery journal already recorded a terminal ambiguity.",
-      phase: "side-effects.draining",
-      userId: input.userId,
-    });
-    throw createAssistantDeliveryAmbiguousError(input.record.failure);
-  }
-
-  if (input.record.state === "failed") {
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: buildHostedAssistantDeliveryDetails({
-        effectId: input.intent.intentId,
-        extra: {
-          journalRecordState: input.record.state,
-          retryable: false,
-        },
-        userId: input.userId,
-      }),
-      level: "error",
-      message: "Hosted assistant delivery journal recorded a terminal failure.",
-      phase: "side-effects.draining",
-      userId: input.userId,
-    });
-    throw {
-      ...normalizeAssistantDeliveryError({
-        code: input.record.failure.code,
-        message: input.record.failure.message,
-      }),
-      retryable: false,
-    };
-  }
-
-  if (input.record.state === "sending" && isHostedNonIdempotentRecordStale(input.record)) {
-    const reason = createAssistantDeliveryAmbiguousError({
-      code: "HOSTED_ASSISTANT_DELIVERY_JOURNAL_STALE",
-      message: "The hosted delivery journal remained in sending state past the confirmation grace window.",
-      retryable: false,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: buildHostedAssistantDeliveryDetails({
-        effectId: input.intent.intentId,
-        extra: {
-          journalRecordState: input.record.state,
-          retryable: false,
-        },
-        userId: input.userId,
-      }),
-      level: "error",
-      message: "Hosted assistant delivery journal aged into terminal ambiguity.",
-      phase: "side-effects.draining",
-      userId: input.userId,
-    });
-    await persistHostedAssistantDeliveryAmbiguousRecord({
-      attempt: input.record.attempt,
-      effectsPort: input.effectsPort,
-      intent: input.intent,
-      journalTrace: input.journalTrace,
-      reason,
-      userId: input.userId,
-    });
-    throw reason;
-  }
-
-  emitHostedExecutionStructuredLog({
-    component: "assistant-delivery",
-    details: buildHostedAssistantDeliveryDetails({
-      effectId: input.intent.intentId,
-      extra: {
-        journalRecordState: input.record.state,
-        localDeliveryPresent: "false",
-        retryable: true,
+}): Promise<void> {
+  await callHostedAssistantDeliveryJournal({
+    effectsPort: input.effectsPort,
+    journalTrace: input.journalTrace,
+    method: "PUT",
+    record: buildHostedAssistantDeliveryFailedRecord({
+      attempt: input.attempt,
+      dedupeKey: input.effect.fingerprint,
+      effectId: input.effect.effectId,
+      failure: {
+        code: input.error.code,
+        failedAt: new Date().toISOString(),
+        message: input.error.message,
       },
-      userId: input.userId,
     }),
-    level: "warn",
-    message: "Hosted assistant delivery journal is still awaiting non-idempotent confirmation.",
-    phase: "side-effects.draining",
-    userId: input.userId,
-  });
-  throw createHostedAssistantDeliveryConfirmationPendingError({
-    effectId: input.intent.intentId,
     userId: input.userId,
   });
 }
 
-function buildHostedAssistantDeliveryAttemptFromIntent(
+function buildHostedAssistantDeliveryPayloadFromIntent(
   intent: Pick<
     AssistantOutboxIntent,
+    | "actorId"
     | "bindingDelivery"
     | "channel"
-    | "delivery"
     | "deliveryIdempotencyKey"
+    | "deliveryTransportIdempotent"
     | "explicitTarget"
-    | "lastAttemptAt"
+    | "identityId"
+    | "intentId"
     | "message"
+    | "replyToMessageId"
+    | "sessionId"
+    | "threadId"
+    | "threadIsDirect"
+    | "turnId"
   >,
-): HostedAssistantDeliveryAttempt {
+): HostedAssistantDeliveryPayload {
   return {
+    actorId: intent.actorId ?? null,
+    bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
+    bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,
-    idempotencyKey: intent.deliveryIdempotencyKey ?? intent.delivery?.idempotencyKey ?? null,
-    messageLength: intent.message.length,
-    providerMessageId: intent.delivery?.providerMessageId ?? null,
-    providerThreadId: intent.delivery?.providerThreadId ?? null,
-    startedAt: intent.lastAttemptAt ?? new Date().toISOString(),
-    target: intent.explicitTarget ?? intent.bindingDelivery?.target ?? intent.delivery?.target ?? null,
-    targetKind: intent.explicitTarget
-      ? "explicit"
-      : intent.bindingDelivery?.kind ?? intent.delivery?.targetKind ?? null,
+    explicitTarget: intent.explicitTarget ?? null,
+    idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
+    identityId: intent.identityId ?? null,
+    message: intent.message,
+    replyToMessageId: intent.replyToMessageId ?? null,
+    sessionId: intent.sessionId,
+    threadId: intent.threadId ?? null,
+    threadIsDirect: intent.threadIsDirect ?? null,
+    transportIdempotent: intent.deliveryTransportIdempotent || intent.channel === "linq",
+    turnId: intent.turnId,
   };
 }
 
-function readLocallyRecordedAssistantDelivery(
-  intent: Pick<AssistantOutboxIntent, "delivery" | "deliveryIdempotencyKey">,
-): AssistantChannelDelivery | null {
-  if (!intent.delivery) {
-    return null;
-  }
-
-  const idempotencyKey = intent.delivery.idempotencyKey ?? intent.deliveryIdempotencyKey;
-  if (!idempotencyKey) {
-    return null;
-  }
-
+function buildAssistantOutboxDispatchPayload(
+  payload: HostedAssistantDeliveryPayload,
+): AssistantOutboxDispatchPayload {
   return {
-    ...intent.delivery,
-    idempotencyKey,
+    actorId: payload.actorId,
+    bindingDelivery: payload.bindingDeliveryKind && payload.bindingDeliveryTarget
+      ? {
+          kind: payload.bindingDeliveryKind,
+          target: payload.bindingDeliveryTarget,
+        }
+      : null,
+    channel: payload.channel,
+    deliveryIdempotencyKey: payload.idempotencyKey,
+    explicitTarget: payload.explicitTarget,
+    identityId: payload.identityId,
+    message: payload.message,
+    replyToMessageId: payload.replyToMessageId,
+    sessionId: payload.sessionId,
+    threadId: payload.threadId,
+    threadIsDirect: payload.threadIsDirect,
+    turnId: payload.turnId,
+  };
+}
+
+function buildHostedAssistantDeliveryAttemptFromEffect(
+  effect: HostedAssistantDeliveryEffect,
+  startedAt: string,
+): HostedAssistantDeliveryAttempt {
+  return {
+    channel: effect.payload.channel ?? null,
+    idempotencyKey: effect.payload.idempotencyKey,
+    messageLength: effect.payload.message.length,
+    providerMessageId: null,
+    providerThreadId: null,
+    startedAt,
+    target: effect.payload.explicitTarget ?? effect.payload.bindingDeliveryTarget ?? null,
+    targetKind: effect.payload.explicitTarget
+      ? "explicit"
+      : effect.payload.bindingDeliveryKind ?? null,
+  };
+}
+
+function buildAssistantChannelDeliveryFromHostedReceipt(
+  receipt: Extract<HostedAssistantDeliveryRecord, { state: "sent" }>["delivery"],
+): AssistantChannelDelivery {
+  return {
+    channel: receipt.channel,
+    idempotencyKey: receipt.idempotencyKey,
+    messageLength: receipt.messageLength,
+    providerMessageId: receipt.providerMessageId,
+    providerThreadId: receipt.providerThreadId,
+    sentAt: receipt.sentAt,
+    target: receipt.target,
+    targetKind: receipt.targetKind,
   };
 }
 
 function isHostedDeliveryTransportIdempotent(
-  intent: Pick<AssistantOutboxIntent, "channel" | "deliveryTransportIdempotent">,
+  effect: Pick<HostedAssistantDeliveryEffect, "payload">,
 ): boolean {
-  return intent.deliveryTransportIdempotent || intent.channel === "linq";
+  return effect.payload.transportIdempotent;
 }
 
-function isHostedNonIdempotentRecordStale(
+function isHostedSendingRecordStale(
   record: Extract<HostedAssistantDeliveryRecord, { state: "sending" }>,
 ): boolean {
   const startedAtMs = Date.parse(record.attempt.startedAt);
@@ -769,11 +726,160 @@ function isHostedNonIdempotentRecordStale(
   return Date.now() - startedAtMs >= HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS;
 }
 
+async function syncHostedAssistantDeliverySendingMirror(input: {
+  effect: HostedAssistantDeliveryEffect;
+  startedAt: string;
+  userId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await bestEffortHostedAssistantDeliveryMirror({
+    effect: input.effect,
+    step: "sending",
+    userId: input.userId,
+    work: async () => {
+      await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: input.effect.payload.idempotencyKey,
+        deliveryTransportIdempotent: input.effect.payload.transportIdempotent,
+        intentId: input.effect.effectId,
+        startedAt: input.startedAt,
+        vault: input.vaultRoot,
+      });
+    },
+  });
+}
+
+async function syncHostedAssistantDeliveryRetryableMirror(input: {
+  effect: HostedAssistantDeliveryEffect;
+  error: unknown;
+  userId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await bestEffortHostedAssistantDeliveryMirror({
+    effect: input.effect,
+    step: "retryable",
+    userId: input.userId,
+    work: async () => {
+      await markAssistantOutboxIntentMirrorRetryableById({
+        error: input.error,
+        intentId: input.effect.effectId,
+        vault: input.vaultRoot,
+      });
+    },
+  });
+}
+
+async function syncHostedAssistantDeliveryTerminalMirror(input: {
+  effect: HostedAssistantDeliveryEffect;
+  error: unknown;
+  status: "abandoned" | "failed";
+  userId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await bestEffortHostedAssistantDeliveryMirror({
+    effect: input.effect,
+    step: input.status,
+    userId: input.userId,
+    work: async () => {
+      await markAssistantOutboxIntentMirrorTerminalById({
+        error: input.error,
+        intentId: input.effect.effectId,
+        status: input.status,
+        vault: input.vaultRoot,
+      });
+    },
+  });
+}
+
+async function syncHostedAssistantDeliverySentMirror(input: {
+  delivery: AssistantChannelDelivery;
+  effect: HostedAssistantDeliveryEffect;
+  userId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await bestEffortHostedAssistantDeliveryMirror({
+    effect: input.effect,
+    step: "sent",
+    userId: input.userId,
+    work: async () => {
+      await markAssistantOutboxIntentSentById({
+        delivery: input.delivery,
+        intentId: input.effect.effectId,
+        vault: input.vaultRoot,
+      });
+    },
+  });
+}
+
+async function bestEffortHostedAssistantDeliveryMirror(input: {
+  effect: HostedAssistantDeliveryEffect;
+  step: string;
+  userId: string;
+  work: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await input.work();
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: buildHostedAssistantDeliveryDetails({
+        effectFingerprint: input.effect.fingerprint,
+        effectId: input.effect.effectId,
+        extra: {
+          failureDomain: "mirror",
+          mirrorStep: input.step,
+          retryable: true,
+        },
+        userId: input.userId,
+      }),
+      error,
+      level: "warn",
+      message: "Hosted assistant delivery local mirror update failed.",
+      phase: "side-effects.draining",
+      userId: input.userId,
+    });
+  }
+}
+
+async function bestEffortSaveHostedAssistantDeliverySession(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  effect: HostedAssistantDeliveryEffect;
+  session: AssistantSession;
+  userId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  try {
+    await saveAssistantSession(input.vaultRoot, input.session);
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: buildHostedAssistantDeliveryDetails({
+        effectFingerprint: input.effect.fingerprint,
+        effectId: input.effect.effectId,
+        extra: {
+          failureDomain: "session",
+          retryable: true,
+        },
+        userId: input.userId,
+      }),
+      dispatch: input.dispatch,
+      error,
+      level: "warn",
+      message: "Hosted assistant delivery session persistence failed after send.",
+      phase: "side-effects.draining",
+      userId: input.userId,
+    });
+  }
+}
+
+function isHostedAssistantDeliveryJournalFailure(error: unknown): boolean {
+  return readStringProperty(error, "code") === "HOSTED_SIDE_EFFECT_JOURNAL_FAILED";
+}
+
 async function callHostedAssistantDeliveryJournal(input:
   | {
       effectsPort: HostedRuntimeEffectsPort;
       journalTrace: HostedAssistantDeliveryJournalTrace;
-      method: "DELETE" | "GET";
+      method: "GET";
       sideEffect: HostedAssistantDeliveryEffect;
       userId: string;
     }
@@ -785,10 +891,10 @@ async function callHostedAssistantDeliveryJournal(input:
       userId: string;
     }): Promise<HostedAssistantDeliveryRecord | null> {
   const sideEffect = input.method === "PUT"
-    ? buildHostedAssistantDeliveryEffect({
-        dedupeKey: input.record.fingerprint,
+    ? {
         effectId: input.record.effectId,
-      })
+        fingerprint: input.record.fingerprint,
+      }
     : input.sideEffect;
   try {
     input.journalTrace.lastMethod = input.method;
@@ -796,13 +902,6 @@ async function callHostedAssistantDeliveryJournal(input:
 
     let result: HostedAssistantDeliveryRecord | null;
     switch (input.method) {
-      case "DELETE":
-        await deletePreparedAssistantDelivery(input.effectsPort, {
-          effectId: sideEffect.effectId,
-          fingerprint: sideEffect.fingerprint,
-        });
-        result = null;
-        break;
       case "GET":
         result = await readAssistantDeliveryRecord(input.effectsPort, {
           effectId: sideEffect.effectId,
@@ -844,13 +943,6 @@ async function callHostedAssistantDeliveryJournal(input:
   }
 }
 
-async function deletePreparedAssistantDelivery(
-  effectsPort: HostedRuntimeEffectsPort,
-  input: Pick<HostedAssistantDeliveryEffect, "effectId" | "fingerprint">,
-): Promise<void> {
-  await effectsPort.deletePreparedAssistantDelivery(input);
-}
-
 async function readAssistantDeliveryRecord(
   effectsPort: HostedRuntimeEffectsPort,
   input: Pick<HostedAssistantDeliveryEffect, "effectId" | "fingerprint">,
@@ -865,63 +957,10 @@ async function writeAssistantDeliveryRecord(
   return await effectsPort.writeAssistantDeliveryRecord(record);
 }
 
-function createHostedAssistantDeliveryConfirmationPendingError(input: {
-  cause?: unknown;
-  effectId: string;
-  userId: string;
-}): Error & {
-  code: string;
-  context: {
-    retryable: true;
-    status: null;
-  };
-  details: Record<string, boolean | null | string>;
-  deliveryMayHaveSucceeded: true;
-  retryable: true;
-} {
-  const detail = input.cause ? normalizeAssistantDeliveryError(input.cause).message : null;
-  const error = new Error(
-    detail
-      ? `Hosted assistant delivery may have succeeded already for ${input.userId}/${input.effectId} and must be reconciled before resend. ${detail}`
-      : `Hosted assistant delivery may have succeeded already for ${input.userId}/${input.effectId} and must be reconciled before resend.`,
-  ) as Error & {
-    code: string;
-    context: {
-      retryable: true;
-      status: null;
-    };
-    cause?: unknown;
-    details: Record<string, boolean | null | string>;
-    deliveryMayHaveSucceeded: true;
-    retryable: true;
-  };
-
-  error.code = "ASSISTANT_DELIVERY_CONFIRMATION_PENDING";
-  error.context = {
-    retryable: true,
-    status: null,
-  };
-  error.details = buildHostedAssistantDeliveryDetails({
-    effectId: input.effectId,
-    extra: {
-      deliveryMayHaveSucceeded: true,
-      failureDomain: "confirmation_pending",
-      retryable: true,
-    },
-    userId: input.userId,
-  });
-  error.deliveryMayHaveSucceeded = true;
-  error.retryable = true;
-  if (input.cause !== undefined) {
-    error.cause = input.cause;
-  }
-  return error;
-}
-
 function createHostedAssistantDeliveryJournalError(
   input:
     | {
-        method: "DELETE" | "GET";
+        method: "GET";
         sideEffect: HostedAssistantDeliveryEffect;
         userId: string;
       }
@@ -1079,6 +1118,18 @@ function readHostedAssistantDeliveryRetryableFlag(error: unknown): boolean | nul
   }
 
   return null;
+}
+
+function readStringProperty(error: unknown, property: string): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  if (!(property in error) || typeof error[property as keyof typeof error] !== "string") {
+    return null;
+  }
+
+  return error[property as keyof typeof error] as string;
 }
 
 function buildHostedAssistantDeliveryDetails(input: {

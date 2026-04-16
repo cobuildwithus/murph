@@ -93,7 +93,9 @@ export async function readAssistantOutboxIntentAtPath(
   intentPath: string,
 ): Promise<AssistantOutboxIntent | null> {
   try {
-    const parsed = JSON.parse(await readFile(intentPath, 'utf8')) as unknown
+    const parsed = stripLegacyAssistantOutboxIntentFields(
+      JSON.parse(await readFile(intentPath, 'utf8')) as unknown,
+    )
     return assistantOutboxIntentSchema.parse(parsed)
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -153,4 +155,14 @@ export async function quarantineAssistantOutboxIntentFile(input: {
       message: normalizeAssistantDeliveryError(input.error).message,
     })
   } catch {}
+}
+
+function stripLegacyAssistantOutboxIntentFields(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+
+  const record = { ...(value as Record<string, unknown>) }
+  Reflect.deleteProperty(record, 'deliveryStateAuthority')
+  return record
 }

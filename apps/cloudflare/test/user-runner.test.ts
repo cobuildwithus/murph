@@ -105,6 +105,33 @@ describe("HostedUserRunner", () => {
     vi.useRealTimers();
   });
 
+  function createAssistantDeliveryEffect(input: {
+    effectId: string;
+    fingerprint: string;
+  }): HostedAssistantDeliveryEffect {
+    return {
+      effectId: input.effectId,
+      fingerprint: input.fingerprint,
+      kind: "assistant.delivery",
+      payload: {
+        actorId: "actor_123",
+        bindingDeliveryKind: "participant",
+        bindingDeliveryTarget: "chat_123",
+        channel: "telegram",
+        explicitTarget: null,
+        idempotencyKey: `assistant-outbox:${input.effectId}`,
+        identityId: "identity_123",
+        message: "hello from hosted runner",
+        replyToMessageId: null,
+        sessionId: `session_${input.effectId}`,
+        threadId: "thread_123",
+        threadIsDirect: true,
+        transportIdempotent: false,
+        turnId: `turn_${input.effectId}`,
+      },
+    };
+  }
+
   async function seedManagedUserCryptoForTest(
     runner: HostedUserRunner,
     userId: string,
@@ -1646,17 +1673,12 @@ describe("HostedUserRunner", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const sideEffects = [
-      {
+      createAssistantDeliveryEffect({
         effectId: "outbox_retry",
         fingerprint: "dedupe_retry",
-        kind: "assistant.delivery" as const,
-      },
+      }),
     ];
-    const expectedResumeSideEffects = sideEffects.map(({ effectId, fingerprint, kind }) => ({
-      effectId,
-      fingerprint,
-      kind,
-    }));
+    const expectedResumeSideEffects = sideEffects;
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
       assistantDeliveryEffects: sideEffects,
@@ -1743,17 +1765,12 @@ describe("HostedUserRunner", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const sideEffects = [
-      {
+      createAssistantDeliveryEffect({
         effectId: "outbox_retry",
         fingerprint: "dedupe_retry",
-        kind: "assistant.delivery" as const,
-      },
+      }),
     ];
-    const expectedResumeSideEffects = sideEffects.map(({ effectId, fingerprint, kind }) => ({
-      effectId,
-      fingerprint,
-      kind,
-    }));
+    const expectedResumeSideEffects = sideEffects;
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
       assistantDeliveryEffects: sideEffects,

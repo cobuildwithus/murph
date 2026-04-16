@@ -230,121 +230,11 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     expect(retried.intent.status).toBe('retryable')
-    expect(retried.intent.deliveryConfirmationPending).toBe(true)
-    expect(retried.intent.lastError?.code).toBe(
-      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
-    )
-    expect(retried.intent.nextAttemptAt).toBe('2026-04-08T02:22:00.000Z')
-  })
-
-  it('keeps hosted-journal non-idempotent deliveries on reconcile instead of resending', async () => {
-    const { vaultRoot } = await createAssistantVault('assistant-outbox-hosted-journal-')
-    vi.useFakeTimers()
-
-    const seed = await createIntent(vaultRoot, {
-      channel: 'telegram',
-      createdAt: '2026-04-08T02:40:00.000Z',
-      identityId: 'participant-hosted',
-      message: 'hosted journal owns this delivery',
-      sessionId: 'session-hosted-journal',
-      threadId: 'thread-hosted-journal',
-      turnId: 'turn-hosted-journal',
-    })
-    await saveAssistantOutboxIntent(vaultRoot, {
-      ...seed,
-      attemptCount: 2,
-      delivery: createDelivery({
-        idempotencyKey: 'telegram-idem',
-        providerMessageId: 'telegram-provider-pending',
-        sentAt: '2026-04-08T02:41:00.000Z',
-      }),
-      deliveryConfirmationPending: false,
-      deliveryIdempotencyKey: 'telegram-idem',
-      deliveryStateAuthority: 'hosted-journal',
-      deliveryTransportIdempotent: false,
-      lastAttemptAt: '2026-04-08T02:41:00.000Z',
-      lastError: createConfirmationPendingError(),
-      nextAttemptAt: null,
-      status: 'sending',
-      updatedAt: '2026-04-08T02:41:00.000Z',
-    })
-
-    vi.setSystemTime(new Date('2026-04-08T02:55:00.000Z'))
-
-    const retried = await dispatchAssistantOutboxIntent({
-      dispatchHooks: {
-        resolveDeliveredIntent: async () => null,
-      },
-      intentId: seed.intentId,
-      now: new Date('2026-04-08T02:55:00.000Z'),
-      vault: vaultRoot,
-    })
-
-    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
-    expect(retried.intent.status).toBe('retryable')
-    expect(retried.intent.deliveryStateAuthority).toBe('hosted-journal')
     expect(retried.intent.deliveryConfirmationPending).toBe(false)
     expect(retried.intent.lastError?.code).toBe(
       'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     )
-    expect(retried.intent.nextAttemptAt).toBe('2026-04-08T02:57:00.000Z')
-  })
-
-  it('can disable persisted delivery recovery when the caller requires journal-only reconciliation', async () => {
-    const { vaultRoot } = await createAssistantVault('assistant-outbox-hosted-reconcile-')
-
-    const seed = await createIntent(vaultRoot, {
-      channel: 'linq',
-      createdAt: '2026-04-08T02:30:00.000Z',
-      explicitTarget: 'chat_123',
-      message: 'hosted recovery only',
-      sessionId: 'session-hosted-reconcile',
-      turnId: 'turn-hosted-reconcile',
-    })
-    await saveAssistantOutboxIntent(vaultRoot, {
-      ...seed,
-      attemptCount: 1,
-      delivery: createDelivery({
-        idempotencyKey: 'idem-old',
-        providerMessageId: 'provider-old',
-        sentAt: '2026-04-08T02:31:00.000Z',
-        target: 'chat_123',
-        targetKind: 'explicit',
-      }),
-      deliveryConfirmationPending: true,
-      deliveryIdempotencyKey: 'idem-old',
-      deliveryTransportIdempotent: true,
-      lastAttemptAt: '2026-04-08T02:31:00.000Z',
-      lastError: createConfirmationPendingError(),
-      nextAttemptAt: null,
-      status: 'sending',
-      updatedAt: '2026-04-08T02:31:00.000Z',
-    })
-
-    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
-      delivery: createDelivery({
-        idempotencyKey: 'idem-new',
-        providerMessageId: 'provider-new',
-        sentAt: '2026-04-08T02:32:00.000Z',
-        target: 'chat_123',
-        targetKind: 'explicit',
-      }),
-      deliveryDeduplicated: false,
-      deliveryTransportIdempotent: true,
-      outboxIntentId: null,
-      session: undefined,
-    })
-
-    const dispatched = await dispatchAssistantOutboxIntent({
-      allowPersistedDeliveryRecovery: false,
-      intentId: seed.intentId,
-      now: new Date('2026-04-08T02:45:00.000Z'),
-      vault: vaultRoot,
-    })
-
-    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
-    expect(dispatched.intent.status).toBe('sent')
-    expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-new')
+    expect(retried.intent.nextAttemptAt).toBe('2026-04-08T02:22:00.000Z')
   })
 
   it('delivers immediately, reuses sent dedupe hits, and supports queue-only mode', async () => {
@@ -941,7 +831,7 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     expect(ambiguous.intent.status).toBe('retryable')
-    expect(ambiguous.intent.deliveryConfirmationPending).toBe(true)
+    expect(ambiguous.intent.deliveryConfirmationPending).toBe(false)
     expect(ambiguous.intent.lastError?.code).toBe(
       'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     )

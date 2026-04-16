@@ -29,8 +29,31 @@ import {
   summarizeHostedExecutionError,
   summarizeHostedExecutionErrorCode,
 } from "../src/index.ts";
+import type { HostedAssistantDeliveryPayload } from "../src/side-effects.ts";
 
 const ORIGINAL_ENV = { ...process.env };
+
+function createHostedAssistantDeliveryPayload(
+  overrides: Partial<HostedAssistantDeliveryPayload> = {},
+): HostedAssistantDeliveryPayload {
+  return {
+    actorId: "actor_123",
+    bindingDeliveryKind: "participant",
+    bindingDeliveryTarget: "chat_123",
+    channel: "telegram",
+    explicitTarget: null,
+    idempotencyKey: "assistant-outbox:intent_123",
+    identityId: "identity_123",
+    message: "hello from hosted execution",
+    replyToMessageId: null,
+    sessionId: "session_123",
+    threadId: "thread_123",
+    threadIsDirect: true,
+    transportIdempotent: false,
+    turnId: "turn_123",
+    ...overrides,
+  };
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -391,10 +414,12 @@ describe("hosted execution side-effects", () => {
     expect(buildHostedAssistantDeliverySideEffect({
       dedupeKey: "dedupe_123",
       effectId: "intent_123",
+      payload: createHostedAssistantDeliveryPayload(),
     })).toEqual({
       effectId: "intent_123",
       fingerprint: "dedupe_123",
       kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
     });
 
     expect(buildHostedAssistantDeliveryPreparedRecord({
@@ -426,10 +451,12 @@ describe("hosted execution side-effects", () => {
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
       kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
     })).toEqual({
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
       kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
     });
 
     expect(parseHostedExecutionSideEffectRecord({
@@ -561,14 +588,22 @@ describe("hosted execution side-effects", () => {
       effectId: "intent_123",
       fingerprint: "dedupe_123",
       kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
     })).toEqual(buildHostedAssistantDeliverySideEffect({
       dedupeKey: "dedupe_123",
       effectId: "intent_123",
+      payload: createHostedAssistantDeliveryPayload(),
     }));
-    expect(parseHostedAssistantDeliverySideEffects([preparedRecord])).toEqual([{
+    expect(parseHostedAssistantDeliverySideEffects([{
       effectId: "intent_123",
       fingerprint: "dedupe_123",
       kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
+    }])).toEqual([{
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      kind: "assistant.delivery",
+      payload: createHostedAssistantDeliveryPayload(),
     }]);
     expect(parseHostedAssistantDeliveryRecord(preparedRecord)).toEqual({
       attempt: {

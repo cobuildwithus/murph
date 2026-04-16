@@ -178,7 +178,6 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   bindingDelivery: null,
   explicitTarget: null,
   delivery: null,
-  deliveryStateAuthority: 'local',
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,

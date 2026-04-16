@@ -357,11 +357,11 @@ function assertEquivalentDuplicateCommit(
   );
   if (
     !sameStructuredJsonValue(
-      sortHostedAssistantDeliveryReplayIdentitySummary(
-        summarizeHostedAssistantDeliveryReplayIdentities(existing.assistantDeliveryEffects),
+      sortHostedAssistantDeliveryCommitEquivalenceSummary(
+        summarizeHostedAssistantDeliveryCommitEquivalence(existing.assistantDeliveryEffects),
       ),
-      sortHostedAssistantDeliveryReplayIdentitySummary(
-        summarizeHostedAssistantDeliveryReplayIdentities(expectedAssistantDeliveryEffects),
+      sortHostedAssistantDeliveryCommitEquivalenceSummary(
+        summarizeHostedAssistantDeliveryCommitEquivalence(expectedAssistantDeliveryEffects),
       ),
     )
   ) {
@@ -472,10 +472,12 @@ function summarizeHostedAssistantDeliveryEffects(
 ): {
   effectId: string;
   fingerprint: string;
+  payload: HostedAssistantDeliveryPayloadSummary;
 }[] {
   return effects.map((effect) => ({
     effectId: effect.effectId,
     fingerprint: effect.fingerprint,
+    payload: summarizeHostedAssistantDeliveryPayload(effect.payload),
   }));
 }
 
@@ -491,12 +493,26 @@ function summarizeHostedAssistantDeliveryReplayIdentities(
   }));
 }
 
+function summarizeHostedAssistantDeliveryCommitEquivalence(
+  effects: readonly HostedAssistantDeliveryEffect[],
+): {
+  fingerprint: string;
+  payload: HostedAssistantDeliveryPayloadSummary;
+}[] {
+  return effects.map((effect) => ({
+    fingerprint: effect.fingerprint,
+    payload: summarizeHostedAssistantDeliveryPayload(effect.payload),
+  }));
+}
+
 function sortHostedAssistantDeliveryEffectsSummary(input: readonly {
   effectId: string;
   fingerprint: string;
+  payload: HostedAssistantDeliveryPayloadSummary;
 }[]): {
   effectId: string;
   fingerprint: string;
+  payload: HostedAssistantDeliveryPayloadSummary;
 }[] {
   return [...input].sort((left, right) => {
     const effectIdOrder = left.effectId.localeCompare(right.effectId);
@@ -523,6 +539,61 @@ function sortHostedAssistantDeliveryReplayIdentitySummary(input: readonly {
 
     return left.kind.localeCompare(right.kind);
   });
+}
+
+function sortHostedAssistantDeliveryCommitEquivalenceSummary(input: readonly {
+  fingerprint: string;
+  payload: HostedAssistantDeliveryPayloadSummary;
+}[]): {
+  fingerprint: string;
+  payload: HostedAssistantDeliveryPayloadSummary;
+}[] {
+  return [...input].sort((left, right) => {
+    const fingerprintOrder = left.fingerprint.localeCompare(right.fingerprint);
+    if (fingerprintOrder !== 0) {
+      return fingerprintOrder;
+    }
+
+    return JSON.stringify(left.payload).localeCompare(JSON.stringify(right.payload));
+  });
+}
+
+type HostedAssistantDeliveryPayloadSummary = {
+  actorId: string | null;
+  bindingDeliveryKind: HostedAssistantDeliveryEffect["payload"]["bindingDeliveryKind"];
+  bindingDeliveryTarget: string | null;
+  channel: string | null;
+  explicitTarget: string | null;
+  identityId: string | null;
+  idempotencyKey: string;
+  message: string;
+  replyToMessageId: string | null;
+  sessionId: string;
+  threadId: string | null;
+  threadIsDirect: boolean | null;
+  transportIdempotent: boolean;
+  turnId: string;
+};
+
+function summarizeHostedAssistantDeliveryPayload(
+  payload: HostedAssistantDeliveryEffect["payload"],
+): HostedAssistantDeliveryPayloadSummary {
+  return {
+    actorId: payload.actorId,
+    bindingDeliveryKind: payload.bindingDeliveryKind,
+    bindingDeliveryTarget: payload.bindingDeliveryTarget,
+    channel: payload.channel,
+    explicitTarget: payload.explicitTarget,
+    identityId: payload.identityId,
+    idempotencyKey: payload.idempotencyKey,
+    message: payload.message,
+    replyToMessageId: payload.replyToMessageId,
+    sessionId: payload.sessionId,
+    threadId: payload.threadId,
+    threadIsDirect: payload.threadIsDirect,
+    transportIdempotent: payload.transportIdempotent,
+    turnId: payload.turnId,
+  };
 }
 
 function resolveExpectedCommittedBundleRef(
