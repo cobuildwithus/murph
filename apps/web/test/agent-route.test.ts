@@ -227,10 +227,13 @@ describe("hosted device-sync agent and webhook routes", () => {
       clientSecret: "oura-client-secret",
       webhookVerificationToken: "verify-token",
     });
-    preflightProvider.webhookAdmin!.handleWebhookPreflight = async ({ method }) => {
+    let observedUrl: string | null = null;
+    preflightProvider.webhookAdmin!.handleWebhookPreflight = async ({ method, url }) => {
       if (method !== "POST") {
         return null;
       }
+
+      observedUrl = url.toString();
 
       return {
         status: 200,
@@ -253,13 +256,14 @@ describe("hosted device-sync agent and webhook routes", () => {
     );
 
     const response = await webhookRoute.POST(
-      new Request("https://example.test/api/device-sync/webhooks/oura", {
+      new Request("https://example.test/api/device-sync/webhooks/oura?via=preflight", {
         method: "POST",
       }),
       createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(200);
+    expect(observedUrl).toBe("https://example.test/api/device-sync/webhooks/oura?via=preflight");
     expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
     expect(mocks.handleWebhookWithRawBody).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
