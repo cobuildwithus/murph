@@ -89,6 +89,7 @@ export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
   desiredChannels: readonly string[]
   inboxServices?: Pick<InboxServices, 'list'>
   isManagedChannel?: (channel: string) => boolean
+  latestCaptureCursor?: AssistantAutomationCursor | null
   vault: string
 }): Promise<{
   changed: boolean
@@ -96,12 +97,18 @@ export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
 }> {
   const state = await readAssistantAutomationState(input.vault)
   const currentAutoReply = 'autoReply' in state ? state.autoReply : []
+  const hasExplicitLatestCaptureCursor = Object.prototype.hasOwnProperty.call(
+    input,
+    'latestCaptureCursor',
+  )
   const nextReplyCursor = managedAssistantAutoReplyChannelsNeedCursorSeed({
     current: currentAutoReply,
     desiredChannels: input.desiredChannels,
     isManagedChannel: input.isManagedChannel,
   })
-    ? await readLatestPersistedInboxCaptureCursor(
+    ? hasExplicitLatestCaptureCursor
+      ? (input.latestCaptureCursor ?? null)
+      : await readLatestPersistedInboxCaptureCursor(
         input.vault,
         input.inboxServices,
       )
@@ -134,6 +141,7 @@ export async function enableAssistantAutoReplyChannelLocal(input: {
   channel: string
   inboxServices?: Pick<InboxServices, 'list'>
   isManagedChannel?: (channel: string) => boolean
+  latestCaptureCursor?: AssistantAutomationCursor | null
   vault: string
 }): Promise<boolean> {
   const state = await readAssistantAutomationState(input.vault)
@@ -148,6 +156,7 @@ export async function enableAssistantAutoReplyChannelLocal(input: {
     ]),
     inboxServices: input.inboxServices,
     isManagedChannel,
+    latestCaptureCursor: input.latestCaptureCursor,
     vault: input.vault,
   })
 

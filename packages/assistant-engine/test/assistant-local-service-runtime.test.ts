@@ -89,6 +89,56 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(stopTyping.mock.calls.length, 1)
 })
 
+test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
+  const hostedDefaultTarget = {
+    adapter: 'openai-compatible',
+    apiKeyEnv: 'HOSTED_OPENAI_API_KEY',
+    endpoint: 'https://gateway.example.com/v1',
+    headers: null,
+    model: 'gpt-4.1-mini',
+    presetId: null,
+    providerName: 'Hosted Gateway',
+    reasoningEffort: null,
+    webSearch: null,
+  } as const
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    executionContext: {
+      hosted: {
+        defaultTarget: hostedDefaultTarget,
+        memberId: 'member-123',
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Use the hosted provider defaults.',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(mocks.resolveAssistantExecutionDefaultTarget.mock.calls.length, 1)
+  assert.deepEqual(
+    mocks.resolveAssistantExecutionDefaultTarget.mock.calls[0]?.[0],
+    {
+      executionContext: {
+        hosted: {
+          defaultTarget: hostedDefaultTarget,
+          memberId: 'member-123',
+          userEnvKeys: [],
+        },
+      },
+      fallbackTarget: {
+        adapter: 'openai-compatible',
+        model: 'gpt-5.4',
+      },
+    },
+  )
+  assert.deepEqual(
+    mocks.resolveAssistantMessageSession.mock.calls[0]?.[0]?.boundaryDefaultTarget,
+    hostedDefaultTarget,
+  )
+})
+
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
   const terminalError = new Error('provider failed hard')
   const recoveredSession = createAssistantSession({
@@ -794,6 +844,9 @@ async function loadLocalServiceModule(input?: {
       message: error.message,
     })),
     normalizeAssistantExecutionContext: vi.fn((value) => value ?? null),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
+    ),
     persistFailedAssistantPromptAttempt: vi.fn(
       async (
         _input: Parameters<
@@ -959,6 +1012,8 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/execution-context.js', () => ({
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
   }))
   vi.doMock('../src/assistant/provider-turn-recovery.js', () => ({
     extractRecoveredAssistantSession: mocks.extractRecoveredAssistantSession,

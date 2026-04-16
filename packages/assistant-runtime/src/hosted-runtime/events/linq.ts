@@ -23,9 +23,13 @@ export async function ingestHostedLinqMessage(
     downloadDriver: createHostedLinqAttachmentDownloadDriver(),
     event,
   });
+  const hostedCapture = {
+    ...capture,
+    accountId: dispatch.event.phoneLookupKey,
+  };
 
   await withHostedInboxPipeline(vaultRoot, async (pipeline) => {
-    await pipeline.processCapture(capture);
+    await pipeline.processCapture(hostedCapture);
   });
 }
 

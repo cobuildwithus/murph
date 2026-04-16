@@ -5,6 +5,7 @@ import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/opera
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
+import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import {
@@ -86,6 +87,10 @@ export async function sendAssistantNotificationLocal(
   input: AssistantNotificationInput,
 ): Promise<AssistantNotificationResult> {
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
+  const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
+    executionContext,
+    fallbackTarget: createDefaultLocalAssistantModelTarget(),
+  })
   const defaults = await resolveAssistantOperatorDefaults()
 
   return withAssistantTurnLock({
@@ -94,7 +99,7 @@ export async function sendAssistantNotificationLocal(
     run: async () => {
       const messageInput = buildAssistantNotificationMessageInput(input)
       const resolved = await resolveAssistantSessionForMessage({
-        boundaryDefaultTarget: createDefaultLocalAssistantModelTarget(),
+        boundaryDefaultTarget,
         defaults,
         message: messageInput,
       })

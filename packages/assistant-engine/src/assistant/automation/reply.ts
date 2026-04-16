@@ -954,10 +954,32 @@ function classifyAssistantAutoReplyFailure(input: {
     })
   }
 
+  if (shouldAssistantAutoReplyHoldCursorOnFailure(input.error)) {
+    return createFailedGroupOutcome({
+      advanceCursor: false,
+      error: input.error,
+      stopScanning: true,
+    })
+  }
+
   return createFailedGroupOutcome({
     advanceCursor: true,
     error: input.error,
   })
+}
+
+function shouldAssistantAutoReplyHoldCursorOnFailure(error: unknown): boolean {
+  const code =
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : null
+
+  return code === 'ASSISTANT_CODEX_NOT_FOUND' ||
+    code === 'HOSTED_ASSISTANT_CONFIG_INVALID' ||
+    code === 'HOSTED_ASSISTANT_CONFIG_REQUIRED'
 }
 
 function classifyAssistantAutoReplyGroupArtifactStatus(
