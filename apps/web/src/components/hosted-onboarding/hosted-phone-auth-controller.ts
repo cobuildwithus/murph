@@ -40,7 +40,6 @@ import {
   toErrorMessage,
 } from "./hosted-phone-auth-support";
 import {
-  getHostedPhoneCountryNotice,
   HOSTED_PHONE_COUNTRY_OPTIONS,
 } from "./hosted-phone-country-options";
 import type {
@@ -94,10 +93,6 @@ export function useHostedPhoneAuthController({
         (option) => option.code === phoneCountryCode,
       ) ?? HOSTED_PHONE_COUNTRY_OPTIONS[0],
     [phoneCountryCode],
-  );
-  const phoneFieldDescription = useMemo(
-    () => getHostedPhoneCountryNotice(selectedPhoneCountry.code),
-    [selectedPhoneCountry.code],
   );
   const normalizedPhoneNumber = useMemo(
     () =>
@@ -169,7 +164,7 @@ export function useHostedPhoneAuthController({
     code,
     disabled: flowDisabled,
     intent,
-    phoneFieldDescription,
+    phoneFieldDescription: null,
     phoneFieldLabel: null,
     pendingAction,
     phoneCountryOptions: HOSTED_PHONE_COUNTRY_OPTIONS,
