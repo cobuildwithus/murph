@@ -109,7 +109,6 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
-
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "202604141730_hosted_member_identity_optional_phone",
@@ -148,6 +147,9 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
     expect(baselineMigrationSql).toContain('"result_json" JSONB');
     expect(baselineMigrationSql).toContain('"dispatch_state" TEXT NOT NULL DEFAULT \'queued\'');
+    expect(baselineMigrationSql).toContain(
+      'CREATE INDEX "execution_outbox_next_attempt_at_created_at_idx" ON "execution_outbox"("next_attempt_at", "created_at")',
+    );
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
     expect(baselineMigrationSql).not.toContain('"phone_number" TEXT');
     expect(baselineMigrationSql).not.toContain('"normalized_phone_number" TEXT');
@@ -157,6 +159,9 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).not.toContain('"dispatch_payload_json" JSONB');
     expect(baselineMigrationSql).not.toContain('"linq_chat_id" TEXT');
     expect(baselineMigrationSql).not.toContain('"revnet_amount_paid" INTEGER');
+    expect(baselineMigrationSql).not.toContain('CREATE TYPE "ExecutionOutboxStatus"');
+    expect(baselineMigrationSql).not.toContain('"status" "ExecutionOutboxStatus"');
+    expect(baselineMigrationSql).not.toContain('"execution_outbox_status_next_attempt_at_created_at_idx"');
   });
 
   it("keeps hosted-member models on the reviewed owner-table set", () => {

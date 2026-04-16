@@ -72,14 +72,9 @@ export function buildHostedExecutionDispatchRef(
 export function serializeHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
   options: {
-    stagedPayloadId?: string | null;
     storage?: HostedExecutionOutboxPayloadStorage | "auto";
   } = {},
 ): Prisma.InputJsonObject {
-  if (options.stagedPayloadId !== undefined && options.stagedPayloadId !== null) {
-    throw new TypeError("Hosted execution outbox payloads no longer support staged payload refs.");
-  }
-
   if (options.storage && options.storage !== "auto" && options.storage !== "inline") {
     throw new TypeError("Hosted execution outbox payloads must use inline storage.");
   }
@@ -155,24 +150,6 @@ export function readHostedExecutionOutboxPayload(
   } catch {
     return null;
   }
-}
-
-export function hasHostedExecutionReferenceOutboxPayloadStorage(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): boolean {
-  return readHostedExecutionText(toHostedExecutionObject(payloadJson).storage) === "reference";
-}
-
-export function resolveHostedExecutionOutboxPayloadEventId(
-  payload: HostedExecutionOutboxPayload,
-): string {
-  return payload.dispatch.eventId;
-}
-
-export function resolveHostedExecutionOutboxPayloadUserId(
-  payload: HostedExecutionOutboxPayload,
-): string {
-  return payload.dispatch.event.userId;
 }
 
 export function resolveHostedExecutionOutboxPayloadStorage(

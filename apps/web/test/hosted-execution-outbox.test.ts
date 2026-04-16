@@ -9,6 +9,7 @@ import type {
 import {
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
+  summarizeHostedExecutionOutboxPayload,
 } from "@/src/lib/hosted-execution/outbox-payload";
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
 import {
   drainHostedExecutionOutbox,
   enqueueHostedExecutionOutbox,
+  pruneHostedExecutionOutbox,
 } from "@/src/lib/hosted-execution/outbox";
 
 describe("hosted execution outbox", () => {
@@ -71,6 +73,35 @@ describe("hosted execution outbox", () => {
     },
   );
 
+  it("summarizes settled accepted rows once no further web retry work remains", async () => {
+    const dispatch = createGatewaySendDispatch();
+    const initialPayload = serializeHostedExecutionOutboxPayload(dispatch, {
+      storage: "inline",
+    }) as Prisma.JsonValue;
+    const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
+      payloadJson: initialPayload,
+    }));
+    mocks.dispatchHostedExecutionStatus.mockResolvedValue(
+      createDispatchResult("queued"),
+    );
+
+    const [record] = await drainHostedExecutionOutbox({
+      now: "2026-03-28T11:00:00.000Z",
+      prisma,
+    });
+
+    expect(record?.dispatchState).toBe("queued");
+    expect(record?.lastError).toBeNull();
+    expect(record?.nextAttemptAt).toBeNull();
+    expect(record?.payloadJson).toEqual(
+      summarizeHostedExecutionOutboxPayload(
+        readHostedExecutionOutboxPayload(initialPayload) as NonNullable<
+          ReturnType<typeof readHostedExecutionOutboxPayload>
+        >,
+      ),
+    );
+  });
+
   it("fails closed when a legacy reference payload survives into the canonical outbox", async () => {
     const dispatch = createGatewaySendDispatch();
     const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
@@ -92,7 +123,7 @@ describe("hosted execution outbox", () => {
     });
 
     expect(record?.dispatchState).toBe("poisoned");
-    expect(record?.lastError).toContain("unsupported reference storage");
+    expect(record?.lastError).toContain("missing a dispatch payload");
     expect(record?.nextAttemptAt).toBeNull();
     expect(record?.payloadJson).toEqual({
       dispatchRef: {
@@ -105,6 +136,30 @@ describe("hosted execution outbox", () => {
       storage: "reference",
     });
     expect(mocks.dispatchHostedExecutionStatus).not.toHaveBeenCalled();
+  });
+
+  it("prunes accepted rows with no remaining web-owned retry work", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 2 }));
+
+    const deleted = await pruneHostedExecutionOutbox({
+      now: "2026-04-27T11:00:00.000Z",
+      prisma: {
+        executionOutbox: {
+          deleteMany,
+        },
+      } as unknown as PrismaClient,
+    });
+
+    expect(deleted).toBe(2);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        claimToken: null,
+        nextAttemptAt: null,
+        updatedAt: {
+          lt: new Date("2026-03-28T11:00:00.000Z"),
+        },
+      },
+    });
   });
 });
 

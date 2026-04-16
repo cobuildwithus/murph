@@ -11,7 +11,7 @@ and the canonical dispatch lifecycle around `execution_outbox`.
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs one
 hosted job, and commits the next encrypted workspace snapshot. It may hold
-opaque encrypted runtime blobs and execution-time mirrors, but it is not the
+opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
 ## Core responsibilities
@@ -202,7 +202,7 @@ user tuple is unchanged.
 - Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate
   `DEVICE_SYNC_ENCRYPTION_KEY`.
 - Durable hosted device-sync authority now lives on the web/device-sync side.
-  Cloudflare may receive execution-time mirrors only; token rotation or
+  Cloudflare consumes explicit execution-time snapshots and signed writebacks only; token rotation or
   revocation must follow the web-owned control-plane path instead of relying on
   worker-owned runtime state.
 
