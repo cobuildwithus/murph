@@ -37,11 +37,11 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedInstallScriptUrl: () => "https://www.withmurph.ai/install.sh",
 }));
 
-vi.mock("../app/lp/auth-controls", () => ({
+vi.mock("../app/auth-controls", () => ({
   LandingAuthActions: mocks.LandingAuthActions,
 }));
 
-test("HomePage now renders the /lp landing page at the root route", async () => {
+test("HomePage renders the canonical landing page at the root route", async () => {
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,

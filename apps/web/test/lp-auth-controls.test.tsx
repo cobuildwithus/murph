@@ -8,7 +8,7 @@ import {
 } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { LandingAuthActions } from "@/app/lp/auth-controls";
+import { LandingAuthActions } from "@/app/auth-controls";
 
 import { renderClientComponent } from "./render-client-component";
 
