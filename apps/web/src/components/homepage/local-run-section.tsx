@@ -1,0 +1,46 @@
+export function LocalRunSection({
+  installCommandUrl,
+}: {
+  installCommandUrl: string;
+}) {
+  return (
+    <section className="bg-[#ede3d0] px-6 pb-16 pt-10 sm:px-10 sm:pb-20 sm:pt-12 lg:px-16 lg:pb-24 lg:pt-14">
+      <div className="mx-auto max-w-[1080px]">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+          Run Murph Locally
+        </span>
+        <h2 className="mt-4 max-w-[16ch] font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
+          Up and running in one command.
+        </h2>
+
+        <div className="mt-10 overflow-hidden rounded-[1.75rem] border border-[#f5f0e8]/10 bg-[#1f1a16] shadow-[0_20px_60px_rgba(42,37,32,0.18)]">
+          <div className="flex items-center gap-2 border-b border-white/8 px-5 py-4">
+            <span className="size-2.5 rounded-full bg-[#d27d6a]" />
+            <span className="size-2.5 rounded-full bg-[#d4b87a]" />
+            <span className="size-2.5 rounded-full bg-[#7a8c6e]" />
+            <span className="ml-4 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f5f0e8]/35">
+              terminal
+            </span>
+          </div>
+
+          <div className="space-y-5 px-5 py-6 font-mono text-[0.8125rem] leading-[1.85] sm:px-7 sm:py-7">
+            <div>
+              <p className="text-[#f5f0e8]/35"># Install Murph and launch setup</p>
+              <p className="mt-2 break-all text-[#f5f0e8]">
+                <span className="text-[#d4b87a]">$</span> curl -fsSL{" "}
+                {installCommandUrl} | bash
+              </p>
+            </div>
+
+            <div className="border-t border-white/8 pt-5">
+              <p className="text-[#f5f0e8]/35"># Start chatting</p>
+              <p className="mt-2 text-[#f5f0e8]">
+                <span className="text-[#d4b87a]">$</span> murph chat
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
