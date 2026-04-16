@@ -39,10 +39,13 @@ import {
   runHostedPrivyFinalizationAttempt,
   toErrorMessage,
 } from "./hosted-phone-auth-support";
+import {
+  getHostedPhoneCountryNotice,
+  HOSTED_PHONE_COUNTRY_OPTIONS,
+} from "./hosted-phone-country-options";
 import type {
   HostedAuthenticatedPhoneAuthView,
   HostedPhoneAuthIntent,
-  HostedPhoneCountryOption,
   HostedPhoneLinkPayload,
   HostedPhoneVerificationAttempt,
 } from "./hosted-phone-auth-types";
@@ -55,21 +58,6 @@ interface HostedPhoneAuthControllerInput {
   onSignOut?: () => Promise<void> | void;
   suppressAuthenticatedSessionIssue?: boolean;
 }
-
-const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
-  {
-    code: "US",
-    dialCode: "+1",
-    label: "United States",
-    placeholder: "(415) 555-2671",
-  },
-  {
-    code: "CA",
-    dialCode: "+1",
-    label: "Canada",
-    placeholder: "(416) 555-0123",
-  },
-];
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
@@ -106,6 +94,10 @@ export function useHostedPhoneAuthController({
         (option) => option.code === phoneCountryCode,
       ) ?? HOSTED_PHONE_COUNTRY_OPTIONS[0],
     [phoneCountryCode],
+  );
+  const phoneFieldDescription = useMemo(
+    () => getHostedPhoneCountryNotice(selectedPhoneCountry.code),
+    [selectedPhoneCountry.code],
   );
   const normalizedPhoneNumber = useMemo(
     () =>
@@ -177,7 +169,7 @@ export function useHostedPhoneAuthController({
     code,
     disabled: flowDisabled,
     intent,
-    phoneFieldDescription: null,
+    phoneFieldDescription,
     phoneFieldLabel: null,
     pendingAction,
     phoneCountryOptions: HOSTED_PHONE_COUNTRY_OPTIONS,
