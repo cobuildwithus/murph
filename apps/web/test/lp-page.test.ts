@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     (props: {
       authenticated: boolean;
       context: "nav" | "hero" | "footer";
+      showSignIn?: boolean;
       signupLabel: string;
     }) =>
       createElement(
@@ -61,6 +62,7 @@ test("LandingPage threads the server-side auth snapshot into the nav, hero, and 
     {
       authenticated: false,
       context: "hero",
+      showSignIn: false,
       signupLabel: "See what works for your body",
     },
     undefined,
