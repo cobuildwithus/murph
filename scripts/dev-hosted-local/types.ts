@@ -1,5 +1,6 @@
 export interface HostedLocalDevConfig {
   skipPrismaMigrate: boolean;
+  skipWeb: boolean;
   skipVercelPull: boolean;
   webHost: string;
   webPort: number;
