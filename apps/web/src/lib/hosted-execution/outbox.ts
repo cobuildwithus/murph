@@ -14,13 +14,12 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   dispatchHostedExecutionStatus,
-  dispatchHostedExecutionStoredReferenceStatus,
 } from "./dispatch";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import {
   areHostedExecutionOutboxPayloadsEquivalent,
   buildHostedExecutionDispatchRef,
-  readHostedExecutionLegacyReferenceOutboxPayload,
+  hasHostedExecutionReferenceOutboxPayloadStorage,
   type HostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
@@ -270,22 +269,11 @@ async function processHostedExecutionOutboxRecord(
   nowIso: string,
 ): Promise<ExecutionOutbox> {
   const payload = readHostedExecutionOutboxPayload(record.payloadJson);
-  const legacyReferencePayload = readHostedExecutionLegacyReferenceOutboxPayload(record.payloadJson);
   let persistedPayloadJson = record.payloadJson as Prisma.InputJsonValue;
 
   try {
-    if (legacyReferencePayload) {
-      const dispatchResult = await dispatchHostedExecutionStoredReferenceStatus(legacyReferencePayload);
-      const outcome = resolveHostedExecutionOutboxAttemptOutcome(dispatchResult);
-      const nextAttemptAt = outcome.retryable
-        ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
-        : null;
-      return finalizeHostedExecutionOutboxAttempt(prisma, record, {
-        lastError: outcome.lastError,
-        nextAttemptAt,
-        payloadJson: persistedPayloadJson,
-        state: outcome.state,
-      });
+    if (hasHostedExecutionReferenceOutboxPayloadStorage(record.payloadJson)) {
+      throw createHostedExecutionReferencePayloadUnsupportedError(record.eventId);
     }
 
     if (!payload) {
@@ -317,6 +305,9 @@ async function processHostedExecutionOutboxRecord(
     const nextAttemptAt = permanentPayloadFailure
       ? null
       : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount));
+    const nextState = permanentPayloadFailure
+      ? "poisoned"
+      : readExecutionLifecycleState(record.dispatchState);
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       lastError: formattedError,
       nextAttemptAt,
@@ -325,9 +316,9 @@ async function processHostedExecutionOutboxRecord(
         nextAttemptAt,
         payload,
         payloadJson: persistedPayloadJson,
-        state: readExecutionLifecycleState(record.dispatchState),
+        state: nextState,
       }),
-      state: readExecutionLifecycleState(record.dispatchState),
+      state: nextState,
     });
     return nextRecord;
   }
@@ -555,6 +546,24 @@ function createHostedExecutionOutboxPayloadError(eventId: string): Error & {
     retryable: false;
   };
   error.code = "HOSTED_EXECUTION_OUTBOX_PAYLOAD_MISSING";
+  error.permanent = true;
+  error.retryable = false;
+  return error;
+}
+
+function createHostedExecutionReferencePayloadUnsupportedError(eventId: string): Error & {
+  code: string;
+  permanent: true;
+  retryable: false;
+} {
+  const error = new Error(
+    `Hosted execution outbox record ${eventId} uses unsupported reference storage.`,
+  ) as Error & {
+    code: string;
+    permanent: true;
+    retryable: false;
+  };
+  error.code = "HOSTED_EXECUTION_OUTBOX_REFERENCE_PAYLOAD_UNSUPPORTED";
   error.permanent = true;
   error.retryable = false;
   return error;

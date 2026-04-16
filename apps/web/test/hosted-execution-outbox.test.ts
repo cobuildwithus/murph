@@ -13,12 +13,10 @@ import {
 
 const mocks = vi.hoisted(() => ({
   dispatchHostedExecutionStatus: vi.fn(),
-  dispatchHostedExecutionStoredReferenceStatus: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
   dispatchHostedExecutionStatus: mocks.dispatchHostedExecutionStatus,
-  dispatchHostedExecutionStoredReferenceStatus: mocks.dispatchHostedExecutionStoredReferenceStatus,
 }));
 
 import {
@@ -73,7 +71,7 @@ describe("hosted execution outbox", () => {
     },
   );
 
-  it("dispatches a legacy reference payload row through the compatibility worker path", async () => {
+  it("fails closed when a legacy reference payload survives into the canonical outbox", async () => {
     const dispatch = createGatewaySendDispatch();
     const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
       payloadJson: {
@@ -87,67 +85,15 @@ describe("hosted execution outbox", () => {
         storage: "reference",
       },
     }));
-    mocks.dispatchHostedExecutionStoredReferenceStatus.mockResolvedValue(
-      createDispatchResult("completed", { eventId: dispatch.eventId }),
-    );
 
     const [record] = await drainHostedExecutionOutbox({
       now: "2026-03-28T11:00:00.000Z",
       prisma,
     });
 
-    expect(mocks.dispatchHostedExecutionStoredReferenceStatus).toHaveBeenCalledWith({
-      dispatchRef: {
-        eventId: dispatch.eventId,
-        eventKind: dispatch.event.kind,
-        occurredAt: dispatch.occurredAt,
-        userId: dispatch.event.userId,
-      },
-      stagedPayloadId: `staged/${dispatch.eventId}`,
-      storage: "reference",
-    });
-    expect(record?.dispatchState).toBe("completed");
-    expect(record?.lastError).toBeNull();
+    expect(record?.dispatchState).toBe("poisoned");
+    expect(record?.lastError).toContain("unsupported reference storage");
     expect(record?.nextAttemptAt).toBeNull();
-    expect(record?.payloadJson).toEqual({
-      dispatchRef: {
-        eventId: dispatch.eventId,
-        eventKind: dispatch.event.kind,
-        occurredAt: dispatch.occurredAt,
-        userId: dispatch.event.userId,
-      },
-      stagedPayloadId: `staged/${dispatch.eventId}`,
-      storage: "reference",
-    });
-    expect(mocks.dispatchHostedExecutionStatus).not.toHaveBeenCalled();
-  });
-
-  it("keeps legacy reference payload rows retryable when the compatibility worker call fails", async () => {
-    const dispatch = createGatewaySendDispatch();
-    const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
-      payloadJson: {
-        dispatchRef: {
-          eventId: dispatch.eventId,
-          eventKind: dispatch.event.kind,
-          occurredAt: dispatch.occurredAt,
-          userId: dispatch.event.userId,
-        },
-        stagedPayloadId: `staged/${dispatch.eventId}`,
-        storage: "reference",
-      },
-    }));
-    mocks.dispatchHostedExecutionStoredReferenceStatus.mockRejectedValue(
-      new Error("compat route unavailable"),
-    );
-
-    const [record] = await drainHostedExecutionOutbox({
-      now: "2026-03-28T11:00:00.000Z",
-      prisma,
-    });
-
-    expect(record?.dispatchState).toBe("queued");
-    expect(record?.lastError).toContain("compat route unavailable");
-    expect(record?.nextAttemptAt?.toISOString()).toBe("2026-03-28T11:00:05.000Z");
     expect(record?.payloadJson).toEqual({
       dispatchRef: {
         eventId: dispatch.eventId,

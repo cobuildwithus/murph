@@ -27,12 +27,6 @@ export interface HostedExecutionInlineOutboxPayload {
   storage: "inline";
 }
 
-export interface HostedExecutionLegacyReferenceOutboxPayload {
-  dispatchRef: HostedExecutionDispatchRef;
-  stagedPayloadId: string;
-  storage: "reference";
-}
-
 export type HostedExecutionOutboxPayload = HostedExecutionInlineOutboxPayload;
 
 interface HostedExecutionPrunedInlineOutboxPayload {
@@ -55,11 +49,6 @@ const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
 ]);
 const HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
   "dispatch",
-  "storage",
-]);
-const HOSTED_EXECUTION_LEGACY_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
-  "dispatchRef",
-  "stagedPayloadId",
   "storage",
 ]);
 const HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
@@ -140,10 +129,8 @@ export function readHostedExecutionDispatchRef(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
 ): HostedExecutionDispatchRef | null {
   const inlinePayload = readHostedExecutionOutboxPayload(payloadJson);
-  const legacyReferencePayload = readHostedExecutionLegacyReferenceOutboxPayload(payloadJson);
 
   return readHostedExecutionPrunedInlineOutboxPayload(payloadJson)?.dispatchRef
-    ?? legacyReferencePayload?.dispatchRef
     ?? (inlinePayload ? buildHostedExecutionDispatchRef(inlinePayload.dispatch) : null);
 }
 
@@ -170,30 +157,10 @@ export function readHostedExecutionOutboxPayload(
   }
 }
 
-export function readHostedExecutionLegacyReferenceOutboxPayload(
+export function hasHostedExecutionReferenceOutboxPayloadStorage(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): HostedExecutionLegacyReferenceOutboxPayload | null {
-  const record = toHostedExecutionObject(payloadJson);
-
-  if (
-    readHostedExecutionText(record.storage) !== "reference"
-    || !hasOnlyHostedExecutionKeys(record, HOSTED_EXECUTION_LEGACY_REFERENCE_OUTBOX_PAYLOAD_KEYS)
-  ) {
-    return null;
-  }
-
-  const dispatchRef = readHostedExecutionInlineDispatchRef(record.dispatchRef);
-  const stagedPayloadId = readHostedExecutionText(record.stagedPayloadId);
-
-  if (!dispatchRef || !stagedPayloadId) {
-    return null;
-  }
-
-  return {
-    dispatchRef,
-    stagedPayloadId,
-    storage: "reference",
-  };
+): boolean {
+  return readHostedExecutionText(toHostedExecutionObject(payloadJson).storage) === "reference";
 }
 
 export function resolveHostedExecutionOutboxPayloadEventId(
