@@ -21,6 +21,8 @@ import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
   ensureHostedAssistantOperatorDefaults,
+  isHostedAssistantProfileReady,
+  resolveActiveHostedAssistantProfile,
   resolveHostedAssistantProviderConfig,
   resolveHostedAssistantOperatorDefaultsState,
 } from "@murphai/operator-config/hosted-assistant-config";
@@ -51,7 +53,13 @@ type HostedAssistantRuntimeState = Pick<
   | "emailAutoReplyEnabled"
   | "linqAutoReplyEnabled"
   | "telegramAutoReplyEnabled"
->;
+> & {
+  assistantActiveProfileId: string | null;
+  assistantActiveProfileManagedBy: "member" | "platform" | null;
+  assistantActiveProfileReady: boolean;
+  assistantConfigInvalid: boolean;
+  assistantConfigPresent: boolean;
+};
 
 type HostedAssistantAutoReplyChannelState = Pick<
   HostedBootstrapResult,
@@ -136,6 +144,30 @@ async function bootstrapHostedAssistantRuntimeState(
     allowMissing: true,
     env: runtimeEnv,
   });
+  const assistantConfigStatus = normalizeHostedAssistantBootstrapStatus(assistantBootstrap)
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      assistantConfigStatus,
+      assistantConfigured: assistantBootstrap.configured,
+      assistantProvider: assistantBootstrap.provider,
+      assistantSeeded: assistantBootstrap.seeded,
+      bootstrapSource: assistantBootstrap.source,
+      hostedAssistantModelConfigured: typeof runtimeEnv.HOSTED_ASSISTANT_MODEL === "string"
+        && runtimeEnv.HOSTED_ASSISTANT_MODEL.length > 0,
+      hostedAssistantProviderConfigured: typeof runtimeEnv.HOSTED_ASSISTANT_PROVIDER === "string"
+        && runtimeEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
+      linqApiTokenConfigured: typeof runtimeEnv.LINQ_API_TOKEN === "string"
+        && runtimeEnv.LINQ_API_TOKEN.length > 0,
+      linqWebhookSecretConfigured: typeof runtimeEnv.LINQ_WEBHOOK_SECRET === "string"
+        && runtimeEnv.LINQ_WEBHOOK_SECRET.length > 0,
+    },
+    dispatch,
+    message: "Hosted assistant bootstrap evaluated.",
+    phase: "dispatch.running",
+  });
+
   const reconciledChannelCapabilities = options.enableAssistantChannelReconciliation
     ? await reconcileHostedAssistantChannelState(
         vaultRoot,
@@ -154,7 +186,12 @@ async function bootstrapHostedAssistantRuntimeState(
       );
 
   return {
-    assistantConfigStatus: normalizeHostedAssistantBootstrapStatus(assistantBootstrap),
+    assistantActiveProfileId: null,
+    assistantActiveProfileManagedBy: null,
+    assistantActiveProfileReady: assistantBootstrap.configured,
+    assistantConfigInvalid: assistantBootstrap.source === "invalid",
+    assistantConfigPresent: assistantBootstrap.source !== "missing",
+    assistantConfigStatus,
     assistantConfigured: assistantBootstrap.configured,
     assistantProvider: assistantBootstrap.provider,
     assistantSeeded: assistantBootstrap.seeded,
@@ -229,12 +266,20 @@ async function ensureHostedAssistantAutoReplyChannelForDispatch(
 
 export async function readHostedAssistantRuntimeState(): Promise<Pick<
   HostedAssistantRuntimeState,
-  "assistantConfigStatus" | "assistantConfigured" | "assistantProvider"
+  | "assistantActiveProfileId"
+  | "assistantActiveProfileManagedBy"
+  | "assistantActiveProfileReady"
+  | "assistantConfigInvalid"
+  | "assistantConfigPresent"
+  | "assistantConfigStatus"
+  | "assistantConfigured"
+  | "assistantProvider"
 >> {
   const operatorConfig = await readOperatorConfig();
   const hostedAssistantConfig = operatorConfig?.hostedAssistant
     ?? (await resolveHostedAssistantConfig());
   const hostedAssistantState = resolveHostedAssistantOperatorDefaultsState(hostedAssistantConfig);
+  const activeProfile = resolveActiveHostedAssistantProfile(hostedAssistantConfig);
   const assistantConfigStatus = operatorConfig?.hostedAssistantInvalid === true
     ? "invalid"
     : hostedAssistantConfig === null
@@ -244,6 +289,11 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
         : "unready";
 
   return {
+    assistantActiveProfileId: activeProfile?.id ?? null,
+    assistantActiveProfileManagedBy: activeProfile?.managedBy ?? null,
+    assistantActiveProfileReady: isHostedAssistantProfileReady(activeProfile),
+    assistantConfigInvalid: operatorConfig?.hostedAssistantInvalid === true,
+    assistantConfigPresent: hostedAssistantConfig !== null,
     assistantConfigStatus,
     assistantConfigured: hostedAssistantState.configured,
     assistantProvider: hostedAssistantState.provider,

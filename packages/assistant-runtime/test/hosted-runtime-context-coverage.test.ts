@@ -253,6 +253,11 @@ describe("hosted runtime context coverage", () => {
       );
 
       assert.deepEqual(result, {
+        assistantActiveProfileId: null,
+        assistantActiveProfileManagedBy: null,
+        assistantActiveProfileReady: false,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: true,
         assistantConfigStatus: "unready",
         assistantConfigured: false,
         assistantProvider: null,
@@ -288,6 +293,11 @@ describe("hosted runtime context coverage", () => {
       provider: null,
     });
     await expect(readHostedAssistantRuntimeState()).resolves.toEqual({
+      assistantActiveProfileId: null,
+      assistantActiveProfileManagedBy: null,
+      assistantActiveProfileReady: false,
+      assistantConfigInvalid: true,
+      assistantConfigPresent: true,
       assistantConfigStatus: "invalid",
       assistantConfigured: false,
       assistantProvider: null,
@@ -300,6 +310,11 @@ describe("hosted runtime context coverage", () => {
       provider: null,
     });
     await expect(readHostedAssistantRuntimeState()).resolves.toEqual({
+      assistantActiveProfileId: null,
+      assistantActiveProfileManagedBy: null,
+      assistantActiveProfileReady: false,
+      assistantConfigInvalid: false,
+      assistantConfigPresent: false,
       assistantConfigStatus: "missing",
       assistantConfigured: false,
       assistantProvider: null,
@@ -315,6 +330,11 @@ describe("hosted runtime context coverage", () => {
       provider: "openai-compatible",
     });
     await expect(readHostedAssistantRuntimeState()).resolves.toEqual({
+      assistantActiveProfileId: null,
+      assistantActiveProfileManagedBy: null,
+      assistantActiveProfileReady: false,
+      assistantConfigInvalid: false,
+      assistantConfigPresent: true,
       assistantConfigStatus: "unready",
       assistantConfigured: false,
       assistantProvider: "openai-compatible",
@@ -330,6 +350,11 @@ describe("hosted runtime context coverage", () => {
       provider: "openai-compatible",
     });
     await expect(readHostedAssistantRuntimeState()).resolves.toEqual({
+      assistantActiveProfileId: null,
+      assistantActiveProfileManagedBy: null,
+      assistantActiveProfileReady: false,
+      assistantConfigInvalid: false,
+      assistantConfigPresent: true,
       assistantConfigStatus: "saved",
       assistantConfigured: true,
       assistantProvider: "openai-compatible",
