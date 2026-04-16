@@ -83,6 +83,7 @@ describe("HostedUserRunner", () => {
     teeAutomationRecipientKeyId: TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
     teeAutomationRecipientPublicKey: TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
     retryDelayMs: 10_000,
+    runnerReadyTimeoutMs: 20_000,
     runnerTimeoutMs: 60_000,
     vercelOidcValidation: createHostedExecutionVercelOidcValidationEnvironment({
       environment: "production",

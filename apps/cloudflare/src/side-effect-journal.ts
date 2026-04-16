@@ -36,12 +36,12 @@ interface HostedAssistantDeliveryJournalContext {
 export interface HostedAssistantDeliveryJournalStore {
   deletePrepared(input: {
     effectId: string;
-    fingerprint: string;
+    fingerprint?: string | null;
     userId: string;
   }): Promise<boolean>;
   read(input: {
     effectId: string;
-    fingerprint: string;
+    fingerprint?: string | null;
     userId: string;
   }): Promise<HostedAssistantDeliveryRecord | null>;
   write(input: {
@@ -175,14 +175,17 @@ async function writeRecordAtKey(
 function assertAssistantDeliveryQueryMatchesRecord(
   query: {
     effectId: string;
-    fingerprint: string;
+    fingerprint?: string | null;
   },
   record: HostedAssistantDeliveryRecord,
 ): void {
-  if (
-    record.effectId === query.effectId
-    && record.fingerprint === query.fingerprint
-  ) {
+  if (record.effectId !== query.effectId) {
+    throw new HostedAssistantDeliveryConflictError(
+      `Hosted assistant delivery ${query.effectId} does not match the stored identity.`,
+    );
+  }
+
+  if (!query.fingerprint || record.fingerprint === query.fingerprint) {
     return;
   }
 

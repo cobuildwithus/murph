@@ -13,17 +13,25 @@ import {
 import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "./internal-hosts.ts";
+import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts";
 import { methodNotAllowed } from "./json.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
-const RUNNER_EXECUTE_URL = "http://container/__internal/run";
+// Local proxy-everything ingress has proven flaky for POSTs under "__internal",
+// so keep the runner invoke path on a normal internal route while preserving the
+// old container entrypoint alias for compatibility.
+const RUNNER_EXECUTE_URL = "http://container/internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
-const RUNNER_READY_TIMEOUT_MS = 20_000;
+const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_TTL_MS = 120_000;
+const HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV =
+  "HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL";
+const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
+const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 
 export class HostedExecutionConfigurationError extends Error {
@@ -90,11 +98,14 @@ export class RunnerContainer extends Container {
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = formatRunnerSleepAfter(DEFAULT_RUNNER_IDLE_TTL_MS);
 
+  private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private runnerControlToken: string | null = null;
+  private runnerOutboundProxyToken: string | null = null;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
+    this.environment = env;
     this.sleepAfter = formatRunnerSleepAfter(readRunnerIdleTtlMs(env));
   }
 
@@ -133,15 +144,30 @@ export class RunnerContainer extends Container {
   ): Promise<HostedAssistantRuntimeJobResult> {
     const dispatch = input.job.request.dispatch;
     const run = input.job.request.run ?? null;
-    const internalWorkerProxyToken = crypto.randomUUID();
+    const internalWorkerProxyToken = this.runnerOutboundProxyToken ?? crypto.randomUUID();
     let keepWarm = false;
 
     try {
       const startTime = Date.now();
       const runnerControlToken = await this.ensureContainerReady(input);
-      await this.installOutboundHandlers(input.userId, internalWorkerProxyToken);
+      this.runnerOutboundProxyToken = internalWorkerProxyToken;
+      await this.installOutboundHandlers(input.userId, internalWorkerProxyToken, {
+        dispatch,
+        run,
+      });
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        dispatch,
+        details: {
+          remainingTimeoutMs,
+          runElapsedMs: computeHostedRunElapsedMs(run),
+        },
+        message: "Hosted execution container dispatching runner request.",
+        phase: "container.ready",
+        run,
+      });
       const response = await this.containerFetch(
         RUNNER_EXECUTE_URL,
         {
@@ -158,6 +184,17 @@ export class RunnerContainer extends Container {
         },
         RUNNER_PORT,
       );
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        dispatch,
+        details: {
+          responseStatus: response.status,
+          runElapsedMs: computeHostedRunElapsedMs(run),
+        },
+        message: "Hosted execution container received runner response.",
+        phase: "container.ready",
+        run,
+      });
 
       if (!response.ok) {
         throw await classifyHostedRunnerContainerErrorResponse(response);
@@ -177,8 +214,7 @@ export class RunnerContainer extends Container {
       });
       throw error;
     } finally {
-      const outboundInvalidated = await this.invalidateOutboundHandlers(input.userId);
-      const shouldDestroy = !(keepWarm && outboundInvalidated);
+      const shouldDestroy = !keepWarm;
 
       if (shouldDestroy) {
         await this.stopWarmContainer();
@@ -196,7 +232,7 @@ export class RunnerContainer extends Container {
 
     if (!isRunnerContainerStopped(status) && this.runnerControlToken) {
       try {
-        await assertRunnerHealthy(this, Math.min(input.timeoutMs, RUNNER_READY_TIMEOUT_MS));
+        await assertRunnerHealthy(this, Math.min(input.timeoutMs, readRunnerReadyTimeoutMs(this.environment)));
         emitHostedExecutionStructuredLog({
           component: "container",
           dispatch,
@@ -245,7 +281,7 @@ export class RunnerContainer extends Container {
 
     const runnerControlToken = crypto.randomUUID();
     const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
-    const readinessTimeoutMs = Math.min(remainingTimeoutMs, RUNNER_READY_TIMEOUT_MS);
+    const readinessTimeoutMs = Math.min(remainingTimeoutMs, readRunnerReadyTimeoutMs(this.environment));
     await this.startAndWaitForPorts({
       cancellationOptions: {
         abort: AbortSignal.timeout(readinessTimeoutMs),
@@ -257,6 +293,7 @@ export class RunnerContainer extends Container {
       startOptions: {
         enableInternet: true,
         envVars: {
+          ...readRunnerContainerSupervisorEnvVars(this.environment),
           HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: runnerControlToken,
           PORT: String(RUNNER_PORT),
         },
@@ -283,21 +320,68 @@ export class RunnerContainer extends Container {
   private async installOutboundHandlers(
     userId: string,
     internalWorkerProxyToken: string,
+    input: {
+      dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+      run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+    },
   ): Promise<void> {
-    await this.setOutboundByHosts(
-      Object.fromEntries(
-        RUNNER_OUTBOUND_HOSTS.map((host) => [
-          host,
-          {
-            method: RUNNER_OUTBOUND_HANDLER_METHOD,
-            params: {
-              internalWorkerProxyToken,
-              userId,
-            },
+    const mapping = Object.fromEntries(
+      RUNNER_OUTBOUND_HOSTS.map((host) => [
+        host,
+        {
+          method: RUNNER_OUTBOUND_HANDLER_METHOD,
+          params: {
+            internalWorkerProxyToken,
+            userId,
           },
-        ]),
-      ),
+        },
+      ]),
     );
+
+    for (let attempt = 1; attempt <= OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT; attempt += 1) {
+      try {
+        await this.setOutboundByHosts(mapping);
+        if (attempt > 1) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            dispatch: input.dispatch,
+            details: {
+              outboundHandlerInstallAttempt: attempt,
+              outboundHandlerInstallRetryCount: attempt - 1,
+              runElapsedMs: computeHostedRunElapsedMs(input.run),
+            },
+            message: "Hosted execution container outbound handlers recovered after retry.",
+            phase: "container.ready",
+            run: input.run,
+          });
+        }
+        return;
+      } catch (error) {
+        if (
+          attempt >= OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT
+          || !isTransientOutboundHandlerInstallError(error)
+        ) {
+          throw error;
+        }
+
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          dispatch: input.dispatch,
+          details: {
+            outboundHandlerInstallAttempt: attempt,
+            outboundHandlerInstallRetryDelayMs: OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS,
+            runElapsedMs: computeHostedRunElapsedMs(input.run),
+          },
+          error,
+          level: "warn",
+          message:
+            "Hosted execution container outbound handler installation hit a transient sidecar error; retrying.",
+          phase: "container.ready",
+          run: input.run,
+        });
+        await sleep(OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS);
+      }
+    }
   }
 
   private async destroyIfRunning(input: {
@@ -324,20 +408,8 @@ export class RunnerContainer extends Container {
     failClosed: true,
   }): Promise<void> {
     this.runnerControlToken = null;
+    this.runnerOutboundProxyToken = null;
     await this.destroyIfRunning(input);
-  }
-
-  private async invalidateOutboundHandlers(userId: string): Promise<boolean> {
-    try {
-      if (isRunnerContainerStopped(readContainerStatus(await this.getState()))) {
-        return false;
-      }
-
-      await this.installOutboundHandlers(userId, crypto.randomUUID());
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
@@ -373,6 +445,7 @@ async function classifyHostedRunnerContainerErrorResponse(
     error?: unknown;
     errorName?: unknown;
   } | null = null;
+  let responseBodyPreview: string | null = null;
 
   try {
     payload = await response.clone().json() as {
@@ -383,17 +456,30 @@ async function classifyHostedRunnerContainerErrorResponse(
     payload = null;
   }
 
+  if (!payload) {
+    try {
+      const raw = await response.clone().text();
+      const trimmed = raw.trim();
+      responseBodyPreview = trimmed.length > 0 ? trimmed.slice(0, 500) : null;
+    } catch {
+      responseBodyPreview = null;
+    }
+  }
+
   const message = typeof payload?.error === "string" && payload.error.trim().length > 0
     ? payload.error
-    : `Hosted runner container returned HTTP ${response.status}.`;
+    : responseBodyPreview
+      ? `Hosted runner container returned HTTP ${response.status}: ${responseBodyPreview.slice(0, 200)}`
+      : `Hosted runner container returned HTTP ${response.status}.`;
   const code = typeof payload?.code === "string" && payload.code.trim().length > 0
     ? payload.code
     : null;
-  const details = sanitizeHostedExecutionStructuredLogDetails(
-    payload?.details && typeof payload.details === "object" && !Array.isArray(payload.details)
+  const details = sanitizeHostedExecutionStructuredLogDetails({
+    ...(payload?.details && typeof payload.details === "object" && !Array.isArray(payload.details)
       ? payload.details as HostedExecutionStructuredLogDetails
-      : null,
-  );
+      : {}),
+    ...(responseBodyPreview ? { responseBodyPreview } : {}),
+  });
   const errorName = typeof payload?.errorName === "string" && payload.errorName.trim().length > 0
     ? payload.errorName.trim()
     : readHostedExecutionErrorNameForCode(code);
@@ -467,7 +553,7 @@ function parseHostedExecutionContainerInvokeInput(
 ): HostedExecutionContainerInvokeInput {
   return {
     job: parseHostedAssistantRuntimeJobInput(payload.job),
-    timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
+    timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
 }
@@ -558,6 +644,55 @@ function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
   }
 
   return parsed;
+}
+
+function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {
+  const raw = source.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS;
+
+  if (raw === undefined || raw === null || raw === "") {
+    return DEFAULT_RUNNER_READY_TIMEOUT_MS;
+  }
+
+  if (typeof raw !== "string") {
+    throw new TypeError("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a string when configured.");
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new TypeError("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
+  }
+
+  return parsed;
+}
+
+function isTransientOutboundHandlerInstallError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return [
+    "Updating sidecar egress port failed",
+    "Connecting to container port through proxy-everything failed",
+    "Monitoring container failed with: 404",
+  ].some((needle) => error.message.includes(needle));
+}
+
+function readRunnerContainerSupervisorEnvVars(
+  source: RunnerContainerEnvironmentSource,
+): Record<string, string> {
+  return readHostedExecutionProcessEnv(asRunnerContainerStringEnvSource(source));
+}
+
+function asRunnerContainerStringEnvSource(
+  source: RunnerContainerEnvironmentSource,
+): Record<string, string | undefined> {
+  const values: Record<string, string | undefined> = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    values[key] = typeof value === "string" ? value : undefined;
+  }
+
+  return values;
 }
 
 function computeHostedRunElapsedMs(

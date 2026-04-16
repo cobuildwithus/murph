@@ -172,6 +172,349 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("fails closed on internal worker proxy requests when no hosted run is active", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/__internal/worker-proxy/results.worker/effects/outbox_123?fingerprint=dedupe_123`,
+      {
+        headers: {
+          "x-hosted-execution-runner-proxy-token": "proxy-token",
+        },
+        method: "GET",
+      },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted runner proxy is not active.",
+    });
+  });
+
+  it("forwards internal worker proxy requests through the entrypoint loopback during an active run", async () => {
+    const upstreamFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      return new Response(JSON.stringify({
+        ok: true,
+        record: {
+          delivery: null,
+          effectId: "outbox_123",
+          fingerprint: "dedupe_123",
+          kind: "assistant.delivery",
+          recordedAt: "2026-03-26T12:00:00.000Z",
+          state: "prepared",
+        },
+      }), {
+        headers: {
+          "content-encoding": "gzip",
+          "content-length": "999",
+          "content-type": "application/json; charset=utf-8",
+          "transfer-encoding": "chunked",
+        },
+        status: 200,
+      });
+    });
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(
+      async (_job: any, options) => {
+        if (!options?.internalWorkerProxyBaseUrl) {
+          throw new Error("Expected the internal worker proxy base URL to be configured.");
+        }
+
+        const proxyResponse = await fetch(
+          `${options.internalWorkerProxyBaseUrl}results.worker/effects/outbox_123?fingerprint=dedupe_123`,
+          {
+            headers: {
+              "x-hosted-execution-runner-proxy-token": "proxy-token",
+            },
+            method: "GET",
+          },
+        );
+
+        expect(proxyResponse.status).toBe(200);
+        expect(proxyResponse.headers.get("content-encoding")).toBeNull();
+        await expect(proxyResponse.json()).resolves.toMatchObject({
+          ok: true,
+          record: {
+            effectId: "outbox_123",
+            fingerprint: "dedupe_123",
+          },
+        });
+
+        return {
+          finalGatewayProjectionSnapshot: null,
+          result: {
+            bundle: null,
+            result: {
+              eventsHandled: 1,
+              nextWakeAt: null,
+              summary: "ok",
+            },
+          },
+        };
+      },
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+        runtime: {
+          fetchImpl: upstreamFetch as typeof fetch,
+        },
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify(buildJobBody({
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_proxy_forward",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(runnerSpy).toHaveBeenCalledTimes(1);
+      const effectCall = upstreamFetch.mock.calls.find(([request]) =>
+        String(request) === "http://results.worker/effects/outbox_123?fingerprint=dedupe_123"
+      );
+      if (!effectCall) {
+        throw new Error("Expected the upstream worker proxy fetch to run.");
+      }
+      const [request] = effectCall as unknown as [RequestInfo | URL, RequestInit?];
+      expect(request).toBeInstanceOf(URL);
+      expect(String(request)).toBe(
+        "http://results.worker/effects/outbox_123?fingerprint=dedupe_123",
+      );
+    } finally {
+      runnerSpy.mockRestore();
+    }
+  });
+
+  it("rewrites internal worker proxy requests through the configured local upstream base url", async () => {
+    vi.stubEnv("HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL", "http://127.0.0.1:8787");
+    const upstreamFetch = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      record: {
+        delivery: null,
+        effectId: "outbox_123",
+        fingerprint: "dedupe_123",
+        kind: "assistant.delivery",
+        recordedAt: "2026-03-26T12:00:00.000Z",
+        state: "prepared",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(
+      async (_job: any, options) => {
+        if (!options?.internalWorkerProxyBaseUrl) {
+          throw new Error("Expected the internal worker proxy base URL to be configured.");
+        }
+
+        const proxyResponse = await fetch(
+          `${options.internalWorkerProxyBaseUrl}results.worker/effects/outbox_123?fingerprint=dedupe_123`,
+          {
+            headers: {
+              "x-hosted-execution-runner-proxy-token": "proxy-token",
+            },
+            method: "GET",
+          },
+        );
+
+        expect(proxyResponse.status).toBe(200);
+        return {
+          finalGatewayProjectionSnapshot: null,
+          result: {
+            bundle: null,
+            result: {
+              eventsHandled: 1,
+              nextWakeAt: null,
+              summary: "ok",
+            },
+          },
+        };
+      },
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+        runtime: {
+          fetchImpl: upstreamFetch as typeof fetch,
+        },
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify(buildJobBody({
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_proxy_forward_local_upstream",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(runnerSpy).toHaveBeenCalledTimes(1);
+      const effectCall = upstreamFetch.mock.calls.find((call) =>
+        String(call.at(0)) === "http://127.0.0.1:8787/effects/outbox_123?fingerprint=dedupe_123"
+      );
+      if (!effectCall) {
+        throw new Error("Expected the upstream worker proxy fetch to run.");
+      }
+      const [request, init] = effectCall as unknown as [RequestInfo | URL, RequestInit?];
+      expect(request).toBeInstanceOf(URL);
+      expect(String(request)).toBe(
+        "http://127.0.0.1:8787/effects/outbox_123?fingerprint=dedupe_123",
+      );
+      const forwardedHeaders = new Headers(init?.headers);
+      expect(forwardedHeaders.get("host")).toBe("results.worker");
+      expect(forwardedHeaders.get("x-hosted-execution-internal-host")).toBe("results.worker");
+    } finally {
+      runnerSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("strips hop-by-hop request headers when forwarding internal worker proxy writes", async () => {
+    const upstreamFetch = vi.fn(async () => new Response(JSON.stringify({
+      effectId: "outbox_put_123",
+      record: {
+        delivery: null,
+        effectId: "outbox_put_123",
+        fingerprint: "dedupe_put_123",
+        kind: "assistant.delivery",
+        recordedAt: "2026-03-26T12:00:00.000Z",
+        state: "prepared",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(
+      async (_job: any, options) => {
+        if (!options?.internalWorkerProxyBaseUrl) {
+          throw new Error("Expected the internal worker proxy base URL to be configured.");
+        }
+
+        const proxyResponse = await fetch(
+          `${options.internalWorkerProxyBaseUrl}results.worker/effects/outbox_put_123?fingerprint=dedupe_put_123`,
+          {
+            body: JSON.stringify({
+              effectId: "outbox_put_123",
+              fingerprint: "dedupe_put_123",
+              kind: "assistant.delivery",
+              recordedAt: "2026-03-26T12:00:00.000Z",
+              state: "prepared",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+              "x-hosted-execution-runner-proxy-token": "proxy-token",
+            },
+            method: "PUT",
+          },
+        );
+
+        expect(proxyResponse.status).toBe(200);
+        return {
+          finalGatewayProjectionSnapshot: null,
+          result: {
+            bundle: null,
+            result: {
+              eventsHandled: 1,
+              nextWakeAt: null,
+              summary: "ok",
+            },
+          },
+        };
+      },
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+        runtime: {
+          fetchImpl: upstreamFetch as typeof fetch,
+        },
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify(buildJobBody({
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_proxy_forward_put",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(runnerSpy).toHaveBeenCalledTimes(1);
+      const effectCall = upstreamFetch.mock.calls.find((call) =>
+        String(call.at(0)) === "http://results.worker/effects/outbox_put_123?fingerprint=dedupe_put_123"
+      );
+      if (!effectCall) {
+        throw new Error("Expected the upstream worker proxy fetch to run.");
+      }
+      const [, init] = effectCall as unknown as [RequestInfo | URL, RequestInit?];
+      const forwardedHeaders = new Headers(init?.headers);
+      expect(forwardedHeaders.get("transfer-encoding")).toBeNull();
+      expect(forwardedHeaders.get("content-type")).toBe("application/json; charset=utf-8");
+    } finally {
+      runnerSpy.mockRestore();
+    }
+  });
+
   it("returns a stable invalid request error when the run body is not an object", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",

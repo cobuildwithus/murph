@@ -301,6 +301,15 @@ describe("hosted execution coverage gaps", () => {
       "Hosted execution dispatch failed with HTTP 502.",
     );
     await expect(longErrorPromise).rejects.not.toThrow(/x{20}/u);
+
+    const localhostClient = createHostedExecutionDispatchClient({
+      allowHttpLocalhost: true,
+      baseUrl: "http://127.0.0.1:8787/root/",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(localhostClient.dispatch(dispatch)).resolves.toEqual(successfulResponse);
   });
 
   it("rejects invalid hosted execution client configuration", () => {

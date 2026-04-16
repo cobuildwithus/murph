@@ -1,9 +1,13 @@
 import http from "node:http";
+import { EventEmitter } from "node:events";
 import type { AddressInfo } from "node:net";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { waitForHealthyHttpEndpoint } from "./runtime.ts";
+import {
+  terminateChildProcessAndWait,
+  waitForHealthyHttpEndpoint,
+} from "./runtime.ts";
 
 describe("waitForHealthyHttpEndpoint", () => {
   let server: http.Server | null = null;
@@ -54,5 +58,36 @@ describe("waitForHealthyHttpEndpoint", () => {
       port: address.port,
       protocol: "http",
     })).resolves.toBeUndefined();
+  });
+});
+
+describe("terminateChildProcessAndWait", () => {
+  it("escalates to SIGKILL when the child ignores the initial graceful signal", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      exitCode: number | null;
+      kill: (signal?: NodeJS.Signals | number) => boolean;
+      once: EventEmitter["once"];
+      pid: number;
+    };
+    const killCalls: Array<NodeJS.Signals | number | undefined> = [];
+    child.exitCode = null;
+    child.pid = 4242;
+    child.kill = (signal?: NodeJS.Signals | number) => {
+      killCalls.push(signal);
+      if (signal === "SIGKILL") {
+        child.exitCode = 137;
+        queueMicrotask(() => {
+          child.emit("exit", 137, "SIGKILL");
+        });
+      }
+      return true;
+    };
+
+    await terminateChildProcessAndWait(child, {
+      graceMs: 1,
+      signal: "SIGTERM",
+    });
+
+    expect(killCalls).toEqual(["SIGTERM", "SIGKILL"]);
   });
 });

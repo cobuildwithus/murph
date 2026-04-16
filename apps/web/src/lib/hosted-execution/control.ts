@@ -17,6 +17,7 @@ export function readHostedExecutionControlClientIfConfigured(
   }
 
   return createCloudflareHostedControlClient({
+    allowHttpLocalhost: true,
     baseUrl,
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
     ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),

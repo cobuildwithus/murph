@@ -50,7 +50,6 @@ const observedLinqRequests: ObservedLinqRequest[] = [];
 const devEnv: NodeJS.ProcessEnv = {
   ...process.env,
   MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
-  MURPH_HOSTED_EXECUTION_RELAY_CHILD_INFO_LOGS: "1",
   MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
   MURPH_DEV_SKIP_WEB: "1",
   MURPH_DEV_WEB_PORT: "3213",

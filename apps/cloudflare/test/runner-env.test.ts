@@ -63,6 +63,24 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
+  it("rewrites loopback runner callback urls to the local container host alias", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "device-sync,linq",
+      DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3000/api/device-sync",
+      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+      LINQ_API_BASE_URL: "http://localhost:4011",
+      TELEGRAM_API_BASE_URL: "https://telegram.example.test",
+    })).toEqual({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "http://host.docker.internal:3000/api/device-sync",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
+      LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
+      NODE_ENV: "production",
+    });
+  });
+
   it("does not forward worker-only runtime config into the child runner env", () => {
     expect(buildHostedRunnerContainerEnv({
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",

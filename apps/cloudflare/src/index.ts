@@ -411,7 +411,7 @@ async function maybeHandleLocalRunnerOutboundProxyRoute(
     return null;
   }
 
-  if (!isTrustedLocalHostedInternalProxyIngress(url)) {
+  if (!isTrustedLocalHostedInternalProxyIngress(url, env)) {
     return unauthorized();
   }
 
@@ -627,8 +627,15 @@ function readLocalLoopbackProxyBaseUrl(value: string): URL | null {
   }
 }
 
-function isTrustedLocalHostedInternalProxyIngress(url: URL): boolean {
-  return isLocalLoopbackProxyProtocol(url.protocol) && isLocalLoopbackProxyHostname(url.hostname);
+function isTrustedLocalHostedInternalProxyIngress(
+  url: URL,
+  env: WorkerEnvironmentSource,
+): boolean {
+  if (!isLocalLoopbackProxyProtocol(url.protocol)) {
+    return false;
+  }
+
+  return resolveLocalHostedInternalProxyIngressHosts(env).has(url.hostname);
 }
 
 function isLocalLoopbackProxyProtocol(value: string): boolean {
@@ -637,6 +644,35 @@ function isLocalLoopbackProxyProtocol(value: string): boolean {
 
 function isLocalLoopbackProxyHostname(value: string): boolean {
   return value === "127.0.0.1" || value === "localhost" || value === "::1";
+}
+
+function resolveLocalHostedInternalProxyIngressHosts(
+  env: WorkerEnvironmentSource,
+): ReadonlySet<string> {
+  const hosts = new Set<string>(["127.0.0.1", "localhost", "::1"]);
+  const configuredUpstream = readLocalHostedInternalProxyUpstreamHost(env);
+
+  if (configuredUpstream) {
+    hosts.add(configuredUpstream);
+  }
+
+  return hosts;
+}
+
+function readLocalHostedInternalProxyUpstreamHost(
+  env: WorkerEnvironmentSource,
+): string | null {
+  const value = env.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.hostname || null;
+  } catch {
+    return null;
+  }
 }
 
 function buildLocalLoopbackProxyRequestHeaders(headers: Headers): Headers {

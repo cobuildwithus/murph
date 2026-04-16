@@ -804,6 +804,53 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("routes configured local runner proxy ingress hosts onto the results.worker handler", async () => {
+    const env = createWorkerEnv(undefined, {
+      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8902",
+    });
+
+    const response = await worker.fetch(
+      new Request("http://host.docker.internal:8902/effects/outbox_local_proxy_alias?fingerprint=dedupe_local_proxy_alias", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_local_proxy_alias",
+          fingerprint: "dedupe_local_proxy_alias",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+
+    const readResponse = await worker.fetch(
+      new Request("http://host.docker.internal:8902/effects/outbox_local_proxy_alias?fingerprint=dedupe_local_proxy_alias", {
+        headers: {
+          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_local_proxy_alias",
+      record: {
+        effectId: "outbox_local_proxy_alias",
+        kind: "assistant.delivery",
+        state: "prepared",
+      },
+    });
+  });
+
   it("rejects direct runner-outbound proxy requests on non-loopback worker hosts", async () => {
     const env = createWorkerEnv(undefined, {
       HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",

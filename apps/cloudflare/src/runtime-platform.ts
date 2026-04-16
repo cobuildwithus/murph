@@ -7,7 +7,11 @@ import {
   parseHostedAssistantDeliveryRecord,
 } from "@murphai/hosted-execution/side-effects";
 import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
@@ -26,6 +30,7 @@ import {
 import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
+  HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER,
 } from "./internal-hosts.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
@@ -36,11 +41,14 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  internalWorkerProxyBaseUrl?: string | null;
   internalWorkerProxyToken?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
+    input.boundUserId,
+    input.internalWorkerProxyBaseUrl ?? null,
     input.internalWorkerProxyToken ?? null,
     input.fetchImpl ?? fetch,
   );
@@ -246,6 +254,8 @@ export function buildHostedExecutionRuntimePlatform(input: {
 }
 
 function createCloudflareHostedRuntimeFetch(
+  boundUserId: string,
+  internalWorkerProxyBaseUrl: string | null,
   internalWorkerProxyToken: string | null,
   fetchImpl: typeof fetch,
 ): typeof fetch {
@@ -263,8 +273,94 @@ function createCloudflareHostedRuntimeFetch(
 
     const headers = new Headers(request.headers);
     headers.set(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER, internalWorkerProxyToken);
-    return fetchImpl(new Request(request, { headers }));
+    if (internalWorkerProxyBaseUrl) {
+      headers.set(HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER, url.hostname);
+      headers.set(HOSTED_EXECUTION_USER_ID_HEADER, boundUserId);
+    }
+    const proxiedUrl = internalWorkerProxyBaseUrl
+      ? buildHostedExecutionInternalProxyUrl(internalWorkerProxyBaseUrl, url)
+      : url;
+    const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
+    const details = {
+      effectsFingerprintPresent: url.searchParams.has("fingerprint"),
+      host: url.hostname,
+      method: proxiedRequest.method,
+      path: url.pathname,
+      proxiedViaLoopback: internalWorkerProxyBaseUrl ? "true" : "false",
+      userId: boundUserId,
+    };
+
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details,
+      message: "Hosted runtime internal request started.",
+      phase: "side-effects.draining",
+      userId: boundUserId,
+    });
+
+    try {
+      const response = await fetchImpl(proxiedRequest);
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: {
+          ...details,
+          ok: response.ok ? "true" : "false",
+          status: String(response.status),
+        },
+        message: "Hosted runtime internal request completed.",
+        phase: "side-effects.draining",
+        userId: boundUserId,
+      });
+      return response;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details,
+        error,
+        level: "warn",
+        message: "Hosted runtime internal request failed.",
+        phase: "side-effects.draining",
+        userId: boundUserId,
+      });
+      throw error;
+    }
   }) as typeof fetch;
+}
+
+interface HostedRequestInitWithDuplex extends RequestInit {
+  duplex?: "half";
+}
+
+function createHostedInternalProxyRequest(
+  proxiedUrl: URL,
+  request: Request,
+  headers: Headers,
+): Request {
+  const init: HostedRequestInitWithDuplex = {
+    body: request.body,
+    headers,
+    method: request.method,
+    signal: request.signal,
+  };
+
+  if (request.body) {
+    init.duplex = "half";
+  }
+
+  return new Request(proxiedUrl, init);
+}
+
+function buildHostedExecutionInternalProxyUrl(
+  baseUrl: string,
+  targetUrl: URL,
+): URL {
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  const proxied = new URL(
+    `${encodeURIComponent(targetUrl.hostname)}${targetUrl.pathname}`,
+    normalizedBase,
+  );
+  proxied.search = targetUrl.search;
+  return proxied;
 }
 
 function createHostedAssistantDeliveryUrl(input: {
@@ -310,7 +406,20 @@ async function fetchHostedJson(input: {
     return null;
   }
 
-  assertHostedOk(response, input.description);
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    const error = new Error(
+      detail.length > 0
+        ? `${input.description} failed with HTTP ${response.status}. ${detail}`
+        : `${input.description} failed with HTTP ${response.status}.`,
+    ) as Error & {
+      status: number;
+      statusCode: number;
+    };
+    error.status = response.status;
+    error.statusCode = response.status;
+    throw error;
+  }
 
   const text = await response.text();
   if (!text.trim()) {
@@ -346,7 +455,13 @@ function assertHostedOk(response: Response, description: string): void {
     return;
   }
 
-  throw new Error(`${description} failed with HTTP ${response.status}.`);
+  const error = new Error(`${description} failed with HTTP ${response.status}.`) as Error & {
+    status: number;
+    statusCode: number;
+  };
+  error.status = response.status;
+  error.statusCode = response.status;
+  throw error;
 }
 
 function readHostedRecordField(

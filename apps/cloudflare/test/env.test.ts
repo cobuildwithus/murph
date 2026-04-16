@@ -23,6 +23,7 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.platformEnvelopeKeyId).toBe("v1");
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.retryDelayMs).toBe(30_000);
+    expect(environment.runnerReadyTimeoutMs).toBe(20_000);
     expect(environment.runnerTimeoutMs).toBe(60_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
     expect(environment.webCallbackSigning.keyId).toBe("v1");
@@ -44,6 +45,14 @@ describe("readHostedExecutionEnvironment", () => {
     }));
 
     expect(environment.runnerTimeoutMs).toBe(15_000);
+  });
+
+  it("reads the runner readiness timeout when configured", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "45000",
+    }));
+
+    expect(environment.runnerReadyTimeoutMs).toBe(45_000);
   });
 
   it("reads optional user env allowlist extensions", () => {

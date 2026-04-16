@@ -57,6 +57,7 @@ describe("hosted deploy automation helpers", () => {
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+      CF_RUNNER_READY_TIMEOUT_MS: "65000",
       CF_WORKER_NAME: "hosted-worker",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
@@ -156,6 +157,7 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS).toBe("65000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");

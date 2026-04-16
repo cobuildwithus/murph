@@ -77,9 +77,10 @@ describe("RunnerContainer", () => {
     expect(coldStartToken).toBeTruthy();
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/__internal/run")
+      String(url).endsWith("/internal/run")
     );
     expect(executeCalls).toHaveLength(2);
+    expect(String(executeCalls[0]?.[0])).toBe("http://container/internal/run");
     expect(executeCalls[0]?.[1]).toMatchObject({
       headers: {
         authorization: `Bearer ${coldStartToken}`,
@@ -94,10 +95,9 @@ describe("RunnerContainer", () => {
     const outboundTokens = setOutboundByHosts.mock.calls.map(([mapping]) =>
       readRunnerProxyToken(mapping as Record<string, unknown>)
     );
-    expect(outboundTokens).toHaveLength(4);
-    expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
-    expect(outboundTokens[1]).not.toBe(outboundTokens[2]);
-    expect(outboundTokens[2]).not.toBe(outboundTokens[3]);
+    expect(outboundTokens).toHaveLength(2);
+    expect(outboundTokens[0]).toBeTruthy();
+    expect(outboundTokens[0]).toBe(outboundTokens[1]);
 
     const outboundMethods = setOutboundByHosts.mock.calls.map(([mapping]) =>
       readRunnerMethodsByHost(mapping as Record<string, unknown>)
@@ -105,8 +105,8 @@ describe("RunnerContainer", () => {
     const expectedOutboundMethods = Object.fromEntries(
       Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS).map((host) => [host, "internalWorkerProxy"]),
     );
-    expect(outboundMethods).toHaveLength(4);
-    expect(outboundMethods).toEqual(new Array(4).fill(expectedOutboundMethods));
+    expect(outboundMethods).toHaveLength(2);
+    expect(outboundMethods).toEqual(new Array(2).fill(expectedOutboundMethods));
 
     const outboundAssignments = setOutboundByHosts.mock.calls.map(([mapping]) =>
       readRunnerOutboundAssignments(mapping as Record<string, unknown>),
@@ -121,8 +121,59 @@ describe("RunnerContainer", () => {
         },
       ]),
     );
-    expect(outboundAssignments).toHaveLength(4);
-    expect(outboundAssignments).toEqual(new Array(4).fill(expectedOutboundAssignments));
+    expect(outboundAssignments).toHaveLength(2);
+    expect(outboundAssignments).toEqual(new Array(2).fill(expectedOutboundAssignments));
+  });
+
+  it("forwards protected hosted execution config into the container supervisor env", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
+        HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
+      },
+    });
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_local_proxy_upstream"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toMatchObject({
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
+      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
+    });
+  });
+
+  it("retries transient outbound handler installation failures before giving up", async () => {
+    const setOutboundByHosts = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Updating sidecar egress port failed with: 404"))
+      .mockRejectedValueOnce(new Error("Connecting to container port through proxy-everything failed"))
+      .mockResolvedValue(undefined);
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      setOutboundByHosts,
+    });
+
+    await expect(container.invoke({
+      job: {
+        request: createRunnerRequest("evt_retry_outbound_handlers"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(setOutboundByHosts).toHaveBeenCalledTimes(3);
   });
 
   it("registers exactly one stable outbound handler method for the runner boundary", () => {
@@ -132,7 +183,7 @@ describe("RunnerContainer", () => {
   });
 
   it("destroys the warm shell on container activity expiry and cold-starts the next run", async () => {
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble();
+    const { container, destroy, setOutboundByHosts, startAndWaitForPorts } = createContainerDouble();
 
     await container.invoke({
       job: {
@@ -156,9 +207,16 @@ describe("RunnerContainer", () => {
     });
     const secondToken =
       startAndWaitForPorts.mock.calls[1]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
+    const outboundTokens = setOutboundByHosts.mock.calls.map(([mapping]) =>
+      readRunnerProxyToken(mapping as Record<string, unknown>)
+    );
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
     expect(firstToken).not.toBe(secondToken);
+    expect(outboundTokens).toHaveLength(2);
+    expect(outboundTokens[0]).toBeTruthy();
+    expect(outboundTokens[1]).toBeTruthy();
+    expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
   });
 
   it("keeps activity-expiry cleanup best-effort when destroy fails", async () => {
@@ -509,6 +567,28 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("3s");
   });
 
+  it("uses the configured readiness timeout when cold-starting the container shell", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "45000",
+      },
+    });
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_ready_timeout"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions).toMatchObject({
+      instanceGetTimeoutMS: 45_000,
+      portReadyTimeoutMS: 45_000,
+    });
+  });
+
   it("destroys running containers but skips stopped ones", async () => {
     const running = createContainerDouble({
       initialStatus: "running",
@@ -592,7 +672,7 @@ describe("RunnerContainer", () => {
     });
 
     const executeCall = containerFetch.mock.calls.find(([url]) =>
-      String(url).endsWith("/__internal/run")
+      String(url).endsWith("/internal/run")
     );
     expect(executeCall).toBeTruthy();
     if (!executeCall?.[1]?.body || typeof executeCall[1].body !== "string") {
