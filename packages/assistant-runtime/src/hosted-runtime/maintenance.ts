@@ -48,6 +48,11 @@ interface HostedMaintenancePassResult extends HostedMaintenanceMetrics {
 }
 
 interface HostedAssistantAutomationReadiness {
+  activeProfileId: string | null;
+  activeProfileManagedBy: "member" | "platform" | null;
+  activeProfileReady: boolean;
+  configInvalid: boolean;
+  configPresent: boolean;
   configStatus: "hosted-env" | "invalid" | "missing" | "saved" | "unready";
   configured: boolean;
   provider: "openai-compatible" | null;
@@ -60,6 +65,11 @@ async function resolveHostedAssistantAutomationReadiness(input: {
   const assistantState = await readHostedAssistantRuntimeState();
 
   return {
+    activeProfileId: assistantState.assistantActiveProfileId,
+    activeProfileManagedBy: assistantState.assistantActiveProfileManagedBy,
+    activeProfileReady: assistantState.assistantActiveProfileReady,
+    configInvalid: assistantState.assistantConfigInvalid,
+    configPresent: assistantState.assistantConfigPresent,
     configStatus: assistantState.assistantConfigStatus,
     configured: assistantState.assistantConfigured,
     provider: assistantState.assistantProvider,
@@ -69,20 +79,29 @@ async function resolveHostedAssistantAutomationReadiness(input: {
 
 function reportHostedAssistantAutomationSkipped(
   dispatch: HostedExecutionDispatchRequest,
-  configStatus: HostedAssistantAutomationReadiness["configStatus"],
-  provider: "openai-compatible" | null,
+  readiness: HostedAssistantAutomationReadiness,
 ): void {
   emitHostedExecutionStructuredLog({
     component: "runtime",
+    details: {
+      activeProfileId: readiness.activeProfileId,
+      activeProfileManagedBy: readiness.activeProfileManagedBy,
+      activeProfileReady: readiness.activeProfileReady,
+      assistantConfigured: readiness.configured,
+      configInvalid: readiness.configInvalid,
+      configPresent: readiness.configPresent,
+      configStatus: readiness.configStatus,
+      provider: readiness.provider,
+    },
     dispatch,
     level: "warn",
     message:
-      configStatus === "invalid"
+      readiness.configStatus === "invalid"
         ? "Hosted assistant automation skipped because the saved hosted assistant config is invalid."
-        : configStatus === "missing"
+        : readiness.configStatus === "missing"
           ? "Hosted assistant automation skipped because no explicit hosted assistant profile is configured."
-          : provider
-            ? `Hosted assistant automation skipped because the active hosted assistant profile (${provider}) is not ready.`
+          : readiness.provider
+            ? `Hosted assistant automation skipped because the active hosted assistant profile (${readiness.provider}) is not ready.`
             : "Hosted assistant automation skipped because the hosted assistant config is not ready.",
     phase: "dispatch.running",
   });
@@ -106,11 +125,7 @@ export async function runHostedMaintenanceLoop(input: {
   });
 
   if (!assistantAutomation.configured) {
-    reportHostedAssistantAutomationSkipped(
-      input.dispatch,
-      assistantAutomation.configStatus,
-      assistantAutomation.provider,
-    );
+    reportHostedAssistantAutomationSkipped(input.dispatch, assistantAutomation);
   }
 
   let deviceSyncProcessed = 0;

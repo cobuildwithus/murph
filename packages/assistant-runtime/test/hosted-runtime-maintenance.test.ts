@@ -109,6 +109,11 @@ beforeEach(() => {
   mocks.createAssistantFoodAutoLogHooks.mockReturnValue(Symbol("food-auto-log-hooks"));
   mocks.createIntegratedVaultServices.mockReturnValue(Symbol("vault-services"));
   mocks.readHostedAssistantRuntimeState.mockResolvedValue({
+    assistantActiveProfileId: null,
+    assistantActiveProfileManagedBy: null,
+    assistantActiveProfileReady: false,
+    assistantConfigInvalid: false,
+    assistantConfigPresent: true,
     assistantConfigStatus: "saved",
     assistantConfigured: true,
     assistantProvider: "openai-compatible",
@@ -811,6 +816,11 @@ describe("runHostedMaintenanceLoop", () => {
     const close = vi.fn();
 
     mocks.readHostedAssistantRuntimeState.mockResolvedValue({
+      assistantActiveProfileId: null,
+      assistantActiveProfileManagedBy: null,
+      assistantActiveProfileReady: false,
+      assistantConfigInvalid: true,
+      assistantConfigPresent: false,
       assistantConfigStatus: "invalid",
       assistantConfigured: false,
       assistantProvider: null,
@@ -865,6 +875,11 @@ describe("runHostedMaintenanceLoop", () => {
     const close = vi.fn();
 
     mocks.readHostedAssistantRuntimeState.mockResolvedValue({
+      assistantActiveProfileId: "platform-default",
+      assistantActiveProfileManagedBy: "platform",
+      assistantActiveProfileReady: false,
+      assistantConfigInvalid: false,
+      assistantConfigPresent: true,
       assistantConfigStatus: "hosted-env",
       assistantConfigured: false,
       assistantProvider: "openai-compatible",
