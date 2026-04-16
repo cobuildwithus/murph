@@ -3,7 +3,6 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
-    "composite": false,
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo",
     "paths": {

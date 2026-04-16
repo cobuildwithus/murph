@@ -128,6 +128,7 @@ const TEST_OUTBOX_INTENT = {
   bindingDelivery: null,
   explicitTarget: null,
   delivery: null,
+  deliveryStateAuthority: 'local',
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,
