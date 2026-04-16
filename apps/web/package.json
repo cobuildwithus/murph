@@ -11,6 +11,7 @@
     "dev:local-env": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
     "build": "prisma generate && next build",
     "lint": "eslint .",
+    "stress:playwright": "pnpm --dir ../.. exec tsx apps/web/scripts/hosted-playwright-stress.ts",
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
     "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
