@@ -33,8 +33,10 @@ import {
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
   RunnerDispatchProcessor,
+  HostedExecutionObsoleteRunResultError,
   type RunnerUserStores,
 } from "./user-runner/runner-dispatch-processor.js";
+import type { RunnerLeaseOwnerInput } from "./user-runner/runner-queue-store.js";
 import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import { RunnerQueueStore } from "./user-runner/runner-queue-store.js";
 import { RunnerScheduler } from "./user-runner/runner-scheduler.js";
@@ -163,6 +165,7 @@ export class HostedUserRunner {
       applyHostedTransition: <T>(input: {
         eventId: string;
         gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+        leaseOwner?: RunnerLeaseOwnerInput;
         run: (userId: string, stores: RunnerUserStores) => Promise<T>;
       }) => this.applyHostedTransition(input),
       bucket: this.bucket,
@@ -346,9 +349,17 @@ export class HostedUserRunner {
   private async applyHostedTransition<T>(input: {
     eventId: string;
     gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+    leaseOwner?: RunnerLeaseOwnerInput;
     run: (userId: string, stores: RunnerUserStores) => Promise<T>;
   }): Promise<T> {
     return this.withEventTransitionLock(input.eventId, async () => {
+      if (input.leaseOwner && !(await this.queueStore.hasActiveRunLease(input.leaseOwner))) {
+        throw new HostedExecutionObsoleteRunResultError(
+          input.eventId,
+          input.leaseOwner.run?.runId ?? null,
+        );
+      }
+
       return this.withUserKeyEnvelopeLock(async () => {
         const userId = await this.requireBoundUserId();
         const stores = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
