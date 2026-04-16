@@ -118,7 +118,6 @@ const TEST_OUTBOX_INTENT = {
   },
   explicitTarget: null,
   delivery: null,
-  deliveryStateAuthority: 'local',
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,

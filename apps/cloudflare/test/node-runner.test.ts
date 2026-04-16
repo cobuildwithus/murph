@@ -61,6 +61,7 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const describe = baseDescribe.sequential;
 const initialGlobalFetch = global.fetch;
+const TEST_INTERNAL_WORKER_PROXY_TOKEN = 'test-hosted-proxy-token'
 const HOSTED_DEVICE_SYNC_ENV_PREFIXES = [
   "DEVICE_SYNC_",
   "GARMIN_",
@@ -112,6 +113,18 @@ async function snapshotHostedExecutionContext(
     bundle: snapshot.bundle,
     vaultBundle: snapshot.bundle,
   };
+}
+
+function normalizeFetchRequest(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Request {
+  return input instanceof Request ? input : new Request(input, init)
+}
+
+async function readFetchRequestBody(request: Request): Promise<unknown> {
+  const body = await request.text()
+  return body.length > 0 ? JSON.parse(body) : null
 }
 
 async function restoreHostedExecutionContext(input: {
@@ -203,12 +216,16 @@ async function runHostedExecutionJob(
       currentBundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
     }),
   };
+  const effectiveInternalWorkerProxyToken =
+    internalWorkerProxyToken === undefined
+      ? TEST_INTERNAL_WORKER_PROXY_TOKEN
+      : internalWorkerProxyToken
 
   let result = await runHostedExecutionJobInternal({
     request: normalizedRequest,
     ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
   }, {
-    ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
+    internalWorkerProxyToken: effectiveInternalWorkerProxyToken,
     ...options,
   });
 
@@ -226,7 +243,7 @@ async function runHostedExecutionJob(
       },
       ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
     }, {
-      ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
+      internalWorkerProxyToken: effectiveInternalWorkerProxyToken,
       ...options,
     });
   }
@@ -310,6 +327,30 @@ describe("runHostedExecutionJob", () => {
       actualAssistantCore.dispatchAssistantOutboxIntent(input));
     hostedCliMocks.runAssistantAutomation.mockImplementation((input) =>
       actualAssistantCore.runAssistantAutomation(input));
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      const request = normalizeFetchRequest(input, init)
+      const url = new URL(request.url)
+
+      if (url.hostname === 'results.worker') {
+        if (request.method === 'GET') {
+          return new Response(JSON.stringify({
+            effectId: url.pathname.split('/').pop() ?? 'effect',
+            record: null,
+          }), { status: 200 })
+        }
+
+        if (request.method === 'PUT') {
+          return new Response(JSON.stringify({
+            effectId: url.pathname.split('/').pop() ?? 'effect',
+            record: await readFetchRequestBody(request),
+          }), { status: 200 })
+        }
+      }
+
+      return initialGlobalFetch
+        ? initialGlobalFetch(request)
+        : Promise.reject(new Error(`Unexpected fetch URL: ${request.url}`))
+    }));
   });
 
   afterEach(async () => {
@@ -1145,11 +1186,13 @@ describe("runHostedExecutionJob", () => {
 
     const attachmentBytes = Uint8Array.from([1, 2, 3, 4]);
     const artifactBytesByUrl = new Map<string, Uint8Array>();
-    const fetchSpy = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      if (String(url).startsWith("http://artifacts.worker/objects/")) {
-        if (init?.method === "PUT") {
-          const bodyBytes = new Uint8Array(await new Response(init.body).arrayBuffer());
-          artifactBytesByUrl.set(String(url), bodyBytes);
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = normalizeFetchRequest(input, init);
+      const url = request.url;
+      if (url.startsWith("http://artifacts.worker/objects/")) {
+        if (request.method === "PUT") {
+          const bodyBytes = new Uint8Array(await request.arrayBuffer());
+          artifactBytesByUrl.set(url, bodyBytes);
           return new Response(JSON.stringify({ ok: true }), {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -1158,8 +1201,8 @@ describe("runHostedExecutionJob", () => {
           });
         }
 
-        if (init?.method === "GET") {
-          const storedBytes = artifactBytesByUrl.get(String(url));
+        if (request.method === "GET") {
+          const storedBytes = artifactBytesByUrl.get(url);
           if (!storedBytes) {
             return new Response("Not found", { status: 404 });
           }
@@ -1173,8 +1216,8 @@ describe("runHostedExecutionJob", () => {
         }
       }
 
-      if (String(url) === "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123") {
-        expect(init?.method).toBe("GET");
+      if (url === "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123") {
+        expect(request.method).toBe("GET");
         return new Response(JSON.stringify({
           ok: true,
           result: {
@@ -1191,8 +1234,8 @@ describe("runHostedExecutionJob", () => {
         });
       }
 
-      if (String(url) === "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg") {
-        expect(init?.method).toBe("GET");
+      if (url === "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg") {
+        expect(request.method).toBe("GET");
         return new Response(attachmentBytes, {
           headers: {
             "content-type": "image/jpeg",
@@ -1201,7 +1244,7 @@ describe("runHostedExecutionJob", () => {
         });
       }
 
-      throw new Error(`Unexpected fetch URL: ${String(url)}`);
+      throw new Error(`Unexpected fetch URL: ${url}`);
     });
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -2185,11 +2228,12 @@ describe("runHostedExecutionJob", () => {
     const fetchCalls: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, init) => {
-        fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
+      vi.fn(async (input, init) => {
+        const request = normalizeFetchRequest(input, init);
+        fetchCalls.push(`${request.method} ${request.url}`);
 
         if (
-          String(url).startsWith(
+          request.url.startsWith(
             "http://results.worker/effects/",
           )
         ) {
@@ -2213,7 +2257,7 @@ describe("runHostedExecutionJob", () => {
           }), { status: 200 });
         }
 
-        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+        throw new Error(`Unexpected fetch URL: ${request.url}`);
       }),
     );
 
@@ -2447,81 +2491,32 @@ describe("runHostedExecutionJob", () => {
       throw new Error("resume path should not rerun hosted automation");
     });
     hostedCliMocks.runAssistantAutomation.mockClear();
-    hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dispatchHooks, intentId: nextIntentId, vault }) => {
-      expect(nextIntentId).toBe(intentId);
-      const nextStatePaths = resolveAssistantStatePaths(vault);
-      const intentPath = path.join(nextStatePaths.outboxDirectory, `${intentId}.json`);
-      const pendingIntent = assistantOutboxIntentSchema.parse(
-        JSON.parse(await readFile(intentPath, "utf8")),
-      );
-
-      await expect(
-        dispatchHooks?.resolveDeliveredIntent?.({
-          intent: pendingIntent,
-          vault,
-        }),
-      ).resolves.toBeNull();
-      await dispatchHooks?.persistDeliveredIntent?.({
-        delivery,
-        intent: pendingIntent,
-        vault,
-      });
-      await writeFile(
-        intentPath,
-        `${JSON.stringify({
-          ...pendingIntent,
-          updatedAt: sentAt,
-          nextAttemptAt: null,
-          sentAt,
-          status: "sent",
-          delivery,
-          lastError: null,
-        })}\n`,
-      );
-
-      return {
-        deliveryError: null,
-        intent: assistantOutboxIntentSchema.parse({
-          ...pendingIntent,
-          updatedAt: sentAt,
-          nextAttemptAt: null,
-          sentAt,
-          status: "sent",
-          delivery,
-          lastError: null,
-        }),
-        session: null,
-      };
-    });
     const fetchCalls: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, init) => {
-        fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
+      vi.fn(async (input, init) => {
+        const request = normalizeFetchRequest(input, init);
+        fetchCalls.push(`${request.method} ${request.url}`);
 
         if (
-          String(url)
+          request.url
           === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume"
-          && (init?.method ?? "GET") === "GET"
+          && request.method === "GET"
         ) {
           return new Response(JSON.stringify({
             effectId: intentId,
-            record: null,
+            record: {
+              delivery,
+              effectId: intentId,
+              fingerprint: "dedupe_hosted_resume",
+              kind: "assistant.delivery",
+              recordedAt: sentAt,
+              state: "sent",
+            },
           }), { status: 200 });
         }
 
-        if (
-          String(url)
-          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume"
-          && init?.method === "PUT"
-        ) {
-          return new Response(JSON.stringify({
-            effectId: intentId,
-            record: JSON.parse(String(init?.body)),
-          }), { status: 200 });
-        }
-
-        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+        throw new Error(`Unexpected fetch URL: ${request.url}`);
       }),
     );
 
@@ -2552,6 +2547,22 @@ describe("runHostedExecutionJob", () => {
               effectId: intentId,
               fingerprint: "dedupe_hosted_resume",
               kind: "assistant.delivery",
+              payload: {
+                actorId: null,
+                bindingDeliveryKind: "thread",
+                bindingDeliveryTarget: "chat_123",
+                channel: "linq",
+                explicitTarget: null,
+                idempotencyKey: `assistant-outbox:${intentId}`,
+                identityId: null,
+                message: "Queued the Linq reply.",
+                replyToMessageId: null,
+                sessionId: "sess_hosted",
+                threadId: "chat_123",
+                threadIsDirect: true,
+                transportIdempotent: true,
+                turnId: "turn_hosted",
+              },
             },
           ],
           result: {
@@ -2565,7 +2576,6 @@ describe("runHostedExecutionJob", () => {
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
     expect(fetchCalls).toEqual([
       "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
-      "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
     ]);
     expect(result.result).toEqual({
       eventsHandled: 1,
@@ -2588,6 +2598,180 @@ describe("runHostedExecutionJob", () => {
       ),
     );
     expect(savedIntent.status).toBe("sent");
+    expect(savedIntent.delivery).toEqual(delivery);
+  });
+
+  it("replays non-idempotent committed side effects from the hosted journal without resending", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-non-idempotent-"));
+    const operatorHomeRoot = path.join(parent, "home");
+    const vaultRoot = path.join(parent, "vault");
+    cleanupPaths.push(parent);
+    await mkdir(operatorHomeRoot, { recursive: true });
+    await mkdir(vaultRoot, { recursive: true });
+
+    const statePaths = resolveAssistantStatePaths(vaultRoot);
+    await mkdir(statePaths.outboxDirectory, { recursive: true });
+    const intentId = "outbox_hosted_resume_non_idempotent";
+    const createdAt = "2026-03-26T12:00:00.000Z";
+    const sentAt = "2026-03-26T12:00:05.000Z";
+    const delivery = {
+      channel: "telegram" as const,
+      idempotencyKey: "assistant-outbox:outbox_hosted_resume_non_idempotent",
+      messageLength: "Queued the Telegram reply.".length,
+      providerMessageId: null,
+      providerThreadId: null,
+      sentAt,
+      target: "chat_123",
+      targetKind: "participant" as const,
+    };
+    await writeFile(
+      path.join(statePaths.outboxDirectory, `${intentId}.json`),
+      `${JSON.stringify(assistantOutboxIntentSchema.parse({
+        schema: "murph.assistant-outbox-intent.v1",
+        intentId,
+        sessionId: "sess_hosted",
+        turnId: "turn_hosted",
+        createdAt,
+        updatedAt: createdAt,
+        lastAttemptAt: null,
+        nextAttemptAt: createdAt,
+        sentAt: null,
+        attemptCount: 0,
+        status: "pending",
+        message: "Queued the Telegram reply.",
+        dedupeKey: "dedupe_hosted_resume_non_idempotent",
+        targetFingerprint: "target_hosted_resume_non_idempotent",
+        channel: "telegram",
+        identityId: null,
+        actorId: null,
+        threadId: "chat_123",
+        threadIsDirect: true,
+        bindingDelivery: {
+          kind: "participant",
+          target: "chat_123",
+        },
+        explicitTarget: null,
+        delivery: null,
+        lastError: null,
+      }))}\n`,
+    );
+    const initialSnapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    hostedCliMocks.runAssistantAutomation.mockImplementation(() => {
+      throw new Error("resume path should not rerun hosted automation");
+    });
+    hostedCliMocks.runAssistantAutomation.mockClear();
+    const fetchCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input, init) => {
+        const request = normalizeFetchRequest(input, init);
+        fetchCalls.push(`${request.method} ${request.url}`);
+
+        if (
+          request.url
+          === "http://results.worker/effects/outbox_hosted_resume_non_idempotent?fingerprint=dedupe_hosted_resume_non_idempotent"
+          && request.method === "GET"
+        ) {
+          return new Response(JSON.stringify({
+            effectId: intentId,
+            record: {
+              delivery,
+              effectId: intentId,
+              fingerprint: "dedupe_hosted_resume_non_idempotent",
+              kind: "assistant.delivery",
+              recordedAt: sentAt,
+              state: "sent",
+            },
+          }), { status: 200 });
+        }
+
+        throw new Error(`Unexpected fetch URL: ${request.url}`);
+      }),
+    );
+
+    const result = await runHostedExecutionJob({
+      bundles: {
+        agentState: encodeHostedBundleBase64(initialSnapshot.agentStateBundle),
+        vault: Buffer.from(initialSnapshot.vaultBundle).toString("base64"),
+      },
+      commit: {
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_outbox_resume_non_idempotent",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+      resume: {
+        committedResult: {
+          assistantDeliveryEffects: [
+            {
+              effectId: intentId,
+              fingerprint: "dedupe_hosted_resume_non_idempotent",
+              kind: "assistant.delivery",
+              payload: {
+                actorId: null,
+                bindingDeliveryKind: "participant",
+                bindingDeliveryTarget: "chat_123",
+                channel: "telegram",
+                explicitTarget: null,
+                idempotencyKey: `assistant-outbox:${intentId}`,
+                identityId: null,
+                message: "Queued the Telegram reply.",
+                replyToMessageId: null,
+                sessionId: "sess_hosted",
+                threadId: "chat_123",
+                threadIsDirect: true,
+                transportIdempotent: false,
+                turnId: "turn_hosted",
+              },
+            },
+          ],
+          result: {
+            eventsHandled: 1,
+            summary: "committed",
+          },
+        },
+      },
+    });
+
+    expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
+    expect(fetchCalls).toEqual([
+      "GET http://results.worker/effects/outbox_hosted_resume_non_idempotent?fingerprint=dedupe_hosted_resume_non_idempotent",
+    ]);
+    expect(result.result).toEqual({
+      eventsHandled: 1,
+      summary: "committed",
+    });
+
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-non-idempotent-restored-"));
+    cleanupPaths.push(workspaceRoot);
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+      workspaceRoot,
+    });
+    const savedIntent = assistantOutboxIntentSchema.parse(
+      JSON.parse(
+        await readFile(
+          path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
+          "utf8",
+        ),
+      ),
+    );
+    expect(savedIntent.status).toBe("sent");
+    expect(savedIntent.deliveryTransportIdempotent).toBe(false);
     expect(savedIntent.delivery).toEqual(delivery);
   });
 

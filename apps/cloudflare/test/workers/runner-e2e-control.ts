@@ -191,11 +191,29 @@ function buildSyntheticAssistantDeliveryEffects(
     return [];
   }
 
+  const effectId = input?.effectId ?? `outbox_${crypto.randomUUID().replace(/-/g, "")}`;
+
   return [
     {
-      effectId: input?.effectId ?? `outbox_${crypto.randomUUID().replace(/-/g, "")}`,
+      effectId,
       fingerprint: `first-contact:${request.dispatch.eventId}`,
       kind: "assistant.delivery" as const,
+      payload: {
+        actorId: "actor_123",
+        bindingDeliveryKind: "participant" as const,
+        bindingDeliveryTarget: "chat_123",
+        channel: "telegram",
+        explicitTarget: null,
+        idempotencyKey: `assistant-outbox:${effectId}`,
+        identityId: "identity_123",
+        message: "hello from runner e2e",
+        replyToMessageId: null,
+        sessionId: `session_${request.dispatch.eventId}`,
+        threadId: "thread_123",
+        threadIsDirect: true,
+        transportIdempotent: false,
+        turnId: `turn_${request.dispatch.eventId}`,
+      },
     },
   ];
 }

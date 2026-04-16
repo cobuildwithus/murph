@@ -1,11 +1,11 @@
 import {
   gatewayDeliveryTargetKindValues,
+  gatewayReplyRouteKindValues,
   type GatewayDeliveryTargetKind,
+  type GatewayReplyRouteKind,
 } from "@murphai/gateway-core";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
-export const HOSTED_ASSISTANT_DELIVERY_EFFECT_KIND =
-  HOSTED_ASSISTANT_DELIVERY_KIND;
 
 export const hostedAssistantDeliveryTargetKindValues =
   gatewayDeliveryTargetKindValues;
@@ -35,6 +35,7 @@ export const HOSTED_ASSISTANT_DELIVERY_RECORD_STATES =
 
 export type HostedAssistantDeliveryKind = typeof HOSTED_ASSISTANT_DELIVERY_KIND;
 export type HostedAssistantDeliveryTargetKind = GatewayDeliveryTargetKind;
+export type HostedAssistantBindingDeliveryKind = GatewayReplyRouteKind;
 
 export type HostedExecutionSideEffectKind = HostedAssistantDeliveryKind;
 
@@ -43,10 +44,30 @@ export type HostedAssistantDeliveryRecordState =
 
 export type HostedExecutionSideEffectRecordState = HostedAssistantDeliveryRecordState;
 
+export const hostedAssistantBindingDeliveryKindValues = gatewayReplyRouteKindValues;
+
+export interface HostedAssistantDeliveryPayload {
+  actorId: string | null;
+  bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
+  bindingDeliveryTarget: string | null;
+  channel: string | null;
+  explicitTarget: string | null;
+  idempotencyKey: string;
+  identityId: string | null;
+  message: string;
+  replyToMessageId: string | null;
+  sessionId: string;
+  threadId: string | null;
+  threadIsDirect: boolean | null;
+  transportIdempotent: boolean;
+  turnId: string;
+}
+
 export interface HostedAssistantDeliverySideEffect {
   effectId: string;
   fingerprint: string;
   kind: HostedAssistantDeliveryKind;
+  payload: HostedAssistantDeliveryPayload;
 }
 
 export type HostedAssistantDeliveryEffect = HostedAssistantDeliverySideEffect;
@@ -142,14 +163,28 @@ export type HostedAssistantDeliveryRecord =
 
 export type HostedExecutionSideEffectRecord = HostedAssistantDeliveryRecord;
 
-export function buildHostedAssistantDeliverySideEffect(input: {
+function buildHostedAssistantDeliveryIdentity(input: {
   dedupeKey: string;
   effectId: string;
-}): HostedAssistantDeliverySideEffect {
+}): Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint" | "kind"> {
   return {
     effectId: input.effectId,
     fingerprint: input.dedupeKey,
     kind: HOSTED_ASSISTANT_DELIVERY_KIND,
+  };
+}
+
+export function buildHostedAssistantDeliverySideEffect(input: {
+  dedupeKey: string;
+  effectId: string;
+  payload: HostedAssistantDeliveryPayload;
+}): HostedAssistantDeliverySideEffect {
+  return {
+    ...buildHostedAssistantDeliveryIdentity(input),
+    payload: parseHostedAssistantDeliveryPayload(
+      input.payload,
+      "Hosted assistant delivery side effect payload",
+    ),
   };
 }
 
@@ -162,7 +197,7 @@ export function buildHostedAssistantDeliveryPendingRecord(input: {
   recordedAt: string;
 }): HostedAssistantDeliveryPendingRecord {
   return {
-    ...buildHostedAssistantDeliverySideEffect(input),
+    ...buildHostedAssistantDeliveryIdentity(input),
     recordedAt: requireString(input.recordedAt, "Hosted assistant pending side effect recordedAt"),
     state: "pending",
   };
@@ -174,7 +209,7 @@ export function buildHostedAssistantDeliveryPreparedRecord(input: {
   recordedAt: string;
 }): HostedAssistantDeliveryPreparedRecord {
   return {
-    ...buildHostedAssistantDeliverySideEffect(input),
+    ...buildHostedAssistantDeliveryIdentity(input),
     recordedAt: requireString(input.recordedAt, "Hosted assistant prepared side effect recordedAt"),
     state: "prepared",
   };
@@ -190,7 +225,7 @@ export function buildHostedAssistantDeliverySendingRecord(input: {
     "Hosted assistant sending side effect attempt",
   );
   return {
-    ...buildHostedAssistantDeliverySideEffect(input),
+    ...buildHostedAssistantDeliveryIdentity(input),
     attempt,
     recordedAt: attempt.startedAt,
     state: "sending",
@@ -203,7 +238,7 @@ export function buildHostedAssistantDeliverySentRecord(input: {
   effectId: string;
 }): HostedAssistantDeliverySentRecord {
   return {
-    ...buildHostedAssistantDeliverySideEffect(input),
+    ...buildHostedAssistantDeliveryIdentity(input),
     delivery: parseHostedAssistantDeliveryReceipt(
       input.delivery,
       "Hosted assistant sent side effect delivery",
@@ -231,7 +266,7 @@ export function buildHostedAssistantDeliveryFailedRecord(input: {
   const state = input.state ?? "failed";
 
   return {
-    ...buildHostedAssistantDeliverySideEffect(input),
+    ...buildHostedAssistantDeliveryIdentity(input),
     attempt,
     failure,
     recordedAt: failure.failedAt,
@@ -258,6 +293,10 @@ export function parseHostedExecutionSideEffect(value: unknown): HostedExecutionS
           "Hosted assistant side effect fingerprint",
         ),
         kind,
+        payload: parseHostedAssistantDeliveryPayload(
+          record.payload,
+          "Hosted assistant side effect payload",
+        ),
       };
     default:
       throw new TypeError(`Unsupported hosted execution side effect kind: ${kind}`);
@@ -295,6 +334,10 @@ export function parseHostedAssistantDeliverySideEffect(
     kind: requireHostedAssistantDeliveryKind(
       record.kind,
       "Hosted assistant delivery side effect kind",
+    ),
+    payload: parseHostedAssistantDeliveryPayload(
+      record.payload,
+      "Hosted assistant delivery side effect payload",
     ),
   };
 }
@@ -587,6 +630,48 @@ function isHostedAssistantDeliveryStoredRecordState(
     || (hostedAssistantDeliveryLegacyRecordStateValues as readonly string[]).includes(value);
 }
 
+function parseHostedAssistantDeliveryPayload(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryPayload {
+  const record = requireObject(value, label);
+
+  return {
+    actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
+    bindingDeliveryKind: requireNullableHostedAssistantBindingDeliveryKind(
+      record.bindingDeliveryKind ?? null,
+      `${label}.bindingDeliveryKind`,
+    ),
+    bindingDeliveryTarget: requireNullableString(
+      record.bindingDeliveryTarget ?? null,
+      `${label}.bindingDeliveryTarget`,
+    ),
+    channel: requireNullableString(record.channel ?? null, `${label}.channel`),
+    explicitTarget: requireNullableString(
+      record.explicitTarget ?? null,
+      `${label}.explicitTarget`,
+    ),
+    idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
+    identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
+    message: requireString(record.message, `${label}.message`),
+    replyToMessageId: requireNullableString(
+      record.replyToMessageId ?? null,
+      `${label}.replyToMessageId`,
+    ),
+    sessionId: requireString(record.sessionId, `${label}.sessionId`),
+    threadId: requireNullableString(record.threadId ?? null, `${label}.threadId`),
+    threadIsDirect: requireNullableBoolean(
+      record.threadIsDirect ?? null,
+      `${label}.threadIsDirect`,
+    ),
+    transportIdempotent: requireBoolean(
+      record.transportIdempotent,
+      `${label}.transportIdempotent`,
+    ),
+    turnId: requireString(record.turnId, `${label}.turnId`),
+  };
+}
+
 function parseHostedAssistantDeliveryAttempt(
   value: unknown,
   label: string,
@@ -680,6 +765,48 @@ function requireNullableNonNegativeInteger(value: unknown, label: string): numbe
   }
 
   return requireNonNegativeInteger(value, label);
+}
+
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function requireNullableBoolean(value: unknown, label: string): boolean | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireBoolean(value, label);
+}
+
+function requireHostedAssistantBindingDeliveryKind(
+  value: unknown,
+  label: string,
+): HostedAssistantBindingDeliveryKind {
+  const bindingKind = requireString(value, label);
+
+  if ((hostedAssistantBindingDeliveryKindValues as readonly string[]).includes(bindingKind)) {
+    return bindingKind as HostedAssistantBindingDeliveryKind;
+  }
+
+  throw new TypeError(
+    `Unsupported hosted assistant binding delivery kind: ${bindingKind}`,
+  );
+}
+
+function requireNullableHostedAssistantBindingDeliveryKind(
+  value: unknown,
+  label: string,
+): HostedAssistantBindingDeliveryKind | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireHostedAssistantBindingDeliveryKind(value, label);
 }
 
 function requireHostedExecutionAssistantDeliveryTargetKind(

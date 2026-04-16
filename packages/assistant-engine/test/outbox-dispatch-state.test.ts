@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { assistantDeliveryErrorSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  beginAssistantOutboxIntentMirrorDispatch,
   createAssistantOutboxIntent,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
@@ -13,6 +14,10 @@ import {
   updateAssistantOutboxAfterDispatchFailure,
 } from '../src/assistant/outbox/dispatch-state.ts'
 import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
+import {
+  createAssistantTurnReceipt,
+  readAssistantTurnReceipt,
+} from '../src/assistant/turns.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 
@@ -27,6 +32,7 @@ async function withTempVault(run: (vault: string) => Promise<void>): Promise<voi
 
 async function createSendingIntent(input: {
   attemptCount: number
+  deliveryTransportIdempotent?: boolean
   vault: string
 }): Promise<Awaited<ReturnType<typeof saveAssistantOutboxIntent>>> {
   const created = await createAssistantOutboxIntent({
@@ -40,7 +46,7 @@ async function createSendingIntent(input: {
     ...created,
     attemptCount: input.attemptCount,
     deliveryConfirmationPending: input.attemptCount > 1,
-    deliveryTransportIdempotent: false,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? false,
     lastAttemptAt: '2026-04-13T00:00:00.000Z',
     nextAttemptAt: null,
     status: 'sending',
@@ -88,6 +94,7 @@ describe('assistant outbox dispatch-state', () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({
         attemptCount: 2,
+        deliveryTransportIdempotent: true,
         vault,
       })
       const paths = resolveAssistantStatePaths(vault)
@@ -110,34 +117,52 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
-  it('keeps hosted-journal retries scheduled without local confirmation ownership', async () => {
+  it('deduplicates repeated hosted mirror sending observations for the same attempt', async () => {
     await withTempVault(async (vault) => {
-      const sending = await createSendingIntent({
-        attemptCount: 2,
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'openai-compatible',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_mirror',
         vault,
       })
-      const hosted = await saveAssistantOutboxIntent(vault, {
-        ...sending,
-        deliveryStateAuthority: 'hosted-journal',
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_mirror',
+        vault,
       })
-      const paths = resolveAssistantStatePaths(vault)
-      const scheduledAt = new Date('2030-04-13T00:05:00.000Z')
+      const startedAt = '2030-04-13T00:10:00.000Z'
 
-      const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
-        error: assistantDeliveryErrorSchema.parse({
-          code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
-          message: 'delivery must be reconciled before resend',
-        }),
-        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, hosted.intentId),
-        scheduledAt,
-        sending: hosted,
+      const first = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt,
+        vault,
+      })
+      const second = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt,
         vault,
       })
 
-      expect(retryIntent.deliveryStateAuthority).toBe('hosted-journal')
-      expect(retryIntent.deliveryConfirmationPending).toBe(false)
-      expect(retryIntent.updatedAt).toBe('2030-04-13T00:05:00.000Z')
-      expect(retryIntent.nextAttemptAt).toBe('2030-04-13T00:07:00.000Z')
+      expect(first?.attemptCount).toBe(1)
+      expect(second).toEqual(first)
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.attemptCount).toBe(1)
+
+      const receipt = await readAssistantTurnReceipt(vault, created.turnId)
+      expect(
+        receipt?.timeline.filter((event) => event.kind === 'delivery.attempt.started'),
+      ).toHaveLength(1)
     })
   })
+
 })
