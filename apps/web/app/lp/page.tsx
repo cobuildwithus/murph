@@ -35,17 +35,20 @@ export default async function LandingPage() {
   const signupCta = authenticated
     ? {
         body:
-          "Jump back into your dashboard, manage billing, and keep your wearable connections in sync from one place.",
+          "Manage billing and connected wearables from one place.",
         eyebrow: "Your account",
+        metaItems: ["Subscription and billing", "Wearable connections"],
+        note: null,
         signupLabel: "Open settings",
         title: "You’re already set up.",
       }
     : {
-        body:
-          "Create your account with your phone, Telegram, or email. Connect your wearable, pick one experiment, and let Murph tell you what actually changed.",
+        body: null,
         eyebrow: "Sign up",
+        metaItems: ["$5/month early access", "Oura and Whoop"],
+        note: null,
         signupLabel: "Create your account",
-        title: "Ready to get more out of your wearable?",
+        title: "Run one experiment. See what changed.",
       };
 
   return (
@@ -394,48 +397,53 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      <section className="bg-[#ede3d0] px-6 pb-4 sm:px-10 lg:px-16">
+      <section className="bg-[#ede3d0] px-6 py-8 sm:px-10 lg:px-16 lg:py-10">
         <div className="mx-auto max-w-[1080px]">
-          <div className="overflow-hidden rounded-[2rem] border border-[#c4a882]/15 bg-[#2a2520] px-6 py-10 text-center shadow-[0_22px_70px_rgba(42,37,32,0.14)] sm:px-10 sm:py-12 lg:px-14 lg:py-14">
-            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]/85">
-              {signupCta.eyebrow}
-            </span>
-            <h2 className="mx-auto mt-5 max-w-[14ch] font-serif text-[clamp(1.9rem,3.6vw,3rem)] font-semibold leading-[1.04] tracking-[-0.04em] text-[#f5f0e8]">
-              {signupCta.title}
-            </h2>
-            <p className="mx-auto mt-5 max-w-[40ch] text-[0.9375rem] leading-[1.8] text-pretty text-[#f5f0e8]/58 sm:text-base">
-              {signupCta.body}
-            </p>
+          <div className="overflow-hidden rounded-[2rem] border border-[#c4a882]/15 bg-[#2a2520] px-6 py-12 shadow-[0_22px_70px_rgba(42,37,32,0.14)] sm:px-10 sm:py-14 lg:px-14 lg:py-16">
+            <div className="mx-auto flex max-w-[700px] flex-col items-center text-center">
+              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]/85">
+                {signupCta.eyebrow}
+              </span>
+              <h2 className="mx-auto mt-4 max-w-[12ch] font-serif text-[clamp(1.9rem,3.5vw,2.85rem)] font-semibold leading-[1.02] tracking-[-0.04em] text-[#f5f0e8]">
+                {signupCta.title}
+              </h2>
+              {signupCta.body ? (
+                <p className="mx-auto mt-4 max-w-[33ch] text-[0.9375rem] leading-[1.75] text-pretty text-[#f5f0e8]/58 sm:text-base">
+                  {signupCta.body}
+                </p>
+              ) : null}
 
-            <div className="mt-7 flex items-center justify-center gap-3 text-[0.8125rem] text-[#f5f0e8]/42">
-              {authenticated ? (
-                <>
-                  <span>Subscription and billing</span>
-                  <span className="text-[#f5f0e8]/18">&middot;</span>
-                  <span>Wearable connections</span>
-                </>
-              ) : (
-                <>
-                  <span>$5/month early access</span>
-                  <span className="text-[#f5f0e8]/18">&middot;</span>
-                  <span>Oura and Whoop</span>
-                </>
-              )}
-            </div>
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 text-[0.8125rem] text-[#f5f0e8]/52">
+                {signupCta.metaItems.map((item) => (
+                  <span
+                    key={item}
+                    className="rounded-full border border-[#f5f0e8]/10 bg-[#f5f0e8]/[0.03] px-3.5 py-1.5"
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
 
-            <div className="mt-8 flex justify-center">
-              <LandingAuthActions
-                authenticated={authenticated}
-                context="footer"
-                showSignIn={false}
-                signupLabel={signupCta.signupLabel}
-              />
+              <div className="mt-8 flex justify-center">
+                <LandingAuthActions
+                  authenticated={authenticated}
+                  context="footer"
+                  showSignIn={false}
+                  signupLabel={signupCta.signupLabel}
+                />
+              </div>
+
+              {signupCta.note ? (
+                <p className="mt-4 text-[0.8125rem] leading-[1.6] text-[#f5f0e8]/48">
+                  {signupCta.note}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="bg-[#ede3d0] px-6 py-16 sm:px-10 lg:px-16 lg:py-24">
+      <section className="bg-[#ede3d0] px-6 pb-16 pt-10 sm:px-10 sm:pb-20 sm:pt-12 lg:px-16 lg:pb-24 lg:pt-14">
         <div className="mx-auto max-w-[1080px]">
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
             Quick start
