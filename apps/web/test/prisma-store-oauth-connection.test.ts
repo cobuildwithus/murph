@@ -316,6 +316,73 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(created.metadata).toEqual({});
   });
 
+  it("keeps hosted device connection persistence provider-generic", async () => {
+    const createdArtifacts: {
+      connection: MutableConnectionRecord | null;
+    } = {
+      connection: null,
+    };
+
+    const tx = {
+      deviceConnection: {
+        findUnique: async ({ where }: { where: { id?: string } | { provider_providerAccountBlindIndex?: { provider: string; providerAccountBlindIndex: string } } }) => {
+          if ("id" in where && where.id && createdArtifacts.connection?.id === where.id) {
+            return cloneConnection(createdArtifacts.connection);
+          }
+
+          return null;
+        },
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          createdArtifacts.connection = normalizeCreatedConnection(data);
+          return cloneConnection(createdArtifacts.connection);
+        },
+        findFirst: async () => null,
+      },
+      deviceConnectionSecret: {
+        create: async () => {
+          throw new Error("deviceConnectionSecret rows should stay unused");
+        },
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const created = await store.upsertConnection({
+      ownerId: "user-123",
+      provider: "demo",
+      externalAccountId: "acct_demo",
+      displayName: "Demo provider",
+      scopes: ["demo:read"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+      },
+      metadata: {
+        region: "test",
+      },
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+
+    expect(created.provider).toBe("demo");
+    expect(createdArtifacts.connection).toMatchObject({
+      id: created.id,
+      provider: "demo",
+      providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+        key: BLIND_INDEX_KEY,
+        provider: "demo",
+        externalAccountId: "acct_demo",
+      }),
+      status: "active",
+    });
+  });
+
   it("updates an existing connection without writing a Prisma secret row", async () => {
     const existing = createConnection({
       id: "dsc_123",

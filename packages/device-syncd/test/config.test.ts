@@ -119,6 +119,24 @@ test("loadDeviceSyncEnvironment supports an explicit control token and public li
   assert.equal(loaded.http.publicPort, 9876);
 });
 
+test("loadDeviceSyncEnvironment keeps provider-owned webhook secrets off the generic service and http shapes", () => {
+  const loaded = loadDeviceSyncEnvironment({
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+    OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",
+    ...createDeviceSyncEnv(),
+  });
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(loaded.service.config, "webhookVerificationToken"),
+    false,
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(loaded.http, "webhookVerificationToken"),
+    false,
+  );
+});
+
 test("loadDeviceSyncEnvironment rejects non-decimal and out-of-range listener ports", () => {
   assert.throws(
     () =>

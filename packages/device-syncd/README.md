@@ -45,6 +45,10 @@ The shared ingress owns:
 - webhook dedupe and account lookup hooks
 
 It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
+It also does **not** own provider-specific webhook-admin secrets. If a provider
+needs verification or subscription credentials, keep them on that provider's
+config and factory path instead of widening the generic ingress or daemon
+HTTP/env shapes.
 
 ## Provider model
 
@@ -63,6 +67,19 @@ WHOOP uses OAuth plus webhooks.
 Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
 
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
+
+## Adding another provider
+
+The permanent provider path is:
+- add one shared descriptor in `@murphai/importers`
+- add one `packages/device-syncd/src/providers/<provider>.ts` transport module that owns auth, refresh, jobs, and any provider-owned webhook preflight/admin behavior
+- add one importer adapter in `packages/importers/src/device-providers/<provider>.ts`
+- register the provider once through the shared `@murphai/device-syncd/config` assembly path
+
+Hosted web should not need a second provider registry or a provider-specific
+Prisma table for a normal addition. Its Postgres device-sync models stay
+provider-generic, and its route layer should keep using the shared
+`DeviceSyncPublicIngress` seam.
 
 ## Environment
 
@@ -120,7 +137,7 @@ Oura settings:
 - `OURA_RECONCILE_DAYS`
 - `OURA_RECONCILE_INTERVAL_MS`
 - `OURA_REQUEST_TIMEOUT_MS`
-- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider to answer webhook preflight challenges and maintain Oura webhook subscriptions
+- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider config to answer webhook preflight challenges and maintain Oura webhook subscriptions
 
 ## Run
 

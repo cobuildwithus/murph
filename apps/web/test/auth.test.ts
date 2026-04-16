@@ -20,7 +20,6 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   encryptionKeysByVersion: { v1: Buffer.alloc(32, 0) },
   encryptionKeyVersion: "v1",
   isProduction: false,
-  ouraWebhookVerificationToken: null,
   publicBaseUrl: "https://control.example.test/api/device-sync",
   trustedUserAssertionHeader: "x-hosted-user-assertion",
   trustedUserSignatureHeader: "x-hosted-user-signature",
@@ -28,6 +27,11 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   devUserEmail: "dev@example.com",
   devUserId: "dev-user",
   devUserName: "Dev User",
+  providers: {
+    garmin: null,
+    whoop: null,
+    oura: null,
+  },
 };
 
 describe("requireAuthenticatedHostedUser", () => {

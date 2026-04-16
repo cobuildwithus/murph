@@ -1,3 +1,12 @@
+import {
+  readConfiguredGarminDeviceSyncProviderConfig,
+  readConfiguredOuraDeviceSyncProviderConfig,
+  readConfiguredWhoopDeviceSyncProviderConfig,
+} from "@murphai/device-syncd/config";
+import type { GarminDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/garmin";
+import type { OuraDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/oura";
+import type { WhoopDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/whoop";
+
 import { decodeHostedEncryptionKey, decodeHostedEncryptionKeyring } from "./crypto";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";
 import {
@@ -12,7 +21,6 @@ export interface HostedDeviceSyncEnvironment {
   encryptionKeysByVersion: Readonly<Record<string, Buffer>>;
   encryptionKeyVersion: string;
   isProduction: boolean;
-  ouraWebhookVerificationToken: string | null;
   publicBaseUrl: string | null;
   trustedUserAssertionHeader: string;
   trustedUserSignatureHeader: string;
@@ -20,6 +28,11 @@ export interface HostedDeviceSyncEnvironment {
   devUserEmail: string | null;
   devUserId: string | null;
   devUserName: string | null;
+  providers: {
+    garmin: GarminDeviceSyncProviderConfig | null;
+    whoop: WhoopDeviceSyncProviderConfig | null;
+    oura: OuraDeviceSyncProviderConfig | null;
+  };
 }
 
 const DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS = [
@@ -54,9 +67,6 @@ const DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS = [
 ] as const;
 const DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET",
-] as const;
-const OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS = [
-  "OURA_WEBHOOK_VERIFICATION_TOKEN",
 ] as const;
 
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
@@ -98,7 +108,6 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
     }),
     encryptionKeyVersion,
     isProduction: (source.NODE_ENV ?? "development") === "production",
-    ouraWebhookVerificationToken: readEnv(source, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS) ?? null,
     publicBaseUrl: readHostedDeviceSyncPublicBaseUrl(source),
     trustedUserAssertionHeader:
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS)) ??
@@ -110,6 +119,11 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
     devUserEmail: readEnv(source, DEVICE_SYNC_DEV_USER_EMAIL_ENV_KEYS) ?? null,
     devUserId: readEnv(source, DEVICE_SYNC_DEV_USER_ID_ENV_KEYS) ?? null,
     devUserName: readEnv(source, DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS) ?? null,
+    providers: {
+      garmin: readConfiguredGarminDeviceSyncProviderConfig(source),
+      whoop: readConfiguredWhoopDeviceSyncProviderConfig(source),
+      oura: readConfiguredOuraDeviceSyncProviderConfig(source),
+    },
   };
 }
 

@@ -88,9 +88,9 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
 
-Optional Oura webhook-admin setting:
+Provider-owned Oura webhook-admin setting:
 
-- `OURA_WEBHOOK_VERIFICATION_TOKEN` when the hosted Oura provider should answer webhook preflight challenges and maintain Oura webhook subscriptions
+- `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
 
 Hosted onboarding extras:
 
