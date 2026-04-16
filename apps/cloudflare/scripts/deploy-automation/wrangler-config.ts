@@ -23,8 +23,8 @@ export function buildHostedWranglerDeployConfig(
     ...environment.workerVars,
   };
 
-  if (environment.allowedUserEnvKeys) {
-    vars.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = environment.allowedUserEnvKeys;
+  if (environment.allowedRunnerSecretKeys) {
+    vars.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = environment.allowedRunnerSecretKeys;
   }
 
   return {

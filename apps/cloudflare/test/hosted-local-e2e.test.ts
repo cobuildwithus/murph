@@ -56,7 +56,7 @@ describe("hosted local end-to-end", () => {
     localHarness = null;
   });
 
-  it("bootstraps a member and completes a follow-up manual run through the live local stack", async () => {
+  it("bootstraps a member and completes a follow-up execution through the live local stack", async () => {
     const harness = requireHarness();
     const activationResult = parseHostedExecutionDispatchResult(await harness.requestJson(
       HOSTED_EXECUTION_DISPATCH_PATH,

@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCloudflareHostedControlUserEventStatusPath,
-  buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "../src/routes.ts";
 
@@ -14,9 +13,6 @@ describe("cloudflare hosted control routes", () => {
   it("builds the narrowed internal routes with encoded identifiers", () => {
     expect(buildCloudflareHostedControlUserEventStatusPath("user/a b", "evt/1 2")).toBe(
       "/internal/users/user%2Fa%20b/events/evt%2F1%202/status",
-    );
-    expect(buildCloudflareHostedControlUserRunPath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/run",
     );
     expect(buildCloudflareHostedControlUserStatusPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/status",
@@ -53,7 +49,6 @@ describe("cloudflare hosted control routes", () => {
     });
     await expect(import("@murphai/cloudflare-hosted-control/routes")).resolves.toMatchObject({
       buildCloudflareHostedControlUserEventStatusPath: expect.any(Function),
-      buildCloudflareHostedControlUserRunPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
     });
     await expect(importBySpecifier("@murphai/cloudflare-hosted-control/contracts")).rejects.toThrow();

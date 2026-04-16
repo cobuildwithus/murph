@@ -12,14 +12,14 @@ import {
 
 import {
   buildHostedRunnerContainerEnv,
-  filterHostedRunnerUserEnv,
+  filterHostedRunnerSecrets,
 } from "./hosted-env-policy.ts";
 
 export function buildHostedRunnerJobRuntime(input: {
   commitTimeoutMs?: number | null;
   forwardedEnv: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
-  userEnv?: Readonly<Record<string, string>>;
+  runnerSecrets?: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const forwardedEnv = { ...input.forwardedEnv };
 
@@ -27,20 +27,20 @@ export function buildHostedRunnerJobRuntime(input: {
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null),
     forwardedEnv,
     resolvedConfig: input.resolvedConfig ?? buildHostedRunnerResolvedConfig(forwardedEnv),
-    userEnv: { ...(input.userEnv ?? {}) },
+    userEnv: { ...(input.runnerSecrets ?? {}) },
   };
 }
 
 export {
   buildHostedRunnerContainerEnv,
-  filterHostedRunnerUserEnv,
+  filterHostedRunnerSecrets,
 } from "./hosted-env-policy.ts";
 
 export function buildHostedRunnerJobRuntimeConfig(input: {
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
-  userEnv: Readonly<Record<string, string>>;
+  runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
 
@@ -51,10 +51,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     ),
     forwardedEnv: input.forwardedEnv,
     resolvedConfig: input.resolvedConfig,
-    userEnv: filterHostedRunnerUserEnv(
-      input.userEnv,
-      configSource,
-    ),
+    runnerSecrets: filterHostedRunnerSecrets(input.runnerSecrets, configSource),
   });
 }
 

@@ -1820,7 +1820,7 @@ describe("runHostedExecutionJob", () => {
     ).rejects.toThrow("Hosted assistant runtime child did not emit a result payload.");
   });
 
-  it("preserves encrypted per-user env overrides across one-shot runs", async () => {
+  it("preserves encrypted runner-secret overrides across one-shot runs", async () => {
     const result = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -1968,12 +1968,12 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("restores the prior process env after per-user overrides are applied", async () => {
-    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
+    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS;
     const previousCustomApiKey = process.env.CUSTOM_API_KEY;
     const previousHome = process.env.HOME;
     const previousVault = process.env.VAULT;
 
-    process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
+    process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = "CUSTOM_API_KEY";
     process.env.CUSTOM_API_KEY = "custom-original-key";
     process.env.HOME = "/tmp/original-home";
     process.env.VAULT = "/tmp/original-vault";
@@ -1998,12 +1998,12 @@ describe("runHostedExecutionJob", () => {
         },
       });
     } finally {
-      expect(process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS).toBe("CUSTOM_API_KEY");
+      expect(process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS).toBe("CUSTOM_API_KEY");
       expect(process.env.CUSTOM_API_KEY).toBe("custom-original-key");
       expect(process.env.HOME).toBe("/tmp/original-home");
       expect(process.env.VAULT).toBe("/tmp/original-vault");
 
-      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
+      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS", previousAllowedUserEnvKeys);
       restoreEnvVar("CUSTOM_API_KEY", previousCustomApiKey);
       restoreEnvVar("HOME", previousHome);
       restoreEnvVar("VAULT", previousVault);
@@ -2012,8 +2012,8 @@ describe("runHostedExecutionJob", () => {
 
   it("allows concurrent hosted runs because each job uses isolated process env", async () => {
     setHostedExecutionRunModeForTests("isolated");
-    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
-    process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
+    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS;
+    process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = "CUSTOM_API_KEY";
 
     const firstPhaseStarted = createDeferred<void>();
     const secondPhaseStarted = createDeferred<void>();
@@ -2130,7 +2130,7 @@ describe("runHostedExecutionJob", () => {
         ["member_2", "user-two-key"],
       ]));
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
+      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS", previousAllowedUserEnvKeys);
     }
   });
 
@@ -2592,16 +2592,16 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("preserves worker-resolved runtime fields while keeping control-only keys out of child env", () => {
-    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
+    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS;
     const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
-    process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "OPENAI_API_KEY";
+    process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = "OPENAI_API_KEY";
     process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
 
     try {
       const runtime = buildHostedExecutionJobRuntimeForTests({
         commitTimeoutMs: 45_000,
         forwardedEnv: {
-          HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
+          HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
           HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
           HOSTED_EMAIL_INGRESS_READY: "true",
           HOSTED_EMAIL_SEND_READY: "true",
@@ -2626,7 +2626,7 @@ describe("runHostedExecutionJob", () => {
         OPENAI_API_KEY: "sk-worker",
       });
       expect(runtime.forwardedEnv).not.toHaveProperty(
-        "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
+        "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS",
       );
       expect(runtime.forwardedEnv).not.toHaveProperty(
         "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
@@ -2642,7 +2642,7 @@ describe("runHostedExecutionJob", () => {
         deviceSync: null,
       });
     } finally {
-      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
+      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS", previousAllowedUserEnvKeys);
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
     }
   });

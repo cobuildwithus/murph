@@ -6,7 +6,7 @@ import {
 import {
   createHostedArtifactStore,
   createHostedBundleStore,
-  createHostedUserEnvStore,
+  createHostedRunnerSecretsStore,
 } from "../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
@@ -176,17 +176,19 @@ describe("hosted storage object keys", () => {
     const storedArtifactKey = findStoredObjectKey(bucket, (key) => key.endsWith(".artifact.bin"));
     expectOpaqueStrings([storedArtifactKey], ["user_artifact_123", artifactSha]);
 
-    const userEnvStore = createHostedUserEnvStore({
+    const runnerSecretsStore = createHostedRunnerSecretsStore({
       bucket,
       key: rootKey,
       keyId,
     });
-    await userEnvStore.writeUserEnv(
+    await runnerSecretsStore.writeRunnerSecrets(
       "user_env_123",
       new TextEncoder().encode('{"OPENAI_API_KEY":"secret"}'),
     );
-    const storedUserEnvKey = findStoredObjectKey(bucket, (key) => key.startsWith("users/env/"));
-    expectOpaqueStrings([storedUserEnvKey], ["user_env_123"]);
+    const storedRunnerSecretsKey = findStoredObjectKey(bucket, (key) =>
+      key.startsWith("users/runner-secrets/")
+    );
+    expectOpaqueStrings([storedRunnerSecretsKey], ["user_env_123"]);
 
     const journalStore = createHostedExecutionJournalStore({
       bucket,

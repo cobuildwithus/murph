@@ -40,7 +40,7 @@ export interface HostedUserKeyAuditRecord {
 
 export interface HostedUserKeyStore {
   hasManagedUserCryptoEnvelope(userId: string): Promise<boolean>;
-  ensureManagedUserCryptoEnvelope(
+  provisionManagedUserCryptoAtActivation(
     userId: string,
     options?: { reason?: string },
   ): Promise<HostedManagedUserCryptoEnvelopeStatus>;
@@ -98,7 +98,7 @@ export function createHostedUserKeyStore(input: {
         userId,
       })) !== null;
     },
-    async ensureManagedUserCryptoEnvelope(userId, options = {}) {
+    async provisionManagedUserCryptoAtActivation(userId, options = {}) {
       const resolved = await resolveHostedUserRootKeyEnvelope({
         auditLog: input.auditLog ?? null,
         automationRecipientPrivateKeysById: automationPrivateKeysById,
@@ -107,8 +107,8 @@ export function createHostedUserKeyStore(input: {
         envelopeEncryptionKey: input.envelopeEncryptionKey,
         envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
         envelopeEncryptionKeysById,
-        allowMissingEnvelopeBootstrap: true,
-        reason: options.reason ?? "managed-user-provisioning",
+        accessMode: "activation-provision",
+        reason: options.reason ?? "member-activation-provisioning",
         userId,
       });
 
@@ -126,7 +126,7 @@ export function createHostedUserKeyStore(input: {
         envelopeEncryptionKey: input.envelopeEncryptionKey,
         envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
         envelopeEncryptionKeysById,
-        allowMissingEnvelopeBootstrap: false,
+        accessMode: "require-existing",
         reason: options.reason ?? "runtime-access",
         userId,
       });
@@ -142,7 +142,7 @@ async function resolveHostedUserCryptoContext(input: {
   envelopeEncryptionKey: Uint8Array;
   envelopeEncryptionKeyId: string;
   envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
-  allowMissingEnvelopeBootstrap: boolean;
+  accessMode: "activation-provision" | "require-existing";
   reason: string;
   userId: string;
 }): Promise<HostedUserCryptoContext> {
@@ -172,7 +172,7 @@ async function resolveHostedUserRootKeyEnvelope(input: {
   envelopeEncryptionKey: Uint8Array;
   envelopeEncryptionKeyId: string;
   envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
-  allowMissingEnvelopeBootstrap: boolean;
+  accessMode: "activation-provision" | "require-existing";
   reason: string;
   userId: string;
 }): Promise<{ envelope: HostedUserRootKeyEnvelope; rootKey: Uint8Array | null }> {
@@ -190,9 +190,9 @@ async function resolveHostedUserRootKeyEnvelope(input: {
   const existingEnvelope = storedEnvelope?.envelope ?? null;
 
   if (!existingEnvelope) {
-    if (!input.allowMissingEnvelopeBootstrap) {
+    if (input.accessMode !== "activation-provision") {
       throw new Error(
-        `Hosted user root key envelope ${input.userId} is missing. Provision managed user crypto before runtime access.`,
+        `Hosted user root key envelope ${input.userId} is missing. Activation provisioning must complete before runtime access.`,
       );
     }
 

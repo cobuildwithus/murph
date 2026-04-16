@@ -13,7 +13,7 @@ export type HostedStorageScope =
   | "root-key-envelope"
   | "root-key-recipient"
   | "side-effect-journal"
-  | "user-env";
+  | "runner-secrets";
 
 export async function deriveHostedStorageKey(
   rootKey: Uint8Array,

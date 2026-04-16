@@ -1,5 +1,4 @@
 import {
-  buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
@@ -11,7 +10,6 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   normalizeOptionalString,
-  parseOptionalStrictInteger,
 } from "./deploy-automation/shared.ts";
 import {
   readBearerAuthorizationToken,
@@ -30,9 +28,6 @@ interface SmokeControlRequest {
 }
 
 type SmokeUserStatus = HostedExecutionUserStatus;
-
-const DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_SMOKE_STATUS_TIMEOUT_MS = 60_000;
 
 export function resolveSmokeWorkerBaseUrl(source: EnvSource = process.env): string {
   const workerBaseUrl = readFirstConfiguredString(
@@ -99,7 +94,7 @@ export async function runSmokeHostedDeploy(input: {
   );
 
   if (!smokeUserId) {
-    log("Skipping manual smoke run because HOSTED_EXECUTION_SMOKE_USER_ID is not configured.");
+    log("Skipping authenticated hosted status check because HOSTED_EXECUTION_SMOKE_USER_ID is not configured.");
     log("Cloudflare hosted execution smoke checks passed.");
     return;
   }
@@ -110,17 +105,6 @@ export async function runSmokeHostedDeploy(input: {
     );
   }
 
-  const pollIntervalMs = readPositiveInteger(
-    source.HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS,
-    DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS,
-    "HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS",
-  );
-  const timeoutMs = readPositiveInteger(
-    source.HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS,
-    DEFAULT_SMOKE_STATUS_TIMEOUT_MS,
-    "HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS",
-  );
-
   const statusRequest: SmokeControlRequest = {
     authorizationHeader,
     boundUserId: smokeUserId,
@@ -128,21 +112,8 @@ export async function runSmokeHostedDeploy(input: {
     url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
     versionOverrideHeaders,
   };
-  const initialStatus = await readSmokeUserStatus(statusRequest);
-  await invokeManualRun({
-    ...statusRequest,
-    url: new URL(buildCloudflareHostedControlUserRunPath(smokeUserId), smokeBaseUrl).toString(),
-  });
-  const finalStatus = await waitForSmokeCompletion({
-    initialStatus,
-    pollIntervalMs,
-    statusRequest,
-    timeoutMs,
-  });
-
-  log(
-    `Manual smoke run completed for ${smokeUserId} at ${finalStatus.lastRunAt}.`,
-  );
+  const status = await readSmokeUserStatus(statusRequest);
+  log(`Authenticated hosted status check passed for ${smokeUserId}. pendingEventCount=${status.pendingEventCount}`);
   log("Cloudflare hosted execution smoke checks passed.");
 }
 
@@ -191,54 +162,13 @@ async function readSmokePublicPayload(
   return await response.json() as { ok?: unknown; service?: unknown };
 }
 
-async function invokeManualRun(input: SmokeControlRequest): Promise<void> {
-  await sendSmokeControlRequest({
-    ...input,
-    action: "Manual smoke run",
-    body: JSON.stringify({}),
-    method: "POST",
-  });
-}
-
 async function readSmokeUserStatus(input: SmokeControlRequest): Promise<SmokeUserStatus> {
   const response = await sendSmokeControlRequest({
     ...input,
-    action: "Manual smoke status check",
+    action: "Hosted execution status check",
   });
 
   return parseHostedExecutionUserStatus(await response.json());
-}
-
-async function waitForSmokeCompletion(input: {
-  initialStatus: SmokeUserStatus;
-  pollIntervalMs: number;
-  statusRequest: SmokeControlRequest;
-  timeoutMs: number;
-}): Promise<SmokeUserStatus> {
-  const startedAt = Date.now();
-
-  while (true) {
-    const status = await readSmokeUserStatus(input.statusRequest);
-
-    if (didSmokeRunComplete(input.initialStatus, status)) {
-      return status;
-    }
-
-    if ((Date.now() - startedAt) >= input.timeoutMs) {
-      throw new Error(
-        [
-          `Timed out waiting for manual smoke run completion after ${input.timeoutMs}ms.`,
-          `pendingEventCount=${status.pendingEventCount}`,
-          `inFlight=${status.inFlight}`,
-          `lastRunAt=${status.lastRunAt ?? "null"}`,
-          `retryingEventId=${status.retryingEventId ?? "null"}`,
-          `lastError=${status.lastError ?? "null"}`,
-        ].join(" "),
-      );
-    }
-
-    await sleep(input.pollIntervalMs);
-  }
 }
 
 async function sendSmokeControlRequest(input: SmokeControlRequest & {
@@ -264,45 +194,6 @@ async function sendSmokeControlRequest(input: SmokeControlRequest & {
   return response;
 }
 
-function didSmokeRunComplete(
-  initialStatus: SmokeUserStatus,
-  nextStatus: SmokeUserStatus,
-): boolean {
-  return nextStatus.pendingEventCount === 0
-    && !nextStatus.inFlight
-    && didLastRunAdvance(initialStatus.lastRunAt, nextStatus.lastRunAt)
-    && nextStatus.bundleRef !== null;
-}
-
-function didLastRunAdvance(
-  initialLastRunAt: string | null,
-  nextLastRunAt: string | null,
-): boolean {
-  if (!nextLastRunAt) {
-    return false;
-  }
-
-  if (!initialLastRunAt) {
-    return true;
-  }
-
-  return Date.parse(nextLastRunAt) > Date.parse(initialLastRunAt);
-}
-
-function readPositiveInteger(value: string | undefined, fallback: number, label: string): number {
-  const parsed = parseOptionalStrictInteger(value, `${label} must be a positive integer.`);
-
-  if (parsed === null) {
-    return fallback;
-  }
-
-  if (parsed < 1) {
-    throw new Error(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
-}
-
 function readSmokeOidcAuthorizationHeader(source: EnvSource): string | null {
   const token = readFirstConfiguredString(
     source.HOSTED_EXECUTION_SMOKE_OIDC_TOKEN,
@@ -315,12 +206,6 @@ function readSmokeOidcAuthorizationHeader(source: EnvSource): string | null {
 
   const normalized = readBearerAuthorizationToken(token.startsWith("Bearer ") ? token : `Bearer ${token}`);
   return normalized ? `Bearer ${normalized}` : null;
-}
-
-function sleep(durationMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, durationMs);
-  });
 }
 
 function readFirstConfiguredString(...values: Array<string | undefined>): string | null {

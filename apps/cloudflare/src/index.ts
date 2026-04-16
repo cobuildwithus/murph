@@ -2,7 +2,6 @@ import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
 import {
-  buildHostedExecutionAssistantCronTickDispatch,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -16,12 +15,6 @@ import {
 import {
   parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
-  HostedExecutionDeviceSyncRuntimeApplyResponse,
-  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -95,17 +88,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchExactPath("/internal/dispatch"),
     methods: ["POST"],
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleManualRunRoute(context, params.userId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/run$/u),
-    methods: ["POST"],
-    wrongMethodResponse: "method-not-allowed",
   },
   {
     authorizeBeforeMethod: true,
@@ -191,18 +173,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     return this.runner.bootstrapUser(userId);
-  }
-
-  async getDeviceSyncRuntimeSnapshot(input: {
-    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
-    return this.runner.getDeviceSyncRuntimeSnapshot(input);
-  }
-
-  async applyDeviceSyncRuntimeUpdates(input: {
-    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-    return this.runner.applyDeviceSyncRuntimeUpdates(input);
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -312,25 +282,6 @@ async function handleDispatchRoute(context: WorkerRouteContext): Promise<Respons
 
   const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatchWithOutcome(dispatch);
   return result.event.state === "backpressured" ? json(result, 429) : json(result);
-}
-
-async function handleManualRunRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  await readCachedOptionalJsonObject(context);
-  const userId = decodeRouteParam(encodedUserId);
-  const dispatch = buildHostedExecutionAssistantCronTickDispatch({
-    eventId: `manual:${Date.now()}`,
-    occurredAt: new Date().toISOString(),
-    reason: "manual",
-    userId,
-  });
-  const status = await (await resolveUserRunnerStub(context.env, userId)).dispatch(dispatch);
-
-  return isBackpressuredStatus(status, dispatch.eventId)
-    ? json(status, 429)
-    : json(status);
 }
 
 async function handleStatusRoute(

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createHostedArtifactStore,
-  createHostedUserEnvStore,
+  createHostedRunnerSecretsStore,
 } from "../src/bundle-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { writeEncryptedR2Json, writeEncryptedR2Payload } from "../src/crypto.js";
@@ -14,7 +14,7 @@ import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 import { expectOpaqueStrings } from "./object-key-assertions.js";
 
 describe("opaque storage path rotation", () => {
-  it("ignores removed raw-path per-user env objects", async () => {
+  it("ignores removed raw-path runner-secrets objects", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(3);
     const nextKey = createTestRootKey(4);
@@ -25,7 +25,7 @@ describe("opaque storage path rotation", () => {
     await writeEncryptedR2Payload({
       aad: buildHostedStorageAad({
         key: objectKey,
-        purpose: "user-env",
+        purpose: "runner-secrets",
         userId,
       }),
       bucket,
@@ -33,52 +33,52 @@ describe("opaque storage path rotation", () => {
       key: objectKey,
       keyId: "old",
       plaintext,
-      scope: "user-env",
+      scope: "runner-secrets",
     });
 
-    const store = createHostedUserEnvStore({
+    const store = createHostedRunnerSecretsStore({
       bucket,
       key: nextKey,
       keyId: "next",
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await store.readUserEnv(userId)).toBeNull();
-    await store.clearUserEnv(userId);
+    expect(await store.readRunnerSecrets(userId)).toBeNull();
+    await store.clearRunnerSecrets(userId);
     expectOpaqueStrings(bucket.deleted, [objectKey]);
   });
 
-  it("requires a rewrite before per-user env survives platform root-key rotation", async () => {
+  it("requires a rewrite before runner secrets survive platform root-key rotation", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(5);
     const nextKey = createTestRootKey(6);
     const userId = "user_live_rotate";
     const plaintext = new TextEncoder().encode(JSON.stringify({ OPENAI_API_KEY: "secret" }));
 
-    await createHostedUserEnvStore({
+    await createHostedRunnerSecretsStore({
       bucket,
       key: oldKey,
       keyId: "old",
       keysById: { old: oldKey },
-    }).writeUserEnv(userId, plaintext);
+    }).writeRunnerSecrets(userId, plaintext);
 
-    const rotatedStore = createHostedUserEnvStore({
+    const rotatedStore = createHostedRunnerSecretsStore({
       bucket,
       key: nextKey,
       keyId: "next",
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await rotatedStore.readUserEnv(userId)).toBeNull();
+    expect(await rotatedStore.readRunnerSecrets(userId)).toBeNull();
 
-    await rotatedStore.clearUserEnv(userId);
+    await rotatedStore.clearRunnerSecrets(userId);
     expect(bucket.deleted).toHaveLength(1);
-    expect(await createHostedUserEnvStore({
+    expect(await createHostedRunnerSecretsStore({
       bucket,
       key: oldKey,
       keyId: "old",
       keysById: { next: nextKey, old: oldKey },
-    }).readUserEnv(userId)).toEqual(plaintext);
+    }).readRunnerSecrets(userId)).toEqual(plaintext);
   });
 
   it("ignores removed raw-path per-user artifacts", async () => {

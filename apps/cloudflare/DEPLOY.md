@@ -77,7 +77,7 @@ Core execution tuning:
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_RUNNER_TIMEOUT_MS` defaults to `120000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
-- `CF_ALLOWED_USER_ENV_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` in the rendered worker config
+- `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant,parsers,web` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
@@ -202,20 +202,13 @@ That command:
 
 - `GET /`
 - `GET /health`
-- if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, `POST /internal/users/:userId/run`
-- if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, `GET /internal/users/:userId/status` until:
-  - `pendingEventCount=0`
-  - `inFlight=false`
-  - `lastRunAt` advances
-  - `bundleRef` is non-null
+- if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 Optional smoke env:
 
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` to target a non-default public Worker URL
-- `HOSTED_EXECUTION_SMOKE_USER_ID` to enable the manual run/status path
-- `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for manual run/status auth
-- `HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS`
-- `HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS`
+- `HOSTED_EXECUTION_SMOKE_USER_ID` to enable the authenticated status check
+- `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` only when intentionally smoke-testing a recovery deployment version override
 
 If `HOSTED_EXECUTION_SMOKE_USER_ID` is unset, smoke stops after the public banner and health checks.

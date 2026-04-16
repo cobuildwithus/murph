@@ -6,7 +6,7 @@ import {
   hostedDispatchPayloadObjectKey,
   hostedExecutionJournalObjectKey,
   hostedSideEffectRecordKey,
-  hostedUserEnvObjectKey,
+  hostedRunnerSecretsObjectKey,
 } from "../src/storage-paths.js";
 import { expectOpaqueStrings } from "./object-key-assertions.js";
 
@@ -22,20 +22,20 @@ describe("hosted storage paths", () => {
 
     const artifactKey = await hostedArtifactObjectKey(rootKey, userId, sha256);
     const bundleKey = await hostedBundleObjectKey(rootKey, "vault", hash);
-    const userEnvKey = await hostedUserEnvObjectKey(rootKey, userId);
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, userId);
     const journalKey = await hostedExecutionJournalObjectKey(rootKey, userId, eventId);
     const sideEffectKey = await hostedSideEffectRecordKey(rootKey, userId, effectId);
     const dispatchPayloadKey = await hostedDispatchPayloadObjectKey(rootKey, userId, eventId);
 
     expect(artifactKey).toMatch(/^users\/artifacts\/[0-9a-f]{24}\/[0-9a-f]{48}\.artifact\.bin$/);
     expect(bundleKey).toMatch(/^bundles\/vault\/[0-9a-f]{48}\.bundle\.json$/);
-    expect(userEnvKey).toMatch(/^users\/env\/[0-9a-f]{24}\.json$/);
+    expect(runnerSecretsKey).toMatch(/^users\/runner-secrets\/[0-9a-f]{24}\.json$/);
     expect(journalKey).toMatch(/^transient\/execution-journal\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
     expect(sideEffectKey).toMatch(/^transient\/side-effects\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
     expect(dispatchPayloadKey).toMatch(/^transient\/dispatch-payloads\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
 
     expectOpaqueStrings(
-      [artifactKey, bundleKey, userEnvKey, journalKey, sideEffectKey, dispatchPayloadKey],
+      [artifactKey, bundleKey, runnerSecretsKey, journalKey, sideEffectKey, dispatchPayloadKey],
       [userId, eventId, effectId, sha256, hash],
     );
   });

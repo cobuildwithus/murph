@@ -1,10 +1,4 @@
-import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
-import {
-  HOSTED_EXECUTION_NONCE_HEADER,
-  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
-  HOSTED_EXECUTION_SIGNATURE_HEADER,
-  HOSTED_EXECUTION_TIMESTAMP_HEADER,
-} from "@murphai/hosted-execution/contracts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
@@ -12,53 +6,37 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
-import type { WorkerUserRunnerNamespaceLike, WorkerUserRunnerStubLike } from "../src/worker-contracts.ts";
-
-const describe = baseDescribe.sequential;
+import type { WorkerUserRunnerNamespaceLike } from "../src/worker-contracts.ts";
 
 const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
+const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 
 describe("handleRunnerOutboundRequest", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("accepts internal worker proxy traffic when the outbound host mapping is present but the proxy header is missing", async () => {
+  it("accepts internal worker proxy traffic when the artifact host mapping is present but the proxy header is missing", async () => {
     const response = await handleRunnerOutboundRequest(
-      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          provider: "oura",
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
+      new Request(MISSING_ARTIFACT_URL, {
+        method: "GET",
       }),
       createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      connections: [],
-      generatedAt: "2026-04-05T00:00:00.000Z",
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
   });
 
-  it("rejects internal worker proxy traffic when the per-run proxy token does not match", async () => {
+  it("rejects artifact host proxy traffic when the per-run proxy token does not match", async () => {
     const response = await handleRunnerOutboundRequest(
-      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          provider: "oura",
-        }),
+      new Request(MISSING_ARTIFACT_URL, {
         headers: {
           [RUNNER_PROXY_TOKEN_HEADER]: "proxy-tokez",
-          "content-type": "application/json; charset=utf-8",
         },
-        method: "POST",
+        method: "GET",
       }),
       createRunnerOutboundEnv(),
       "member_123",
@@ -71,199 +49,8 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("handles device-sync runtime requests locally and binds them to the authenticated user", async () => {
-    const getDeviceSyncRuntimeSnapshot = vi.fn(async (input: { request: { userId: string } }) => ({
-      connections: [],
-      generatedAt: "2026-04-05T00:00:00.000Z",
-      userId: input.request.userId,
-    }));
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          provider: "oura",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        USER_RUNNER: {
-          getByName() {
-            return {
-              async commit() {
-                throw new Error("not used");
-              },
-              getDeviceSyncRuntimeSnapshot,
-            };
-          },
-        },
-      }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      connections: [],
-      generatedAt: "2026-04-05T00:00:00.000Z",
-      userId: "member_123",
-    });
-    expect(getDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith({
-      request: {
-        provider: "oura",
-        userId: "member_123",
-      },
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects seeded device-sync runtime apply requests from the untrusted runner path", async () => {
-    const applyDeviceSyncRuntimeUpdates = vi.fn();
-
-    await expect(handleRunnerOutboundRequest(
-      new Request("http://device-sync.worker/api/internal/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              seed: {
-                connection: {
-                  accessTokenExpiresAt: null,
-                  connectedAt: "2026-04-07T00:00:00.000Z",
-                  createdAt: "2026-04-07T00:00:00.000Z",
-                  displayName: "Oura",
-                  externalAccountId: "acct_123",
-                  id: "conn_123",
-                  metadata: {},
-                  provider: "oura",
-                  scopes: ["heartrate:read"],
-                  status: "active",
-                },
-                localState: {
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSyncCompletedAt: null,
-                  lastSyncErrorAt: null,
-                  lastSyncStartedAt: null,
-                  lastWebhookAt: null,
-                  nextReconcileAt: null,
-                },
-                tokenBundle: null,
-              },
-            },
-          ],
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        USER_RUNNER: {
-          getByName() {
-            return {
-              applyDeviceSyncRuntimeUpdates,
-              async commit() {
-                throw new Error("not used");
-              },
-            };
-          },
-        },
-      }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    )).rejects.toThrow(
-      "Runner device-sync runtime apply requests must not include seeded connections.",
-    );
-
-    expect(applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
-  });
-
-  it("does not depend on hosted-web allowlists for local device-sync runtime paths", async () => {
+  it("returns 404 for removed Cloudflare-owned device-sync runtime hosts", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          provider: "oura",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      connections: [],
-      generatedAt: expect.any(String),
-      userId: "member_123",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("bootstraps the bound user through the runner lane before local crypto-backed runtime reads", async () => {
-    const bootstrapUser = vi.fn(async (userId: string) => ({ userId }));
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          provider: "oura",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        USER_RUNNER: {
-          getByName() {
-            return {
-              async commit() {
-                throw new Error("not used");
-              },
-              bootstrapUser,
-              async getDeviceSyncRuntimeSnapshot(input: { request: { userId: string } }) {
-                return {
-                  connections: [],
-                  generatedAt: "2026-04-05T00:00:00.000Z",
-                  userId: input.request.userId,
-                };
-              },
-            };
-          },
-        },
-      }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(200);
-    expect(bootstrapUser).toHaveBeenCalledTimes(1);
-    expect(bootstrapUser).toHaveBeenCalledWith("member_123");
-  });
-
-  it("keeps device-sync runtime routes local even when deprecated hosted-web vars are present", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -283,27 +70,15 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      connections: [],
-      generatedAt: expect.any(String),
-      userId: "member_123",
+      error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("proxies hosted device connect-link requests through hosted web with the Cloudflare callback signature", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      authorizationUrl: "https://provider.example.test/oauth/start",
-      expiresAt: "2026-04-04T12:00:00.000Z",
-      provider: "whoop",
-      providerLabel: "WHOOP",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
+  it("returns 404 for removed Cloudflare-owned device-sync connect-link hosts", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -318,149 +93,12 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://provider.example.test/oauth/start",
-      expiresAt: "2026-04-04T12:00:00.000Z",
-      provider: "whoop",
-      providerLabel: "WHOOP",
-    });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://web.example.test/api/internal/device-sync/providers/whoop/connect-link",
-      expect.objectContaining({
-        headers: expect.any(Headers),
-        method: "POST",
-      }),
-    );
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected hosted-web connect-link fetch to be called.");
-    }
-    const [, requestInit] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
-    expect(requestInit).toBeTruthy();
-    const requestHeaders = requestInit?.headers;
-    expect(requestHeaders).toBeInstanceOf(Headers);
-    expect((requestHeaders as Headers).get("authorization")).toBeNull();
-    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
-    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("v1");
-    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_NONCE_HEADER)).toMatch(/^[a-f0-9]{32}$/u);
-    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER)).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
-    expect((requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toMatch(/^[A-Za-z0-9\-_]+$/u);
-  });
-
-  it("returns 404 when a share pack has not been published for the bound user", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://share.worker/internal/shares/share_123/payload", {
-        headers: createRunnerProxyHeaders(),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
-
-  it("keeps the removed legacy hosted share payload route disabled", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload", {
-        headers: createRunnerProxyHeaders(),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: "Not found",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("does not expose a runner-local pending-usage route anymore", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      recorded: 1,
-      usageIds: ["usage_123"],
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://usage.worker/api/internal/hosted-execution/usage/record", {
-        body: JSON.stringify({
-          usage: [
-            {
-              usageId: "usage_123",
-            },
-          ],
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(404);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects side-effect writes when the route effect id and payload effect id differ", async () => {
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://results.worker/effects/outbox_123", {
-        body: JSON.stringify({
-          effectId: "outbox_999",
-          fingerprint: "dedupe_123",
-          kind: "assistant.delivery",
-          recordedAt: "2026-03-26T12:00:05.000Z",
-          state: "prepared",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "PUT",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "effectId mismatch: expected outbox_123, received outbox_999.",
-    });
-  });
-
 });
 
 function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
@@ -479,20 +117,6 @@ function createRunnerOutboundEnv(
       return {
         async bootstrapUser() {
           return { userId: "member_123" };
-        },
-        async applyDeviceSyncRuntimeUpdates(input: { request: { userId: string } }) {
-          return {
-            appliedAt: "2026-04-05T00:00:00.000Z",
-            updates: [],
-            userId: input.request.userId,
-          };
-        },
-        async getDeviceSyncRuntimeSnapshot(input: { request: { userId: string } }) {
-          return {
-            connections: [],
-            generatedAt: "2026-04-05T00:00:00.000Z",
-            userId: input.request.userId,
-          };
         },
       };
     },
@@ -548,7 +172,7 @@ function createRunnerOutboundEnv(
     ...env,
     USER_RUNNER: {
       getByName(userId: string) {
-        const stub: WorkerUserRunnerStubLike = userRunnerNamespace.getByName(userId);
+        const stub = userRunnerNamespace.getByName(userId);
         return {
           ...stub,
           async bootstrapUser(boundUserId: string) {
@@ -588,5 +212,5 @@ async function ensureRunnerOutboundUserEnvelope(
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
   });
-  await store.ensureManagedUserCryptoEnvelope(userId);
+  await store.provisionManagedUserCryptoAtActivation(userId);
 }

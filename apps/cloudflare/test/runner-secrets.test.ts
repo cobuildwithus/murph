@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  applyHostedUserEnvUpdate,
-  decodeHostedUserEnvPayload,
-  encodeHostedUserEnvPayload,
-  parseHostedUserEnvUpdate,
-} from "../src/user-env.js";
+  applyHostedRunnerSecretsUpdate,
+  decodeHostedRunnerSecretsPayload,
+  encodeHostedRunnerSecretsPayload,
+  parseHostedRunnerSecretsUpdate,
+} from "../src/runner-secrets.js";
 
 const REMOVED_HOSTED_USER_PREFIX_KEY = "HB_USER_SAMPLE_FLAG";
 
-describe("hosted user env helpers", () => {
+describe("hosted runner secrets helpers", () => {
   it("merges allowlisted keys and removes null values", () => {
-    const result = applyHostedUserEnvUpdate({
+    const result = applyHostedRunnerSecretsUpdate({
       current: {
         OPENAI_API_KEY: "old-key",
       },
@@ -30,10 +30,10 @@ describe("hosted user env helpers", () => {
   });
 
   it("accepts explicitly allowlisted keys but rejects removed or prefix-only keys", () => {
-    expect(applyHostedUserEnvUpdate({
+    expect(applyHostedRunnerSecretsUpdate({
       current: {},
       source: {
-        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "HOSTED_USER_SAMPLE_FLAG",
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "HOSTED_USER_SAMPLE_FLAG",
       },
       update: {
         env: {
@@ -45,7 +45,7 @@ describe("hosted user env helpers", () => {
       HOSTED_USER_SAMPLE_FLAG: "enabled",
     });
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -55,10 +55,10 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       source: {
-        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
       },
       update: {
         env: {
@@ -70,7 +70,7 @@ describe("hosted user env helpers", () => {
   });
 
   it("rejects removed AgentMail and ffmpeg alias keys", () => {
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -80,7 +80,7 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -92,7 +92,7 @@ describe("hosted user env helpers", () => {
   });
 
   it("accepts canonical model keys but rejects operator-only parser keys and removed integration keys", () => {
-    expect(applyHostedUserEnvUpdate({
+    expect(applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -110,7 +110,7 @@ describe("hosted user env helpers", () => {
       XAI_API_KEY: "xai-user",
     });
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -120,7 +120,7 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -130,7 +130,7 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -140,7 +140,7 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -150,7 +150,7 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -160,7 +160,7 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -170,7 +170,7 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -181,11 +181,11 @@ describe("hosted user env helpers", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("does not let hosted user env extensions re-enable AgentMail keys", () => {
-    expect(() => applyHostedUserEnvUpdate({
+  it("does not let hosted runner secrets extensions re-enable AgentMail keys", () => {
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       source: {
-        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "AGENTMAIL_API_KEY",
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "AGENTMAIL_API_KEY",
       },
       update: {
         env: {
@@ -195,10 +195,10 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       source: {
-        HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES: "AGENTMAIL_",
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_PREFIXES: "AGENTMAIL_",
       },
       update: {
         env: {
@@ -210,7 +210,7 @@ describe("hosted user env helpers", () => {
   });
 
   it("rejects dangerous env names", () => {
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       update: {
         env: {
@@ -220,10 +220,10 @@ describe("hosted user env helpers", () => {
       },
     })).toThrow(/not allowed/u);
 
-    expect(() => applyHostedUserEnvUpdate({
+    expect(() => applyHostedRunnerSecretsUpdate({
       current: {},
       source: {
-        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "NODE_OPTIONS",
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "NODE_OPTIONS",
       },
       update: {
         env: {
@@ -234,8 +234,8 @@ describe("hosted user env helpers", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("round-trips user env config through the standalone hosted payload", () => {
-    const payload = encodeHostedUserEnvPayload({
+  it("round-trips runner secrets through the standalone hosted payload", () => {
+    const payload = encodeHostedRunnerSecretsPayload({
       env: {
         OPENAI_API_KEY: "sk-user",
         XAI_API_KEY: "xai-user",
@@ -243,28 +243,28 @@ describe("hosted user env helpers", () => {
       now: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(decodeHostedUserEnvPayload(payload)).toEqual({
+    expect(decodeHostedRunnerSecretsPayload(payload)).toEqual({
       OPENAI_API_KEY: "sk-user",
       XAI_API_KEY: "xai-user",
     });
   });
 
   it("round-trips extension-only keys when the same allowlist source is provided on read", () => {
-    const payload = encodeHostedUserEnvPayload({
+    const payload = encodeHostedRunnerSecretsPayload({
       env: {
         CUSTOM_API_KEY: "custom-secret",
       },
       now: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(decodeHostedUserEnvPayload(payload, {
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
+    expect(decodeHostedRunnerSecretsPayload(payload, {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
     })).toEqual({
       CUSTOM_API_KEY: "custom-secret",
     });
   });
 
-  it("rejects the removed legacy hosted user env schema", () => {
+  it("rejects the removed legacy hosted runner secrets schema", () => {
     const payload = new TextEncoder().encode(JSON.stringify({
       env: {
         VENICE_API_KEY: "venice-user",
@@ -273,16 +273,16 @@ describe("hosted user env helpers", () => {
       updatedAt: "2026-03-26T12:00:00.000Z",
     }));
 
-    expect(() => decodeHostedUserEnvPayload(payload)).toThrow("Hosted user env config is invalid.");
+    expect(() => decodeHostedRunnerSecretsPayload(payload)).toThrow("Hosted runner secrets config is invalid.");
   });
 
-  it("requires the canonical env wrapper and returns the shared update shape", () => {
-    expect(() => parseHostedUserEnvUpdate({
+  it("requires the canonical runner-secrets wrapper and returns the shared update shape", () => {
+    expect(() => parseHostedRunnerSecretsUpdate({
       OPENAI_API_KEY: "sk-test",
       mode: "replace",
-    })).toThrow("Hosted user env request body field `env` must be a JSON object.");
+    })).toThrow("Hosted runner secrets request body field `env` must be a JSON object.");
 
-    expect(parseHostedUserEnvUpdate({
+    expect(parseHostedRunnerSecretsUpdate({
       env: {
         OPENAI_API_KEY: "sk-test",
       },
@@ -296,7 +296,7 @@ describe("hosted user env helpers", () => {
   });
 
   it("preserves the explicit env wrapper and ignores top-level extras when env is present", () => {
-    expect(parseHostedUserEnvUpdate({
+    expect(parseHostedRunnerSecretsUpdate({
       env: {
         OPENAI_API_KEY: "sk-test",
         REMOVE_ME: null,
@@ -313,22 +313,22 @@ describe("hosted user env helpers", () => {
   });
 
   it("delegates value validation to the shared hosted-execution parser", () => {
-    expect(() => parseHostedUserEnvUpdate({
+    expect(() => parseHostedRunnerSecretsUpdate({
       env: {
         OPENAI_API_KEY: 123,
       },
       mode: "merge",
     })).toThrow(
-      "Hosted user env request body field `env.OPENAI_API_KEY` must be a string or null.",
+      "Hosted runner secrets request body field `env.OPENAI_API_KEY` must be a string or null.",
     );
   });
 
   it("preserves blank strings so the apply step can still treat them as deletions", () => {
-    expect(applyHostedUserEnvUpdate({
+    expect(applyHostedRunnerSecretsUpdate({
       current: {
         OPENAI_API_KEY: "sk-user",
       },
-      update: parseHostedUserEnvUpdate({
+      update: parseHostedRunnerSecretsUpdate({
         env: {
           OPENAI_API_KEY: "",
         },

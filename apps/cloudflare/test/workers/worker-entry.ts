@@ -233,6 +233,6 @@ async function resolveHostedUserCryptoContext(userId: string) {
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
   });
-  await store.ensureManagedUserCryptoEnvelope(userId);
+  await store.provisionManagedUserCryptoAtActivation(userId);
   return store.requireUserCryptoContext(userId);
 }

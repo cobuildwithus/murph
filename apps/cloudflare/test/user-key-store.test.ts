@@ -37,7 +37,26 @@ describe("createHostedUserKeyStore", () => {
 
     await expect(
       store.requireUserCryptoContext(USER_ID, { reason: "test-runtime-access" }),
-    ).rejects.toThrow(/Provision managed user crypto before runtime access/u);
+    ).rejects.toThrow(/Activation provisioning must complete before runtime access/u);
+  });
+
+  it("exposes activation-only provisioning and no generic bootstrap helper", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const automationKeys = await generateHostedUserRecipientKeyPair();
+    const recoveryKeys = await generateHostedUserRecipientKeyPair();
+    const store = createHostedUserKeyStore({
+      automationRecipientKeyId: "automation:v1",
+      automationRecipientPrivateKey: automationKeys.privateKeyJwk,
+      automationRecipientPublicKey: automationKeys.publicKeyJwk,
+      bucket,
+      envelopeEncryptionKey: PLATFORM_ENVELOPE_KEY,
+      envelopeEncryptionKeyId: PLATFORM_ENVELOPE_KEY_ID,
+      recoveryRecipientKeyId: "recovery:v1",
+      recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
+    });
+
+    expect("provisionManagedUserCryptoAtActivation" in store).toBe(true);
+    expect("ensureManagedUserCryptoEnvelope" in store).toBe(false);
   });
 
   it("ensures automation, recovery, and optional tee recipients", async () => {
@@ -62,7 +81,7 @@ describe("createHostedUserKeyStore", () => {
       teeAutomationRecipientPublicKey: teeKeys.publicKeyJwk,
     });
 
-    const status = await store.ensureManagedUserCryptoEnvelope(USER_ID, {
+    const status = await store.provisionManagedUserCryptoAtActivation(USER_ID, {
       reason: "test-bootstrap",
     });
 
@@ -104,7 +123,7 @@ describe("createHostedUserKeyStore", () => {
       recoveryRecipientKeyId: "recovery:v1",
       recoveryRecipientPublicKey: initialRecoveryKeys.publicKeyJwk,
     });
-    const ensured = await initialStore.ensureManagedUserCryptoEnvelope(USER_ID, {
+    const ensured = await initialStore.provisionManagedUserCryptoAtActivation(USER_ID, {
       reason: "test-bootstrap",
     });
     const initialContext = await initialStore.requireUserCryptoContext(USER_ID, {
@@ -221,7 +240,7 @@ describe("createHostedUserKeyStore", () => {
       teeAutomationRecipientPublicKey: teeKeys.publicKeyJwk,
     });
 
-    await initialStore.ensureManagedUserCryptoEnvelope(USER_ID, {
+    await initialStore.provisionManagedUserCryptoAtActivation(USER_ID, {
       reason: "test-bootstrap",
     });
 
@@ -260,7 +279,7 @@ describe("createHostedUserKeyStore", () => {
       recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
     });
 
-    await store.ensureManagedUserCryptoEnvelope(USER_ID, {
+    await store.provisionManagedUserCryptoAtActivation(USER_ID, {
       reason: "test-bootstrap",
     });
 

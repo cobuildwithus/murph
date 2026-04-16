@@ -13,7 +13,7 @@ import {
 import {
   hostedBundleObjectKey,
   hostedArtifactObjectKey,
-  hostedUserEnvObjectKey,
+  hostedRunnerSecretsObjectKey,
 } from "./storage-paths.js";
 import {
   readEncryptedR2Payload,
@@ -45,10 +45,10 @@ export interface HostedArtifactStore {
   writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
 }
 
-export interface HostedUserEnvStore {
-  clearUserEnv(userId: string): Promise<void>;
-  readUserEnv(userId: string): Promise<Uint8Array | null>;
-  writeUserEnv(userId: string, plaintext: Uint8Array): Promise<void>;
+export interface HostedRunnerSecretsStore {
+  clearRunnerSecrets(userId: string): Promise<void>;
+  readRunnerSecrets(userId: string): Promise<Uint8Array | null>;
+  writeRunnerSecrets(userId: string, plaintext: Uint8Array): Promise<void>;
 }
 
 export function describeHostedBundleBytesRef(
@@ -248,28 +248,28 @@ export function createHostedArtifactStore(input: {
   };
 }
 
-export function createHostedUserEnvStore(input: {
+export function createHostedRunnerSecretsStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
-}): HostedUserEnvStore {
+}): HostedRunnerSecretsStore {
   return {
-    async clearUserEnv(userId) {
+    async clearRunnerSecrets(userId) {
       if (!input.bucket.delete) {
         return;
       }
 
-      const key = await hostedUserEnvObjectKey(input.key, userId);
+      const key = await hostedRunnerSecretsObjectKey(input.key, userId);
       await input.bucket.delete(key);
     },
 
-    async readUserEnv(userId) {
-      const key = await hostedUserEnvObjectKey(input.key, userId);
+    async readRunnerSecrets(userId) {
+      const key = await hostedRunnerSecretsObjectKey(input.key, userId);
       return readEncryptedR2Payload({
         aad: buildHostedStorageAad({
           key,
-          purpose: "user-env",
+          purpose: "runner-secrets",
           userId,
         }),
         bucket: input.bucket,
@@ -277,16 +277,16 @@ export function createHostedUserEnvStore(input: {
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key,
-        scope: "user-env",
+        scope: "runner-secrets",
       });
     },
 
-    async writeUserEnv(userId, plaintext) {
-      const key = await hostedUserEnvObjectKey(input.key, userId);
+    async writeRunnerSecrets(userId, plaintext) {
+      const key = await hostedRunnerSecretsObjectKey(input.key, userId);
       await writeEncryptedR2Payload({
         aad: buildHostedStorageAad({
           key,
-          purpose: "user-env",
+          purpose: "runner-secrets",
           userId,
         }),
         bucket: input.bucket,
@@ -294,7 +294,7 @@ export function createHostedUserEnvStore(input: {
         key,
         keyId: input.keyId,
         plaintext,
-        scope: "user-env",
+        scope: "runner-secrets",
       });
     },
   };

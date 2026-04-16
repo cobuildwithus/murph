@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  filterHostedRunnerUserEnv,
-  isHostedUserEnvKeyAllowed,
+  filterHostedRunnerSecrets,
+  isHostedRunnerSecretKeyAllowed,
 } from "../src/hosted-env-policy.js";
 import { readHostedExecutionEnvironment } from "../src/env.js";
 import { toStringEnvSource } from "../src/string-env.js";
@@ -55,12 +55,12 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.runnerReadyTimeoutMs).toBe(45_000);
   });
 
-  it("reads optional user env allowlist extensions", () => {
+  it("reads optional runner-secret allowlist extensions", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY,TELEGRAM_BOT_TOKEN",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY,TELEGRAM_BOT_TOKEN",
     }));
 
-    expect(environment.allowedUserEnvKeys).toBe("OPENAI_API_KEY,TELEGRAM_BOT_TOKEN");
+    expect(environment.allowedRunnerSecretKeys).toBe("OPENAI_API_KEY,TELEGRAM_BOT_TOKEN");
   });
 
   it("reads optional platform-envelope keyrings", () => {
@@ -123,13 +123,13 @@ describe("readHostedExecutionEnvironment", () => {
   it("drops non-string worker bindings before config readers consume env", () => {
     expect(toStringEnvSource({
       BUNDLES: { fetch() {} },
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
       OPENAI_API_KEY: "openai-secret",
       PORT: 8787,
     })).toEqual({
       BUNDLES: undefined,
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
       OPENAI_API_KEY: "openai-secret",
       PORT: undefined,
@@ -137,31 +137,31 @@ describe("readHostedExecutionEnvironment", () => {
   });
 });
 
-describe("hosted runner user env policy", () => {
+describe("hosted runner secrets policy", () => {
   it("keeps parser executable selectors operator-only", () => {
-    expect(isHostedUserEnvKeyAllowed("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(true);
 
-    expect(isHostedUserEnvKeyAllowed("FFMPEG_COMMAND")).toBe(false);
-    expect(isHostedUserEnvKeyAllowed("WHISPER_COMMAND")).toBe(false);
-    expect(isHostedUserEnvKeyAllowed("WHISPER_MODEL_PATH")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("WHISPER_MODEL_PATH")).toBe(false);
   });
 
   it("does not let the custom allowlist re-enable operator-only or process-control keys", () => {
     const source = {
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: [
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
         "FFMPEG_COMMAND",
         "WHISPER_COMMAND",
         "NODE_OPTIONS",
       ].join(","),
     };
 
-    expect(isHostedUserEnvKeyAllowed("FFMPEG_COMMAND", source)).toBe(false);
-    expect(isHostedUserEnvKeyAllowed("WHISPER_COMMAND", source)).toBe(false);
-    expect(isHostedUserEnvKeyAllowed("NODE_OPTIONS", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("NODE_OPTIONS", source)).toBe(false);
   });
 
-  it("filters operator-only keys out of runner user env before execution", () => {
-    expect(filterHostedRunnerUserEnv({
+  it("filters operator-only keys out of runner secrets before execution", () => {
+    expect(filterHostedRunnerSecrets({
       FFMPEG_COMMAND: "/tmp/evil-ffmpeg",
       NODE_OPTIONS: "--require /tmp/evil-loader.js",
       OPENAI_API_KEY: "sk-test",

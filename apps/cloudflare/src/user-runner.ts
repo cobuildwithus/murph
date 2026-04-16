@@ -5,12 +5,6 @@ import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import type {
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
-  HostedExecutionDeviceSyncRuntimeApplyResponse,
-  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-} from "@murphai/device-syncd/hosted-runtime";
-import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
   GatewayListConversationsInput,
@@ -32,7 +26,6 @@ import {
   createHostedExecutionDispatchPayloadStore,
   type HostedDispatchPayloadStore,
 } from "./dispatch-payload-store.js";
-import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.ts";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import { toStringEnvSource } from "./string-env.js";
@@ -48,8 +41,6 @@ import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
 import {
-} from "./user-env.js";
-import {
   createRunnerCommitRecovery,
 } from "./user-runner/runner-commit-recovery.js";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
@@ -57,7 +48,7 @@ import {
   RunnerDispatchProcessor,
   type RunnerUserStores,
 } from "./user-runner/runner-dispatch-processor.js";
-import { RunnerUserEnvService } from "./user-runner/runner-user-env.js";
+import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import { RunnerQueueStore } from "./user-runner/runner-queue-store.js";
 import { RunnerScheduler } from "./user-runner/runner-scheduler.js";
 import {
@@ -250,7 +241,7 @@ export class HostedUserRunner {
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
       }),
-      userEnv: this.createRunnerUserEnvService(crypto),
+      runnerSecrets: this.createRunnerSecretsService(crypto),
       userId,
     };
 
@@ -314,44 +305,6 @@ export class HostedUserRunner {
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     await this.queueStore.bootstrapUser(userId);
     return { userId };
-  }
-
-  async getDeviceSyncRuntimeSnapshot(input: {
-    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
-    const userId = await this.requireBoundUserId();
-
-    if (input.request.userId !== userId) {
-      throw new TypeError("Hosted device-sync runtime snapshot userId does not match the bound user.");
-    }
-
-    const { crypto } = await this.ensureRunnerStores(userId);
-    return createHostedDeviceSyncRuntimeStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).readSnapshot(input.request);
-  }
-
-  async applyDeviceSyncRuntimeUpdates(input: {
-    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-    const userId = await this.requireBoundUserId();
-
-    if (input.request.userId !== userId) {
-      throw new TypeError("Hosted device-sync runtime apply userId does not match the bound user.");
-    }
-
-    return this.withUserKeyEnvelopeLock(async () => {
-      const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
-      return createHostedDeviceSyncRuntimeStore({
-        bucket: this.bucket,
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
-      }).applyUpdates(input.request);
-    });
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -457,26 +410,26 @@ export class HostedUserRunner {
     });
   }
 
-  private readAllowedUserEnvSource(): Readonly<Record<string, string | undefined>> {
+  private readAllowedRunnerSecretsSource(): Readonly<Record<string, string | undefined>> {
     return {
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: this.env.allowedUserEnvKeys ?? undefined,
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: this.env.allowedRunnerSecretKeys ?? undefined,
     };
   }
 
-  private createRunnerUserEnvService(crypto: HostedUserCryptoContext): RunnerUserEnvService {
-    return new RunnerUserEnvService(
+  private createRunnerSecretsService(crypto: HostedUserCryptoContext): RunnerSecretsService {
+    return new RunnerSecretsService(
       this.bucket,
       crypto.rootKey,
       crypto.rootKeyId,
       crypto.keysById,
-      this.readAllowedUserEnvSource(),
+      this.readAllowedRunnerSecretsSource(),
     );
   }
 
   private readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>> {
     return {
       ...this.readWorkerStringEnvSource(),
-      ...this.readAllowedUserEnvSource(),
+      ...this.readAllowedRunnerSecretsSource(),
     };
   }
 
@@ -484,14 +437,14 @@ export class HostedUserRunner {
     return toStringEnvSource(this.runnerRuntimeEnvSource);
   }
 
-  private async resolveUserEnvServiceWhileHoldingKeyLock(
+  private async resolveRunnerSecretsServiceWhileHoldingKeyLock(
     userId: string,
     options: {
       reason: string;
     },
-  ): Promise<RunnerUserEnvService | null> {
+  ): Promise<RunnerSecretsService | null> {
     if (this.runnerStores?.userId === userId) {
-      return this.runnerStores.userEnv;
+      return this.runnerStores.runnerSecrets;
     }
 
     if (!(await this.userKeyStore.hasManagedUserCryptoEnvelope(userId))) {
@@ -501,14 +454,14 @@ export class HostedUserRunner {
     const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
       reason: options.reason,
     });
-    return this.createRunnerUserEnvService(crypto);
+    return this.createRunnerSecretsService(crypto);
   }
 
   private async provisionManagedUserCryptoAtActivation(
     userId: string,
     reason: string,
   ) {
-    const status = await this.userKeyStore.ensureManagedUserCryptoEnvelope(userId, {
+    const status = await this.userKeyStore.provisionManagedUserCryptoAtActivation(userId, {
       reason,
     });
 

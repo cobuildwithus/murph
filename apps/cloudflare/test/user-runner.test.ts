@@ -25,7 +25,7 @@ import {
 import {
   createHostedArtifactStore,
   createHostedBundleStore,
-  createHostedUserEnvStore,
+  createHostedRunnerSecretsStore,
 } from "../src/bundle-store.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
@@ -46,7 +46,7 @@ import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
-import { encodeHostedUserEnvPayload } from "../src/user-env.js";
+import { encodeHostedRunnerSecretsPayload } from "../src/runner-secrets.js";
 import {
   TEST_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
@@ -65,7 +65,7 @@ describe("HostedUserRunner", () => {
   const bucket = createBucket();
   const storage = createStorage();
   const environment: HostedExecutionEnvironment = {
-    allowedUserEnvKeys: null,
+    allowedRunnerSecretKeys: null,
     automationRecipientKeyId: TEST_AUTOMATION_RECIPIENT_KEY_ID,
     automationRecipientPrivateKey: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
     automationRecipientPrivateKeysById: {
@@ -127,22 +127,22 @@ describe("HostedUserRunner", () => {
       environment: environmentOverride,
       userId: input.userId,
     });
-    const store = createHostedUserEnvStore({
+    const store = createHostedRunnerSecretsStore({
       bucket: bucket.api,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     });
-    const payload = encodeHostedUserEnvPayload({
+    const payload = encodeHostedRunnerSecretsPayload({
       env: input.env,
     });
 
     if (payload) {
-      await store.writeUserEnv(input.userId, payload);
+      await store.writeRunnerSecrets(input.userId, payload);
       return;
     }
 
-    await store.clearUserEnv(input.userId);
+    await store.clearRunnerSecrets(input.userId);
   }
 
   it("roundtrips encrypted bundle payloads through object storage", async () => {
@@ -1119,7 +1119,7 @@ describe("HostedUserRunner", () => {
       storage.state,
       {
         ...environment,
-        allowedUserEnvKeys: "CUSTOM_API_KEY",
+        allowedRunnerSecretKeys: "CUSTOM_API_KEY",
       },
       bucket.api,
       {
@@ -1287,7 +1287,7 @@ describe("HostedUserRunner", () => {
     });
   });
 
-  it("forwards stored per-user env through the runner container invoke payload", async () => {
+  it("forwards stored runner secrets through the runner container invoke payload", async () => {
     const resultPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state").toString("base64"),
       summary: "ok",
@@ -1312,7 +1312,7 @@ describe("HostedUserRunner", () => {
       storage.state,
       {
         ...environment,
-        allowedUserEnvKeys: "OPENAI_API_KEY",
+        allowedRunnerSecretKeys: "OPENAI_API_KEY",
       },
       bucket.api,
     );
@@ -2847,7 +2847,7 @@ describe("HostedUserRunner", () => {
   it("stores encrypted runner-secret config in a dedicated hosted object", async () => {
     const runner = new HostedUserRunner(storage.state, {
       ...environment,
-      allowedUserEnvKeys: "OPENAI_API_KEY,XAI_API_KEY",
+      allowedRunnerSecretKeys: "OPENAI_API_KEY,XAI_API_KEY",
     }, bucket.api);
 
     await seedManagedUserCryptoForTest(runner, "member_123");
@@ -2865,16 +2865,16 @@ describe("HostedUserRunner", () => {
       userId: "member_123",
     });
     expect(bucket.keys()).toEqual(expect.arrayContaining([
-      await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
+      await runnerSecretsObjectKeyForTest(crypto.rootKey, "member_123"),
       await userKeyEnvelopeObjectKeyForTest(environment.platformEnvelopeKey, "member_123"),
     ]));
   });
 
-  it("reads per-user env encrypted with a previous key id after rotation", async () => {
+  it("reads runner secrets encrypted with a previous key id after rotation", async () => {
     const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const previousEnvironment = {
       ...environment,
-      allowedUserEnvKeys: "OPENAI_API_KEY",
+      allowedRunnerSecretKeys: "OPENAI_API_KEY",
       platformEnvelopeKey: previousKey,
       platformEnvelopeKeyId: "v1",
       platformEnvelopeKeysById: {
@@ -2883,7 +2883,7 @@ describe("HostedUserRunner", () => {
     };
     const rotatedEnvironment = {
       ...environment,
-      allowedUserEnvKeys: "OPENAI_API_KEY",
+      allowedRunnerSecretKeys: "OPENAI_API_KEY",
       platformEnvelopeKey: Uint8Array.from({ length: 32 }, () => 7),
       platformEnvelopeKeyId: "v2",
       platformEnvelopeKeysById: {
@@ -2956,7 +2956,7 @@ describe("HostedUserRunner", () => {
     ]);
   });
 
-  it("clears per-user env config without dropping unrelated agent-state bundle data", async () => {
+  it("clears runner secrets without dropping unrelated agent-state bundle data", async () => {
     const initialAgentState = writeHostedBundleTextFile({
       bytes: null,
       kind: "vault",
@@ -3020,7 +3020,7 @@ describe("HostedUserRunner", () => {
       userId: "member_123",
     });
     expect(bucket.keys()).toContain(
-      await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
+      await runnerSecretsObjectKeyForTest(crypto.rootKey, "member_123"),
     );
 
     await writeRunnerSecretsForTest({
@@ -3030,7 +3030,7 @@ describe("HostedUserRunner", () => {
 
     expectHostedBundleKeys(bucket.keys(), ["vault"]);
     expect(bucket.keys()).not.toContain(
-      await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
+      await runnerSecretsObjectKeyForTest(crypto.rootKey, "member_123"),
     );
   });
 
@@ -3452,15 +3452,15 @@ function expectHostedBundleKeys(
   }
 }
 
-async function userEnvObjectKeyForTest(rootKey: Uint8Array, userId: string): Promise<string> {
+async function runnerSecretsObjectKeyForTest(rootKey: Uint8Array, userId: string): Promise<string> {
   const userSegment = await deriveHostedStorageOpaqueId({
     length: 24,
     rootKey,
-    scope: "user-env-path",
+    scope: "runner-secrets-path",
     value: `user:${userId}`,
   });
 
-  return `users/env/${userSegment}.json`;
+  return `users/runner-secrets/${userSegment}.json`;
 }
 
 async function userKeyEnvelopeObjectKeyForTest(
@@ -3856,6 +3856,6 @@ async function resolveHostedUserCryptoContextForTest(input: {
     teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
   });
-  await store.ensureManagedUserCryptoEnvelope(input.userId);
+  await store.provisionManagedUserCryptoAtActivation(input.userId);
   return store.requireUserCryptoContext(input.userId);
 }

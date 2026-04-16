@@ -5,7 +5,7 @@ import {
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerResolvedConfig,
-  filterHostedRunnerUserEnv,
+  filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
 
 describe("buildHostedRunnerContainerEnv", () => {
@@ -83,7 +83,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("does not forward worker-only runtime config into the child runner env", () => {
     expect(buildHostedRunnerContainerEnv({
-      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
@@ -177,8 +177,8 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("preserves hosted automation per-user env while dropping operator-only keys", () => {
-    expect(filterHostedRunnerUserEnv({
+  it("preserves hosted automation runner secrets while dropping operator-only keys", () => {
+    expect(filterHostedRunnerSecrets({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
@@ -210,7 +210,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         },
         deviceSync: null,
       },
-      userEnv: {
+      runnerSecrets: {
         CUSTOM_API_KEY: "custom-user",
       },
     })).toEqual({
@@ -232,16 +232,16 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
-  it("uses the shared config source for both timeout and allowed user env filtering", () => {
+  it("uses the shared config source for both timeout and allowed runner-secret filtering", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       configSource: {
-        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       },
       forwardedEnv: {
         OPENAI_API_KEY: "sk-worker",
       },
-      userEnv: {
+      runnerSecrets: {
         CUSTOM_API_KEY: "custom-user",
         OPENAI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
@@ -279,7 +279,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         },
         deviceSync: null,
       },
-      userEnv: {},
+      runnerSecrets: {},
     })).toEqual({
       commitTimeoutMs: 30_000,
       forwardedEnv: {

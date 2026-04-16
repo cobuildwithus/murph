@@ -201,7 +201,7 @@ export async function startHostedContainerEntrypoint(input: {
         details: {
           forwardedEnvKeyCount: Object.keys(job.runtime?.forwardedEnv ?? {}).length,
           resumeFromCommit: Boolean(job.request.resume?.committedResult),
-          userEnvKeyCount: Object.keys(job.runtime?.userEnv ?? {}).length,
+          runnerSecretKeyCount: Object.keys(job.runtime?.userEnv ?? {}).length,
         },
         dispatch: job.request.dispatch,
         message: "Hosted container entrypoint accepted runner job.",

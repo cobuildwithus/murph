@@ -44,7 +44,7 @@ export type HostedContainerInstanceType =
   | HostedContainerCustomInstanceType;
 
 export interface HostedDeployAutomationEnvironment {
-  allowedUserEnvKeys: string | null;
+  allowedRunnerSecretKeys: string | null;
   bundlesBucketName: string;
   bundlesPreviewBucketName: string;
   platformEnvelopeKeyId: string;
@@ -66,7 +66,7 @@ export function readHostedDeployAutomationEnvironment(
   source: EnvSource = process.env,
 ): HostedDeployAutomationEnvironment {
   return {
-    allowedUserEnvKeys: normalizeOptionalString(source.CF_ALLOWED_USER_ENV_KEYS),
+    allowedRunnerSecretKeys: normalizeOptionalString(source.CF_ALLOWED_RUNNER_SECRET_KEYS),
     bundlesBucketName: requireConfiguredString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET"),
     bundlesPreviewBucketName: requireConfiguredString(
       source.CF_BUNDLES_PREVIEW_BUCKET,
