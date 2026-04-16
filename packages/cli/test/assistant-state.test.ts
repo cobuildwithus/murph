@@ -1044,7 +1044,7 @@ test('getAssistantSession rejects invalid provider payloads instead of coercing 
   await assert.rejects(() => getAssistantSession(vaultRoot, sessionId))
 })
 
-test('resolveAssistantSession ignores legacy aliases.json fallback state', async () => {
+test('resolveAssistantSession rebuilds indexes from durable sessions without trusting aliases.json', async () => {
   const { vaultRoot } = await createAssistantStateVault('murph-assistant-alias-hard-cut-')
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
@@ -1103,13 +1103,15 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
     'utf8',
   )
 
-  await assert.rejects(() =>
-    resolveAssistantSession({
-      vault: vaultRoot,
-      alias: 'chat:bob',
-      createIfMissing: false,
-    }),
-  )
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:bob',
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.sessionId, 'asst_existing')
+  assert.equal(resolved.session.alias, 'chat:bob')
 })
 
 test('readAssistantAutomationState quarantines and rebuilds legacy automation v1 payloads', async () => {

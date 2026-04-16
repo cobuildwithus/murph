@@ -421,6 +421,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, "diagnostics", "events.jsonl"), "{\"kind\":\"assistant.scan\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "diagnostics", "snapshot.json"), "{\"status\":\"healthy\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "failover.json"), "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n");
+    await writeFile(
+      path.join(assistantRuntimeRoot, "indexes.json"),
+      "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
+    );
     await writeFile(path.join(assistantRuntimeRoot, "outbox", "intent_1.json"), "{\"intent\":\"deliver\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "outbox", ".quarantine", "ignored.json"), "{\"ignored\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "receipts", "turn_1.json"), "{\"receipt\":\"saved\"}\n");
@@ -490,6 +494,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       {
         expected: "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
         path: ".runtime/operations/assistant/failover.json",
+        root: "vault",
+      },
+      {
+        expected:
+          "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
+        path: ".runtime/operations/assistant/indexes.json",
         root: "vault",
       },
       { expected: null, path: ".runtime/operations/assistant/status.json", root: "vault" },
@@ -606,6 +616,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "failover.json"), "utf8"),
       "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "indexes.json"), "utf8"),
+      "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
     );
     assert.equal(
       await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
@@ -762,6 +776,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/status.json")).toMatchObject({
     classification: "operational",
     portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/indexes.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/diagnostics/snapshot.json")).toMatchObject({
     classification: "operational",

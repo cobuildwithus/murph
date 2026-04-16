@@ -6,6 +6,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
+import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import {
@@ -91,7 +92,10 @@ export async function sendAssistantNotificationLocal(
     executionContext,
     fallbackTarget: createDefaultLocalAssistantModelTarget(),
   })
-  const defaults = await resolveAssistantOperatorDefaults()
+  const defaults = resolveAssistantExecutionOperatorDefaults({
+    defaults: await resolveAssistantOperatorDefaults(),
+    executionContext,
+  })
 
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,

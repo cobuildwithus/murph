@@ -6,6 +6,11 @@ import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { finalizeAssistantTurnFromDeliveryOutcome } from './delivery-service.js'
 import {
+  normalizeAssistantExecutionContext,
+  resolveAssistantExecutionDefaultTarget,
+  resolveAssistantExecutionOperatorDefaults,
+} from './execution-context.js'
+import {
   hasAssistantSeenFirstContact,
   markAssistantFirstContactSeen,
   resolveAssistantFirstContactStateDocIds,
@@ -14,7 +19,10 @@ import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome
 import { buildAssistantFirstContactWelcomeTurnMetadata } from './first-contact-welcome-turn-metadata.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { buildResolveAssistantSessionInput } from './session-resolution.js'
-import type { AssistantSessionResolutionFields } from './service-contracts.js'
+import type {
+  AssistantExecutionContext,
+  AssistantSessionResolutionFields,
+} from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
 export interface AssistantFirstContactWelcomeInput extends Pick<
@@ -22,6 +30,7 @@ export interface AssistantFirstContactWelcomeInput extends Pick<
   'actorId' | 'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
 > {
   abortSignal?: AbortSignal
+  executionContext?: AssistantExecutionContext | null
   fromPhoneNumber?: string | null
   kind?: 'linq-materialize-home-thread' | 'thread'
   toPhoneNumber?: string | null
@@ -52,7 +61,15 @@ async function runAssistantFirstContactWelcomeLocal(
   input: AssistantFirstContactWelcomeInput,
   mode: AssistantFirstContactWelcomeMode,
 ): Promise<AssistantFirstContactWelcomeResult> {
-  const defaults = await resolveAssistantOperatorDefaults()
+  const executionContext = normalizeAssistantExecutionContext(input.executionContext)
+  const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
+    executionContext,
+    fallbackTarget: createDefaultLocalAssistantModelTarget(),
+  })
+  const defaults = resolveAssistantExecutionOperatorDefaults({
+    defaults: await resolveAssistantOperatorDefaults(),
+    executionContext,
+  })
 
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
@@ -66,7 +83,7 @@ async function runAssistantFirstContactWelcomeLocal(
         threadId: input.threadId,
         threadIsDirect: input.threadIsDirect,
         vault: input.vault,
-      }, defaults, createDefaultLocalAssistantModelTarget())
+      }, defaults, boundaryDefaultTarget)
       const resolveInput = (({ vault: _vault, ...rest }) => rest)(sessionInput)
       const resolved = await state.sessions.resolve(resolveInput)
       const firstContactStateDocIds = resolveAssistantFirstContactStateDocIdsForSession(

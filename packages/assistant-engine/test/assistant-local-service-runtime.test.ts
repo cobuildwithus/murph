@@ -135,16 +135,23 @@ test('sendAssistantMessageLocal prefers the hosted execution default target when
   )
   const firstResolvedMessageSessionCall = (
     mocks.resolveAssistantMessageSession.mock.calls as Array<
-      Array<{ boundaryDefaultTarget?: unknown }>
+      Array<{ boundaryDefaultTarget?: unknown; defaults?: unknown }>
     >
   )[0]
   const firstResolvedMessageSessionInput =
     firstResolvedMessageSessionCall?.[0] as
-      | { boundaryDefaultTarget?: unknown }
+      | { boundaryDefaultTarget?: unknown; defaults?: unknown }
       | undefined
   assert.deepEqual(
     firstResolvedMessageSessionInput?.boundaryDefaultTarget,
     hostedDefaultTarget,
+  )
+  assert.deepEqual(
+    firstResolvedMessageSessionInput?.defaults,
+    {
+      backend: hostedDefaultTarget,
+      timezone: 'Australia/Sydney',
+    },
   )
 })
 
@@ -856,6 +863,14 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
     ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
     persistFailedAssistantPromptAttempt: vi.fn(
       async (
         _input: Parameters<
@@ -1023,6 +1038,8 @@ async function loadLocalServiceModule(input?: {
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
     resolveAssistantExecutionDefaultTarget:
       mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
   }))
   vi.doMock('../src/assistant/provider-turn-recovery.js', () => ({
     extractRecoveredAssistantSession: mocks.extractRecoveredAssistantSession,

@@ -18,6 +18,7 @@ import {
 import {
   readRequestBody,
   requireBoundTcpPort,
+  reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv,
   shouldUseAssistantProviderStub,
   startAssistantProviderStubServer,
@@ -35,18 +36,11 @@ type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boolean;
 
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
+const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
 
 const observedLinqRequests: ObservedLinqRequest[] = [];
 const observedLinqChatIdsByRecipient = new Map<string, string>();
-const devEnv: NodeJS.ProcessEnv = {
-  ...process.env,
-  MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
-  MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
-  MURPH_DEV_SKIP_WEB: "1",
-  MURPH_DEV_WEB_PORT: "3213",
-  MURPH_DEV_WORKER_PORT: "8902",
-  NEXT_DIST_DIR_MODE: "smoke",
-};
+const observedAssistantProviderBodies: string[] = [];
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const debugE2E = process.env.MURPH_E2E_DEBUG_PROGRESS === "1";
 const useAssistantProviderStub = shouldUseAssistantProviderStub(process.env);
@@ -61,16 +55,29 @@ let localHarness: HostedLocalDevHarness | null = null;
 let workerBaseUrl = "";
 let workerPersistDir: string | null = null;
 
+it("derives stable numeric suffixes from the full Linq user id", () => {
+  expect(buildStableTestNumericSuffix("member_local_linq_first_contact_20260408", 7)).not.toBe(
+    buildStableTestNumericSuffix("member_local_linq_direct_reply_20260408", 7),
+  );
+});
+
 describe("hosted local Linq first-contact e2e", () => {
   beforeAll(async () => {
     logDebug("starting hosted local Linq e2e setup");
     observedLinqRequests.length = 0;
     observedLinqChatIdsByRecipient.clear();
+    observedAssistantProviderBodies.length = 0;
     linqServer = await startLinqStubServer();
-    linqServerBaseUrl = `http://127.0.0.1:${requireBoundTcpPort(linqServer, "Linq stub")}`;
+    linqServerBaseUrl =
+      `http://host.docker.internal:${requireBoundTcpPort(linqServer, "Linq stub")}`;
     logDebug("started Linq stub server", { linqServerBaseUrl });
     if (useAssistantProviderStub) {
-      assistantProviderServer = await startAssistantProviderStubServer();
+      assistantProviderServer = await startAssistantProviderStubServer({
+        onRequestBody: (body) => {
+          observedAssistantProviderBodies.push(body);
+        },
+        resolveMessageText: resolveHostedAssistantReplyText,
+      });
       assistantProviderBaseUrl =
         `http://host.docker.internal:${requireBoundTcpPort(assistantProviderServer, "assistant provider stub")}/v1`;
       logDebug("started assistant provider stub server", {
@@ -82,11 +89,23 @@ describe("hosted local Linq first-contact e2e", () => {
       useAssistantProviderStub ? assistantProviderBaseUrl : null,
       "Local hosted Linq e2e",
     );
+    const webPort = await reserveLocalTcpPort();
+    const workerPort = await reserveLocalTcpPort();
     const runtimeEnv: NodeJS.ProcessEnv = {
-      ...devEnv,
+      ...process.env,
       ...hostedAssistantDevEnv,
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRunnerEnvProfiles(
+        process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
+        "linq",
+      ),
       LINQ_API_BASE_URL: linqServerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
+      MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
+      MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
+      MURPH_DEV_SKIP_WEB: "1",
+      MURPH_DEV_WEB_PORT: String(webPort),
+      MURPH_DEV_WORKER_PORT: String(workerPort),
+      NEXT_DIST_DIR_MODE: "smoke",
     };
     localHarness = await startHostedLocalDevHarness({
       env: runtimeEnv,
@@ -207,6 +226,131 @@ describe("hosted local Linq first-contact e2e", () => {
       userId: directReplyUserId,
     });
     expect(replySend.method).toBe("POST");
+  }, 300_000);
+
+  it("keeps Linq context when two replies arrive before hosted completion catches up", async () => {
+    logDebug("dispatching fast-reply activation", { userId: fastReplyUserId });
+    const activationResult = await dispatchHostedEvent(
+      buildActivationDispatch(fastReplyUserId),
+      fastReplyUserId,
+    );
+    expect(activationResult.event).toMatchObject({
+      eventId: `member.activated:local:${fastReplyUserId}:evt_linq_first_contact`,
+      lastError: null,
+      state: "completed",
+      userId: fastReplyUserId,
+    });
+
+    const createChatRequest = await waitForLinqSend({
+      expectedPath: expectedLinqCreateChatPath,
+      matchRequest: createLinqCreateChatRequestMatcher(fastReplyUserId),
+      userId: fastReplyUserId,
+    });
+    expect(createChatRequest.method).toBe("POST");
+
+    const materializedChatId = requireObservedLinqChatId(fastReplyUserId);
+    const expectedDirectReplyChatPath =
+      `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const outboundCountBeforeReply = countObservedLinqSends(expectedDirectReplyChatPath);
+    logDebug("dispatching immediate inbound Linq messages", {
+      baselineSendCount: outboundCountBeforeReply,
+      chatId: materializedChatId,
+      userId: fastReplyUserId,
+    });
+    const firstInboundDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_name`,
+      linqEvent: buildInboundLinqEvent(fastReplyUserId, materializedChatId, {
+        messageId: `msg_fast_name_${fastReplyUserId}`,
+        text: "U can call me Rocket Man",
+      }),
+      linqMessageId: `msg_fast_name_${fastReplyUserId}`,
+      occurredAt: new Date().toISOString(),
+      phoneLookupKey: fastReplyUserId,
+      userId: fastReplyUserId,
+    });
+    const firstInboundResult = await dispatchHostedEvent(firstInboundDispatch, fastReplyUserId);
+    expect(firstInboundResult.event).toMatchObject({
+      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_name`,
+      lastError: null,
+      state: "completed",
+      userId: fastReplyUserId,
+    });
+
+    const secondInboundDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_goals`,
+      linqEvent: buildInboundLinqEvent(fastReplyUserId, materializedChatId, {
+        messageId: `msg_fast_goals_${fastReplyUserId}`,
+        text: "I want to build more strength, improve endurance, and get fitter overall.",
+      }),
+      linqMessageId: `msg_fast_goals_${fastReplyUserId}`,
+      occurredAt: new Date().toISOString(),
+      phoneLookupKey: fastReplyUserId,
+      userId: fastReplyUserId,
+    });
+    const secondInboundResult = await dispatchHostedEvent(secondInboundDispatch, fastReplyUserId);
+    expect(secondInboundResult.event).toMatchObject({
+      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_goals`,
+      lastError: null,
+      state: "completed",
+      userId: fastReplyUserId,
+    });
+
+    const statusBeforeWait = await requireHarness().readUserStatus(fastReplyUserId);
+    await requireHarness().waitForHostedCompletion(fastReplyUserId);
+    const statusAfterWait = await requireHarness().readUserStatus(fastReplyUserId);
+    logDebug("immediate inbound Linq messages completed", { userId: fastReplyUserId });
+
+    const replySends = await waitForMatchingLinqSendCount({
+      expectedCount: outboundCountBeforeReply + 2,
+      expectedPath: expectedDirectReplyChatPath,
+      userId: fastReplyUserId,
+    });
+    const createChatRequests = observedLinqRequests.filter((request) =>
+      isMatchingObservedLinqSend(
+        request,
+        expectedLinqCreateChatPath,
+        createLinqCreateChatRequestMatcher(fastReplyUserId),
+      )
+    );
+    if (createChatRequests.length !== 1) {
+      throw new Error(
+        `Expected exactly one Linq chat materialization for ${fastReplyUserId}, saw ${
+          createChatRequests.length
+        }: ${JSON.stringify(
+          {
+            createChatRequests: createChatRequests.map((request) => ({
+              text: readObservedLinqMessageText(request),
+              url: request.url,
+            })),
+            observedAssistantProviderBodies,
+            statusAfterWait,
+            statusBeforeWait,
+          },
+        )}`,
+      );
+    }
+
+    const newReplySends = replySends.slice(outboundCountBeforeReply);
+    const firstReplyText = readObservedLinqMessageText(newReplySends[0]!);
+    const secondReplyText = readObservedLinqMessageText(newReplySends[1]!);
+    if (secondReplyText !== "Got you — stronger, fitter, faster, and more endurance.") {
+      throw new Error(
+        `Unexpected second Linq reply: ${JSON.stringify({
+          firstReplyText,
+          secondReplyText,
+          observedAssistantProviderBodies,
+        })}`,
+      );
+    }
+    expect(firstReplyText).toBe("Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?");
+    expect(secondReplyText).toBe(
+      "Got you — stronger, fitter, faster, and more endurance.",
+    );
+    expect(secondReplyText).not.toContain("What should I call you");
+    expect(secondReplyText).not.toContain("Hey, I'm Murph");
+    expect(observedAssistantProviderBodies).toHaveLength(3);
+    expect(observedAssistantProviderBodies.at(-1)).toContain("Rocket Man");
+    expect(observedAssistantProviderBodies.at(-1)).toContain("build more strength");
   }, 300_000);
 
   async function dispatchHostedEvent(dispatch: object, nextUserId: string) {
@@ -333,6 +477,54 @@ async function waitForAdditionalLinqSend(input: {
       `stderr tail: ${requireHarness().stderrTail()}`,
     ].join("\n"));
   }
+
+async function waitForMatchingLinqSendCount(input: {
+    expectedCount: number;
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+    userId: string;
+  }): Promise<ObservedLinqRequest[]> {
+    const startedAt = Date.now();
+    let nextProgressLogAt = startedAt;
+
+    while ((Date.now() - startedAt) < 60_000) {
+      const matchingRequests = observedLinqRequests.filter((request) =>
+        isMatchingObservedLinqSend(request, input.expectedPath, input.matchRequest)
+      );
+
+      if (matchingRequests.length >= input.expectedCount) {
+        logDebug("observed expected Linq send count", {
+          elapsedMs: Date.now() - startedAt,
+          expectedCount: input.expectedCount,
+          expectedPath: input.expectedPath,
+          userId: input.userId,
+        });
+        return matchingRequests;
+      }
+
+      if (Date.now() >= nextProgressLogAt) {
+        logDebug("waiting for expected Linq send count", {
+          elapsedMs: Date.now() - startedAt,
+          expectedCount: input.expectedCount,
+          expectedPath: input.expectedPath,
+          matchingRequestCount: matchingRequests.length,
+          userId: input.userId,
+        });
+        nextProgressLogAt = Date.now() + 5_000;
+      }
+
+      await sleep(250);
+    }
+
+    const status = await requireHarness().readUserStatus(input.userId);
+    throw new Error([
+      `Timed out waiting for ${input.expectedCount} Linq sends for ${input.userId}.`,
+      `observed requests: ${JSON.stringify(observedLinqRequests)}`,
+      `hosted status: ${JSON.stringify(status)}`,
+      `stdout tail: ${requireHarness().stdoutTail()}`,
+      `stderr tail: ${requireHarness().stderrTail()}`,
+    ].join("\n"));
+  }
 });
 
 function requireHarness(): HostedLocalDevHarness {
@@ -364,7 +556,7 @@ function buildActivationDispatch(nextUserId: string) {
     firstContact: {
       channel: "linq",
       fromPhoneNumber: buildLinqHomePhoneNumber(nextUserId),
-      identityId: `linq:${nextUserId}`,
+      identityId: nextUserId,
       kind: "linq-materialize-home-thread",
       toPhoneNumber: buildLinqRecipientPhoneNumber(nextUserId),
     },
@@ -378,7 +570,14 @@ function buildActivationDispatch(nextUserId: string) {
   });
 }
 
-function buildInboundLinqEvent(nextUserId: string, chatId: string) {
+function buildInboundLinqEvent(
+  nextUserId: string,
+  chatId: string,
+  input: {
+    messageId?: string;
+    text?: string;
+  } = {},
+) {
   return {
     api_version: "v3",
     created_at: new Date().toISOString(),
@@ -403,11 +602,11 @@ function buildInboundLinqEvent(nextUserId: string, chatId: string) {
       },
       is_from_me: false,
       message: {
-        id: `msg_local_${nextUserId}`,
+        id: input.messageId ?? `msg_local_${nextUserId}`,
         parts: [
           {
             type: "text",
-            value: "hello mate",
+            value: input.text ?? "hello mate",
           },
         ],
       },
@@ -479,6 +678,31 @@ function parseObservedLinqJson(body: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function readObservedLinqMessageText(request: ObservedLinqRequest): string | null {
+  const parsed = parseObservedLinqJson(request.body);
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  const message = "message" in parsed ? parsed.message : null;
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const parts = "parts" in message ? message.parts : null;
+  if (!Array.isArray(parts)) {
+    return null;
+  }
+
+  const firstPart = parts[0];
+  if (!firstPart || typeof firstPart !== "object") {
+    return null;
+  }
+
+  const value = "value" in firstPart ? firstPart.value : null;
+  return typeof value === "string" ? value : null;
 }
 
 async function startLinqStubServer(): Promise<ReturnType<typeof createServer>> {
@@ -556,7 +780,46 @@ function buildLinqRecipientPhoneNumber(nextUserId: string): string {
 }
 
 function buildStableTestPhoneNumber(nextUserId: string, prefix: string): string {
-  const digits = nextUserId.replace(/\D/gu, "");
-  const suffix = digits.slice(-7).padStart(7, "0");
+  const suffix = buildStableTestNumericSuffix(nextUserId, 7);
   return `+1555${prefix}${suffix}`;
+}
+
+function buildStableTestNumericSuffix(value: string, length: number): string {
+  let hash = 0;
+
+  for (const character of value) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 10_000_000;
+  }
+
+  return String(hash).padStart(length, "0").slice(-length);
+}
+
+function mergeRunnerEnvProfiles(
+  existingProfiles: string | undefined,
+  requiredProfile: string,
+): string {
+  const profiles = new Set(
+    String(existingProfiles ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+  profiles.add(requiredProfile);
+  return Array.from(profiles).join(",");
+}
+
+function resolveHostedAssistantReplyText(body: string): string {
+  if (body.includes("Rocket Man") && body.includes("build more strength")) {
+    if (body.includes("I’ll call you Rocket Man") || body.includes("I'll call you Rocket Man")) {
+      return "Got you — stronger, fitter, faster, and more endurance.";
+    }
+
+    return "What should I call you? And out of those, which ones matter most to you right now?";
+  }
+
+  if (body.includes("Rocket Man")) {
+    return "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
+  }
+
+  return "Got it - I saw your message and I'm here.";
 }

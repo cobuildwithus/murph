@@ -19,6 +19,7 @@ export async function resolveAssistantTurnSharedPlan(
   const requestedWorkingDirectory = input.workingDirectory ?? input.vault
   const conversationPolicy = resolveAssistantConversationPolicy({
     message: {
+      conversation: input.conversation,
       deliverResponse: input.deliverResponse,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       deliveryTarget: input.deliveryTarget,

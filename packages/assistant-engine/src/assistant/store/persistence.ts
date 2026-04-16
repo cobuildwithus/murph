@@ -452,6 +452,9 @@ export async function readAssistantIndexStore(
     if (!isMissingFileError(error)) {
       throw error
     }
+    if (await hasDurableAssistantSessions(paths)) {
+      return rebuildAssistantIndexStore(paths)
+    }
     const initial = createInitialAssistantIndexStore()
     await writeJsonFileAtomic(paths.indexesPath, initial)
     assistantIndexStoreCache.set(paths.indexesPath, initial)
@@ -585,8 +588,7 @@ async function rebuildAssistantIndexStore(
   const entries = await readdir(paths.sessionsDirectory, {
     withFileTypes: true,
   })
-  const aliases: Record<string, string> = {}
-  const conversationKeys: Record<string, string> = {}
+  const sessions: AssistantSession[] = []
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) {
@@ -602,14 +604,20 @@ async function rebuildAssistantIndexStore(
       if (!session) {
         continue
       }
-      if (session.alias) {
-        aliases[session.alias] = session.sessionId
-      }
-      if (session.binding.conversationKey) {
-        conversationKeys[session.binding.conversationKey] = session.sessionId
-      }
+      sessions.push(session)
     } catch {
       // Quarantine already happened in readAssistantSession; keep rebuild best-effort.
+    }
+  }
+
+  const aliases: Record<string, string> = {}
+  const conversationKeys: Record<string, string> = {}
+  for (const session of sortSessionsForIndexRebuild(sessions)) {
+    if (session.alias) {
+      aliases[session.alias] = session.sessionId
+    }
+    if (session.binding.conversationKey) {
+      conversationKeys[session.binding.conversationKey] = session.sessionId
     }
   }
 
@@ -629,6 +637,36 @@ async function rebuildAssistantIndexStore(
     message: 'Assistant session indexes were rebuilt from durable session files.',
   }).catch(() => undefined)
   return rebuilt
+}
+
+async function hasDurableAssistantSessions(
+  paths: AssistantStatePaths,
+): Promise<boolean> {
+  const entries = await readdir(paths.sessionsDirectory, {
+    withFileTypes: true,
+  })
+  return entries.some((entry) => entry.isFile() && entry.name.endsWith('.json'))
+}
+
+function sortSessionsForIndexRebuild(
+  sessions: readonly AssistantSession[],
+): AssistantSession[] {
+  return [...sessions].sort((left, right) =>
+    resolveAssistantIndexRebuildTimestamp(left).localeCompare(
+      resolveAssistantIndexRebuildTimestamp(right),
+    ),
+  )
+}
+
+function resolveAssistantIndexRebuildTimestamp(
+  session: AssistantSession,
+): string {
+  return (
+    normalizeNullableString(session.lastTurnAt) ??
+    normalizeNullableString(session.updatedAt) ??
+    normalizeNullableString(session.createdAt) ??
+    ''
+  )
 }
 
 function createInitialAutomationState(): AssistantAutomationState {

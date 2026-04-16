@@ -124,6 +124,7 @@ import {
 import {
   normalizeAssistantExecutionContext,
   resolveAssistantExecutionDefaultTarget,
+  resolveAssistantExecutionOperatorDefaults,
 } from "../src/assistant/execution-context.ts";
 import {
   resolveAssistantTurnRoutes,
@@ -1195,6 +1196,90 @@ describe("assistant execution context normalization", () => {
         fallbackTarget,
       }),
     ).toEqual(fallbackTarget);
+  });
+
+  it("overlays the hosted default target onto operator defaults without dropping other defaults", () => {
+    const hostedDefaultTarget = createAssistantModelTarget({
+      apiKeyEnv: "HOSTED_OPENAI_API_KEY",
+      baseUrl: "https://gateway.example.com/v1",
+      model: "gpt-5.4-mini",
+      provider: "openai-compatible",
+      providerName: "Hosted Gateway",
+    });
+    if (!hostedDefaultTarget) {
+      throw new Error("expected hosted default target");
+    }
+
+    expect(
+      resolveAssistantExecutionOperatorDefaults({
+        defaults: {
+          backend: {
+            adapter: "codex-cli",
+            approvalPolicy: "never",
+            codexCommand: null,
+            codexHome: null,
+            model: "gpt-5.4",
+            oss: false,
+            profile: null,
+            reasoningEffort: "medium",
+            sandbox: "danger-full-access",
+          },
+          failoverRoutes: [
+            {
+              apiKeyEnv: "BACKUP_API_KEY",
+              baseUrl: "https://backup.example.com/v1",
+              codexCommand: null,
+              cooldownMs: null,
+              headers: null,
+              model: "gpt-4.1-mini",
+              name: null,
+              provider: "openai-compatible",
+              providerName: "Backup Gateway",
+              reasoningEffort: null,
+              approvalPolicy: null,
+              oss: false,
+              presetId: null,
+              profile: null,
+              sandbox: null,
+              webSearch: null,
+            },
+          ],
+          identityId: "identity-123",
+          selfDeliveryTargets: null,
+        },
+        executionContext: {
+          hosted: {
+            defaultTarget: hostedDefaultTarget,
+            memberId: "member-123",
+            userEnvKeys: [],
+          },
+        },
+      }),
+    ).toEqual({
+      backend: hostedDefaultTarget,
+      failoverRoutes: [
+        {
+          apiKeyEnv: "BACKUP_API_KEY",
+          baseUrl: "https://backup.example.com/v1",
+          codexCommand: null,
+          cooldownMs: null,
+          headers: null,
+          model: "gpt-4.1-mini",
+          name: null,
+          provider: "openai-compatible",
+          providerName: "Backup Gateway",
+          reasoningEffort: null,
+          approvalPolicy: null,
+          oss: false,
+          presetId: null,
+          profile: null,
+          sandbox: null,
+          webSearch: null,
+        },
+      ],
+      identityId: "identity-123",
+      selfDeliveryTargets: null,
+    });
   });
 });
 

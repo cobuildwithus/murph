@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     "assistantGatewayLocalProjectionSourceReader",
   ),
   handleHostedShareAcceptedDispatch: vi.fn(),
+  hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   ingestHostedEmailMessage: vi.fn(),
   ingestHostedLinqMessage: vi.fn(),
   ingestHostedTelegramMessage: vi.fn(),
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
+  hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
   prepareHostedDispatchContext: mocks.prepareHostedDispatchContext,
 }));
 
@@ -65,6 +67,13 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
 
 import { executeHostedDispatchEvent } from "../src/hosted-runtime/events.ts";
 
+const executionContext = {
+  hosted: {
+    memberId: "member_123",
+    userEnvKeys: [],
+  },
+} as const;
+
 function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
   return {
     commitTimeoutMs: null,
@@ -87,6 +96,7 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
 afterEach(() => {
   vi.clearAllMocks();
   mocks.prepareHostedDispatchContext.mockResolvedValue(null);
+  mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.handleHostedShareAcceptedDispatch.mockResolvedValue({
     shareImportResult: null,
     shareImportTitle: null,
@@ -127,6 +137,7 @@ describe("executeHostedDispatchEvent", () => {
     const runtime = createRuntime();
     const result = await executeHostedDispatchEvent({
       dispatch,
+      executionContext,
       runtime,
       runtimeEnv: {
         OPENAI_API_KEY: "secret",
@@ -145,6 +156,7 @@ describe("executeHostedDispatchEvent", () => {
     expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
       actorId: null,
       channel: "linq",
+      executionContext,
       identityId: "hbidx:phone:v1:test",
       threadId: "thread_123",
       threadIsDirect: true,
@@ -154,6 +166,65 @@ describe("executeHostedDispatchEvent", () => {
       bootstrapResult,
       shareImportResult: null,
       shareImportTitle: null,
+    });
+  });
+
+  it("rehydrates execution context after bootstrap before queuing first contact", async () => {
+    const hydratedExecutionContext = {
+      hosted: {
+        defaultTarget: {
+          adapter: "openai-compatible" as const,
+          apiKeyEnv: "OPENAI_API_KEY",
+          endpoint: "https://gateway.example.test/v1",
+          headers: null,
+          model: "gpt-4.1-mini",
+          presetId: null,
+          providerName: "Hosted Gateway",
+          reasoningEffort: null,
+          webSearch: null,
+        },
+        memberId: "member_123",
+        userEnvKeys: [],
+      },
+    };
+    mocks.hydrateHostedExecutionDefaultTarget.mockResolvedValue(hydratedExecutionContext);
+
+    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+      eventId: "evt_member_activated_rehydrate",
+      firstContact: {
+        channel: "linq",
+        identityId: "hbidx:phone:v1:test",
+        threadId: "thread_123",
+        threadIsDirect: true,
+      },
+      memberId: "member_123",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await executeHostedDispatchEvent({
+      dispatch,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      executionContext,
+    );
+    expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
+      actorId: null,
+      channel: "linq",
+      executionContext: hydratedExecutionContext,
+      identityId: "hbidx:phone:v1:test",
+      threadId: "thread_123",
+      threadIsDirect: true,
+      vault: "/tmp/assistant-runtime-events",
     });
   });
 
@@ -178,6 +249,7 @@ describe("executeHostedDispatchEvent", () => {
 
     await executeHostedDispatchEvent({
       dispatch,
+      executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
@@ -185,6 +257,7 @@ describe("executeHostedDispatchEvent", () => {
 
     expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
       channel: "linq",
+      executionContext,
       fromPhoneNumber: "+15550001111",
       identityId: "hbidx:phone:v1:test",
       kind: "linq-materialize-home-thread",
@@ -210,6 +283,7 @@ describe("executeHostedDispatchEvent", () => {
     });
     await executeHostedDispatchEvent({
       dispatch: linqDispatch,
+      executionContext,
       runtime,
       runtimeEnv: {},
       vaultRoot,
@@ -228,6 +302,7 @@ describe("executeHostedDispatchEvent", () => {
     });
     await executeHostedDispatchEvent({
       dispatch: telegramDispatch,
+      executionContext,
       runtime,
       runtimeEnv: {},
       vaultRoot,
@@ -243,6 +318,7 @@ describe("executeHostedDispatchEvent", () => {
     });
     await executeHostedDispatchEvent({
       dispatch: emailDispatch,
+      executionContext,
       runtime,
       runtimeEnv: {
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
@@ -274,6 +350,7 @@ describe("executeHostedDispatchEvent", () => {
 
     const result = await executeHostedDispatchEvent({
       dispatch,
+      executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
@@ -301,6 +378,7 @@ describe("executeHostedDispatchEvent", () => {
     await expect(
       executeHostedDispatchEvent({
         dispatch,
+        executionContext,
         runtime: createRuntime(),
         runtimeEnv: {},
         vaultRoot: "/tmp/assistant-runtime-events",
@@ -324,6 +402,7 @@ describe("executeHostedDispatchEvent", () => {
 
     await executeHostedDispatchEvent({
       dispatch,
+      executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",

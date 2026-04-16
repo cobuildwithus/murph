@@ -1,4 +1,5 @@
 import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { SharePack } from '@murphai/contracts'
 import { normalizeNullableString } from './shared.js'
@@ -87,4 +88,21 @@ export function resolveAssistantExecutionDefaultTarget(input: {
   fallbackTarget: AssistantModelTarget
 }): AssistantModelTarget {
   return input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget
+}
+
+export function resolveAssistantExecutionOperatorDefaults(input: {
+  defaults: AssistantOperatorDefaults | null | undefined
+  executionContext: AssistantExecutionContext | null | undefined
+}): AssistantOperatorDefaults | null {
+  const hostedDefaultTarget = input.executionContext?.hosted?.defaultTarget ?? null
+  if (!hostedDefaultTarget) {
+    return input.defaults ?? null
+  }
+
+  return {
+    ...(input.defaults ?? {}),
+    identityId: input.defaults?.identityId ?? null,
+    selfDeliveryTargets: input.defaults?.selfDeliveryTargets ?? null,
+    backend: hostedDefaultTarget,
+  }
 }

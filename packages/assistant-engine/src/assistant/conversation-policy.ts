@@ -3,6 +3,7 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantMessageInput } from './service-contracts.js'
+import { threadIsDirectFromConversationDirectness } from './conversation-ref.js'
 import {
   isAcceptedInboundMessageOperatorAuthority,
   resolveAssistantOperatorAuthority,
@@ -38,6 +39,7 @@ export interface AssistantConversationPolicy {
 export function resolveAssistantConversationPolicy(input: {
   message: Pick<
     AssistantMessageInput,
+    | 'conversation'
     | 'deliverResponse'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
@@ -66,6 +68,7 @@ export function resolveAssistantConversationPolicy(input: {
 export function resolveAssistantConversationAudience(input: {
   message: Pick<
     AssistantMessageInput,
+    | 'conversation'
     | 'deliverResponse'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
@@ -77,18 +80,39 @@ export function resolveAssistantConversationAudience(input: {
   session: Pick<AssistantSession, 'binding'>
 }): AssistantConversationAudience {
   const binding = input.session.binding
-  const channel = normalizeNullableString(binding.channel)
-  const identityId = normalizeNullableString(binding.identityId)
-  const actorId = normalizeNullableString(binding.actorId)
+  const conversation =
+    typeof input.message.conversation === 'object' && input.message.conversation !== null
+      ? input.message.conversation
+      : null
+  const channel =
+    normalizeNullableString(binding.channel) ??
+    normalizeNullableString(conversation?.channel)
+  const identityId =
+    normalizeNullableString(binding.identityId) ??
+    normalizeNullableString(conversation?.identityId)
+  const actorId =
+    normalizeNullableString(binding.actorId) ??
+    normalizeNullableString(conversation?.participantId)
   const threadId =
     normalizeNullableString(input.message.threadId) ??
     normalizeNullableString(input.message.sourceThreadId) ??
+    normalizeNullableString(conversation?.threadId) ??
     normalizeNullableString(binding.threadId)
   const explicitTarget = normalizeNullableString(input.message.deliveryTarget)
   const replyToMessageId = normalizeNullableString(
     input.message.deliveryReplyToMessageId,
   )
-  const bindingDelivery = binding.delivery ?? null
+  const threadIsDirect =
+    typeof input.message.threadIsDirect === 'boolean'
+      ? input.message.threadIsDirect
+      : threadIsDirectFromConversationDirectness(conversation?.directness) ??
+        binding.threadIsDirect
+  const bindingDelivery = resolveConversationAudienceBindingDelivery({
+    bindingDelivery: binding.delivery ?? null,
+    channel,
+    threadId,
+    threadIsDirect,
+  })
 
   return {
     actorId,
@@ -113,10 +137,7 @@ export function resolveAssistantConversationAudience(input: {
     identityId,
     replyToMessageId,
     threadId,
-    threadIsDirect:
-      typeof input.message.threadIsDirect === 'boolean'
-        ? input.message.threadIsDirect
-        : binding.threadIsDirect,
+    threadIsDirect,
   }
 }
 
@@ -242,4 +263,36 @@ function inferDirectAudienceFromTarget(input: {
   }
 
   return null
+}
+
+function resolveConversationAudienceBindingDelivery(input: {
+  bindingDelivery: AssistantBindingDelivery | null
+  channel: string | null
+  threadId: string | null
+  threadIsDirect: boolean | null
+}): AssistantBindingDelivery | null {
+  if (
+    input.threadId &&
+    input.threadIsDirect === true &&
+    input.bindingDelivery?.kind === 'participant' &&
+    isThreadFirstAssistantChannel(input.channel)
+  ) {
+    return {
+      kind: 'thread',
+      target: input.threadId,
+    }
+  }
+
+  return input.bindingDelivery
+}
+
+function isThreadFirstAssistantChannel(channel: string | null): boolean {
+  switch (channel) {
+    case 'email':
+    case 'linq':
+    case 'telegram':
+      return true
+    default:
+      return false
+  }
 }

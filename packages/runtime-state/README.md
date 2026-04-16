@@ -20,7 +20,7 @@ Inside the vault, `.runtime/**` is now split by durability/rebuildability and by
 - `.runtime/projections/**`: rebuildable local projections and indexes such as inbox capture indexes, the query-owned canonical read/search projection, and the gateway source-backed projection store. These are `machine_local`.
 - `.runtime/cache/**` and `.runtime/tmp/**`: ephemeral scratch state that may be deleted freely. These are `machine_local`.
 
-`vault/.runtime/operations/assistant/**` is the assistant runtime residue root. Assistant runtime paths are portable only when the assistant descriptor manifest marks them portable; current portable examples include session resume metadata, transcripts, outbox intents, receipts, automation execution state/cursors, and failover cooldowns. Current machine-local examples include locks, status snapshots, diagnostics, caches, secrets, and other throwaway operational state.
+`vault/.runtime/operations/assistant/**` is the assistant runtime residue root. Assistant runtime paths are portable only when the assistant descriptor manifest marks them portable; current portable examples include session resume metadata, transcripts, alias/conversation indexes, outbox intents, receipts, automation execution state/cursors, and failover cooldowns. Current machine-local examples include locks, status snapshots, diagnostics, caches, secrets, and other throwaway operational state.
 
 That assistant runtime root is intentionally not a product-state incubator. If a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical `vault/**` or explicit `derived/**` materializations, not under assistant runtime.
 
