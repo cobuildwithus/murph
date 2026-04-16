@@ -603,7 +603,18 @@ function isHostedContainerLocalProxyHostname(value: string): boolean {
   return value === "127.0.0.1"
     || value === "localhost"
     || value === "::1"
-    || value === "host.docker.internal";
+    || value === "host.docker.internal"
+    || value === readHostedContainerRunnerHostAlias();
+}
+
+function readHostedContainerRunnerHostAlias(): string | null {
+  const value = process.env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS;
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function ensureTrailingSlash(value: URL): URL {

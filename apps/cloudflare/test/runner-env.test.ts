@@ -92,6 +92,7 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("rewrites only forwarded loopback runner callback urls to the local container host alias", () => {
     expect(buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "device-sync,linq",
       DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3000/api/device-sync",
@@ -100,6 +101,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       LINQ_API_BASE_URL: "http://localhost:4011",
       TELEGRAM_API_BASE_URL: "https://telegram.example.test",
     })).toEqual({
+      HOSTED_ASSISTANT_BASE_URL: "http://host.docker.internal:4111/v1",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
