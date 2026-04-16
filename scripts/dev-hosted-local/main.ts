@@ -44,8 +44,11 @@ import {
 export async function main(): Promise<void> {
   const config = resolveHostedLocalDevConfig(process.env);
   const tempDirOverride = process.env.MURPH_DEV_TEMP_DIR?.trim() || null;
+  const providedVercelOidcToken = process.env.VERCEL_OIDC_TOKEN?.trim() || null;
 
-  await ensureVercelLinkExists();
+  if (!config.skipVercelPull && !providedVercelOidcToken) {
+    await ensureVercelLinkExists();
+  }
   if (!config.skipWeb) {
     await assertHostedWebDevServerAvailable(process.env);
     await assertPortAvailable(config.webHost, config.webPort, [
@@ -76,7 +79,7 @@ export async function main(): Promise<void> {
   let hadExistingCloudflareDevVars = false;
 
   try {
-    if (!config.skipVercelPull) {
+    if (!config.skipVercelPull && !providedVercelOidcToken) {
       await runCommand("vercel", ["env", "pull", pulledEnvPath, "--environment=development"], {
         cwd: webDir,
         env: initialEnv,
@@ -85,7 +88,9 @@ export async function main(): Promise<void> {
     }
 
     const repoEnv = await readOptionalSimpleEnvFile(repoEnvPath);
-    const pulledEnv = config.skipVercelPull ? {} : await readSimpleEnvFile(pulledEnvPath);
+    const pulledEnv = (config.skipVercelPull || providedVercelOidcToken)
+      ? {}
+      : await readSimpleEnvFile(pulledEnvPath);
     const vercelEnv: NodeJS.ProcessEnv = {
       ...repoEnv,
       ...pulledEnv,
