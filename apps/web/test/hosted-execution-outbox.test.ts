@@ -75,9 +75,7 @@ describe("hosted execution outbox", () => {
 
   it("summarizes settled accepted rows once no further web retry work remains", async () => {
     const dispatch = createGatewaySendDispatch();
-    const initialPayload = serializeHostedExecutionOutboxPayload(dispatch, {
-      storage: "inline",
-    }) as Prisma.JsonValue;
+    const initialPayload = serializeHostedExecutionOutboxPayload(dispatch) as Prisma.JsonValue;
     const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
       payloadJson: initialPayload,
     }));
@@ -239,9 +237,7 @@ function createOutboxRecord(
     lastAttemptAt: null,
     lastError: null,
     nextAttemptAt: new Date("2026-03-28T11:00:00.000Z"),
-    payloadJson: (input.payloadJson ?? serializeHostedExecutionOutboxPayload(dispatch, {
-      storage: "inline",
-    })) as Prisma.JsonValue,
+    payloadJson: (input.payloadJson ?? serializeHostedExecutionOutboxPayload(dispatch)) as Prisma.JsonValue,
     sourceId: null,
     sourceType: "hosted_execution",
     updatedAt: new Date("2026-03-28T11:00:00.000Z"),
