@@ -1,6 +1,7 @@
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
+import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/provider-label";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -43,25 +44,3 @@ export const POST = withJsonError(async (
     providerLabel: formatHostedDeviceSyncProviderLabel(result.provider),
   });
 });
-
-function formatHostedDeviceSyncProviderLabel(provider: string): string {
-  const normalized = provider.trim().toLowerCase();
-
-  if (normalized === "whoop") {
-    return "WHOOP";
-  }
-
-  if (normalized === "oura") {
-    return "Oura";
-  }
-
-  if (normalized === "garmin") {
-    return "Garmin";
-  }
-
-  return normalized
-    .split(/[\s_-]+/u)
-    .filter(Boolean)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-}

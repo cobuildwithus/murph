@@ -210,7 +210,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       createRouteContext({ provider: "%6Fura" }),
     );
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
     expect(mocks.handleWebhook).toHaveBeenCalledWith(
       "oura",

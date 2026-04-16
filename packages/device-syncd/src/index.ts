@@ -27,6 +27,7 @@ export {
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
+  readConfiguredStravaDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "./config.ts";
 export type {
@@ -44,6 +45,8 @@ export { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
 export type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 export { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
+export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";
+export type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
 export {
   createOuraWebhookSubscriptionClient,
   OURA_DEFAULT_WEBHOOK_DATA_TYPES,
@@ -59,6 +62,15 @@ export type {
   OuraWebhookSubscriptionClient,
   OuraWebhookTarget,
 } from "./providers/oura-webhooks.ts";
+export {
+  createStravaWebhookSubscriptionClient,
+} from "./providers/strava-webhooks.ts";
+export type {
+  CreateStravaWebhookSubscriptionClientInput,
+  StravaWebhookEnsureResult,
+  StravaWebhookSubscription,
+  StravaWebhookSubscriptionClient,
+} from "./providers/strava-webhooks.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
 export * from "./types.ts";

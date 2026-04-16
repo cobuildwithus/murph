@@ -13,7 +13,7 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 
 ## Built-in Device Providers
 
-`createImporters()` and `prepareDeviceProviderSnapshotImport()` ship with built-in adapters for `whoop`, `oura`, and `garmin`.
+`createImporters()` and `prepareDeviceProviderSnapshotImport()` ship with built-in adapters for `whoop`, `oura`, `garmin`, and `strava`.
 
 Provider transport stays separate from normalization. Each adapter accepts one provider snapshot, preserves the upstream payloads as raw artifacts, and only promotes fields that fit the current canonical device batch surface.
 

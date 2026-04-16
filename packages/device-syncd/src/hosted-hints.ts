@@ -11,6 +11,8 @@ export function shapeHostedDeviceSyncJobHintPayload(
       return shapeHostedGarminJobHintPayload(job.kind, payload);
     case "oura":
       return shapeHostedOuraJobHintPayload(job.kind, payload);
+    case "strava":
+      return shapeHostedStravaJobHintPayload(job.kind, payload);
     case "whoop":
       return shapeHostedWhoopJobHintPayload(job.kind, payload);
     default:
@@ -62,6 +64,31 @@ function shapeHostedOuraJobHintPayload(
         objectId: "string",
         occurredAt: "string",
         sourceEventType: "string",
+      });
+    default:
+      return {};
+  }
+}
+
+function shapeHostedStravaJobHintPayload(
+  kind: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  switch (kind) {
+    case "backfill":
+    case "reconcile":
+      return pickHostedWakePayloadFields(payload, {
+        windowEnd: "string",
+        windowStart: "string",
+      });
+    case "resource":
+    case "delete":
+    case "deauthorize":
+      return pickHostedWakePayloadFields(payload, {
+        eventType: "string",
+        occurredAt: "string",
+        resourceId: "string",
+        resourceType: "string",
       });
     default:
       return {};

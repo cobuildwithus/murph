@@ -78,6 +78,8 @@ function formatSetupWearable(wearable: SetupWearable): string {
       return 'Garmin'
     case 'oura':
       return 'Oura'
+    case 'strava':
+      return 'Strava'
     case 'whoop':
       return 'WHOOP'
   }

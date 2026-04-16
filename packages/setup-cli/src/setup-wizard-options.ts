@@ -68,6 +68,11 @@ export const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = 
     wearable: 'oura',
   },
   {
+    description: 'Import runs, rides, and workouts from Strava.',
+    title: 'Strava',
+    wearable: 'strava',
+  },
+  {
     description: 'Import sleep, strain, and recovery from WHOOP.',
     title: 'WHOOP',
     wearable: 'whoop',
@@ -200,6 +205,8 @@ export function formatSetupWearable(wearable: SetupWearable): string {
       return 'Garmin'
     case 'oura':
       return 'Oura'
+    case 'strava':
+      return 'Strava'
     case 'whoop':
       return 'WHOOP'
   }

@@ -17,6 +17,7 @@ import {
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredOuraDeviceSyncProviderConfig,
+  readConfiguredStravaDeviceSyncProviderConfig,
 } from "../src/config.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
@@ -68,6 +69,18 @@ test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () =
   );
 });
 
+test("loadDeviceSyncEnvironment supports Strava-only deployments", () => {
+  const loaded = loadDeviceSyncEnvironment({
+    STRAVA_CLIENT_ID: "strava-client-id",
+    STRAVA_CLIENT_SECRET: "strava-client-secret",
+    ...createDeviceSyncEnv(),
+  });
+  const providers = requireValue(loaded.service.providers);
+
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0]?.provider, "strava");
+});
+
 test("loadDeviceSyncEnvironment supports Garmin, WHOOP, and Oura together", () => {
   const loaded = loadDeviceSyncEnvironment({
     GARMIN_CLIENT_ID: "garmin-client-id",
@@ -103,7 +116,7 @@ test("createConfiguredDeviceSyncRegistry assembles the configured providers in d
 });
 
 test("configuredDeviceSyncProviderKeys follow the shared descriptor order", () => {
-  assert.deepEqual(configuredDeviceSyncProviderKeys, ["garmin", "oura", "whoop"]);
+  assert.deepEqual(configuredDeviceSyncProviderKeys, ["garmin", "oura", "whoop", "strava"]);
 });
 
 test("shared provider-config helpers preserve descriptor order and report presence", () => {
@@ -127,6 +140,8 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "OURA_CLIENT_SECRET",
     "WHOOP_CLIENT_ID",
     "WHOOP_CLIENT_SECRET",
+    "STRAVA_CLIENT_ID",
+    "STRAVA_CLIENT_SECRET",
   ]);
   assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
     "GARMIN_API_BASE_URL",
@@ -151,6 +166,13 @@ test("shared provider runtime env key lists stay aligned with the configured pro
     "WHOOP_REQUEST_TIMEOUT_MS",
     "WHOOP_SCOPES",
     "WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
+    "STRAVA_API_BASE_URL",
+    "STRAVA_AUTH_BASE_URL",
+    "STRAVA_BACKFILL_DAYS",
+    "STRAVA_RECONCILE_DAYS",
+    "STRAVA_RECONCILE_INTERVAL_MS",
+    "STRAVA_REQUEST_TIMEOUT_MS",
+    "STRAVA_SCOPES",
   ]);
 });
 
@@ -174,6 +196,13 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
       fetchImpl: fetch,
       scopes: ["read:profile"],
     },
+    strava: {
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      fetchImpl: fetch,
+      scopes: ["activity:read", "activity:read_all"],
+      webhookVerifyToken: "verify-token-for-tests",
+    },
   });
 
   assert.deepEqual(cloned, {
@@ -190,6 +219,11 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
       clientId: "whoop-client-id",
       clientSecret: "whoop-client-secret",
       scopes: ["read:profile"],
+    },
+    strava: {
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      scopes: ["activity:read", "activity:read_all"],
     },
   });
 });
@@ -231,6 +265,17 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted run
         scopes: ["read:profile", "read:sleep"],
         webhookTimestampToleranceMs: 120_000,
       },
+      strava: {
+        apiBaseUrl: "https://strava.example.test",
+        authBaseUrl: "https://strava-auth.example.test",
+        backfillDays: 30,
+        clientId: "strava-client-id",
+        clientSecret: "strava-client-secret",
+        reconcileDays: 14,
+        reconcileIntervalMs: 14_400_000,
+        requestTimeoutMs: 30_000,
+        scopes: ["activity:read"],
+      },
     },
     "runtime.providerConfigs",
   );
@@ -269,6 +314,17 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted run
       requestTimeoutMs: 30_000,
       scopes: ["read:profile", "read:sleep"],
       webhookTimestampToleranceMs: 120_000,
+    },
+    strava: {
+      apiBaseUrl: "https://strava.example.test",
+      authBaseUrl: "https://strava-auth.example.test",
+      backfillDays: 30,
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      reconcileDays: 14,
+      reconcileIntervalMs: 14_400_000,
+      requestTimeoutMs: 30_000,
+      scopes: ["activity:read"],
     },
   });
 });
@@ -330,7 +386,37 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs rejects unknown provi
         },
         "runtime.providerConfigs",
       ),
-    /runtime\.providerConfigs\.oura\.webhookVerificationToken is not supported in serialized runtime config/u,
+    /runtime\.providerConfigs\.oura\.webhookVerificationToken is a provider-owned admin secret/u,
+  );
+
+  assert.throws(
+    () =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          strava: {
+            clientId: "strava-client-id",
+            clientSecret: "strava-client-secret",
+            webhookVerifyToken: "verify-token-for-tests",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    /runtime\.providerConfigs\.strava\.webhookVerifyToken is a provider-owned admin secret/u,
+  );
+
+  assert.throws(
+    () =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          strava: {
+            clientId: "strava-client-id",
+            clientSecret: "strava-client-secret",
+            mysteriousField: "nope",
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    /runtime\.providerConfigs\.strava\.mysteriousField is not a supported serialized provider config field/u,
   );
 });
 
@@ -560,6 +646,32 @@ test("readConfiguredOuraDeviceSyncProviderConfig rejects invalid integer overrid
       }),
     /OURA_BACKFILL_DAYS must be an integer/u,
   );
+});
+
+test("readConfiguredStravaDeviceSyncProviderConfig trims scopes and keeps the webhook verify token", () => {
+  const config = readConfiguredStravaDeviceSyncProviderConfig({
+    STRAVA_CLIENT_ID: "strava-client-id",
+    STRAVA_CLIENT_SECRET: "strava-client-secret",
+    STRAVA_SCOPES: "activity:read, activity:read_all",
+    STRAVA_BACKFILL_DAYS: "21",
+    STRAVA_RECONCILE_DAYS: "7",
+    STRAVA_RECONCILE_INTERVAL_MS: "14400000",
+    STRAVA_REQUEST_TIMEOUT_MS: "15000",
+    STRAVA_WEBHOOK_VERIFY_TOKEN: "verify-token-for-tests",
+  });
+
+  assert.deepEqual(config, {
+    clientId: "strava-client-id",
+    clientSecret: "strava-client-secret",
+    authBaseUrl: undefined,
+    apiBaseUrl: undefined,
+    scopes: ["activity:read", "activity:read_all"],
+    backfillDays: 21,
+    reconcileDays: 7,
+    reconcileIntervalMs: 14_400_000,
+    requestTimeoutMs: 15_000,
+    webhookVerifyToken: "verify-token-for-tests",
+  });
 });
 
 test("createConsoleDeviceSyncLogger forwards messages and defaults missing context to an empty object", () => {

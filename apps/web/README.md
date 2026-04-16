@@ -19,8 +19,8 @@ instead of maintaining an app-local provider list or provider-config object.
 
 ## Core responsibilities
 
-- Garmin, WHOOP, and Oura OAuth start/callback flows
-- WHOOP and Oura webhook intake
+- Garmin, Oura, Strava, and WHOOP OAuth start/callback flows
+- Oura, Strava, and WHOOP webhook intake
 - hosted Linq and Telegram webhook ingress plus sparse routing state
 - per-user device connection ownership mapping plus token audit history
 - hosted member core, identity, routing, billing, and email-authorization slices
@@ -72,6 +72,8 @@ Required for the hosted device-sync lane:
 - `WHOOP_CLIENT_SECRET`
 - `OURA_CLIENT_ID`
 - `OURA_CLIENT_SECRET`
+- `STRAVA_CLIENT_ID`
+- `STRAVA_CLIENT_SECRET`
 
 Required for hosted Linq ingress:
 
@@ -91,9 +93,10 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
 
-Provider-owned Oura webhook-admin setting:
+Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
+- `STRAVA_WEBHOOK_VERIFY_TOKEN` when the shared Strava provider config should answer webhook preflight challenges and maintain the one app-global Strava webhook subscription. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
 
 Hosted onboarding extras:
 
@@ -269,6 +272,7 @@ Public provider-facing routes:
 - `GET /api/device-sync/oauth/:provider/callback`
 - `POST /api/device-sync/webhooks/:provider`
 - `GET /api/device-sync/webhooks/oura`
+- `GET /api/device-sync/webhooks/strava`
 - `GET /api/linq/webhook`
 - `POST /api/linq/webhook`
 - `POST /api/hosted-onboarding/telegram/webhook`

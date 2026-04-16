@@ -664,7 +664,7 @@ test("device sync http handler routes control and public requests without socket
       ok: true,
     }),
   });
-  assert.equal(webhookResponse.statusCode, 202);
+  assert.equal(webhookResponse.statusCode, 200);
   assert.deepEqual(webhookResponse.readJson(), {
     accepted: true,
     duplicate: false,
@@ -761,7 +761,7 @@ test("device sync http handler forwards single-value webhook headers and string 
     controlToken: CONTROL_TOKEN,
   });
 
-  assert.equal(response.statusCode, 202);
+  assert.equal(response.statusCode, 200);
   assert.deepEqual(observed, [
     {
       header: "trace-single-header",
@@ -795,7 +795,7 @@ test("device sync http handler preserves repeated webhook headers", async () => 
     controlToken: CONTROL_TOKEN,
   });
 
-  assert.equal(response.statusCode, 202);
+  assert.equal(response.statusCode, 200);
   assert.deepEqual(observedHeaders, ["trace-one, trace-two"]);
 });
 
@@ -1155,7 +1155,7 @@ test("device sync http server wires control and public listeners to the correct 
     }),
     publicWebhook.response,
   );
-  assert.equal(publicWebhook.statusCode, 202);
+  assert.equal(publicWebhook.statusCode, 200);
 
   await handle.close();
 });

@@ -17,7 +17,7 @@ import { StickyNav } from "./sticky-nav";
 export const metadata: Metadata = {
   title: "Murph — Turn wearable data into answers about your body",
   description:
-    "Expert-backed health experiments measured by your wearable. Pick a protocol, follow it, see what changed. Works with Oura, Whoop, and Garmin.",
+    "Expert-backed health experiments measured by your wearable. Pick a protocol, follow it, see what changed. Works with Oura, WHOOP, Strava, and Garmin.",
   alternates: {
     canonical: "/",
   },
@@ -51,7 +51,7 @@ export default async function HomePage() {
     : {
         body: null,
         eyebrow: "Sign up",
-        metaItems: ["$5/month early access", "Oura and Whoop"],
+        metaItems: ["$5/month early access", "Oura, WHOOP, Strava, and Garmin"],
         note: null,
         signupLabel: "Create your account",
         title: "Figure out what actually makes you healthier.",

@@ -12,12 +12,14 @@ import {
 import { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
 import { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 import { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
+import { createStravaDeviceSyncProvider } from "./providers/strava.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
 import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.ts";
 
 import type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
 import type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 import type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+import type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
 import type { CreateDeviceSyncServiceInput } from "./service.ts";
 import type {
   DeviceSyncHttpConfig,
@@ -36,12 +38,14 @@ export interface ConfiguredDeviceSyncProviderConfigByKey {
   garmin: GarminDeviceSyncProviderConfig;
   oura: OuraDeviceSyncProviderConfig;
   whoop: WhoopDeviceSyncProviderConfig;
+  strava: StravaDeviceSyncProviderConfig;
 }
 
 export interface SerializableConfiguredDeviceSyncProviderConfigByKey {
   garmin: Omit<GarminDeviceSyncProviderConfig, "fetchImpl">;
   oura: Omit<OuraDeviceSyncProviderConfig, "fetchImpl" | "webhookVerificationToken">;
   whoop: Omit<WhoopDeviceSyncProviderConfig, "fetchImpl">;
+  strava: Omit<StravaDeviceSyncProviderConfig, "fetchImpl" | "webhookVerifyToken">;
 }
 
 export type ConfiguredDeviceSyncProviderKey = keyof ConfiguredDeviceSyncProviderConfigByKey;
@@ -151,6 +155,24 @@ const WHOOP_SCOPES_ENV_KEYS = ["WHOOP_SCOPES"] as const;
 const WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS = [
   "WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
 ] as const;
+const STRAVA_API_BASE_URL_ENV_KEYS = ["STRAVA_API_BASE_URL"] as const;
+const STRAVA_AUTH_BASE_URL_ENV_KEYS = ["STRAVA_AUTH_BASE_URL"] as const;
+const STRAVA_BACKFILL_DAYS_ENV_KEYS = ["STRAVA_BACKFILL_DAYS"] as const;
+const STRAVA_CLIENT_ID_ENV_KEYS = ["STRAVA_CLIENT_ID"] as const;
+const STRAVA_CLIENT_SECRET_ENV_KEYS = ["STRAVA_CLIENT_SECRET"] as const;
+const STRAVA_RECONCILE_DAYS_ENV_KEYS = [
+  "STRAVA_RECONCILE_DAYS",
+] as const;
+const STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS = [
+  "STRAVA_RECONCILE_INTERVAL_MS",
+] as const;
+const STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS = [
+  "STRAVA_REQUEST_TIMEOUT_MS",
+] as const;
+const STRAVA_SCOPES_ENV_KEYS = ["STRAVA_SCOPES"] as const;
+const STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS = [
+  "STRAVA_WEBHOOK_VERIFY_TOKEN",
+] as const;
 
 const GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
   ...GARMIN_CLIENT_ID_ENV_KEYS,
@@ -183,6 +205,10 @@ const WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
   ...WHOOP_CLIENT_ID_ENV_KEYS,
   ...WHOOP_CLIENT_SECRET_ENV_KEYS,
 ] as const;
+const STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
+  ...STRAVA_CLIENT_ID_ENV_KEYS,
+  ...STRAVA_CLIENT_SECRET_ENV_KEYS,
+] as const;
 const WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS = [
   ...WHOOP_BACKFILL_DAYS_ENV_KEYS,
   ...WHOOP_BASE_URL_ENV_KEYS,
@@ -192,17 +218,28 @@ const WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS = [
   ...WHOOP_SCOPES_ENV_KEYS,
   ...WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
 ] as const;
+const STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS = [
+  ...STRAVA_API_BASE_URL_ENV_KEYS,
+  ...STRAVA_AUTH_BASE_URL_ENV_KEYS,
+  ...STRAVA_BACKFILL_DAYS_ENV_KEYS,
+  ...STRAVA_RECONCILE_DAYS_ENV_KEYS,
+  ...STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS,
+  ...STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS,
+  ...STRAVA_SCOPES_ENV_KEYS,
+] as const;
 
 export const deviceSyncProviderRuntimeSecretEnvKeys = Object.freeze([
   ...GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
   ...OURA_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
   ...WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
+  ...STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
 ]);
 
 export const deviceSyncProviderRuntimeVariableEnvKeys = Object.freeze([
   ...GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
   ...OURA_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
   ...WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
+  ...STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
 ]);
 
 export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env): LoadedDeviceSyncEnvironment {
@@ -466,6 +503,34 @@ export function readConfiguredOuraDeviceSyncProviderConfig(
   };
 }
 
+export function readConfiguredStravaDeviceSyncProviderConfig(
+  env: DeviceSyncEnvSource,
+): StravaDeviceSyncProviderConfig | null {
+  const credentials = readOptionalCredentialPair(
+    env,
+    STRAVA_CLIENT_ID_ENV_KEYS,
+    STRAVA_CLIENT_SECRET_ENV_KEYS,
+    "Strava",
+  );
+
+  if (!credentials) {
+    return null;
+  }
+
+  return {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
+    authBaseUrl: optionalEnv(env, STRAVA_AUTH_BASE_URL_ENV_KEYS),
+    apiBaseUrl: optionalEnv(env, STRAVA_API_BASE_URL_ENV_KEYS),
+    scopes: parseCsvEnv(env, STRAVA_SCOPES_ENV_KEYS),
+    backfillDays: parseIntegerEnv(env, STRAVA_BACKFILL_DAYS_ENV_KEYS),
+    reconcileDays: parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS),
+    reconcileIntervalMs: parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    requestTimeoutMs: parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS),
+    webhookVerifyToken: optionalEnv(env, STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS),
+  };
+}
+
 const configuredDeviceSyncProviderConfigHandlers: {
   [TKey in ConfiguredDeviceSyncProviderKey]: ConfiguredDeviceSyncProviderConfigHandler<TKey>;
 } = {
@@ -486,6 +551,12 @@ const configuredDeviceSyncProviderConfigHandlers: {
     read: readConfiguredWhoopDeviceSyncProviderConfig,
     clone: cloneWhoopDeviceSyncProviderConfig,
     parseSerializable: parseSerializableWhoopDeviceSyncProviderConfig,
+  },
+  strava: {
+    create: createStravaDeviceSyncProvider,
+    read: readConfiguredStravaDeviceSyncProviderConfig,
+    clone: cloneStravaDeviceSyncProviderConfig,
+    parseSerializable: parseSerializableStravaDeviceSyncProviderConfig,
   },
 };
 
@@ -534,6 +605,21 @@ function cloneOuraDeviceSyncProviderConfig(
   const {
     fetchImpl: _fetchImpl,
     webhookVerificationToken: _webhookVerificationToken,
+    ...serializableConfig
+  } = config;
+
+  return {
+    ...serializableConfig,
+    ...(config.scopes ? { scopes: [...config.scopes] } : {}),
+  };
+}
+
+function cloneStravaDeviceSyncProviderConfig(
+  config: StravaDeviceSyncProviderConfig,
+): SerializableConfiguredDeviceSyncProviderConfigByKey["strava"] {
+  const {
+    fetchImpl: _fetchImpl,
+    webhookVerifyToken: _webhookVerifyToken,
     ...serializableConfig
   } = config;
 
@@ -631,6 +717,42 @@ function parseSerializableOuraDeviceSyncProviderConfig(
   };
 }
 
+function parseSerializableStravaDeviceSyncProviderConfig(
+  value: unknown,
+  label: string,
+): SerializableConfiguredDeviceSyncProviderConfigByKey["strava"] {
+  const record = requireSerializableProviderConfigRecord(
+    value,
+    label,
+    [
+      "apiBaseUrl",
+      "authBaseUrl",
+      "backfillDays",
+      "clientId",
+      "clientSecret",
+      "reconcileDays",
+      "reconcileIntervalMs",
+      "requestTimeoutMs",
+      "scopes",
+    ],
+  );
+
+  return {
+    apiBaseUrl: parseSerializableOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
+    authBaseUrl: parseSerializableOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
+    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
+    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
+    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
+    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
+    reconcileIntervalMs: parseSerializableOptionalNumber(
+      record.reconcileIntervalMs,
+      `${label}.reconcileIntervalMs`,
+    ),
+    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
+    scopes: parseSerializableOptionalStringArray(record.scopes, `${label}.scopes`),
+  };
+}
+
 function parseSerializableWhoopDeviceSyncProviderConfig(
   value: unknown,
   label: string,
@@ -698,9 +820,21 @@ function requireSerializableProviderConfigRecord(
     throw new TypeError(`${label}.fetchImpl is not supported in serialized runtime config.`);
   }
 
+  if (record.webhookVerificationToken !== undefined) {
+    throw new TypeError(
+      `${label}.webhookVerificationToken is a provider-owned admin secret and is not supported in serialized runtime config.`,
+    );
+  }
+
+  if (record.webhookVerifyToken !== undefined) {
+    throw new TypeError(
+      `${label}.webhookVerifyToken is a provider-owned admin secret and is not supported in serialized runtime config.`,
+    );
+  }
+
   for (const key of Object.keys(record)) {
     if (!supportedKeys.has(key)) {
-      throw new TypeError(`${label}.${key} is not supported in serialized runtime config.`);
+      throw new TypeError(`${label}.${key} is not a supported serialized provider config field.`);
     }
   }
 

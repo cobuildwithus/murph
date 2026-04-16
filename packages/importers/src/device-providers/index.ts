@@ -13,6 +13,7 @@ export {
   defaultDeviceProviderDescriptors,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
 } from "./defaults.ts";
 export {
@@ -25,6 +26,11 @@ export {
   ouraProviderAdapter,
   type OuraSnapshotInput,
 } from "./oura.ts";
+export {
+  normalizeStravaSnapshot,
+  stravaProviderAdapter,
+  type StravaSnapshotInput,
+} from "./strava.ts";
 export {
   normalizeWhoopSnapshot,
   whoopProviderAdapter,

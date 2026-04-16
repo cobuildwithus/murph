@@ -1,5 +1,5 @@
 import { deviceSyncError } from "../errors.ts";
-import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, subtractDays } from "../shared.ts";
+import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, splitScopeList, subtractDays } from "../shared.ts";
 
 import type { DeviceSyncErrorOptions } from "../errors.ts";
 import type { DeviceSyncAccount, ProviderAuthTokens, ProviderJobContext, ProviderScheduleResult } from "../types.ts";
@@ -116,14 +116,7 @@ export function isoFromExpiresIn(expiresIn: unknown, now = new Date().toISOStrin
 }
 
 export function splitScopes(value: unknown): string[] {
-  if (typeof value !== "string") {
-    return [];
-  }
-
-  return value
-    .split(/\s+/u)
-    .map((scope) => scope.trim())
-    .filter(Boolean);
+  return splitScopeList(value);
 }
 
 export function isTokenNearExpiry(
@@ -313,14 +306,24 @@ export function buildOAuthConnectUrl(input: {
   callbackUrl: string;
   scopes: string[];
   state: string;
+  scopeDelimiter?: string;
+  extraSearchParams?: Record<string, string | null | undefined>;
 }): string {
   const search = new URLSearchParams({
     client_id: input.clientId,
     response_type: "code",
     redirect_uri: input.callbackUrl,
-    scope: input.scopes.join(" "),
+    scope: input.scopes.join(input.scopeDelimiter ?? " "),
     state: input.state,
   });
+
+  for (const [key, rawValue] of Object.entries(input.extraSearchParams ?? {})) {
+    const value = normalizeString(rawValue ?? undefined);
+
+    if (value) {
+      search.set(key, value);
+    }
+  }
 
   return `${input.baseUrl}${input.authorizePath}?${search.toString()}`;
 }

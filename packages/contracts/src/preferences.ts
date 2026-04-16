@@ -10,7 +10,7 @@ export const workoutUnitPreferencesSchema = z
   })
   .strict();
 
-export const wearablePreferenceProviderValues = ["garmin", "oura", "whoop"] as const;
+export const wearablePreferenceProviderValues = ["garmin", "oura", "strava", "whoop"] as const;
 export const wearablePreferenceProviderSchema = z.enum(wearablePreferenceProviderValues);
 const wearablePreferenceProviderOrder = new Map<WearablePreferenceProvider, number>(
   wearablePreferenceProviderValues.map((provider, index) => [provider, index] as const),

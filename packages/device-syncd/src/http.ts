@@ -359,7 +359,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
       }
 
       const result = await service.handleWebhook(provider, headers, rawBody);
-      sendJson(response, 202, result);
+      sendJson(response, 200, result);
     },
   }),
   createStaticRoute({

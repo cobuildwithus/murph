@@ -1,0 +1,1009 @@
+import {
+  resolveDeviceProviderDescriptor,
+  requireDeviceProviderOAuthDescriptor,
+  requireDeviceProviderSyncDescriptor,
+  requireDeviceProviderWebhookDescriptor,
+} from "@murphai/importers/device-providers/provider-descriptors";
+
+import { deviceSyncError } from "../errors.ts";
+import {
+  addMilliseconds,
+  coerceRecord,
+  normalizeIdentifier,
+  normalizeString,
+  sha256Text,
+  subtractDays,
+} from "../shared.ts";
+import {
+  buildOAuthConnectUrl,
+  buildProviderApiError,
+  buildScheduledReconcileJobs,
+  createRefreshingApiSession,
+  fetchBearerJson,
+  isoFromExpiresIn,
+  isTokenNearExpiry,
+  parseResponseBody,
+  postOAuthTokenRequest,
+  refreshOAuthTokens,
+  requireRefreshToken,
+  tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
+} from "./shared-oauth.ts";
+import { createStravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
+
+import type {
+  DeviceSyncAccount,
+  DeviceSyncJobInput,
+  DeviceSyncJobRecord,
+  DeviceSyncProvider,
+  DeviceSyncWebhookPreflightResponse,
+  ProviderAuthTokens,
+  ProviderCallbackContext,
+  ProviderConnectionResult,
+  ProviderJobContext,
+  ProviderJobResult,
+  ProviderScheduleResult,
+  ProviderWebhookAdminCapability,
+  ProviderWebhookContext,
+  ProviderWebhookResult,
+  StoredDeviceSyncAccount,
+} from "../types.ts";
+import type { StravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
+
+const STRAVA_AUTH_BASE_URL = "https://www.strava.com";
+const STRAVA_API_BASE_URL = "https://www.strava.com/api/v3";
+const STRAVA_AUTHORIZE_PATH = "/oauth/authorize";
+const STRAVA_TOKEN_PATH = "/oauth/token";
+const STRAVA_DEAUTHORIZE_PATH = "/oauth/deauthorize";
+const STRAVA_PROVIDER_DESCRIPTOR =
+  resolveDeviceProviderDescriptor("strava") ??
+  (() => {
+    throw new TypeError("Strava provider descriptor is not registered.");
+  })();
+const STRAVA_OAUTH = requireDeviceProviderOAuthDescriptor(STRAVA_PROVIDER_DESCRIPTOR);
+const STRAVA_WEBHOOK = requireDeviceProviderWebhookDescriptor(STRAVA_PROVIDER_DESCRIPTOR);
+const STRAVA_SYNC = requireDeviceProviderSyncDescriptor(STRAVA_PROVIDER_DESCRIPTOR);
+const STRAVA_WEBHOOK_PATH = STRAVA_WEBHOOK.path;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_BACKFILL_DAYS = STRAVA_SYNC.windows.backfillDays;
+const DEFAULT_RECONCILE_DAYS = STRAVA_SYNC.windows.reconcileDays;
+const DEFAULT_RECONCILE_INTERVAL_MS = STRAVA_SYNC.windows.reconcileIntervalMs;
+const STRAVA_DEFAULT_SCOPES = Object.freeze([...STRAVA_OAUTH.defaultScopes]);
+const STRAVA_PAGED_ACTIVITY_SIZE = 200;
+const STRAVA_REFRESH_SKEW_MS = 60 * 60_000;
+const STRAVA_ACTIVITY_WEBHOOK_PRIORITY = 90;
+const STRAVA_DELETE_WEBHOOK_PRIORITY = 95;
+const STRAVA_DEAUTHORIZE_WEBHOOK_PRIORITY = 100;
+
+type StravaWebhookResourceType = "activity" | "athlete";
+
+type StravaWebhookAspectType = "create" | "update" | "delete";
+
+interface StravaTokenResponse {
+  access_token?: unknown;
+  expires_at?: unknown;
+  expires_in?: unknown;
+  refresh_token?: unknown;
+  scope?: unknown;
+  athlete?: unknown;
+  token_type?: unknown;
+}
+
+interface StravaWebhookEventPayload {
+  aspect_type?: unknown;
+  event_time?: unknown;
+  object_id?: unknown;
+  object_type?: unknown;
+  owner_id?: unknown;
+  subscription_id?: unknown;
+  updates?: unknown;
+}
+
+interface StravaDeleteMarker {
+  resource_type: string;
+  resource_id: string;
+  occurred_at: string;
+  source_event_type?: string;
+}
+
+interface StravaWebhookJobPayload {
+  eventType: string;
+  occurredAt?: string | null;
+  resourceId: string;
+  resourceType: StravaWebhookResourceType;
+}
+
+interface StravaApiSession {
+  account: DeviceSyncAccount;
+  requestJson<T>(path: string, options?: { optional?: boolean }): Promise<T | null>;
+  fetchActivities(windowStart: string, windowEnd: string): Promise<Record<string, unknown>[]>;
+  fetchActivityById(activityId: string): Promise<Record<string, unknown> | null>;
+}
+
+export interface StravaDeviceSyncProviderConfig {
+  clientId: string;
+  clientSecret: string;
+  authBaseUrl?: string;
+  apiBaseUrl?: string;
+  scopes?: string[];
+  backfillDays?: number;
+  reconcileDays?: number;
+  reconcileIntervalMs?: number;
+  requestTimeoutMs?: number;
+  webhookVerifyToken?: string;
+  fetchImpl?: typeof fetch;
+}
+
+function normalizeStravaScopes(value: unknown): string[] {
+  if (!Array.isArray(value) && typeof value !== "string") {
+    return [];
+  }
+
+  const rawScopes = Array.isArray(value) ? value : [value];
+  const deduped = new Set<string>();
+
+  for (const entry of rawScopes) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+
+    for (const scope of entry.split(/[\s,]+/u)) {
+      const normalized = scope.trim();
+
+      if (normalized) {
+        deduped.add(normalized);
+      }
+    }
+  }
+
+  return [...deduped];
+}
+
+function buildStravaScopes(input: string[] | undefined): string[] {
+  const scopes = normalizeStravaScopes(input);
+  return scopes.length > 0 ? scopes : [...STRAVA_DEFAULT_SCOPES];
+}
+
+function epochSecondsToIso(value: unknown): string | undefined {
+  const numeric = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return undefined;
+  }
+
+  const milliseconds = numeric >= 10_000_000_000 ? numeric : numeric * 1000;
+  const timestamp = new Date(milliseconds);
+
+  return Number.isFinite(timestamp.valueOf()) ? timestamp.toISOString() : undefined;
+}
+
+function buildStravaApiError(
+  code: string,
+  message: string,
+  response: Response,
+  body: string,
+  options: {
+    retryable?: boolean;
+    accountStatus?: "reauthorization_required" | "disconnected" | null;
+  } = {},
+) {
+  return buildProviderApiError(code, message, response, body, options);
+}
+
+function tokenResponseToAuthTokens(payload: StravaTokenResponse): ProviderAuthTokens {
+  const tokens = sharedTokenResponseToAuthTokens(payload, () =>
+    deviceSyncError({
+      code: "STRAVA_ACCESS_TOKEN_MISSING",
+      message: "Strava token response did not include an access token.",
+      retryable: false,
+      httpStatus: 502,
+    }),
+  );
+
+  tokens.accessTokenExpiresAt = epochSecondsToIso(payload.expires_at) ?? isoFromExpiresIn(payload.expires_in);
+
+  return tokens;
+}
+
+function buildAthleteDisplayName(athlete: Record<string, unknown>): string | null {
+  const fullName = [normalizeString(athlete.firstname), normalizeString(athlete.lastname)]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+
+  if (fullName) {
+    return fullName;
+  }
+
+  const username = normalizeString(athlete.username);
+
+  if (username) {
+    return username;
+  }
+
+  const athleteId = normalizeIdentifier(athlete.id);
+  return athleteId ? `Strava ${athleteId}` : null;
+}
+
+function buildAthleteMetadata(athlete: Record<string, unknown>): Record<string, unknown> {
+  const athleteId = normalizeIdentifier(athlete.id);
+  const username = normalizeString(athlete.username);
+  const firstname = normalizeString(athlete.firstname);
+  const lastname = normalizeString(athlete.lastname);
+  const city = normalizeString(athlete.city);
+  const state = normalizeString(athlete.state);
+  const country = normalizeString(athlete.country);
+  const sex = normalizeString(athlete.sex);
+
+  return {
+    ...(athleteId ? { athleteId } : {}),
+    ...(username ? { username } : {}),
+    ...(firstname ? { firstname } : {}),
+    ...(lastname ? { lastname } : {}),
+    ...(city ? { city } : {}),
+    ...(state ? { state } : {}),
+    ...(country ? { country } : {}),
+    ...(sex ? { sex } : {}),
+  };
+}
+
+function buildWindowJobPayload(input: {
+  now: string;
+  windowDays: number;
+  includeAthlete?: boolean;
+  kind?: "backfill" | "reconcile";
+}): Record<string, unknown> {
+  return {
+    windowStart: subtractDays(input.now, input.windowDays),
+    windowEnd: input.now,
+    ...(input.includeAthlete ? { includeAthlete: true } : {}),
+    ...(input.kind ? { windowKind: input.kind } : {}),
+  };
+}
+
+function buildWebhookDedupeKey(input: {
+  externalAccountId: string;
+  resourceType: string;
+  resourceId: string;
+  eventType: string;
+  occurredAt?: string | null;
+}): string {
+  return `${input.eventType}:${sha256Text(
+    `${input.externalAccountId}:${input.resourceType}:${input.resourceId}:${input.occurredAt ?? ""}`,
+  )}`;
+}
+
+function coerceArrayOfRecords(payload: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload
+    .map((entry) => (entry && typeof entry === "object" && !Array.isArray(entry) ? coerceRecord(entry) : null))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+}
+
+function buildRequiredActivityScopeError(): Error {
+  return deviceSyncError({
+    code: "STRAVA_ACTIVITY_SCOPE_REQUIRED",
+    message: "Strava authorization must grant activity:read or activity:read_all for activity sync.",
+    retryable: false,
+    httpStatus: 400,
+  });
+}
+
+function hasAcceptedActivityScope(scopes: readonly string[]): boolean {
+  return scopes.includes("activity:read") || scopes.includes("activity:read_all");
+}
+
+function resolveAccountScopes(callbackGrantedScopes: readonly string[], tokenScopePayload: unknown): string[] {
+  const scopes = normalizeStravaScopes(callbackGrantedScopes.length > 0 ? callbackGrantedScopes : tokenScopePayload);
+
+  if (!hasAcceptedActivityScope(scopes)) {
+    throw buildRequiredActivityScopeError();
+  }
+
+  return scopes;
+}
+
+function isStravaTokenNearExpiry(account: Pick<DeviceSyncAccount, "accessTokenExpiresAt">): boolean {
+  return isTokenNearExpiry(account, STRAVA_REFRESH_SKEW_MS);
+}
+
+function buildWebhookTraceId(payload: Record<string, unknown>): string {
+  return `strava-${sha256Text(JSON.stringify(payload))}`;
+}
+
+function normalizeWebhookObjectType(value: unknown): StravaWebhookResourceType | null {
+  const normalized = normalizeString(value)?.toLowerCase();
+
+  if (normalized === "activity" || normalized === "athlete") {
+    return normalized;
+  }
+
+  return null;
+}
+
+function normalizeWebhookAspectType(value: unknown): StravaWebhookAspectType | null {
+  const normalized = normalizeString(value)?.toLowerCase();
+
+  if (normalized === "create" || normalized === "update" || normalized === "delete") {
+    return normalized;
+  }
+
+  return null;
+}
+
+function isAthleteDeauthorizationEvent(input: {
+  objectType: StravaWebhookResourceType;
+  aspectType: StravaWebhookAspectType;
+  updates: Record<string, unknown>;
+}): boolean {
+  if (input.objectType !== "athlete" || input.aspectType !== "update") {
+    return false;
+  }
+
+  const authorized = input.updates.authorized;
+
+  if (typeof authorized === "boolean") {
+    return !authorized;
+  }
+
+  if (typeof authorized === "number") {
+    return authorized === 0;
+  }
+
+  const normalized = normalizeString(authorized)?.toLowerCase();
+  return normalized === "false" || normalized === "0";
+}
+
+function buildDeleteMarker(input: {
+  occurredAt: string;
+  resourceId: string;
+  resourceType: string;
+  sourceEventType: string;
+}): StravaDeleteMarker {
+  return {
+    resource_type: input.resourceType,
+    resource_id: input.resourceId,
+    occurred_at: input.occurredAt,
+    source_event_type: input.sourceEventType,
+  };
+}
+
+function buildStravaWebhookPreflightResponse(input: {
+  method: string;
+  url: URL;
+  verifyToken: string | null;
+}): DeviceSyncWebhookPreflightResponse | null {
+  if (input.method.toUpperCase() !== "GET") {
+    return null;
+  }
+
+  const mode = normalizeString(input.url.searchParams.get("hub.mode"));
+  const challenge = normalizeString(input.url.searchParams.get("hub.challenge"));
+  const verifyToken = normalizeString(input.url.searchParams.get("hub.verify_token"));
+
+  if (!mode && !challenge && !verifyToken) {
+    return null;
+  }
+
+  if (mode !== "subscribe" || !challenge) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_CHALLENGE_INVALID",
+      message: "Strava webhook verification request was missing hub.mode=subscribe or hub.challenge.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  if (!input.verifyToken) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_VERIFY_TOKEN_MISSING",
+      message: "Strava webhook verification token is not configured.",
+      retryable: false,
+      httpStatus: 500,
+    });
+  }
+
+  if (verifyToken !== input.verifyToken) {
+    throw deviceSyncError({
+      code: "STRAVA_WEBHOOK_VERIFY_TOKEN_MISMATCH",
+      message: "Strava webhook verification request did not include the configured verify token.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return {
+    status: 200,
+    body: {
+      "hub.challenge": challenge,
+    },
+  };
+}
+
+export function resolveStravaWebhookPreflightResponse(input: {
+  method: string;
+  url: URL;
+  verifyToken: string | null | undefined;
+}): DeviceSyncWebhookPreflightResponse | null {
+  return buildStravaWebhookPreflightResponse({
+    method: input.method,
+    url: input.url,
+    verifyToken: normalizeString(input.verifyToken) ?? null,
+  });
+}
+
+export function createStravaDeviceSyncProvider(
+  config: StravaDeviceSyncProviderConfig,
+): DeviceSyncProvider {
+  const fetchImpl = config.fetchImpl ?? fetch;
+  const authBaseUrl = (config.authBaseUrl ?? STRAVA_AUTH_BASE_URL).replace(/\/+$/u, "");
+  const apiBaseUrl = (config.apiBaseUrl ?? STRAVA_API_BASE_URL).replace(/\/+$/u, "");
+  const scopes = buildStravaScopes(config.scopes);
+  const backfillDays = Math.max(1, config.backfillDays ?? DEFAULT_BACKFILL_DAYS);
+  const reconcileDays = Math.max(1, config.reconcileDays ?? DEFAULT_RECONCILE_DAYS);
+  const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
+  const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const webhookVerifyToken = normalizeString(config.webhookVerifyToken) ?? null;
+  const descriptor = {
+    ...STRAVA_PROVIDER_DESCRIPTOR,
+    oauth: {
+      ...STRAVA_OAUTH,
+      defaultScopes: [...scopes],
+    },
+    sync: {
+      ...STRAVA_SYNC,
+      windows: {
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
+  let webhookSubscriptionClient: StravaWebhookSubscriptionClient | null = null;
+
+  async function postTokenRequest(parameters: Record<string, string>): Promise<StravaTokenResponse> {
+    return postOAuthTokenRequest<StravaTokenResponse>({
+      fetchImpl,
+      url: `${authBaseUrl}${STRAVA_TOKEN_PATH}`,
+      timeoutMs,
+      parameters,
+      buildError: (response, body) =>
+        buildStravaApiError("STRAVA_TOKEN_REQUEST_FAILED", "Strava token request failed.", response, body, {
+          retryable: response.status >= 500,
+          accountStatus: response.status === 401 ? "reauthorization_required" : null,
+        }),
+    });
+  }
+
+  async function fetchStravaJson<T>(input: {
+    path: string;
+    accessToken: string;
+    optional?: boolean;
+  }): Promise<T | null> {
+    return fetchBearerJson<T>({
+      fetchImpl,
+      url: `${apiBaseUrl}${input.path}`,
+      accessToken: input.accessToken,
+      timeoutMs,
+      optional: input.optional,
+      buildError: (response, body) =>
+        buildStravaApiError(
+          "STRAVA_API_REQUEST_FAILED",
+          `Strava API request failed for ${input.path}.`,
+          response,
+          body,
+          {
+            retryable: response.status === 429 || response.status >= 500,
+            accountStatus: response.status === 401 ? "reauthorization_required" : null,
+          },
+        ),
+    });
+  }
+
+  async function fetchAthleteProfile(accessToken: string): Promise<Record<string, unknown>> {
+    return coerceRecord(
+      await fetchStravaJson<Record<string, unknown>>({
+        path: "/athlete",
+        accessToken,
+      }),
+    );
+  }
+
+  async function listAthleteActivities(
+    requestJson: <T>(path: string, options?: { optional?: boolean }) => Promise<T | null>,
+    input: {
+      after?: string | null;
+      before?: string | null;
+    },
+  ): Promise<Record<string, unknown>[]> {
+    const records: Record<string, unknown>[] = [];
+    let page = 1;
+
+    while (true) {
+      const search = new URLSearchParams({
+        page: String(page),
+        per_page: String(STRAVA_PAGED_ACTIVITY_SIZE),
+      });
+      const afterSeconds = input.after ? Math.floor(Date.parse(input.after) / 1000) : null;
+      const beforeSeconds = input.before ? Math.floor(Date.parse(input.before) / 1000) : null;
+
+      if (afterSeconds !== null && Number.isFinite(afterSeconds)) {
+        search.set("after", String(afterSeconds));
+      }
+
+      if (beforeSeconds !== null && Number.isFinite(beforeSeconds)) {
+        search.set("before", String(beforeSeconds));
+      }
+
+      const pageRecords = coerceArrayOfRecords(
+        await requestJson<unknown[]>(`/athlete/activities?${search.toString()}`),
+      );
+
+      if (pageRecords.length === 0) {
+        break;
+      }
+
+      records.push(...pageRecords);
+
+      if (pageRecords.length < STRAVA_PAGED_ACTIVITY_SIZE) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return records;
+  }
+
+  async function fetchActivityById(
+    requestJson: <T>(path: string, options?: { optional?: boolean }) => Promise<T | null>,
+    activityId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const payload = await requestJson<Record<string, unknown>>(
+      `/activities/${encodeURIComponent(activityId)}`,
+      { optional: true },
+    );
+
+    return payload ? coerceRecord(payload) : null;
+  }
+
+  async function deauthorize(accessToken: string): Promise<void> {
+    const url = new URL(`${authBaseUrl}${STRAVA_DEAUTHORIZE_PATH}`);
+    url.searchParams.set("access_token", accessToken);
+
+    const response = await fetchImpl(url.toString(), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (response.status === 401 || response.status === 404) {
+      return;
+    }
+
+    if (!response.ok) {
+      throw buildStravaApiError(
+        "STRAVA_DEAUTHORIZE_FAILED",
+        "Strava deauthorization failed.",
+        response,
+        await parseResponseBody(response),
+        {
+          retryable: response.status === 429 || response.status >= 500,
+          accountStatus: response.status === 401 ? "disconnected" : null,
+        },
+      );
+    }
+  }
+
+  function getWebhookSubscriptionClient(): StravaWebhookSubscriptionClient {
+    if (!webhookSubscriptionClient) {
+      webhookSubscriptionClient = createStravaWebhookSubscriptionClient({
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        apiBaseUrl,
+        fetchImpl,
+        timeoutMs,
+      });
+    }
+
+    return webhookSubscriptionClient;
+  }
+
+  const webhookAdmin: ProviderWebhookAdminCapability = {
+    handleWebhookPreflight(context) {
+      return resolveStravaWebhookPreflightResponse({
+        method: context.method,
+        url: context.url,
+        verifyToken: webhookVerifyToken,
+      });
+    },
+    async ensureSubscriptions(context) {
+      if (!webhookVerifyToken) {
+        return;
+      }
+
+      const callbackUrl = new URL(
+        STRAVA_WEBHOOK_PATH.replace(/^\/+/, ""),
+        `${context.publicBaseUrl}/`,
+      ).toString();
+
+      await getWebhookSubscriptionClient().ensure({
+        callbackUrl,
+        verifyToken: webhookVerifyToken,
+      });
+    },
+  };
+
+  function createApiSession(context: ProviderJobContext): StravaApiSession {
+    const session = createRefreshingApiSession({
+      context,
+      requestJsonWithAccessToken: <T>(accessToken: string, path: string, options: { optional?: boolean }) =>
+        fetchStravaJson<T>({
+          path,
+          accessToken,
+          optional: options.optional,
+        }),
+      shouldRefresh: isStravaTokenNearExpiry,
+    });
+
+    return {
+      get account() {
+        return session.account;
+      },
+      requestJson: session.requestJson,
+      fetchActivities(windowStart: string, windowEnd: string) {
+        return listAthleteActivities(session.requestJson, {
+          after: windowStart,
+          before: windowEnd,
+        });
+      },
+      fetchActivityById(activityId: string) {
+        return fetchActivityById(session.requestJson, activityId);
+      },
+    };
+  }
+
+  async function executeWindowImport(
+    context: ProviderJobContext,
+    payload: Record<string, unknown>,
+    fallbackWindowDays: number,
+  ): Promise<ProviderJobResult> {
+    const now = context.now;
+    const windowStart = normalizeString(payload.windowStart) ?? subtractDays(now, fallbackWindowDays);
+    const windowEnd = normalizeString(payload.windowEnd) ?? now;
+    const windowKind = normalizeString(payload.windowKind)
+      ?? (fallbackWindowDays === backfillDays ? "backfill" : "reconcile");
+    const includeAthlete = payload.includeAthlete === true;
+    const api = createApiSession(context);
+    const athlete = includeAthlete
+      ? coerceRecord(
+          await api.requestJson<Record<string, unknown>>("/athlete", {
+            optional: false,
+          }),
+        )
+      : null;
+    const activities = await api.fetchActivities(windowStart, windowEnd);
+
+    await context.importSnapshot({
+      accountId: api.account.externalAccountId,
+      importedAt: now,
+      ...(athlete && Object.keys(athlete).length > 0 ? { athlete } : {}),
+      activities,
+      sourceWindow: {
+        kind: windowKind,
+        windowStart,
+        windowEnd,
+      },
+    });
+
+    return {};
+  }
+
+  async function executeResourceImport(
+    context: ProviderJobContext,
+    payload: Record<string, unknown>,
+  ): Promise<ProviderJobResult> {
+    const resourceType = normalizeWebhookObjectType(payload.resourceType);
+    const resourceId = normalizeIdentifier(payload.resourceId);
+
+    if (!resourceType || !resourceId) {
+      throw deviceSyncError({
+        code: "STRAVA_RESOURCE_JOB_INVALID",
+        message: "Strava resource job payload must include resourceType and resourceId.",
+        retryable: false,
+      });
+    }
+
+    if (resourceType !== "activity") {
+      return {};
+    }
+
+    const api = createApiSession(context);
+    const activity = await api.fetchActivityById(resourceId);
+
+    if (!activity) {
+      return {};
+    }
+
+    await context.importSnapshot({
+      accountId: api.account.externalAccountId,
+      importedAt: context.now,
+      activities: [activity],
+      sourceWindow: {
+        kind: "resource",
+        occurredAt: normalizeString(payload.occurredAt) ?? context.now,
+        resourceId,
+        resourceType,
+      },
+    });
+
+    return {};
+  }
+
+  async function executeDeleteImport(
+    context: ProviderJobContext,
+    payload: Record<string, unknown>,
+  ): Promise<ProviderJobResult> {
+    const resourceType = normalizeString(payload.resourceType) ?? "activity";
+    const resourceId = normalizeIdentifier(payload.resourceId);
+    const occurredAt = normalizeString(payload.occurredAt) ?? context.now;
+    const sourceEventType = normalizeString(payload.eventType) ?? `strava:${resourceType}:delete`;
+
+    if (!resourceId) {
+      throw deviceSyncError({
+        code: "STRAVA_DELETE_JOB_INVALID",
+        message: "Strava delete job payload must include resourceId.",
+        retryable: false,
+      });
+    }
+
+    await context.importSnapshot({
+      accountId: context.account.externalAccountId,
+      importedAt: context.now,
+      deletions: [
+        buildDeleteMarker({
+          resourceId,
+          resourceType,
+          occurredAt,
+          sourceEventType,
+        }),
+      ],
+    });
+
+    return {};
+  }
+
+  return {
+    provider: descriptor.provider,
+    descriptor,
+    webhookAdmin,
+    buildConnectUrl(context) {
+      return buildOAuthConnectUrl({
+        baseUrl: authBaseUrl,
+        authorizePath: STRAVA_AUTHORIZE_PATH,
+        clientId: config.clientId,
+        callbackUrl: context.callbackUrl,
+        scopes: normalizeStravaScopes(context.scopes.length > 0 ? context.scopes : scopes),
+        state: context.state,
+        scopeDelimiter: ",",
+        extraSearchParams: {
+          approval_prompt: "auto",
+        },
+      });
+    },
+    async exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult> {
+      const tokenPayload = await postTokenRequest({
+        grant_type: "authorization_code",
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        code,
+      });
+      const tokens = tokenResponseToAuthTokens(tokenPayload);
+      tokens.refreshToken = requireRefreshToken(tokens.refreshToken, () =>
+        deviceSyncError({
+          code: "STRAVA_REFRESH_TOKEN_MISSING",
+          message: "Strava token response did not include a refresh token.",
+          retryable: false,
+          httpStatus: 502,
+        })
+      );
+      let athlete = coerceRecord(tokenPayload.athlete);
+      let externalAccountId = normalizeIdentifier(athlete.id);
+
+      if (!externalAccountId) {
+        athlete = await fetchAthleteProfile(tokens.accessToken);
+        externalAccountId = normalizeIdentifier(athlete.id);
+      }
+
+      if (!externalAccountId) {
+        throw deviceSyncError({
+          code: "STRAVA_ATHLETE_INVALID",
+          message: "Strava token response did not include a stable athlete identifier.",
+          retryable: false,
+          httpStatus: 502,
+        });
+      }
+
+      const grantedScopes = resolveAccountScopes(context.grantedScopes, tokenPayload.scope);
+
+      return {
+        externalAccountId,
+        displayName: buildAthleteDisplayName(athlete),
+        scopes: grantedScopes,
+        metadata: buildAthleteMetadata(athlete),
+        tokens,
+        initialJobs: [
+          {
+            kind: "backfill",
+            priority: 100,
+            payload: buildWindowJobPayload({
+              now: context.now,
+              windowDays: backfillDays,
+              includeAthlete: true,
+              kind: "backfill",
+            }),
+          },
+        ],
+        nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+      };
+    },
+    async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+      return refreshOAuthTokens({
+        postTokenRequest,
+        account,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        tokenResponseToAuthTokens,
+        buildMissingRefreshTokenError: () =>
+          deviceSyncError({
+            code: "STRAVA_REFRESH_TOKEN_MISSING",
+            message: "Strava account does not have a refresh token and must be reconnected.",
+            retryable: false,
+            accountStatus: "reauthorization_required",
+          }),
+        resolveRefreshToken: ({ responseRefreshToken }) =>
+          requireRefreshToken(responseRefreshToken, () =>
+            deviceSyncError({
+              code: "STRAVA_REFRESH_TOKEN_MISSING",
+              message: "Strava refresh response did not include a refresh token.",
+              retryable: false,
+              accountStatus: "reauthorization_required",
+            }),
+          ),
+      });
+    },
+    async revokeAccess(account: DeviceSyncAccount): Promise<void> {
+      await deauthorize(account.accessToken);
+    },
+    createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
+      return buildScheduledReconcileJobs({
+        accountId: account.id,
+        nextReconcileAt: account.nextReconcileAt,
+        now,
+        reconcileDays,
+        reconcileIntervalMs,
+        payload: {
+          windowKind: "reconcile",
+        },
+      });
+    },
+    async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
+      let payload: unknown;
+
+      try {
+        payload = JSON.parse(context.rawBody.toString("utf8"));
+      } catch (error) {
+        throw deviceSyncError({
+          code: "STRAVA_WEBHOOK_JSON_INVALID",
+          message: "Strava webhook payload must be valid JSON.",
+          retryable: false,
+          httpStatus: 400,
+          details: {
+            cause: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+
+      const record = coerceRecord(payload) as StravaWebhookEventPayload & Record<string, unknown>;
+      const objectType = normalizeWebhookObjectType(record.object_type);
+      const aspectType = normalizeWebhookAspectType(record.aspect_type);
+      const ownerId = normalizeIdentifier(record.owner_id);
+      const objectId = normalizeIdentifier(record.object_id);
+      const occurredAt = epochSecondsToIso(record.event_time) ?? context.now;
+
+      if (!objectType || !aspectType || !ownerId || !objectId) {
+        throw deviceSyncError({
+          code: "STRAVA_WEBHOOK_PAYLOAD_INVALID",
+          message: "Strava webhook payload was missing object_type, aspect_type, owner_id, or object_id.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const updates = coerceRecord(record.updates);
+      const deauthorization = isAthleteDeauthorizationEvent({
+        objectType,
+        aspectType,
+        updates,
+      });
+      const eventType = deauthorization ? "athlete.deauthorized" : `${objectType}.${aspectType}`;
+      const traceId = buildWebhookTraceId({
+        aspect_type: aspectType,
+        event_time: record.event_time ?? null,
+        object_id: objectId,
+        object_type: objectType,
+        owner_id: ownerId,
+        subscription_id: normalizeIdentifier(record.subscription_id) ?? null,
+        updates,
+      });
+      const jobs: DeviceSyncJobInput[] = [];
+
+      if (deauthorization) {
+        jobs.push({
+          kind: "deauthorize",
+          priority: STRAVA_DEAUTHORIZE_WEBHOOK_PRIORITY,
+          dedupeKey: `deauthorize:${ownerId}`,
+          payload: {
+            eventType,
+            occurredAt,
+            resourceId: objectId,
+            resourceType: objectType,
+          } satisfies StravaWebhookJobPayload,
+        });
+      } else if (objectType === "activity") {
+        const jobKind = aspectType === "delete" ? "delete" : "resource";
+
+        jobs.push({
+          kind: jobKind,
+          priority: jobKind === "delete" ? STRAVA_DELETE_WEBHOOK_PRIORITY : STRAVA_ACTIVITY_WEBHOOK_PRIORITY,
+          dedupeKey: buildWebhookDedupeKey({
+            externalAccountId: ownerId,
+            resourceType: objectType,
+            resourceId: objectId,
+            eventType,
+            occurredAt,
+          }),
+          payload: {
+            eventType,
+            occurredAt,
+            resourceId: objectId,
+            resourceType: objectType,
+          } satisfies StravaWebhookJobPayload,
+        });
+      }
+
+      return {
+        externalAccountId: ownerId,
+        eventType,
+        traceId,
+        occurredAt,
+        resourceCategory: objectType,
+        jobs,
+      };
+    },
+    async executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {
+      switch (job.kind) {
+        case "backfill":
+          return executeWindowImport(context, job.payload, backfillDays);
+        case "reconcile":
+          return executeWindowImport(context, job.payload, reconcileDays);
+        case "resource":
+          return executeResourceImport(context, job.payload);
+        case "delete":
+          return executeDeleteImport(context, job.payload);
+        case "deauthorize":
+          await context.disconnectAccount?.();
+          return {};
+        default:
+          throw deviceSyncError({
+            code: "STRAVA_JOB_KIND_UNSUPPORTED",
+            message: `Strava job kind ${job.kind} is not supported.`,
+            retryable: false,
+          });
+      }
+    },
+  } satisfies DeviceSyncProvider;
+}

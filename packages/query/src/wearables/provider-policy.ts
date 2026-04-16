@@ -16,13 +16,6 @@ import {
 } from "./types.ts";
 import { normalizeLowercaseString } from "./shared.ts";
 
-const PROVIDER_DISPLAY_NAMES = {
-  garmin: "Garmin",
-  unknown: "Unknown provider",
-  oura: "Oura",
-  whoop: "WHOOP",
-} as const;
-
 const DEFAULT_PROVIDER_PRIORITY_ORDER: readonly string[] = defaultDeviceProviderDescriptors.map(
   (descriptor) => descriptor.provider,
 );
@@ -114,8 +107,13 @@ export function inferDefaultMetricFamily(metric: WearableMetricKey): DeviceProvi
 }
 
 export function formatProviderName(provider: string): string {
-  const normalized = provider.trim().toLowerCase();
-  return PROVIDER_DISPLAY_NAMES[normalized as keyof typeof PROVIDER_DISPLAY_NAMES] ?? provider;
+  const descriptor = resolveDeviceProviderDescriptor(provider);
+
+  if (descriptor?.displayName) {
+    return descriptor.displayName;
+  }
+
+  return normalizeLowercaseString(provider) === "unknown" ? "Unknown provider" : provider;
 }
 
 export function formatMetricLabel(metric: string): string {

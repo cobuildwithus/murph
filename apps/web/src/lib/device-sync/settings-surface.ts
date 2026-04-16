@@ -2,6 +2,10 @@ import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingr
 
 import type { HostedBrowserDeviceSyncConnection } from "./public-connection";
 
+import { formatHostedDeviceSyncProviderLabel } from "./provider-label";
+
+export { formatHostedDeviceSyncProviderLabel };
+
 export interface HostedDeviceSyncSettingsAction {
   kind: "connect" | "reconnect" | "disconnect";
   label: string;
@@ -104,24 +108,6 @@ export function buildHostedDeviceSyncSettingsSources(input: {
   return sources;
 }
 
-export function formatHostedDeviceSyncProviderLabel(provider: string): string {
-  const normalized = provider.trim().toLowerCase();
-
-  switch (normalized) {
-    case "oura":
-      return "Oura";
-    case "garmin":
-      return "Garmin";
-    case "whoop":
-      return "WHOOP";
-    default:
-      return normalized
-        .split(/[-_\s]+/u)
-        .filter(Boolean)
-        .map((part) => part[0]?.toUpperCase() + part.slice(1))
-        .join(" ") || provider;
-  }
-}
 
 function buildAvailableSource(provider: PublicProviderDescriptor): HostedDeviceSyncSettingsSource {
   return {

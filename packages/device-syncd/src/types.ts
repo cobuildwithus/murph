@@ -269,6 +269,7 @@ export interface ProviderJobContext {
   now: string;
   importSnapshot(snapshot: unknown): Promise<unknown>;
   refreshAccountTokens(): Promise<DeviceSyncAccount>;
+  disconnectAccount?(): Promise<void>;
   logger: DeviceSyncLogger;
 }
 

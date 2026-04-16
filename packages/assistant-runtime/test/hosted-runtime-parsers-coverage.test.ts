@@ -279,6 +279,6 @@ describe("hosted runtime parser coverage", () => {
           secret: "secret_123",
         },
       },
-    })).toThrow(/webhookVerificationToken is not supported in serialized runtime config/u);
+    })).toThrow(/webhookVerificationToken is a provider-owned admin secret/u);
   });
 });
