@@ -6,7 +6,6 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import { requireJsonObject } from "../json.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import {
   createHostedUserKeyStore,
@@ -78,16 +77,4 @@ export async function readCachedRequestText(
 ): Promise<string> {
   context.requestText ??= context.request.text();
   return context.requestText;
-}
-
-export async function readCachedOptionalJsonObject(
-  context: Pick<WorkerRouteContext, "request" | "requestText">,
-): Promise<Record<string, unknown>> {
-  const payload = await readCachedRequestText(context);
-
-  if (!payload.trim()) {
-    return {};
-  }
-
-  return requireJsonObject(JSON.parse(payload) as unknown);
 }

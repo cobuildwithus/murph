@@ -46,11 +46,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
       }),
-    ).rejects.toMatchObject({
-      message: "Hosted side-effect delete effect_123 failed with HTTP 503.",
-      status: 503,
-      statusCode: 503,
-    });
+    ).rejects.toThrow(
+      "Hosted side-effect delete effect_123 request failed.",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

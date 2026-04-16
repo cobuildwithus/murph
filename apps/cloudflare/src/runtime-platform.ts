@@ -224,9 +224,9 @@ function createCloudflareHostedRuntimeFetch(
     }
 
     if (!internalWorkerProxyToken) {
-      return new Response("Hosted runner outbound proxy token is not configured.", {
-        status: 503,
-      });
+      throw new Error(
+        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing the per-run proxy token.`,
+      );
     }
 
     const headers = new Headers(request.headers);

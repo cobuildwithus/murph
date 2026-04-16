@@ -19,7 +19,6 @@ import { formatHostedExecutionSafeLogError } from "./logging";
 import {
   areHostedExecutionOutboxPayloadsEquivalent,
   buildHostedExecutionDispatchRef,
-  hasHostedExecutionReferenceOutboxPayloadStorage,
   type HostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
@@ -203,22 +202,11 @@ function buildPrunableOutboxWhere(
   cutoff: Date,
 ): Prisma.ExecutionOutboxWhereInput {
   return {
+    claimToken: null,
+    nextAttemptAt: null,
     updatedAt: {
       lt: cutoff,
     },
-    OR: [
-      {
-        dispatchState: {
-          in: ["completed", "poisoned"],
-        },
-      },
-      {
-        nextAttemptAt: null,
-        lastError: {
-          not: null,
-        },
-      },
-    ],
   };
 }
 
@@ -272,10 +260,6 @@ async function processHostedExecutionOutboxRecord(
   let persistedPayloadJson = record.payloadJson as Prisma.InputJsonValue;
 
   try {
-    if (hasHostedExecutionReferenceOutboxPayloadStorage(record.payloadJson)) {
-      throw createHostedExecutionReferencePayloadUnsupportedError(record.eventId);
-    }
-
     if (!payload) {
       throw createHostedExecutionOutboxPayloadError(record.eventId);
     }
@@ -447,7 +431,7 @@ function shouldPruneHostedExecutionOutboxPayload(input: {
   state: HostedExecutionDispatchLifecycleState;
 }): boolean {
   return isExecutionLifecycleTerminal(input.state)
-    || (input.nextAttemptAt === null && input.lastError !== null);
+    || input.nextAttemptAt === null;
 }
 
 function assertHostedExecutionOutboxRecordMatches(
@@ -546,24 +530,6 @@ function createHostedExecutionOutboxPayloadError(eventId: string): Error & {
     retryable: false;
   };
   error.code = "HOSTED_EXECUTION_OUTBOX_PAYLOAD_MISSING";
-  error.permanent = true;
-  error.retryable = false;
-  return error;
-}
-
-function createHostedExecutionReferencePayloadUnsupportedError(eventId: string): Error & {
-  code: string;
-  permanent: true;
-  retryable: false;
-} {
-  const error = new Error(
-    `Hosted execution outbox record ${eventId} uses unsupported reference storage.`,
-  ) as Error & {
-    code: string;
-    permanent: true;
-    retryable: false;
-  };
-  error.code = "HOSTED_EXECUTION_OUTBOX_REFERENCE_PAYLOAD_UNSUPPORTED";
   error.permanent = true;
   error.retryable = false;
   return error;

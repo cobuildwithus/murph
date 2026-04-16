@@ -11,9 +11,6 @@ CREATE TYPE "HostedStripeEventStatus" AS ENUM ('pending', 'processing', 'complet
 CREATE TYPE "HostedRevnetIssuanceStatus" AS ENUM ('pending', 'submitting', 'submitted', 'confirmed', 'failed');
 
 -- CreateEnum
-CREATE TYPE "ExecutionOutboxStatus" AS ENUM ('queued', 'dispatching', 'dispatched', 'delivery_failed');
-
--- CreateEnum
 CREATE TYPE "HostedWebhookReceiptStatus" AS ENUM ('processing', 'completed', 'failed');
 
 -- CreateEnum
@@ -348,7 +345,6 @@ CREATE TABLE "execution_outbox" (
     "event_kind" TEXT NOT NULL,
     "payload_json" JSONB NOT NULL,
     "dispatch_state" TEXT NOT NULL DEFAULT 'queued',
-    "status" "ExecutionOutboxStatus" NOT NULL DEFAULT 'queued',
     "attempt_count" INTEGER NOT NULL DEFAULT 0,
     "last_attempt_at" TIMESTAMP(3),
     "next_attempt_at" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP,
@@ -612,7 +608,7 @@ CREATE INDEX "hosted_webhook_receipt_side_effect_source_event_id_status_idx" ON 
 CREATE UNIQUE INDEX "execution_outbox_event_id_key" ON "execution_outbox"("event_id");
 
 -- CreateIndex
-CREATE INDEX "execution_outbox_status_next_attempt_at_created_at_idx" ON "execution_outbox"("status", "next_attempt_at", "created_at");
+CREATE INDEX "execution_outbox_next_attempt_at_created_at_idx" ON "execution_outbox"("next_attempt_at", "created_at");
 
 -- CreateIndex
 CREATE INDEX "execution_outbox_user_id_created_at_idx" ON "execution_outbox"("user_id", "created_at");

@@ -36,7 +36,7 @@ The checked-in lifecycle file only backstops execution-transient blobs:
 - `transient/side-effects/` expires after 6 hours
 - `transient/hosted-email/messages/` expires after 1 hour
 
-Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-env blobs, and execution-time device-sync runtime mirrors.
+Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-secret blobs, and queue-local execution sidecars.
 
 ## Required GitHub Environment Vars
 
