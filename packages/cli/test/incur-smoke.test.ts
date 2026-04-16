@@ -54,6 +54,21 @@ async function runBuiltCliFromCwd(
   return stdout.trim()
 }
 
+async function runSourceCliRaw(args: string[]): Promise<string> {
+  const cli = createVaultCli()
+  const output: string[] = []
+
+  await cli.serve(args, {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return output.join('').trim()
+}
+
 async function runJsonCli<TData>(
   cli: Cli.Cli,
   args: string[],
@@ -1170,7 +1185,7 @@ test('automation help points operators at canonical automations', async () => {
 
 test('food schedule schema exposes the recurring food options', async () => {
   const schema = JSON.parse(
-    await runRawCli(['food', 'schedule', '--schema', '--format', 'json']),
+    await runSourceCliRaw(['food', 'schedule', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -1190,11 +1205,34 @@ test('food schedule schema exposes the recurring food options', async () => {
   assert.deepEqual(schema.options.required, ['vault', 'time'])
 })
 
+test('food unschedule schema exposes the recurring food lookup', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['food', 'unschedule', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('id' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['id'])
+  assert.deepEqual(schema.options.required, ['vault'])
+  assert.equal('input' in schema.options.properties, false)
+  assert.equal('set' in schema.options.properties, false)
+  assert.equal('clear' in schema.options.properties, false)
+})
+
 test('food help exposes schedule and no longer exposes add-daily', async () => {
-  const help = await runRawCli(['food', '--help'])
+  const help = await runSourceCliRaw(['food', '--help'])
 
   assert.match(help, /rename\s+Rename one remembered food while preserving its canonical id\./u)
   assert.match(help, /schedule\s+Schedule one remembered food for daily auto-log meal creation\./u)
+  assert.match(help, /unschedule\s+Unschedule one remembered food from daily auto-log meal creation\./u)
   assert.doesNotMatch(help, /add-daily/u)
 })
 

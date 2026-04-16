@@ -789,6 +789,80 @@ test.sequential(
 )
 
 test.sequential(
+  'food unschedule clears a remembered food daily auto-log job',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-unschedule-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const foodSchedule = await runSliceCli<{
+        foodId: string
+        path: string
+      }>([
+        'food',
+        'schedule',
+        'Morning Smoothie',
+        '--time',
+        '08:00',
+        '--note',
+        'Bone broth protein, inulin, prebiotic GOS, creatine, and coconut water.',
+        '--vault',
+        vaultRoot,
+      ])
+      const foodUnschedule = await runSliceCli<{
+        entity: {
+          id: string
+          data: {
+            autoLogDaily?: unknown
+          }
+        }
+      }>([
+        'food',
+        'unschedule',
+        requireData(foodSchedule).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const foodShow = await runSliceCli<{
+        entity: {
+          id: string
+          data: {
+            autoLogDaily?: unknown
+          }
+        }
+      }>([
+        'food',
+        'show',
+        requireData(foodSchedule).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const jobs = await listAssistantCronJobs(vaultRoot)
+
+      assert.equal(foodUnschedule.ok, true, JSON.stringify(foodUnschedule))
+      assert.equal(foodUnschedule.meta?.command, 'food unschedule')
+      assert.equal(requireData(foodUnschedule).entity.id, requireData(foodSchedule).foodId)
+      assert.equal(requireData(foodUnschedule).entity.data.autoLogDaily, undefined)
+
+      assert.equal(foodShow.ok, true)
+      assert.equal(requireData(foodShow).entity.id, requireData(foodSchedule).foodId)
+      assert.equal(requireData(foodShow).entity.data.autoLogDaily, undefined)
+
+      assert.equal(jobs.length, 0)
+
+      const foodMarkdown = await readFile(
+        path.join(vaultRoot, requireData(foodSchedule).path),
+        'utf8',
+      )
+      assert.doesNotMatch(foodMarkdown, /autoLogDaily:/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'food rename moves the record to the new slug while preserving the id and prior title alias',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-rename-'))
