@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 
-export function StickyNav() {
+import { LandingAuthActions } from "./auth-controls";
+
+export function StickyNav({ authenticated }: { authenticated: boolean }) {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -26,7 +28,7 @@ export function StickyNav() {
         alt="Murph"
         className="h-6"
       />
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-4 sm:gap-6">
         {[
           { href: "#how", label: "How it works" },
           { href: "#pricing", label: "Pricing" },
@@ -40,12 +42,11 @@ export function StickyNav() {
             {label}
           </a>
         ))}
-        <a
-          href="/sign-in"
-          className="rounded-lg border border-white/25 px-4 py-1.5 text-sm font-medium text-white/85 transition-colors hover:border-white/40 hover:bg-white/5"
-        >
-          Sign in
-        </a>
+        <LandingAuthActions
+          authenticated={authenticated}
+          context="nav"
+          signupLabel="Sign up"
+        />
       </div>
     </nav>
   );

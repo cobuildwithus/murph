@@ -1,4 +1,8 @@
 import type { Metadata } from "next";
+
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+
+import { LandingAuthActions } from "./auth-controls";
 import { StickyNav } from "./sticky-nav";
 
 export const metadata: Metadata = {
@@ -20,10 +24,12 @@ export const metadata: Metadata = {
   },
 };
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const { authenticated } = await getHostedPageAuthSnapshot();
+
   return (
     <main className="min-h-screen bg-[#f5f0e8] antialiased">
-      <StickyNav />
+      <StickyNav authenticated={authenticated} />
 
       {/* ━━━ HERO ━━━ */}
       <section className="relative min-h-[85svh] overflow-hidden bg-[#3a3028] sm:min-h-svh">
@@ -50,14 +56,12 @@ export default function LandingPage() {
               try, measures what changed, and gives you a clear answer.
             </p>
 
-            <div className="mt-8 flex flex-wrap items-center gap-4">
-              <a
-                href="/sign-up"
-                className="group inline-flex items-center gap-2 rounded-xl bg-[#5a6e32] px-5 py-3.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]"
-              >
-                See what works for your body
-                <span className="inline-block transition-transform group-hover:translate-x-0.5">&rarr;</span>
-              </a>
+            <div className="mt-8">
+              <LandingAuthActions
+                authenticated={authenticated}
+                context="hero"
+                signupLabel="See what works for your body"
+              />
             </div>
 
             <div className="mt-8 flex items-center gap-2 text-[0.8125rem] text-white/60">
@@ -375,13 +379,11 @@ export default function LandingPage() {
               <span className="font-semibold text-[#f5f0e8]">$5/month.</span>{" "}
               Full library, before/after analysis, cancel anytime.
             </p>
-            <a
-              href="/sign-up"
-              className="group inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#5a6e32] px-5 py-3 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]"
-            >
-              Start your first experiment
-              <span className="inline-block transition-transform group-hover:translate-x-0.5">&rarr;</span>
-            </a>
+            <LandingAuthActions
+              authenticated={authenticated}
+              context="footer"
+              signupLabel="Start your first experiment"
+            />
           </div>
           <div className="flex items-center justify-between border-t border-[#f5f0e8]/8 py-4 text-[0.8125rem] text-[#f5f0e8]/50">
             <p>Early product, improving fast &middot; Open source &middot; Apache 2.0</p>
