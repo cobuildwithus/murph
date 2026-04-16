@@ -1,17 +1,49 @@
+import { constants as fsConstants } from "node:fs";
+import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
+import { runnerBundleDirectoryName } from "./runner-bundle-contract.js";
+
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const preparedRunnerBundleDir = path.join(
+  resolveCloudflareDeployPaths(appDir).deployDir,
+  runnerBundleDirectoryName,
+);
 
 export function normalizePnpmScriptArgs(argv: readonly string[]): string[] {
   return argv[0] === "--" ? [...argv.slice(1)] : [...argv];
 }
 
+export function shouldSkipRunnerBundle(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.MURPH_DEV_SKIP_RUNNER_BUNDLE === "1";
+}
+
+export function resolveWorkerDevPnpmCommands(
+  argv: readonly string[] = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+): string[][] {
+  const commands: string[][] = [];
+
+  if (!shouldSkipRunnerBundle(env)) {
+    commands.push(["runner:bundle"]);
+  }
+
+  commands.push(["exec", "wrangler", "dev", ...normalizePnpmScriptArgs(argv)]);
+  return commands;
+}
+
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
-  await runPnpm(["runner:bundle"]);
-  await runPnpm(["exec", "wrangler", "dev", ...normalizePnpmScriptArgs(argv)]);
+  if (shouldSkipRunnerBundle(process.env)) {
+    await assertPreparedRunnerBundleAvailable();
+  }
+
+  for (const commandArgs of resolveWorkerDevPnpmCommands(argv, process.env)) {
+    await runPnpm(commandArgs);
+  }
 }
 
 async function runPnpm(args: string[]): Promise<void> {
@@ -38,6 +70,20 @@ async function runPnpm(args: string[]): Promise<void> {
       );
     });
   });
+}
+
+async function assertPreparedRunnerBundleAvailable(): Promise<void> {
+  try {
+    await access(preparedRunnerBundleDir, fsConstants.R_OK);
+  } catch {
+    throw new Error(
+      [
+        "MURPH_DEV_SKIP_RUNNER_BUNDLE=1 requires a prepared Cloudflare runner bundle.",
+        `Missing bundle directory: ${path.relative(appDir, preparedRunnerBundleDir) || preparedRunnerBundleDir}`,
+        "Run `pnpm --dir apps/cloudflare runner:bundle` before starting the hosted local dev lane.",
+      ].join(" "),
+    );
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
