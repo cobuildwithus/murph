@@ -17,6 +17,7 @@ export interface HostedExecutionWorkerEnvironment {
   platformEnvelopeKeyringJson: string | null;
   maxEventAttempts: number;
   retryDelayMs: number;
+  runnerReadyTimeoutMs: number;
   runnerTimeoutMs: number;
 }
 
@@ -73,6 +74,11 @@ export function readHostedExecutionWorkerEnvironment(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RETRY_DELAY_MS),
       30_000,
       "HOSTED_EXECUTION_RETRY_DELAY_MS",
+    ),
+    runnerReadyTimeoutMs: parsePositiveInteger(
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS),
+      20_000,
+      "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
     ),
     runnerTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),

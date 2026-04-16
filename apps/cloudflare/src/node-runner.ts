@@ -27,6 +27,7 @@ let hostedExecutionIsolatedRunnerForTests:
   ) => Promise<HostedAssistantRuntimeJobResult>)
   | null = null;
 const hostedExecutionChildControlEnvKeys = new Set([
+  "HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL",
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
   "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
@@ -62,6 +63,7 @@ export function buildHostedExecutionJobRuntimeForTests(
 export async function runHostedExecutionJob(
   input: HostedAssistantRuntimeJobInput,
   options?: {
+    internalWorkerProxyBaseUrl?: string | null;
     internalWorkerProxyToken?: string | null;
     signal?: AbortSignal;
   },
@@ -72,6 +74,7 @@ export async function runHostedExecutionJob(
   const runtimePlatform = buildHostedExecutionRuntimePlatform({
     boundUserId: input.request.dispatch.event.userId,
     commitTimeoutMs: runtime.commitTimeoutMs,
+    internalWorkerProxyBaseUrl: options?.internalWorkerProxyBaseUrl ?? null,
     internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
     webCallbackSigning: environment.webCallbackSigning,
     webControlBaseUrl: process.env.HOSTED_WEB_BASE_URL ?? null,
@@ -91,6 +94,7 @@ export async function runHostedExecutionJob(
 
   return await runIsolated(
     {
+      internalWorkerProxyBaseUrl: options?.internalWorkerProxyBaseUrl ?? null,
       internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
       job: {
         request: input.request,

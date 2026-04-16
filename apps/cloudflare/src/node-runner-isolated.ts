@@ -18,7 +18,10 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 
+import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts";
+
 export interface HostedExecutionIsolatedRunnerInput {
+  internalWorkerProxyBaseUrl?: string | null;
   internalWorkerProxyToken?: string | null;
   job: HostedAssistantRuntimeJobInput;
 }
@@ -48,7 +51,13 @@ export async function runHostedExecutionJobIsolatedDetailed(
         cwd: launcherRoot,
         detached: process.platform !== "win32",
         env: createHostedRuntimeChildProcessEnv({
-          forwardedEnv: { ...(input.job.runtime?.forwardedEnv ?? {}) },
+          forwardedEnv: {
+            ...readHostedExecutionProcessEnv(process.env),
+            ...(input.job.runtime?.forwardedEnv ?? {}),
+            ...(input.internalWorkerProxyBaseUrl
+              ? { HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL: input.internalWorkerProxyBaseUrl }
+              : {}),
+          },
           isTypeScriptChild,
           launcherDirectories,
         }),
@@ -60,12 +69,8 @@ export async function runHostedExecutionJobIsolatedDetailed(
     child.stderr.setEncoding("utf8");
 
     const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
     child.stdout.on("data", (chunk: string) => {
       stdoutChunks.push(chunk);
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderrChunks.push(chunk);
     });
 
     const terminateChild = () => {

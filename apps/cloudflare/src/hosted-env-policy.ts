@@ -86,6 +86,7 @@ export const HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV =
 const RUNNER_ENV_PROFILE_KEYS = {
   assistant: [
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+    "HOSTED_EXECUTION_RUNNER_HOST_ALIAS",
     "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
     "NODE_ENV",
     ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
@@ -179,7 +180,7 @@ export function buildHostedRunnerContainerEnv(
       continue;
     }
 
-    values[key] = value;
+    values[key] = rewriteHostedRunnerLoopbackUrlForContainer(key, value, source);
   }
 
   if (!values.NODE_ENV) {
@@ -196,6 +197,40 @@ export function buildHostedRunnerContainerEnv(
   values.HOSTED_EMAIL_SEND_READY = emailCapabilities.sendReady ? "true" : "false";
 
   return values;
+}
+
+const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
+  "DEVICE_SYNC_PUBLIC_BASE_URL",
+  "HOSTED_WEB_BASE_URL",
+  "LINQ_API_BASE_URL",
+  "TELEGRAM_API_BASE_URL",
+]);
+
+function rewriteHostedRunnerLoopbackUrlForContainer(
+  key: string,
+  value: string,
+  source: UnknownEnvSource,
+): string {
+  if (!CONTAINER_REWRITABLE_RUNNER_URL_KEYS.has(key)) {
+    return value;
+  }
+
+  const hostAlias = normalizeStringEnvValue(source.HOSTED_EXECUTION_RUNNER_HOST_ALIAS);
+  if (!hostAlias) {
+    return value;
+  }
+
+  try {
+    const url = new URL(value);
+    if (!isLoopbackHostname(url.hostname)) {
+      return value;
+    }
+
+    url.hostname = hostAlias;
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 export function filterHostedRunnerUserEnv(
@@ -231,6 +266,19 @@ function resolveHostedRunnerEnvProfileNames(
   }
 
   return enabledProfiles;
+}
+
+function normalizeStringEnvValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
 function resolveHostedRunnerEnvKeys(

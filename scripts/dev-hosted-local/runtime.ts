@@ -27,6 +27,23 @@ interface SetupCommandInput {
   name: "setup";
 }
 
+interface BoundedCommandInput {
+  command: string;
+  args: readonly string[];
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}
+
+interface BoundedCommandResult {
+  exitCode: number | null;
+  stderr: string;
+  stdout: string;
+  timedOut: boolean;
+}
+
+const HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-RunnerContainer-";
+
 export async function assertHostedWebDevServerAvailable(env: NodeJS.ProcessEnv): Promise<void> {
   const lockPaths = resolveHostedWebDevLockPaths(env);
   const rawMetadata = await tryReadTextFile(lockPaths.metadataPath);
@@ -188,6 +205,104 @@ export async function captureCommandOutput(
   return stdout;
 }
 
+export async function collectDockerDevDiagnostics(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}): Promise<string> {
+  const timeoutMs = input.timeoutMs ?? 10_000;
+  const commands: ReadonlyArray<{
+    args: readonly string[];
+    label: string;
+  }> = [
+    {
+      args: ["version", "--format", "{{json .Server}}"],
+      label: "docker version",
+    },
+    {
+      args: ["ps", "-a", "--format", "{{.ID}} {{.Image}} {{.Status}} {{.Names}}"],
+      label: "docker ps -a",
+    },
+    {
+      args: ["buildx", "ls"],
+      label: "docker buildx ls",
+    },
+  ];
+
+  const sections = ["Docker diagnostics:"];
+
+  for (const command of commands) {
+    const result = await runBoundedCommand({
+      args: command.args,
+      command: "docker",
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs,
+    });
+    sections.push(formatBoundedCommandResult(command.label, result));
+  }
+
+  return sections.join("\n");
+}
+
+export async function cleanupHostedRunnerContainers(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  ignoreErrors?: boolean;
+  timeoutMs?: number;
+}): Promise<void> {
+  const timeoutMs = input.timeoutMs ?? 15_000;
+  const listed = await runBoundedCommand({
+    args: [
+      "ps",
+      "-aq",
+      "--filter",
+      `name=${HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX}`,
+    ],
+    command: "docker",
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs,
+  });
+
+  if (listed.timedOut || listed.exitCode !== 0) {
+    if (input.ignoreErrors) {
+      return;
+    }
+    throw new Error(
+      [
+        "Failed to inspect local Cloudflare runner containers before startup.",
+        formatBoundedCommandResult("docker ps -aq", listed),
+      ].join("\n"),
+    );
+  }
+
+  const containerIds = listed.stdout
+    .split(/\s+/)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (containerIds.length === 0) {
+    return;
+  }
+
+  const removed = await runBoundedCommand({
+    args: ["rm", "-f", ...containerIds],
+    command: "docker",
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs,
+  });
+
+  if ((removed.timedOut || removed.exitCode !== 0) && !input.ignoreErrors) {
+    throw new Error(
+      [
+        "Failed to remove stale local Cloudflare runner containers.",
+        formatBoundedCommandResult(`docker rm -f (${containerIds.length})`, removed),
+      ].join("\n"),
+    );
+  }
+}
+
 export async function waitForHealthyHttpEndpoint(input: {
   host: string;
   label: string;
@@ -238,10 +353,142 @@ export function terminateChildProcess(
   }
 }
 
+export async function terminateChildProcessAndWait(
+  child: HostedLocalChildProcess,
+  input: {
+    graceMs?: number;
+    signal?: NodeJS.Signals;
+  } = {},
+): Promise<void> {
+  const signal = input.signal ?? "SIGTERM";
+  const graceMs = input.graceMs ?? 15_000;
+
+  if (child.exitCode !== null || child.pid === undefined) {
+    return;
+  }
+
+  const exited = await waitForChildExit(child, graceMs, () => {
+    terminateChildProcess(child, signal);
+  });
+  if (exited) {
+    return;
+  }
+
+  await waitForChildExit(child, 5_000, () => {
+    terminateChildProcess(child, "SIGKILL");
+  });
+}
+
+async function waitForChildExit(
+  child: HostedLocalChildProcess,
+  timeoutMs: number,
+  terminate: () => void,
+): Promise<boolean> {
+  if (child.exitCode !== null) {
+    return true;
+  }
+
+  const exited = new Promise<boolean>((resolve) => {
+    child.once("exit", () => resolve(true));
+  });
+  const timedOut = new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    timer.unref?.();
+  });
+
+  terminate();
+  return await Promise.race([exited, timedOut]);
+}
+
 export function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
+}
+
+async function runBoundedCommand(input: BoundedCommandInput): Promise<BoundedCommandResult> {
+  const child = spawn(input.command, [...input.args], {
+    cwd: input.cwd,
+    env: input.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk: string | Buffer) => {
+    stdout += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk: string | Buffer) => {
+    stderr += chunk.toString();
+  });
+
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    try {
+      if (process.platform !== "win32" && child.pid !== undefined) {
+        process.kill(-child.pid, "SIGKILL");
+      }
+    } catch {
+      // Fall through to the direct child kill.
+    }
+
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Ignore already-dead children.
+    }
+  }, input.timeoutMs);
+  timeout.unref?.();
+
+  try {
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code));
+    });
+
+    return {
+      exitCode,
+      stderr,
+      stdout,
+      timedOut,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatBoundedCommandResult(label: string, result: BoundedCommandResult): string {
+  if (result.timedOut) {
+    return `- ${label}: timed out`;
+  }
+
+  const status = result.exitCode === 0
+    ? "ok"
+    : `exit ${result.exitCode ?? "unknown"}`;
+  const stdout = truncateCommandOutput(result.stdout);
+  const stderr = truncateCommandOutput(result.stderr);
+  const details = [stdout ? `stdout=${stdout}` : null, stderr ? `stderr=${stderr}` : null]
+    .filter((value): value is string => value !== null)
+    .join(" ");
+
+  return details.length > 0
+    ? `- ${label}: ${status} ${details}`
+    : `- ${label}: ${status}`;
+}
+
+function truncateCommandOutput(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.length > 240
+    ? `${normalized.slice(0, 237)}...`
+    : normalized;
 }
 
 function resolveHostedWebDevLockPaths(env: NodeJS.ProcessEnv): {

@@ -146,7 +146,7 @@ beforeEach(() => {
     messages: [],
     permissions: [],
   });
-  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue(undefined);
+  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([]);
   mocks.exportHostedPendingAssistantUsage.mockResolvedValue({
     exported: 0,
     failed: 0,
@@ -421,6 +421,7 @@ describe("completeHostedExecutionAfterCommit", () => {
       vaultRoot: "/tmp/vault-root",
     });
     assert.deepEqual(result, {
+      assistantDeliveryOutcomes: [],
       finalGatewayProjectionSnapshot: {
         schema: "murph.gateway-projection-snapshot.v1",
         generatedAt: "2026-04-08T00:10:00.000Z",

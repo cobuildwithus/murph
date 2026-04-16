@@ -20,6 +20,10 @@ async function main(): Promise<void> {
         platform: buildHostedExecutionRuntimePlatform({
           boundUserId: input.job.request.dispatch.event.userId,
           commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
+          internalWorkerProxyBaseUrl: readNullableString(
+            process.env.HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL,
+            "HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL",
+          ),
           internalWorkerProxyToken: input.internalWorkerProxyToken,
           webCallbackSigning: environment.webCallbackSigning,
           webControlBaseUrl: process.env.HOSTED_WEB_BASE_URL ?? null,

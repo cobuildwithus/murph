@@ -85,6 +85,32 @@ export interface HostedCommittedExecutionState {
   committedResult: HostedExecutionRunnerResult;
 }
 
+export type HostedAssistantDeliveryOutcomeStatus =
+  | "abandoned"
+  | "failed"
+  | "missing-result"
+  | "pending"
+  | "retryable"
+  | "sending"
+  | "sent"
+  | "threw";
+
+export interface HostedAssistantDeliveryOutcome {
+  deliveryChannel: string | null;
+  deliveryErrorCode: string | null;
+  deliveryErrorMessage: string | null;
+  deliveryStatus: HostedAssistantDeliveryOutcomeStatus;
+  effectFingerprint: string;
+  effectId: string;
+  journalMethod: "DELETE" | "GET" | "PUT" | null;
+  journalStatus: string | null;
+  providerMessageId: string | null;
+  providerThreadId: string | null;
+  retryable: boolean;
+  target: string | null;
+  targetKind: string | null;
+}
+
 export interface HostedAssistantRuntimeCommittedJobResult {
   committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
@@ -94,6 +120,7 @@ export interface HostedAssistantRuntimeCommittedJobResult {
 }
 
 export interface HostedAssistantRuntimeCompletedJobResult {
+  assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
   committedAssistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
   committedGatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;

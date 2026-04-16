@@ -45,6 +45,24 @@ describe("createCloudflareHostedControlClient", () => {
     );
   });
 
+  it("accepts a loopback HTTP base URL only when explicitly allowed", async () => {
+    expect(() =>
+      createCloudflareHostedControlClient({
+        baseUrl: "http://127.0.0.1:8787",
+        getBearerToken: async () => "token-123",
+      }),
+    ).toThrow(/HTTPS unless the host is explicitly allowlisted/u);
+
+    const client = createCloudflareHostedControlClient({
+      allowHttpLocalhost: true,
+      baseUrl: "http://127.0.0.1:8787",
+      fetchImpl: vi.fn(async () => createJsonResponse(createUserStatus())) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.getStatus("user_123")).resolves.toEqual(createUserStatus());
+  });
+
   it("does not echo HTTP response bodies in thrown errors", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",

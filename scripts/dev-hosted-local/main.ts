@@ -121,12 +121,6 @@ export async function main(): Promise<void> {
           HOSTED_EXECUTION_RUNNER_HOST_ALIAS: runnerHostAlias,
         }
         : {}),
-      ...(initialEnv.MURPH_HOSTED_EXECUTION_RELAY_CHILD_INFO_LOGS?.trim()
-        ? {
-          MURPH_HOSTED_EXECUTION_RELAY_CHILD_INFO_LOGS:
-            initialEnv.MURPH_HOSTED_EXECUTION_RELAY_CHILD_INFO_LOGS,
-        }
-        : {}),
     };
     const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
     await writeFile(workerEnvPath, workerEnvText, "utf8");

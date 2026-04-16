@@ -150,7 +150,6 @@ beforeEach(() => {
   });
   mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([
     {
-      debugTrace: [],
       deliveryChannel: "linq",
       deliveryErrorCode: null,
       deliveryStatus: "sent",
@@ -469,7 +468,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     assert.deepEqual(result, {
       assistantDeliveryOutcomes: [
         {
-          debugTrace: [],
           deliveryChannel: "linq",
           deliveryErrorCode: null,
           deliveryStatus: "sent",

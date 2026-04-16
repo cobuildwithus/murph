@@ -32,6 +32,36 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect((request as Request).method).toBe("DELETE");
   });
 
+  it("rewrites internal worker requests through the loopback proxy when configured", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyBaseUrl: "http://127.0.0.1:8080/__internal/worker-proxy/",
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await platform.effectsPort.deletePreparedAssistantDelivery({
+      effectId: "effect_123",
+      fingerprint: "fingerprint_123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the proxied effects port fetch to run.");
+    }
+    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    expect(request).toBeInstanceOf(Request);
+    expect((request as Request).url).toBe(
+      "http://127.0.0.1:8080/__internal/worker-proxy/results.worker/effects/effect_123?fingerprint=fingerprint_123",
+    );
+    expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect((request as Request).method).toBe("DELETE");
+  });
+
   it("binds device-sync requests to the hosted member id at the Cloudflare port seam", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -146,5 +176,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(String(deleteRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
     expect(String(readRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
     expect(String(writeRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+  });
+
+  it("preserves HTTP status on hosted assistant-delivery journal failures", async () => {
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: vi.fn(async () => new Response("unavailable", { status: 503 })) as typeof fetch,
+    });
+
+    await expect(
+      platform.effectsPort.readAssistantDeliveryRecord({
+        effectId: "intent_123",
+        fingerprint: "dedupe_123",
+      }),
+    ).rejects.toMatchObject({
+      message: "Hosted side-effect read intent_123 failed with HTTP 503. unavailable",
+      status: 503,
+      statusCode: 503,
+    });
   });
 });

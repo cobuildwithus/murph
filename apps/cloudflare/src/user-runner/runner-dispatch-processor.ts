@@ -9,6 +9,7 @@ import type {
 } from "@murphai/hosted-execution";
 import { parseHostedExecutionRunnerSharePack } from "@murphai/hosted-execution/parsers";
 import type {
+  HostedAssistantDeliveryOutcome,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -261,6 +262,23 @@ export class RunnerDispatchProcessor {
           })
           : await (await this.dependencies.ensureRunnerStores(record.userId))
             .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            assistantDeliveryEffectCount: runnerResult.phase === "committed"
+              ? runnerResult.committedAssistantDeliveryEffects.length
+              : durableCommit?.assistantDeliveryEffects.length ?? 0,
+            committedPhaseReturned: String(runnerResult.phase),
+            gatewayProjectionSnapshotPresent: runnerResult.phase === "committed"
+              ? String(runnerResult.committedGatewayProjectionSnapshot !== null)
+              : String(durableCommit?.gatewayProjectionSnapshot !== null),
+            runElapsedMs: computeHostedRunElapsedMs(run),
+          },
+          dispatch: nextPending.dispatch,
+          message: "Hosted runner returned a durable commit payload.",
+          phase: "commit.recorded",
+          run,
+        });
         if (!durableCommit) {
           throw new Error("Hosted runner returned before recording a durable commit.");
         }
@@ -289,6 +307,19 @@ export class RunnerDispatchProcessor {
         if (finalRunnerResult.phase !== "completed") {
           throw new Error("Hosted runner returned a duplicate committed result during finalize.");
         }
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            ...summarizeHostedAssistantDeliveryOutcomes(finalRunnerResult.assistantDeliveryOutcomes),
+            finalGatewayProjectionSnapshotPresent:
+              String(finalRunnerResult.finalGatewayProjectionSnapshot !== null),
+            runElapsedMs: computeHostedRunElapsedMs(run),
+          },
+          dispatch: nextPending.dispatch,
+          message: "Hosted runner returned a completed finalize payload.",
+          phase: "side-effects.draining",
+          run,
+        });
         await this.finalizeReturnedRunnerResult({
           eventId: nextPending.dispatch.eventId,
           finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
@@ -844,6 +875,34 @@ export class RunnerDispatchProcessor {
       // Best-effort cleanup only; lifecycle TTL still backstops raw message deletion.
     }
   }
+}
+
+function summarizeHostedAssistantDeliveryOutcomes(
+  outcomes: readonly HostedAssistantDeliveryOutcome[] | undefined,
+): Record<string, number | string> {
+  if (!Array.isArray(outcomes) || outcomes.length === 0) {
+    return {
+      assistantDeliveryOutcomeCount: 0,
+    };
+  }
+
+  const sentCount = outcomes.filter((outcome) => outcome.deliveryStatus === "sent").length;
+  const nonSent = outcomes.find((outcome) => outcome.deliveryStatus !== "sent") ?? null;
+
+  return {
+    assistantDeliveryOutcomeCount: outcomes.length,
+    assistantDeliverySentCount: sentCount,
+    assistantDeliveryNonSentCount: outcomes.length - sentCount,
+    ...(nonSent ? {
+      assistantDeliveryFirstNonSentChannel: nonSent.deliveryChannel ?? "unknown",
+      assistantDeliveryFirstNonSentCode: nonSent.deliveryErrorCode ?? "unknown",
+      assistantDeliveryFirstNonSentMessage: nonSent.deliveryErrorMessage ?? "unknown",
+      assistantDeliveryFirstNonSentJournalMethod: nonSent.journalMethod ?? "unknown",
+      assistantDeliveryFirstNonSentJournalStatus: nonSent.journalStatus ?? "unknown",
+      assistantDeliveryFirstNonSentStatus: nonSent.deliveryStatus,
+      assistantDeliveryFirstNonSentTarget: nonSent.target ?? "unknown",
+    } : {}),
+  };
 }
 
 function computeHostedRunElapsedMs(

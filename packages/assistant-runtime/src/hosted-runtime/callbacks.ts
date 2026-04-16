@@ -25,6 +25,7 @@ import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-c
 import type {
   HostedCommittedExecutionState,
   HostedAssistantRuntimeJobRequest,
+  HostedAssistantDeliveryOutcome,
 } from "./models.ts";
 import type {
   HostedRuntimeEffectsPort,
@@ -34,6 +35,10 @@ const HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS = 20;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_finalize";
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
+type HostedAssistantDeliveryJournalTrace = {
+  lastMethod: "DELETE" | "GET" | "PUT" | null;
+  lastStatus: number | null;
+};
 
 export function resumeHostedCommittedExecution(
   request: HostedAssistantRuntimeJobRequest,
@@ -82,16 +87,19 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<HostedAssistantDeliveryOutcome[]> {
+  const outcomes: HostedAssistantDeliveryOutcome[] = [];
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
-    await dispatchHostedCommittedAssistantDelivery({
+    outcomes.push(await dispatchHostedCommittedAssistantDelivery({
       dispatch: input.dispatch,
       effectsPort: input.effectsPort,
       assistantDeliveryEffect,
       userId: input.dispatch.event.userId,
       vaultRoot: input.vaultRoot,
-    });
+    }));
   }
+
+  return outcomes;
 }
 
 async function dispatchHostedCommittedAssistantDelivery(input: {
@@ -100,7 +108,11 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   userId: string;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<HostedAssistantDeliveryOutcome> {
+  const journalTrace: HostedAssistantDeliveryJournalTrace = {
+    lastMethod: null,
+    lastStatus: null,
+  };
   try {
     const dispatched = await dispatchAssistantOutboxIntent({
       dependencies: {
@@ -109,6 +121,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       },
       dispatchHooks: createHostedAssistantDeliveryDispatchHooks({
         effectsPort: input.effectsPort,
+        journalTrace,
         userId: input.userId,
       }),
       intentId: input.assistantDeliveryEffect.effectId,
@@ -116,7 +129,67 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
     });
 
     if (!dispatched || typeof dispatched !== "object" || !("intent" in dispatched)) {
-      return;
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectFingerprint: input.assistantDeliveryEffect.fingerprint,
+          effectId: input.assistantDeliveryEffect.effectId,
+          extra: {
+            deliveryStatus: "missing-result",
+            failureDomain: "dispatch",
+            retryable: true,
+          },
+          userId: input.userId,
+        }),
+        dispatch: input.dispatch,
+        level: "warn",
+        message: "Hosted assistant delivery dispatch returned no result.",
+        phase: "side-effects.draining",
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryStatus: "missing-result",
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable: true,
+      });
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: buildHostedAssistantDeliveryDetails({
+        effectFingerprint: input.assistantDeliveryEffect.fingerprint,
+        effectId: input.assistantDeliveryEffect.effectId,
+        extra: {
+          dispatchedIntentStatus: dispatched.intent.status,
+          deliveryErrorCode: dispatched.deliveryError?.code ?? null,
+          retryable: dispatched.intent.status === "pending"
+            || dispatched.intent.status === "retryable"
+            || dispatched.intent.status === "sending",
+        },
+        userId: input.userId,
+      }),
+      dispatch: input.dispatch,
+      level: dispatched.intent.status === "sent" ? "info" : "warn",
+      message: "Hosted assistant delivery dispatch finished.",
+      phase: "side-effects.draining",
+      userId: input.userId,
+    });
+
+    if (dispatched.intent.status === "sent" && dispatched.intent.delivery) {
+      emitHostedAssistantDeliveryDispatchSuccess({
+        delivery: dispatched.intent.delivery,
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        delivery: dispatched.intent.delivery,
+        deliveryStatus: "sent",
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable: false,
+      });
     }
 
     if (dispatched.intent.status !== "sent") {
@@ -127,7 +200,24 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
         intentStatus: dispatched.intent.status,
         userId: input.userId,
       });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: dispatched.deliveryError?.code ?? null,
+        deliveryErrorMessage: dispatched.deliveryError?.message ?? null,
+        deliveryStatus: dispatched.intent.status,
+        effect: input.assistantDeliveryEffect,
+        journalTrace,
+        retryable: dispatched.intent.status === "pending"
+          || dispatched.intent.status === "retryable"
+          || dispatched.intent.status === "sending",
+      });
     }
+
+    return buildHostedAssistantDeliveryOutcome({
+      deliveryStatus: "missing-result",
+      effect: input.assistantDeliveryEffect,
+      journalTrace,
+      retryable: true,
+    });
   } catch (error) {
     const enrichedError = attachHostedAssistantDeliveryDispatchDetails(error, {
       effectId: input.assistantDeliveryEffect.effectId,
@@ -153,6 +243,36 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
     });
     throw enrichedError;
   }
+}
+
+function emitHostedAssistantDeliveryDispatchSuccess(input: {
+  delivery: AssistantChannelDelivery;
+  dispatch: HostedExecutionDispatchRequest;
+  effect: HostedAssistantDeliveryEffect;
+  userId: string;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details: buildHostedAssistantDeliveryDetails({
+      effectFingerprint: input.effect.fingerprint,
+      effectId: input.effect.effectId,
+      extra: {
+        deliveryChannel: input.delivery.channel,
+        deliveryStatus: "sent",
+        failureDomain: "dispatch",
+        providerMessageId: input.delivery.providerMessageId ?? null,
+        providerThreadId: input.delivery.providerThreadId ?? null,
+        retryable: false,
+        target: input.delivery.target,
+        targetKind: input.delivery.targetKind,
+      },
+      userId: input.userId,
+    }),
+    dispatch: input.dispatch,
+    message: "Hosted assistant delivery sent successfully during post-commit dispatch.",
+    phase: "side-effects.draining",
+    userId: input.userId,
+  });
 }
 
 function emitHostedAssistantDeliveryDispatchOutcome(input: {
@@ -189,6 +309,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
 
 function createHostedAssistantDeliveryDispatchHooks(input: {
   effectsPort: HostedRuntimeEffectsPort;
+  journalTrace: HostedAssistantDeliveryJournalTrace;
   userId: string;
 }): AssistantOutboxDispatchHooks {
   return {
@@ -198,6 +319,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
     }) => {
       await callHostedAssistantDeliveryJournal({
         effectsPort: input.effectsPort,
+        journalTrace: input.journalTrace,
         method: "DELETE",
         sideEffect: buildHostedAssistantDeliveryEffect({
           dedupeKey: intent.dedupeKey,
@@ -224,6 +346,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
     }) => {
       await callHostedAssistantDeliveryJournal({
         effectsPort: input.effectsPort,
+        journalTrace: input.journalTrace,
         method: "PUT",
         record: buildHostedAssistantDeliveryPreparedRecord({
           dedupeKey: intent.dedupeKey,
@@ -243,6 +366,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       });
       const record = await callHostedAssistantDeliveryJournal({
         effectsPort: input.effectsPort,
+        journalTrace: input.journalTrace,
         method: "GET",
         sideEffect,
         userId: input.userId,
@@ -267,6 +391,22 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
 
       const localDelivery = readLocallyRecordedAssistantDelivery(intent);
       if (!localDelivery) {
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: buildHostedAssistantDeliveryDetails({
+            effectId: intent.intentId,
+            extra: {
+              journalRecordState: record.state,
+              localDeliveryPresent: "false",
+              retryable: true,
+            },
+            userId: input.userId,
+          }),
+          level: "warn",
+          message: "Hosted assistant delivery reconciliation found a prepared journal record but no local delivery.",
+          phase: "side-effects.draining",
+          userId: input.userId,
+        });
         throw createHostedAssistantDeliveryConfirmationPendingError({
           effectId: intent.intentId,
           userId: input.userId,
@@ -281,6 +421,23 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
           userId: input.userId,
         });
       } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: buildHostedAssistantDeliveryDetails({
+            effectId: intent.intentId,
+            extra: {
+              journalRecordState: record.state,
+              localDeliveryPresent: "true",
+              retryable: true,
+            },
+            userId: input.userId,
+          }),
+          error,
+          level: "warn",
+          message: "Hosted assistant delivery reconciliation could not persist the local send.",
+          phase: "side-effects.draining",
+          userId: input.userId,
+        });
         throw createHostedAssistantDeliveryConfirmationPendingError({
           cause: error,
           effectId: intent.intentId,
@@ -307,6 +464,10 @@ async function persistHostedAssistantDeliveryRecord(input: {
 
   await callHostedAssistantDeliveryJournal({
     effectsPort: input.effectsPort,
+    journalTrace: {
+      lastMethod: null,
+      lastStatus: null,
+    },
     method: "PUT",
     record: buildHostedAssistantDeliverySentRecord({
       dedupeKey: input.intent.dedupeKey,
@@ -341,12 +502,14 @@ function readLocallyRecordedAssistantDelivery(
 async function callHostedAssistantDeliveryJournal(input:
   | {
       effectsPort: HostedRuntimeEffectsPort;
+      journalTrace: HostedAssistantDeliveryJournalTrace;
       method: "DELETE" | "GET";
       sideEffect: HostedAssistantDeliveryEffect;
       userId: string;
     }
   | {
       effectsPort: HostedRuntimeEffectsPort;
+      journalTrace: HostedAssistantDeliveryJournalTrace;
       method: "PUT";
       record: HostedAssistantDeliveryRecord;
       userId: string;
@@ -358,23 +521,56 @@ async function callHostedAssistantDeliveryJournal(input:
       })
     : input.sideEffect;
   try {
+    input.journalTrace.lastMethod = input.method;
+    input.journalTrace.lastStatus = null;
+
+    let result: HostedAssistantDeliveryRecord | null;
     switch (input.method) {
       case "DELETE":
         await deletePreparedAssistantDelivery(input.effectsPort, {
           effectId: sideEffect.effectId,
           fingerprint: sideEffect.fingerprint,
         });
-        return null;
+        result = null;
+        break;
       case "GET":
-        return await readAssistantDeliveryRecord(input.effectsPort, {
+        result = await readAssistantDeliveryRecord(input.effectsPort, {
           effectId: sideEffect.effectId,
           fingerprint: sideEffect.fingerprint,
         });
+        break;
       case "PUT":
-        return await writeAssistantDeliveryRecord(input.effectsPort, input.record);
+        result = await writeAssistantDeliveryRecord(input.effectsPort, input.record);
+        break;
     }
+
+    return result;
   } catch (error) {
-    throw createHostedAssistantDeliveryJournalError(input, null, error);
+    input.journalTrace.lastMethod = input.method;
+    input.journalTrace.lastStatus = readHostedAssistantDeliveryJournalStatus(error);
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: buildHostedAssistantDeliveryDetails({
+        effectFingerprint: sideEffect.fingerprint,
+        effectId: sideEffect.effectId,
+        extra: {
+          failureDomain: "journal",
+          journalMethod: input.method,
+          retryable: true,
+        },
+        userId: input.userId,
+      }),
+      error,
+      level: "warn",
+      message: `Hosted assistant delivery journal ${input.method} failed.`,
+      phase: "side-effects.draining",
+      userId: input.userId,
+    });
+    throw createHostedAssistantDeliveryJournalError(
+      input,
+      readHostedAssistantDeliveryJournalStatus(error),
+      error,
+    );
   }
 }
 
@@ -476,10 +672,16 @@ function createHostedAssistantDeliveryJournalError(
   retryable: true;
 } {
   const effectId = input.method === "PUT" ? input.record.effectId : input.sideEffect.effectId;
+  const causeDetail = cause ? normalizeAssistantDeliveryError(cause).message : null;
   const error = new Error(
-    status === null
-      ? `Hosted runner side-effect journal ${input.method} failed for ${input.userId}/${effectId}.`
-      : `Hosted runner side-effect journal ${input.method} failed for ${input.userId}/${effectId} with HTTP ${status}.`,
+    [
+      status === null
+        ? `Hosted runner side-effect journal ${input.method} failed for ${input.userId}/${effectId}.`
+        : `Hosted runner side-effect journal ${input.method} failed for ${input.userId}/${effectId} with HTTP ${status}.`,
+      causeDetail && !causeDetail.startsWith("Hosted runner side-effect journal")
+        ? causeDetail
+        : null,
+    ].filter((part) => typeof part === "string" && part.length > 0).join(" "),
   ) as Error & {
     code: string;
     context: {
@@ -513,6 +715,26 @@ function createHostedAssistantDeliveryJournalError(
   return error;
 }
 
+function readHostedAssistantDeliveryJournalStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  if ("status" in error && typeof error.status === "number") {
+    return error.status;
+  }
+
+  if ("statusCode" in error && typeof error.statusCode === "number") {
+    return error.statusCode;
+  }
+
+  if ("cause" in error) {
+    return readHostedAssistantDeliveryJournalStatus(error.cause);
+  }
+
+  return null;
+}
+
 function attachHostedAssistantDeliveryDispatchDetails(
   error: unknown,
   input: {
@@ -539,6 +761,32 @@ function attachHostedAssistantDeliveryDispatchDetails(
     },
   });
   return error;
+}
+
+function buildHostedAssistantDeliveryOutcome(input: {
+  delivery?: AssistantChannelDelivery | null;
+  deliveryErrorCode?: string | null;
+  deliveryErrorMessage?: string | null;
+  deliveryStatus: HostedAssistantDeliveryOutcome["deliveryStatus"];
+  effect: HostedAssistantDeliveryEffect;
+  journalTrace: HostedAssistantDeliveryJournalTrace;
+  retryable: boolean;
+}): HostedAssistantDeliveryOutcome {
+  return {
+    deliveryChannel: input.delivery?.channel ?? null,
+    deliveryErrorCode: input.deliveryErrorCode ?? null,
+    deliveryErrorMessage: input.deliveryErrorMessage ?? null,
+    deliveryStatus: input.deliveryStatus,
+    effectFingerprint: input.effect.fingerprint,
+    effectId: input.effect.effectId,
+    journalMethod: input.journalTrace.lastMethod,
+    journalStatus: input.journalTrace.lastStatus === null ? null : String(input.journalTrace.lastStatus),
+    providerMessageId: input.delivery?.providerMessageId ?? null,
+    providerThreadId: input.delivery?.providerThreadId ?? null,
+    retryable: input.retryable,
+    target: input.delivery?.target ?? null,
+    targetKind: input.delivery?.targetKind ?? null,
+  };
 }
 
 function readHostedAssistantDeliveryRetryableFlag(error: unknown): boolean | null {

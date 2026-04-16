@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { parseEnv } from "node:util";
-
-import { cloudflareDevVarsPath, WRANGLER_VAR_ALLOWLIST } from "./constants.ts";
+import {
+  cloudflareDevVarsPath,
+  DEFAULT_DATABASE_URL,
+  WRANGLER_VAR_ALLOWLIST,
+} from "./constants.ts";
 import {
   HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
@@ -21,6 +23,7 @@ import type {
 export async function resolveCloudflareLocalEnv(input: {
   config: HostedLocalDevConfig;
   oidcIdentity: HostedExecutionOidcIdentity;
+  overrides?: Record<string, string | undefined>;
 }): Promise<Record<string, string>> {
   const originalContents = await tryReadTextFile(cloudflareDevVarsPath);
   const existing = originalContents === null ? {} : parseEnvText(originalContents);
@@ -29,6 +32,7 @@ export async function resolveCloudflareLocalEnv(input: {
     config: input.config,
     existing,
     oidcIdentity: input.oidcIdentity,
+    overrides: input.overrides,
   });
 }
 
@@ -36,54 +40,78 @@ export function mergeCloudflareLocalEnv(input: {
   config: HostedLocalDevConfig;
   existing: Record<string, string>;
   oidcIdentity: HostedExecutionOidcIdentity;
+  overrides?: Record<string, string | undefined>;
   createEnvelopeKey?: () => string;
   createJwkPair?: () => EcP256JwkPairJson;
 }): Record<string, string> {
   const createEnvelopeKey = input.createEnvelopeKey ?? (() => randomBytes(32).toString("base64"));
   const createJwkPair = input.createJwkPair ?? createEcP256JwkPairJson;
+  const resolvedExisting = {
+    ...input.existing,
+    ...normalizeOptionalEnvOverrides(input.overrides),
+  };
 
-  assertLocalWorkerOidcEnvironment(input.existing);
+  assertLocalWorkerOidcEnvironment(resolvedExisting);
 
-  const automationKeys = input.existing.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK?.trim()
-    && input.existing.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK?.trim()
+  const automationKeys = resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK?.trim()
+    && resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK?.trim()
     ? {
-      privateJwkJson: input.existing.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK,
-      publicJwkJson: input.existing.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+      privateJwkJson: resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK,
+      publicJwkJson: resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK,
     }
     : createJwkPair();
-  const callbackSigningPrivateJwkJson = input.existing.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?.trim()
-    ? input.existing.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK
+  const callbackSigningPrivateJwkJson = resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?.trim()
+    ? resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK
     : createJwkPair().privateJwkJson;
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
 
   return {
-    ...input.existing,
+    ...resolvedExisting,
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY:
-      input.existing.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY?.trim()
+      resolvedExisting.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY?.trim()
       ?? createEnvelopeKey(),
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID:
-      input.existing.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID?.trim()
+      resolvedExisting.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID?.trim()
       ?? "v1",
     HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID:
-      input.existing.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID?.trim()
+      resolvedExisting.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID?.trim()
       ?? "automation:v1",
     HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: automationKeys.privateJwkJson,
     HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: automationKeys.publicJwkJson,
     HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID:
-      input.existing.HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID?.trim()
+      resolvedExisting.HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID?.trim()
       ?? "recovery:v1",
     HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK:
-      input.existing.HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK?.trim()
+      resolvedExisting.HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK?.trim()
       ?? automationKeys.publicJwkJson,
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:
-      input.existing.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim()
+      resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim()
       ?? "v1",
     HOSTED_WEB_BASE_URL: webOrigin,
   };
+}
+
+function normalizeOptionalEnvOverrides(
+  input: Record<string, string | undefined> | undefined,
+): Record<string, string> {
+  if (!input) {
+    return {};
+  }
+
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    values[key] = value;
+  }
+
+  return values;
 }
 
 export function buildHostedLocalDevOverrides(
@@ -109,6 +137,41 @@ export function buildHostedLocalDevOverrides(
     ...(callbackKeyId ? { HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackKeyId } : {}),
     VERCEL_PROJECT_PRODUCTION_URL: `${config.webHost}:${config.webPort}`,
   };
+}
+
+export function normalizeLocalDatabaseUrl(
+  value: string | undefined,
+  fallbackUrl: string = DEFAULT_DATABASE_URL,
+): string {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    return fallbackUrl;
+  }
+
+  let parsed: URL;
+  let fallback: URL;
+  try {
+    parsed = new URL(normalized);
+    fallback = new URL(fallbackUrl);
+  } catch {
+    return normalized;
+  }
+
+  if (!isPostgresProtocol(parsed.protocol) || !isLoopbackHost(parsed.hostname)) {
+    return normalized;
+  }
+
+  if (hasExplicitDatabaseName(parsed.pathname) || !hasExplicitDatabaseName(fallback.pathname)) {
+    return normalized;
+  }
+
+  parsed.pathname = fallback.pathname;
+  return parsed.toString();
+}
+
+export function shouldSyncLocalDatabaseSchema(value: string | undefined): boolean {
+  return isLoopbackPostgresUrl(normalizeLocalDatabaseUrl(value));
 }
 
 export function buildWranglerVarArgs(
@@ -161,6 +224,8 @@ export function buildWranglerLocalDevConfig(
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: resolveWranglerEnvValue("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID", source) ?? "v1",
     HOSTED_EXECUTION_RETRY_DELAY_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RETRY_DELAY_MS", source) ?? "30000",
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", source) ?? "30000",
+    // Local Cloudflare container cold starts are materially slower than the hosted runtime.
+    HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS", source) ?? "60000",
     HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_TIMEOUT_MS", source) ?? "120000",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: resolveWranglerEnvValue("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT", source) ?? "development",
   };
@@ -253,12 +318,40 @@ export async function readOptionalSimpleEnvFile(filePath: string): Promise<Recor
 }
 
 export function parseEnvText(raw: string): Record<string, string> {
-  const parsed = parseEnv(raw);
+  const parsed: Record<string, string> = {};
+  let index = 0;
 
-  return Object.fromEntries(
-    Object.entries(parsed)
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  );
+  while (index < raw.length) {
+    index = skipWhitespaceAndComments(raw, index);
+
+    if (index >= raw.length) {
+      break;
+    }
+
+    const keyStart = index;
+    while (index < raw.length && raw[index] !== "=" && raw[index] !== "\n" && raw[index] !== "\r") {
+      index += 1;
+    }
+
+    if (index >= raw.length || raw[index] !== "=") {
+      index = skipLine(raw, index);
+      continue;
+    }
+
+    const key = raw.slice(keyStart, index).trim();
+    index += 1;
+
+    if (!key) {
+      index = skipLine(raw, index);
+      continue;
+    }
+
+    const parsedValue = readEnvValue(raw, index);
+    parsed[key] = parsedValue.value;
+    index = parsedValue.nextIndex;
+  }
+
+  return parsed;
 }
 
 export function assertLocalWorkerOidcEnvironment(cloudflareDevVars: Record<string, string>): void {
@@ -309,6 +402,172 @@ function resolveWranglerEnvValue(
   }
 
   return null;
+}
+
+function skipWhitespaceAndComments(raw: string, startIndex: number): number {
+  let index = startIndex;
+
+  while (index < raw.length) {
+    while (index < raw.length && (raw[index] === " " || raw[index] === "\t")) {
+      index += 1;
+    }
+
+    if (raw[index] === "#") {
+      index = skipLine(raw, index);
+      continue;
+    }
+
+    if (raw[index] === "\n") {
+      index += 1;
+      continue;
+    }
+
+    if (raw[index] === "\r") {
+      index += 1;
+      if (raw[index] === "\n") {
+        index += 1;
+      }
+      continue;
+    }
+
+    break;
+  }
+
+  return index;
+}
+
+function skipLine(raw: string, startIndex: number): number {
+  let index = startIndex;
+
+  while (index < raw.length && raw[index] !== "\n" && raw[index] !== "\r") {
+    index += 1;
+  }
+
+  if (raw[index] === "\r") {
+    index += 1;
+  }
+  if (raw[index] === "\n") {
+    index += 1;
+  }
+
+  return index;
+}
+
+function readEnvValue(raw: string, startIndex: number): { nextIndex: number; value: string } {
+  if (startIndex >= raw.length) {
+    return { nextIndex: startIndex, value: "" };
+  }
+
+  const quote = raw[startIndex];
+  if (quote === "\"" || quote === "'") {
+    return readQuotedEnvValue(raw, startIndex + 1, quote);
+  }
+
+  let endIndex = startIndex;
+  while (endIndex < raw.length && raw[endIndex] !== "\n" && raw[endIndex] !== "\r") {
+    endIndex += 1;
+  }
+
+  const value = raw.slice(startIndex, endIndex).trim();
+  return {
+    nextIndex: skipLine(raw, endIndex),
+    value,
+  };
+}
+
+function readQuotedEnvValue(
+  raw: string,
+  startIndex: number,
+  quote: "\"" | "'",
+): { nextIndex: number; value: string } {
+  let index = startIndex;
+  let value = "";
+
+  while (index < raw.length) {
+    const character = raw[index];
+
+    if (character === "\\") {
+      const escaped = readEscapedCharacter(raw, index + 1, quote);
+      value += escaped.value;
+      index = escaped.nextIndex;
+      continue;
+    }
+
+    if (character === quote) {
+      const nextIndex = skipLine(raw, index + 1);
+      return {
+        nextIndex,
+        value,
+      };
+    }
+
+    value += character;
+    index += 1;
+  }
+
+  return {
+    nextIndex: index,
+    value,
+  };
+}
+
+function readEscapedCharacter(
+  raw: string,
+  startIndex: number,
+  quote: "\"" | "'",
+): { nextIndex: number; value: string } {
+  if (startIndex >= raw.length) {
+    return { nextIndex: startIndex, value: "\\" };
+  }
+
+  const character = raw[startIndex];
+
+  if (character === quote || character === "\\") {
+    return {
+      nextIndex: startIndex + 1,
+      value: character,
+    };
+  }
+
+  if (quote === "\"") {
+    if (character === "n") {
+      return { nextIndex: startIndex + 1, value: "\n" };
+    }
+
+    if (character === "r") {
+      return { nextIndex: startIndex + 1, value: "\r" };
+    }
+
+    if (character === "t") {
+      return { nextIndex: startIndex + 1, value: "\t" };
+    }
+  }
+
+  return {
+    nextIndex: startIndex + 1,
+    value: `\\${character}`,
+  };
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+}
+
+function isPostgresProtocol(protocol: string): boolean {
+  return protocol === "postgres:" || protocol === "postgresql:";
+}
+
+function isLoopbackPostgresUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return isPostgresProtocol(parsed.protocol) && isLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function hasExplicitDatabaseName(pathname: string): boolean {
+  return pathname !== "" && pathname !== "/";
 }
 
 async function tryReadTextFile(filePath: string): Promise<string | null> {

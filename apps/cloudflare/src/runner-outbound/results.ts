@@ -33,8 +33,6 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 
-const HOSTED_EXECUTION_RUNNER_CONTAINER_DEBUG_PATH = "/debug/container-stage";
-
 export async function handleRunnerResultsRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -89,44 +87,7 @@ export async function handleRunnerResultsRequest(input: {
     });
   }
 
-  if (input.url.pathname === HOSTED_EXECUTION_RUNNER_CONTAINER_DEBUG_PATH) {
-    if (input.request.method !== "POST") {
-      return methodNotAllowed();
-    }
-
-    return handleRunnerContainerDebugRequest({
-      request: input.request,
-      userId: input.userId,
-    });
-  }
-
   return notFound();
-}
-
-async function handleRunnerContainerDebugRequest(input: {
-  request: Request;
-  userId: string;
-}): Promise<Response> {
-  const payload = parseRunnerContainerDebugRequest(
-    await readJsonObject(input.request),
-  );
-  emitHostedExecutionStructuredLog({
-    component: "container-debug",
-    details: {
-      ...(payload.details ?? {}),
-      ...(payload.eventId ? { eventId: payload.eventId } : {}),
-      ...(payload.runId ? { runId: payload.runId } : {}),
-      userId: input.userId,
-    },
-    level: payload.level ?? "info",
-    message: payload.message,
-    phase: payload.phase ?? "dispatch.running",
-    userId: input.userId,
-  });
-
-  return json({
-    ok: true,
-  });
 }
 
 async function handleRunnerEmailMessageReadRequest(input: {

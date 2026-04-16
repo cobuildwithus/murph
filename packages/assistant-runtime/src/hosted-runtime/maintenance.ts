@@ -12,6 +12,7 @@ import {
 import {
   type AssistantExecutionContext,
   createAssistantFoodAutoLogHooks,
+  readAssistantAutomationState,
   runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -226,22 +227,70 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
   executionContext: AssistantExecutionContext,
+  dispatch: HostedExecutionDispatchRequest,
 ): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
+  const beforeState = await readAssistantAutomationState(vaultRoot);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      autoReplyChannels: beforeState.autoReply.map((entry) => entry.channel).join(","),
+      autoReplyCursorSummary: beforeState.autoReply.map((entry) =>
+        `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+      ).join(","),
+      inboxScanCursor: beforeState.inboxScanCursor?.captureId ?? null,
+      requestId,
+    },
+    dispatch,
+    message: "Hosted assistant automation pass starting.",
+    phase: "dispatch.running",
+  });
 
   try {
-    return await runAssistantAutomationPass({
+    const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
       inboxServices,
+      onEvent: (event) => {
+        emitHostedExecutionStructuredLog({
+          component: "runtime",
+          details: {
+            captureId: "captureId" in event ? (event.captureId ?? null) : null,
+            details: event.details ?? null,
+            requestId,
+            type: event.type,
+          },
+          dispatch,
+          message: `Hosted assistant automation event: ${event.type}.`,
+          phase: "dispatch.running",
+        });
+      },
       vaultServices,
       requestId,
       vault: vaultRoot,
     });
+    const afterState = await readAssistantAutomationState(vaultRoot);
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: {
+        autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
+        autoReplyCursorSummary: afterState.autoReply.map((entry) =>
+          `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+        ).join(","),
+        inboxScanCursor: afterState.inboxScanCursor?.captureId ?? null,
+        nextWakeAt: result.nextWakeAt,
+        progressed: result.progressed,
+        requestId,
+      },
+      dispatch,
+      message: "Hosted assistant automation pass finished.",
+      phase: "dispatch.running",
+    });
+    return result;
   } catch (error) {
     if (
       error
@@ -249,6 +298,15 @@ export async function runHostedAssistantAutomation(
       && "code" in error
       && error.code === "INBOX_NOT_INITIALIZED"
     ) {
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        details: {
+          requestId,
+        },
+        dispatch,
+        message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
+        phase: "dispatch.running",
+      });
       return {
         nextWakeAt: null,
         progressed: false,
@@ -363,6 +421,7 @@ async function runHostedMaintenancePass(input: {
         input.vaultRoot,
         input.requestId,
         input.executionContext,
+        input.dispatch,
       )
     : {
         nextWakeAt: null,

@@ -24,7 +24,7 @@ describe("handleRunnerOutboundRequest", () => {
     vi.restoreAllMocks();
   });
 
-  it("rejects internal worker proxy traffic that is missing the per-run proxy token", async () => {
+  it("accepts internal worker proxy traffic when the outbound host mapping is present but the proxy header is missing", async () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
         body: JSON.stringify({
@@ -40,9 +40,11 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
+      connections: [],
+      generatedAt: "2026-04-05T00:00:00.000Z",
+      userId: "member_123",
     });
   });
 

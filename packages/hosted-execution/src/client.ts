@@ -17,6 +17,8 @@ export interface HostedExecutionDispatchClient {
 }
 
 export interface HostedExecutionDispatchClientOptions {
+  allowHttpHosts?: readonly string[];
+  allowHttpLocalhost?: boolean;
   baseUrl: string;
   fetchImpl?: typeof fetch;
   getBearerToken: () => Promise<string>;
@@ -26,7 +28,7 @@ export interface HostedExecutionDispatchClientOptions {
 export function createHostedExecutionDispatchClient(
   options: HostedExecutionDispatchClientOptions,
 ): HostedExecutionDispatchClient {
-  const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl);
+  const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl, options);
   const fetchImpl = options.fetchImpl ?? fetch;
   const getAuthorizationHeader = createHostedExecutionBearerAuthorizationHeaderProvider(
     options.getBearerToken,
@@ -55,8 +57,11 @@ export function createHostedExecutionDispatchClient(
   };
 }
 
-function requireHostedExecutionBaseUrl(value: string): string {
-  const normalized = normalizeHostedExecutionBaseUrl(value);
+function requireHostedExecutionBaseUrl(
+  value: string,
+  options?: Pick<HostedExecutionDispatchClientOptions, "allowHttpHosts" | "allowHttpLocalhost">,
+): string {
+  const normalized = normalizeHostedExecutionBaseUrl(value, options);
 
   if (!normalized) {
     throw new TypeError("Hosted execution baseUrl must be configured.");

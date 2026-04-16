@@ -22,6 +22,8 @@ export interface CloudflareHostedControlClient {
 }
 
 export interface CloudflareHostedControlClientOptions {
+  allowHttpHosts?: readonly string[];
+  allowHttpLocalhost?: boolean;
   baseUrl: string;
   fetchImpl?: typeof fetch;
   getBearerToken: () => Promise<string>;
@@ -31,7 +33,7 @@ export interface CloudflareHostedControlClientOptions {
 export function createCloudflareHostedControlClient(
   options: CloudflareHostedControlClientOptions,
 ): CloudflareHostedControlClient {
-  const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl);
+  const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl, options);
   const fetchImpl = options.fetchImpl ?? fetch;
   const getAuthorizationHeader = createHostedExecutionBearerAuthorizationHeaderProvider(
     options.getBearerToken,
@@ -90,8 +92,11 @@ function parseHostedExecutionDispatchStatusOrNull(
   return value === null ? null : parseHostedExecutionDispatchStatus(value);
 }
 
-function requireHostedExecutionBaseUrl(value: string): string {
-  const normalized = normalizeHostedExecutionBaseUrl(value);
+function requireHostedExecutionBaseUrl(
+  value: string,
+  options: Pick<CloudflareHostedControlClientOptions, "allowHttpHosts" | "allowHttpLocalhost">,
+): string {
+  const normalized = normalizeHostedExecutionBaseUrl(value, options);
 
   if (!normalized) {
     throw new TypeError("Hosted execution baseUrl must be configured.");

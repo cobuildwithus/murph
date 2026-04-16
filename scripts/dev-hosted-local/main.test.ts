@@ -113,7 +113,6 @@ describe("hosted local dev main", () => {
       .mockReturnValueOnce(webChild);
     waitForFirstChildExit.mockResolvedValue(webChild);
     vi.stubEnv("HOSTED_EXECUTION_RUNNER_HOST_ALIAS", "host.test.internal");
-    vi.stubEnv("MURPH_HOSTED_EXECUTION_RELAY_CHILD_INFO_LOGS", "1");
 
     const { main } = await import("./main.ts");
 
@@ -147,7 +146,6 @@ describe("hosted local dev main", () => {
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.test.internal:8787",
         HOSTED_ASSISTANT_PROVIDER: "venice",
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.test.internal",
-        MURPH_HOSTED_EXECUTION_RELAY_CHILD_INFO_LOGS: "1",
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
     );

@@ -112,6 +112,7 @@ async function postHostedExecutionDispatch(
   },
 ): Promise<HostedExecutionDispatchResult> {
   return createHostedExecutionDispatchClient({
+    allowHttpLocalhost: true,
     baseUrl: environment.dispatchUrl,
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
     timeoutMs: environment.dispatchTimeoutMs,
