@@ -55,6 +55,11 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /data-slot="combobox-trigger"/);
     assert.match(markup, />\+1</);
     assert.match(markup, /placeholder="\((?:415|416)\) 555-(?:2671|0123)"/);
+    assert.match(markup, /name="phone-number"/);
+    assert.match(
+      markup,
+      /data-slot="input"[^>]*class="[^"]*\bh-11\b[^"]*\brounded-2xl\b[^"]*\bpx-4\b[^"]*\bpy-2\.5\b/,
+    );
     assert.doesNotMatch(markup, /Defaulting to United States/);
   });
 
