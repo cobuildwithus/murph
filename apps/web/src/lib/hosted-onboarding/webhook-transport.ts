@@ -1,6 +1,3 @@
-import type { Prisma } from "@prisma/client";
-
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
@@ -14,7 +11,6 @@ import {
 } from "./linq";
 import { maybeIssueHostedRevnetForStripeInvoice } from "./stripe-revnet-issuance";
 import type {
-  HostedWebhookDispatchEnqueueInput,
   HostedWebhookLinqConversationHomeRedirectPayload,
   HostedWebhookLinqInviteMessagePayload,
   HostedWebhookLinqMessagePayload,
@@ -37,27 +33,8 @@ export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandle
         await markHostedInviteSentBestEffort(effect.payload.inviteId, prisma);
       }
     },
-    enqueueDispatch: enqueueHostedWebhookDispatch,
     performSideEffect: performHostedWebhookSideEffect,
   };
-}
-
-async function enqueueHostedWebhookDispatch(
-  input: HostedWebhookDispatchEnqueueInput,
-): Promise<void> {
-  return enqueueHostedWebhookDispatchWithTransaction(input, input.transaction);
-}
-
-async function enqueueHostedWebhookDispatchWithTransaction(
-  input: HostedWebhookDispatchEnqueueInput,
-  transaction: Prisma.TransactionClient,
-): Promise<void> {
-  await enqueueHostedExecutionOutbox({
-    dispatch: input.dispatch,
-    sourceId: `${input.source}:${input.eventId}`,
-    sourceType: "hosted_webhook_receipt",
-    tx: transaction,
-  });
 }
 
 async function performHostedWebhookSideEffect(
