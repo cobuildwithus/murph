@@ -147,6 +147,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
+  maxInlineDrainMs?: number;
   rawBody: string;
   secretToken: string | null;
   prisma?: PrismaClient;
@@ -176,6 +177,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   await maybeDrainHostedExecutionWebhookDispatch({
     defer: input.defer,
     eventId: buildHostedTelegramWebhookEventId(update),
+    maxInlineDrainMs: input.maxInlineDrainMs,
     prisma,
     response,
     source: "telegram",
@@ -431,6 +433,7 @@ async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
 async function maybeDrainHostedExecutionWebhookDispatch(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
+  maxInlineDrainMs?: number;
   prisma: PrismaClient;
   response:
     | HostedOnboardingLinqWebhookResponse
@@ -446,41 +449,92 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
     {
       deferred: Boolean(input.defer),
       eventId: input.eventId,
+      inlineTimeoutMs: input.maxInlineDrainMs ?? null,
       responseReason: input.response.reason,
     },
   );
 
-  if (input.defer) {
-    await input.defer(async () => {
-      const drainTiming = startHostedOnboardingTiming(
-        `hosted-onboarding.webhook.${input.source}.outbox-drain`,
-        {
+  if (typeof input.maxInlineDrainMs === "number" && input.maxInlineDrainMs > 0) {
+    const completedInline = await waitForHostedExecutionWebhookDrain({
+      eventId: input.eventId,
+      prisma: input.prisma,
+      responseReason: input.response.reason,
+      source: input.source,
+      timeoutMs: input.maxInlineDrainMs,
+    });
+
+    if (completedInline) {
+      finishHostedOnboardingTiming(handoffTiming, "completed", {
+        deferred: false,
+      });
+      return;
+    }
+
+    if (input.defer) {
+      await input.defer(() =>
+        drainHostedExecutionWebhookOutbox({
           deferred: true,
           eventId: input.eventId,
+          prisma: input.prisma,
           responseReason: input.response.reason,
-        },
+          source: input.source,
+        }),
       );
-      await drainHostedExecutionOutboxBestEffort({
-        eventIds: [
-          input.eventId,
-        ],
-        limit: 1,
-        prisma: input.prisma,
+      finishHostedOnboardingTiming(handoffTiming, "scheduled", {
+        deferred: true,
+        timedOut: true,
       });
-      finishHostedOnboardingTiming(drainTiming, "completed");
+      return;
+    }
+
+    finishHostedOnboardingTiming(handoffTiming, "completed", {
+      deferred: false,
+      timedOut: true,
     });
+    return;
+  }
+
+  if (input.defer) {
+    await input.defer(() =>
+      drainHostedExecutionWebhookOutbox({
+        deferred: true,
+        eventId: input.eventId,
+        prisma: input.prisma,
+        responseReason: input.response.reason,
+        source: input.source,
+      }),
+    );
     finishHostedOnboardingTiming(handoffTiming, "scheduled", {
       deferred: true,
     });
     return;
   }
 
+  await drainHostedExecutionWebhookOutbox({
+    deferred: false,
+    eventId: input.eventId,
+    prisma: input.prisma,
+    responseReason: input.response.reason,
+    source: input.source,
+  });
+  finishHostedOnboardingTiming(handoffTiming, "completed", {
+    deferred: false,
+  });
+}
+
+async function drainHostedExecutionWebhookOutbox(input: {
+  deferred: boolean;
+  eventId: string;
+  prisma: PrismaClient;
+  responseReason: string | undefined;
+  source: "linq" | "telegram";
+}): Promise<void> {
   const drainTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.outbox-drain`,
     {
-      deferred: false,
+      deferred: input.deferred,
       eventId: input.eventId,
-      responseReason: input.response.reason,
+      responseReason: input.responseReason,
     },
   );
   await drainHostedExecutionOutboxBestEffort({
@@ -491,7 +545,39 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
     prisma: input.prisma,
   });
   finishHostedOnboardingTiming(drainTiming, "completed");
-  finishHostedOnboardingTiming(handoffTiming, "completed", {
-    deferred: false,
-  });
+}
+
+async function waitForHostedExecutionWebhookDrain(input: {
+  eventId: string;
+  prisma: PrismaClient;
+  responseReason: string | undefined;
+  source: "linq" | "telegram";
+  timeoutMs: number;
+}): Promise<boolean> {
+  const timeoutMs = Math.max(1, Math.floor(input.timeoutMs));
+
+  if (!Number.isFinite(timeoutMs)) {
+    return false;
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      drainHostedExecutionWebhookOutbox({
+        deferred: false,
+        eventId: input.eventId,
+        prisma: input.prisma,
+        responseReason: input.responseReason,
+        source: input.source,
+      }).then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
