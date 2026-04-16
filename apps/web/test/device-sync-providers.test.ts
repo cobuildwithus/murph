@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createConfiguredDeviceSyncProviders } from "@murphai/device-syncd/config";
+import { createConfiguredDeviceSyncRegistry } from "@murphai/device-syncd/config";
 
 import { createHostedDeviceSyncRegistry } from "@/src/lib/device-sync/providers";
 
@@ -17,7 +17,7 @@ describe("createHostedDeviceSyncRegistry", () => {
     };
 
     const hostedProviders = createHostedDeviceSyncRegistry(env).list().map((provider) => provider.provider);
-    const sharedProviders = createConfiguredDeviceSyncProviders(env).map((provider) => provider.provider);
+    const sharedProviders = createConfiguredDeviceSyncRegistry(env).list().map((provider) => provider.provider);
 
     expect(hostedProviders).toEqual(sharedProviders);
     expect(hostedProviders).toEqual(["garmin", "whoop", "oura"]);

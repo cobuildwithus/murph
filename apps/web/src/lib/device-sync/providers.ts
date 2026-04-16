@@ -1,16 +1,13 @@
 import {
-  createDeviceSyncRegistry,
   deviceSyncError,
 } from "@murphai/device-syncd/public-ingress";
-import { createConfiguredDeviceSyncProviders } from "@murphai/device-syncd/config";
+import { createConfiguredDeviceSyncRegistry } from "@murphai/device-syncd/config";
 import type { DeviceSyncProvider, DeviceSyncRegistry } from "@murphai/device-syncd/public-ingress";
 
 export function createHostedDeviceSyncRegistry(
   env: NodeJS.ProcessEnv = process.env,
 ): DeviceSyncRegistry {
-  return createDeviceSyncRegistry(
-    createConfiguredDeviceSyncProviders(env),
-  );
+  return createConfiguredDeviceSyncRegistry(env);
 }
 
 export function requireHostedDeviceSyncProvider(registry: DeviceSyncRegistry, provider: string): DeviceSyncProvider {
@@ -19,7 +16,7 @@ export function requireHostedDeviceSyncProvider(registry: DeviceSyncRegistry, pr
   if (!resolved) {
     throw deviceSyncError({
       code: "PROVIDER_NOT_CONFIGURED",
-      message: `Hosted device-sync provider ${provider} is not configured in apps/web.`,
+      message: `Hosted device-sync provider ${provider} is not configured in the shared device-sync provider registry.`,
       retryable: false,
       httpStatus: 404,
     });

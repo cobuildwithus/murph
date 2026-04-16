@@ -27,11 +27,6 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   devUserEmail: "dev@example.com",
   devUserId: "dev-user",
   devUserName: "Dev User",
-  providers: {
-    garmin: null,
-    whoop: null,
-    oura: null,
-  },
 };
 
 describe("requireAuthenticatedHostedUser", () => {

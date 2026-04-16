@@ -13,6 +13,9 @@ authenticated execution intents, restores encrypted runtime state, runs one
 hosted job, and commits the next encrypted workspace snapshot. It may hold
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
+Hosted device-sync provider registration is intentionally shared with
+`@murphai/device-syncd/config`; `apps/web` should reuse that assembly path
+instead of maintaining an app-local provider list or provider-config object.
 
 ## Core responsibilities
 

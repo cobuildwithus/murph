@@ -21,7 +21,7 @@ describe("readHostedDeviceSyncEnvironment", () => {
     expect(environment.trustedUserAssertionHeader).toBe("x-hosted-user-assertion");
     expect(environment.trustedUserSignatureHeader).toBe("x-hosted-user-signature");
     expect(environment).not.toHaveProperty("ouraWebhookVerificationToken");
-    expect(environment.providers.oura?.webhookVerificationToken).toBe("verify-token-for-tests");
+    expect(environment).not.toHaveProperty("providers");
   });
 
   it("falls back to the Vercel production domain for hosted defaults", () => {
