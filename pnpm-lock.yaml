@@ -14,9 +14,6 @@ importers:
       '@cobuild/review-gpt':
         specifier: ^0.5.62
         version: 0.5.62(@cfworker/json-schema@4.1.1)
-      '@playwright/test':
-        specifier: 1.51.1
-        version: 1.51.1
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -9686,6 +9683,7 @@ snapshots:
   '@playwright/test@1.51.1':
     dependencies:
       playwright: 1.51.1
+    optional: true
 
   '@poppinss/colors@4.1.6':
     dependencies:
@@ -15262,7 +15260,7 @@ snapshots:
       statuses: 2.0.2
       strict-event-emitter: 0.5.1
       tough-cookie: 6.0.1
-      type-fest: 5.4.4
+      type-fest: 5.5.0
       until-async: 3.0.2
       yargs: 17.7.2
     optionalDependencies:
@@ -15815,13 +15813,15 @@ snapshots:
       exsolve: 1.0.8
       pathe: 2.0.3
 
-  playwright-core@1.51.1: {}
+  playwright-core@1.51.1:
+    optional: true
 
   playwright@1.51.1:
     dependencies:
       playwright-core: 1.51.1
     optionalDependencies:
       fsevents: 2.3.2
+    optional: true
 
   pngjs@5.0.0: {}
 
