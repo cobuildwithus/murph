@@ -325,6 +325,17 @@ describe("executeHostedDispatchForCommit", () => {
     assert.equal(result.committedResult.result.eventsHandled, 1);
     assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
     assert.match(result.committedResult.result.summary, /Processed member activation/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          committedAssistantDeliveryEffectCount: "1",
+        }),
+        message: "Hosted runtime collected committed assistant delivery effects.",
+        phase: "commit.recorded",
+      }),
+    );
   });
 
   it("preserves an existing hosted execution default target during maintenance setup", async () => {
@@ -582,5 +593,26 @@ describe("completeHostedExecutionAfterCommit", () => {
         },
       },
     });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          assistantDeliveryEffectCount: "1",
+        }),
+        message: "Hosted runtime draining committed side effects.",
+        phase: "side-effects.draining",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          assistantDeliveryOutcomeSummary: "linq:sent=1",
+        }),
+        message: "Hosted runtime drained committed side effects.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 });

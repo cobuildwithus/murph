@@ -90,6 +90,18 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }): Promise<HostedAssistantDeliveryOutcome[]> {
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: buildHostedAssistantDeliveryDetails({
+        effectFingerprint: assistantDeliveryEffect.fingerprint,
+        effectId: assistantDeliveryEffect.effectId,
+        userId: input.dispatch.event.userId,
+      }),
+      dispatch: input.dispatch,
+      message: "Hosted assistant delivery dispatch starting.",
+      phase: "side-effects.draining",
+      userId: input.dispatch.event.userId,
+    });
     outcomes.push(await dispatchHostedCommittedAssistantDelivery({
       dispatch: input.dispatch,
       effectsPort: input.effectsPort,
@@ -315,6 +327,20 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       intent: AssistantOutboxIntent;
       vault: string;
     }) => {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectId: intent.intentId,
+          extra: {
+            journalMethod: "DELETE",
+            retryable: true,
+          },
+          userId: input.userId,
+        }),
+        message: "Hosted assistant delivery clearing prepared journal intent.",
+        phase: "side-effects.draining",
+        userId: input.userId,
+      });
       await callHostedAssistantDeliveryJournal({
         effectsPort: input.effectsPort,
         journalTrace: input.journalTrace,
@@ -331,6 +357,22 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       intent: AssistantOutboxIntent;
       vault: string;
     }) => {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectId: intent.intentId,
+          extra: {
+            deliveryChannel: delivery.channel,
+            journalMethod: "PUT",
+            retryable: false,
+            targetKind: delivery.targetKind,
+          },
+          userId: input.userId,
+        }),
+        message: "Hosted assistant delivery persisting sent journal record.",
+        phase: "side-effects.draining",
+        userId: input.userId,
+      });
       await persistHostedAssistantDeliveryRecord({
         delivery,
         effectsPort: input.effectsPort,
@@ -342,6 +384,20 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       intent: AssistantOutboxIntent;
       vault: string;
     }) => {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectId: intent.intentId,
+          extra: {
+            journalMethod: "PUT",
+            retryable: true,
+          },
+          userId: input.userId,
+        }),
+        message: "Hosted assistant delivery reserving prepared journal intent.",
+        phase: "side-effects.draining",
+        userId: input.userId,
+      });
       await callHostedAssistantDeliveryJournal({
         effectsPort: input.effectsPort,
         journalTrace: input.journalTrace,
@@ -358,6 +414,20 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       intent: AssistantOutboxIntent;
       vault: string;
     }) => {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectId: intent.intentId,
+          extra: {
+            journalMethod: "GET",
+            retryable: true,
+          },
+          userId: input.userId,
+        }),
+        message: "Hosted assistant delivery reconciling journal state.",
+        phase: "side-effects.draining",
+        userId: input.userId,
+      });
       const sideEffect = buildHostedAssistantDeliveryEffect({
         dedupeKey: intent.dedupeKey,
         effectId: intent.intentId,
@@ -375,6 +445,22 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       }
 
       if (record.state === "sent") {
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: buildHostedAssistantDeliveryDetails({
+            effectId: intent.intentId,
+            extra: {
+              deliveryChannel: record.delivery.channel,
+              journalRecordState: record.state,
+              retryable: false,
+              targetKind: record.delivery.targetKind,
+            },
+            userId: input.userId,
+          }),
+          message: "Hosted assistant delivery journal already recorded a sent outcome.",
+          phase: "side-effects.draining",
+          userId: input.userId,
+        });
         return {
           channel: record.delivery.channel,
           idempotencyKey: record.delivery.idempotencyKey,

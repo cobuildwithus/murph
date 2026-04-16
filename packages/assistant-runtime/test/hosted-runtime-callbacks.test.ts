@@ -256,6 +256,28 @@ describe("hosted runtime callbacks", () => {
       component: "assistant-delivery",
       details: {
         assistantDeliveryBoundary: "hosted_runtime_finalize",
+        effectFingerprint: "dedupe_retryable",
+        effectId: "intent_retryable",
+        userId: "member_123",
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_retryable_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      message: "Hosted assistant delivery dispatch starting.",
+      phase: "side-effects.draining",
+      userId: "member_123",
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(2, {
+      component: "assistant-delivery",
+      details: {
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
         deliveryErrorCode: "LINQ_SEND_FAILED",
         deliveryErrorMessage: "Linq outbound chat creation failed with HTTP 403.",
         dispatchedIntentStatus: "retryable",
@@ -279,7 +301,7 @@ describe("hosted runtime callbacks", () => {
       userId: "member_123",
     });
 
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(2, {
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(3, {
       component: "assistant-delivery",
       details: {
         assistantDeliveryBoundary: "hosted_runtime_finalize",
@@ -825,6 +847,19 @@ describe("hosted runtime callbacks", () => {
       effectId: "intent_123",
       fingerprint: "dedupe_123",
     }]);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: expect.objectContaining({
+          effectId: "intent_123",
+          journalMethod: "DELETE",
+          retryable: true,
+        }),
+        message: "Hosted assistant delivery clearing prepared journal intent.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 
   it("fails closed when local delivery confirmation is still pending after the send", async () => {
@@ -914,6 +949,21 @@ describe("hosted runtime callbacks", () => {
         vault: "/tmp/vault",
       }),
     ).rejects.toThrow(/require a non-empty idempotencyKey/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: expect.objectContaining({
+          deliveryChannel: "email",
+          effectId: "intent_123",
+          journalMethod: "PUT",
+          retryable: false,
+          targetKind: "explicit",
+        }),
+        message: "Hosted assistant delivery persisting sent journal record.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 
   it("fails closed when the local delivery record is missing both idempotency key fields", async () => {
@@ -1062,6 +1112,21 @@ describe("hosted runtime callbacks", () => {
       targetKind: "explicit",
     });
     assert.deepEqual(writes, []);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: expect.objectContaining({
+          deliveryChannel: "email",
+          effectId: "intent_123",
+          journalRecordState: "sent",
+          retryable: false,
+          targetKind: "explicit",
+        }),
+        message: "Hosted assistant delivery journal already recorded a sent outcome.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 
   it("reconciles delivered intents from the local record when the journal is still prepared", async () => {
@@ -1154,6 +1219,19 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_123",
       }),
     ]);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: expect.objectContaining({
+          effectId: "intent_123",
+          journalMethod: "GET",
+          retryable: true,
+        }),
+        message: "Hosted assistant delivery reconciling journal state.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 
   it("marks delivery confirmation pending when journal reconciliation fails after a local send", async () => {

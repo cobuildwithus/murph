@@ -139,6 +139,17 @@ export async function executeHostedDispatchForCommit(input: {
   const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
     input.restored.vaultRoot,
   );
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    details: {
+      committedAssistantDeliveryEffectCount: String(committedAssistantDeliveryEffects.length),
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+    },
+    message: "Hosted runtime collected committed assistant delivery effects.",
+    phase: "commit.recorded",
+    run: input.request.run ?? null,
+  });
   const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
     input.restored.vaultRoot,
     {
@@ -199,6 +210,9 @@ export async function completeHostedExecutionAfterCommit(input: {
     component: "runtime",
     dispatch: input.dispatch,
     details: {
+      assistantDeliveryEffectCount: String(
+        input.committedExecution.committedAssistantDeliveryEffects.length,
+      ),
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
     },
     message: "Hosted runtime draining committed side effects.",
@@ -221,6 +235,9 @@ export async function completeHostedExecutionAfterCommit(input: {
     component: "runtime",
     dispatch: input.dispatch,
     details: {
+      assistantDeliveryOutcomeSummary: summarizeHostedAssistantDeliveryOutcomes(
+        assistantDeliveryOutcomes,
+      ),
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
       sideEffectsDrainLatencyMs: Date.now() - sideEffectsStartedAtMs,
     },
@@ -322,4 +339,23 @@ function computeHostedRunElapsedMs(
   }
 
   return Math.max(0, Date.now() - startedAtMs);
+}
+
+function summarizeHostedAssistantDeliveryOutcomes(
+  outcomes: ReadonlyArray<{ deliveryChannel: string | null; deliveryStatus: string }>,
+): string {
+  if (outcomes.length === 0) {
+    return "none";
+  }
+
+  const counts = new Map<string, number>();
+  for (const outcome of outcomes) {
+    const key = `${outcome.deliveryChannel ?? "unknown"}:${outcome.deliveryStatus}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, count]) => `${key}=${count}`)
+    .join(",");
 }

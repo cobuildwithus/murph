@@ -73,6 +73,19 @@ function createTelegramDispatch() {
   });
 }
 
+function createTelegramDispatchWithTarget(threadId: string) {
+  return buildHostedExecutionTelegramMessageReceivedDispatch({
+    eventId: "evt_telegram_typing",
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    telegramMessage: {
+      messageId: "tg_message_123",
+      schema: "murph.hosted-telegram-message.v1",
+      threadId,
+    },
+    userId: "member_123",
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.parseLinqWebhookEvent.mockReturnValue({
@@ -207,6 +220,42 @@ describe("hosted runtime typing helpers", () => {
     );
   });
 
+  it("logs a null elapsed time when the hosted run startedAt is invalid", async () => {
+    const indicator = startHostedDispatchTypingIndicator({
+      dispatch: createLinqDispatch(),
+      run: {
+        attempt: 1,
+        runId: "run_invalid_started_at",
+        startedAt: "not-a-real-timestamp",
+      },
+      runtimeEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+    });
+    if (!indicator) {
+      throw new Error("Expected a Linq typing indicator.");
+    }
+
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "runtime",
+          details: expect.objectContaining({
+            chatIdPresent: true,
+            operation: "typing_start",
+            provider: "linq",
+            runElapsedMs: null,
+            startLatencyMs: expect.any(Number),
+          }),
+          message: "Hosted Linq typing indicator started.",
+          phase: "dispatch.running",
+        }),
+      );
+    });
+
+    await indicator.stop();
+  });
+
   it("stops an in-flight Telegram typing indicator once even when stop is requested twice", async () => {
     const stopHandle = vi.fn(async () => {});
     let resolveHandle!: (value: { stop(): Promise<void> }) => void;
@@ -244,7 +293,139 @@ describe("hosted runtime typing helpers", () => {
         },
       },
     );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          provider: "telegram",
+          targetBusinessConnectionPresent: false,
+          targetDirectMessagesTopicPresent: false,
+          targetMessageThreadPresent: false,
+          targetParseable: true,
+        }),
+        message: "Hosted Telegram typing indicator requested.",
+        phase: "dispatch.running",
+      }),
+    );
     expect(stopHandle).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs fallback target details when the Telegram thread target is not parseable", async () => {
+    const dispatch = createTelegramDispatch();
+    if (dispatch.event.kind !== "telegram.message.received") {
+      throw new Error("Expected a Telegram message dispatch.");
+    }
+    dispatch.event.telegramMessage.threadId = "123:business::dm-topic:9";
+
+    const indicator = startHostedDispatchTypingIndicator({
+      dispatch,
+      run: null,
+      runtimeEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    });
+    if (!indicator) {
+      throw new Error("Expected a Telegram typing indicator.");
+    }
+
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "runtime",
+          details: {
+            provider: "telegram",
+            targetBusinessConnectionPresent: true,
+            targetDirectMessagesTopicPresent: true,
+            targetMessageThreadPresent: false,
+            targetParseable: false,
+          },
+          message: "Hosted Telegram typing indicator requested.",
+          phase: "dispatch.running",
+        }),
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.startTelegramTypingSession).toHaveBeenCalledWith(
+        {
+          target: "123:business::dm-topic:9",
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: "telegram-token",
+          },
+        },
+      );
+    });
+
+    await indicator.stop();
+  });
+
+  it("logs canonical Telegram target details for business direct-message topics", async () => {
+    const indicator = startHostedDispatchTypingIndicator({
+      dispatch: createTelegramDispatchWithTarget("-1001234567890:business:biz-42:dm-topic:9"),
+      run: null,
+      runtimeEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    });
+    if (!indicator) {
+      throw new Error("Expected a Telegram typing indicator.");
+    }
+
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "runtime",
+          details: expect.objectContaining({
+            provider: "telegram",
+            targetBusinessConnectionPresent: true,
+            targetDirectMessagesTopicPresent: true,
+            targetMessageThreadPresent: false,
+            targetParseable: true,
+          }),
+          message: "Hosted Telegram typing indicator requested.",
+          phase: "dispatch.running",
+        }),
+      );
+    });
+
+    await indicator.stop();
+  });
+
+  it("carries Telegram target parse diagnostics into start failures", async () => {
+    const startError = new Error("telegram typing rejected");
+    mocks.startTelegramTypingSession.mockRejectedValue(startError);
+
+    const indicator = startHostedDispatchTypingIndicator({
+      dispatch: createTelegramDispatchWithTarget("123:topic:abc"),
+      run: null,
+      runtimeEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    });
+    if (!indicator) {
+      throw new Error("Expected a Telegram typing indicator.");
+    }
+
+    await indicator.stop();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          provider: "telegram",
+          targetBusinessConnectionPresent: false,
+          targetDirectMessagesTopicPresent: false,
+          targetMessageThreadPresent: true,
+          targetParseable: false,
+        }),
+        error: startError,
+        level: "warn",
+        message: "Hosted Telegram typing indicator could not be started.",
+        phase: "dispatch.running",
+      }),
+    );
   });
 
   it("swallows async typing stop failures and logs a warning", async () => {

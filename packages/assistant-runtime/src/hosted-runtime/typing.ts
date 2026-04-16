@@ -6,6 +6,9 @@ import {
   parseLinqWebhookEvent,
 } from "@murphai/messaging-ingress/linq-webhook";
 import {
+  parseTelegramThreadTarget,
+} from "@murphai/messaging-ingress/telegram-webhook";
+import {
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
 } from "@murphai/operator-config/linq-runtime";
@@ -151,13 +154,25 @@ function startHostedTelegramDispatchTypingIndicator(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): HostedDispatchTypingIndicator | null {
+  const target = input.dispatch.event.telegramMessage.threadId;
+  const startLogDetails = buildHostedTelegramTypingLogDetails(target);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: startLogDetails,
+    dispatch: input.dispatch,
+    message: "Hosted Telegram typing indicator requested.",
+    phase: "dispatch.running",
+    run: input.run,
+  });
+
   return createAsyncHostedTypingIndicator({
     channelLabel: "Telegram",
     dispatch: input.dispatch,
     run: input.run,
+    startLogDetails,
     start: () => startTelegramTypingSession(
       {
-        target: input.dispatch.event.telegramMessage.threadId,
+        target,
       },
       {
         env: input.runtimeEnv as NodeJS.ProcessEnv,
@@ -304,4 +319,39 @@ function isHostedTelegramMessageReceivedDispatch(
   >;
 } {
   return dispatch.event.kind === "telegram.message.received";
+}
+
+function buildHostedTelegramTypingLogDetails(target: string): Record<string, boolean | string> {
+  const parsedTarget = parseHostedTelegramTypingTarget(target);
+  return {
+    provider: "telegram",
+    targetBusinessConnectionPresent: parsedTarget.businessConnectionPresent,
+    targetDirectMessagesTopicPresent: parsedTarget.directMessagesTopicPresent,
+    targetMessageThreadPresent: parsedTarget.messageThreadPresent,
+    targetParseable: parsedTarget.parseable,
+  };
+}
+
+function parseHostedTelegramTypingTarget(target: string): {
+  businessConnectionPresent: boolean;
+  directMessagesTopicPresent: boolean;
+  messageThreadPresent: boolean;
+  parseable: boolean;
+} {
+  const parsedTarget = parseTelegramThreadTarget(target);
+  if (!parsedTarget) {
+    return {
+      businessConnectionPresent: target.includes(":business:"),
+      directMessagesTopicPresent: target.includes(":dm-topic:"),
+      messageThreadPresent: target.includes(":topic:"),
+      parseable: false,
+    };
+  }
+
+  return {
+    businessConnectionPresent: parsedTarget.businessConnectionId != null,
+    directMessagesTopicPresent: parsedTarget.directMessagesTopicId != null,
+    messageThreadPresent: parsedTarget.messageThreadId != null,
+    parseable: true,
+  };
 }
