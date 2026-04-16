@@ -302,6 +302,7 @@ export async function main(): Promise<void> {
         "",
       ].join("\n"),
     );
+    emitReadyToken(process.env.MURPH_DEV_READY_TOKEN);
 
     const exited = await waitForFirstChildExit(children);
     await stopChildren("SIGTERM");
@@ -327,6 +328,15 @@ export async function main(): Promise<void> {
       await rm(tempDir, { force: true, recursive: true });
     }
   }
+}
+
+function emitReadyToken(token: string | undefined): void {
+  const normalized = token?.trim();
+  if (!normalized) {
+    return;
+  }
+
+  process.stdout.write(`__MURPH_HOSTED_LOCAL_READY__ ${normalized}\n`);
 }
 
 function resolveHostedLocalTempDir(
