@@ -108,6 +108,7 @@ export interface AssistantChannelAdapter {
   supportsIdempotencyKey: boolean
   send: (
     input: {
+      actorId: string | null
       bindingDelivery: AssistantBindingDelivery | null
       explicitTarget: string | null
       idempotencyKey?: string | null
@@ -133,6 +134,7 @@ export interface AssistantChannelAdapterSpec {
   }) => Promise<AssistantChannelActivityHandle | null | void>
   supportsIdempotencyKey: boolean
   sendMessage: (input: {
+    actorId: string | null
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies
     idempotencyKey?: string | null

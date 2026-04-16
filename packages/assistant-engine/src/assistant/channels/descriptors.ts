@@ -2,6 +2,8 @@ import {
   resolveAgentmailApiKey,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  type LinqFetch,
+  probeLinqApi,
   resolveLinqApiToken,
   resolveLinqWebhookSecret,
 } from '@murphai/operator-config/linq-runtime'
@@ -15,6 +17,7 @@ import {
   readDeliveredProviderThreadId,
   readDeliveredTarget,
 } from './helpers.js'
+import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry-policy.js'
 import {
   sendEmailMessage,
   sendLinqMessage,
@@ -24,6 +27,7 @@ import {
 } from './runtime.js'
 import type {
   AssistantChannelAdapter,
+  AssistantChannelDependencies,
   AssistantChannelName,
 } from './types.js'
 
@@ -81,17 +85,36 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
+  async sendMessage({ actorId, candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
     const send = dependencies.sendLinq ?? sendLinqMessage
-    const delivered = await send({
-      idempotencyKey: idempotencyKey ?? null,
-      target: candidate.target,
-      message,
-      replyToMessageId: replyToMessageId ?? null,
-    })
+    let delivered
+    try {
+      delivered = await send({
+        idempotencyKey: idempotencyKey ?? null,
+        target: candidate.target,
+        message,
+        replyToMessageId: replyToMessageId ?? null,
+      })
+    } catch (error) {
+      const recovered = await maybeRecoverMissingLinqDirectThread({
+        actorId,
+        candidate,
+        dependencies,
+        error,
+        idempotencyKey,
+        message,
+        replyToMessageId,
+      })
+      if (!recovered) {
+        throw error
+      }
+      delivered = recovered
+    }
 
     return {
+      target: readDeliveredTarget(delivered) ?? candidate.target,
       providerMessageId: readDeliveredProviderMessageId(delivered),
+      providerThreadId: readDeliveredProviderThreadId(delivered),
     }
   },
 })
@@ -145,3 +168,110 @@ export const ASSISTANT_CHANNEL_ADAPTERS: Readonly<Record<
   linq: LINQ_CHANNEL_ADAPTER,
   email: EMAIL_CHANNEL_ADAPTER,
 })
+
+async function maybeRecoverMissingLinqDirectThread(input: {
+  actorId: string | null
+  candidate: { kind: string; target: string }
+  dependencies: AssistantChannelDependencies
+  error: unknown
+  idempotencyKey?: string | null
+  message: string
+  replyToMessageId?: string | null
+}): Promise<
+  | {
+      providerMessageId?: string | null
+      providerThreadId?: string | null
+      target?: string | null
+    }
+  | null
+> {
+  if (
+    !looksLikeMissingLinqChatError(input.error)
+    || (input.candidate.kind !== 'thread' && input.candidate.kind !== 'explicit')
+  ) {
+    return null
+  }
+
+  const recipient = normalizeDirectLinqRecipient(input.actorId)
+  if (!recipient) {
+    return null
+  }
+
+  const senders = await resolveLinqSenderPhoneNumbers({
+    env: process.env,
+  })
+  if (senders.length === 0) {
+    return null
+  }
+
+  const send = input.dependencies.sendLinq ?? sendLinqMessage
+  for (const sender of senders) {
+    let delivered
+    try {
+      delivered = await send({
+        fromPhoneNumber: sender,
+        idempotencyKey: input.idempotencyKey ?? null,
+        target: recipient,
+        targetKind: 'participant',
+        message: input.message,
+        replyToMessageId: input.replyToMessageId ?? null,
+      })
+    } catch {
+      continue
+    }
+    if (!delivered || typeof delivered !== 'object') {
+      continue
+    }
+
+    const target =
+      readDeliveredTarget(delivered) ??
+      readDeliveredProviderThreadId(delivered)
+    if (!target) {
+      throw createAssistantDeliveryConfirmationPendingError(
+        new VaultCliError(
+          'ASSISTANT_LINQ_CHAT_ID_REQUIRED',
+          'Recovered Linq direct delivery did not return a chat id.',
+        ),
+      )
+    }
+
+    return {
+      ...delivered,
+      providerThreadId: readDeliveredProviderThreadId(delivered) ?? target,
+      target,
+    }
+  }
+
+  return null
+}
+
+function looksLikeMissingLinqChatError(error: unknown): error is VaultCliError {
+  return error instanceof VaultCliError
+    && error.code === 'LINQ_API_REQUEST_FAILED'
+    && error.context?.provider === 'linq'
+    && error.context?.status === 404
+    && typeof error.message === 'string'
+    && error.message.includes('Chat not found')
+}
+
+function normalizeDirectLinqRecipient(value: string | null): string | null {
+  const recipient = value?.trim() ?? ''
+  return recipient.startsWith('+') ? recipient : null
+}
+
+async function resolveLinqSenderPhoneNumbers(input: {
+  env: NodeJS.ProcessEnv
+  fetchImplementation?: LinqFetch
+}): Promise<string[]> {
+  try {
+    const probed = await probeLinqApi({
+      env: input.env,
+      fetchImplementation: input.fetchImplementation,
+    })
+    return probed.phoneNumbers
+      .map((phoneNumber) => phoneNumber?.trim() ?? '')
+      .filter((phoneNumber) => phoneNumber.startsWith('+'))
+  } catch {
+    return []
+  }
+}

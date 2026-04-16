@@ -68,6 +68,7 @@ export function createAssistantChannelAdapter(
       )
       const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
       const delivered = await spec.sendMessage({
+        actorId: normalizeOptionalText(input.actorId),
         candidate,
         dependencies,
         idempotencyKey,

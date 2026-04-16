@@ -296,6 +296,11 @@ test("hosted dispatch context still requires member activation bootstrap before 
       );
 
       assert.deepEqual(bootstrapResult, {
+        assistantActiveProfileId: null,
+        assistantActiveProfileManagedBy: null,
+        assistantActiveProfileReady: false,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: false,
         assistantConfigStatus: "missing",
         assistantConfigured: false,
         assistantProvider: null,
@@ -340,6 +345,11 @@ test("hosted member activation enables managed Linq auto-reply when first contac
       );
 
       assert.deepEqual(bootstrapResult, {
+        assistantActiveProfileId: null,
+        assistantActiveProfileManagedBy: null,
+        assistantActiveProfileReady: true,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: true,
         assistantConfigStatus: "hosted-env",
         assistantConfigured: true,
         assistantProvider: "openai-compatible",
