@@ -25,6 +25,11 @@ const waitForFirstChildExit = vi.fn<() => Promise<NamedChildProcess>>();
 const waitForHealthyHttpEndpoint = vi.fn(async () => {});
 const cleanupHostedRunnerContainers = vi.fn(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
+const spawnSync = vi.fn(() => ({
+  error: undefined,
+  status: 0,
+  stdout: "",
+}));
 
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn(async () => {}),
@@ -33,6 +38,10 @@ vi.mock("node:fs/promises", () => ({
   rm: vi.fn(async () => {}),
   symlink: vi.fn(async () => {}),
   writeFile: vi.fn(async () => {}),
+}));
+
+vi.mock("node:child_process", () => ({
+  spawnSync,
 }));
 
 vi.mock("./config.ts", () => ({
@@ -162,6 +171,68 @@ describe("hosted local dev main", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(2);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the Docker bridge gateway as the runner host alias on Linux", async () => {
+    const createChild = (input: {
+      exitCode: number | null;
+      pid: number;
+    }): HostedLocalChildProcess => ({
+      exitCode: input.exitCode,
+      kill: vi.fn(() => true),
+      once: vi.fn(function once(this: HostedLocalChildProcess) {
+        return this;
+      }),
+      pid: input.pid,
+    });
+    const cloudflareChild = {
+      child: createChild({ exitCode: null, pid: 151 }),
+      name: "cloudflare" as const,
+    } satisfies NamedChildProcess;
+    const webChild = {
+      child: createChild({ exitCode: 0, pid: 152 }),
+      name: "web" as const,
+    } satisfies NamedChildProcess;
+
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(webChild);
+    waitForFirstChildExit.mockResolvedValue(webChild);
+    spawnSync.mockReturnValueOnce({
+      error: undefined,
+      status: 0,
+      stdout: "172.17.0.1\n",
+    });
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+
+    const { main } = await import("./main.ts");
+
+    await main();
+
+    expect(spawnSync).toHaveBeenCalledWith(
+      "docker",
+      [
+        "network",
+        "inspect",
+        "bridge",
+        "--format",
+        "{{range .IPAM.Config}}{{.Gateway}}{{end}}",
+      ],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "cloudflare",
+      "pnpm",
+      expect.any(Array),
+      expect.objectContaining({
+        HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://172.17.0.1:8787",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+      }),
+    );
+    platformSpy.mockRestore();
   });
 
   it("can start only the worker lane for focused hosted runtime debugging", async () => {

@@ -193,6 +193,7 @@ export function buildHostedRunnerContainerEnv(
 }
 
 const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
+  "HOSTED_ASSISTANT_BASE_URL",
   "LINQ_API_BASE_URL",
   "TELEGRAM_API_BASE_URL",
 ]);

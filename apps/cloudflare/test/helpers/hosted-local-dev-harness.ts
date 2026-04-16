@@ -45,8 +45,9 @@ export async function startHostedLocalDevHarness(input: {
   streamLogs?: boolean;
 }): Promise<HostedLocalDevHarness> {
   const config = resolveHostedLocalDevConfig(input.env);
-  const workerBaseUrl = `${config.workerProtocol}://${config.workerHost}:${config.workerPort}`;
-  const webBaseUrl = `http://${config.webHost}:${config.webPort}`;
+  const workerBaseUrl =
+    `${config.workerProtocol}://${resolveLocalHarnessBaseHost(config.workerHost)}:${config.workerPort}`;
+  const webBaseUrl = `http://${resolveLocalHarnessBaseHost(config.webHost)}:${config.webPort}`;
   const statusPath = input.statusPath ?? ((userId: string) => buildCloudflareHostedControlUserStatusPath(userId));
   const statusHeaders = input.statusHeaders ?? (() => ({}));
   const streamLogs = input.streamLogs === true;
@@ -250,6 +251,10 @@ export async function startHostedLocalDevHarness(input: {
       ], stdout, stderr));
     }
   }
+}
+
+function resolveLocalHarnessBaseHost(host: string): string {
+  return host === "0.0.0.0" ? "127.0.0.1" : host;
 }
 
 async function readHostedUserStatus(input: {

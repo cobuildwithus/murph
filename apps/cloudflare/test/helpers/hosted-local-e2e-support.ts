@@ -156,6 +156,13 @@ export function requireBoundTcpPort(
   return address.port;
 }
 
+export function buildHostLoopbackStubBaseUrl(
+  server: ReturnType<typeof createServer>,
+  label: string,
+): string {
+  return `http://127.0.0.1:${requireBoundTcpPort(server, label)}`;
+}
+
 export async function reserveLocalTcpPort(): Promise<number> {
   const server = createNetServer();
 

@@ -20,8 +20,8 @@ import {
   type HostedLocalOidcFixture,
 } from "./helpers/hosted-local-oidc-support.js";
 import {
+  buildHostLoopbackStubBaseUrl,
   readRequestBody,
-  requireBoundTcpPort,
   reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv,
   shouldUseAssistantProviderStub,
@@ -73,8 +73,7 @@ describe("hosted local Linq first-contact e2e", () => {
     observedLinqChatIdsByRecipient.clear();
     observedAssistantProviderBodies.length = 0;
     linqServer = await startLinqStubServer();
-    linqServerBaseUrl =
-      `http://host.docker.internal:${requireBoundTcpPort(linqServer, "Linq stub")}`;
+    linqServerBaseUrl = buildHostLoopbackStubBaseUrl(linqServer, "Linq stub");
     logDebug("started Linq stub server", { linqServerBaseUrl });
     if (useAssistantProviderStub) {
       assistantProviderServer = await startAssistantProviderStubServer({
@@ -84,7 +83,7 @@ describe("hosted local Linq first-contact e2e", () => {
         resolveMessageText: resolveHostedAssistantReplyText,
       });
       assistantProviderBaseUrl =
-        `http://host.docker.internal:${requireBoundTcpPort(assistantProviderServer, "assistant provider stub")}/v1`;
+        `${buildHostLoopbackStubBaseUrl(assistantProviderServer, "assistant provider stub")}/v1`;
       logDebug("started assistant provider stub server", {
         assistantProviderBaseUrl,
       });
@@ -95,6 +94,7 @@ describe("hosted local Linq first-contact e2e", () => {
       useAssistantProviderStub ? assistantProviderBaseUrl : null,
       "Local hosted Linq e2e",
     );
+    const workerListenHost = resolveHostedLocalWorkerListenHost();
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
     const runtimeEnv: NodeJS.ProcessEnv = {
@@ -111,6 +111,7 @@ describe("hosted local Linq first-contact e2e", () => {
       MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
       MURPH_DEV_SKIP_WEB: "1",
       MURPH_DEV_WEB_PORT: String(webPort),
+      ...(workerListenHost ? { MURPH_DEV_WORKER_HOST: workerListenHost } : {}),
       MURPH_DEV_WORKER_PORT: String(workerPort),
       NEXT_DIST_DIR_MODE: "smoke",
       VERCEL_OIDC_TOKEN: requireOidcFixture().token,
@@ -824,6 +825,10 @@ function mergeRunnerEnvProfiles(
   );
   profiles.add(requiredProfile);
   return Array.from(profiles).join(",");
+}
+
+function resolveHostedLocalWorkerListenHost(): "0.0.0.0" | undefined {
+  return process.platform === "linux" ? "0.0.0.0" : undefined;
 }
 
 function resolveHostedAssistantReplyText(body: string): string {

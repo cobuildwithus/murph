@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { spawnSync } from "node:child_process";
 
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
@@ -375,7 +376,35 @@ function resolveLocalRunnerHostAlias(env: NodeJS.ProcessEnv): string | null {
     return configured;
   }
 
-  return process.platform === "linux" ? null : "host.docker.internal";
+  if (process.platform !== "linux") {
+    return "host.docker.internal";
+  }
+
+  return readLinuxDockerBridgeGatewayHost();
+}
+
+function readLinuxDockerBridgeGatewayHost(): string | null {
+  const result = spawnSync(
+    "docker",
+    [
+      "network",
+      "inspect",
+      "bridge",
+      "--format",
+      "{{range .IPAM.Config}}{{.Gateway}}{{end}}",
+    ],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+
+  const gateway = result.stdout.trim();
+  return gateway.length > 0 ? gateway : null;
 }
 
 function resolveWranglerDebugArgs(env: NodeJS.ProcessEnv): string[] {
