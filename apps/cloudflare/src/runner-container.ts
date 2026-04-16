@@ -392,8 +392,18 @@ export class RunnerContainer extends Container {
         return;
       }
 
-      await this.destroy();
+      let destroyError: unknown = null;
+      try {
+        await this.destroy();
+      } catch (error) {
+        destroyError = error;
+      }
+
       await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
+
+      if (destroyError) {
+        return;
+      }
     } catch {
       if (input.failClosed) {
         throw new Error("Hosted runner container failed to destroy cleanly.");
