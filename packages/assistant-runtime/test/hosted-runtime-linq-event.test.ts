@@ -119,6 +119,60 @@ describe("ingestHostedLinqMessage", () => {
       accountId: "15551234567",
     });
   });
+
+  it("preserves the raw Linq message id for hosted reply threading", async () => {
+    const dispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+      eventId: "evt_linq_raw_reply_id",
+      linqEvent: {
+        event_type: "message.received",
+        message: {
+          id: "hbid:linq.message:v1:opaque",
+        },
+      },
+      linqMessageId: "msg_real_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "15551234567",
+      userId: "member_123",
+    }) as HostedLinqDispatch;
+    if (dispatch.event.kind !== "linq.message.received") {
+      throw new Error("Expected Linq message dispatch.");
+    }
+
+    const capture = {
+      accountId: "raw-recipient-phone",
+      externalId: "linq:hbid:linq.message:v1:opaque",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      raw: {},
+      source: "linq",
+      text: "hello",
+      thread: {
+        id: "chat_123",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      attachments: [],
+    };
+    const processCapture = vi.fn(async () => {});
+
+    mocks.parseLinqWebhookEvent.mockReturnValue({ parsed: true });
+    mocks.normalizeLinqWebhookEvent.mockResolvedValue(capture);
+    mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
+      processCapture,
+    }));
+
+    await ingestHostedLinqMessage("/tmp/assistant-runtime-linq", {
+      ...dispatch,
+      event: dispatch.event,
+    });
+
+    expect(processCapture).toHaveBeenCalledWith({
+      ...capture,
+      accountId: "15551234567",
+      externalId: "linq:msg_real_123",
+    });
+  });
 });
 
 describe("normalizeHostedLinqAttachmentUrl", () => {
