@@ -72,6 +72,12 @@ async function runAssistantFirstContactWelcomeLocal(
       const firstContactStateDocIds = resolveAssistantFirstContactStateDocIdsForSession(
         resolved.session,
       )
+      const firstContactDeliveryBinding = buildFirstContactDeliveryBinding(input)
+      const shouldMaterializeHomeThread = (
+        firstContactDeliveryBinding !== null &&
+        resolved.session.binding.threadId === null &&
+        resolved.session.binding.delivery?.kind !== 'thread'
+      )
 
       if (await hasAssistantSeenFirstContact({
         docIds: firstContactStateDocIds,
@@ -143,7 +149,10 @@ async function runAssistantFirstContactWelcomeLocal(
           turnId,
         })
       const outboxInput = {
-        bindingDelivery: resolved.session.binding.delivery,
+        bindingDelivery:
+          shouldMaterializeHomeThread
+            ? firstContactDeliveryBinding
+            : resolved.session.binding.delivery,
         channel: resolved.session.binding.channel,
         dedupeToken: 'assistant-first-contact-welcome',
         deliveryIdempotencyKey: buildAssistantFirstContactWelcomeDeliveryIdempotencyKey(
@@ -153,7 +162,10 @@ async function runAssistantFirstContactWelcomeLocal(
         message: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
         sessionId: resolved.session.sessionId,
         threadId: resolved.session.binding.threadId,
-        threadIsDirect: resolved.session.binding.threadIsDirect,
+        threadIsDirect:
+          shouldMaterializeHomeThread
+            ? true
+            : resolved.session.binding.threadIsDirect,
         turnId: receipt.turnId,
       }
 
@@ -254,6 +266,22 @@ async function runAssistantFirstContactWelcomeLocal(
       }
     },
   })
+}
+
+function buildFirstContactDeliveryBinding(
+  input: AssistantFirstContactWelcomeInput,
+): NonNullable<AssistantSession['binding']['delivery']> | null {
+  if (
+    input.kind !== 'linq-materialize-home-thread' ||
+    !input.toPhoneNumber?.trim()
+  ) {
+    return null
+  }
+
+  return {
+    kind: 'participant',
+    target: input.toPhoneNumber.trim(),
+  }
 }
 
 function buildAssistantFirstContactWelcomeTurnId(sessionId: string): string {
