@@ -509,6 +509,38 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("accepts explicit destroy races when the shell is already stopping and still settles", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopping" | "stopped" = "running";
+      const destroy = vi.fn(async () => {
+        status = "stopping";
+        setTimeout(() => {
+          status = "stopped";
+        }, 250);
+        throw new Error("container is already stopping");
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status,
+      }));
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance();
+      await vi.advanceTimersByTimeAsync(300);
+
+      await expect(destroyPromise).resolves.toBeUndefined();
+      expect(destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails closed when explicit destroy throws", async () => {
     const destroy = vi.fn(async () => {
       throw new Error("destroy failed");
@@ -555,6 +587,77 @@ describe("RunnerContainer", () => {
     })).rejects.toThrow("Hosted runner container failed to destroy cleanly.");
     expect(destroy.mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("restarts the warm shell when destroy races with an already-stopping shell", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopping" | "stopped" = "stopped";
+      let healthChecks = 0;
+      const destroy = vi.fn(async () => {
+        status = "stopping";
+        setTimeout(() => {
+          status = "stopped";
+        }, 250);
+        throw new Error("container is already stopping");
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status,
+      }));
+      const startAndWaitForPortsMock = vi.fn(async () => {
+        status = "running";
+      });
+      const { container, startAndWaitForPorts } = createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            healthChecks += 1;
+            return new Response(JSON.stringify({ error: "stale shell" }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 503,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+        destroy,
+        getState,
+        startAndWaitForPorts: startAndWaitForPortsMock,
+      });
+
+      await expect(container.invoke({
+        job: {
+          request: createRunnerRequest("evt_before_destroy_race"),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+
+      const secondInvokePromise = container.invoke({
+        job: {
+          request: createRunnerRequest("evt_after_destroy_race"),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      });
+      await vi.advanceTimersByTimeAsync(300);
+
+      await expect(secondInvokePromise).resolves.toEqual(createRunnerResult());
+      expect(healthChecks).toBe(1);
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("maps the configured idle TTL onto the container sleepAfter lifecycle", () => {
