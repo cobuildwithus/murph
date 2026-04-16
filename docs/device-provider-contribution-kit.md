@@ -223,6 +223,8 @@ Do not add a second bespoke registry. Both packages already share the keyed regi
 ### 6. Decide whether hosted or onboarding surfaces need the provider now
 
 If the provider should also work in hosted settings or control-plane surfaces, wire it into the relevant `apps/web` device-sync helpers.
+Reuse the shared configured-provider assembly helpers from `@murphai/device-syncd/config`
+instead of adding a second hosted-only provider config object or registration list.
 
 If the provider should appear in local onboarding or setup flows, update the CLI setup surfaces.
 
