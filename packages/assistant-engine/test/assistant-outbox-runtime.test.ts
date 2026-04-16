@@ -409,7 +409,7 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('keeps materialized Linq first-contact intents retryable when persisting the upgraded session fails', async () => {
+  it('keeps materialized Linq first-contact intents retryable without forgetting the resolved chat binding', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-first-contact-persist-failure-',
     )
@@ -500,6 +500,24 @@ describe('assistant outbox runtime', () => {
       })
       expect(persistDeliveredIntent).not.toHaveBeenCalled()
       await expect(
+        readAssistantOutboxIntent(vaultRoot, queued.intentId),
+      ).resolves.toMatchObject({
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'linq-chat-created',
+        },
+        delivery: {
+          channel: 'linq',
+          providerMessageId: 'linq-message-created',
+          providerThreadId: 'linq-chat-created',
+          target: 'linq-chat-created',
+          targetKind: 'thread',
+        },
+        deliveryConfirmationPending: true,
+        status: 'retryable',
+        threadId: 'linq-chat-created',
+      })
+      await expect(
         getAssistantSession(vaultRoot, 'session-linq-first-contact-persist-failure'),
       ).resolves.toMatchObject({
         binding: {
@@ -509,6 +527,159 @@ describe('assistant outbox runtime', () => {
           },
           threadId: null,
         },
+      })
+
+      sendLinq.mockClear()
+      const reconciled = await dispatchAssistantOutboxIntent({
+        dependencies: {
+          sendLinq,
+        },
+        dispatchHooks: {
+          resolveDeliveredIntent: async ({ intent }) => intent.delivery,
+        },
+        force: true,
+        intentId: queued.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(sendLinq).not.toHaveBeenCalled()
+      expect(reconciled.intent.status).toBe('sent')
+      expect(reconciled.intent.delivery).toMatchObject({
+        providerThreadId: 'linq-chat-created',
+        target: 'linq-chat-created',
+      })
+    } finally {
+      saveAssistantSessionSpy.mockRestore()
+    }
+  })
+
+  it('reconciles materialized Linq first-contact retries locally without sending again', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-first-contact-local-reconcile-',
+    )
+
+    await saveAssistantSession(
+      vaultRoot,
+      createAssistantSession({
+        binding: {
+          actorId: '+15550101',
+          channel: 'linq',
+          conversationKey:
+            'channel:linq|identity:phone_lookup_local|actor:%2B15550101',
+          delivery: {
+            kind: 'participant',
+            target: '+15550101',
+          },
+          identityId: 'phone_lookup_local',
+          threadId: null,
+          threadIsDirect: true,
+        },
+        sessionId: 'session-linq-first-contact-local-reconcile',
+      }),
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
+        fromPhoneNumber: '+15550100',
+      }),
+      prompt: 'welcome',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-linq-first-contact-local-reconcile',
+      turnId: 'turn-linq-first-contact-local-reconcile',
+      vault: vaultRoot,
+    })
+    const queued = await createAssistantOutboxIntent({
+      actorId: '+15550101',
+      bindingDelivery: {
+        kind: 'participant',
+        target: '+15550101',
+      },
+      channel: 'linq',
+      deliveryIdempotencyKey: 'idem-linq-first-contact-local-reconcile',
+      identityId: 'phone_lookup_local',
+      message: 'welcome',
+      sessionId: 'session-linq-first-contact-local-reconcile',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-linq-first-contact-local-reconcile',
+      vault: vaultRoot,
+    })
+    const originalSaveAssistantSession = assistantStore.saveAssistantSession
+    const saveAssistantSessionSpy = vi
+      .spyOn(assistantStore, 'saveAssistantSession')
+      .mockImplementation(async (...args) => {
+        const [, session] = args
+        if (
+          session.sessionId === 'session-linq-first-contact-local-reconcile' &&
+          session.binding.threadId === 'linq-chat-created-local'
+        ) {
+          throw new Error('session persist failed')
+        }
+        return await originalSaveAssistantSession(...args)
+      })
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-created-local',
+      providerThreadId: 'linq-chat-created-local',
+      target: 'linq-chat-created-local',
+    })
+
+    try {
+      const dispatched = await dispatchAssistantOutboxIntent({
+        dependencies: {
+          sendLinq,
+        },
+        force: true,
+        intentId: queued.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(sendLinq).toHaveBeenCalledTimes(1)
+      expect(dispatched.intent.status).toBe('retryable')
+      expect(dispatched.intent.deliveryConfirmationPending).toBe(true)
+      expect(dispatched.intent.delivery).toMatchObject({
+        providerMessageId: 'linq-message-created-local',
+        providerThreadId: 'linq-chat-created-local',
+        target: 'linq-chat-created-local',
+        targetKind: 'thread',
+      })
+      expect(dispatched.deliveryError).toMatchObject({
+        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      })
+      await expect(
+        readAssistantOutboxIntent(vaultRoot, queued.intentId),
+      ).resolves.toMatchObject({
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'linq-chat-created-local',
+        },
+        delivery: {
+          providerMessageId: 'linq-message-created-local',
+          providerThreadId: 'linq-chat-created-local',
+          target: 'linq-chat-created-local',
+          targetKind: 'thread',
+        },
+        deliveryConfirmationPending: true,
+        status: 'retryable',
+        threadId: 'linq-chat-created-local',
+      })
+
+      sendLinq.mockClear()
+      const reconciled = await dispatchAssistantOutboxIntent({
+        dependencies: {
+          sendLinq,
+        },
+        force: true,
+        intentId: queued.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(sendLinq).not.toHaveBeenCalled()
+      expect(reconciled.intent.status).toBe('sent')
+      expect(reconciled.intent.delivery).toMatchObject({
+        providerMessageId: 'linq-message-created-local',
+        providerThreadId: 'linq-chat-created-local',
+        target: 'linq-chat-created-local',
       })
     } finally {
       saveAssistantSessionSpy.mockRestore()
