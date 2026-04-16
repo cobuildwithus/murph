@@ -60,6 +60,7 @@ export default async function LandingPage() {
               <LandingAuthActions
                 authenticated={authenticated}
                 context="hero"
+                showSignIn={false}
                 signupLabel="See what works for your body"
               />
             </div>

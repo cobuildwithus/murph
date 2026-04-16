@@ -110,10 +110,12 @@ function getLandingAuthClasses(context: LandingAuthContext) {
 export function LandingAuthActions({
   authenticated,
   context,
+  showSignIn = true,
   signupLabel,
 }: {
   authenticated: boolean;
   context: LandingAuthContext;
+  showSignIn?: boolean;
   signupLabel: string;
 }) {
   const styles = getLandingAuthClasses(context);
@@ -139,13 +141,15 @@ export function LandingAuthActions({
         showLegalNotice
         title="Sign up for Murph"
       />
-      <LandingAuthDialogButton
-        buttonClassName={styles.signin}
-        buttonLabel="Sign in"
-        description="Use your phone number, email address, or Telegram to sign in."
-        intent="signin"
-        title="Sign in to Murph"
-      />
+      {showSignIn ? (
+        <LandingAuthDialogButton
+          buttonClassName={styles.signin}
+          buttonLabel="Sign in"
+          description="Use your phone number, email address, or Telegram to sign in."
+          intent="signin"
+          title="Sign in to Murph"
+        />
+      ) : null}
     </div>
   );
 }
