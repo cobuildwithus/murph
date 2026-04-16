@@ -138,6 +138,34 @@ function createFoodScheduleCommandConfig(services: VaultServices) {
   }
 }
 
+function createFoodUnscheduleCommandConfig(services: VaultServices) {
+  return {
+    args: z.object({
+      id: z.string().min(1).describe('Food id or slug to unschedule.'),
+    }),
+    description: 'Unschedule one remembered food from daily auto-log meal creation.',
+    hint: 'This clears the recurring auto-log setting and removes the scheduled assistant job while keeping the food record.',
+    options: withBaseOptions({}),
+    output: showResultSchema,
+    async run(context: {
+      args: {
+        id: string
+      }
+      options: {
+        vault: string
+        requestId?: string
+      }
+    }) {
+      return services.core.editFood({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        lookup: context.args.id,
+        clear: ['autoLogDaily'],
+      })
+    },
+  }
+}
+
 export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
   const food = createRegistryDocEntityGroup({
     commandName: 'food',
@@ -193,6 +221,10 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     },
   })
 
+  food.command('rename', createFoodRenameCommandConfig(services))
+  food.command('schedule', createFoodScheduleCommandConfig(services))
+  food.command('unschedule', createFoodUnscheduleCommandConfig(services))
+
   food.command('edit', createDirectEntityEditCommandDefinition({
     arg: {
       name: 'id',
@@ -226,9 +258,5 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       })
     },
   }))
-
-  food.command('rename', createFoodRenameCommandConfig(services))
-  food.command('schedule', createFoodScheduleCommandConfig(services))
-
   cli.command(food)
 }
