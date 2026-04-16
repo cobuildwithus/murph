@@ -102,7 +102,12 @@ function parseSubscriptionList(payload: unknown): StravaWebhookSubscription[] {
     return [parseSubscription(record)];
   }
 
-  return [];
+  throw deviceSyncError({
+    code: "STRAVA_WEBHOOK_SUBSCRIPTION_RESPONSE_INVALID",
+    message: "Strava webhook subscription list response did not include subscription data.",
+    retryable: false,
+    httpStatus: 502,
+  });
 }
 
 function sortSubscriptionsForRetention(

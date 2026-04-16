@@ -794,7 +794,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(consoleError).toHaveBeenCalledWith(
       "Failed to ensure hosted webhook admin upkeep.",
       expect.objectContaining({
-        callbackBaseUrlSource: "configured",
+        publicIngressBaseUrlSource: "configured",
         provider: "oura",
         reason: "connection-established",
         errorMessage: "sync upkeep failure",

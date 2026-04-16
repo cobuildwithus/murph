@@ -121,4 +121,80 @@ describe("Strava importer adapter", () => {
     );
     expect(payload.rawArtifacts?.[0]?.role).toContain("deletion:activity:1001");
   });
+
+  it("covers Strava fallback normalization paths and synthetic deletion ids", async () => {
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "strava",
+      snapshot: {
+        athlete: {
+          athlete_id: 77,
+          username: "fallback-athlete",
+        },
+        sourceWindow: {
+          windowKind: "resource",
+          resourceId: "activity-42",
+          resourceType: "activity",
+          windowEnd: "2026-04-16T00:00:00.000Z",
+          windowStart: "2026-04-15T00:00:00.000Z",
+        },
+        activities: [
+          {
+            name: "  ",
+            sportType: "Ride",
+            startDateLocal: "2026-04-15T07:00:00.000Z",
+            movingTime: 30,
+            distanceMeter: 250,
+            totalElevationGain: 12,
+            averageSpeed: 3.5,
+            maxSpeed: 5.1,
+            calories: 220,
+            trainer: 1,
+            commute: "false",
+            manual: "true",
+            private: 0,
+          },
+        ],
+        deletions: [
+          {
+            resourceType: "activity",
+            occurredAt: "2026-04-16T00:00:00.000Z",
+            event_type: "activity.deleted",
+          },
+        ],
+      },
+    });
+
+    expect(payload.accountId).toBe("77");
+    expect(payload.provenance?.sourceWindow).toMatchObject({
+      kind: "resource",
+      resourceId: "activity-42",
+      resourceType: "activity",
+    });
+
+    const sessionEvent = payload.events?.find((event) => event.kind === "activity_session");
+    expect(sessionEvent).toMatchObject({
+      title: "Strava Ride",
+      fields: expect.objectContaining({
+        trainer: true,
+        commute: false,
+        manual: true,
+        private: false,
+        totalElevationGainMeters: 12,
+      }),
+    });
+
+    const deletionEvent = payload.events?.find(
+      (event) => event.kind === "observation" && event.fields?.metric === "external-resource-deleted",
+    );
+    expect(deletionEvent?.externalRef?.resourceId).toMatch(/^deleted-/u);
+  });
+
+  it("rejects non-object Strava snapshots", async () => {
+    await expect(
+      prepareDeviceProviderSnapshotImport({
+        provider: "strava",
+        snapshot: [],
+      }),
+    ).rejects.toThrow(/Strava snapshot must be an object/u);
+  });
 });

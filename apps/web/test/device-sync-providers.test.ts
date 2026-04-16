@@ -20,6 +20,6 @@ describe("createHostedDeviceSyncRegistry", () => {
     const sharedProviders = createConfiguredDeviceSyncRegistry(env).list().map((provider) => provider.provider);
 
     expect(hostedProviders).toEqual(sharedProviders);
-    expect(hostedProviders).toEqual(["garmin", "whoop", "oura"]);
+    expect(hostedProviders).toEqual(["garmin", "oura", "whoop"]);
   });
 });
