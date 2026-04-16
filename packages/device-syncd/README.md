@@ -8,9 +8,12 @@ Murph's CLI can install, start, reuse, and stop this daemon for the selected vau
 
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
-The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook verification/dispatch. Hosted or alternate HTTP surfaces should import that seam from `@murphai/device-syncd/public-ingress`; the package root stays daemon-oriented. That shared ingress is the seam used by the current hosted Vercel control plane while keeping the local/tunneled callback flow alive.
+The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook preflight/dispatch. Hosted or alternate HTTP surfaces should import that seam from `@murphai/device-syncd/public-ingress`; the package root stays daemon-oriented. That shared ingress is the seam used by the current hosted Vercel control plane while keeping the local/tunneled callback flow alive.
 Daemon config readers and HTTP response helpers stay on `@murphai/device-syncd/config`
 and `@murphai/device-syncd/http` instead of leaking back through the shared ingress seam.
+Hosted surfaces should also reuse the configured-provider assembly helpers on
+`@murphai/device-syncd/config` instead of maintaining app-local provider config objects
+or registration lists.
 For non-daemon callers, `@murphai/device-syncd/client` is the canonical shared control-plane client surface for base-url/token resolution, loopback safety checks, and JSON request helpers inside this workspace or bundled public tarballs.
 
 What it does:
@@ -38,7 +41,7 @@ The shared ingress owns:
 - provider connect URL creation
 - OAuth state validation
 - OAuth callback completion
-- provider webhook verification/parsing
+- provider-owned webhook preflight plus webhook parsing
 - webhook dedupe and account lookup hooks
 
 It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
@@ -84,7 +87,6 @@ Common optional settings:
 - `DEVICE_SYNC_SESSION_TTL_MS`
 - `DEVICE_SYNC_WORKER_LEASE_MS`
 - `DEVICE_SYNC_PUBLIC_HOST` plus `DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
-- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the daemon to answer Oura's webhook verification challenge over `GET /webhooks/oura`
 
 Garmin settings:
 - `GARMIN_CLIENT_ID`
@@ -118,6 +120,7 @@ Oura settings:
 - `OURA_RECONCILE_DAYS`
 - `OURA_RECONCILE_INTERVAL_MS`
 - `OURA_REQUEST_TIMEOUT_MS`
+- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider to answer webhook preflight challenges and maintain Oura webhook subscriptions
 
 ## Run
 

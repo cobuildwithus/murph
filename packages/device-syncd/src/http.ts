@@ -15,12 +15,12 @@ import {
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
-import { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
+import { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "./types.ts";
 
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type { DeviceSyncError } from "./errors.ts";
-import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.ts";
+import type { DeviceSyncHttpConfig, DeviceSyncWebhookPreflightResponse, NodeServerHandle } from "./types.ts";
 import type { DeviceSyncService } from "./service.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES;
@@ -313,18 +313,26 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     pattern: /^\/webhooks\/([^/]+)$/u,
     paramNames: ["provider"],
     surface: "public",
-    handle({ response, service, url, config, params }) {
+    async handle({ request, response, service, url, params }) {
       const provider = params.provider ?? "";
-      sendJson(
-        response,
-        200,
-        resolveDeviceSyncWebhookVerificationResponse({
-          provider,
-          registry: service.registry,
-          url,
-          verificationToken: config?.ouraWebhookVerificationToken ?? null,
-        }),
-      );
+      const preflight = await resolveDeviceSyncWebhookPreflightResponse({
+        provider,
+        registry: service.registry,
+        method: request.method ?? "GET",
+        url,
+        headers: toFetchHeaders(request),
+        rawBody: Buffer.alloc(0),
+      });
+
+      if (preflight) {
+        sendWebhookPreflightResponse(response, preflight);
+        return;
+      }
+
+      sendJson(response, 200, {
+        ok: true,
+        provider,
+      });
     },
   }),
   createParameterizedRoute({
@@ -334,7 +342,23 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     surface: "public",
     async handle({ request, response, service, bodyLimitBytes, params }) {
       const rawBody = await readRequestBody(request, bodyLimitBytes);
-      const result = await service.handleWebhook(params.provider ?? "", toFetchHeaders(request), rawBody);
+      const provider = params.provider ?? "";
+      const headers = toFetchHeaders(request);
+      const preflight = await resolveDeviceSyncWebhookPreflightResponse({
+        provider,
+        registry: service.registry,
+        method: request.method ?? "POST",
+        url: new URL(request.url ?? "/", `${service.publicBaseUrl}/`),
+        headers,
+        rawBody,
+      });
+
+      if (preflight) {
+        sendWebhookPreflightResponse(response, preflight);
+        return;
+      }
+
+      const result = await service.handleWebhook(provider, headers, rawBody);
       sendJson(response, 202, result);
     },
   }),
@@ -739,6 +763,28 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.setHeader("Content-Type", "application/json; charset=utf-8");
   response.setHeader("Content-Length", Buffer.byteLength(body));
   response.end(body);
+}
+
+function sendWebhookPreflightResponse(
+  response: ServerResponse,
+  preflight: DeviceSyncWebhookPreflightResponse,
+): void {
+  for (const [key, value] of Object.entries(preflight.headers ?? {})) {
+    response.setHeader(key, value);
+  }
+
+  if (typeof preflight.body === "string") {
+    response.statusCode = preflight.status;
+    response.setHeader(
+      "Content-Type",
+      preflight.headers?.["content-type"] ?? preflight.headers?.["Content-Type"] ?? "text/plain; charset=utf-8",
+    );
+    response.setHeader("Content-Length", Buffer.byteLength(preflight.body));
+    response.end(preflight.body);
+    return;
+  }
+
+  sendJson(response, preflight.status, preflight.body);
 }
 
 function sendHtml(response: ServerResponse, statusCode: number, body: string): void {

@@ -33,6 +33,7 @@ import { createOuraWebhookSubscriptionClient, OURA_DEFAULT_WEBHOOK_TARGETS } fro
 
 import type {
   DeviceSyncAccount,
+  DeviceSyncWebhookPreflightResponse,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
   ProviderWebhookAdminCapability,
@@ -163,6 +164,7 @@ export interface OuraDeviceSyncProviderConfig {
   reconcileIntervalMs?: number;
   requestTimeoutMs?: number;
   webhookTimestampToleranceMs?: number;
+  webhookVerificationToken?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -511,7 +513,7 @@ const OURA_RESOURCE_DESCRIPTORS: Readonly<Record<OuraWebhookDataType, OuraResour
   },
 });
 
-export function resolveOuraWebhookVerificationChallenge(input: {
+function resolveOuraWebhookVerificationChallenge(input: {
   url: URL;
   verificationToken: string | null | undefined;
 }): string | null {
@@ -544,6 +546,29 @@ export function resolveOuraWebhookVerificationChallenge(input: {
   return challenge;
 }
 
+export function resolveOuraWebhookPreflightResponse(input: {
+  method: string;
+  url: URL;
+  verificationToken: string | null | undefined;
+}): DeviceSyncWebhookPreflightResponse | null {
+  if (input.method.toUpperCase() !== "GET") {
+    return null;
+  }
+
+  const challenge = resolveOuraWebhookVerificationChallenge(input);
+
+  if (challenge === null) {
+    return null;
+  }
+
+  return {
+    status: 200,
+    body: {
+      challenge,
+    },
+  };
+}
+
 function buildOuraApiError(
   code: string,
   message: string,
@@ -567,6 +592,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const webhookTimestampToleranceMs = Math.max(1_000, config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS);
+  const webhookVerificationToken = normalizeString(config.webhookVerificationToken) ?? null;
   const descriptor = {
     ...OURA_PROVIDER_DESCRIPTOR,
     oauth: {
@@ -676,20 +702,22 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   }
 
   const webhookAdmin: ProviderWebhookAdminCapability = {
-    resolveVerificationChallenge(context) {
-      return resolveOuraWebhookVerificationChallenge(context);
+    handleWebhookPreflight(context) {
+      return resolveOuraWebhookPreflightResponse({
+        method: context.method,
+        url: context.url,
+        verificationToken: webhookVerificationToken,
+      });
     },
     async ensureSubscriptions(context) {
-      const verificationToken = normalizeString(context.verificationToken);
-
-      if (!verificationToken) {
+      if (!webhookVerificationToken) {
         return;
       }
 
       const callbackUrl = new URL(OURA_WEBHOOK_PATH.replace(/^\/+/u, ""), `${context.publicBaseUrl}/`).toString();
       await getWebhookSubscriptionClient().ensure({
         callbackUrl,
-        verificationToken,
+        verificationToken: webhookVerificationToken,
         desired: OURA_DEFAULT_WEBHOOK_TARGETS,
         renewIfExpiringWithinMs: 7 * 24 * 60 * 60_000,
         pruneDuplicates: true,

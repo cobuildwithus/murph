@@ -12,6 +12,7 @@ import {
 import { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
 import { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 import { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
+import { createDeviceSyncRegistry } from "./registry.ts";
 import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.ts";
 
 import type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
@@ -22,6 +23,7 @@ import type {
   DeviceSyncHttpConfig,
   DeviceSyncLogger,
   DeviceSyncProvider,
+  DeviceSyncRegistry,
   DeviceSyncServiceConfig,
 } from "./types.ts";
 
@@ -167,7 +169,6 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
       host,
       port: parsePortEnv(env, DEVICE_SYNC_PORT_ENV_KEYS) ?? 8788,
       controlToken,
-      ouraWebhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
       ...publicListener,
     },
   };
@@ -196,6 +197,14 @@ export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): D
   );
 }
 
+export function createConfiguredDeviceSyncRegistry(
+  env: DeviceSyncEnvSource,
+): DeviceSyncRegistry {
+  return createConfiguredDeviceSyncRegistryFromConfigs(
+    readConfiguredDeviceSyncProviderConfigs(env),
+  );
+}
+
 export function createConfiguredDeviceSyncProvidersFromConfigs(
   configs: ConfiguredDeviceSyncProviderConfigs,
 ): DeviceSyncProvider[] {
@@ -217,6 +226,14 @@ export function createConfiguredDeviceSyncProvidersFromConfigs(
   }
 
   return providers;
+}
+
+export function createConfiguredDeviceSyncRegistryFromConfigs(
+  configs: ConfiguredDeviceSyncProviderConfigs,
+): DeviceSyncRegistry {
+  return createDeviceSyncRegistry(
+    createConfiguredDeviceSyncProvidersFromConfigs(configs),
+  );
 }
 
 export function readConfiguredDeviceSyncProviderConfigs(
@@ -312,6 +329,7 @@ export function readConfiguredOuraDeviceSyncProviderConfig(
     reconcileIntervalMs: parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS),
     webhookTimestampToleranceMs: parseIntegerEnv(env, OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
     requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
+    webhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
   };
 }
 

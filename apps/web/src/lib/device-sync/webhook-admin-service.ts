@@ -33,7 +33,6 @@ export class HostedDeviceSyncWebhookAdminService {
     if (!input.bestEffort) {
       await ensureSubscriptions({
         publicBaseUrl: this.context.webhookAdminCallbackBaseUrl,
-        verificationToken: this.context.env.ouraWebhookVerificationToken,
       });
       return;
     }
@@ -41,7 +40,6 @@ export class HostedDeviceSyncWebhookAdminService {
     try {
       await ensureSubscriptions({
         publicBaseUrl: this.context.webhookAdminCallbackBaseUrl,
-        verificationToken: this.context.env.ouraWebhookVerificationToken,
       });
     } catch (error) {
       console.error("Failed to ensure hosted webhook admin upkeep.", {
