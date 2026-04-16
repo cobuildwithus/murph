@@ -50,7 +50,7 @@ describe("hosted share lifecycle reconciliation", () => {
     expect(prisma.share.lastEventId).toBe("evt_share");
   });
 
-  it("releases a claimed share from the canonical lifecycle without waiting for dispatched transport state", async () => {
+  it("releases a claimed share from the canonical lifecycle without waiting for a separate transport state", async () => {
     const prisma = createHostedSharePrisma({
       executionOutboxRow: {
         dispatchState: "queued",

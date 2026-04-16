@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedAiUsageStripeMetering: vi.fn(),
   drainHostedOnboardingWebhookReceipts: vi.fn(),
   getPrisma: vi.fn(),
+  readExecutionLifecycleState: vi.fn((value: string | null | undefined) => value ?? "queued"),
   pruneHostedExecutionOutbox: vi.fn(),
   pruneHostedWebhookReceiptHistory: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutbox: mocks.drainHostedExecutionOutbox,
   pruneHostedExecutionOutbox: mocks.pruneHostedExecutionOutbox,
+  readExecutionLifecycleState: mocks.readExecutionLifecycleState,
 }));
 
 vi.mock("@/src/lib/hosted-execution/stripe-metering", () => ({
@@ -85,12 +87,12 @@ describe("hosted execution async routes", () => {
     });
     mocks.drainHostedExecutionOutbox.mockResolvedValue([
       {
+        dispatchState: "queued",
         eventId: "evt_1",
-        status: "dispatched",
       },
       {
+        dispatchState: "backpressured",
         eventId: "evt_2",
-        status: "delivery_failed",
       },
     ]);
     mocks.pruneHostedExecutionOutbox.mockResolvedValue(4);
@@ -138,9 +140,9 @@ describe("hosted execution async routes", () => {
     await expect(response.json()).resolves.toEqual({
       drained: 2,
       pruned: 4,
-      statusCounts: {
-        delivery_failed: 1,
-        dispatched: 1,
+      stateCounts: {
+        backpressured: 1,
+        queued: 1,
       },
     });
   });

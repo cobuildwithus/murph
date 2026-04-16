@@ -106,7 +106,6 @@ describe("getHostedInviteStatus", () => {
         findFirst: vi.fn().mockResolvedValue({
           dispatchState: "queued",
           eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-          status: "dispatched",
         }),
       },
       hostedInvite: {
@@ -219,7 +218,6 @@ describe("getHostedInviteStatus", () => {
         findFirst: vi.fn().mockResolvedValue({
           dispatchState: "queued",
           eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-          status: "dispatched",
         }),
       },
       hostedInvite: {
@@ -260,7 +258,6 @@ describe("getHostedInviteStatus", () => {
         findFirst: vi.fn().mockResolvedValue({
           dispatchState: "queued",
           eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-          status: "dispatched",
         }),
       },
       hostedInvite: {
@@ -292,7 +289,6 @@ describe("getHostedInviteStatus", () => {
         findFirst: vi.fn().mockResolvedValue({
           dispatchState: "poisoned",
           eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-          status: "dispatched",
         }),
       },
       hostedInvite: {

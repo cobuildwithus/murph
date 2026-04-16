@@ -308,12 +308,12 @@ That made web activation state and event outcome reads reason across multiple mo
 This patch:
 
 - adds durable `dispatchState` persistence on `ExecutionOutbox` and stores the shared `HostedExecutionEventDispatchState` union there
-- keeps `ExecutionOutbox.status` transport-local for queue claim/retry/handoff mechanics only
+- removes the separate `ExecutionOutbox.status` transport column so queue claim/retry/handoff uses `nextAttemptAt`, claim leases, and `lastError` directly
 - updates web outbox finalization so payload cleanup depends on terminal shared outcomes or terminal local failures instead of `status === dispatched`
 - updates activation progress to derive user-facing completion from `dispatchState` plus optional live Cloudflare status
 - teaches the Cloudflare runner queue to return the shared event dispatch status directly on event-scoped reads instead of leaking raw presence booleans across the boundary
 
-**Why this is simpler:** there is now one cross-boundary outcome vocabulary and one local transport lifecycle, so product state does not need to infer meaning from queue-local or Postgres-local mechanics.
+**Why this is simpler:** there is now one cross-boundary outcome vocabulary, and the remaining web-local retry mechanics stay as plain queue fields instead of a second status enum that product code could accidentally depend on.
 
 **Main refactor risk:** keep queue-local observability and retry mechanics app-local.
 If future edits collapse those back into the shared outcome union, the boundary will blur again and duplicate-pending versus duplicate-consumed semantics will get harder to preserve.
