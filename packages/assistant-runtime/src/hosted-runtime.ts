@@ -6,6 +6,9 @@ import {
   decodeHostedBundleBase64,
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
+import {
+  listConfiguredDeviceSyncProviderNames,
+} from "@murphai/device-syncd/config";
 import type {
   HostedExecutionRunnerResult,
   HostedExecutionStructuredLogDetails,
@@ -408,10 +411,3 @@ function hasAnyHostedRuntimeConfigKey(
   return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }
 
-function listConfiguredDeviceSyncProviderNames(
-  providerConfigs: NonNullable<ReturnType<typeof normalizeHostedAssistantRuntimeConfig>["resolvedConfig"]["deviceSync"]>["providerConfigs"],
-): string[] {
-  return ["garmin", "oura", "whoop"].filter((provider) => Boolean(
-    providerConfigs[provider as keyof typeof providerConfigs],
-  ));
-}
