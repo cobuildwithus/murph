@@ -31,6 +31,7 @@ import {
 } from './artifacts.js'
 import {
   computeAssistantAutoReplyRetryAt,
+  isAssistantAutoReplyRepairableConfigError,
   isAssistantProviderCapacityError,
 } from './auto-reply-retry.js'
 import {
@@ -958,6 +959,7 @@ function classifyAssistantAutoReplyFailure(input: {
     return createFailedGroupOutcome({
       advanceCursor: false,
       error: input.error,
+      nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
       stopScanning: true,
     })
   }
@@ -969,17 +971,7 @@ function classifyAssistantAutoReplyFailure(input: {
 }
 
 function shouldAssistantAutoReplyHoldCursorOnFailure(error: unknown): boolean {
-  const code =
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    typeof (error as { code?: unknown }).code === 'string'
-      ? (error as { code: string }).code
-      : null
-
-  return code === 'ASSISTANT_CODEX_NOT_FOUND' ||
-    code === 'HOSTED_ASSISTANT_CONFIG_INVALID' ||
-    code === 'HOSTED_ASSISTANT_CONFIG_REQUIRED'
+  return isAssistantAutoReplyRepairableConfigError(error)
 }
 
 function classifyAssistantAutoReplyGroupArtifactStatus(

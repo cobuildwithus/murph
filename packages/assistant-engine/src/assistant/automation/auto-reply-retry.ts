@@ -13,6 +13,7 @@ export const AUTO_REPLY_RECEIPT_RETRY_AT_KEY = 'autoReplyRetryAt'
 
 const ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS = 5 * 60 * 1000
+const ASSISTANT_AUTO_REPLY_CONFIG_RETRY_DELAY_MS = 5 * 60 * 1000
 
 export function computeAssistantAutoReplyRetryAt(
   error: unknown,
@@ -31,6 +32,13 @@ export function computeAssistantAutoReplyRetryAt(
   if (isAssistantProviderCapacityError(error)) {
     return computeAssistantAutomationRetryAt(
       ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS,
+      nowMs,
+    )
+  }
+
+  if (isAssistantAutoReplyRepairableConfigError(error)) {
+    return computeAssistantAutomationRetryAt(
+      ASSISTANT_AUTO_REPLY_CONFIG_RETRY_DELAY_MS,
       nowMs,
     )
   }
@@ -96,4 +104,20 @@ export function isAssistantProviderCapacityError(error: unknown): boolean {
     code === 'UNKNOWN' ||
     message.includes('you exceeded your current quota')
   )
+}
+
+export function isAssistantAutoReplyRepairableConfigError(
+  error: unknown,
+): boolean {
+  const code =
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : null
+
+  return code === 'ASSISTANT_CODEX_NOT_FOUND' ||
+    code === 'HOSTED_ASSISTANT_CONFIG_INVALID' ||
+    code === 'HOSTED_ASSISTANT_CONFIG_REQUIRED'
 }

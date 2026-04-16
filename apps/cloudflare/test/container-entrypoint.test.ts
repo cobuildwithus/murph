@@ -456,6 +456,81 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("rejects non-local internal worker proxy upstream base urls", async () => {
+    vi.stubEnv("HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL", "https://example.com:8787");
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(
+      async (_job: any, options) => {
+        if (!options?.internalWorkerProxyBaseUrl) {
+          throw new Error("Expected the internal worker proxy base URL to be configured.");
+        }
+
+        const proxyResponse = await fetch(
+          `${options.internalWorkerProxyBaseUrl}results.worker/effects/outbox_123?fingerprint=dedupe_123`,
+          {
+            headers: {
+              "x-hosted-execution-runner-proxy-token": "proxy-token",
+            },
+            method: "GET",
+          },
+        );
+
+        expect(proxyResponse.status).toBe(502);
+        await expect(proxyResponse.json()).resolves.toMatchObject({
+          detail: expect.stringContaining("must target a local loopback host"),
+          error: "Hosted runner internal proxy failed.",
+        });
+        return {
+          finalGatewayProjectionSnapshot: null,
+          result: {
+            bundle: null,
+            result: {
+              eventsHandled: 1,
+              nextWakeAt: null,
+              summary: "ok",
+            },
+          },
+        };
+      },
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify(buildJobBody({
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_proxy_forward_non_local_upstream",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "runtime_error",
+        error: "Hosted execution runtime failed.",
+      });
+    } finally {
+      runnerSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("strips hop-by-hop request headers when forwarding internal worker proxy writes", async () => {
     const upstreamFetch = vi.fn(async () => new Response(JSON.stringify({
       effectId: "outbox_put_123",

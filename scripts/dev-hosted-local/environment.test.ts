@@ -221,6 +221,14 @@ describe("shouldSyncLocalDatabaseSchema", () => {
     ).toBe(false);
   });
 
+  it("returns false for non-default local database targets", () => {
+    expect(
+      shouldSyncLocalDatabaseSchema(
+        "postgresql://postgres:postgres@127.0.0.1:5432/custom_local_db",
+      ),
+    ).toBe(false);
+  });
+
   it("treats a local postgres url without a database name as the default local sync target", () => {
     expect(
       shouldSyncLocalDatabaseSchema(

@@ -59,7 +59,7 @@ export async function main(): Promise<void> {
   ].join(" "));
 
   const tempDir = tempDirOverride
-    ? path.resolve(repoRoot, tempDirOverride)
+    ? resolveHostedLocalTempDir(repoRoot, tempDirOverride)
     : await mkdtemp(path.join(os.tmpdir(), "murph-dev-env-"));
   if (tempDirOverride) {
     await rm(tempDir, { force: true, recursive: true });
@@ -327,6 +327,26 @@ export async function main(): Promise<void> {
       await rm(tempDir, { force: true, recursive: true });
     }
   }
+}
+
+function resolveHostedLocalTempDir(
+  root: string,
+  override: string,
+): string {
+  const tempRoot = path.join(root, ".tmp");
+  const resolved = path.resolve(root, override);
+  const relative = path.relative(tempRoot, resolved);
+
+  if (
+    relative.length === 0
+    || relative === "."
+    || relative.startsWith("..")
+    || path.isAbsolute(relative)
+  ) {
+    throw new Error("MURPH_DEV_TEMP_DIR must resolve inside the repo-local .tmp directory.");
+  }
+
+  return resolved;
 }
 
 function resolveLocalRunnerHostAlias(env: NodeJS.ProcessEnv): string | null {

@@ -560,8 +560,7 @@ function createLocalLoopbackProxyRequest(upstreamUrl: URL, request: Request): Re
 }
 
 function readLocalHostedInternalProxyEnabled(env: WorkerEnvironmentSource): boolean {
-  const value = env.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL;
-  return typeof value === "string" && value.trim().length > 0;
+  return readLocalHostedInternalProxyUpstreamHost(env) !== null;
 }
 
 function readLocalLoopbackProxyToken(env: WorkerEnvironmentSource): string | null {
@@ -646,6 +645,10 @@ function isLocalLoopbackProxyHostname(value: string): boolean {
   return value === "127.0.0.1" || value === "localhost" || value === "::1";
 }
 
+function isAllowedLocalHostedInternalProxyHostname(value: string): boolean {
+  return isLocalLoopbackProxyHostname(value) || value === "host.docker.internal";
+}
+
 function resolveLocalHostedInternalProxyIngressHosts(
   env: WorkerEnvironmentSource,
 ): ReadonlySet<string> {
@@ -669,7 +672,9 @@ function readLocalHostedInternalProxyUpstreamHost(
 
   try {
     const url = new URL(value);
-    return url.hostname || null;
+    return isAllowedLocalHostedInternalProxyHostname(url.hostname)
+      ? (url.hostname || null)
+      : null;
   } catch {
     return null;
   }

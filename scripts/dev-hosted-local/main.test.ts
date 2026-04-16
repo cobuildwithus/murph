@@ -246,6 +246,16 @@ describe("hosted local dev main", () => {
     );
   });
 
+  it("rejects temp dir overrides outside the repo-local .tmp subtree", async () => {
+    vi.stubEnv("MURPH_DEV_TEMP_DIR", "../unsafe-temp-dir");
+
+    const { main } = await import("./main.ts");
+
+    await expect(main()).rejects.toThrow(
+      "MURPH_DEV_TEMP_DIR must resolve inside the repo-local .tmp directory.",
+    );
+  });
+
   it("lets explicit shell env override pulled Vercel env for hosted worker config", async () => {
     const createChild = (input: {
       exitCode: number | null;

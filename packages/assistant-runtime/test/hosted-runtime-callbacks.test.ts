@@ -252,7 +252,33 @@ describe("hosted runtime callbacks", () => {
       },
     ]);
 
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(1, {
+      component: "assistant-delivery",
+      details: {
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        deliveryErrorCode: "LINQ_SEND_FAILED",
+        dispatchedIntentStatus: "retryable",
+        effectFingerprint: "dedupe_retryable",
+        effectId: "intent_retryable",
+        retryable: true,
+        userId: "member_123",
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_retryable_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      level: "warn",
+      message: "Hosted assistant delivery dispatch finished.",
+      phase: "side-effects.draining",
+      userId: "member_123",
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(2, {
       component: "assistant-delivery",
       details: {
         assistantDeliveryBoundary: "hosted_runtime_finalize",
@@ -274,7 +300,7 @@ describe("hosted runtime callbacks", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       level: "warn",
-      message: "Linq outbound chat creation failed with HTTP 403.",
+      message: "Hosted assistant delivery finished with retryable status during post-commit dispatch.",
       phase: "side-effects.draining",
       userId: "member_123",
     });
@@ -328,10 +354,7 @@ describe("hosted runtime callbacks", () => {
         effectFingerprint: "dedupe_sent",
         effectId: "intent_sent",
         failureDomain: "dispatch",
-        providerMessageId: "linq_message_123",
-        providerThreadId: "chat_123",
         retryable: false,
-        target: "chat_123",
         targetKind: "thread",
         userId: "member_123",
       },

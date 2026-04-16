@@ -171,7 +171,7 @@ export function normalizeLocalDatabaseUrl(
 }
 
 export function shouldSyncLocalDatabaseSchema(value: string | undefined): boolean {
-  return isLoopbackPostgresUrl(normalizeLocalDatabaseUrl(value));
+  return normalizeLocalDatabaseUrl(value) === DEFAULT_DATABASE_URL;
 }
 
 export function buildWranglerVarArgs(
