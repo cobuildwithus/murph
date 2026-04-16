@@ -26,6 +26,7 @@
     "test": "pnpm typecheck && pnpm test:node",
     "test:node": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
     "test:e2e:local": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts --no-coverage",
+    "test:e2e:telegram:local": "env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts --no-coverage",
     "test:e2e:linq-delivery:local": "env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts --no-coverage",
     "test:e2e:first-contact:local": "env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts --no-coverage",
     "test:e2e:duplicate-commit:local": "env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-duplicate-commit-e2e.test.ts --no-coverage",

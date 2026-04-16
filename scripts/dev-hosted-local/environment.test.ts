@@ -4,6 +4,7 @@ import {
   assertLocalWorkerOidcEnvironment,
   buildHostedLocalDevOverrides,
   buildWranglerEnvFileText,
+  buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
   mergeCloudflareLocalEnv,
   normalizeLocalDatabaseUrl,
@@ -284,5 +285,32 @@ describe("buildWranglerEnvFileText", () => {
         LINQ_API_TOKEN: "linq-secret",
       }),
     ).toContain('LINQ_API_TOKEN="linq-secret"');
+  });
+});
+
+describe("buildWranglerLocalDevConfig", () => {
+  it("keeps repo-relative defaults for the checked-in local dev location", () => {
+    const config = buildWranglerLocalDevConfig({});
+    const container = (config.containers as { image: string; image_build_context: string }[])[0];
+
+    expect(config.main).toBe("../src/index.ts");
+    expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
+    expect(container.image_build_context).toBe("..");
+  });
+
+  it("re-roots generated paths to the temp config directory", () => {
+    const config = buildWranglerLocalDevConfig(
+      {},
+      {
+        cloudflareAppDir: "/workspace/apps/cloudflare",
+        configDir: "/tmp/murph-dev-env-test",
+        workspaceRoot: "/workspace",
+      },
+    );
+    const container = (config.containers as { image: string; image_build_context: string }[])[0];
+
+    expect(config.main).toBe("../../workspace/apps/cloudflare/src/index.ts");
+    expect(container.image).toBe("../../workspace/Dockerfile.cloudflare-hosted-runner");
+    expect(container.image_build_context).toBe("../../workspace/apps/cloudflare");
   });
 });

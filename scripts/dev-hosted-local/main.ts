@@ -69,7 +69,7 @@ export async function main(): Promise<void> {
   const workerEnvPath = path.join(tempDir, "cloudflare-worker.env");
   const workerDevVarsPath = path.join(tempDir, "cloudflare-worker.dev.vars");
   const workerDevVarsBackupPath = path.join(tempDir, "cloudflare-worker.dev.vars.backup");
-  const workerConfigPath = path.join(repoRoot, "apps", "cloudflare", ".wrangler", "local-dev.generated.json");
+  const workerConfigPath = path.join(tempDir, "cloudflare-worker.local-dev.generated.json");
   const repoEnvPath = path.join(repoRoot, ".env");
   const initialEnv = { ...process.env } satisfies NodeJS.ProcessEnv;
   let restoreCloudflareDevVars = false;
@@ -125,10 +125,15 @@ export async function main(): Promise<void> {
     const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
     await writeFile(workerEnvPath, workerEnvText, "utf8");
     await writeFile(workerDevVarsPath, workerEnvText, "utf8");
-    await mkdir(path.dirname(workerConfigPath), { recursive: true });
     await writeFile(
       workerConfigPath,
-      `${JSON.stringify(buildWranglerLocalDevConfig(workerRuntimeEnv), null, 2)}\n`,
+      `${JSON.stringify(
+        buildWranglerLocalDevConfig(workerRuntimeEnv, {
+          configDir: path.dirname(workerConfigPath),
+        }),
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
     try {
