@@ -237,6 +237,59 @@ describe('assistant outbox runtime', () => {
     expect(retried.intent.nextAttemptAt).toBe('2026-04-08T02:22:00.000Z')
   })
 
+  it('keeps hosted-journal non-idempotent deliveries on reconcile instead of resending', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-hosted-journal-')
+    vi.useFakeTimers()
+
+    const seed = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      createdAt: '2026-04-08T02:40:00.000Z',
+      identityId: 'participant-hosted',
+      message: 'hosted journal owns this delivery',
+      sessionId: 'session-hosted-journal',
+      threadId: 'thread-hosted-journal',
+      turnId: 'turn-hosted-journal',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...seed,
+      attemptCount: 2,
+      delivery: createDelivery({
+        idempotencyKey: 'telegram-idem',
+        providerMessageId: 'telegram-provider-pending',
+        sentAt: '2026-04-08T02:41:00.000Z',
+      }),
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: 'telegram-idem',
+      deliveryStateAuthority: 'hosted-journal',
+      deliveryTransportIdempotent: false,
+      lastAttemptAt: '2026-04-08T02:41:00.000Z',
+      lastError: createConfirmationPendingError(),
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T02:41:00.000Z',
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T02:55:00.000Z'))
+
+    const retried = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        resolveDeliveredIntent: async () => null,
+      },
+      intentId: seed.intentId,
+      now: new Date('2026-04-08T02:55:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    expect(retried.intent.status).toBe('retryable')
+    expect(retried.intent.deliveryStateAuthority).toBe('hosted-journal')
+    expect(retried.intent.deliveryConfirmationPending).toBe(false)
+    expect(retried.intent.lastError?.code).toBe(
+      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    )
+    expect(retried.intent.nextAttemptAt).toBe('2026-04-08T02:57:00.000Z')
+  })
+
   it('can disable persisted delivery recovery when the caller requires journal-only reconciliation', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-hosted-reconcile-')
 

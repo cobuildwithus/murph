@@ -136,6 +136,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
         sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
           input.effectsPort.sendEmail(request),
       },
+      deliveryStateAuthority: "hosted-journal",
       dispatchHooks: createHostedAssistantDeliveryDispatchHooks({
         effectsPort: input.effectsPort,
         journalTrace,

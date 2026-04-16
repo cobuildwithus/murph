@@ -54,7 +54,10 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const baseIntent = current ?? input.intent
     const pendingIntent = assistantOutboxIntentSchema.parse({
       ...baseIntent,
-      deliveryConfirmationPending: true,
+      deliveryConfirmationPending: shouldPersistLocalDeliveryConfirmationPending({
+        deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+        intent: baseIntent,
+      }),
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
       deliveryIdempotencyKey:
         input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
@@ -175,7 +178,12 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       : null
     const failedIntent = assistantOutboxIntentSchema.parse({
       ...(current ?? input.sending),
-      deliveryConfirmationPending: input.deliveryMayHaveSucceeded,
+      deliveryConfirmationPending: input.deliveryMayHaveSucceeded
+        ? shouldPersistLocalDeliveryConfirmationPending({
+            deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+            intent: current ?? input.sending,
+          })
+        : false,
       deliveryTransportIdempotent: input.deliveryMayHaveSucceeded
         ? input.deliveryTransportIdempotent
         : (current?.deliveryTransportIdempotent ?? input.sending.deliveryTransportIdempotent),
@@ -247,7 +255,10 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const scheduledAt = input.scheduledAt.toISOString()
     const retryIntent = assistantOutboxIntentSchema.parse({
       ...baseIntent,
-      deliveryConfirmationPending: true,
+      deliveryConfirmationPending: shouldPersistLocalDeliveryConfirmationPending({
+        deliveryTransportIdempotent: baseIntent.deliveryTransportIdempotent,
+        intent: baseIntent,
+      }),
       updatedAt: scheduledAt,
       nextAttemptAt: buildAssistantOutboxRetryTimestamp(
         input.scheduledAt,
@@ -279,4 +290,11 @@ function sameAssistantChannelDelivery(
     left.providerMessageId === right.providerMessageId &&
     left.providerThreadId === right.providerThreadId
   )
+}
+
+function shouldPersistLocalDeliveryConfirmationPending(input: {
+  deliveryTransportIdempotent: boolean
+  intent: Pick<AssistantOutboxIntent, 'deliveryStateAuthority'>
+}): boolean {
+  return input.deliveryTransportIdempotent || input.intent.deliveryStateAuthority !== 'hosted-journal'
 }

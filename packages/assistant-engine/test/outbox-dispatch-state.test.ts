@@ -109,4 +109,35 @@ describe('assistant outbox dispatch-state', () => {
       expect(retryIntent.nextAttemptAt).toBe('2030-04-13T00:07:00.000Z')
     })
   })
+
+  it('keeps hosted-journal retries scheduled without local confirmation ownership', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 2,
+        vault,
+      })
+      const hosted = await saveAssistantOutboxIntent(vault, {
+        ...sending,
+        deliveryStateAuthority: 'hosted-journal',
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const scheduledAt = new Date('2030-04-13T00:05:00.000Z')
+
+      const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
+        error: assistantDeliveryErrorSchema.parse({
+          code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+          message: 'delivery must be reconciled before resend',
+        }),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, hosted.intentId),
+        scheduledAt,
+        sending: hosted,
+        vault,
+      })
+
+      expect(retryIntent.deliveryStateAuthority).toBe('hosted-journal')
+      expect(retryIntent.deliveryConfirmationPending).toBe(false)
+      expect(retryIntent.updatedAt).toBe('2030-04-13T00:05:00.000Z')
+      expect(retryIntent.nextAttemptAt).toBe('2030-04-13T00:07:00.000Z')
+    })
+  })
 })
