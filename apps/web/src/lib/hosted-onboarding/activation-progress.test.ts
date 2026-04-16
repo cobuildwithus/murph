@@ -1,5 +1,4 @@
 import {
-  ExecutionOutboxStatus,
   HostedBillingStatus,
   type PrismaClient,
 } from "@prisma/client";
@@ -30,7 +29,6 @@ describe("hosted member activation progress", () => {
     const prisma = createActivationPrisma({
       dispatchState: "queued",
       eventId: "evt_activation",
-      status: ExecutionOutboxStatus.dispatched,
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       getEventStatus: mocks.getEventStatus,
@@ -45,11 +43,10 @@ describe("hosted member activation progress", () => {
     expect(mocks.getEventStatus).toHaveBeenCalledWith("member_123", "evt_activation");
   });
 
-  it("accepts a completed live hint without requiring transport status to be dispatched", async () => {
+  it("accepts a completed live hint without requiring a separate transport status", async () => {
     const prisma = createActivationPrisma({
       dispatchState: "queued",
       eventId: "evt_activation",
-      status: ExecutionOutboxStatus.delivery_failed,
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       getEventStatus: mocks.getEventStatus,
@@ -73,14 +70,12 @@ describe("hosted member activation progress", () => {
 function createActivationPrisma(record: {
   dispatchState: string;
   eventId: string;
-  status: ExecutionOutboxStatus;
 }): PrismaClient {
   return {
     executionOutbox: {
       findFirst: vi.fn(async () => ({
         dispatchState: record.dispatchState,
         eventId: record.eventId,
-        status: record.status,
       })),
     },
   } as unknown as PrismaClient;

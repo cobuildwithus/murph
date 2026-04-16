@@ -469,7 +469,6 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     });
 
-    prisma.outboxRows[0]!.status = "dispatched";
     prisma.outboxRows[0]!.dispatchState = "queued";
     shareHarness.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       getEventStatus: shareHarness.getEventStatus,
@@ -531,7 +530,6 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     });
 
-    prisma.outboxRows[0]!.status = "dispatched";
     prisma.outboxRows[0]!.dispatchState = "queued";
     shareHarness.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       getEventStatus: shareHarness.getEventStatus,
