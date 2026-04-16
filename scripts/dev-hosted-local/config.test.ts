@@ -10,6 +10,7 @@ describe("resolveHostedLocalDevConfig", () => {
   it("returns the documented defaults", () => {
     expect(resolveHostedLocalDevConfig({})).toEqual({
       skipPrismaMigrate: false,
+      skipWeb: false,
       skipVercelPull: false,
       webHost: "127.0.0.1",
       webPort: 3000,
@@ -24,6 +25,7 @@ describe("resolveHostedLocalDevConfig", () => {
     expect(
       resolveHostedLocalDevConfig({
         MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
+        MURPH_DEV_SKIP_WEB: "1",
         MURPH_DEV_SKIP_VERCEL_PULL: "1",
         MURPH_DEV_WEB_HOST: "0.0.0.0",
         MURPH_DEV_WEB_PORT: "3015",
@@ -34,6 +36,7 @@ describe("resolveHostedLocalDevConfig", () => {
       }),
     ).toEqual({
       skipPrismaMigrate: true,
+      skipWeb: true,
       skipVercelPull: true,
       webHost: "0.0.0.0",
       webPort: 3015,

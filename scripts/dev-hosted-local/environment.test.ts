@@ -6,7 +6,9 @@ import {
   buildWranglerEnvFileText,
   buildWranglerVarArgs,
   mergeCloudflareLocalEnv,
+  normalizeLocalDatabaseUrl,
   parseEnvText,
+  shouldSyncLocalDatabaseSchema,
 } from "./environment.ts";
 import type {
   HostedExecutionOidcIdentity,
@@ -14,6 +16,7 @@ import type {
 } from "./types.ts";
 
 const localConfig: HostedLocalDevConfig = {
+  skipWeb: false,
   skipPrismaMigrate: false,
   skipVercelPull: false,
   webHost: "127.0.0.1",
@@ -54,6 +57,34 @@ describe("parseEnvText", () => {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     });
   });
+
+  it("parses quoted multi-line values without truncating structured json", () => {
+    expect(
+      parseEnvText(
+        [
+          "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=\"{",
+          "\\\"kty\\\": \\\"EC\\\",",
+          "\\\"crv\\\": \\\"P-256\\\",",
+          "\\\"x\\\": \\\"callback-x\\\",",
+          "\\\"y\\\": \\\"callback-y\\\",",
+          "\\\"d\\\": \\\"callback-d\\\"",
+          "}\"",
+          "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID=callback:v1",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: [
+        "{",
+        "\"kty\": \"EC\",",
+        "\"crv\": \"P-256\",",
+        "\"x\": \"callback-x\",",
+        "\"y\": \"callback-y\",",
+        "\"d\": \"callback-d\"",
+        "}",
+      ].join("\n"),
+    });
+  });
 });
 
 describe("mergeCloudflareLocalEnv", () => {
@@ -92,6 +123,23 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://127.0.0.1:3000");
   });
+
+  it("lets current env overrides replace stale existing optional worker vars", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        LINQ_API_BASE_URL: "http://127.0.0.1:9999",
+      },
+      oidcIdentity,
+      overrides: {
+        LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+        LINQ_API_TOKEN: "linq-local-test-token",
+      },
+    });
+
+    expect(merged.LINQ_API_BASE_URL).toBe("http://127.0.0.1:4011");
+    expect(merged.LINQ_API_TOKEN).toBe("linq-local-test-token");
+  });
 });
 
 describe("assertLocalWorkerOidcEnvironment", () => {
@@ -127,12 +175,68 @@ describe("buildHostedLocalDevOverrides", () => {
   });
 });
 
+describe("normalizeLocalDatabaseUrl", () => {
+  it("fills the default local database name when the local url omits it", () => {
+    expect(
+      normalizeLocalDatabaseUrl(
+        "postgresql://postgres:postgres@127.0.0.1:5432",
+        "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync",
+      ),
+    ).toBe("postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync");
+  });
+
+  it("leaves already-correct local database urls unchanged", () => {
+    expect(
+      normalizeLocalDatabaseUrl(
+        "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync",
+        "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync",
+      ),
+    ).toBe("postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync");
+  });
+
+  it("does not rewrite non-local database urls", () => {
+    expect(
+      normalizeLocalDatabaseUrl(
+        "postgresql://db.example.test:5432",
+        "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync",
+      ),
+    ).toBe("postgresql://db.example.test:5432");
+  });
+});
+
+describe("shouldSyncLocalDatabaseSchema", () => {
+  it("returns true for the local loopback postgres target", () => {
+    expect(
+      shouldSyncLocalDatabaseSchema(
+        "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false for non-local database targets", () => {
+    expect(
+      shouldSyncLocalDatabaseSchema(
+        "postgresql://db.example.test:5432/murph",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats a local postgres url without a database name as the default local sync target", () => {
+    expect(
+      shouldSyncLocalDatabaseSchema(
+        "postgresql://postgres:postgres@127.0.0.1:5432",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("buildWranglerVarArgs", () => {
   it("emits only allowlisted non-empty values", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         IGNORED_SECRET: "secret",
       }),
     ).toEqual([
@@ -140,6 +244,8 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000",
       "--var",
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS:60000",
     ]);
   });
 });
@@ -149,6 +255,7 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
@@ -156,6 +263,15 @@ describe("buildWranglerEnvFileText", () => {
     expect(
       buildWranglerEnvFileText({
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
+        HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+        LINQ_API_TOKEN: "linq-secret",
+      }),
+    ).toContain('HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS="60000"');
+    expect(
+      buildWranglerEnvFileText({
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-secret",
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
