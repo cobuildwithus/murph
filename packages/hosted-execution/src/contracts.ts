@@ -137,7 +137,6 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
   kind: "device-sync.wake";
   provider?: string | null;
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
-  runtimeSnapshot?: DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse | null;
 }
 
 export interface HostedExecutionShareReference {

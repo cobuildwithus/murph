@@ -257,7 +257,6 @@ describe("hosted execution builders", () => {
       occurredAt,
       provider: null,
       reason: "connected",
-      runtimeSnapshot: null,
       userId: "user_123",
     });
 
@@ -268,7 +267,6 @@ describe("hosted execution builders", () => {
       kind: "device-sync.wake",
       provider: null,
       reason: "connected",
-      runtimeSnapshot: null,
       userId: "user_123",
     });
   });

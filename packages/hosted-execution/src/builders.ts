@@ -138,7 +138,6 @@ export function buildHostedExecutionDeviceSyncWakeDispatch(input: {
   occurredAt: string;
   provider?: string | null;
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
-  runtimeSnapshot?: HostedExecutionDeviceSyncWakeEvent["runtimeSnapshot"];
   userId: string;
 }): HostedExecutionDispatchRequest {
   return {
@@ -148,7 +147,6 @@ export function buildHostedExecutionDeviceSyncWakeDispatch(input: {
       kind: "device-sync.wake",
       ...(input.provider === undefined ? {} : { provider: input.provider }),
       reason: input.reason,
-      ...(input.runtimeSnapshot === undefined ? {} : { runtimeSnapshot: input.runtimeSnapshot }),
       userId: input.userId,
     } satisfies HostedExecutionDeviceSyncWakeEvent,
     eventId: input.eventId,

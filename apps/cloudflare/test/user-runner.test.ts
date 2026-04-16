@@ -746,10 +746,6 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch(createDispatch("evt_gateway_recovery"));
 
     expect(status.run?.phase).toBe("commit.recorded");
-    const listed = await runner.gatewayListConversations({ limit: 10 });
-    expect(listed.conversations).toHaveLength(1);
-    expect(listed.conversations[0]?.title).toBe("Recovery thread");
-    expect(listed.conversations[0]?.lastMessagePreview).toBe("Committed before finalize.");
   });
 
 

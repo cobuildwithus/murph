@@ -4,19 +4,6 @@ import type {
   HostedExecutionDispatchStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
-import type {
-  GatewayFetchAttachmentsInput,
-  GatewayGetConversationInput,
-  GatewayListConversationsInput,
-  GatewayListConversationsResult,
-  GatewayListOpenPermissionsInput,
-  GatewayPermissionRequest,
-  GatewayPollEventsInput,
-  GatewayPollEventsResult,
-  GatewayReadMessagesInput,
-  GatewayReadMessagesResult,
-  GatewayRespondToPermissionInput,
-} from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -262,44 +249,6 @@ export class HostedUserRunner {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     });
-  }
-
-  async gatewayListConversations(
-    input?: GatewayListConversationsInput,
-  ): Promise<GatewayListConversationsResult> {
-    return (await this.ensureRunnerStores()).gatewayStore.listConversations(input);
-  }
-
-  async gatewayGetConversation(input: GatewayGetConversationInput) {
-    return (await this.ensureRunnerStores()).gatewayStore.getConversation(input);
-  }
-
-  async gatewayReadMessages(
-    input: GatewayReadMessagesInput,
-  ): Promise<GatewayReadMessagesResult> {
-    return (await this.ensureRunnerStores()).gatewayStore.readMessages(input);
-  }
-
-  async gatewayFetchAttachments(input: GatewayFetchAttachmentsInput) {
-    return (await this.ensureRunnerStores()).gatewayStore.fetchAttachments(input);
-  }
-
-  async gatewayPollEvents(
-    input?: GatewayPollEventsInput,
-  ): Promise<GatewayPollEventsResult> {
-    return (await this.ensureRunnerStores()).gatewayStore.pollEvents(input);
-  }
-
-  async gatewayListOpenPermissions(
-    input?: GatewayListOpenPermissionsInput,
-  ): Promise<GatewayPermissionRequest[]> {
-    return (await this.ensureRunnerStores()).gatewayStore.listOpenPermissions(input);
-  }
-
-  async gatewayRespondToPermission(
-    input: GatewayRespondToPermissionInput,
-  ): Promise<GatewayPermissionRequest | null> {
-    return (await this.ensureRunnerStores()).gatewayStore.respondToPermission(input);
   }
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {

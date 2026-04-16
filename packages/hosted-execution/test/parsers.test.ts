@@ -163,7 +163,6 @@ describe("parseHostedExecutionEvent", () => {
         kind: "device-sync.wake",
         provider: "oura",
         reason: "webhook_hint",
-        runtimeSnapshot: null,
         userId: "user-1",
       }),
     ).toEqual({
@@ -196,7 +195,6 @@ describe("parseHostedExecutionEvent", () => {
       kind: "device-sync.wake",
       provider: "oura",
       reason: "webhook_hint",
-      runtimeSnapshot: null,
       userId: "user-1",
     });
   });

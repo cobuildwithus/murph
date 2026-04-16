@@ -48,14 +48,6 @@ export interface EnqueueHostedExecutionOutboxInput {
   tx: HostedExecutionOutboxClient;
 }
 
-export interface EnqueueHostedExecutionOutboxPayloadInput {
-  now?: string;
-  payload: HostedExecutionOutboxPayload;
-  sourceId?: string | null;
-  sourceType: string;
-  tx: HostedExecutionOutboxClient;
-}
-
 export function readExecutionLifecycleState(
   value: string | null | undefined,
 ): HostedExecutionDispatchLifecycleState {
@@ -117,31 +109,6 @@ export async function enqueueHostedExecutionOutbox(
     sourceId: input.sourceId ?? null,
     sourceType: input.sourceType,
     tx: input.tx,
-  });
-}
-
-export async function enqueueHostedExecutionOutboxPayload(
-  input: EnqueueHostedExecutionOutboxPayloadInput,
-): Promise<ExecutionOutbox> {
-  const now = new Date(input.now ?? new Date().toISOString());
-  const payload = input.payload;
-  const payloadJson = serializeExistingHostedExecutionOutboxPayload(payload);
-
-  return upsertHostedExecutionOutboxRecord({
-    dispatchRef: buildHostedExecutionDispatchRef(payload.dispatch),
-    now,
-    payloadJson,
-    sourceId: input.sourceId ?? null,
-    sourceType: input.sourceType,
-    tx: input.tx,
-  });
-}
-
-function serializeExistingHostedExecutionOutboxPayload(
-  payload: HostedExecutionOutboxPayload,
-): Prisma.InputJsonObject {
-  return serializeHostedExecutionOutboxPayload(payload.dispatch, {
-    storage: "inline",
   });
 }
 

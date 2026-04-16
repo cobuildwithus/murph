@@ -40,19 +40,19 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
-  timeoutMs: number | null;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
-  const inlineSnapshot = input.dispatch.event.kind === "device-sync.wake"
-    ? input.dispatch.event.runtimeSnapshot ?? null
-    : null;
-  const client = inlineSnapshot
-    ? null
-    : resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
-  if (!client && !inlineSnapshot) {
+  const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
+  if (!client) {
+    if (input.dispatch.event.kind === "device-sync.wake") {
+      throw new Error(
+        "Hosted device-sync wake dispatch requires a configured hosted device-sync control-plane port.",
+      );
+    }
+
     return createEmptyHostedDeviceSyncRuntimeSyncState();
   }
 
-  const snapshot = inlineSnapshot ?? await client!.fetchSnapshot();
+  const snapshot = await client.fetchSnapshot();
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(snapshot);
   if (!snapshot) {
     return state;
@@ -109,7 +109,6 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
-  timeoutMs: number | null;
 }): Promise<void> {
   if (!input.state.snapshot) {
     return;
