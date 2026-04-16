@@ -387,6 +387,7 @@ describe('assistant channel descriptors and runtime edges', () => {
     await expect(
       ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
         {
+          actorId: null,
           bindingDelivery: createAssistantBindingDelivery('thread', 'thread-1'),
           explicitTarget: null,
           identityId: null,
@@ -423,6 +424,7 @@ describe('assistant channel descriptors and runtime edges', () => {
     await expect(
       ASSISTANT_CHANNEL_ADAPTERS.linq.send(
         {
+          actorId: null,
           bindingDelivery: null,
           explicitTarget: ' linq-chat ',
           identityId: null,
@@ -453,6 +455,7 @@ describe('assistant channel descriptors and runtime edges', () => {
     await expect(
       ASSISTANT_CHANNEL_ADAPTERS.email.send(
         {
+          actorId: null,
           bindingDelivery: createAssistantBindingDelivery('thread', 'thread-target'),
           explicitTarget: null,
           identityId: null,
@@ -472,6 +475,7 @@ describe('assistant channel descriptors and runtime edges', () => {
     await expect(
       ASSISTANT_CHANNEL_ADAPTERS.email.send(
         {
+          actorId: null,
           bindingDelivery: null,
           explicitTarget: 'person@example.com',
           identityId: ' identity-1 ',

@@ -278,6 +278,7 @@ export async function deliverAssistantMessageOverBinding(
 
   const delivery = await adapter.send(
     {
+      actorId: binding.actorId,
       bindingDelivery: binding.delivery,
       explicitTarget,
       idempotencyKey: input.idempotencyKey ?? null,

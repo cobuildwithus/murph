@@ -163,6 +163,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
         extra: {
           dispatchedIntentStatus: dispatched.intent.status,
           deliveryErrorCode: dispatched.deliveryError?.code ?? null,
+          deliveryErrorMessage: dispatched.deliveryError?.message ?? null,
           retryable: dispatched.intent.status === "pending"
             || dispatched.intent.status === "retryable"
             || dispatched.intent.status === "sending",
@@ -289,6 +290,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
       effectId: input.effect.effectId,
       extra: {
         deliveryErrorCode: input.deliveryError?.code ?? null,
+        deliveryErrorMessage: input.deliveryError?.message ?? null,
         deliveryStatus: input.intentStatus,
         failureDomain: "dispatch",
         retryable,

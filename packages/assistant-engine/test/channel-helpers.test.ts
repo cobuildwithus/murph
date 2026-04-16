@@ -296,6 +296,7 @@ describe('channel helper seams', () => {
 
     const delivery = await adapter.send(
       {
+        actorId: null,
         bindingDelivery: createAssistantBindingDelivery('participant', 'participant-7'),
         explicitTarget: '   ',
         idempotencyKey: '  idem-7  ',
@@ -307,6 +308,7 @@ describe('channel helper seams', () => {
     )
 
     expect(sendMessage).toHaveBeenCalledWith({
+      actorId: null,
       candidate: {
         kind: 'participant',
         target: 'participant-7',
@@ -427,6 +429,7 @@ describe('channel helper seams', () => {
 
     const telegramDelivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
       {
+        actorId: null,
         bindingDelivery: createAssistantBindingDelivery('participant', 'participant-11'),
         explicitTarget: '  telegram-chat  ',
         idempotencyKey: '   ',
@@ -457,6 +460,7 @@ describe('channel helper seams', () => {
 
     const linqDelivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
       {
+        actorId: null,
         bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-11'),
         explicitTarget: null,
         idempotencyKey: '  idem-linq  ',
@@ -487,6 +491,7 @@ describe('channel helper seams', () => {
 
     const emailDelivery = await ASSISTANT_CHANNEL_ADAPTERS.email.send(
       {
+        actorId: null,
         bindingDelivery: createAssistantBindingDelivery(
           'participant',
           'friend@example.com',
@@ -523,6 +528,7 @@ describe('channel helper seams', () => {
     await expect(
       ASSISTANT_CHANNEL_ADAPTERS.email.send(
         {
+          actorId: null,
           bindingDelivery: createAssistantBindingDelivery(
             'participant',
             'friend@example.com',

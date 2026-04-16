@@ -257,6 +257,7 @@ describe("hosted runtime callbacks", () => {
       details: {
         assistantDeliveryBoundary: "hosted_runtime_finalize",
         deliveryErrorCode: "LINQ_SEND_FAILED",
+        deliveryErrorMessage: "Linq outbound chat creation failed with HTTP 403.",
         dispatchedIntentStatus: "retryable",
         effectFingerprint: "dedupe_retryable",
         effectId: "intent_retryable",
@@ -283,6 +284,7 @@ describe("hosted runtime callbacks", () => {
       details: {
         assistantDeliveryBoundary: "hosted_runtime_finalize",
         deliveryErrorCode: "LINQ_SEND_FAILED",
+        deliveryErrorMessage: "Linq outbound chat creation failed with HTTP 403.",
         deliveryStatus: "retryable",
         effectFingerprint: "dedupe_retryable",
         effectId: "intent_retryable",
@@ -457,6 +459,7 @@ describe("hosted runtime callbacks", () => {
       details: {
         assistantDeliveryBoundary: "hosted_runtime_finalize",
         deliveryErrorCode: null,
+        deliveryErrorMessage: null,
         deliveryStatus: "failed",
         effectFingerprint: "dedupe_failed",
         effectId: "intent_failed",

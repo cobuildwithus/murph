@@ -5,10 +5,12 @@ import type {
   AgentmailFetch,
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
   createLinqChat: vi.fn(),
+  probeLinqApi: vi.fn(),
   sendLinqChatMessage: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
   return {
     ...actual,
     createLinqChat: runtimeMocks.createLinqChat,
+    probeLinqApi: runtimeMocks.probeLinqApi,
     sendLinqChatMessage: runtimeMocks.sendLinqChatMessage,
     startLinqChatTypingIndicator: runtimeMocks.startLinqChatTypingIndicator,
     stopLinqChatTypingIndicator: runtimeMocks.stopLinqChatTypingIndicator,
@@ -36,6 +39,7 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
 })
 
 import { isAssistantUserFacingChannel } from '../src/assistant/channel-presentation.ts'
+import { createAssistantBindingDelivery } from '../src/assistant/channels/helpers.ts'
 import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptors.ts'
 import {
   getAssistantChannelAdapter,
@@ -56,6 +60,7 @@ beforeEach(() => {
   vi.restoreAllMocks()
   runtimeMocks.createAgentmailApiClient.mockReset()
   runtimeMocks.createLinqChat.mockReset()
+  runtimeMocks.probeLinqApi.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
@@ -469,6 +474,194 @@ describe('assistant channels runtime seam', () => {
         fetchImplementation: undefined,
       },
     )
+  })
+
+  it('recovers Linq thread sends when the stored chat id is stale', async () => {
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Chat not found',
+      {
+        operation: 'send_message',
+        path: '/chats/stale-chat/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    const sendLinq = vi
+      .fn()
+      .mockRejectedValueOnce(missingChatError)
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'LINQ_API_REQUEST_FAILED',
+          'Forbidden',
+          {
+            operation: 'create_chat',
+            path: '/chats',
+            provider: 'linq',
+            retryable: false,
+            status: 403,
+          },
+        ),
+      )
+      .mockResolvedValueOnce({
+        providerMessageId: '  recovered-message  ',
+        providerThreadId: '  recovered-chat  ',
+        target: '  recovered-chat  ',
+      })
+    runtimeMocks.probeLinqApi.mockResolvedValue({
+      ok: true,
+      phoneNumbers: ['+15550000', '+15550002'],
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: ' +15550001 ',
+          bindingDelivery: createAssistantBindingDelivery('thread', ' stale-chat '),
+          explicitTarget: null,
+          idempotencyKey: ' idem-stale-thread ',
+          identityId: null,
+          message: 'hello again',
+          replyToMessageId: ' reply-9 ',
+        },
+        {
+          sendLinq,
+        },
+      ),
+    ).resolves.toMatchObject({
+      channel: 'linq',
+      idempotencyKey: 'idem-stale-thread',
+      providerMessageId: 'recovered-message',
+      providerThreadId: 'recovered-chat',
+      target: 'recovered-chat',
+      targetKind: 'thread',
+    })
+
+    expect(runtimeMocks.probeLinqApi).toHaveBeenCalledWith({
+      env: process.env,
+      fetchImplementation: undefined,
+    })
+    expect(sendLinq).toHaveBeenNthCalledWith(1, {
+      idempotencyKey: 'idem-stale-thread',
+      message: 'hello again',
+      replyToMessageId: 'reply-9',
+      target: ' stale-chat ',
+    })
+    expect(sendLinq).toHaveBeenNthCalledWith(2, {
+      fromPhoneNumber: '+15550000',
+      idempotencyKey: 'idem-stale-thread',
+      message: 'hello again',
+      replyToMessageId: 'reply-9',
+      target: '+15550001',
+      targetKind: 'participant',
+    })
+    expect(sendLinq).toHaveBeenNthCalledWith(3, {
+      fromPhoneNumber: '+15550002',
+      idempotencyKey: 'idem-stale-thread',
+      message: 'hello again',
+      replyToMessageId: 'reply-9',
+      target: '+15550001',
+      targetKind: 'participant',
+    })
+  })
+
+  it('keeps stale Linq thread recovery confirmation-pending when no new chat id is returned', async () => {
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Chat not found',
+      {
+        operation: 'send_message',
+        path: '/chats/stale-chat/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    const sendLinq = vi
+      .fn()
+      .mockRejectedValueOnce(missingChatError)
+      .mockResolvedValueOnce({
+        providerMessageId: '  recovered-message  ',
+      })
+    runtimeMocks.probeLinqApi.mockResolvedValue({
+      ok: true,
+      phoneNumbers: ['+15550000'],
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: ' +15550001 ',
+          bindingDelivery: createAssistantBindingDelivery('thread', ' stale-chat '),
+          explicitTarget: null,
+          idempotencyKey: ' idem-stale-thread ',
+          identityId: null,
+          message: 'hello again',
+          replyToMessageId: ' reply-9 ',
+        },
+        {
+          sendLinq,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    })
+  })
+
+  it('falls back to the original stale-chat error when Linq sender probing or recovery fails', async () => {
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Chat not found',
+      {
+        operation: 'send_message',
+        path: '/chats/stale-chat/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    const sendLinq = vi
+      .fn()
+      .mockRejectedValueOnce(missingChatError)
+    runtimeMocks.probeLinqApi.mockRejectedValue(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Phone number lookup failed',
+        {
+          operation: 'probe_phone_numbers',
+          path: '/phone_numbers',
+          provider: 'linq',
+          retryable: true,
+          status: 503,
+        },
+      ),
+    )
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: ' +15550001 ',
+          bindingDelivery: null,
+          explicitTarget: ' stale-chat ',
+          idempotencyKey: ' idem-stale-thread ',
+          identityId: null,
+          message: 'hello again',
+          replyToMessageId: ' reply-9 ',
+        },
+        {
+          sendLinq,
+        },
+      ),
+    ).rejects.toBe(missingChatError)
+
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+    expect(sendLinq).toHaveBeenCalledWith({
+      idempotencyKey: 'idem-stale-thread',
+      message: 'hello again',
+      replyToMessageId: 'reply-9',
+      target: 'stale-chat',
+    })
   })
 
   it('sends email to recipients and threads, with typed failures for missing configuration', async () => {

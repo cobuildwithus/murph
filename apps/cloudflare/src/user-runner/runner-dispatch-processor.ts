@@ -920,7 +920,7 @@ export class HostedExecutionObsoleteRunResultError extends Error {
   }
 }
 
-function summarizeHostedAssistantDeliveryOutcomes(
+export function summarizeHostedAssistantDeliveryOutcomes(
   outcomes: readonly HostedAssistantDeliveryOutcome[] | undefined,
 ): Record<string, number | string> {
   if (!Array.isArray(outcomes) || outcomes.length === 0) {
@@ -939,6 +939,7 @@ function summarizeHostedAssistantDeliveryOutcomes(
     ...(nonSent ? {
       assistantDeliveryFirstNonSentChannel: nonSent.deliveryChannel ?? "unknown",
       assistantDeliveryFirstNonSentCode: nonSent.deliveryErrorCode ?? "unknown",
+      assistantDeliveryFirstNonSentMessage: nonSent.deliveryErrorMessage ?? "unknown",
       assistantDeliveryFirstNonSentJournalMethod: nonSent.journalMethod ?? "unknown",
       assistantDeliveryFirstNonSentJournalStatus: nonSent.journalStatus ?? "unknown",
       assistantDeliveryFirstNonSentStatus: nonSent.deliveryStatus,
