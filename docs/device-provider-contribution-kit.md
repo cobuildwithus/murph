@@ -32,6 +32,9 @@ Murph intentionally splits provider work across four seams.
 - source-priority hints
 
 Both `packages/device-syncd` and `packages/importers` consume that descriptor surface. New providers should extend it instead of inventing a second metadata shape.
+That descriptor plus the shared registry helpers are the permanent metadata seam;
+adding another provider should not require a second hosted registry or
+descriptor copy.
 
 ### 2. `packages/device-syncd` owns transport and lifecycle
 
@@ -43,8 +46,13 @@ Both `packages/device-syncd` and `packages/importers` consume that descriptor su
 - local token storage and runtime state outside the vault
 
 The runtime provider object should expose the shared `descriptor` plus behavior hooks only. Do not mirror callback paths, webhook paths, default scopes, or other lifecycle metadata onto extra top-level runtime fields.
+Provider-specific webhook-admin secrets also stay on the provider-owned config
+and factory path. Do not add them to generic hosted or local env/config types.
 
 If you need the same callback or webhook behavior on a different HTTP surface, reuse `@murphai/device-syncd/public-ingress` instead of forking provider-specific ingress logic.
+Shared ingress should only understand the generic preflight plus parse
+lifecycle. The provider module owns any provider-specific verification or
+challenge behavior.
 
 ### 3. `packages/importers` owns parsing and normalization
 
@@ -77,6 +85,9 @@ That split is the main guardrail for provider contributions. Treat shared metada
 - If a provider supports webhooks, treat them as routing or freshness hints that enqueue work; normalization still happens through importer snapshots.
 - Reuse the shared descriptor and shared registry helper; do not reintroduce provider metadata drift between `device-syncd` and `importers`.
 - If you need a hosted or alternate HTTP surface, build it on top of `@murphai/device-syncd/public-ingress` rather than duplicating callback or webhook verification logic.
+- Keep hosted and local generic env/config surfaces provider-agnostic. If a
+  provider needs a webhook-admin secret, keep it on that provider's config
+  reader/factory only.
 
 ## Required touchpoints
 
@@ -225,6 +236,9 @@ Do not add a second bespoke registry. Both packages already share the keyed regi
 If the provider should also work in hosted settings or control-plane surfaces, wire it into the relevant `apps/web` device-sync helpers.
 Reuse the shared configured-provider assembly helpers from `@murphai/device-syncd/config`
 instead of adding a second hosted-only provider config object or registration list.
+Hosted Postgres persistence should stay provider-generic. A normal provider
+addition should not need a provider-specific table or architectural storage
+change.
 
 If the provider should appear in local onboarding or setup flows, update the CLI setup surfaces.
 
@@ -242,6 +256,16 @@ If the provider adds a new metric family, naming pattern, or normalization conve
 ## Contribution checklist
 
 Use this as the merge checklist for a new provider.
+
+The normal end state is still just:
+1. shared descriptor
+2. `device-syncd` transport module
+3. importer adapter
+4. shared config/factory registration
+5. optional hosted or onboarding exposure when the product needs it
+
+If a provider needs more than that, treat it as an architecture review instead
+of quietly branching generic code.
 
 ### Descriptor and shared metadata
 

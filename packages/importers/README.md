@@ -19,6 +19,14 @@ Provider transport stays separate from normalization. Each adapter accepts one p
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 
+For the next provider, importers should only need:
+- one shared descriptor entry
+- one adapter under `src/device-providers`
+- tests that prove descriptor and adapter alignment
+
+Auth, webhook preflight/admin behavior, token storage, and hosted control-plane
+wiring stay outside this package. Importers own normalization only.
+
 The Garmin adapter keeps one provider key, `garmin`, and expects a snapshot object with optional `profile`, `dailySummaries`, `epochSummaries`, `sleeps`, `activities`, `activityFiles`, `womenHealth`, and `deletions` collections. It validates the canonical record collections at the adapter boundary, preserves unsupported top-level sections as raw `snapshot-section:*` artifacts when they actually produce retained evidence, accepts Garmin activity exports only through `activityFiles`, and retains metadata-only activity-file evidence on first-class `activity-asset:*` raw-artifact roles instead of synthesizing fake `.fit` / `.gpx` / `.tcx` payloads.
 
 ## Core Integration Seam

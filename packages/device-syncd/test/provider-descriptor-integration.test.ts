@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  defaultDeviceProviderDescriptors,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+  resolveDeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
@@ -11,6 +13,37 @@ import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 
 describe("device-sync providers", () => {
+  it("keeps the built-in runtime providers aligned with the shared descriptor registry", () => {
+    const providers = [
+      createGarminDeviceSyncProvider({
+        clientId: "garmin-client",
+        clientSecret: "garmin-secret",
+      }),
+      createWhoopDeviceSyncProvider({
+        clientId: "whoop-client",
+        clientSecret: "whoop-secret",
+      }),
+      createOuraDeviceSyncProvider({
+        clientId: "oura-client",
+        clientSecret: "oura-secret",
+      }),
+    ];
+
+    expect(
+      [...providers.map((provider) => provider.provider)].sort(),
+    ).toEqual(
+      [...defaultDeviceProviderDescriptors.map((descriptor) => descriptor.provider)].sort(),
+    );
+
+    for (const provider of providers) {
+      const descriptor = resolveDeviceProviderDescriptor(provider.provider);
+
+      expect(descriptor?.provider).toBe(provider.provider);
+      expect(provider.descriptor.provider).toBe(provider.provider);
+      expect(provider.descriptor.displayName).toBe(descriptor?.displayName);
+    }
+  });
+
   it("hydrates Garmin provider defaults from the shared descriptor", () => {
     const provider = createGarminDeviceSyncProvider({
       clientId: "garmin-client",
