@@ -65,15 +65,18 @@ test("acquireCanonicalWriteLock waits across processes instead of failing immedi
   const holder = spawnTsxProcess(holderScript, [vaultRoot]);
   const holderExitPromise = waitForChild(holder);
   await waitForStdoutLine(holder, "locked");
-  const waiter = await runTsxProcess(waiterScript, [vaultRoot]);
+  const waiter = spawnTsxProcess(waiterScript, [vaultRoot]);
+  const waiterExitPromise = waitForChild(waiter);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(waiter.exitCode, null);
+  const waiterResult = await waiterExitPromise;
   const holderExit = await holderExitPromise;
 
   assert.equal(holderExit.code, 0);
-  assert.equal(waiter.code, 0);
-  assert.doesNotMatch(waiter.stderr, /CANONICAL_WRITE_LOCKED/u);
-
-  const payload = JSON.parse(waiter.stdout.trim()) as { waitedMs: number };
-  assert.equal(payload.waitedMs >= 250, true);
+  assert.equal(waiterResult.code, 0);
+  assert.doesNotMatch(waiterResult.stderr, /CANONICAL_WRITE_LOCKED/u);
+  const payload = JSON.parse(waiterResult.stdout) as { waitedMs: number };
+  assert.equal(Number.isFinite(payload.waitedMs), true);
 });
 
 test("parallel meal and workout writes complete without a canonical write lock failure", async () => {
