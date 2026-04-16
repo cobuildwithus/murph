@@ -329,7 +329,8 @@ export async function dispatchAssistantOutboxIntent(input: {
       (await input.dispatchHooks?.resolveDeliveredIntent?.({
         intent: dispatchIntent,
         vault: input.vault,
-      })) ?? null
+      })) ??
+      resolvePersistedAssistantOutboxDelivery(dispatchIntent)
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
         delivery: reconciledDelivery,
@@ -413,23 +414,26 @@ export async function dispatchAssistantOutboxIntent(input: {
     })
     deliveryTransportIdempotent = delivered.deliveryTransportIdempotent === true
     deliveryMayHaveSucceeded = true
-    const deliveredIntent = assistantOutboxIntentSchema.parse({
-      ...dispatchIntent,
+    const deliveredIntent = buildAssistantOutboxDeliveredIntent({
+      delivery,
       deliveryTransportIdempotent,
+      intent: dispatchIntent,
+      session: delivered.session ?? null,
     })
+    await saveAssistantOutboxIntentLocal(input.vault, deliveredIntent)
+
+    const durableDeliveredIntent =
+      await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+        delivery,
+        deliveryTransportIdempotent,
+        intent: deliveredIntent,
+        intentPath: dispatchIntentPath,
+        vault: input.vault,
+      })
+
     if (delivered.session) {
       await saveAssistantSession(input.vault, delivered.session)
     }
-
-    const durableDeliveredIntent = input.dispatchHooks?.persistDeliveredIntent
-      ? await persistAssistantOutboxIntentDeliveryPendingConfirmation({
-          delivery,
-          deliveryTransportIdempotent,
-          intent: deliveredIntent,
-          intentPath: dispatchIntentPath,
-          vault: input.vault,
-        })
-      : deliveredIntent
 
     await input.dispatchHooks?.persistDeliveredIntent?.({
       delivery,
@@ -754,4 +758,38 @@ function normalizeRequiredMessage(value: string): string {
   }
 
   return normalized
+}
+
+function buildAssistantOutboxDeliveredIntent(input: {
+  delivery: AssistantChannelDelivery
+  deliveryTransportIdempotent: boolean
+  intent: AssistantOutboxIntent
+  session: AssistantSession | null
+}): AssistantOutboxIntent {
+  const sessionBinding = input.session?.binding ?? null
+
+  return assistantOutboxIntentSchema.parse({
+    ...input.intent,
+    actorId: sessionBinding?.actorId ?? input.intent.actorId,
+    bindingDelivery: sessionBinding?.delivery ?? input.intent.bindingDelivery,
+    channel: sessionBinding?.channel ?? input.intent.channel,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    identityId: sessionBinding?.identityId ?? input.intent.identityId,
+    threadId: sessionBinding?.threadId ?? input.intent.threadId,
+    threadIsDirect: sessionBinding?.threadIsDirect ?? input.intent.threadIsDirect,
+  })
+}
+
+function resolvePersistedAssistantOutboxDelivery(
+  intent: AssistantOutboxIntent,
+): AssistantChannelDelivery | null {
+  if (
+    !intent.deliveryConfirmationPending ||
+    !intent.deliveryTransportIdempotent ||
+    !intent.delivery
+  ) {
+    return null
+  }
+
+  return intent.delivery
 }
