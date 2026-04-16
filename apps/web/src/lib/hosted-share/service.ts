@@ -12,26 +12,15 @@ import {
   createHostedShareLink as createHostedShareLinkBase,
 } from "./link-service";
 import {
-  finalizeHostedShareAcceptance,
   findHostedShareLinkByCode,
-  readHostedShareDispatchState,
-  releaseHostedShareAcceptance,
+  reconcileHostedShareAcceptanceLifecycle,
 } from "./shared";
 import type {
-  AcceptHostedShareResult,
   CreateHostedShareLinkResult,
   HostedSharePageData,
-  HostedSharePageStage,
-  HostedSharePreview,
 } from "./types";
 
-export type {
-  AcceptHostedShareResult,
-  CreateHostedShareLinkResult,
-  HostedSharePageData,
-  HostedSharePageStage,
-  HostedSharePreview,
-} from "./types";
+export type { AcceptHostedShareResult, CreateHostedShareLinkResult, HostedSharePageData, HostedSharePageStage, HostedSharePreview } from "./types";
 export { acceptHostedShareLink };
 
 export async function createHostedShareLink(
@@ -66,30 +55,14 @@ export async function buildHostedSharePageData(input: {
     return data;
   }
 
-  const dispatchState = await readHostedShareDispatchState({
+  const lifecycleState = await reconcileHostedShareAcceptanceLifecycle({
     eventId: shareLink.lastEventId,
     memberId,
     prisma,
+    shareId: shareLink.id,
   });
 
-  if (dispatchState === "completed") {
-    await finalizeHostedShareAcceptance({
-      eventId: shareLink.lastEventId,
-      memberId,
-      prisma,
-      shareId: shareLink.id,
-    });
-    data = await buildHostedSharePageDataBase({
-      ...input,
-      prisma,
-    });
-  } else if (dispatchState === "poisoned") {
-    await releaseHostedShareAcceptance({
-      eventId: shareLink.lastEventId,
-      memberId,
-      prisma,
-      shareId: shareLink.id,
-    });
+  if (lifecycleState === "completed" || lifecycleState === "poisoned") {
     data = await buildHostedSharePageDataBase({
       ...input,
       prisma,
@@ -98,6 +71,7 @@ export async function buildHostedSharePageData(input: {
 
   return data;
 }
+
 function shouldReconcileHostedSharePageState(
   shareLink: HostedShareLink | null,
   memberId: string,
