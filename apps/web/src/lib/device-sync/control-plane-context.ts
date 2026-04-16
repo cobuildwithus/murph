@@ -22,13 +22,14 @@ export interface HostedDeviceSyncControlPlaneContext {
 export function createHostedDeviceSyncControlPlaneContext(
   request: Request,
 ): HostedDeviceSyncControlPlaneContext {
-  const env = readHostedDeviceSyncEnvironment();
+  const envSource = process.env;
+  const env = readHostedDeviceSyncEnvironment(envSource);
   const publicBaseUrl = resolveHostedPublicBaseUrl(request, env.publicBaseUrl, env.isProduction);
 
   return {
     request,
     env,
-    registry: createHostedDeviceSyncRegistry(env),
+    registry: createHostedDeviceSyncRegistry(envSource),
     store: new PrismaDeviceSyncControlPlaneStore({
       codec: createHostedSecretCodec({
         key: env.encryptionKey,
