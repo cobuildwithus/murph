@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  type AssistantOutboxDeliveryStateAuthority,
   type AssistantChannelDelivery,
   assistantChannelDeliverySchema,
   assistantOutboxIntentSchema,
@@ -174,6 +175,7 @@ export async function createAssistantOutboxIntent(input: {
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...buildAssistantOutboxPersistedTarget(input),
       delivery: null,
+      deliveryStateAuthority: 'local',
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey: normalizeNullableString(input.deliveryIdempotencyKey),
       deliveryTransportIdempotent: false,
@@ -252,6 +254,7 @@ export async function listAssistantOutboxIntentsLocal(
 export async function dispatchAssistantOutboxIntent(input: {
   allowPersistedDeliveryRecovery?: boolean
   dependencies?: AssistantChannelDependencies
+  deliveryStateAuthority?: AssistantOutboxDeliveryStateAuthority
   dispatchHooks?: AssistantOutboxDispatchHooks
   force?: boolean
   intentId: string
@@ -274,7 +277,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       }
     }
 
-    if (intent.deliveryConfirmationPending && !intent.deliveryTransportIdempotent) {
+    if (shouldReconcileAssistantOutboxIntent(intent)) {
       return {
         action: 'reconcile' as const,
         intent,
@@ -285,6 +288,8 @@ export async function dispatchAssistantOutboxIntent(input: {
     const startedAt = now.toISOString()
     const sending = assistantOutboxIntentSchema.parse({
       ...intent,
+      deliveryStateAuthority:
+        input.deliveryStateAuthority ?? intent.deliveryStateAuthority,
       deliveryIdempotencyKey:
         intent.deliveryIdempotencyKey ?? buildAssistantDeliveryIdempotencyKey(intent),
       updatedAt: startedAt,
@@ -353,10 +358,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       }
     }
 
-    if (
-      dispatchIntent.deliveryConfirmationPending &&
-      !dispatchIntent.deliveryTransportIdempotent
-    ) {
+    if (shouldReconcileAssistantOutboxIntent(dispatchIntent)) {
       const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
         error: createAssistantDeliveryConfirmationPendingError(),
         intentPath: dispatchIntentPath,
@@ -784,6 +786,25 @@ function buildAssistantOutboxDeliveredIntent(input: {
     threadId: sessionBinding?.threadId ?? input.intent.threadId,
     threadIsDirect: sessionBinding?.threadIsDirect ?? input.intent.threadIsDirect,
   })
+}
+
+function shouldReconcileAssistantOutboxIntent(
+  intent: Pick<
+    AssistantOutboxIntent,
+    | 'deliveryConfirmationPending'
+    | 'deliveryStateAuthority'
+    | 'deliveryTransportIdempotent'
+    | 'status'
+  >,
+): boolean {
+  if (intent.deliveryTransportIdempotent) {
+    return false
+  }
+
+  return intent.deliveryConfirmationPending || (
+    intent.deliveryStateAuthority === 'hosted-journal'
+    && intent.status !== 'pending'
+  )
 }
 
 function resolvePersistedAssistantOutboxDelivery(

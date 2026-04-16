@@ -213,6 +213,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith(
       expect.objectContaining({
         allowPersistedDeliveryRecovery: false,
+        deliveryStateAuthority: "hosted-journal",
       }),
     );
   });
