@@ -14,8 +14,7 @@ export interface HostedDeviceSyncControlPlaneContext {
   readonly registry: DeviceSyncRegistry;
   readonly store: PrismaDeviceSyncControlPlaneStore;
   readonly publicIngressBaseUrl: string;
-  readonly webhookAdminCallbackBaseUrl: string;
-  readonly webhookAdminCallbackBaseUrlSource: HostedDeviceSyncPublicBaseUrlSource;
+  readonly publicIngressBaseUrlSource: HostedDeviceSyncPublicBaseUrlSource;
   readonly allowedReturnOrigins: string[];
 }
 
@@ -40,8 +39,7 @@ export function createHostedDeviceSyncControlPlaneContext(
       prisma: getPrisma(),
     }),
     publicIngressBaseUrl: publicBaseUrl.baseUrl,
-    webhookAdminCallbackBaseUrl: publicBaseUrl.baseUrl,
-    webhookAdminCallbackBaseUrlSource: publicBaseUrl.source,
+    publicIngressBaseUrlSource: publicBaseUrl.source,
     allowedReturnOrigins: resolveAllowedReturnOrigins(
       request,
       publicBaseUrl.baseUrl,

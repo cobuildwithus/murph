@@ -34,9 +34,8 @@ export class HostedDeviceSyncControlPlane {
   readonly registry: HostedDeviceSyncControlPlaneContext["registry"];
   readonly store: HostedDeviceSyncControlPlaneContext["store"];
   readonly publicIngressBaseUrl: string;
-  readonly webhookAdminCallbackBaseUrl: string;
-  readonly webhookAdminCallbackBaseUrlSource:
-    HostedDeviceSyncControlPlaneContext["webhookAdminCallbackBaseUrlSource"];
+  readonly publicIngressBaseUrlSource:
+    HostedDeviceSyncControlPlaneContext["publicIngressBaseUrlSource"];
   readonly allowedReturnOrigins: string[];
   readonly agentSessions: HostedDeviceSyncAgentSessionService;
   readonly connections: HostedDeviceSyncPublicIngressService;
@@ -51,8 +50,7 @@ export class HostedDeviceSyncControlPlane {
     this.registry = this.context.registry;
     this.store = this.context.store;
     this.publicIngressBaseUrl = this.context.publicIngressBaseUrl;
-    this.webhookAdminCallbackBaseUrl = this.context.webhookAdminCallbackBaseUrl;
-    this.webhookAdminCallbackBaseUrlSource = this.context.webhookAdminCallbackBaseUrlSource;
+    this.publicIngressBaseUrlSource = this.context.publicIngressBaseUrlSource;
     this.allowedReturnOrigins = this.context.allowedReturnOrigins;
     this.agentSessions = new HostedDeviceSyncAgentSessionService({
       request,
@@ -100,15 +98,11 @@ export class HostedDeviceSyncControlPlane {
     return this.connections.handleOAuthCallback(provider);
   }
 
-  async handleWebhook(provider: string) {
-    return this.connections.handleWebhook(provider);
-  }
-
   async readWebhookRawBody() {
     return this.connections.readWebhookRawBody();
   }
 
-  async handleWebhookWithRawBody(provider: string, rawBody: Buffer) {
+  async handleWebhook(provider: string, rawBody?: Buffer) {
     return this.connections.handleWebhook(provider, rawBody);
   }
 

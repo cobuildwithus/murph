@@ -32,20 +32,20 @@ export class HostedDeviceSyncWebhookAdminService {
 
     if (!input.bestEffort) {
       await ensureSubscriptions({
-        publicBaseUrl: this.context.webhookAdminCallbackBaseUrl,
+        publicBaseUrl: this.context.publicIngressBaseUrl,
       });
       return;
     }
 
     try {
       await ensureSubscriptions({
-        publicBaseUrl: this.context.webhookAdminCallbackBaseUrl,
+        publicBaseUrl: this.context.publicIngressBaseUrl,
       });
     } catch (error) {
       console.error("Failed to ensure hosted webhook admin upkeep.", {
         provider: input.provider.provider,
         reason: input.reason,
-        callbackBaseUrlSource: this.context.webhookAdminCallbackBaseUrlSource,
+        publicIngressBaseUrlSource: this.context.publicIngressBaseUrlSource,
         errorMessage: normalizeHostedExecutionOperatorMessage(
           normalizeHostedExecutionErrorMessage(error),
         ),

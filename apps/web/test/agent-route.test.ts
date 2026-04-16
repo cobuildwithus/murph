@@ -9,7 +9,7 @@ import { createBearerRequest, createJsonPostRequest, createRouteContext } from "
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   exportTokenBundle: vi.fn(),
-  handleWebhookWithRawBody: vi.fn(),
+  handleWebhook: vi.fn(),
   listSignals: vi.fn(),
   readWebhookRawBody: vi.fn(),
   refreshTokenBundle: vi.fn(),
@@ -45,7 +45,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       exportTokenBundle: mocks.exportTokenBundle,
-      handleWebhookWithRawBody: mocks.handleWebhookWithRawBody,
+      handleWebhook: mocks.handleWebhook,
       listSignals: mocks.listSignals,
       readWebhookRawBody: mocks.readWebhookRawBody,
       registry: mocks.webhookRegistry,
@@ -199,7 +199,7 @@ describe("hosted device-sync agent and webhook routes", () => {
   });
 
   it("decodes encoded webhook provider params before calling the control plane", async () => {
-    mocks.handleWebhookWithRawBody.mockResolvedValue({
+    mocks.handleWebhook.mockResolvedValue({
       ok: true,
     });
 
@@ -212,7 +212,7 @@ describe("hosted device-sync agent and webhook routes", () => {
 
     expect(response.status).toBe(202);
     expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
-    expect(mocks.handleWebhookWithRawBody).toHaveBeenCalledWith(
+    expect(mocks.handleWebhook).toHaveBeenCalledWith(
       "oura",
       Buffer.from('{"event":"sleep.updated"}', "utf8"),
     );
@@ -265,7 +265,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     expect(response.status).toBe(200);
     expect(observedUrl).toBe("https://example.test/api/device-sync/webhooks/oura?via=preflight");
     expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
-    expect(mocks.handleWebhookWithRawBody).not.toHaveBeenCalled();
+    expect(mocks.handleWebhook).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       challenge: "demo-preflight-challenge",
     });
