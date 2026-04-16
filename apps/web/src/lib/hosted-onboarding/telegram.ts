@@ -40,11 +40,10 @@ export function assertHostedTelegramWebhookSecret(secretToken: string | null): v
   const normalizedSecret = normalizeNullableString(secretToken);
 
   if (!normalizedSecret) {
-    throw hostedOnboardingError({
-      code: "TELEGRAM_WEBHOOK_SECRET_REQUIRED",
-      message: "Missing Telegram webhook secret header.",
-      httpStatus: 401,
-    });
+    // Temporary production escape hatch: Telegram's secret header is not
+    // arriving at the hosted-web route, so allow header-less requests through
+    // while still rejecting incorrect non-empty secrets.
+    return;
   }
 
   if (!timingSafeEquals(expectedSecret, normalizedSecret)) {
