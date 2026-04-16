@@ -32,6 +32,21 @@ export default async function LandingPage() {
   const { authenticated } = await getHostedPageAuthSnapshot();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
+  const signupCta = authenticated
+    ? {
+        body:
+          "Jump back into your dashboard, manage billing, and keep your wearable connections in sync from one place.",
+        eyebrow: "Your account",
+        signupLabel: "Open settings",
+        title: "You’re already set up.",
+      }
+    : {
+        body:
+          "Create your account with your phone, Telegram, or email. Connect your wearable, pick one experiment, and let Murph tell you what actually changed.",
+        eyebrow: "Sign up",
+        signupLabel: "Create your account",
+        title: "Ready to get more out of your wearable?",
+      };
 
   return (
     <main className="min-h-screen bg-[#f5f0e8] antialiased">
@@ -374,6 +389,47 @@ export default async function LandingPage() {
                   <p className="mt-1.5 text-[0.8125rem] leading-[1.65] text-[#736a58]">{a}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#ede3d0] px-6 pb-4 sm:px-10 lg:px-16">
+        <div className="mx-auto max-w-[1080px]">
+          <div className="overflow-hidden rounded-[2rem] border border-[#c4a882]/15 bg-[#2a2520] px-6 py-10 text-center shadow-[0_22px_70px_rgba(42,37,32,0.14)] sm:px-10 sm:py-12 lg:px-14 lg:py-14">
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]/85">
+              {signupCta.eyebrow}
+            </span>
+            <h2 className="mx-auto mt-5 max-w-[14ch] font-serif text-[clamp(1.9rem,3.6vw,3rem)] font-semibold leading-[1.04] tracking-[-0.04em] text-[#f5f0e8]">
+              {signupCta.title}
+            </h2>
+            <p className="mx-auto mt-5 max-w-[40ch] text-[0.9375rem] leading-[1.8] text-pretty text-[#f5f0e8]/58 sm:text-base">
+              {signupCta.body}
+            </p>
+
+            <div className="mt-7 flex items-center justify-center gap-3 text-[0.8125rem] text-[#f5f0e8]/42">
+              {authenticated ? (
+                <>
+                  <span>Subscription and billing</span>
+                  <span className="text-[#f5f0e8]/18">&middot;</span>
+                  <span>Wearable connections</span>
+                </>
+              ) : (
+                <>
+                  <span>$5/month early access</span>
+                  <span className="text-[#f5f0e8]/18">&middot;</span>
+                  <span>Oura and Whoop</span>
+                </>
+              )}
+            </div>
+
+            <div className="mt-8 flex justify-center">
+              <LandingAuthActions
+                authenticated={authenticated}
+                context="footer"
+                showSignIn={false}
+                signupLabel={signupCta.signupLabel}
+              />
             </div>
           </div>
         </div>
