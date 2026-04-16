@@ -117,6 +117,7 @@ export async function main(): Promise<void> {
       VERCEL_OIDC_TOKEN: vercelOidcToken,
     };
     const runnerHostAlias = resolveLocalRunnerHostAlias(initialEnv);
+    assertRunnerHostAliasAvailableWhenRequired(runnerHostAlias, runtimeEnv);
     const internalWorkerProxyUpstreamBaseUrl = `${config.workerProtocol}://${runnerHostAlias ?? config.workerHost}:${config.workerPort}`;
     const workerRuntimeEnv: NodeJS.ProcessEnv = {
       ...runtimeEnv,
@@ -405,6 +406,51 @@ function readLinuxDockerBridgeGatewayHost(): string | null {
 
   const gateway = result.stdout.trim();
   return gateway.length > 0 ? gateway : null;
+}
+
+const RUNNER_HOST_ALIAS_REQUIRED_URL_ENV_KEYS = [
+  "HOSTED_ASSISTANT_BASE_URL",
+  "LINQ_API_BASE_URL",
+  "TELEGRAM_API_BASE_URL",
+] as const;
+
+function assertRunnerHostAliasAvailableWhenRequired(
+  runnerHostAlias: string | null,
+  env: NodeJS.ProcessEnv,
+): void {
+  if (process.platform !== "linux" || runnerHostAlias) {
+    return;
+  }
+
+  const requiredKeys = RUNNER_HOST_ALIAS_REQUIRED_URL_ENV_KEYS.filter((key) =>
+    isLoopbackUrlString(env[key]),
+  );
+  if (requiredKeys.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Hosted local dev on Linux requires HOSTED_EXECUTION_RUNNER_HOST_ALIAS when loopback-backed runner callbacks are configured.",
+      `Missing host alias for: ${requiredKeys.join(", ")}.`,
+      "Set HOSTED_EXECUTION_RUNNER_HOST_ALIAS explicitly or make sure `docker network inspect bridge` works in this environment.",
+    ].join(" "),
+  );
+}
+
+function isLoopbackUrlString(value: string | undefined): boolean {
+  if (!value?.trim()) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.hostname === "127.0.0.1"
+      || url.hostname === "localhost"
+      || url.hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function resolveWranglerDebugArgs(env: NodeJS.ProcessEnv): string[] {

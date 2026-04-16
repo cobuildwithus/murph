@@ -235,6 +235,24 @@ describe("hosted local dev main", () => {
     platformSpy.mockRestore();
   });
 
+  it("fails closed on Linux when loopback runner callbacks need a host alias but gateway discovery fails", async () => {
+    spawnSync.mockReturnValueOnce({
+      error: undefined,
+      status: 1,
+      stdout: "",
+    });
+    vi.stubEnv("HOSTED_ASSISTANT_BASE_URL", "http://127.0.0.1:4111/v1");
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+
+    const { main } = await import("./main.ts");
+
+    await expect(main()).rejects.toThrow(
+      "Hosted local dev on Linux requires HOSTED_EXECUTION_RUNNER_HOST_ALIAS when loopback-backed runner callbacks are configured.",
+    );
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+    platformSpy.mockRestore();
+  });
+
   it("can start only the worker lane for focused hosted runtime debugging", async () => {
     const createChild = (input: {
       exitCode: number | null;

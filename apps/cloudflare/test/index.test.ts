@@ -805,6 +805,54 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("routes configured numeric runner host aliases onto the results.worker handler", async () => {
+    const env = createWorkerEnv(undefined, {
+      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://172.17.0.1:8902",
+      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+    });
+
+    const response = await worker.fetch(
+      new Request("http://172.17.0.1:8902/effects/outbox_local_proxy_gateway?fingerprint=dedupe_local_proxy_gateway", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_local_proxy_gateway",
+          fingerprint: "dedupe_local_proxy_gateway",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+
+    const readResponse = await worker.fetch(
+      new Request("http://172.17.0.1:8902/effects/outbox_local_proxy_gateway?fingerprint=dedupe_local_proxy_gateway", {
+        headers: {
+          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_local_proxy_gateway",
+      record: {
+        effectId: "outbox_local_proxy_gateway",
+        kind: "assistant.delivery",
+        state: "sending",
+      },
+    });
+  });
+
   it("rejects direct runner-outbound proxy requests on non-loopback worker hosts", async () => {
     const env = createWorkerEnv(undefined, {
       HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",
