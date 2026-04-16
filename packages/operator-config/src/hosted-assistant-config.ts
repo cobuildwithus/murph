@@ -248,6 +248,18 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   const envProfile = resolveHostedAssistantEnvProfile(input.env, existingActiveProfile)
 
   if (existingHostedConfigInvalid) {
+    if (envProfile) {
+      const nextConfig = upsertHostedAssistantProfile(existingHostedConfig, envProfile)
+      const saved = await saveHostedAssistantConfig(nextConfig, input.homeDirectory)
+      const savedState = resolveHostedAssistantOperatorDefaultsState(saved.hostedAssistant)
+
+      return {
+        ...savedState,
+        seeded: true,
+        source: 'hosted-env',
+      }
+    }
+
     if (input.allowMissing) {
       return {
         configured: false,

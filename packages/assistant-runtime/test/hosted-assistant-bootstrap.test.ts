@@ -480,28 +480,36 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(
       ensureHostedAssistantOperatorDefaults({
         allowMissing: true,
-        env: {},
+        env: {
+          HOSTED_ASSISTANT_MODEL: "openai-gpt-54",
+          HOSTED_ASSISTANT_PROVIDER: "venice",
+          HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+        },
         homeDirectory,
       }),
     ).resolves.toMatchObject({
-      configured: false,
-      provider: null,
-      seeded: false,
-      source: "invalid",
+      configured: true,
+      provider: "openai-compatible",
+      seeded: true,
+      source: "hosted-env",
     });
 
-    await expect(
-      ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {},
-        homeDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_ASSISTANT_CONFIG_INVALID",
-      name: "HostedAssistantConfigurationError",
+    await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toMatchObject({
+      activeProfileId: "platform-default",
+      profiles: [
+        {
+          id: "platform-default",
+          managedBy: "platform",
+          target: {
+            adapter: "openai-compatible",
+            apiKeyEnv: "VENICE_API_KEY",
+            model: "openai-gpt-54",
+            providerName: "venice",
+            reasoningEffort: "medium",
+          },
+        },
+      ],
     });
-
-    await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toBeNull();
     const defaults = await resolveAssistantOperatorDefaults(homeDirectory);
     expect(resolveAssistantBackendTarget(defaults)).toMatchObject({
       adapter: "openai-compatible",
@@ -556,25 +564,18 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(
       ensureHostedAssistantOperatorDefaults({
         allowMissing: true,
-        env: {},
+        env: {
+          HOSTED_ASSISTANT_MODEL: "openai-gpt-54",
+          HOSTED_ASSISTANT_PROVIDER: "venice",
+          HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+        },
         homeDirectory,
       }),
     ).resolves.toMatchObject({
-      configured: false,
-      provider: null,
-      seeded: false,
-      source: "invalid",
-    });
-
-    await expect(
-      ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {},
-        homeDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_ASSISTANT_CONFIG_INVALID",
-      name: "HostedAssistantConfigurationError",
+      configured: true,
+      provider: "openai-compatible",
+      seeded: true,
+      source: "hosted-env",
     });
   });
 });

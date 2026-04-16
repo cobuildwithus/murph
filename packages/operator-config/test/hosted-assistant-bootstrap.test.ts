@@ -366,6 +366,23 @@ test('hosted assistant bootstrap returns missing or invalid states and throws re
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
       /present but invalid/u.test(error.message),
   )
+
+  assert.deepEqual(
+    await invalidModule.ensureHostedAssistantOperatorDefaults({
+      allowMissing: true,
+      env: {
+        HOSTED_ASSISTANT_MODEL: 'openai-gpt-54',
+        HOSTED_ASSISTANT_PROVIDER: 'venice',
+        HOSTED_ASSISTANT_REASONING_EFFORT: 'medium',
+      },
+    }),
+    {
+      configured: true,
+      provider: 'openai-compatible',
+      seeded: true,
+      source: 'hosted-env',
+    },
+  )
 })
 
 test('hosted assistant bootstrap seeds or updates platform profiles from hosted env', async () => {
