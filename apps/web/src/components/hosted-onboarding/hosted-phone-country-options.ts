@@ -221,13 +221,3 @@ export const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
   { code: "ZM", dialCode: "+260", label: "Zambia", placeholder: "095 5123456" },
   { code: "ZW", dialCode: "+263", label: "Zimbabwe", placeholder: "071 234 5678" },
 ];
-
-const HOSTED_PHONE_COUNTRY_NOTICES: Record<string, string> = {
-  CA: "Twilio applies stricter OTP compliance in Canada. Keep compliant opt-in copy in the flow, and if your Twilio setup uses a toll-free sender, complete Twilio toll-free verification.",
-  CN: "Twilio requires a registered SMS template before sending verification codes to China. Confirm the Twilio account connected to Privy has that template configured.",
-  SG: "Twilio applies extra sender rules in Singapore. Confirm the connected Twilio account has the required Singapore sender setup before sending codes there.",
-};
-
-export function getHostedPhoneCountryNotice(countryCode: string): string | null {
-  return HOSTED_PHONE_COUNTRY_NOTICES[countryCode] ?? null;
-}

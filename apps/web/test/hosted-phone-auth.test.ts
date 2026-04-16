@@ -45,10 +45,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("uses the Twilio-documented international region list for the real picker", async () => {
-    const {
-      HOSTED_PHONE_COUNTRY_OPTIONS,
-      getHostedPhoneCountryNotice,
-    } = await import(
+    const { HOSTED_PHONE_COUNTRY_OPTIONS } = await import(
       "@/src/components/hosted-onboarding/hosted-phone-country-options"
     );
 
@@ -67,19 +64,6 @@ describe("HostedPhoneAuth", () => {
       HOSTED_PHONE_COUNTRY_OPTIONS.some((option) => option.code === "BQ"),
       false,
     );
-    assert.match(
-      getHostedPhoneCountryNotice("CN") ?? "",
-      /registered SMS template/i,
-    );
-    assert.match(
-      getHostedPhoneCountryNotice("SG") ?? "",
-      /sender setup/i,
-    );
-    assert.match(
-      getHostedPhoneCountryNotice("CA") ?? "",
-      /toll-free verification/i,
-    );
-    assert.equal(getHostedPhoneCountryNotice("US"), null);
   });
 
   it("renders the real closed country picker as a button with +1 by default", async () => {
