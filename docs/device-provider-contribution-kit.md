@@ -244,6 +244,21 @@ If the provider should appear in local onboarding or setup flows, update the CLI
 
 Keep this optional. A provider can land first in the local daemon-plus-importer path and only later join hosted or onboarding UX.
 
+## Provider readiness checkpoint
+
+After the current cleanup, the normal next-provider path is intentionally small:
+- one shared descriptor entry in `@murphai/importers`
+- one transport module in `packages/device-syncd/src/providers`
+- one importer adapter in `packages/importers/src/device-providers`
+- one shared registration step in `@murphai/device-syncd/config`
+
+That is the steady-state architecture. A normal provider should not require:
+- provider-specific webhook secrets on generic hosted or local env/config shapes
+- provider-specific branching in shared callback or webhook ingress
+- provider-specific hosted persistence tables or a second hosted provider registry
+
+If a provider seems to need one of those, stop and treat it as architecture work rather than routine provider implementation.
+
 ### 7. Update docs
 
 At minimum:
