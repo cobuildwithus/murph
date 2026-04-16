@@ -1,5 +1,4 @@
 import {
-  ExecutionOutboxStatus,
   type PrismaClient,
 } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
@@ -19,28 +18,28 @@ import {
 } from "./outbox";
 
 describe("hosted execution lifecycle readers", () => {
-  it("reads canonical lifecycle state without consulting transport status", async () => {
+  it("reads canonical lifecycle state from the outbox row", async () => {
     const executionOutbox = {
-      findUnique: vi.fn(async () => {
-        throw new Error("Execution lifecycle fallback rows should bypass Prisma reads.");
-      }),
+      findUnique: vi.fn(async () => ({
+        dispatchState: "poisoned",
+      })),
     };
     const prisma = {
       executionOutbox,
-      outboxRows: [
-        {
-          dispatchState: "poisoned",
-          eventId: "evt_123",
-          status: ExecutionOutboxStatus.queued,
-        },
-      ],
     } as unknown as Pick<PrismaClient, "executionOutbox">;
 
     await expect(readExecutionLifecycleStateFromOutbox({
       eventId: "evt_123",
       prisma,
     })).resolves.toBe("poisoned");
-    expect(executionOutbox.findUnique).not.toHaveBeenCalled();
+    expect(executionOutbox.findUnique).toHaveBeenCalledWith({
+      select: {
+        dispatchState: true,
+      },
+      where: {
+        eventId: "evt_123",
+      },
+    });
   });
 
   it("normalizes invalid lifecycle values and preserves terminal checks", () => {

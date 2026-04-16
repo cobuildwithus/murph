@@ -885,6 +885,14 @@ function createHostedSharePrisma(input?: {
       },
     },
     executionOutbox: {
+      findUnique: async ({
+        where,
+      }: {
+        where: { eventId: string };
+      }) => {
+        const existing = outboxRows.find((entry) => entry.eventId === where.eventId) ?? null;
+        return existing ? { dispatchState: existing.dispatchState } : null;
+      },
       upsert: async ({
         create,
         where,

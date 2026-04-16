@@ -116,6 +116,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("forces hosted device-sync connect-link creation through the signed POST callback route", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      authorizationUrl: "https://sync.example.test/oauth",
+      expiresAt: "2026-04-07T00:00:00.000Z",
+      provider: "oura",
+      providerLabel: "Oura",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test/app",
+    });
+
+    const connectLink = await platform.deviceSyncPort!.createConnectLink({
+      provider: "oura",
+    });
+
+    expect(connectLink.provider).toBe("oura");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the device-sync connect-link fetch to run.");
+    }
+    const [url, init] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/providers/oura/connect-link");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBeNull();
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(headers.get("x-hosted-execution-signing-key-id")).toBe("v1");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
   it("supports the assistant-delivery-specific journal method names", async () => {
     const record = {
       delivery: {

@@ -1,4 +1,3 @@
-import { ExecutionOutboxStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -26,13 +25,9 @@ describe("hosted share lifecycle reconciliation", () => {
 
   it("finalizes a claimed share from the canonical lifecycle without transport-status gating", async () => {
     const prisma = createHostedSharePrisma({
-      outboxRows: [
-        {
-          dispatchState: "queued",
-          eventId: "evt_share",
-          status: ExecutionOutboxStatus.delivery_failed,
-        },
-      ],
+      executionOutboxRow: {
+        dispatchState: "queued",
+      },
       share: {
         acceptedByMemberId: "member_123",
         lastEventId: "evt_share",
@@ -57,13 +52,9 @@ describe("hosted share lifecycle reconciliation", () => {
 
   it("releases a claimed share from the canonical lifecycle without waiting for dispatched transport state", async () => {
     const prisma = createHostedSharePrisma({
-      outboxRows: [
-        {
-          dispatchState: "queued",
-          eventId: "evt_share",
-          status: ExecutionOutboxStatus.queued,
-        },
-      ],
+      executionOutboxRow: {
+        dispatchState: "queued",
+      },
       share: {
         acceptedByMemberId: "member_123",
         lastEventId: "evt_share",
@@ -89,11 +80,9 @@ describe("hosted share lifecycle reconciliation", () => {
 });
 
 function createHostedSharePrisma(input: {
-  outboxRows: Array<{
+  executionOutboxRow: {
     dispatchState: string;
-    eventId: string;
-    status: ExecutionOutboxStatus;
-  }>;
+  };
   share?: Partial<HostedShareRow>;
 }) {
   const share: HostedShareRow = {
@@ -109,7 +98,7 @@ function createHostedSharePrisma(input: {
 
   return {
     executionOutbox: {
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async () => input.executionOutboxRow),
     },
     hostedShareLink: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
@@ -146,7 +135,6 @@ function createHostedSharePrisma(input: {
         return { count: 1 };
       }),
     },
-    outboxRows: input.outboxRows,
     share,
   };
 }
