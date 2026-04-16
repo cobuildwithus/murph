@@ -17,12 +17,6 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
 
-import {
-  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
-  CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
-  HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER,
-} from "./internal-hosts.ts";
-
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
   name: string;
@@ -73,6 +67,11 @@ interface HostedContainerRuntimeDependencies {
   processIsolation: boolean;
 }
 
+interface HostedExecutionLocalBridgeConfig {
+  localInternalProxyBaseUrl: string | null;
+  localLoopbackProxyToken: string | null;
+}
+
 class HostedRunnerShellIsolationError extends Error {
   constructor(message: string) {
     super(message);
@@ -87,13 +86,15 @@ export async function startHostedContainerEntrypoint(input: {
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
   let activeHostedRunnerJobCount = 0;
-  let activeInternalWorkerProxyToken: string | null = null;
-  let internalWorkerProxyBaseUrl: string | null = null;
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
     let job: HostedAssistantRuntimeJobInput | null = null;
     let internalWorkerProxyToken: string | null = null;
+    let localBridge: HostedExecutionLocalBridgeConfig = {
+      localInternalProxyBaseUrl: null,
+      localLoopbackProxyToken: null,
+    };
 
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -102,17 +103,6 @@ export async function startHostedContainerEntrypoint(input: {
         response.statusCode = 200;
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner-node" }));
-        return;
-      }
-
-      if (requestUrl.pathname.startsWith(HOSTED_CONTAINER_INTERNAL_WORKER_PROXY_PREFIX)) {
-        await handleHostedContainerInternalWorkerProxyRequest({
-          activeInternalWorkerProxyToken,
-          fetchImpl: runtime.fetchImpl,
-          request,
-          requestUrl,
-          response,
-        });
         return;
       }
 
@@ -180,7 +170,7 @@ export async function startHostedContainerEntrypoint(input: {
         );
         job = parsed.job;
         internalWorkerProxyToken = parsed.internalWorkerProxyToken;
-        activeInternalWorkerProxyToken = internalWorkerProxyToken;
+        localBridge = parsed.localBridge;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -210,8 +200,9 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       const result = await runHostedExecutionJob(job, {
-        internalWorkerProxyBaseUrl,
         internalWorkerProxyToken,
+        localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
+        localLoopbackProxyToken: localBridge.localLoopbackProxyToken,
         signal: requestAbort.signal,
       });
       if (runtime.processIsolation) {
@@ -255,9 +246,6 @@ export async function startHostedContainerEntrypoint(input: {
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
       if (claimedRunnerSlot) {
-        activeInternalWorkerProxyToken = null;
-      }
-      if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }
       requestAbort.cleanup();
@@ -273,362 +261,13 @@ export async function startHostedContainerEntrypoint(input: {
   if (!address || typeof address === "string") {
     throw new Error("Hosted container entrypoint failed to resolve its listening TCP port.");
   }
-  internalWorkerProxyBaseUrl = `http://127.0.0.1:${address.port}${HOSTED_CONTAINER_INTERNAL_WORKER_PROXY_PREFIX}`;
 
   return server;
 }
 
-const HOSTED_CONTAINER_INTERNAL_WORKER_PROXY_PREFIX = "/__internal/worker-proxy/";
-const HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV =
-  "HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL";
-
-async function handleHostedContainerInternalWorkerProxyRequest(input: {
-  activeInternalWorkerProxyToken: string | null;
-  fetchImpl: typeof fetch;
-  request: IncomingMessage;
-  requestUrl: URL;
-  response: ServerResponse;
-}): Promise<void> {
-  const proxied = parseHostedContainerInternalWorkerProxyTarget(input.requestUrl);
-
-  if (!proxied) {
-    writeJsonResponse(input.response, 404, {
-      error: "Not found",
-    });
-    return;
-  }
-
-  if (!input.activeInternalWorkerProxyToken) {
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        host: proxied.host,
-        method: input.request.method ?? "GET",
-        path: proxied.path,
-      },
-      level: "warn",
-      message: "Hosted container internal worker proxy rejected a request without an active run.",
-      phase: "failed",
-    });
-    writeJsonResponse(input.response, 503, {
-      error: "Hosted runner proxy is not active.",
-    });
-    return;
-  }
-
-  const providedToken = input.request.headers[HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER];
-  const normalizedProvidedToken = Array.isArray(providedToken) ? providedToken[0] : providedToken;
-
-  if (
-    !normalizedProvidedToken
-    || !timingSafeEquals(normalizedProvidedToken, input.activeInternalWorkerProxyToken)
-  ) {
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        host: proxied.host,
-        method: input.request.method ?? "GET",
-        path: proxied.path,
-      },
-      level: "warn",
-      message: "Hosted container internal worker proxy rejected an unauthorized request.",
-      phase: "failed",
-    });
-    writeJsonResponse(input.response, 401, {
-      error: "Unauthorized",
-    });
-    return;
-  }
-
-  const body = await readHostedContainerRequestBody(input.request);
-  const requestHeaders = new Headers();
-
-  for (const [key, value] of Object.entries(input.request.headers)) {
-    if (value === undefined) {
-      continue;
-    }
-    if (!shouldForwardHostedContainerProxyRequestHeader(key)) {
-      continue;
-    }
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        requestHeaders.append(key, entry);
-      }
-      continue;
-    }
-    requestHeaders.set(key, value);
-  }
-
-  const upstream = resolveHostedContainerInternalWorkerProxyUpstream(proxied);
-  requestHeaders.set(HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER, proxied.host);
-  if (upstream.preserveHostHeader) {
-    requestHeaders.set("host", proxied.host);
-  }
-
-  emitHostedExecutionStructuredLog({
-    component: "container",
-    details: {
-      host: proxied.host,
-      method: input.request.method ?? "GET",
-      path: proxied.path,
-      search: proxied.search,
-      upstreamRewritten: upstream.rewritten ? "true" : "false",
-      upstreamUrl: upstream.url.toString(),
-    },
-    message: "Hosted container internal worker proxy forwarding request.",
-    phase: "side-effects.draining",
-  });
-
-  try {
-    const upstreamResponse = await input.fetchImpl(upstream.url, {
-      body:
-        canHttpRequestCarryBody(input.request.method) && body
-          ? new Uint8Array(body)
-          : undefined,
-      headers: requestHeaders,
-      method: input.request.method,
-    });
-    input.response.statusCode = upstreamResponse.status;
-    const responseBytes = Buffer.from(await upstreamResponse.arrayBuffer());
-    upstreamResponse.headers.forEach((value, key) => {
-      if (shouldForwardHostedContainerProxyResponseHeader(key)) {
-        input.response.setHeader(key, value);
-      }
-    });
-    input.response.setHeader("content-length", String(responseBytes.byteLength));
-    input.response.end(responseBytes);
-
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        host: proxied.host,
-        method: input.request.method ?? "GET",
-        path: proxied.path,
-        search: proxied.search,
-        status: String(upstreamResponse.status),
-        upstreamRewritten: upstream.rewritten ? "true" : "false",
-        upstreamUrl: upstream.url.toString(),
-      },
-      message: "Hosted container internal worker proxy completed request.",
-      phase: "side-effects.draining",
-    });
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        host: proxied.host,
-        method: input.request.method ?? "GET",
-        path: proxied.path,
-        search: proxied.search,
-        upstreamRewritten: upstream.rewritten ? "true" : "false",
-        upstreamUrl: upstream.url.toString(),
-      },
-      error,
-      level: "warn",
-      message: "Hosted container internal worker proxy failed.",
-      phase: "failed",
-    });
-    writeJsonResponse(input.response, 502, {
-      detail: readHostedContainerProxyErrorDetail(error),
-      error: "Hosted runner internal proxy failed.",
-    });
-  }
-}
-
-function shouldForwardHostedContainerProxyRequestHeader(name: string): boolean {
-  switch (name.toLowerCase()) {
-    case "connection":
-    case "content-length":
-    case "host":
-    case "keep-alive":
-    case "proxy-authenticate":
-    case "proxy-authorization":
-    case "te":
-    case "trailer":
-    case "transfer-encoding":
-    case "upgrade":
-      return false;
-    default:
-      return true;
-  }
-}
-
-function shouldForwardHostedContainerProxyResponseHeader(name: string): boolean {
-  switch (name.toLowerCase()) {
-    case "connection":
-    case "content-encoding":
-    case "content-length":
-    case "keep-alive":
-    case "proxy-authenticate":
-    case "proxy-authorization":
-    case "te":
-    case "trailer":
-    case "transfer-encoding":
-    case "upgrade":
-      return false;
-    default:
-      return true;
-  }
-}
-
-function readHostedContainerProxyErrorDetail(error: unknown): string {
-  const parts: string[] = [];
-  let current: unknown = error;
-  let depth = 0;
-
-  while (current !== null && current !== undefined && depth < 4) {
-    if (current instanceof Error) {
-      const name = current.name.trim();
-      const message = current.message.trim();
-      const summary = [name, message].filter((part) => part.length > 0).join(": ");
-      if (summary.length > 0) {
-        parts.push(summary);
-      }
-      current = "cause" in current ? current.cause : null;
-      depth += 1;
-      continue;
-    }
-
-    const fallback = String(current).trim();
-    if (fallback.length > 0) {
-      parts.push(fallback);
-    }
-    break;
-  }
-
-  return parts.length > 0
-    ? parts.join(" <- ")
-    : "Unknown upstream proxy error.";
-}
-
-function parseHostedContainerInternalWorkerProxyTarget(
-  requestUrl: URL,
-): {
-  host: string;
-  path: string;
-  search: string;
-  url: URL;
-} | null {
-  const suffix = requestUrl.pathname.slice(HOSTED_CONTAINER_INTERNAL_WORKER_PROXY_PREFIX.length);
-  if (!suffix) {
-    return null;
-  }
-
-  const slashIndex = suffix.indexOf("/");
-  const encodedHost = slashIndex === -1 ? suffix : suffix.slice(0, slashIndex);
-  const path = slashIndex === -1 ? "/" : suffix.slice(slashIndex);
-  let host: string;
-
-  try {
-    host = decodeURIComponent(encodedHost);
-  } catch {
-    return null;
-  }
-
-  if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(host)) {
-    return null;
-  }
-
-  const url = new URL(`http://${host}${path}`);
-  url.search = requestUrl.search;
-
-  return {
-    host,
-    path: url.pathname,
-    search: url.search,
-    url,
-  };
-}
-
-function buildHostedContainerInternalWorkerProxyUrl(baseUrl: string, targetUrl: URL): URL {
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const proxied = new URL(
-    `${encodeURIComponent(targetUrl.hostname)}${targetUrl.pathname}`,
-    normalizedBase,
-  );
-  proxied.search = targetUrl.search;
-  return proxied;
-}
-
-function resolveHostedContainerInternalWorkerProxyUpstream(input: {
-  host: string;
-  path: string;
-  search: string;
-  url: URL;
-}): {
-  preserveHostHeader: boolean;
-  rewritten: boolean;
-  url: URL;
-} {
-  const configuredBaseUrl = process.env[HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV]?.trim();
-  if (!configuredBaseUrl) {
-    return {
-      preserveHostHeader: false,
-      rewritten: false,
-      url: input.url,
-    };
-  }
-
-  let upstreamBaseUrl: URL;
-  try {
-    upstreamBaseUrl = new URL(configuredBaseUrl);
-  } catch {
-    throw new TypeError(
-      `${HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV} must be an absolute URL.`,
-    );
-  }
-
-  if (upstreamBaseUrl.protocol !== "http:" && upstreamBaseUrl.protocol !== "https:") {
-    throw new TypeError(
-      `${HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV} must use http or https.`,
-    );
-  }
-  if (!isHostedContainerLocalProxyHostname(upstreamBaseUrl.hostname)) {
-    throw new TypeError(
-      `${HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV} must target a local loopback host.`,
-    );
-  }
-
-  const upstreamUrl = new URL(input.path, ensureTrailingSlash(upstreamBaseUrl));
-  upstreamUrl.search = input.search;
-
-  return {
-    preserveHostHeader: true,
-    rewritten: true,
-    url: upstreamUrl,
-  };
-}
-
-function isHostedContainerLocalProxyHostname(value: string): boolean {
-  return value === "127.0.0.1"
-    || value === "localhost"
-    || value === "::1"
-    || value === "host.docker.internal"
-    || value === readHostedContainerRunnerHostAlias();
-}
-
-function readHostedContainerRunnerHostAlias(): string | null {
-  const value = process.env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS;
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function ensureTrailingSlash(value: URL): URL {
-  if (value.pathname.endsWith("/")) {
-    return value;
-  }
-
-  const next = new URL(value.toString());
-  next.pathname = `${next.pathname}/`;
-  return next;
-}
-
 async function parseHostedExecutionContainerRunRequest(value: unknown): Promise<{
   internalWorkerProxyToken: string | null;
+  localBridge: HostedExecutionLocalBridgeConfig;
   job: HostedAssistantRuntimeJobInput;
 }> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -643,6 +282,16 @@ async function parseHostedExecutionContainerRunRequest(value: unknown): Promise<
       record.internalWorkerProxyToken,
       "Hosted container runner request.internalWorkerProxyToken",
     ),
+    localBridge: {
+      localInternalProxyBaseUrl: readNullableString(
+        record.localInternalProxyBaseUrl,
+        "Hosted container runner request.localInternalProxyBaseUrl",
+      ),
+      localLoopbackProxyToken: readNullableString(
+        record.localLoopbackProxyToken,
+        "Hosted container runner request.localLoopbackProxyToken",
+      ),
+    },
     job: assistantRuntime.parseHostedAssistantRuntimeJobInput(record.job),
   };
 }
@@ -962,8 +611,9 @@ function classifyRequestDecodeError(error: unknown): {
 async function runHostedExecutionJob(
   input: HostedAssistantRuntimeJobInput,
   options?: {
-    internalWorkerProxyBaseUrl?: string | null;
     internalWorkerProxyToken?: string | null;
+    localInternalProxyBaseUrl?: string | null;
+    localLoopbackProxyToken?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedExecutionJob"]>>> {

@@ -94,7 +94,6 @@ describe("hosted local Linq first-contact e2e", () => {
       useAssistantProviderStub ? assistantProviderBaseUrl : null,
       "Local hosted Linq e2e",
     );
-    const workerListenHost = resolveHostedLocalWorkerListenHost();
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
     const runtimeEnv: NodeJS.ProcessEnv = {
@@ -111,7 +110,6 @@ describe("hosted local Linq first-contact e2e", () => {
       MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
       MURPH_DEV_SKIP_WEB: "1",
       MURPH_DEV_WEB_PORT: String(webPort),
-      ...(workerListenHost ? { MURPH_DEV_WORKER_HOST: workerListenHost } : {}),
       MURPH_DEV_WORKER_PORT: String(workerPort),
       NEXT_DIST_DIR_MODE: "smoke",
       VERCEL_OIDC_TOKEN: requireOidcFixture().token,
@@ -825,10 +823,6 @@ function mergeRunnerEnvProfiles(
   );
   profiles.add(requiredProfile);
   return Array.from(profiles).join(",");
-}
-
-function resolveHostedLocalWorkerListenHost(): "0.0.0.0" | undefined {
-  return process.platform === "linux" ? "0.0.0.0" : undefined;
 }
 
 function resolveHostedAssistantReplyText(body: string): string {

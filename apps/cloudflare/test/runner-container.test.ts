@@ -95,9 +95,8 @@ describe("RunnerContainer", () => {
     const outboundTokens = setOutboundByHosts.mock.calls.map(([mapping]) =>
       readRunnerProxyToken(mapping as Record<string, unknown>)
     );
-    expect(outboundTokens).toHaveLength(2);
+    expect(outboundTokens).toHaveLength(1);
     expect(outboundTokens[0]).toBeTruthy();
-    expect(outboundTokens[0]).toBe(outboundTokens[1]);
 
     const outboundMethods = setOutboundByHosts.mock.calls.map(([mapping]) =>
       readRunnerMethodsByHost(mapping as Record<string, unknown>)
@@ -105,8 +104,8 @@ describe("RunnerContainer", () => {
     const expectedOutboundMethods = Object.fromEntries(
       Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS).map((host) => [host, "internalWorkerProxy"]),
     );
-    expect(outboundMethods).toHaveLength(2);
-    expect(outboundMethods).toEqual(new Array(2).fill(expectedOutboundMethods));
+    expect(outboundMethods).toHaveLength(1);
+    expect(outboundMethods).toEqual([expectedOutboundMethods]);
 
     const outboundAssignments = setOutboundByHosts.mock.calls.map(([mapping]) =>
       readRunnerOutboundAssignments(mapping as Record<string, unknown>),
@@ -121,14 +120,16 @@ describe("RunnerContainer", () => {
         },
       ]),
     );
-    expect(outboundAssignments).toHaveLength(2);
-    expect(outboundAssignments).toEqual(new Array(2).fill(expectedOutboundAssignments));
+    expect(outboundAssignments).toHaveLength(1);
+    expect(outboundAssignments).toEqual([expectedOutboundAssignments]);
   });
 
-  it("forwards protected hosted execution config into the container supervisor env", async () => {
+  it("forwards protected hosted execution config into the container supervisor env without reviving deprecated proxy vars", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
@@ -147,10 +148,46 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toMatchObject({
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
-      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
+    });
+    expect(
+      startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars
+        ?.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL,
+    ).toBeUndefined();
+  });
+
+  it("passes the local internal bridge config through each runner request when configured", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
+      },
+    });
+
+    await expect(container.invoke({
+      job: {
+        request: createRunnerRequest("evt_local_bridge_forwarding"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const executeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/run")
+    );
+    expect(executeCall).toBeTruthy();
+    if (!executeCall?.[1]?.body || typeof executeCall[1].body !== "string") {
+      throw new Error("Expected the container double to forward a JSON request body.");
+    }
+
+    expect(JSON.parse(executeCall[1].body)).toMatchObject({
+      localInternalProxyBaseUrl:
+        "http://127.0.0.1:8787/__murph/local-internal-proxy/local-loopback-token/",
+      localLoopbackProxyToken: null,
     });
   });
 
@@ -180,6 +217,28 @@ describe("RunnerContainer", () => {
     expect(Object.keys(RunnerContainer.outboundHandlers ?? {})).toEqual([
       "internalWorkerProxy",
     ]);
+  });
+
+  it("does not route generic loopback hosts through the outbound handler even when local loopback proxying is enabled", async () => {
+    const { container, setOutboundByHosts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
+      },
+    });
+
+    await expect(container.invoke({
+      job: {
+        request: createRunnerRequest("evt_loopback_proxy"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const mapping = setOutboundByHosts.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(mapping).toBeDefined();
+    expect(readRunnerMethodsByHost(mapping ?? {})).not.toHaveProperty("::1");
+    expect(readRunnerMethodsByHost(mapping ?? {})).not.toHaveProperty("127.0.0.1");
+    expect(readRunnerMethodsByHost(mapping ?? {})).not.toHaveProperty("localhost");
   });
 
   it("destroys the warm shell on container activity expiry and cold-starts the next run", async () => {
@@ -790,6 +849,8 @@ describe("RunnerContainer", () => {
     const forwarded = JSON.parse(executeCall[1].body) as Record<string, unknown>;
     expect(forwarded).toMatchObject({
       internalWorkerProxyToken: expect.any(String),
+      localInternalProxyBaseUrl: null,
+      localLoopbackProxyToken: null,
       job: {
         request: {
           resume: {

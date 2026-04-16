@@ -52,13 +52,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rewrites internal worker requests through the loopback proxy when configured", async () => {
+  it("routes local hosted internal requests through the worker loopback bridge when configured", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyBaseUrl: "http://127.0.0.1:8080/__internal/worker-proxy/",
       internalWorkerProxyToken: "runner-proxy-token",
+      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
+      localLoopbackProxyToken: "local-loopback-token",
     });
 
     await platform.effectsPort.deletePreparedAssistantDelivery({
@@ -69,17 +70,38 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
     if (!firstCall) {
-      throw new Error("Expected the proxied effects port fetch to run.");
+      throw new Error("Expected the bridged effects port fetch to run.");
     }
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
     expect((request as Request).url).toBe(
-      "http://127.0.0.1:8080/__internal/worker-proxy/results.worker/effects/effect_123?fingerprint=fingerprint_123",
+      "http://127.0.0.1:8787/__murph/local-internal-proxy/local-loopback-token/results.worker/effects/effect_123?fingerprint=fingerprint_123",
     );
+    expect((request as Request).headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
     expect((request as Request).method).toBe("DELETE");
+  });
+
+  it("fails closed before issuing loopback bridge requests when the local loopback token is missing", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
+    });
+
+    await expect(
+      platform.effectsPort.deletePreparedAssistantDelivery({
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+      }),
+    ).rejects.toThrow(
+      "Hosted side-effect delete effect_123 request failed.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("binds device-sync runtime requests to the hosted member id at the signed web callback seam", async () => {

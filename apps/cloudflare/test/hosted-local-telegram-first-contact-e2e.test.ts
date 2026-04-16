@@ -92,7 +92,6 @@ describe("hosted local Telegram auto-reply e2e", () => {
       useAssistantProviderStub ? assistantProviderBaseUrl : null,
       "Local hosted Telegram e2e",
     );
-    const workerListenHost = resolveHostedLocalWorkerListenHost();
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
     const runtimeEnv: NodeJS.ProcessEnv = {
@@ -107,7 +106,6 @@ describe("hosted local Telegram auto-reply e2e", () => {
       MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
       MURPH_DEV_SKIP_WEB: "1",
       MURPH_DEV_WEB_PORT: String(webPort),
-      ...(workerListenHost ? { MURPH_DEV_WORKER_HOST: workerListenHost } : {}),
       MURPH_DEV_WORKER_PORT: String(workerPort),
       NEXT_DIST_DIR_MODE: "smoke",
       TELEGRAM_API_BASE_URL: telegramApiBaseUrl,
@@ -610,10 +608,6 @@ function mergeRunnerEnvProfiles(
   );
   profiles.add(requiredProfile);
   return Array.from(profiles).join(",");
-}
-
-function resolveHostedLocalWorkerListenHost(): "0.0.0.0" | undefined {
-  return process.platform === "linux" ? "0.0.0.0" : undefined;
 }
 
 function resolveHostedTelegramAssistantReplyText(body: string): string {

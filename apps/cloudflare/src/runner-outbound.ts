@@ -26,7 +26,6 @@ export async function handleRunnerOutboundRequest(
   internalWorkerProxyToken: string | null = null,
 ): Promise<Response> {
   try {
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
     const url = new URL(request.url);
     const authorizationError = requireRunnerInternalProxyAuthorization(
       request,
@@ -36,6 +35,8 @@ export async function handleRunnerOutboundRequest(
     if (authorizationError) {
       return authorizationError;
     }
+
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
       return handleRunnerResultsRequest({

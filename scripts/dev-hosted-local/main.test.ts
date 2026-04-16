@@ -62,7 +62,11 @@ vi.mock("./environment.ts", () => ({
   })),
   readSimpleEnvFile: vi.fn(async () => ({})),
   requireEnvValue: vi.fn(),
-  resolveCloudflareLocalEnv: vi.fn(async () => ({
+  resolveCloudflareLocalEnv: vi.fn(async (input: { overrides?: Record<string, string | undefined> }) => ({
+    HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
+      input.overrides?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL
+      ?? "http://127.0.0.1:8787",
+    HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
   })),
   warnForMissingEnv: vi.fn(),
@@ -121,7 +125,6 @@ describe("hosted local dev main", () => {
       .mockReturnValueOnce(cloudflareChild)
       .mockReturnValueOnce(webChild);
     waitForFirstChildExit.mockResolvedValue(webChild);
-    vi.stubEnv("HOSTED_EXECUTION_RUNNER_HOST_ALIAS", "host.test.internal");
 
     const { main } = await import("./main.ts");
 
@@ -151,10 +154,10 @@ describe("hosted local dev main", () => {
         "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000",
       ],
       expect.objectContaining({
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-        HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.test.internal:8787",
         HOSTED_ASSISTANT_PROVIDER: "venice",
-        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.test.internal",
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
     );
@@ -173,7 +176,7 @@ describe("hosted local dev main", () => {
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
   });
 
-  it("uses the Docker bridge gateway as the runner host alias on Linux", async () => {
+  it("uses the Docker bridge gateway as the worker bridge host on Linux", async () => {
     const createChild = (input: {
       exitCode: number | null;
       pid: number;
@@ -228,26 +231,25 @@ describe("hosted local dev main", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://172.17.0.1:8787",
-        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://172.17.0.1:8787",
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
       }),
     );
     platformSpy.mockRestore();
   });
 
-  it("fails closed on Linux when loopback runner callbacks need a host alias but gateway discovery fails", async () => {
+  it("fails closed on Linux when the worker bridge host cannot be resolved", async () => {
     spawnSync.mockReturnValueOnce({
       error: undefined,
       status: 1,
       stdout: "",
     });
-    vi.stubEnv("HOSTED_ASSISTANT_BASE_URL", "http://127.0.0.1:4111/v1");
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
 
     const { main } = await import("./main.ts");
 
     await expect(main()).rejects.toThrow(
-      "Hosted local dev on Linux requires HOSTED_EXECUTION_RUNNER_HOST_ALIAS when loopback-backed runner callbacks are configured.",
+      "Hosted local dev on Linux could not resolve a container-reachable worker host.",
     );
     expect(spawnChildProcess).not.toHaveBeenCalled();
     platformSpy.mockRestore();

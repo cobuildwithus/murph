@@ -90,23 +90,23 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("rewrites only forwarded loopback runner callback urls to the local container host alias", () => {
+  it("rewrites forwarded loopback runner callback urls to the container-reachable worker bridge host", () => {
     expect(buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
-      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "device-sync,linq",
-      DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3000/api/device-sync",
-      GARMIN_CLIENT_ID: "garmin-client",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       LINQ_API_BASE_URL: "http://localhost:4011",
-      TELEGRAM_API_BASE_URL: "https://telegram.example.test",
+      TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
+      TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
     })).toEqual({
       HOSTED_ASSISTANT_BASE_URL: "http://host.docker.internal:4111/v1",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
       NODE_ENV: "production",
+      TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
+      TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
     });
   });
 

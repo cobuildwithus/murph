@@ -21,8 +21,9 @@ import {
 import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
-  internalWorkerProxyBaseUrl?: string | null;
   internalWorkerProxyToken?: string | null;
+  localInternalProxyBaseUrl?: string | null;
+  localLoopbackProxyToken?: string | null;
   job: HostedAssistantRuntimeJobInput;
 }
 
@@ -56,9 +57,6 @@ export async function runHostedExecutionJobIsolatedDetailed(
           forwardedEnv: {
             ...readHostedExecutionProcessEnv(process.env),
             ...(input.job.runtime?.forwardedEnv ?? {}),
-            ...(input.internalWorkerProxyBaseUrl
-              ? { HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL: input.internalWorkerProxyBaseUrl }
-              : {}),
           },
           isTypeScriptChild,
           launcherDirectories,
