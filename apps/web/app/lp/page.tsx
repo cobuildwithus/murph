@@ -48,7 +48,7 @@ export default async function LandingPage() {
         metaItems: ["$5/month early access", "Oura and Whoop"],
         note: null,
         signupLabel: "Create your account",
-        title: "Run one experiment. See what changed.",
+        title: "Figure out what actually makes you healthier.",
       };
 
   return (
