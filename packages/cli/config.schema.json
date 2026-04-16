@@ -2185,7 +2185,7 @@
                           "maxLength": 128
                         },
                         "input": {
-                          "description": "Optional structured meal payload in @file.json form or - for stdin.",
+                          "description": "Optional structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams? }, provenance?: { source, confidence?, sourceDetail? } }`. Explicit flags override payload fields.",
                           "type": "string"
                         },
                         "photo": {
@@ -2284,6 +2284,13 @@
                           "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "limit": {
+                          "default": 50,
+                          "description": "Maximum number of results to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
                         }
                       }
                     }

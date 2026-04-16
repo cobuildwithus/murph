@@ -192,8 +192,10 @@ async function listOwnedRecords(input: {
   vault: string
   expectedKind: DocumentMealKind
   from?: string
+  limit?: number
   to?: string
 }) {
+  const limit = input.limit ?? DEFAULT_LIST_LIMIT
   const query = await loadQueryRuntime('document/meal query reads')
   const readModel = await query.readVault(input.vault)
   const items = query
@@ -203,7 +205,7 @@ async function listOwnedRecords(input: {
       from: input.from,
       to: input.to,
     })
-    .slice(0, DEFAULT_LIST_LIMIT)
+    .slice(0, limit)
     .map((record: QueryRecord) => {
       const entity = toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS)
       return toListEntity(entity)
@@ -213,7 +215,7 @@ async function listOwnedRecords(input: {
     kind: input.expectedKind,
     from: input.from,
     to: input.to,
-    limit: DEFAULT_LIST_LIMIT,
+    limit,
   }, items)
 }
 
@@ -264,12 +266,14 @@ export async function showMealRecord(vault: string, lookup: string) {
 export async function listMealRecords(input: {
   vault: string
   from?: string
+  limit?: number
   to?: string
 }) {
   return listOwnedRecords({
     vault: input.vault,
     expectedKind: 'meal',
     from: input.from,
+    limit: input.limit,
     to: input.to,
   })
 }
