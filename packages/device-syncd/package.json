@@ -42,6 +42,10 @@
       "types": "./dist/hosted-runtime.d.ts",
       "default": "./dist/hosted-runtime.js"
     },
+    "./provider-label": {
+      "types": "./dist/provider-label.d.ts",
+      "default": "./dist/provider-label.js"
+    },
     "./hosted-hints": {
       "types": "./dist/hosted-hints.d.ts",
       "default": "./dist/hosted-hints.js"
@@ -61,6 +65,10 @@
     "./providers/oura": {
       "types": "./dist/providers/oura.d.ts",
       "default": "./dist/providers/oura.js"
+    },
+    "./providers/strava": {
+      "types": "./dist/providers/strava.d.ts",
+      "default": "./dist/providers/strava.js"
     },
     "./providers/whoop": {
       "types": "./dist/providers/whoop.d.ts",

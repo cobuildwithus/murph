@@ -55,7 +55,7 @@ export function normalizeActivityTypeFromTitle(value: string | null): string | n
   }
 
   return value
-    .replace(/^(garmin|oura|whoop)\s+/iu, "")
+    .replace(/^(garmin|oura|strava|whoop)\s+/iu, "")
     .replace(/\s+session$/iu, "")
     .trim() || null;
 }

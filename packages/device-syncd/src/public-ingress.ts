@@ -10,6 +10,7 @@ import {
   resolveRelativeOrAllowedOriginUrl,
   scopeWebhookTraceId,
   sha256Text,
+  splitScopeList,
   toIsoTimestamp,
 } from "./shared.ts";
 
@@ -203,12 +204,7 @@ export class DeviceSyncPublicIngress {
         });
       }
 
-      const grantedScopes = normalizeString(input.scope)
-        ? input.scope!
-            .split(/\s+/u)
-            .map((scope) => scope.trim())
-            .filter(Boolean)
-        : [];
+      const grantedScopes = splitScopeList(input.scope);
 
       const connection = await provider.exchangeAuthorizationCode(
         {
@@ -514,6 +510,8 @@ export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";
+export type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
 export {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,

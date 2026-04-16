@@ -21,6 +21,9 @@ const WHOOP_CLIENT_KEY_GROUPS = [WHOOP_CLIENT_ID_KEYS, WHOOP_CLIENT_SECRET_KEYS]
 const OURA_CLIENT_ID_KEYS = ['OURA_CLIENT_ID'] as const
 const OURA_CLIENT_SECRET_KEYS = ['OURA_CLIENT_SECRET'] as const
 const OURA_CLIENT_KEY_GROUPS = [OURA_CLIENT_ID_KEYS, OURA_CLIENT_SECRET_KEYS] as const
+const STRAVA_CLIENT_ID_KEYS = ['STRAVA_CLIENT_ID'] as const
+const STRAVA_CLIENT_SECRET_KEYS = ['STRAVA_CLIENT_SECRET'] as const
+const STRAVA_CLIENT_KEY_GROUPS = [STRAVA_CLIENT_ID_KEYS, STRAVA_CLIENT_SECRET_KEYS] as const
 
 export const SETUP_RUNTIME_ENV_NOTICE =
   'Murph can use keys from your current shell for this setup run. Anything you enter here is only used for this run and is not written to a file.'
@@ -117,6 +120,8 @@ export function resolveSetupWearableMissingEnv(
       return resolvePreferredEnvKeys(env, GARMIN_CLIENT_KEY_GROUPS)
     case 'oura':
       return resolvePreferredEnvKeys(env, OURA_CLIENT_KEY_GROUPS)
+    case 'strava':
+      return resolvePreferredEnvKeys(env, STRAVA_CLIENT_KEY_GROUPS)
     case 'whoop':
       return resolvePreferredEnvKeys(env, WHOOP_CLIENT_KEY_GROUPS)
   }
@@ -215,6 +220,21 @@ export function describeSetupWearableStatus(
             badge: 'needs client keys',
             detail:
               'Add OURA_CLIENT_ID and OURA_CLIENT_SECRET to the current environment to enable Oura connect.',
+            missingEnv,
+            ready: false,
+          }
+    case 'strava':
+      return missingEnv.length === 0
+        ? {
+            badge: 'ready',
+            detail: 'OAuth connect can open after setup.',
+            missingEnv,
+            ready: true,
+          }
+        : {
+            badge: 'needs client keys',
+            detail:
+              'Add STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET to the current environment to enable Strava connect.',
             missingEnv,
             ready: false,
           }
@@ -342,6 +362,8 @@ function formatSetupWearableName(wearable: SetupWearable): string {
       return 'Garmin'
     case 'oura':
       return 'Oura'
+    case 'strava':
+      return 'Strava'
     case 'whoop':
       return 'WHOOP'
   }

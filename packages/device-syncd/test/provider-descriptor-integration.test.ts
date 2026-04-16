@@ -4,12 +4,14 @@ import {
   defaultDeviceProviderDescriptors,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   resolveDeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
 import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
+import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 
 describe("device-sync providers", () => {
@@ -26,6 +28,10 @@ describe("device-sync providers", () => {
       createOuraDeviceSyncProvider({
         clientId: "oura-client",
         clientSecret: "oura-secret",
+      }),
+      createStravaDeviceSyncProvider({
+        clientId: "strava-client",
+        clientSecret: "strava-secret",
       }),
     ];
 
@@ -115,5 +121,33 @@ describe("device-sync providers", () => {
     );
     expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
     expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
+  });
+
+  it("applies Strava runtime overrides onto the shared descriptor shape", () => {
+    const baselineScopes = [...STRAVA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes ?? []];
+    const baselineWindows = { ...STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows };
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client",
+      clientSecret: "strava-secret",
+      scopes: ["activity:read", "activity:read_all"],
+      backfillDays: 18,
+      reconcileDays: 6,
+      reconcileIntervalMs: 789_000,
+    });
+
+    expect(provider.provider).toBe(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.provider);
+    expect(provider.descriptor.displayName).toBe(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.displayName);
+    expect(provider.descriptor.webhook?.path).toBe(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
+    expect(provider.descriptor.oauth?.defaultScopes).toEqual(["activity:read", "activity:read_all"]);
+    expect(provider.descriptor.sync?.windows).toEqual({
+      backfillDays: 18,
+      reconcileDays: 6,
+      reconcileIntervalMs: 789_000,
+    });
+    expect(Boolean(provider.revokeAccess)).toBe(
+      STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.supportsRemoteDisconnect,
+    );
+    expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
+    expect(STRAVA_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
   });
 });

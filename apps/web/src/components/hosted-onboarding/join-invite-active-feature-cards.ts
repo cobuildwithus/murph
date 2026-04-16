@@ -12,7 +12,7 @@ export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
     title: "Log meals & nutrition",
   },
   {
-    body: "Syncs with Oura, WHOOP, and Garmin in the background.",
+    body: "Syncs with Oura, WHOOP, and Garmin for sleep and recovery, plus Strava for activity.",
     icon: MoonIcon,
     title: "Track sleep & recovery",
   },

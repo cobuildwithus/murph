@@ -1,0 +1,398 @@
+import { extractIsoDatePrefix } from "@murphai/contracts";
+
+import { stripEmptyObject, stripUndefined } from "../shared.ts";
+import {
+  asArray,
+  asPlainObject,
+  buildSyntheticDeletionResourceId,
+  createRawArtifact,
+  emitObservationMetrics,
+  finiteNumber,
+  makeNormalizedDeviceBatch,
+  makeProviderExternalRef,
+  pushDeletionObservation as pushSharedDeletionObservation,
+  pushRawArtifact,
+  slugify,
+  stringId,
+  toIso,
+  trimToLength,
+} from "./shared-normalization.ts";
+
+import type {
+  DeviceEventPayload,
+  DeviceRawArtifactPayload,
+  DeviceSamplePayload,
+} from "../core-port.ts";
+import type {
+  ObservationMetricDescriptor,
+  PlainObject,
+} from "./shared-normalization.ts";
+import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
+import { STRAVA_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
+
+export interface StravaSnapshotInput {
+  accountId?: string | number;
+  importedAt?: string | number | Date;
+  athlete?: unknown;
+  activities?: unknown[];
+  deletions?: unknown[];
+  sourceWindow?: unknown;
+}
+
+interface StravaActivityMetricSource {
+  activity: PlainObject;
+  distanceMeters?: number;
+  sportName: string;
+}
+
+const STRAVA_ACTIVITY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<StravaActivityMetricSource>[] = [
+  {
+    metric: "distance",
+    value: ({ distanceMeters }) => distanceMeters,
+    unit: "meter",
+    title: ({ sportName }) => `Strava ${sportName} distance`,
+    facet: "distance",
+  },
+  {
+    metric: "active-calories",
+    value: ({ activity }) => firstNumber(activity.calories),
+    unit: "kcal",
+    title: ({ sportName }) => `Strava ${sportName} calories`,
+    facet: "active-calories",
+  },
+  {
+    metric: "average-heart-rate",
+    value: ({ activity }) => firstNumber(activity.average_heartrate, activity.averageHeartRate),
+    unit: "bpm",
+    title: ({ sportName }) => `Strava ${sportName} average heart rate`,
+    facet: "average-heart-rate",
+  },
+  {
+    metric: "max-heart-rate",
+    value: ({ activity }) => firstNumber(activity.max_heartrate, activity.maxHeartRate),
+    unit: "bpm",
+    title: ({ sportName }) => `Strava ${sportName} max heart rate`,
+    facet: "max-heart-rate",
+  },
+  {
+    metric: "energy-burned",
+    value: ({ activity }) => firstNumber(activity.kilojoules),
+    unit: "kJ",
+    title: ({ sportName }) => `Strava ${sportName} energy burned`,
+    facet: "energy-burned",
+  },
+  {
+    metric: "altitude-gain",
+    value: ({ activity }) => firstNumber(activity.total_elevation_gain, activity.totalElevationGain),
+    unit: "meter",
+    title: ({ sportName }) => `Strava ${sportName} elevation gain`,
+    facet: "altitude-gain",
+  },
+  {
+    metric: "average-speed",
+    value: ({ activity }) => firstNumber(activity.average_speed, activity.averageSpeed),
+    unit: "m/s",
+    title: ({ sportName }) => `Strava ${sportName} average speed`,
+    facet: "average-speed",
+  },
+  {
+    metric: "max-speed",
+    value: ({ activity }) => firstNumber(activity.max_speed, activity.maxSpeed),
+    unit: "m/s",
+    title: ({ sportName }) => `Strava ${sportName} max speed`,
+    facet: "max-speed",
+  },
+];
+
+function parseStravaSnapshot(snapshot: unknown): StravaSnapshotInput {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new TypeError("Strava snapshot must be an object.");
+  }
+
+  return snapshot as StravaSnapshotInput;
+}
+
+function asObjectArray(value: unknown): PlainObject[] {
+  return asArray(value)
+    .map((entry) => asPlainObject(entry))
+    .filter((entry): entry is PlainObject => Boolean(entry));
+}
+
+function firstString(...values: readonly unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const normalized = value.trim();
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function firstNumber(...values: readonly unknown[]): number | undefined {
+  for (const value of values) {
+    const numeric = finiteNumber(value);
+    if (numeric !== undefined) {
+      return numeric;
+    }
+  }
+
+  return undefined;
+}
+
+function firstIso(...values: readonly unknown[]): string | undefined {
+  for (const value of values) {
+    const normalized = toIso(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeBooleanLike(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0") {
+      return false;
+    }
+  }
+
+  return undefined;
+}
+
+function firstDayKey(...values: readonly unknown[]): string | undefined {
+  for (const value of values) {
+    const candidate = typeof value === "string" ? value : toIso(value);
+    const dayKey = extractIsoDatePrefix(candidate ?? undefined);
+    if (dayKey) {
+      return dayKey;
+    }
+  }
+
+  return undefined;
+}
+
+function addSecondsToIso(timestamp: string | undefined, seconds: number | undefined): string | undefined {
+  if (!timestamp || seconds === undefined) {
+    return undefined;
+  }
+
+  const startMs = Date.parse(timestamp);
+  if (!Number.isFinite(startMs)) {
+    return undefined;
+  }
+
+  return new Date(startMs + seconds * 1000).toISOString();
+}
+
+function makeExternalRef(
+  resourceType: string,
+  resourceId: string,
+  version?: string,
+  facet?: string,
+) {
+  return makeProviderExternalRef("strava", resourceType, resourceId, version, facet);
+}
+
+function pushDeletionObservation(
+  events: DeviceEventPayload[],
+  rawArtifacts: DeviceRawArtifactPayload[],
+  importedAt: string,
+  deletion: PlainObject,
+): void {
+  const resourceType = slugify(deletion.resource_type ?? deletion.resourceType, "activity");
+  const occurredAt = firstIso(deletion.occurred_at, deletion.occurredAt) ?? importedAt;
+  const sourceEventType = firstString(
+    deletion.source_event_type,
+    deletion.sourceEventType,
+    deletion.eventType,
+    deletion.event_type,
+  );
+  const resourceId =
+    stringId(deletion.resource_id ?? deletion.resourceId ?? deletion.object_id ?? deletion.objectId) ??
+    buildSyntheticDeletionResourceId({
+      provider: "strava",
+      resourceType,
+      occurredAt,
+      sourceEventType,
+      deletion,
+    });
+
+  pushSharedDeletionObservation(events, rawArtifacts, {
+    provider: "strava",
+    providerDisplayName: "Strava",
+    resourceType,
+    resourceId,
+    occurredAt,
+    sourceEventType,
+    makeExternalRef,
+  });
+}
+
+export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): NormalizedDeviceBatch {
+  const request = asPlainObject(snapshot) ?? {};
+  const importedAt = toIso(request.importedAt) ?? new Date().toISOString();
+  const athlete = asPlainObject(request.athlete);
+  const activities = asObjectArray(request.activities);
+  const deletions = asObjectArray(request.deletions);
+  const sourceWindow = asPlainObject(request.sourceWindow);
+  const events: DeviceEventPayload[] = [];
+  const samples: DeviceSamplePayload[] = [];
+  const rawArtifacts: DeviceRawArtifactPayload[] = [];
+  const accountId =
+    stringId(request.accountId) ??
+    stringId(athlete?.id ?? athlete?.athlete_id ?? athlete?.athleteId);
+
+  pushRawArtifact(rawArtifacts, createRawArtifact("athlete", "athlete.json", athlete));
+
+  for (const activity of activities) {
+    const activityId = stringId(activity.id) ?? `activity-${events.length + 1}`;
+    const role = `activity:${activityId}`;
+    const version = firstIso(activity.updated_at, activity.updatedAt, activity.start_date, activity.startDate);
+    const occurredAt = firstIso(activity.start_date, activity.startDate) ?? importedAt;
+    const recordedAt = firstIso(
+      activity.updated_at,
+      activity.updatedAt,
+      activity.start_date_local,
+      activity.startDateLocal,
+      activity.start_date,
+      activity.startDate,
+    ) ?? occurredAt;
+    const elapsedSeconds = firstNumber(activity.elapsed_time, activity.elapsedTime);
+    const movingSeconds = firstNumber(activity.moving_time, activity.movingTime);
+    const durationSeconds = elapsedSeconds ?? movingSeconds;
+    const durationMinutes = durationSeconds !== undefined
+      ? Math.max(1, Math.round(durationSeconds / 60))
+      : undefined;
+    const startAt = firstIso(activity.start_date, activity.startDate) ?? occurredAt;
+    const endAt = addSecondsToIso(startAt, durationSeconds);
+    const dayKey = firstDayKey(activity.start_date_local, activity.start_date, occurredAt, recordedAt);
+    const sportName =
+      firstString(activity.sport_type, activity.sportType, activity.type, activity.activity_type, activity.activityType)
+      ?? "Activity";
+    const activityType = slugify(sportName, "activity");
+    const distanceMeters = firstNumber(activity.distance, activity.distance_meter, activity.distanceMeter);
+    const distanceKm = distanceMeters !== undefined ? distanceMeters / 1000 : undefined;
+    const totalElevationGainMeters = firstNumber(
+      activity.total_elevation_gain,
+      activity.totalElevationGain,
+    );
+    const averageSpeedMps = firstNumber(activity.average_speed, activity.averageSpeed);
+    const maxSpeedMps = firstNumber(activity.max_speed, activity.maxSpeed);
+    const deviceName = firstString(activity.device_name, activity.deviceName);
+    const title = firstString(activity.name)
+      ? `Strava ${firstString(activity.name)}`
+      : `Strava ${sportName}`;
+
+    pushRawArtifact(rawArtifacts, createRawArtifact(role, `activity-${activityId}.json`, activity));
+
+    if (occurredAt && durationMinutes !== undefined) {
+      events.push(
+        stripUndefined({
+          kind: "activity_session",
+          occurredAt,
+          recordedAt,
+          dayKey,
+          source: "device",
+          title: trimToLength(title, 160),
+          rawArtifactRoles: [role],
+          externalRef: makeExternalRef("activity", activityId, version),
+          fields: stripUndefined({
+            activityType,
+            distanceKm,
+            durationMinutes,
+            elapsedSeconds,
+            movingSeconds,
+            totalElevationGainMeters,
+            averageSpeedMps,
+            maxSpeedMps,
+            trainer: normalizeBooleanLike(activity.trainer),
+            commute: normalizeBooleanLike(activity.commute),
+            manual: normalizeBooleanLike(activity.manual),
+            private: normalizeBooleanLike(activity.private),
+            deviceName,
+            workout: {
+              sourceApp: "strava",
+              sourceWorkoutId: activityId,
+              startedAt: startAt,
+              endedAt: endAt,
+              sessionNote: trimToLength(title, 160),
+              exercises: [],
+            },
+          }),
+        }),
+      );
+    }
+
+    emitObservationMetrics(
+      events,
+      {
+        source: {
+          activity,
+          distanceMeters,
+          sportName,
+        },
+        occurredAt,
+        recordedAt,
+        dayKey,
+        rawArtifactRoles: [role],
+        externalRef: (facet) => makeExternalRef("activity", activityId, version, facet),
+      },
+      STRAVA_ACTIVITY_OBSERVATION_METRICS,
+    );
+  }
+
+  for (const deletion of deletions) {
+    pushDeletionObservation(events, rawArtifacts, importedAt, deletion);
+  }
+
+
+  const provenance = stripEmptyObject({
+    athleteId: stringId(athlete?.id ?? athlete?.athlete_id ?? athlete?.athleteId),
+    importedSections: {
+      athlete: Boolean(athlete),
+      activities: activities.length,
+      deletions: deletions.length,
+    },
+    sourceWindow: sourceWindow
+      ? stripUndefined({
+          kind: firstString(sourceWindow.kind, sourceWindow.windowKind),
+          resourceId: stringId(sourceWindow.resourceId),
+          resourceType: firstString(sourceWindow.resourceType),
+          windowEnd: firstIso(sourceWindow.windowEnd),
+          windowStart: firstIso(sourceWindow.windowStart),
+        })
+      : undefined,
+  });
+
+  return makeNormalizedDeviceBatch({
+    provider: "strava",
+    accountId,
+    importedAt,
+    events,
+    samples,
+    rawArtifacts,
+    provenance,
+  });
+}
+
+export const stravaProviderAdapter: DeviceProviderAdapter<StravaSnapshotInput> = {
+  ...STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
+  parseSnapshot: parseStravaSnapshot,
+  normalizeSnapshot: normalizeStravaSnapshot,
+};

@@ -294,6 +294,18 @@ const WHOOP_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
   weightKg: 80,
 } as const satisfies Record<string, number>);
 
+const STRAVA_DEVICE_PROVIDER_METRIC_PRIORITIES = Object.freeze({
+  activeCalories: 85,
+  averageHeartRate: 95,
+  averageSpeedMps: 90,
+  distanceKm: 100,
+  maxHeartRate: 95,
+  maxSpeedMps: 90,
+  sessionCount: 80,
+  sessionMinutes: 100,
+  totalElevationGainMeters: 90,
+} as const satisfies Record<string, number>);
+
 export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "garmin",
   displayName: "Garmin",
@@ -387,6 +399,44 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
   },
 } as const satisfies DeviceProviderDescriptor;
 
+export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
+  provider: "strava",
+  displayName: "Strava",
+  transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+  oauth: {
+    callbackPath: "/oauth/strava/callback",
+    defaultScopes: ["activity:read"],
+  },
+  webhook: {
+    path: "/webhooks/strava",
+    deliveryMode: "notification",
+    supportsAdmin: true,
+  },
+  sync: {
+    windows: {
+      backfillDays: 30,
+      reconcileDays: 7,
+      reconcileIntervalMs: 6 * 60 * 60_000,
+    },
+    jobKinds: ["backfill", "reconcile", "resource", "delete", "deauthorize"],
+    supportsRemoteDisconnect: true,
+    supportsTokenRefresh: true,
+  },
+  normalization: {
+    metricFamilies: ["activity", "cardio", "session"],
+    snapshotParser: "schema",
+  },
+  sourcePriorityHints: {
+    defaultPriority: 75,
+    metricFamilies: {
+      activity: 100,
+      cardio: 90,
+      session: 95,
+    },
+    metrics: STRAVA_DEVICE_PROVIDER_METRIC_PRIORITIES,
+  },
+} as const satisfies DeviceProviderDescriptor;
+
 export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   provider: "whoop",
   displayName: "WHOOP",
@@ -440,6 +490,7 @@ export const defaultDeviceProviderDescriptors = Object.freeze([
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
+  STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
 ] as const);
 
 export function resolveDeviceProviderDescriptor(

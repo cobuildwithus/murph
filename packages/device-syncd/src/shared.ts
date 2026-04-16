@@ -71,6 +71,17 @@ export function normalizeStringList(value: unknown): string[] {
     .filter((entry): entry is string => typeof entry === "string");
 }
 
+export function splitScopeList(value: unknown): string[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(/[\s,]+/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 const DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
 const DEVICE_SYNC_METADATA_MAX_KEY_LENGTH = 64;
 const DEVICE_SYNC_METADATA_MAX_STRING_LENGTH = 256;

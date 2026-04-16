@@ -28,8 +28,9 @@ What it does:
 
 Current providers:
 - Garmin
-- WHOOP
 - Oura
+- Strava
+- WHOOP
 
 ## Shared public ingress
 
@@ -63,6 +64,7 @@ HTTP/env shapes.
 Garmin uses OAuth plus scheduled polling. Once the operator configures the Garmin client ID and secret, the end-user flow is connect once and let scheduled sync keep the account fresh.
 
 WHOOP uses OAuth plus webhooks.
+Strava uses OAuth, polling, and optional app-global webhooks.
 
 Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
 
@@ -143,6 +145,18 @@ Oura settings:
 - `OURA_RECONCILE_INTERVAL_MS`
 - `OURA_REQUEST_TIMEOUT_MS`
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider config to answer webhook preflight challenges and maintain Oura webhook subscriptions
+
+Strava settings:
+- `STRAVA_CLIENT_ID`
+- `STRAVA_CLIENT_SECRET`
+- `STRAVA_AUTH_BASE_URL`
+- `STRAVA_API_BASE_URL`
+- `STRAVA_SCOPES`
+- `STRAVA_BACKFILL_DAYS`
+- `STRAVA_RECONCILE_DAYS`
+- `STRAVA_RECONCILE_INTERVAL_MS`
+- `STRAVA_REQUEST_TIMEOUT_MS`
+- `STRAVA_WEBHOOK_VERIFY_TOKEN` when you want the Strava provider config to answer webhook preflight challenges and maintain the single app-global Strava webhook subscription
 
 ## Run
 

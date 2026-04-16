@@ -392,21 +392,31 @@ export class DeviceSyncService {
     this.store.markSyncStarted(storedAccount.id, now);
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
-    const ensureExecutionActive = (): void => {
+    const ensureJobLeaseOwned = (): void => {
       const currentJob = this.store.getJobById(job.id);
 
       if (!currentJob || currentJob.status !== "running" || currentJob.leaseOwner !== this.workerId) {
         throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
       }
+    };
+    const ensureAccountActive = (): void => {
+      const currentStoredAccount = this.store.getAccountById(storedAccount.id);
 
-      const currentAccount = this.store.getAccountById(storedAccount.id);
-
-      if (!currentAccount || currentAccount.status !== "active" || currentAccount.disconnectGeneration !== disconnectGeneration) {
+      if (
+        !currentStoredAccount ||
+        currentStoredAccount.status !== "active" ||
+        currentStoredAccount.disconnectGeneration !== disconnectGeneration
+      ) {
         throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
       }
     };
+    const ensureExecutionActive = (): void => {
+      ensureJobLeaseOwned();
+      ensureAccountActive();
+    };
 
     let currentAccount: DeviceSyncAccount;
+    let executionDisconnected = false;
 
     try {
       currentAccount = this.toDecryptedAccount(storedAccount);
@@ -438,10 +448,32 @@ export class DeviceSyncService {
             currentAccount = this.toDecryptedAccount(updated);
             return currentAccount;
           },
+          disconnectAccount: async () => {
+            ensureExecutionActive();
+            this.store.markPendingJobsDeadForAccount(
+              currentAccount.id,
+              now,
+              "ACCOUNT_DISCONNECTED",
+              "Device account disconnected.",
+            );
+            const disconnected = this.store.disconnectAccount(currentAccount.id, now);
+            currentAccount = this.toDecryptedAccount(disconnected);
+            executionDisconnected = true;
+          },
           logger: this.logger,
         },
         job,
       );
+
+      if (executionDisconnected) {
+        ensureJobLeaseOwned();
+
+        if (!this.store.completeJobIfOwned(job.id, this.workerId, now)) {
+          return job;
+        }
+
+        return job;
+      }
 
       ensureExecutionActive();
 

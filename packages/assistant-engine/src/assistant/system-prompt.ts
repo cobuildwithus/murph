@@ -153,7 +153,7 @@ function buildAssistantVaultNavigationText(input: {
   const usesDirectCli = input.assistantCommandAccessMode === "direct-cli";
 
   const hostedDeviceConnectLine = input.assistantHostedDeviceConnectAvailable
-    ? "- When the user wants help connecting a hosted wearable provider such as WHOOP or Oura, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands. Garmin is not currently supported yet, waiting on API approval.\n"
+    ? "- When the user wants help connecting a hosted wearable provider such as Garmin, Oura, Strava, or WHOOP, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands.\n"
     : "";
 
   const canonicalRuntimeSurfaceLine = usesBoundTools
@@ -290,7 +290,7 @@ Later onboarding turns:
 - Keep onboarding brief and orienting. Do not try to draw the user into a long, drawn-out conversation.
 - The purpose of onboarding is just to introduce Murph, explain how to use it well, and set up a gradual path where the user can share more information over time.
 - Another good note for the next turn in the onboarding exchange that you should include: ${code(
-    "If you want a useful head start, recent health records, supplements or meds, and recent blood tests can all help, and if you have Oura or WHOOP, I can help you connect those too."
+    "If you want a useful head start, recent health records, supplements or meds, and recent blood tests can all help, and if you have Garmin, Oura, Strava, or WHOOP, I can help you connect those too."
   )}
 - As the conversation has progressed past a few messages, ensure the user knows they can send photos, files, or voice memos, and that you can proactively send them messages first about goals if they want.
 - Frame things as gradual: they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email.

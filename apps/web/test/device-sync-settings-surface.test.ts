@@ -15,6 +15,16 @@ const GARMIN_PROVIDER: PublicProviderDescriptor = {
   webhookUrl: null,
 };
 
+const STRAVA_PROVIDER: PublicProviderDescriptor = {
+  callbackPath: "/oauth/strava/callback",
+  callbackUrl: "https://example.com/oauth/strava/callback",
+  defaultScopes: ["activity:read"],
+  provider: "strava",
+  supportsWebhooks: true,
+  webhookPath: "/webhooks/strava",
+  webhookUrl: "https://example.com/webhooks/strava",
+};
+
 const OURA_PROVIDER: PublicProviderDescriptor = {
   callbackPath: "/oauth/oura/callback",
   callbackUrl: "https://example.com/oauth/oura/callback",
@@ -61,6 +71,22 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       primaryAction: { kind: "connect", label: "Connect" },
       provider: "garmin",
       providerLabel: "Garmin",
+      state: "available",
+      statusLabel: "Not connected",
+      tone: "muted",
+    });
+  });
+
+  it("uses the shared Strava provider label when rendering available sources", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [],
+      providers: [STRAVA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      connectionId: null,
+      provider: "strava",
+      providerLabel: "Strava",
       state: "available",
       statusLabel: "Not connected",
       tone: "muted",
