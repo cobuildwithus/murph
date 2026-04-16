@@ -74,6 +74,8 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
 
   it("passes protected hosted execution worker secrets into the isolated child env", async () => {
     vi.stubEnv("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK", '{"kty":"EC"}');
+    vi.stubEnv("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL", "http://127.0.0.1:8787");
+    vi.stubEnv("HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN", "local-loopback-token");
     vi.stubEnv("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY", "platform-key");
     vi.stubEnv("HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG", "cobuildwithus");
     vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK", '{"kty":"EC","d":"secret"}');
@@ -82,6 +84,8 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     spawnMock.mockImplementation((_command, _args, options) => {
       expect(options?.env).toMatchObject({
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',

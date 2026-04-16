@@ -15,6 +15,10 @@ import {
 } from "./internal-hosts.ts";
 import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts";
 import { methodNotAllowed } from "./json.ts";
+import {
+  buildLocalInternalProxyRouteBaseUrl,
+  createLocalInternalProxyUserToken,
+} from "./local-internal-proxy-token.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
@@ -28,8 +32,8 @@ const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
-const HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL_ENV =
-  "HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL";
+const HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN_ENV =
+  "HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN";
 const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
 const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
@@ -91,6 +95,8 @@ type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
 
 const RUNNER_OUTBOUND_HOSTS = Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS);
+const HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV =
+  "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL";
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
@@ -102,6 +108,7 @@ export class RunnerContainer extends Container {
   private lifecycleLock: Promise<void> = Promise.resolve();
   private runnerControlToken: string | null = null;
   private runnerOutboundProxyToken: string | null = null;
+  private installedRunnerOutboundProxyToken: string | null = null;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
@@ -144,7 +151,19 @@ export class RunnerContainer extends Container {
   ): Promise<HostedAssistantRuntimeJobResult> {
     const dispatch = input.job.request.dispatch;
     const run = input.job.request.run ?? null;
-    const internalWorkerProxyToken = this.runnerOutboundProxyToken ?? crypto.randomUUID();
+    const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
+      this.environment,
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV,
+    );
+    const localLoopbackProxyToken = readOptionalRunnerContainerEnvString(
+      this.environment,
+      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN_ENV,
+    );
+    const internalWorkerProxyToken = this.runnerOutboundProxyToken
+      ?? await createRunnerOutboundProxyToken({
+        localLoopbackProxyToken,
+        userId: input.userId,
+      });
     let keepWarm = false;
 
     try {
@@ -173,6 +192,11 @@ export class RunnerContainer extends Container {
         {
           body: JSON.stringify({
             internalWorkerProxyToken,
+            localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
+              localInternalProxyBaseUrl,
+              localLoopbackProxyToken,
+            }),
+            localLoopbackProxyToken: null,
             job: input.job,
           }),
           headers: {
@@ -325,6 +349,10 @@ export class RunnerContainer extends Container {
       run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
     },
   ): Promise<void> {
+    if (this.installedRunnerOutboundProxyToken === internalWorkerProxyToken) {
+      return;
+    }
+
     const mapping = Object.fromEntries(
       RUNNER_OUTBOUND_HOSTS.map((host) => [
         host,
@@ -355,6 +383,7 @@ export class RunnerContainer extends Container {
             run: input.run,
           });
         }
+        this.installedRunnerOutboundProxyToken = internalWorkerProxyToken;
         return;
       } catch (error) {
         if (
@@ -419,6 +448,7 @@ export class RunnerContainer extends Container {
   }): Promise<void> {
     this.runnerControlToken = null;
     this.runnerOutboundProxyToken = null;
+    this.installedRunnerOutboundProxyToken = null;
     await this.destroyIfRunning(input);
   }
 
@@ -537,6 +567,47 @@ function createRunnerOutboundHandler() {
       ),
     );
   };
+}
+
+function readOptionalRunnerContainerEnvString(
+  env: RunnerContainerEnvironmentSource,
+  key: string,
+): string | null {
+  const value = env[key];
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function createRunnerOutboundProxyToken(input: {
+  localLoopbackProxyToken: string | null;
+  userId: string;
+}): Promise<string> {
+  if (input.localLoopbackProxyToken) {
+    return await createLocalInternalProxyUserToken({
+      boundUserId: input.userId,
+      proxyTokenSecret: input.localLoopbackProxyToken,
+    });
+  }
+
+  return crypto.randomUUID();
+}
+
+function createChildLocalInternalProxyBaseUrl(input: {
+  localInternalProxyBaseUrl: string | null;
+  localLoopbackProxyToken: string | null;
+}): string | null {
+  if (!input.localInternalProxyBaseUrl || !input.localLoopbackProxyToken) {
+    return null;
+  }
+
+  return buildLocalInternalProxyRouteBaseUrl({
+    baseUrl: input.localInternalProxyBaseUrl,
+    loopbackToken: input.localLoopbackProxyToken,
+  });
 }
 
 export async function destroyHostedExecutionContainer(input: {

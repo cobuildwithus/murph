@@ -88,7 +88,6 @@ export const HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV =
 const RUNNER_ENV_PROFILE_KEYS = {
   assistant: [
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
-    "HOSTED_EXECUTION_RUNNER_HOST_ALIAS",
     "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
     "NODE_ENV",
     ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
@@ -196,6 +195,7 @@ const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
   "HOSTED_ASSISTANT_BASE_URL",
   "LINQ_API_BASE_URL",
   "TELEGRAM_API_BASE_URL",
+  "TELEGRAM_FILE_BASE_URL",
 ]);
 
 function rewriteHostedRunnerLoopbackUrlForContainer(
@@ -207,8 +207,8 @@ function rewriteHostedRunnerLoopbackUrlForContainer(
     return value;
   }
 
-  const hostAlias = normalizeStringEnvValue(source.HOSTED_EXECUTION_RUNNER_HOST_ALIAS);
-  if (!hostAlias) {
+  const containerReachableHost = readContainerReachableHost(source);
+  if (!containerReachableHost) {
     return value;
   }
 
@@ -218,13 +218,30 @@ function rewriteHostedRunnerLoopbackUrlForContainer(
       return value;
     }
 
-    url.hostname = hostAlias;
+    url.hostname = containerReachableHost;
     return url.toString();
   } catch {
     return value;
   }
 }
 
+function readContainerReachableHost(source: UnknownEnvSource): string | null {
+  const localInternalProxyBaseUrl = normalizeStringEnvValue(
+    source.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL,
+  );
+  if (localInternalProxyBaseUrl) {
+    try {
+      const url = new URL(localInternalProxyBaseUrl);
+      if (!isLoopbackHostname(url.hostname)) {
+        return url.hostname;
+      }
+    } catch {
+      // Ignore invalid bridge URLs and fall back to the explicit host alias, if present.
+    }
+  }
+
+  return normalizeStringEnvValue(source.HOSTED_EXECUTION_RUNNER_HOST_ALIAS);
+}
 export function filterHostedRunnerSecrets(
   env: Readonly<Record<string, string>>,
   source: StringEnvSource = process.env,

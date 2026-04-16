@@ -30,7 +30,6 @@ import {
 import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
-  HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER,
 } from "./internal-hosts.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
@@ -41,15 +40,17 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
-  internalWorkerProxyBaseUrl?: string | null;
   internalWorkerProxyToken?: string | null;
+  localInternalProxyBaseUrl?: string | null;
+  localLoopbackProxyToken?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
     input.boundUserId,
-    input.internalWorkerProxyBaseUrl ?? null,
     input.internalWorkerProxyToken ?? null,
+    input.localInternalProxyBaseUrl ?? process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL ?? null,
+    input.localLoopbackProxyToken ?? process.env.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN ?? null,
     input.fetchImpl ?? fetch,
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
@@ -211,8 +212,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
 function createCloudflareHostedRuntimeFetch(
   boundUserId: string,
-  internalWorkerProxyBaseUrl: string | null,
   internalWorkerProxyToken: string | null,
+  localInternalProxyBaseUrl: string | null,
+  localLoopbackProxyToken: string | null,
   fetchImpl: typeof fetch,
 ): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -231,20 +233,23 @@ function createCloudflareHostedRuntimeFetch(
 
     const headers = new Headers(request.headers);
     headers.set(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER, internalWorkerProxyToken);
-    if (internalWorkerProxyBaseUrl) {
-      headers.set(HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER, url.hostname);
+    const proxiedUrl = localInternalProxyBaseUrl
+      ? createHostedLocalInternalProxyUrl(
+        localInternalProxyBaseUrl,
+        url,
+        requireLocalLoopbackProxyToken(localLoopbackProxyToken),
+      )
+      : url;
+    if (localInternalProxyBaseUrl) {
       headers.set(HOSTED_EXECUTION_USER_ID_HEADER, boundUserId);
     }
-    const proxiedUrl = internalWorkerProxyBaseUrl
-      ? buildHostedExecutionInternalProxyUrl(internalWorkerProxyBaseUrl, url)
-      : url;
     const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
     const details = {
       effectsFingerprintPresent: url.searchParams.has("fingerprint"),
       host: url.hostname,
       method: proxiedRequest.method,
       path: url.pathname,
-      proxiedViaLoopback: internalWorkerProxyBaseUrl ? "true" : "false",
+      proxiedViaLoopback: localInternalProxyBaseUrl ? "true" : "false",
       userId: boundUserId,
     };
 
@@ -285,6 +290,47 @@ function createCloudflareHostedRuntimeFetch(
   }) as typeof fetch;
 }
 
+function createHostedLocalInternalProxyUrl(
+  baseUrl: string,
+  targetUrl: URL,
+  token: string,
+): URL {
+  let normalizedBaseUrl: URL;
+  try {
+    normalizedBaseUrl = new URL(baseUrl);
+  } catch {
+    throw new TypeError("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL must be an absolute URL.");
+  }
+
+  if (normalizedBaseUrl.protocol !== "http:" && normalizedBaseUrl.protocol !== "https:") {
+    throw new TypeError("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL must use http or https.");
+  }
+
+  const normalizedBasePath = ensureTrailingSlash(normalizedBaseUrl);
+  const proxyBaseUrl = isTokenizedLocalInternalProxyBaseUrl(normalizedBasePath)
+    ? normalizedBasePath
+    : new URL(
+      `__murph/local-internal-proxy/${encodeURIComponent(token)}/`,
+      normalizedBasePath,
+    );
+  const proxyUrl = new URL(
+    `${encodeURIComponent(targetUrl.hostname)}${targetUrl.pathname}`,
+    proxyBaseUrl,
+  );
+  proxyUrl.search = targetUrl.search;
+  return proxyUrl;
+}
+
+function requireLocalLoopbackProxyToken(value: string | null): string {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  throw new Error(
+    "HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN must be configured when HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL is set.",
+  );
+}
+
 interface HostedRequestInitWithDuplex extends RequestInit {
   duplex?: "half";
 }
@@ -308,19 +354,6 @@ function createHostedInternalProxyRequest(
   return new Request(proxiedUrl, init);
 }
 
-function buildHostedExecutionInternalProxyUrl(
-  baseUrl: string,
-  targetUrl: URL,
-): URL {
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const proxied = new URL(
-    `${encodeURIComponent(targetUrl.hostname)}${targetUrl.pathname}`,
-    normalizedBase,
-  );
-  proxied.search = targetUrl.search;
-  return proxied;
-}
-
 function createHostedAssistantDeliveryUrl(input: {
   effectId: string;
   fingerprint: string;
@@ -331,6 +364,20 @@ function createHostedAssistantDeliveryUrl(input: {
   );
   url.searchParams.set("fingerprint", input.fingerprint);
   return url;
+}
+
+function ensureTrailingSlash(value: URL): URL {
+  if (value.pathname.endsWith("/")) {
+    return value;
+  }
+
+  const next = new URL(value.toString());
+  next.pathname = `${next.pathname}/`;
+  return next;
+}
+
+function isTokenizedLocalInternalProxyBaseUrl(value: URL): boolean {
+  return /^\/__murph\/local-internal-proxy\/[^/]+\/$/u.test(value.pathname);
 }
 
 function createHostedWebDeviceSyncPort(input: {
@@ -521,8 +568,24 @@ async function fetchHostedResponse(input: {
       signal: AbortSignal.timeout(input.timeoutMs),
     });
   } catch (error) {
-    throw new Error(`${input.description} request failed.`, { cause: error });
+    throw new Error(
+      `${input.description} request failed.${formatHostedResponseFetchCause(error)}`,
+      { cause: error },
+    );
   }
+}
+
+function formatHostedResponseFetchCause(error: unknown): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    return message.length > 0 ? ` ${message}` : "";
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return ` ${error.trim()}`;
+  }
+
+  return "";
 }
 
 function assertHostedOk(response: Response, description: string): void {

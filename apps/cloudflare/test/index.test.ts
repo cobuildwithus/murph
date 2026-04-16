@@ -13,7 +13,7 @@ import {
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
-import { HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER } from "../src/internal-hosts.ts";
+import { createLocalInternalProxyUserToken } from "../src/local-internal-proxy-token.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
@@ -270,6 +270,110 @@ describe("cloudflare worker routes", () => {
     expect(invalidTargetResponse.status).toBe(400);
     await expect(invalidTargetResponse.json()).resolves.toEqual({
       error: "Local loopback proxy only supports loopback http(s) targets.",
+    });
+  });
+
+  it("routes local internal proxy requests onto the results.worker handler", async () => {
+    const env = createWorkerEnv(undefined, {
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
+      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
+    });
+    const runnerProxyToken = await createLocalInternalProxyUserToken({
+      boundUserId: "member_123",
+      proxyTokenSecret: "local-token",
+    });
+
+    const writeResponse = await worker.fetch(
+      new Request(
+        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
+        {
+          body: JSON.stringify(createPreparedSideEffectRecord({
+            effectId: "outbox_local_internal",
+            fingerprint: "dedupe_local_internal",
+          })),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
+            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+          },
+          method: "PUT",
+        },
+      ),
+      env,
+    );
+
+    expect(writeResponse.status).toBe(200);
+
+    const missingProxyTokenResponse = await worker.fetch(
+      new Request(
+        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
+        {
+          headers: {
+            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+          },
+          method: "GET",
+        },
+      ),
+      env,
+    );
+
+    expect(missingProxyTokenResponse.status).toBe(401);
+    await expect(missingProxyTokenResponse.json()).resolves.toEqual({
+      error: `${HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER} header is required for local internal proxy requests.`,
+    });
+
+    const readResponse = await worker.fetch(
+      new Request(
+        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
+        {
+          headers: {
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
+            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+          },
+          method: "GET",
+        },
+      ),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_local_internal",
+      record: {
+        effectId: "outbox_local_internal",
+        kind: "assistant.delivery",
+        state: "sending",
+      },
+    });
+  });
+
+  it("rejects local internal proxy requests when the proxy token is replayed against another user", async () => {
+    const env = createWorkerEnv(undefined, {
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
+      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
+    });
+    const runnerProxyToken = await createLocalInternalProxyUserToken({
+      boundUserId: "member_123",
+      proxyTokenSecret: "local-token",
+    });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
+        {
+          headers: {
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
+            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_456",
+          },
+          method: "GET",
+        },
+      ),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
     });
   });
 
@@ -664,224 +768,6 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("routes local loopback proxy requests onto the results.worker handler when the intended host is carried in headers", async () => {
-    const env = createWorkerEnv(undefined, {
-      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",
-    });
-
-    const response = await worker.fetch(
-      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy?fingerprint=dedupe_local_proxy", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_local_proxy",
-          fingerprint: "dedupe_local_proxy",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-
-    const readResponse = await worker.fetch(
-      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy?fingerprint=dedupe_local_proxy", {
-        headers: {
-          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(readResponse.status).toBe(200);
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_local_proxy",
-      record: {
-        effectId: "outbox_local_proxy",
-        kind: "assistant.delivery",
-        state: "sending",
-      },
-    });
-  });
-
-  it("routes local loopback proxy requests onto the results.worker handler when only the Host header survives the proxy hop", async () => {
-    const env = createWorkerEnv(undefined, {
-      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",
-    });
-
-    const response = await worker.fetch(
-      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy_host?fingerprint=dedupe_local_proxy_host", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_local_proxy_host",
-          fingerprint: "dedupe_local_proxy_host",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          host: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-
-    const readResponse = await worker.fetch(
-      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy_host?fingerprint=dedupe_local_proxy_host", {
-        headers: {
-          host: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(readResponse.status).toBe(200);
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_local_proxy_host",
-      record: {
-        effectId: "outbox_local_proxy_host",
-        kind: "assistant.delivery",
-        state: "sending",
-      },
-    });
-  });
-
-  it("routes configured local runner proxy ingress hosts onto the results.worker handler", async () => {
-    const env = createWorkerEnv(undefined, {
-      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8902",
-    });
-
-    const response = await worker.fetch(
-      new Request("http://host.docker.internal:8902/effects/outbox_local_proxy_alias?fingerprint=dedupe_local_proxy_alias", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_local_proxy_alias",
-          fingerprint: "dedupe_local_proxy_alias",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-
-    const readResponse = await worker.fetch(
-      new Request("http://host.docker.internal:8902/effects/outbox_local_proxy_alias?fingerprint=dedupe_local_proxy_alias", {
-        headers: {
-          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(readResponse.status).toBe(200);
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_local_proxy_alias",
-      record: {
-        effectId: "outbox_local_proxy_alias",
-        kind: "assistant.delivery",
-        state: "sending",
-      },
-    });
-  });
-
-  it("routes configured numeric runner host aliases onto the results.worker handler", async () => {
-    const env = createWorkerEnv(undefined, {
-      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://172.17.0.1:8902",
-      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
-    });
-
-    const response = await worker.fetch(
-      new Request("http://172.17.0.1:8902/effects/outbox_local_proxy_gateway?fingerprint=dedupe_local_proxy_gateway", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_local_proxy_gateway",
-          fingerprint: "dedupe_local_proxy_gateway",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-
-    const readResponse = await worker.fetch(
-      new Request("http://172.17.0.1:8902/effects/outbox_local_proxy_gateway?fingerprint=dedupe_local_proxy_gateway", {
-        headers: {
-          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(readResponse.status).toBe(200);
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_local_proxy_gateway",
-      record: {
-        effectId: "outbox_local_proxy_gateway",
-        kind: "assistant.delivery",
-        state: "sending",
-      },
-    });
-  });
-
-  it("rejects direct runner-outbound proxy requests on non-loopback worker hosts", async () => {
-    const env = createWorkerEnv(undefined, {
-      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",
-    });
-
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/effects/outbox_direct_probe?fingerprint=dedupe_direct_probe", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_direct_probe",
-          fingerprint: "dedupe_direct_probe",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
-          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-    expect(env.__bucketStore.keys()).toEqual([]);
-  });
-
   it("reads side-effect journal records even when the outbound bridge drops the fingerprint query", async () => {
     const env = createWorkerEnv();
 
@@ -1201,11 +1087,14 @@ type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
 
 function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTAINER"] {
   return {
-    getByName() {
+    getByName(name: string) {
       return {
         async destroyInstance() {},
         async invoke(): Promise<HostedAssistantRuntimeJobResult> {
           throw new Error("Runner container should not be invoked by route tests.");
+        },
+        async ownsInternalWorkerProxyToken(input: { token: string }): Promise<boolean> {
+          return name === "member_123" && input.token === RUNNER_PROXY_TOKEN;
         },
       };
     },

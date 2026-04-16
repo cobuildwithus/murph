@@ -49,10 +49,11 @@ export function mergeCloudflareLocalEnv(input: {
 }): Record<string, string> {
   const createEnvelopeKey = input.createEnvelopeKey ?? (() => randomBytes(32).toString("base64"));
   const createJwkPair = input.createJwkPair ?? createEcP256JwkPairJson;
-  const resolvedExisting = {
+  const normalizedOverrides = normalizeOptionalEnvOverrides(input.overrides);
+  const resolvedExisting = stripDeprecatedHostedLocalProxyEnv({
     ...input.existing,
-    ...normalizeOptionalEnvOverrides(input.overrides),
-  };
+    ...normalizedOverrides,
+  });
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
@@ -67,6 +68,8 @@ export function mergeCloudflareLocalEnv(input: {
     ? resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK
     : createJwkPair().privateJwkJson;
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
+  const workerOrigin =
+    `${input.config.workerProtocol}://${input.config.workerHost}:${input.config.workerPort}`;
 
   return {
     ...resolvedExisting,
@@ -90,12 +93,27 @@ export function mergeCloudflareLocalEnv(input: {
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
+    HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN:
+      resolvedExisting.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN?.trim()
+      ?? randomBytes(16).toString("hex"),
+    HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
+      normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
+      ?? workerOrigin,
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:
       resolvedExisting.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim()
       ?? "v1",
     HOSTED_WEB_BASE_URL: webOrigin,
   };
+}
+
+function stripDeprecatedHostedLocalProxyEnv(
+  input: Record<string, string>,
+): Record<string, string> {
+  const next = { ...input };
+  delete next.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL;
+  delete next.HOSTED_EXECUTION_RUNNER_HOST_ALIAS;
+  return next;
 }
 
 function normalizeOptionalEnvOverrides(

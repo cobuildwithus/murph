@@ -93,6 +93,7 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:9999",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "existing-envelope",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
       },
@@ -121,6 +122,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG).toBe("murph");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBe("murph-web");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("development");
+    expect(merged.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBe("http://127.0.0.1:8787");
+    expect(merged.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN).toMatch(/^[a-f0-9]{32}$/u);
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://127.0.0.1:3000");
   });
@@ -140,6 +143,23 @@ describe("mergeCloudflareLocalEnv", () => {
 
     expect(merged.LINQ_API_BASE_URL).toBe("http://127.0.0.1:4011");
     expect(merged.LINQ_API_TOKEN).toBe("linq-local-test-token");
+  });
+
+  it("preserves an explicit current worker bridge override instead of resetting to the listen host", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:9999",
+      },
+      oidcIdentity,
+      overrides: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+      },
+    });
+
+    expect(merged.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBe(
+      "http://host.docker.internal:8787",
+    );
   });
 });
 
@@ -243,6 +263,7 @@ describe("buildWranglerVarArgs", () => {
   it("emits only allowlisted non-empty values", () => {
     expect(
       buildWranglerVarArgs({
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
@@ -254,6 +275,8 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000",
       "--var",
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
+      "--var",
+      "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:http://127.0.0.1:8787",
       "--var",
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS:60000",
       "--var",

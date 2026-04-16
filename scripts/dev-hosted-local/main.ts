@@ -1,8 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
 
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
@@ -41,6 +41,7 @@ import {
   parseHostedExecutionOidcIdentity,
   resolveVercelOidcToken,
 } from "./vercel.ts";
+import type { HostedLocalDevConfig } from "./types.ts";
 
 export async function main(): Promise<void> {
   const config = resolveHostedLocalDevConfig(process.env);
@@ -102,13 +103,17 @@ export async function main(): Promise<void> {
       vercelEnv.DATABASE_URL,
       DEFAULT_DATABASE_URL,
     );
+    const localInternalProxyBaseUrl = resolveContainerReachableWorkerOrigin(config, vercelEnv);
 
     const vercelOidcToken = await resolveVercelOidcToken(vercelEnv);
     const oidcIdentity = parseHostedExecutionOidcIdentity(vercelOidcToken);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
       config,
       oidcIdentity,
-      overrides: vercelEnv,
+      overrides: {
+        ...vercelEnv,
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: localInternalProxyBaseUrl,
+      },
     });
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);
     const runtimeEnv: NodeJS.ProcessEnv = {
@@ -116,18 +121,9 @@ export async function main(): Promise<void> {
       ...localOverrides,
       VERCEL_OIDC_TOKEN: vercelOidcToken,
     };
-    const runnerHostAlias = resolveLocalRunnerHostAlias(initialEnv);
-    assertRunnerHostAliasAvailableWhenRequired(runnerHostAlias, runtimeEnv);
-    const internalWorkerProxyUpstreamBaseUrl = `${config.workerProtocol}://${runnerHostAlias ?? config.workerHost}:${config.workerPort}`;
     const workerRuntimeEnv: NodeJS.ProcessEnv = {
       ...runtimeEnv,
       ...cloudflareDevVars,
-      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: internalWorkerProxyUpstreamBaseUrl,
-      ...(runnerHostAlias
-        ? {
-          HOSTED_EXECUTION_RUNNER_HOST_ALIAS: runnerHostAlias,
-        }
-        : {}),
     };
     const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
     await writeFile(workerEnvPath, workerEnvText, "utf8");
@@ -371,7 +367,22 @@ function resolveHostedLocalTempDir(
   return resolved;
 }
 
-function resolveLocalRunnerHostAlias(env: NodeJS.ProcessEnv): string | null {
+function resolveContainerReachableWorkerOrigin(
+  config: HostedLocalDevConfig,
+  env: NodeJS.ProcessEnv,
+): string {
+  const reachableHost = resolveContainerReachableWorkerHost(config.workerHost, env);
+  return `${config.workerProtocol}://${reachableHost}:${config.workerPort}`;
+}
+
+function resolveContainerReachableWorkerHost(
+  workerHost: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  if (!isLoopbackWorkerHost(workerHost)) {
+    return workerHost;
+  }
+
   const configured = env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS?.trim();
   if (configured) {
     return configured;
@@ -381,7 +392,22 @@ function resolveLocalRunnerHostAlias(env: NodeJS.ProcessEnv): string | null {
     return "host.docker.internal";
   }
 
-  return readLinuxDockerBridgeGatewayHost();
+  const gateway = readLinuxDockerBridgeGatewayHost();
+  if (gateway) {
+    return gateway;
+  }
+
+  throw new Error(
+    "Hosted local dev on Linux could not resolve a container-reachable worker host. Set HOSTED_EXECUTION_RUNNER_HOST_ALIAS to the host bridge address.",
+  );
+}
+
+function isLoopbackWorkerHost(value: string): boolean {
+  return value === "127.0.0.1"
+    || value === "0.0.0.0"
+    || value === "::1"
+    || value === "::"
+    || value === "localhost";
 }
 
 function readLinuxDockerBridgeGatewayHost(): string | null {
@@ -406,51 +432,6 @@ function readLinuxDockerBridgeGatewayHost(): string | null {
 
   const gateway = result.stdout.trim();
   return gateway.length > 0 ? gateway : null;
-}
-
-const RUNNER_HOST_ALIAS_REQUIRED_URL_ENV_KEYS = [
-  "HOSTED_ASSISTANT_BASE_URL",
-  "LINQ_API_BASE_URL",
-  "TELEGRAM_API_BASE_URL",
-] as const;
-
-function assertRunnerHostAliasAvailableWhenRequired(
-  runnerHostAlias: string | null,
-  env: NodeJS.ProcessEnv,
-): void {
-  if (process.platform !== "linux" || runnerHostAlias) {
-    return;
-  }
-
-  const requiredKeys = RUNNER_HOST_ALIAS_REQUIRED_URL_ENV_KEYS.filter((key) =>
-    isLoopbackUrlString(env[key]),
-  );
-  if (requiredKeys.length === 0) {
-    return;
-  }
-
-  throw new Error(
-    [
-      "Hosted local dev on Linux requires HOSTED_EXECUTION_RUNNER_HOST_ALIAS when loopback-backed runner callbacks are configured.",
-      `Missing host alias for: ${requiredKeys.join(", ")}.`,
-      "Set HOSTED_EXECUTION_RUNNER_HOST_ALIAS explicitly or make sure `docker network inspect bridge` works in this environment.",
-    ].join(" "),
-  );
-}
-
-function isLoopbackUrlString(value: string | undefined): boolean {
-  if (!value?.trim()) {
-    return false;
-  }
-
-  try {
-    const url = new URL(value);
-    return url.hostname === "127.0.0.1"
-      || url.hostname === "localhost"
-      || url.hostname === "::1";
-  } catch {
-    return false;
-  }
 }
 
 function resolveWranglerDebugArgs(env: NodeJS.ProcessEnv): string[] {

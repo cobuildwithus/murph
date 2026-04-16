@@ -20,11 +20,9 @@ async function main(): Promise<void> {
         platform: buildHostedExecutionRuntimePlatform({
           boundUserId: input.job.request.dispatch.event.userId,
           commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
-          internalWorkerProxyBaseUrl: readNullableString(
-            process.env.HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL,
-            "HOSTED_EXECUTION_INTERNAL_PROXY_BASE_URL",
-          ),
           internalWorkerProxyToken: input.internalWorkerProxyToken,
+          localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
+          localLoopbackProxyToken: input.localLoopbackProxyToken,
           webCallbackSigning: environment.webCallbackSigning,
           webControlBaseUrl: process.env.HOSTED_WEB_BASE_URL ?? null,
         }),
@@ -65,6 +63,8 @@ async function readStandardInput(): Promise<string> {
 
 function parseHostedExecutionChildInput(value: unknown): {
   internalWorkerProxyToken: string | null;
+  localInternalProxyBaseUrl: string | null;
+  localLoopbackProxyToken: string | null;
   job: ReturnType<typeof parseHostedAssistantRuntimeJobInput>;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -78,6 +78,14 @@ function parseHostedExecutionChildInput(value: unknown): {
       record.internalWorkerProxyToken,
       "Hosted node runner child input.internalWorkerProxyToken",
     ),
+    localInternalProxyBaseUrl: readNullableString(
+      record.localInternalProxyBaseUrl,
+      "Hosted node runner child input.localInternalProxyBaseUrl",
+    ),
+    localLoopbackProxyToken: readNullableString(
+      record.localLoopbackProxyToken,
+      "Hosted node runner child input.localLoopbackProxyToken",
+    ),
     job: parseHostedAssistantRuntimeJobInput(record.job),
   };
 }
@@ -86,13 +94,11 @@ function readNullableString(value: unknown, label: string): string | null {
   if (value === undefined || value === null) {
     return null;
   }
-
   if (typeof value !== "string") {
     throw new TypeError(`${label} must be a string or null.`);
   }
 
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
+  return value;
 }
 
 await main();

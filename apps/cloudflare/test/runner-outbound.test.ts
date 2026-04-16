@@ -102,6 +102,31 @@ describe("handleRunnerOutboundRequest", () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("does not proxy generic loopback host traffic through runner outbound handling", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://127.0.0.1:8788/health?from=runner", {
+        headers: createRunnerProxyHeaders({
+          "x-hosted-execution-user-id": "member_123",
+        }),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function createRunnerProxyHeaders(headers: Record<string, string> = {}) {

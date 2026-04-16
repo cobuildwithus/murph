@@ -5,8 +5,8 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchStatus,
@@ -18,8 +18,14 @@ import {
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
-  HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER,
 } from "./internal-hosts.ts";
+import {
+  isLocalLoopbackProxyHostname,
+  isLocalLoopbackProxyProtocol,
+  proxyLocalLoopbackRequest,
+  readLocalLoopbackProxyBaseUrl,
+} from "./local-loopback-proxy.ts";
+import { verifyLocalInternalProxyUserToken } from "./local-internal-proxy-token.ts";
 import {
   verifyHostedExecutionVercelOidcRequest,
 } from "./auth-adapter.ts";
@@ -116,6 +122,14 @@ export default {
   async fetch(request: Request, env: WorkerEnvironmentSource): Promise<Response> {
     try {
       const url = new URL(request.url);
+      const localInternalProxyResponse = await maybeHandleLocalInternalProxyRoute(
+        request,
+        url,
+        env,
+      );
+      if (localInternalProxyResponse) {
+        return localInternalProxyResponse;
+      }
       const localLoopbackProxyResponse = await maybeHandleLocalLoopbackProxyRoute(
         request,
         url,
@@ -123,14 +137,6 @@ export default {
       );
       if (localLoopbackProxyResponse) {
         return localLoopbackProxyResponse;
-      }
-      const localRunnerOutboundProxyResponse = await maybeHandleLocalRunnerOutboundProxyRoute(
-        request,
-        url,
-        env,
-      );
-      if (localRunnerOutboundProxyResponse) {
-        return localRunnerOutboundProxyResponse;
       }
       const publicResponse = await dispatchDeclarativeRoute(workerPublicRoutes, { request, url });
       if (publicResponse) {
@@ -347,20 +353,30 @@ function readHostedExecutionBoundUserId(request: Request): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-async function maybeHandleLocalRunnerOutboundProxyRoute(
+interface InternalProxyRequestInit extends RequestInit {
+  duplex?: "half";
+}
+
+async function maybeHandleLocalInternalProxyRoute(
   request: Request,
   url: URL,
   env: WorkerEnvironmentSource,
 ): Promise<Response | null> {
-  if (!readLocalHostedInternalProxyEnabled(env)) {
+  const configuredToken = readLocalLoopbackProxyToken(env);
+  if (!configuredToken) {
     return null;
   }
 
-  const internalHost = readLocalHostedInternalProxyHost(request);
-  if (!internalHost) {
+  const match = /^\/__murph\/local-internal-proxy\/(?<token>[^/]+)\/(?<host>[^/]+)(?<path>\/.*)?$/u.exec(
+    url.pathname,
+  );
+  if (!match?.groups) {
     return null;
   }
 
+  if (match.groups.token !== configuredToken) {
+    return unauthorized();
+  }
   if (!isTrustedLocalHostedInternalProxyIngress(url, env)) {
     return unauthorized();
   }
@@ -368,36 +384,39 @@ async function maybeHandleLocalRunnerOutboundProxyRoute(
   const boundUserId = readHostedExecutionBoundUserId(request);
   if (!boundUserId) {
     return json({
-      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for local internal proxy requests.`,
     }, 401);
   }
-
-  emitHostedExecutionStructuredLog({
-    component: "worker",
-    details: {
-      hostSource: internalHost.source,
-      internalHost: internalHost.host,
-      method: request.method,
-      path: url.pathname,
-      userId: boundUserId,
-    },
-    message: "Hosted worker local runner outbound proxy intercepted request.",
-    phase: "side-effects.draining",
-    userId: boundUserId,
-  });
-
-  const proxiedUrl = new URL(`http://${internalHost.host}${url.pathname}`);
-  proxiedUrl.search = url.search;
-  const internalWorkerProxyToken = readOptionalTrimmedHeader(
+  const runnerProxyToken = readOptionalTrimmedHeader(
     request,
     HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   );
+  if (!runnerProxyToken) {
+    return json({
+      error: `${HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER} header is required for local internal proxy requests.`,
+    }, 401);
+  }
+  const validRunnerProxyToken = await verifyLocalInternalProxyUserToken({
+    boundUserId,
+    proxyTokenSecret: configuredToken,
+    token: runnerProxyToken,
+  });
+  if (!validRunnerProxyToken) {
+    return unauthorized();
+  }
 
-  return handleRunnerOutboundRequest(
-    new Request(proxiedUrl, request),
+  const targetHost = decodeRouteParam(match.groups.host);
+  if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(targetHost)) {
+    return notFound();
+  }
+
+  const internalUrl = new URL(`http://${targetHost}${match.groups.path ?? "/"}`);
+  internalUrl.search = url.search;
+  return await handleRunnerOutboundRequest(
+    createLocalInternalProxyRequest(request, internalUrl),
     env,
     boundUserId,
-    internalWorkerProxyToken,
+    runnerProxyToken,
   );
 }
 
@@ -435,145 +454,20 @@ async function maybeHandleLocalLoopbackProxyRoute(
     upstreamBaseUrl,
   );
   upstreamUrl.search = url.search;
-
-  emitHostedExecutionStructuredLog({
+  return await proxyLocalLoopbackRequest({
+    completedMessage: "Hosted worker local loopback proxy request completed.",
     component: "worker",
-    details: {
-      hasBody: request.body ? "true" : "false",
-      hasQuery: url.search.length > 0 ? "true" : "false",
-      method: request.method,
-      upstreamOrigin: upstreamUrl.origin,
-      upstreamPathname: upstreamUrl.pathname,
-    },
-    message: "Hosted worker local loopback proxy request started.",
+    failedMessage: "Hosted worker local loopback proxy request failed.",
     phase: "dispatch.running",
+    request,
+    startMessage: "Hosted worker local loopback proxy request started.",
+    upstreamUrl,
   });
-
-  let response: Response;
-  try {
-    response = await fetch(createLocalLoopbackProxyRequest(upstreamUrl, request));
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: {
-        hasBody: request.body ? "true" : "false",
-        hasQuery: url.search.length > 0 ? "true" : "false",
-        method: request.method,
-        upstreamOrigin: upstreamUrl.origin,
-        upstreamPathname: upstreamUrl.pathname,
-      },
-      error,
-      level: "warn",
-      message: "Hosted worker local loopback proxy request failed.",
-      phase: "failed",
-    });
-    throw error;
-  }
-
-  emitHostedExecutionStructuredLog({
-    component: "worker",
-    details: {
-      hasBody: request.body ? "true" : "false",
-      hasQuery: url.search.length > 0 ? "true" : "false",
-      method: request.method,
-      status: String(response.status),
-      upstreamOrigin: upstreamUrl.origin,
-      upstreamPathname: upstreamUrl.pathname,
-    },
-    message: "Hosted worker local loopback proxy request completed.",
-    phase: "dispatch.running",
-  });
-
-  return new Response(response.body, {
-    headers: buildLocalLoopbackProxyResponseHeaders(response.headers),
-    status: response.status,
-  });
-}
-
-interface LocalLoopbackProxyRequestInit extends RequestInit {
-  duplex?: "half";
-}
-
-function createLocalLoopbackProxyRequest(upstreamUrl: URL, request: Request): Request {
-  const init: LocalLoopbackProxyRequestInit = {
-    headers: buildLocalLoopbackProxyRequestHeaders(request.headers),
-    method: request.method,
-    signal: request.signal,
-  };
-
-  if (request.body) {
-    init.body = request.body;
-    init.duplex = "half";
-  }
-
-  return new Request(upstreamUrl, init);
-}
-
-function readLocalHostedInternalProxyEnabled(env: WorkerEnvironmentSource): boolean {
-  return readLocalHostedInternalProxyUpstreamHost(env) !== null;
 }
 
 function readLocalLoopbackProxyToken(env: WorkerEnvironmentSource): string | null {
   const value = env.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN;
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function readLocalHostedInternalProxyHost(request: Request): {
-  host: string;
-  source: "header" | "host";
-} | null {
-  const explicit = readOptionalTrimmedHeader(request, HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER);
-  if (explicit && CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(explicit)) {
-    return {
-      host: explicit,
-      source: "header",
-    };
-  }
-
-  const hostHeader = readOptionalTrimmedHeader(request, "host");
-  const normalizedHost = normalizeWorkerHostHeader(hostHeader);
-  if (normalizedHost && CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(normalizedHost)) {
-    return {
-      host: normalizedHost,
-      source: "host",
-    };
-  }
-
-  return null;
-}
-
-function readOptionalTrimmedHeader(request: Request, name: string): string | null {
-  const value = request.headers.get(name);
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function normalizeWorkerHostHeader(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return new URL(`http://${value}`).hostname;
-  } catch {
-    return null;
-  }
-}
-
-function readLocalLoopbackProxyBaseUrl(value: string): URL | null {
-  try {
-    const url = new URL(value);
-    if (!isLocalLoopbackProxyProtocol(url.protocol) || !isLocalLoopbackProxyHostname(url.hostname)) {
-      return null;
-    }
-    return new URL(`${url.origin}${url.pathname.replace(/\/?$/u, "/")}`);
-  } catch {
-    return null;
-  }
 }
 
 function isTrustedLocalHostedInternalProxyIngress(
@@ -584,111 +478,72 @@ function isTrustedLocalHostedInternalProxyIngress(
     return false;
   }
 
-  return resolveLocalHostedInternalProxyIngressHosts(env).has(url.hostname);
-}
-
-function isLocalLoopbackProxyProtocol(value: string): boolean {
-  return value === "http:" || value === "https:";
-}
-
-function isLocalLoopbackProxyHostname(value: string): boolean {
-  return value === "127.0.0.1" || value === "localhost" || value === "::1";
-}
-
-function isAllowedLocalHostedInternalProxyHostname(
-  value: string,
-  env: WorkerEnvironmentSource,
-): boolean {
-  return isLocalLoopbackProxyHostname(value)
-    || value === "host.docker.internal"
-    || readHostedRunnerHostAliasFromWorkerEnv(env) === value;
+  return resolveLocalHostedInternalProxyIngressHosts(env).has(
+    normalizeLocalHostedProxyHostname(url.hostname),
+  );
 }
 
 function resolveLocalHostedInternalProxyIngressHosts(
   env: WorkerEnvironmentSource,
 ): ReadonlySet<string> {
   const hosts = new Set<string>(["127.0.0.1", "localhost", "::1"]);
-  const configuredUpstream = readLocalHostedInternalProxyUpstreamHost(env);
+  const configuredHost = readLocalHostedInternalProxyIngressHost(env);
 
-  if (configuredUpstream) {
-    hosts.add(configuredUpstream);
+  if (configuredHost) {
+    hosts.add(configuredHost);
   }
 
   return hosts;
 }
 
-function readLocalHostedInternalProxyUpstreamHost(
+function readLocalHostedInternalProxyIngressHost(
   env: WorkerEnvironmentSource,
 ): string | null {
-  const value = env.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL;
+  const value = env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL;
   if (typeof value !== "string" || value.trim().length === 0) {
     return null;
   }
 
   try {
     const url = new URL(value);
-    return isAllowedLocalHostedInternalProxyHostname(url.hostname, env)
-      ? (url.hostname || null)
-      : null;
+    return normalizeLocalHostedProxyHostname(url.hostname);
   } catch {
     return null;
   }
 }
 
-function readHostedRunnerHostAliasFromWorkerEnv(
-  env: WorkerEnvironmentSource,
-): string | null {
-  const value = env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS;
+function normalizeLocalHostedProxyHostname(value: string): string {
+  return value.startsWith("[") && value.endsWith("]")
+    ? value.slice(1, -1)
+    : value;
+}
+
+function createLocalInternalProxyRequest(
+  request: Request,
+  internalUrl: URL,
+): Request {
+  const init: InternalProxyRequestInit = {
+    headers: request.headers,
+    method: request.method,
+    signal: request.signal,
+  };
+
+  if (request.body) {
+    init.body = request.body;
+    init.duplex = "half";
+  }
+
+  return new Request(internalUrl, init);
+}
+
+function readOptionalTrimmedHeader(request: Request, name: string): string | null {
+  const value = request.headers.get(name);
   if (typeof value !== "string") {
     return null;
   }
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-function buildLocalLoopbackProxyRequestHeaders(headers: Headers): Headers {
-  const nextHeaders = new Headers();
-
-  headers.forEach((value, key) => {
-    if (shouldStripLocalLoopbackProxyHeader(key)) {
-      return;
-    }
-    nextHeaders.set(key, value);
-  });
-
-  return nextHeaders;
-}
-
-function buildLocalLoopbackProxyResponseHeaders(headers: Headers): Headers {
-  const nextHeaders = new Headers();
-
-  headers.forEach((value, key) => {
-    if (shouldStripLocalLoopbackProxyHeader(key)) {
-      return;
-    }
-    nextHeaders.set(key, value);
-  });
-
-  return nextHeaders;
-}
-
-function shouldStripLocalLoopbackProxyHeader(name: string): boolean {
-  switch (name.toLowerCase()) {
-    case "connection":
-    case "content-length":
-    case "host":
-    case "keep-alive":
-    case "proxy-authenticate":
-    case "proxy-authorization":
-    case "te":
-    case "trailer":
-    case "transfer-encoding":
-    case "upgrade":
-      return true;
-    default:
-      return false;
-  }
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {
