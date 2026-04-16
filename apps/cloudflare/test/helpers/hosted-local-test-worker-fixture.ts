@@ -3,6 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import type { HostedExecutionUserStatus } from "@murphai/hosted-execution";
+
 import { repoRoot } from "../../vitest.shared.js";
 import {
   sleep,
@@ -19,6 +21,10 @@ export interface HostedLocalTestWorkerFixture {
   client: HostedLocalTestWorkerClient;
   dispose(): Promise<void>;
   waitForRunnerPauseEntry(eventId: string): Promise<void>;
+  waitForUserStatus(
+    userId: string,
+    predicate: (status: HostedExecutionUserStatus) => boolean,
+  ): Promise<HostedExecutionUserStatus>;
 }
 
 export async function startHostedLocalTestWorkerFixture(input: {
@@ -120,6 +126,26 @@ export async function startHostedLocalTestWorkerFixture(input: {
           `Timed out waiting for the paused runner commit for ${eventId}.`,
         ], stdout, stderr));
       },
+      waitForUserStatus: async (
+        userId: string,
+        predicate: (status: HostedExecutionUserStatus) => boolean,
+      ): Promise<HostedExecutionUserStatus> => {
+        const startedAt = Date.now();
+
+        while ((Date.now() - startedAt) < 180_000) {
+          const status = await client.getJson(`/__test/status?userId=${encodeURIComponent(userId)}`);
+
+          if (isHostedExecutionUserStatus(status) && predicate(status)) {
+            return status;
+          }
+
+          await sleep(250);
+        }
+
+        throw new Error(formatFailure([
+          `Timed out waiting for the hosted user status predicate for ${userId}.`,
+        ], stdout, stderr));
+      },
     };
   } catch (error) {
     if (child?.pid) {
@@ -218,6 +244,14 @@ function isRunnerPauseState(value: unknown): value is {
     && typeof (value as { entered?: unknown }).entered === "boolean"
     && "hasRequest" in value
     && typeof (value as { hasRequest?: unknown }).hasRequest === "boolean";
+}
+
+function isHostedExecutionUserStatus(value: unknown): value is HostedExecutionUserStatus {
+  return typeof value === "object"
+    && value !== null
+    && "pendingEventCount" in value
+    && typeof (value as { pendingEventCount?: unknown }).pendingEventCount === "number"
+    && "retryingEventId" in value;
 }
 
 function formatFailure(lines: string[], stdout: string, stderr: string): string {

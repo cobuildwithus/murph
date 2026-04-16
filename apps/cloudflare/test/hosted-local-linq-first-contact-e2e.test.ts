@@ -16,6 +16,10 @@ import {
   type HostedLocalDevHarness,
 } from "./helpers/hosted-local-dev-harness.js";
 import {
+  startHostedLocalOidcFixture,
+  type HostedLocalOidcFixture,
+} from "./helpers/hosted-local-oidc-support.js";
+import {
   readRequestBody,
   requireBoundTcpPort,
   reserveLocalTcpPort,
@@ -52,6 +56,7 @@ let linqServerBaseUrl = "";
 let assistantProviderServer: ReturnType<typeof createServer> | null = null;
 let assistantProviderBaseUrl = "";
 let localHarness: HostedLocalDevHarness | null = null;
+let oidcFixture: HostedLocalOidcFixture | null = null;
 let workerBaseUrl = "";
 let workerPersistDir: string | null = null;
 
@@ -84,6 +89,7 @@ describe("hosted local Linq first-contact e2e", () => {
         assistantProviderBaseUrl,
       });
     }
+    oidcFixture = await startHostedLocalOidcFixture();
     const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
       process.env,
       useAssistantProviderStub ? assistantProviderBaseUrl : null,
@@ -98,6 +104,7 @@ describe("hosted local Linq first-contact e2e", () => {
         process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
         "linq",
       ),
+      HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: requireOidcFixture().jwksUrl,
       LINQ_API_BASE_URL: linqServerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
@@ -106,6 +113,7 @@ describe("hosted local Linq first-contact e2e", () => {
       MURPH_DEV_WEB_PORT: String(webPort),
       MURPH_DEV_WORKER_PORT: String(workerPort),
       NEXT_DIST_DIR_MODE: "smoke",
+      VERCEL_OIDC_TOKEN: requireOidcFixture().token,
     };
     localHarness = await startHostedLocalDevHarness({
       env: runtimeEnv,
@@ -129,6 +137,8 @@ describe("hosted local Linq first-contact e2e", () => {
     logDebug("tearing down hosted local Linq e2e");
     await localHarness?.stop();
     localHarness = null;
+    await oidcFixture?.stop();
+    oidcFixture = null;
 
     await stopHttpStubServer(linqServer);
     await stopHttpStubServer(assistantProviderServer);
@@ -533,6 +543,14 @@ function requireHarness(): HostedLocalDevHarness {
   }
 
   return localHarness;
+}
+
+function requireOidcFixture(): HostedLocalOidcFixture {
+  if (!oidcFixture) {
+    throw new Error("Hosted local OIDC fixture was not initialized.");
+  }
+
+  return oidcFixture;
 }
 
 function sleep(delayMs: number): Promise<void> {

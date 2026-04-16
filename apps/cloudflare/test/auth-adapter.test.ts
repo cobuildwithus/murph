@@ -44,6 +44,44 @@ describe("cloudflare hosted execution auth adapter", () => {
     })).toEqual(TEST_VALIDATION);
   });
 
+  it("accepts a development-only JWKS URL override for local verification", () => {
+    expect(readHostedExecutionVercelOidcValidationEnvironment({
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+      HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
+      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: TEST_PROJECT_NAME,
+      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: TEST_TEAM_SLUG,
+    })).toEqual({
+      ...createHostedExecutionVercelOidcValidationEnvironment({
+        environment: "development",
+        projectName: TEST_PROJECT_NAME,
+        teamSlug: TEST_TEAM_SLUG,
+      }),
+      jwksUrl: "http://127.0.0.1:4010/.well-known/jwks",
+    });
+  });
+
+  it("rejects JWKS URL overrides outside development", () => {
+    expect(() =>
+      readHostedExecutionVercelOidcValidationEnvironment({
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
+        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: TEST_PROJECT_NAME,
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: TEST_TEAM_SLUG,
+      })
+    ).toThrow("HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL is only supported");
+  });
+
+  it("rejects non-local development JWKS URL overrides", () => {
+    expect(() =>
+      readHostedExecutionVercelOidcValidationEnvironment({
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "https://example.com/.well-known/jwks",
+        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: TEST_PROJECT_NAME,
+        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: TEST_TEAM_SLUG,
+      })
+    ).toThrow("HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL must use a local loopback or bridge hostname");
+  });
+
   it("verifies a valid bearer token against the configured Vercel workload identity", async () => {
     installOidcJwksFetch();
 

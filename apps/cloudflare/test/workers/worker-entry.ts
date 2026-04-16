@@ -57,6 +57,10 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return this.runner.status();
   }
 
+  async runAlarmForTest(): Promise<void> {
+    await this.runner.alarm();
+  }
+
   override async alarm(): Promise<void> {
     await this.runner.alarm();
   }
@@ -92,6 +96,20 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     }
 
     return Response.json(await getUserRunnerStub(userId).status());
+  }
+
+  if (url.pathname === "/__test/alarm" && request.method === "POST") {
+    const body = await request.json() as { userId?: unknown };
+
+    if (typeof body.userId !== "string" || body.userId.length === 0) {
+      return Response.json({ error: "userId is required." }, { status: 400 });
+    }
+
+    await getUserRunnerStub(body.userId).runAlarmForTest();
+    return Response.json({
+      ok: true,
+      userId: body.userId,
+    });
   }
 
   if (url.pathname === "/__test/runner/pause" && request.method === "POST") {
@@ -207,6 +225,7 @@ function getUserRunnerStub(userId: string) {
       USER_RUNNER: {
         getByName(name: string): {
           dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+          runAlarmForTest(): Promise<void>;
           status(): Promise<HostedExecutionUserStatus>;
         };
       };
