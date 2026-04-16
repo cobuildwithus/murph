@@ -4,6 +4,8 @@
  * longer keeps a compatibility lane for legacy per-thread aliases.
  */
 
+import { EmailMessage } from "cloudflare:email";
+
 import type { HostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
   createHostedEmailThreadTarget,
@@ -17,12 +19,21 @@ import {
 } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "../bundle-store.ts";
+import type { WorkerSendEmailBindingLike } from "../worker-contracts.ts";
 import type { HostedEmailConfig } from "./config.ts";
 import { createHostedEmailUserAddress } from "./routes.ts";
+
+export class HostedEmailSendValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostedEmailSendValidationError";
+  }
+}
 
 export async function sendHostedEmailMessage(input: {
   bucket: R2BucketLike;
   config: HostedEmailConfig;
+  emailBinding?: WorkerSendEmailBindingLike;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
@@ -34,9 +45,11 @@ export async function sendHostedEmailMessage(input: {
   if (!input.config.domain || !input.config.signingSecret) {
     throw new Error("Hosted email routing is not configured.");
   }
-  if (!input.config.cloudflareAccountId || !input.config.cloudflareApiToken) {
+  if (!input.emailBinding) {
     throw new Error("Hosted email sending is not configured.");
   }
+
+  assertSupportedHostedEmailSendRequest(input.request, input.config);
 
   const replyAddress = await createHostedEmailUserAddress({
     bucket: input.bucket,
@@ -54,48 +67,71 @@ export async function sendHostedEmailMessage(input: {
     targetKind: input.request.targetKind,
   });
 
-  const response = await fetch(
-    `${input.config.apiBaseUrl}/accounts/${encodeURIComponent(input.config.cloudflareAccountId)}/email/sending/send_raw`,
-    {
-      body: JSON.stringify({
-        from: prepared.fromAddress,
-        mime_message: prepared.mimeMessage,
-        recipients: prepared.recipients,
-      }),
-      headers: {
-        authorization: `Bearer ${input.config.cloudflareApiToken}`,
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    },
-  );
-
-  const payload = await response.json().catch(() => null) as {
-    errors?: Array<{ message?: string | null }>;
-    messages?: Array<{ message?: string | null }>;
-    result?: {
-      delivered?: string[];
-      permanent_bounces?: string[];
-      queued?: string[];
-    };
-    success?: boolean;
-  } | null;
-
-  if (!response.ok || payload?.success === false) {
-    const details = [
-      ...(payload?.errors ?? []),
-      ...(payload?.messages ?? []),
-    ]
-      .map((entry) => entry.message?.trim())
-      .filter((entry): entry is string => Boolean(entry));
-    throw new Error(
-      details[0] ?? `Hosted email send failed with HTTP ${response.status}.`,
-    );
-  }
+  await sendHostedEmailMimeMessage({
+    binding: input.emailBinding,
+    fromAddress: prepared.fromAddress,
+    mimeMessage: prepared.mimeMessage,
+    recipients: prepared.recipients,
+  });
 
   return {
     target: serializeHostedEmailThreadTarget(prepared.threadTarget),
   };
+}
+
+function assertSupportedHostedEmailSendRequest(
+  request: HostedEmailSendRequest,
+  config: HostedEmailConfig,
+): void {
+  const configuredSender = normalizeHostedEmailAddress(config.fromAddress);
+  const requestedSender = normalizeHostedEmailAddress(request.identityId);
+
+  if (requestedSender && configuredSender && requestedSender !== configuredSender) {
+    throw new HostedEmailSendValidationError(
+      `Hosted email sender identity is config-owned and must remain ${configuredSender}.`,
+    );
+  }
+}
+
+async function sendHostedEmailMimeMessage(input: {
+  binding: WorkerSendEmailBindingLike;
+  fromAddress: string;
+  mimeMessage: string;
+  recipients: string[];
+}): Promise<void> {
+  // Cloudflare's raw MIME EmailMessage constructor targets one envelope
+  // recipient at a time, so fan out the same MIME payload across recipients.
+  const deliveryResults = await Promise.allSettled(
+    input.recipients.map((recipient) =>
+      input.binding.send(new EmailMessage(input.fromAddress, recipient, input.mimeMessage))
+    ),
+  );
+
+  const failures = deliveryResults.flatMap((result, index) => {
+    if (result.status === "fulfilled") {
+      return [];
+    }
+
+    return [formatHostedEmailSendError(input.recipients[index], result.reason)];
+  });
+
+  if (failures.length > 0) {
+    throw new Error(
+      failures.length === 1
+        ? failures[0] ?? "Hosted email send failed."
+        : `Hosted email send failed for ${failures.length} recipient(s): ${failures.join("; ")}`,
+    );
+  }
+}
+
+function formatHostedEmailSendError(recipient: string | undefined, error: unknown): string {
+  const details = error instanceof Error
+    ? error.message.trim()
+    : typeof error === "string"
+      ? error.trim()
+      : "Hosted email send failed.";
+  const normalizedDetails = details.length > 0 ? details : "Hosted email send failed.";
+  return recipient ? `${recipient}: ${normalizedDetails}` : normalizedDetails;
 }
 
 async function prepareHostedEmailSend(input: {
@@ -115,11 +151,24 @@ async function prepareHostedEmailSend(input: {
     throw new Error("Hosted email sender identity is not configured.");
   }
 
+  if (input.targetKind === "participant") {
+    throw new HostedEmailSendValidationError(
+      "Hosted email participant delivery is not supported. Use an explicit recipient or a serialized thread target.",
+    );
+  }
+  if (input.targetKind !== "explicit" && input.targetKind !== "thread") {
+    throw new HostedEmailSendValidationError(
+      "Hosted email delivery requires an explicit recipient or a serialized thread target.",
+    );
+  }
+
   const existingThreadTarget = input.targetKind === "thread"
     ? parseHostedEmailThreadTarget(input.target)
     : null;
   if (input.targetKind === "thread" && !existingThreadTarget) {
-    throw new Error("Hosted email thread delivery requires a serialized thread target.");
+    throw new HostedEmailSendValidationError(
+      "Hosted email thread delivery requires a serialized thread target.",
+    );
   }
 
   const to = existingThreadTarget
@@ -127,7 +176,9 @@ async function prepareHostedEmailSend(input: {
     : normalizeHostedEmailAddressList([input.target]);
   const cc = existingThreadTarget?.cc ?? [];
   if (to.length === 0) {
-    throw new Error("Hosted email delivery requires at least one recipient email address.");
+    throw new HostedEmailSendValidationError(
+      "Hosted email delivery requires at least one recipient email address.",
+    );
   }
 
   const subject = existingThreadTarget

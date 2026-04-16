@@ -749,18 +749,18 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("bootstraps hosted email auto-reply when the hosted email bridge is configured", async () => {
-    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
-    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailIngressReady = process.env.HOSTED_EMAIL_INGRESS_READY;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSendReady = process.env.HOSTED_EMAIL_SEND_READY;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
     const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
-    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
-    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_INGRESS_READY = "true";
     process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SEND_READY = "true";
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
 
     try {
@@ -790,27 +790,25 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("hosted email auto-reply ready");
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_INGRESS_READY", previousHostedEmailIngressReady);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SEND_READY", previousHostedEmailSendReady);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
       restoreEnvVars(previousHostedAssistantEnv);
     }
   });
 
   it("does not bootstrap hosted email auto-reply when sender credentials exist without a hosted email domain", async () => {
-    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
-    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailFromAddress = process.env.HOSTED_EMAIL_FROM_ADDRESS;
+    const previousHostedEmailSendReady = process.env.HOSTED_EMAIL_SEND_READY;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
     const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
-    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
-    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
     process.env.HOSTED_EMAIL_FROM_ADDRESS = "assistant@mail.example.test";
+    process.env.HOSTED_EMAIL_SEND_READY = "true";
     delete process.env.HOSTED_EMAIL_DOMAIN;
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
 
@@ -844,28 +842,27 @@ describe("runHostedExecutionJob", () => {
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_FROM_ADDRESS", previousHostedEmailFromAddress);
+      restoreEnvVar("HOSTED_EMAIL_SEND_READY", previousHostedEmailSendReady);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
       restoreEnvVars(previousHostedAssistantEnv);
     }
   });
 
   it("does not enable hosted auto-reply on non-activation events after bootstrap", async () => {
-    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
-    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailIngressReady = process.env.HOSTED_EMAIL_INGRESS_READY;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSendReady = process.env.HOSTED_EMAIL_SEND_READY;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
     const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = clearHostedAssistantSeedEnv();
 
-    delete process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
-    delete process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     delete process.env.HOSTED_EMAIL_DOMAIN;
+    delete process.env.HOSTED_EMAIL_INGRESS_READY;
     delete process.env.HOSTED_EMAIL_LOCAL_PART;
+    delete process.env.HOSTED_EMAIL_SEND_READY;
     delete process.env.HOSTED_EMAIL_SIGNING_SECRET;
 
     try {
@@ -885,10 +882,10 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
-      process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
       process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+      process.env.HOSTED_EMAIL_INGRESS_READY = "true";
       process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+      process.env.HOSTED_EMAIL_SEND_READY = "true";
       process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
 
       const result = await runHostedExecutionJob({
@@ -920,10 +917,10 @@ describe("runHostedExecutionJob", () => {
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVars(previousHostedAssistantEnv);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_INGRESS_READY", previousHostedEmailIngressReady);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SEND_READY", previousHostedEmailSendReady);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
     }
   });
@@ -2947,8 +2944,6 @@ describe("runHostedExecutionJob", () => {
       forwardedEnv: {
         DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
         DEVICE_SYNC_SECRET: "secret_123",
-        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
         HOSTED_EMAIL_INGRESS_READY: "true",
         HOSTED_EMAIL_LOCAL_PART: "assistant",

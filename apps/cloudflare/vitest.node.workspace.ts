@@ -20,6 +20,10 @@ const cloudflareNodeVitestConcurrency = resolveMurphVitestConcurrency();
 const cloudflareNodeVitestMaxWorkers = resolveMurphAppVitestMaxWorkers();
 const nodeOnlyAliases = [
   {
+    find: "cloudflare:email",
+    replacement: path.resolve(cloudflareDir, "test/stubs/cloudflare-email.ts"),
+  },
+  {
     find: "cloudflare:workers",
     replacement: path.resolve(cloudflareDir, "test/stubs/cloudflare-workers.ts"),
   },

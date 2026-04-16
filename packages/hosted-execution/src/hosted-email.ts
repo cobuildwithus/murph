@@ -1,6 +1,6 @@
 import { normalizeHostedExecutionString } from "./env.ts";
 
-type EnvSource = Readonly<Record<string, string | undefined>>;
+type EnvSource = Readonly<Record<string, unknown>>;
 
 export interface HostedEmailCapabilities {
   ingressReady: boolean;
@@ -13,19 +13,21 @@ export const HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID = "hosted-email-p
 export function readHostedEmailCapabilities(
   source: EnvSource = process.env,
 ): HostedEmailCapabilities {
-  const domain = normalizeHostedExecutionString(source.HOSTED_EMAIL_DOMAIN)?.toLowerCase() ?? null;
+  const domain = readHostedEmailEnvString(source, "HOSTED_EMAIL_DOMAIN")?.toLowerCase() ?? null;
   const senderIdentity = resolveHostedEmailSenderIdentity(source);
-  const signingSecret = normalizeHostedExecutionString(source.HOSTED_EMAIL_SIGNING_SECRET);
-  const cloudflareAccountId = normalizeHostedExecutionString(source.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID);
-  const cloudflareApiToken = normalizeHostedExecutionString(source.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN);
+  const signingSecret = readHostedEmailEnvString(source, "HOSTED_EMAIL_SIGNING_SECRET");
   const inferredIngressReady = senderIdentity !== null && domain !== null && signingSecret !== null;
-  const inferredSendReady = inferredIngressReady
-    && cloudflareAccountId !== null
-    && cloudflareApiToken !== null;
   const ingressReady = senderIdentity !== null
-    && (parseHostedEmailCapabilityFlag(source.HOSTED_EMAIL_INGRESS_READY) ?? inferredIngressReady);
-  const sendReady = senderIdentity !== null
-    && (parseHostedEmailCapabilityFlag(source.HOSTED_EMAIL_SEND_READY) ?? inferredSendReady);
+    && (
+      parseHostedEmailCapabilityFlag(readHostedEmailEnvString(source, "HOSTED_EMAIL_INGRESS_READY"))
+      ?? inferredIngressReady
+    );
+  const inferredSendReady = inferredIngressReady && hasHostedEmailSendBindingValue(source.HOSTED_EMAIL);
+  const sendReady = ingressReady
+    && (
+      parseHostedEmailCapabilityFlag(readHostedEmailEnvString(source, "HOSTED_EMAIL_SEND_READY"))
+      ?? inferredSendReady
+    );
 
   return {
     ingressReady,
@@ -37,17 +39,19 @@ export function readHostedEmailCapabilities(
 export function resolveHostedEmailSenderIdentity(
   source: EnvSource = process.env,
 ): string | null {
-  const explicit = normalizeHostedEmailAddress(source.HOSTED_EMAIL_FROM_ADDRESS);
+  const explicit = normalizeHostedEmailAddress(
+    readHostedEmailEnvString(source, "HOSTED_EMAIL_FROM_ADDRESS"),
+  );
   if (explicit) {
     return explicit;
   }
 
-  const domain = normalizeHostedExecutionString(source.HOSTED_EMAIL_DOMAIN)?.toLowerCase() ?? null;
+  const domain = readHostedEmailEnvString(source, "HOSTED_EMAIL_DOMAIN")?.toLowerCase() ?? null;
   if (!domain) {
     return null;
   }
 
-  const localPart = normalizeHostedExecutionString(source.HOSTED_EMAIL_LOCAL_PART)?.toLowerCase()
+  const localPart = readHostedEmailEnvString(source, "HOSTED_EMAIL_LOCAL_PART")?.toLowerCase()
     ?? "assistant";
   return `${localPart}@${domain}`;
 }
@@ -79,6 +83,15 @@ export function resolveHostedEmailSelfAddresses(input: {
   return addresses;
 }
 
+function hasHostedEmailSendBindingValue(value: unknown): boolean {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && "send" in value
+      && typeof (value as { send?: unknown }).send === "function",
+  );
+}
+
 function normalizeHostedEmailAddress(value: string | null | undefined): string | null {
   const normalized = normalizeHostedExecutionString(value);
   if (!normalized) {
@@ -106,4 +119,9 @@ function parseHostedEmailCapabilityFlag(value: string | null | undefined): boole
   }
 
   return null;
+}
+
+function readHostedEmailEnvString(source: EnvSource, key: string): string | null {
+  const value = source[key];
+  return normalizeHostedExecutionString(typeof value === "string" ? value : null);
 }

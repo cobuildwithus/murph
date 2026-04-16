@@ -317,8 +317,9 @@ describe("hosted email helpers", () => {
 
   it("derives capabilities from env defaults and explicit flags", () => {
     expect(readHostedEmailCapabilities({
-      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "token_123",
+      HOSTED_EMAIL: {
+        send: async (_message: unknown) => undefined,
+      },
       HOSTED_EMAIL_DOMAIN: "example.com",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "secret_123",
@@ -335,7 +336,7 @@ describe("hosted email helpers", () => {
       HOSTED_EMAIL_SEND_READY: "1",
     })).toEqual({
       ingressReady: false,
-      sendReady: true,
+      sendReady: false,
       senderIdentity: "assistant@example.com",
     });
 

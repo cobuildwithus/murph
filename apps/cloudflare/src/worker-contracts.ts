@@ -1,6 +1,10 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
+export interface WorkerSendEmailBindingLike {
+  send(message: unknown): Promise<unknown>;
+}
+
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
 }
@@ -46,9 +50,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG?: string;
-  HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
-  HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL?: string;
-  HOSTED_EMAIL_CLOUDFLARE_API_TOKEN?: string;
+  HOSTED_EMAIL?: WorkerSendEmailBindingLike;
   HOSTED_EMAIL_DEFAULT_SUBJECT?: string;
   HOSTED_EMAIL_DOMAIN?: string;
   HOSTED_EMAIL_FROM_ADDRESS?: string;

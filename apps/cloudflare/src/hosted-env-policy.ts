@@ -6,7 +6,7 @@ import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution/hosted-email";
 
-import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
+import type { StringEnvSource } from "./string-env.ts";
 
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",
@@ -188,7 +188,7 @@ export function buildHostedRunnerContainerEnv(
   }
 
   const emailCapabilities = enabledProfileNames.has("hosted-email")
-    ? readHostedEmailCapabilities(toStringEnvSource(source))
+    ? readHostedEmailCapabilities(source)
     : {
         ingressReady: false,
         sendReady: false,

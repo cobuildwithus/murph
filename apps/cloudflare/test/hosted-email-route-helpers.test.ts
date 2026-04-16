@@ -14,9 +14,6 @@ import {
 } from "../src/hosted-email/route-crypto.ts";
 
 const hostedEmailConfig: HostedEmailConfig = {
-  apiBaseUrl: "https://api.cloudflare.com/client/v4",
-  cloudflareAccountId: null,
-  cloudflareApiToken: null,
   defaultSubject: "Murph update",
   domain: "example.com",
   fromAddress: "assistant@example.com",

@@ -23,7 +23,7 @@ export {
   resolveHostedEmailInboundRoute,
 } from "./hosted-email/routes.ts";
 export { shouldRejectHostedEmailIngressFailure } from "./hosted-email/ingress-policy.ts";
-export { sendHostedEmailMessage } from "./hosted-email/transport.ts";
+export { HostedEmailSendValidationError, sendHostedEmailMessage } from "./hosted-email/transport.ts";
 
 const HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024;
 
