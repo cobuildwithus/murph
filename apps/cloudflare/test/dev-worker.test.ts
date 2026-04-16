@@ -1,15 +1,56 @@
-import { describe, expect, it } from "vitest";
+import * as fsPromises from "node:fs/promises";
 
-import { normalizePnpmScriptArgs } from "../scripts/dev-worker.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-describe("normalizePnpmScriptArgs", () => {
-  it("drops pnpm's leading argument separator before forwarding to wrangler", () => {
-    expect(normalizePnpmScriptArgs(["--", "--ip", "127.0.0.1", "--port", "8901"]))
-      .toEqual(["--ip", "127.0.0.1", "--port", "8901"]);
+vi.mock("node:fs/promises", () => ({
+  access: vi.fn(async () => {}),
+}));
+
+import {
+  normalizePnpmScriptArgs,
+  resolveWorkerDevPnpmCommands,
+  shouldSkipRunnerBundle,
+} from "../scripts/dev-worker.ts";
+
+describe("cloudflare dev-worker script", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
-  it("preserves plain wrangler arguments", () => {
-    expect(normalizePnpmScriptArgs(["--local-protocol", "http"]))
-      .toEqual(["--local-protocol", "http"]);
+  it("normalizes pnpm passthrough args", () => {
+    expect(normalizePnpmScriptArgs(["--", "--ip", "127.0.0.1"])).toEqual(["--ip", "127.0.0.1"]);
+    expect(normalizePnpmScriptArgs(["--ip", "127.0.0.1"])).toEqual(["--ip", "127.0.0.1"]);
+  });
+
+  it("bundles the runner before wrangler dev by default", () => {
+    expect(resolveWorkerDevPnpmCommands(["--", "--port", "8787"], {})).toEqual([
+      ["runner:bundle"],
+      ["exec", "wrangler", "dev", "--port", "8787"],
+    ]);
+  });
+
+  it("skips the bundle step when the caller prebuilt it", () => {
+    const env = { MURPH_DEV_SKIP_RUNNER_BUNDLE: "1" } satisfies NodeJS.ProcessEnv;
+
+    expect(shouldSkipRunnerBundle(env)).toBe(true);
+    expect(resolveWorkerDevPnpmCommands(["--", "--port", "8787"], env)).toEqual([
+      ["exec", "wrangler", "dev", "--port", "8787"],
+    ]);
+  });
+
+  it("fails closed before wrangler dev when skip mode is set but the prepared bundle is missing", async () => {
+    const accessMock = vi.mocked(fsPromises.access).mockRejectedValueOnce(
+      Object.assign(new Error("missing"), { code: "ENOENT" }),
+    );
+    const { main } = await import("../scripts/dev-worker.ts");
+
+    vi.stubEnv("MURPH_DEV_SKIP_RUNNER_BUNDLE", "1");
+
+    await expect(main([])).rejects.toThrow(
+      "MURPH_DEV_SKIP_RUNNER_BUNDLE=1 requires a prepared Cloudflare runner bundle.",
+    );
+    expect(accessMock).toHaveBeenCalledTimes(1);
   });
 });
