@@ -34,6 +34,26 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect((request as Request).method).toBe("DELETE");
   });
 
+  it("fails closed before issuing internal-host requests when the per-run proxy token is missing", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      platform.effectsPort.deletePreparedAssistantDelivery({
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+      }),
+    ).rejects.toMatchObject({
+      message: "Hosted side-effect delete effect_123 failed with HTTP 503.",
+      status: 503,
+      statusCode: 503,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rewrites internal worker requests through the loopback proxy when configured", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
@@ -197,6 +217,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
     });
     const { effectsPort } = platform;
 
@@ -225,19 +246,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(writtenRecord).toEqual(record);
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
-    const deleteRequest = fetchMock.mock.calls[0]?.[0] as URL;
-    const readRequest = fetchMock.mock.calls[1]?.[0] as URL;
-    const writeRequest = fetchMock.mock.calls[2]?.[0] as URL;
+    const deleteRequest = fetchMock.mock.calls[0]?.[0] as Request;
+    const readRequest = fetchMock.mock.calls[1]?.[0] as Request;
+    const writeRequest = fetchMock.mock.calls[2]?.[0] as Request;
 
-    expect(String(deleteRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
-    expect(String(readRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
-    expect(String(writeRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+    expect(deleteRequest).toBeInstanceOf(Request);
+    expect(readRequest).toBeInstanceOf(Request);
+    expect(writeRequest).toBeInstanceOf(Request);
+    expect(deleteRequest.url).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+    expect(readRequest.url).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+    expect(writeRequest.url).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
   });
 
   it("preserves HTTP status on hosted assistant-delivery journal failures", async () => {
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: vi.fn(async () => new Response("unavailable", { status: 503 })) as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(

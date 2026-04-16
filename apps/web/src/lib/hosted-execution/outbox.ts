@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 
 import {
-  ExecutionOutboxStatus,
   Prisma,
   type ExecutionOutbox,
   type PrismaClient,
@@ -15,11 +14,13 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   dispatchHostedExecutionStatus,
+  dispatchHostedExecutionStoredReferenceStatus,
 } from "./dispatch";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import {
   areHostedExecutionOutboxPayloadsEquivalent,
   buildHostedExecutionDispatchRef,
+  readHostedExecutionLegacyReferenceOutboxPayload,
   type HostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
@@ -180,29 +181,17 @@ function buildDueOutboxWhere(
           },
         }
       : {}),
+    dispatchState: {
+      notIn: ["completed", "poisoned"],
+    },
+    nextAttemptAt: {
+      lte: now,
+    },
     OR: [
       {
-        status: {
-          in: [ExecutionOutboxStatus.queued, ExecutionOutboxStatus.delivery_failed],
-        },
-        nextAttemptAt: {
-          lte: now,
-        },
-        claimExpiresAt: null,
+        claimToken: null,
       },
       {
-        status: {
-          in: [ExecutionOutboxStatus.queued, ExecutionOutboxStatus.delivery_failed],
-        },
-        nextAttemptAt: {
-          lte: now,
-        },
-        claimExpiresAt: {
-          lt: now,
-        },
-      },
-      {
-        status: ExecutionOutboxStatus.dispatching,
         claimExpiresAt: {
           lt: now,
         },
@@ -220,14 +209,15 @@ function buildPrunableOutboxWhere(
     },
     OR: [
       {
-        status: ExecutionOutboxStatus.dispatched,
         dispatchState: {
           in: ["completed", "poisoned"],
         },
       },
       {
-        status: ExecutionOutboxStatus.delivery_failed,
         nextAttemptAt: null,
+        lastError: {
+          not: null,
+        },
       },
     ],
   };
@@ -244,31 +234,12 @@ async function claimHostedExecutionOutboxRecord(
   const claimed = await prisma.executionOutbox.updateMany({
     where: {
       id: record.id,
-      status: record.status,
-      ...(record.status === ExecutionOutboxStatus.dispatching
-        ? {
-            claimExpiresAt: {
-              lt: now,
-            },
-          }
-        : {
-            nextAttemptAt: {
-              lte: now,
-            },
-            OR: [
-              {
-                claimExpiresAt: null,
-              },
-              {
-                claimExpiresAt: {
-                  lt: now,
-                },
-              },
-            ],
-          }),
+      dispatchState: record.dispatchState,
+      nextAttemptAt: record.nextAttemptAt,
+      claimToken: record.claimToken,
+      claimExpiresAt: record.claimExpiresAt,
     },
     data: {
-      status: ExecutionOutboxStatus.dispatching,
       attemptCount: {
         increment: 1,
       },
@@ -285,7 +256,6 @@ async function claimHostedExecutionOutboxRecord(
 
   return {
     ...record,
-    status: ExecutionOutboxStatus.dispatching,
     attemptCount: record.attemptCount + 1,
     lastAttemptAt: now,
     claimToken,
@@ -300,15 +270,26 @@ async function processHostedExecutionOutboxRecord(
   nowIso: string,
 ): Promise<ExecutionOutbox> {
   const payload = readHostedExecutionOutboxPayload(record.payloadJson);
+  const legacyReferencePayload = readHostedExecutionLegacyReferenceOutboxPayload(record.payloadJson);
   let persistedPayloadJson = record.payloadJson as Prisma.InputJsonValue;
 
   try {
-    if (!payload) {
-      throw createHostedExecutionOutboxPayloadError(record.eventId);
+    if (legacyReferencePayload) {
+      const dispatchResult = await dispatchHostedExecutionStoredReferenceStatus(legacyReferencePayload);
+      const outcome = resolveHostedExecutionOutboxAttemptOutcome(dispatchResult);
+      const nextAttemptAt = outcome.retryable
+        ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
+        : null;
+      return finalizeHostedExecutionOutboxAttempt(prisma, record, {
+        lastError: outcome.lastError,
+        nextAttemptAt,
+        payloadJson: persistedPayloadJson,
+        state: outcome.state,
+      });
     }
 
-    if (payload.storage !== "inline") {
-      throw createHostedExecutionReferencePayloadUnsupportedError(record.eventId);
+    if (!payload) {
+      throw createHostedExecutionOutboxPayloadError(record.eventId);
     }
 
     persistedPayloadJson = record.payloadJson as Prisma.InputJsonValue;
@@ -321,31 +302,32 @@ async function processHostedExecutionOutboxRecord(
       lastError: outcome.lastError,
       nextAttemptAt,
       payloadJson: resolveHostedExecutionPersistedPayloadJson({
+        lastError: outcome.lastError,
         nextAttemptAt,
         payload,
         payloadJson: persistedPayloadJson,
-        transportStatus: outcome.transportStatus,
+        state: outcome.state,
       }),
       state: outcome.state,
-      transportStatus: outcome.transportStatus,
     });
     return nextRecord;
   } catch (error) {
     const permanentPayloadFailure = isPermanentHostedExecutionOutboxError(error);
+    const formattedError = formatHostedExecutionSafeLogError(error);
     const nextAttemptAt = permanentPayloadFailure
       ? null
       : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount));
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
-      lastError: formatHostedExecutionSafeLogError(error),
+      lastError: formattedError,
       nextAttemptAt,
       payloadJson: resolveHostedExecutionPersistedPayloadJson({
+        lastError: formattedError,
         nextAttemptAt,
         payload,
         payloadJson: persistedPayloadJson,
-        transportStatus: ExecutionOutboxStatus.delivery_failed,
+        state: readExecutionLifecycleState(record.dispatchState),
       }),
       state: readExecutionLifecycleState(record.dispatchState),
-      transportStatus: ExecutionOutboxStatus.delivery_failed,
     });
     return nextRecord;
   }
@@ -359,7 +341,6 @@ async function finalizeHostedExecutionOutboxAttempt(
     nextAttemptAt: Date | null;
     payloadJson: Prisma.InputJsonValue;
     state: HostedExecutionDispatchLifecycleState;
-    transportStatus: ExecutionOutboxStatus;
   },
 ): Promise<ExecutionOutbox> {
   const updated = await prisma.executionOutbox.updateMany({
@@ -369,7 +350,6 @@ async function finalizeHostedExecutionOutboxAttempt(
     },
     data: {
       dispatchState: input.state,
-      status: input.transportStatus,
       lastError: input.lastError,
       nextAttemptAt: input.nextAttemptAt,
       payloadJson: input.payloadJson,
@@ -431,7 +411,6 @@ async function upsertHostedExecutionOutboxRecord(input: {
       eventKind: input.dispatchRef.eventKind,
       payloadJson: input.payloadJson,
       dispatchState: DEFAULT_EXECUTION_LIFECYCLE_STATE,
-      status: ExecutionOutboxStatus.queued,
       nextAttemptAt: input.now,
     },
   });
@@ -458,10 +437,11 @@ function prepareHostedExecutionOutboxPayloadJson(
 }
 
 function resolveHostedExecutionPersistedPayloadJson(input: {
+  lastError: string | null;
   nextAttemptAt: Date | null;
   payload: HostedExecutionOutboxPayload | null;
   payloadJson: Prisma.InputJsonValue;
-  transportStatus: ExecutionOutboxStatus;
+  state: HostedExecutionDispatchLifecycleState;
 }): Prisma.InputJsonValue {
   if (!input.payload || !shouldPruneHostedExecutionOutboxPayload(input)) {
     return input.payloadJson;
@@ -471,11 +451,12 @@ function resolveHostedExecutionPersistedPayloadJson(input: {
 }
 
 function shouldPruneHostedExecutionOutboxPayload(input: {
+  lastError: string | null;
   nextAttemptAt: Date | null;
-  transportStatus: ExecutionOutboxStatus;
+  state: HostedExecutionDispatchLifecycleState;
 }): boolean {
-  return input.transportStatus === ExecutionOutboxStatus.dispatched
-    || (input.transportStatus === ExecutionOutboxStatus.delivery_failed && input.nextAttemptAt === null);
+  return isExecutionLifecycleTerminal(input.state)
+    || (input.nextAttemptAt === null && input.lastError !== null);
 }
 
 function assertHostedExecutionOutboxRecordMatches(
@@ -519,14 +500,12 @@ function resolveHostedExecutionOutboxAttemptOutcome(
   lastError: string | null;
   retryable: boolean;
   state: HostedExecutionDispatchLifecycleState;
-  transportStatus: ExecutionOutboxStatus;
 } {
   if (dispatchResult.status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR) {
     return {
       state: DEFAULT_EXECUTION_LIFECYCLE_STATE,
       lastError: normalizeHostedExecutionOutboxLastError(dispatchResult.status.lastError),
       retryable: true,
-      transportStatus: ExecutionOutboxStatus.delivery_failed,
     };
   }
 
@@ -540,14 +519,12 @@ function resolveHostedExecutionOutboxAttemptOutcome(
           ?? "Hosted execution user queue is backpressured.",
         ),
         retryable: true,
-        transportStatus: ExecutionOutboxStatus.delivery_failed,
       };
     case "queued":
       return {
         state: dispatchResult.event.state,
         lastError: null,
         retryable: false,
-        transportStatus: ExecutionOutboxStatus.dispatched,
       };
     case "completed":
     case "poisoned":
@@ -555,7 +532,6 @@ function resolveHostedExecutionOutboxAttemptOutcome(
         state: dispatchResult.event.state,
         lastError: null,
         retryable: false,
-        transportStatus: ExecutionOutboxStatus.dispatched,
       };
     default:
       return dispatchResult.event.state satisfies never;
@@ -579,24 +555,6 @@ function createHostedExecutionOutboxPayloadError(eventId: string): Error & {
     retryable: false;
   };
   error.code = "HOSTED_EXECUTION_OUTBOX_PAYLOAD_MISSING";
-  error.permanent = true;
-  error.retryable = false;
-  return error;
-}
-
-function createHostedExecutionReferencePayloadUnsupportedError(eventId: string): Error & {
-  code: string;
-  permanent: true;
-  retryable: false;
-} {
-  const error = new Error(
-    `Hosted execution outbox record ${eventId} still references staged payload storage, which is no longer supported.`,
-  ) as Error & {
-    code: string;
-    permanent: true;
-    retryable: false;
-  };
-  error.code = "HOSTED_EXECUTION_OUTBOX_REFERENCE_PAYLOAD_UNSUPPORTED";
   error.permanent = true;
   error.retryable = false;
   return error;

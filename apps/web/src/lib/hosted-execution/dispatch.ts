@@ -1,5 +1,6 @@
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
+  HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
@@ -7,6 +8,9 @@ import {
 import {
   createHostedExecutionDispatchClient,
 } from "@murphai/hosted-execution/client";
+import {
+  parseHostedExecutionDispatchResult,
+} from "@murphai/hosted-execution/parsers";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import { formatHostedExecutionSafeLogError } from "./logging";
@@ -14,6 +18,9 @@ import {
   type HostedExecutionDispatchEnvironment,
   readHostedExecutionDispatchEnvironment,
 } from "./environment";
+import type { HostedExecutionLegacyReferenceOutboxPayload } from "./outbox-payload";
+
+const HOSTED_EXECUTION_LEGACY_REFERENCE_DISPATCH_PATH = "/internal/dispatch/legacy-reference";
 
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,
@@ -47,6 +54,21 @@ export async function dispatchHostedExecution(
   return {
     dispatched: true,
   };
+}
+
+export async function dispatchHostedExecutionStoredReferenceStatus(
+  input: HostedExecutionLegacyReferenceOutboxPayload,
+): Promise<HostedExecutionDispatchResult> {
+  const environment = readHostedExecutionDispatchEnvironment();
+
+  if (!isHostedExecutionConfigured(environment)) {
+    return buildHostedExecutionNotConfiguredStatus({
+      eventId: input.dispatchRef.eventId,
+      userId: input.dispatchRef.userId,
+    });
+  }
+
+  return postHostedExecutionLegacyReferenceDispatch(input, environment);
 }
 
 export async function dispatchHostedExecutionBestEffort(
@@ -117,4 +139,37 @@ async function postHostedExecutionDispatch(
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
     timeoutMs: environment.dispatchTimeoutMs,
   }).dispatch(input);
+}
+
+async function postHostedExecutionLegacyReferenceDispatch(
+  input: HostedExecutionLegacyReferenceOutboxPayload,
+  environment: HostedExecutionDispatchEnvironment & {
+    dispatchUrl: string;
+  },
+): Promise<HostedExecutionDispatchResult> {
+  const headers = new Headers({
+    "content-type": "application/json; charset=utf-8",
+  });
+  headers.set("authorization", await createHostedExecutionVercelOidcBearerTokenProvider()());
+  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.dispatchRef.userId);
+
+  const response = await fetch(
+    new URL(
+      HOSTED_EXECUTION_LEGACY_REFERENCE_DISPATCH_PATH.replace(/^\/+/u, ""),
+      `${environment.dispatchUrl}/`,
+    ).toString(),
+    {
+      body: JSON.stringify(input),
+      headers,
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(environment.dispatchTimeoutMs),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Hosted execution legacy reference dispatch failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedExecutionDispatchResult(await response.json());
 }

@@ -1,4 +1,3 @@
-import { ExecutionOutboxStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExecutionOutbox, Prisma, PrismaClient } from "@prisma/client";
@@ -14,10 +13,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   dispatchHostedExecutionStatus: vi.fn(),
+  dispatchHostedExecutionStoredReferenceStatus: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
   dispatchHostedExecutionStatus: mocks.dispatchHostedExecutionStatus,
+  dispatchHostedExecutionStoredReferenceStatus: mocks.dispatchHostedExecutionStoredReferenceStatus,
 }));
 
 import {
@@ -48,13 +49,13 @@ describe("hosted execution outbox", () => {
   });
 
   it.each([
-    ["queued", ExecutionOutboxStatus.dispatched, "queued", null],
-    ["completed", ExecutionOutboxStatus.dispatched, "completed", null],
-    ["poisoned", ExecutionOutboxStatus.dispatched, "poisoned", null],
-    ["backpressured", ExecutionOutboxStatus.delivery_failed, "backpressured", "runner full"],
+    ["queued", "queued", null, null],
+    ["completed", "completed", null, null],
+    ["poisoned", "poisoned", null, null],
+    ["backpressured", "backpressured", "runner full", "2026-03-28T11:00:05.000Z"],
   ] as const)(
     "maps %s dispatch results onto the canonical lifecycle",
-    async (eventState, expectedStatus, expectedDispatchState, lastError) => {
+    async (eventState, expectedDispatchState, lastError, nextAttemptAt) => {
       const dispatch = createCronDispatch();
       const prisma = createOutboxPrisma(createOutboxRecord(dispatch));
       mocks.dispatchHostedExecutionStatus.mockResolvedValue(
@@ -66,12 +67,13 @@ describe("hosted execution outbox", () => {
         prisma,
       });
 
-      expect(record?.status).toBe(expectedStatus);
       expect(record?.dispatchState).toBe(expectedDispatchState);
+      expect(record?.lastError).toBe(lastError);
+      expect(record?.nextAttemptAt?.toISOString() ?? null).toBe(nextAttemptAt);
     },
   );
 
-  it("fails closed when a legacy reference payload survives into the canonical outbox", async () => {
+  it("dispatches a legacy reference payload row through the compatibility worker path", async () => {
     const dispatch = createGatewaySendDispatch();
     const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
       payloadJson: {
@@ -85,14 +87,78 @@ describe("hosted execution outbox", () => {
         storage: "reference",
       },
     }));
+    mocks.dispatchHostedExecutionStoredReferenceStatus.mockResolvedValue(
+      createDispatchResult("completed", { eventId: dispatch.eventId }),
+    );
 
     const [record] = await drainHostedExecutionOutbox({
       now: "2026-03-28T11:00:00.000Z",
       prisma,
     });
 
-    expect(record?.status).toBe(ExecutionOutboxStatus.delivery_failed);
-    expect(record?.lastError).toContain("missing a dispatch payload");
+    expect(mocks.dispatchHostedExecutionStoredReferenceStatus).toHaveBeenCalledWith({
+      dispatchRef: {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+      stagedPayloadId: `staged/${dispatch.eventId}`,
+      storage: "reference",
+    });
+    expect(record?.dispatchState).toBe("completed");
+    expect(record?.lastError).toBeNull();
+    expect(record?.nextAttemptAt).toBeNull();
+    expect(record?.payloadJson).toEqual({
+      dispatchRef: {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+      stagedPayloadId: `staged/${dispatch.eventId}`,
+      storage: "reference",
+    });
+    expect(mocks.dispatchHostedExecutionStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy reference payload rows retryable when the compatibility worker call fails", async () => {
+    const dispatch = createGatewaySendDispatch();
+    const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
+      payloadJson: {
+        dispatchRef: {
+          eventId: dispatch.eventId,
+          eventKind: dispatch.event.kind,
+          occurredAt: dispatch.occurredAt,
+          userId: dispatch.event.userId,
+        },
+        stagedPayloadId: `staged/${dispatch.eventId}`,
+        storage: "reference",
+      },
+    }));
+    mocks.dispatchHostedExecutionStoredReferenceStatus.mockRejectedValue(
+      new Error("compat route unavailable"),
+    );
+
+    const [record] = await drainHostedExecutionOutbox({
+      now: "2026-03-28T11:00:00.000Z",
+      prisma,
+    });
+
+    expect(record?.dispatchState).toBe("queued");
+    expect(record?.lastError).toContain("compat route unavailable");
+    expect(record?.nextAttemptAt?.toISOString()).toBe("2026-03-28T11:00:05.000Z");
+    expect(record?.payloadJson).toEqual({
+      dispatchRef: {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+      stagedPayloadId: `staged/${dispatch.eventId}`,
+      storage: "reference",
+    });
+    expect(mocks.dispatchHostedExecutionStatus).not.toHaveBeenCalled();
   });
 });
 
@@ -177,7 +243,6 @@ function createOutboxRecord(
     })) as Prisma.JsonValue,
     sourceId: null,
     sourceType: "hosted_execution",
-    status: ExecutionOutboxStatus.queued,
     updatedAt: new Date("2026-03-28T11:00:00.000Z"),
     userId: dispatch.event.userId,
   };
@@ -203,7 +268,21 @@ function createOutboxPrisma(record: ExecutionOutbox): PrismaClient {
           return { count: 0 };
         }
 
-        if ("status" in where && where.status !== current.status) {
+        if ("dispatchState" in where && where.dispatchState !== current.dispatchState) {
+          return { count: 0 };
+        }
+
+        if (
+          "nextAttemptAt" in where
+          && !sameDate(where.nextAttemptAt as Date | null | undefined, current.nextAttemptAt)
+        ) {
+          return { count: 0 };
+        }
+
+        if (
+          "claimExpiresAt" in where
+          && !sameDate(where.claimExpiresAt as Date | null | undefined, current.claimExpiresAt)
+        ) {
           return { count: 0 };
         }
 
@@ -236,4 +315,8 @@ function createEnqueueOutboxPrisma(record: ExecutionOutbox): Pick<PrismaClient, 
       })),
     },
   } as unknown as Pick<PrismaClient, "executionOutbox">;
+}
+
+function sameDate(left: Date | null | undefined, right: Date | null | undefined): boolean {
+  return (left?.toISOString() ?? null) === (right?.toISOString() ?? null);
 }

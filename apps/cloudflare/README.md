@@ -27,10 +27,11 @@ Public routes:
 Internal execution routes:
 
 - `POST /internal/dispatch`
+- `POST /internal/dispatch/legacy-reference` for rollout-only drainage of legacy reference outbox rows
 - `GET /internal/users/:userId/status`
 - `GET /internal/users/:userId/events/:eventId/status`
 
-The supported worker HTTP surface stops at those three execution routes plus the public banner and health checks.
+The supported worker HTTP surface stops at the canonical execution routes above, the temporary legacy-reference compatibility route, and the public banner and health checks.
 
 ## Storage Contract
 
