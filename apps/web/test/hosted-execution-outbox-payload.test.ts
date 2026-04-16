@@ -126,23 +126,18 @@ describe("hosted execution outbox payload storage", () => {
   });
 
   it("ignores legacy storage hints and still serializes direct outbox payloads inline", () => {
-    const payload = serializeHostedExecutionOutboxPayload(
-      {
-        event: {
-          clientRequestId: null,
-          kind: "gateway.message.send",
-          replyToMessageId: null,
-          sessionKey: "gwcs_secret_456",
-          text: "still private",
-          userId: "member_123",
-        },
-        eventId: "evt_gateway_456",
-        occurredAt: "2026-04-04T00:00:00.000Z",
+    const payload = serializeHostedExecutionOutboxPayload({
+      event: {
+        clientRequestId: null,
+        kind: "gateway.message.send",
+        replyToMessageId: null,
+        sessionKey: "gwcs_secret_456",
+        text: "still private",
+        userId: "member_123",
       },
-        {
-          storage: "inline",
-        },
-    );
+      eventId: "evt_gateway_456",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    });
 
     expect((payload as { storage?: unknown }).storage).toBe("inline");
     expect(payload).not.toHaveProperty("stagedPayloadId");

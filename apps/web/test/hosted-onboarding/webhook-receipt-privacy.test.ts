@@ -103,9 +103,6 @@ import {
   serializeHostedWebhookReceiptSideEffect,
 } from "../../src/lib/hosted-onboarding/webhook-receipt-codec";
 import {
-  stageHostedWebhookDispatchSideEffectPayload,
-} from "../../src/lib/hosted-onboarding/webhook-dispatch-payload";
-import {
   createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookReceiptState,
@@ -120,25 +117,27 @@ describe("hosted webhook receipt privacy baseline", () => {
     vi.resetAllMocks();
   });
 
-  it("stages dispatch side effects into inline canonical outbox payloads", async () => {
+  it("creates inline canonical outbox payloads immediately for dispatch side effects", () => {
     const dispatch = createSensitiveDispatch();
-    const pendingEffect = createHostedWebhookDispatchSideEffect({ dispatch });
-    const stagedPayload = await stageHostedWebhookDispatchSideEffectPayload(pendingEffect.payload);
+    const inlineEffect = createHostedWebhookDispatchSideEffect({ dispatch });
 
-    expect(stagedPayload).toEqual({
+    expect(inlineEffect.payload).toEqual({
       dispatch,
       storage: "inline",
     });
-    expect(buildHostedWebhookDispatchFromPayload(stagedPayload)).toEqual(dispatch);
+    expect(buildHostedWebhookDispatchFromPayload(inlineEffect.payload)).toEqual(dispatch);
   });
 
-  it("fails closed when a dispatch side effect reaches receipt JSON before staging", () => {
+  it("serializes freshly created dispatch side effects without a staging pass", () => {
     const dispatch = createSensitiveDispatch();
-    const pendingEffect = createHostedWebhookDispatchSideEffect({ dispatch });
+    const inlineEffect = createHostedWebhookDispatchSideEffect({ dispatch });
 
-    expect(() =>
-      serializeHostedWebhookReceiptSideEffect(pendingEffect),
-    ).toThrowError(/must be staged/i);
+    expect(serializeHostedWebhookReceiptSideEffect(inlineEffect)).toMatchObject({
+      payloadJson: {
+        dispatch,
+        storage: "inline",
+      },
+    });
   });
 
   it("fails closed when receipt hydration sees a legacy dispatch snapshot shape", () => {
@@ -187,11 +186,9 @@ describe("hosted webhook receipt privacy baseline", () => {
     ).toThrowError(/invalid or legacy payload shape/i);
   });
 
-  it("round-trips inline dispatch payloads when legacy receipt storage still contains them", async () => {
+  it("round-trips inline dispatch payloads when legacy receipt storage still contains them", () => {
     const dispatch = createSensitiveDispatch();
-    const payload = await stageHostedWebhookDispatchSideEffectPayload(
-      createHostedWebhookDispatchSideEffect({ dispatch }).payload,
-    );
+    const payload = createHostedWebhookDispatchSideEffect({ dispatch }).payload;
     const stagedEffect = {
       ...createHostedWebhookDispatchSideEffect({ dispatch }),
       payload,

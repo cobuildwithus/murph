@@ -3,10 +3,8 @@ import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
-  maybeStageHostedExecutionDispatchPayload: vi.fn(),
   runtimeEnv: {
     encryptionKeyVersion: "v1",
     inviteTtlHours: 24,
@@ -31,7 +29,6 @@ const mocks = vi.hoisted(() => ({
     telegramBotUsername: "murph_bot",
     telegramWebhookSecret: null as string | null,
   },
-  stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", async () => {
@@ -43,38 +40,6 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
     ...actual,
     drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-    enqueueHostedExecutionOutboxPayload: (input: {
-      payload: {
-        dispatch?: HostedExecutionDispatchRequest;
-        dispatchRef?: {
-          eventId: string;
-        };
-      };
-      sourceId: string;
-      sourceType: string;
-      tx: unknown;
-    }) => mocks.enqueueHostedExecutionOutbox({
-      dispatch:
-        input.payload.dispatch
-        ?? (input.payload.dispatchRef
-          ? mocks.stagedDispatches.get(input.payload.dispatchRef.eventId)
-          : undefined),
-      sourceId: input.sourceId,
-      sourceType: input.sourceType,
-      tx: input.tx,
-    }),
-  };
-});
-
-vi.mock("@/src/lib/hosted-execution/control", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/control")>(
-    "@/src/lib/hosted-execution/control",
-  );
-
-  return {
-    ...actual,
-    deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
-    maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
   };
 });
 
@@ -100,15 +65,8 @@ import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboardi
 describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.stagedDispatches.clear();
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
-    mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(
-      async (dispatch: HostedExecutionDispatchRequest) => {
-        mocks.stagedDispatches.set(dispatch.eventId, dispatch);
-        return createStagedPayload(dispatch);
-      },
-    );
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 
@@ -1002,15 +960,6 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
     };
   }
   return prismaWithTransaction;
-}
-
-function createStagedPayload(
-  dispatch: HostedExecutionDispatchRequest,
-) {
-  return {
-    dispatch,
-    storage: "inline" as const,
-  };
 }
 
 function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefined): Record<string, unknown>[] {

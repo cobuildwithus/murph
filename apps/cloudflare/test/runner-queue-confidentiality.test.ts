@@ -1,33 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { SharePack } from "@murphai/contracts";
 
 import {
   createHostedDispatchPayloadStore,
-  resolveHostedRunnerDispatchPayloadStorage,
 } from "../src/dispatch-payload-store.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 import { expectOpaqueStrings } from "./object-key-assertions.js";
 
-const SHARE_PACK: SharePack = {
-  createdAt: "2026-04-06T00:00:00.000Z",
-  entities: [
-    {
-      kind: "food",
-      payload: {
-        kind: "smoothie",
-        status: "active",
-        title: "Overnight oats",
-      },
-      ref: "food.oats",
-    },
-  ],
-  schemaVersion: "murph.share-pack.v1",
-  title: "Breakfast staples",
-};
-
 describe("hosted dispatch payload store confidentiality", () => {
-  it("externalizes gateway message sends instead of persisting session text inline", async () => {
+  it("stores only opaque staged refs for gateway message sends", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -47,18 +28,17 @@ describe("hosted dispatch payload store confidentiality", () => {
       occurredAt: "2026-04-03T00:00:00.000Z",
     } as const;
 
-    const payloadJson = await store.writeStoredDispatch(dispatch);
+    const payloadRef = await store.writeDispatchPayload(dispatch);
 
-    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expectOpaqueStrings([JSON.stringify(payloadJson)], ["super secret gateway message", "session-secret"]);
+    expectOpaqueStrings([JSON.stringify(payloadRef)], ["super secret gateway message", "session-secret"]);
     expect([...bucket.objects.keys()]).toHaveLength(1);
-    expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
+    expect(await store.readDispatchPayload(payloadRef)).toEqual(dispatch);
 
-    await store.deleteStoredPayloadEnvelope(payloadJson);
+    await store.deleteDispatchPayload(payloadRef);
     expect(bucket.deleted).toHaveLength(1);
   });
 
-  it("externalizes provider webhook payloads instead of persisting them inline", async () => {
+  it("stores opaque staged refs for provider webhook payloads", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -95,18 +75,18 @@ describe("hosted dispatch payload store confidentiality", () => {
       occurredAt: "2026-04-03T00:02:00.000Z",
     } as const;
 
-    const linqPayloadJson = await store.writeStoredDispatch(linqDispatch);
-    const telegramPayloadJson = await store.writeStoredDispatch(telegramDispatch);
+    const linqPayloadRef = await store.writeDispatchPayload(linqDispatch);
+    const telegramPayloadRef = await store.writeDispatchPayload(telegramDispatch);
 
     expectOpaqueStrings(
-      [JSON.stringify(linqPayloadJson), JSON.stringify(telegramPayloadJson)],
+      [JSON.stringify(linqPayloadRef), JSON.stringify(telegramPayloadRef)],
       ["private linq body", "phone-lookup", "private telegram text", "telegramMessage"],
     );
-    expect(await store.readStoredDispatch(linqPayloadJson)).toEqual(linqDispatch);
-    expect(await store.readStoredDispatch(telegramPayloadJson)).toEqual(telegramDispatch);
+    expect(await store.readDispatchPayload(linqPayloadRef)).toEqual(linqDispatch);
+    expect(await store.readDispatchPayload(telegramPayloadRef)).toEqual(telegramDispatch);
   });
 
-  it("keeps hosted share acceptance inline without persisting the opaque pack", async () => {
+  it("stores opaque staged refs for hosted share acceptance dispatches", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -126,14 +106,13 @@ describe("hosted dispatch payload store confidentiality", () => {
       occurredAt: "2026-04-03T00:04:00.000Z",
     } as const;
 
-    const payloadJson = await store.writeStoredDispatch(dispatch);
+    const payloadRef = await store.writeDispatchPayload(dispatch);
 
-    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("inline");
-    expect(JSON.stringify(payloadJson)).not.toContain(SHARE_PACK.title);
-    expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
+    expect(JSON.stringify(payloadRef)).not.toContain("hshare_123");
+    expect(await store.readDispatchPayload(payloadRef)).toEqual(dispatch);
   });
 
-  it("externalizes device-sync wake hints instead of persisting them inline", async () => {
+  it("stores opaque staged refs for device-sync wake hints", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -156,11 +135,10 @@ describe("hosted dispatch payload store confidentiality", () => {
       occurredAt: "2026-04-03T00:05:00.000Z",
     } as const;
 
-    const payloadJson = await store.writeStoredDispatch(dispatch);
+    const payloadRef = await store.writeDispatchPayload(dispatch);
 
-    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expectOpaqueStrings([JSON.stringify(payloadJson)], ["sleep.updated", "trace_123"]);
-    expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
+    expectOpaqueStrings([JSON.stringify(payloadRef)], ["sleep.updated", "trace_123"]);
+    expect(await store.readDispatchPayload(payloadRef)).toEqual(dispatch);
   });
 
   it("reads and deletes referenced payload blobs across key rotation", async () => {
@@ -196,15 +174,15 @@ describe("hosted dispatch payload store confidentiality", () => {
       occurredAt: "2026-04-03T00:04:00.000Z",
     } as const;
 
-    const payloadJson = await legacyStore.writeStoredDispatch(dispatch);
+    const payloadRef = await legacyStore.writeDispatchPayload(dispatch);
 
-    await expect(rotatedStore.readStoredDispatch(payloadJson)).resolves.toEqual(dispatch);
-    await rotatedStore.deleteStoredPayloadEnvelope(payloadJson);
+    await expect(rotatedStore.readDispatchPayload(payloadRef)).resolves.toEqual(dispatch);
+    await rotatedStore.deleteDispatchPayload(payloadRef);
 
     expect(bucket.deleted).toHaveLength(1);
   });
 
-  it("rejects legacy raw dispatch payload JSON instead of reinterpreting it", async () => {
+  it("treats unknown staged payload ids as absent", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -212,18 +190,12 @@ describe("hosted dispatch payload store confidentiality", () => {
       keyId: "k-current",
     });
 
-    await expect(store.readStoredDispatch(JSON.stringify({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "legacy_user",
-      },
-      eventId: "evt_legacy_raw",
-      occurredAt: "2026-04-03T00:06:00.000Z",
-    }))).rejects.toThrow("Hosted dispatch payload envelope is invalid.");
+    await expect(store.readDispatchPayload({
+      stagedPayloadId: "transient/dispatch-payloads/missing",
+    })).resolves.toBeNull();
   });
 
-  it("externalizes hosted email dispatch refs instead of persisting them inline", async () => {
+  it("stores opaque staged refs for hosted email dispatches", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedDispatchPayloadStore({
       bucket,
@@ -242,11 +214,10 @@ describe("hosted dispatch payload store confidentiality", () => {
       occurredAt: "2026-04-03T00:03:00.000Z",
     } as const;
 
-    const payloadJson = await store.writeStoredDispatch(dispatch);
+    const payloadRef = await store.writeDispatchPayload(dispatch);
 
-    expect(resolveHostedRunnerDispatchPayloadStorage(dispatch)).toBe("reference");
-    expectOpaqueStrings([JSON.stringify(payloadJson)], ["rawMessageKey"]);
+    expectOpaqueStrings([JSON.stringify(payloadRef)], ["rawMessageKey"]);
     expect(bucket.objects.size).toBe(1);
-    expect(await store.readStoredDispatch(payloadJson)).toEqual(dispatch);
+    expect(await store.readDispatchPayload(payloadRef)).toEqual(dispatch);
   });
 });

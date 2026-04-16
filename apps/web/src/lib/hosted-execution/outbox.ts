@@ -408,7 +408,7 @@ function prepareHostedExecutionOutboxPayloadJson(
   // The web-owned outbox row is the canonical dispatch owner for direct enqueue paths.
   // Direct enqueue stays inline here so the web tier no longer stages payload bodies in
   // Cloudflare-controlled storage before dispatch.
-  return serializeHostedExecutionOutboxPayload(dispatch, { storage: "inline" });
+  return serializeHostedExecutionOutboxPayload(dispatch);
 }
 
 function resolveHostedExecutionPersistedPayloadJson(input: {

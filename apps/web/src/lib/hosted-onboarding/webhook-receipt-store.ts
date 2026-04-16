@@ -7,10 +7,6 @@ import {
   serializeHostedWebhookReceiptErrorState,
   serializeHostedWebhookReceiptSideEffect,
 } from "./webhook-receipt-codec";
-import {
-  deleteHostedStoredDispatchPayloadBestEffort,
-  requireHostedWebhookStoredDispatchSideEffectPayload,
-} from "./webhook-dispatch-payload";
 import { buildHostedWebhookDispatchFromPayload } from "./webhook-receipt-dispatch";
 import {
   claimHostedWebhookReceipt,
@@ -24,15 +20,12 @@ import type {
   HostedWebhookReceiptLocalSideEffect,
   HostedWebhookReceiptPersistenceClient,
   HostedWebhookReceiptState,
-  HostedWebhookSideEffect,
-  HostedWebhookStoredDispatchSideEffectPayload,
 } from "./webhook-receipt-types";
 
 const RECEIPT_CLAIM_LEASE_MS = 10 * 60_000;
 const TERMINAL_WEBHOOK_RECEIPT_RETENTION_DAYS = 30;
 
 type HostedWebhookReceiptWriteResult = {
-  cleanupPayloads?: HostedWebhookStoredDispatchSideEffectPayload[];
   updatedCount: number;
 };
 
@@ -289,22 +282,6 @@ export async function enqueueHostedWebhookDispatchSideEffects(input: {
   }
 }
 
-async function cleanupHostedWebhookReceiptStagedPayloads(
-  payloads: readonly HostedWebhookStoredDispatchSideEffectPayload[],
-): Promise<void> {
-  await Promise.all(
-    payloads.map((payload) => deleteHostedStoredDispatchPayloadBestEffort(payload)),
-  );
-}
-
-async function cleanupHostedWebhookReceiptStagedPayloadsBestEffort(
-  payloads: readonly HostedWebhookStoredDispatchSideEffectPayload[],
-): Promise<void> {
-  await Promise.allSettled(
-    payloads.map((payload) => deleteHostedStoredDispatchPayloadBestEffort(payload)),
-  );
-}
-
 async function claimExistingHostedWebhookReceipt(
   input: {
     eventId: string;
@@ -471,8 +448,6 @@ async function updateHostedWebhookReceiptStatus(input: {
     source: input.source,
     updateReceipt: ({ currentClaim, nextClaim }) =>
       writeHostedWebhookReceiptClaimState({
-        cleanupRemovedDispatchPayloads:
-          input.status === "failed" && nextClaim.state.lastError?.retryable === false,
         currentClaim,
         nextClaim,
         prisma: input.prisma,
@@ -577,10 +552,6 @@ async function compareAndSwapHostedWebhookReceiptClaim<
     });
 
     if (writeResult.updatedCount === 1) {
-      if ((writeResult.cleanupPayloads?.length ?? 0) > 0) {
-        await cleanupHostedWebhookReceiptStagedPayloadsBestEffort(writeResult.cleanupPayloads ?? []);
-      }
-
       return decision.result;
     }
 
@@ -750,15 +721,10 @@ function buildHostedWebhookReceiptStateUpdateData(
 }
 
 async function writeHostedWebhookReceiptClaimState(input: {
-  cleanupRemovedDispatchPayloads?: boolean;
   currentClaim: HostedWebhookReceiptClaim;
   nextClaim: HostedWebhookReceiptClaim;
   prisma: HostedWebhookReceiptPersistenceClient;
 }): Promise<HostedWebhookReceiptWriteResult> {
-  const cleanupPayloads = input.cleanupRemovedDispatchPayloads
-    ? collectRemovedDispatchCleanupPayloads(input.currentClaim.state.sideEffects, input.nextClaim.state.sideEffects)
-    : [];
-
   const updatedCount = await runHostedWebhookReceiptTransaction(input.prisma, async (transaction) => {
     const updated = await transaction.hostedWebhookReceipt.updateMany({
       where: {
@@ -784,7 +750,6 @@ async function writeHostedWebhookReceiptClaimState(input: {
   });
 
   return {
-    cleanupPayloads,
     updatedCount,
   };
 }
@@ -834,25 +799,6 @@ async function syncHostedWebhookReceiptSideEffects(
       update: serialized,
     });
   }
-}
-
-function collectRemovedDispatchCleanupPayloads(
-  currentSideEffects: readonly HostedWebhookSideEffect[],
-  nextSideEffects: readonly HostedWebhookSideEffect[],
-): HostedWebhookStoredDispatchSideEffectPayload[] {
-  const nextIds = new Set(nextSideEffects.map((effect) => effect.effectId));
-  const payloads: HostedWebhookStoredDispatchSideEffectPayload[] = [];
-
-  for (const effect of currentSideEffects) {
-    if (effect.kind !== "hosted_execution_dispatch" || nextIds.has(effect.effectId)) {
-      continue;
-    }
-
-    const payload = requireHostedWebhookStoredDispatchSideEffectPayload(effect.payload, effect.effectId);
-    payloads.push(payload);
-  }
-
-  return payloads;
 }
 
 async function runHostedWebhookReceiptTransaction<TResult>(

@@ -13,8 +13,6 @@ import {
   parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/parsers";
 
-export type HostedExecutionOutboxPayloadStorage = "inline";
-
 export interface HostedExecutionDispatchRef {
   eventId: string;
   eventKind: HostedExecutionEventKind;
@@ -71,14 +69,7 @@ export function buildHostedExecutionDispatchRef(
 
 export function serializeHostedExecutionOutboxPayload(
   dispatch: HostedExecutionDispatchRequest,
-  options: {
-    storage?: HostedExecutionOutboxPayloadStorage | "auto";
-  } = {},
 ): Prisma.InputJsonObject {
-  if (options.storage && options.storage !== "auto" && options.storage !== "inline") {
-    throw new TypeError("Hosted execution outbox payloads must use inline storage.");
-  }
-
   return toPrismaInputJsonObject({
     dispatch: parseHostedExecutionDispatchRequest(dispatch),
     storage: "inline",
@@ -150,17 +141,6 @@ export function readHostedExecutionOutboxPayload(
   } catch {
     return null;
   }
-}
-
-export function resolveHostedExecutionOutboxPayloadStorage(
-  _dispatch: HostedExecutionDispatchRequest,
-  requested: HostedExecutionOutboxPayloadStorage | "auto",
-): HostedExecutionOutboxPayloadStorage {
-  if (requested !== "auto" && requested !== "inline") {
-    throw new TypeError("Hosted execution outbox payloads must use inline storage.");
-  }
-
-  return "inline";
 }
 
 function readHostedExecutionPrunedInlineOutboxPayload(

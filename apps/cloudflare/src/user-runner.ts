@@ -10,7 +10,7 @@ import {
 
 import type { R2BucketLike } from "./bundle-store.js";
 import {
-  createHostedExecutionDispatchPayloadStore,
+  createHostedDispatchPayloadStore,
   type HostedDispatchPayloadStore,
 } from "./dispatch-payload-store.js";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
@@ -80,12 +80,6 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
-    const dispatchPayloadParserStore = createHostedExecutionDispatchPayloadStore({
-      bucket,
-      key: env.platformEnvelopeKey,
-      keyId: env.platformEnvelopeKeyId,
-      keysById: env.platformEnvelopeKeysById,
-    });
     const userKeyStore = createHostedUserKeyStore({
       auditLog: emitHostedUserKeyAuditLog,
       automationRecipientKeyId: env.automationRecipientKeyId,
@@ -112,17 +106,6 @@ export class HostedUserRunner {
         await bucket.delete(ref.stagedPayloadId);
       },
 
-      deleteStoredPayloadEnvelope: async (payloadJson) => {
-        const dispatchRef = dispatchPayloadParserStore.readStoredDispatchRef(payloadJson);
-
-        if (!dispatchRef) {
-          return;
-        }
-
-        await (await runner.resolveUserDispatchPayloadStore(dispatchRef.userId))
-          .deleteStoredPayloadEnvelope(payloadJson);
-      },
-
       readDispatchPayload: async (ref) => {
         const userId = await runner.tryReadBoundUserId();
         if (!userId) {
@@ -132,28 +115,9 @@ export class HostedUserRunner {
         return (await runner.resolveUserDispatchPayloadStore(userId)).readDispatchPayload(ref);
       },
 
-      readStoredDispatch: async (payloadJson) => {
-        const dispatchRef = dispatchPayloadParserStore.readStoredDispatchRef(payloadJson);
-        if (!dispatchRef) {
-          return dispatchPayloadParserStore.readStoredDispatch(payloadJson);
-        }
-
-        return (await runner.resolveUserDispatchPayloadStore(dispatchRef.userId))
-          .readStoredDispatch(payloadJson);
-      },
-
-      readStoredDispatchRef(payloadJson) {
-        return dispatchPayloadParserStore.readStoredDispatchRef(payloadJson);
-      },
-
       writeDispatchPayload: async (dispatch) => {
         return (await runner.resolveUserDispatchPayloadStore(dispatch.event.userId))
           .writeDispatchPayload(dispatch);
-      },
-
-      writeStoredDispatch: async (dispatch) => {
-        return (await runner.resolveUserDispatchPayloadStore(dispatch.event.userId))
-          .writeStoredDispatch(dispatch);
       },
     };
     this.queueStore = new RunnerQueueStore(
@@ -246,7 +210,7 @@ export class HostedUserRunner {
         reason: "dispatch-payload-access",
       });
 
-    return createHostedExecutionDispatchPayloadStore({
+    return createHostedDispatchPayloadStore({
       bucket: this.bucket,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,

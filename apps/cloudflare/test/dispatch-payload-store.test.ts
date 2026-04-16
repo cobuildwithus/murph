@@ -5,8 +5,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  buildHostedExecutionDispatchRef,
-  createHostedExecutionDispatchPayloadStore,
+  createHostedDispatchPayloadStore,
 } from "../src/dispatch-payload-store.ts";
 import type { R2BucketLike } from "../src/bundle-store.ts";
 
@@ -54,31 +53,27 @@ function createTestDispatch(input?: Partial<{
 }
 
 describe("hosted dispatch payload store", () => {
-  it("writes staged reference payload envelopes for reference-backed dispatches", async () => {
+  it("writes encrypted dispatch payload blobs and reads them back", async () => {
     const bucket = new MemoryR2Bucket();
-    const store = createHostedExecutionDispatchPayloadStore({
+    const store = createHostedDispatchPayloadStore({
       bucket,
       key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
       keyId: "test-key",
     });
     const dispatch = createTestDispatch();
 
-    const payload = await store.writeStoredDispatch(dispatch);
+    const payloadRef = await store.writeDispatchPayload(dispatch);
 
-    expect(payload.storage).toBe("reference");
-    if (payload.storage !== "reference") {
-      throw new Error("Expected device-sync dispatches to use reference payload storage.");
-    }
-    expect(payload.stagedPayloadId).toBeTruthy();
+    expect(payloadRef.stagedPayloadId).toBeTruthy();
     expect(bucket.objects.size).toBe(1);
-    await expect(store.readStoredDispatch(payload)).resolves.toEqual(dispatch);
-    await store.deleteStoredPayloadEnvelope(payload);
-    expect(bucket.deleted).toEqual([payload.stagedPayloadId]);
+    await expect(store.readDispatchPayload(payloadRef)).resolves.toEqual(dispatch);
+    await store.deleteDispatchPayload(payloadRef);
+    expect(bucket.deleted).toEqual([payloadRef.stagedPayloadId]);
   });
 
   it("uses content-addressed payload keys for new staged blobs", async () => {
     const bucket = new MemoryR2Bucket();
-    const store = createHostedExecutionDispatchPayloadStore({
+    const store = createHostedDispatchPayloadStore({
       bucket,
       key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
       keyId: "test-key",
@@ -101,7 +96,7 @@ describe("hosted dispatch payload store", () => {
 
   it("keeps the same staged payload id when equivalent nested dispatch JSON keys are reordered", async () => {
     const bucket = new MemoryR2Bucket();
-    const store = createHostedExecutionDispatchPayloadStore({
+    const store = createHostedDispatchPayloadStore({
       bucket,
       key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
       keyId: "test-key",
@@ -131,44 +126,30 @@ describe("hosted dispatch payload store", () => {
     expect(reorderedRef.stagedPayloadId).toBe(firstRef.stagedPayloadId);
   });
 
-  it("rejects reference payload envelopes without staged payload ids", async () => {
+  it("treats unknown staged payload ids as absent instead of failing", async () => {
     const bucket = new MemoryR2Bucket();
-    const store = createHostedExecutionDispatchPayloadStore({
+    const store = createHostedDispatchPayloadStore({
       bucket,
       key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
       keyId: "test-key",
     });
-    const dispatch = createTestDispatch({ eventId: "device-sync.wake:test-user:event-legacy" });
-    const legacyPayload = {
-      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-      storage: "reference",
-    };
-
-    await expect(store.readStoredDispatch(legacyPayload)).rejects.toThrow(
-      "Hosted dispatch payload envelope is invalid.",
-    );
-    expect(store.readStoredDispatchRef(legacyPayload)).toBeNull();
-    await expect(store.deleteStoredPayloadEnvelope(legacyPayload)).resolves.toBeUndefined();
+    await expect(store.readDispatchPayload({
+      stagedPayloadId: "transient/dispatch-payloads/test-user/missing",
+    })).resolves.toBeNull();
   });
 
   it("treats missing staged payload probes as absent instead of failing", async () => {
     const bucket = new MemoryR2Bucket();
-    const store = createHostedExecutionDispatchPayloadStore({
+    const store = createHostedDispatchPayloadStore({
       bucket,
       key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
       keyId: "test-key",
     });
     const dispatch = createTestDispatch({ eventId: "device-sync.wake:test-user:event-missing" });
-    const payload = await store.writeStoredDispatch(dispatch);
-
-    if (payload.storage !== "reference") {
-      throw new Error("Expected device-sync dispatches to use reference payload storage.");
-    }
+    const payloadRef = await store.writeDispatchPayload(dispatch);
 
     bucket.objects.clear();
 
-    await expect(store.readDispatchPayload({
-      stagedPayloadId: payload.stagedPayloadId,
-    })).resolves.toBeNull();
+    await expect(store.readDispatchPayload(payloadRef)).resolves.toBeNull();
   });
 });

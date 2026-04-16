@@ -12,35 +12,14 @@ import {
 } from "../hosted-execution/outbox-payload";
 import { hostedOnboardingError } from "./errors";
 
-export type HostedWebhookPendingDispatchSideEffectPayload = {
-  dispatch: HostedExecutionDispatchRequest;
-  storage: "pending";
-};
-
+export type HostedWebhookDispatchSideEffectPayload = HostedExecutionOutboxPayload;
 export type HostedWebhookStoredDispatchSideEffectPayload = HostedExecutionOutboxPayload;
-
-export type HostedWebhookDispatchSideEffectPayload =
-  | HostedWebhookPendingDispatchSideEffectPayload
-  | HostedWebhookStoredDispatchSideEffectPayload;
 
 export function createHostedWebhookDispatchSideEffectPayload(
   dispatch: HostedExecutionDispatchRequest,
-): HostedWebhookPendingDispatchSideEffectPayload {
+): HostedWebhookDispatchSideEffectPayload {
   return {
     dispatch: parseHostedExecutionDispatchRequest(dispatch),
-    storage: "pending",
-  };
-}
-
-export async function stageHostedWebhookDispatchSideEffectPayload(
-  payload: HostedWebhookDispatchSideEffectPayload,
-): Promise<HostedWebhookStoredDispatchSideEffectPayload> {
-  if (payload.storage !== "pending") {
-    return payload;
-  }
-
-  return {
-    dispatch: parseHostedExecutionDispatchRequest(payload.dispatch),
     storage: "inline",
   };
 }
@@ -62,8 +41,8 @@ export function requireHostedWebhookStoredDispatchSideEffectPayload(
   }
 
   throw hostedOnboardingError({
-    code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_NOT_STAGED",
-    message: `Hosted webhook dispatch side effect ${effectId} must be staged before it is persisted or enqueued.`,
+    code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_INVALID",
+    message: `Hosted webhook dispatch side effect ${effectId} must use an inline hosted execution payload.`,
     httpStatus: 500,
     retryable: false,
   });
@@ -72,13 +51,7 @@ export function requireHostedWebhookStoredDispatchSideEffectPayload(
 export function buildHostedWebhookDispatchFromPayload(
   payload: HostedWebhookDispatchSideEffectPayload,
 ): HostedExecutionDispatchRequest | null {
-  if (payload.storage === "pending" || payload.storage === "inline") {
-    return parseHostedExecutionDispatchRequest(payload.dispatch);
-  }
-
-  return null;
+  return payload.storage === "inline"
+    ? parseHostedExecutionDispatchRequest(payload.dispatch)
+    : null;
 }
-
-export async function deleteHostedStoredDispatchPayloadBestEffort(
-  _payload?: HostedWebhookStoredDispatchSideEffectPayload,
-): Promise<void> {}

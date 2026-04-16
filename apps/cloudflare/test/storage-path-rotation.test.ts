@@ -301,7 +301,7 @@ describe("opaque storage path rotation", () => {
       keyId: "old",
       keysById: { old: oldKey },
     });
-    const payloadJson = await oldStore.writeStoredDispatch(dispatch);
+    const payloadRef = await oldStore.writeDispatchPayload(dispatch);
 
     const rotatedStore = createHostedDispatchPayloadStore({
       bucket,
@@ -310,8 +310,8 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await rotatedStore.readStoredDispatch(payloadJson)).toEqual(dispatch);
-    await rotatedStore.deleteStoredPayloadEnvelope(payloadJson);
+    expect(await rotatedStore.readDispatchPayload(payloadRef)).toEqual(dispatch);
+    await rotatedStore.deleteDispatchPayload(payloadRef);
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 

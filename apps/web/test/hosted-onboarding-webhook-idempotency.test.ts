@@ -4,7 +4,6 @@ import {
 } from "@prisma/client";
 import {
   buildHostedExecutionLinqMessageReceivedDispatch,
-  type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -21,7 +20,6 @@ const mocks = vi.hoisted(() => {
   return {
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
-    deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
@@ -29,14 +27,12 @@ const mocks = vi.hoisted(() => {
     incrementHostedLinqOutboundDailyState: vi.fn(),
     isHostedRevnetBroadcastStatusUnknownError: vi.fn(),
     isHostedOnboardingRevnetEnabled: vi.fn(),
-    maybeStageHostedExecutionDispatchPayload: vi.fn(),
     normalizeHostedWalletAddress: vi.fn((value: string | null | undefined) => value ?? null),
     requireHostedRevnetConfig: vi.fn(),
     reconcileHostedStripeEventById: vi.fn(),
     recordHostedStripeEvent: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     submitHostedRevnetPayment: vi.fn(),
-    stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
     stripeChargesRetrieve,
     stripeConstructEvent,
     stripePaymentIntentsRetrieve,
@@ -52,38 +48,6 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
     ...actual,
     drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-    enqueueHostedExecutionOutboxPayload: (input: {
-      payload: {
-        dispatch?: HostedExecutionDispatchRequest;
-        dispatchRef?: {
-          eventId: string;
-        };
-      };
-      sourceId: string;
-      sourceType: string;
-      tx: unknown;
-    }) => mocks.enqueueHostedExecutionOutbox({
-      dispatch:
-        input.payload.dispatch
-        ?? (input.payload.dispatchRef
-          ? mocks.stagedDispatches.get(input.payload.dispatchRef.eventId)
-          : undefined),
-      sourceId: input.sourceId,
-      sourceType: input.sourceType,
-      tx: input.tx,
-    }),
-  };
-});
-
-vi.mock("@/src/lib/hosted-execution/control", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/control")>(
-    "@/src/lib/hosted-execution/control",
-  );
-
-  return {
-    ...actual,
-    deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
-    maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
   };
 });
 
@@ -188,7 +152,6 @@ type HostedWebhookPrisma = Parameters<typeof handleHostedOnboardingLinqWebhook>[
 
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
-    mocks.stagedDispatches.clear();
     mocks.claimHostedLinqOnboardingLinkNotice.mockReset();
     mocks.claimHostedLinqQuotaReplyNotice.mockReset();
     mocks.drainHostedExecutionOutboxBestEffort.mockReset();
@@ -198,7 +161,6 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockReset();
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockReset();
     mocks.isHostedOnboardingRevnetEnabled.mockReset();
-    mocks.maybeStageHostedExecutionDispatchPayload.mockReset();
     mocks.normalizeHostedWalletAddress.mockReset();
     mocks.recordHostedStripeEvent.mockReset();
     mocks.requireHostedRevnetConfig.mockReset();
@@ -217,12 +179,6 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
-    mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(
-      async (dispatch: HostedExecutionDispatchRequest) => {
-        mocks.stagedDispatches.set(dispatch.eventId, dispatch);
-        return createStagedPayload(dispatch);
-      },
-    );
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockImplementation((error: unknown) =>
       String(error instanceof Error ? error.message : error).toLowerCase().includes("already known"),
     );
@@ -3164,13 +3120,4 @@ function readPayloadJsonFromUpdateCall(call: Record<string, unknown> | undefined
   }
 
   return (data as { payloadJson?: unknown }).payloadJson;
-}
-
-function createStagedPayload(
-  dispatch: HostedExecutionDispatchRequest,
-) {
-  return {
-    dispatch,
-    storage: "inline" as const,
-  };
 }

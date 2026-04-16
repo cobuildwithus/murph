@@ -1,4 +1,3 @@
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +8,6 @@ import {
 } from "@/src/lib/hosted-onboarding/linq";
 
 const mocks = vi.hoisted(() => ({
-  deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
@@ -18,14 +16,12 @@ const mocks = vi.hoisted(() => ({
   finishHostedOnboardingTiming: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
-  maybeStageHostedExecutionDispatchPayload: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
     baseDetails,
     startedAtMs: 0,
     step,
   })),
-  stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", async () => {
@@ -37,38 +33,6 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
     ...actual,
     drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-    enqueueHostedExecutionOutboxPayload: (input: {
-      payload: {
-        dispatch?: HostedExecutionDispatchRequest;
-        dispatchRef?: {
-          eventId: string;
-        };
-      };
-      sourceId: string;
-      sourceType: string;
-      tx: unknown;
-    }) => mocks.enqueueHostedExecutionOutbox({
-      dispatch:
-        input.payload.dispatch
-        ?? (input.payload.dispatchRef
-          ? mocks.stagedDispatches.get(input.payload.dispatchRef.eventId)
-          : undefined),
-      sourceId: input.sourceId,
-      sourceType: input.sourceType,
-      tx: input.tx,
-    }),
-  };
-});
-
-vi.mock("@/src/lib/hosted-execution/control", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/control")>(
-    "@/src/lib/hosted-execution/control",
-  );
-
-  return {
-    ...actual,
-    deleteHostedStoredDispatchPayloadBestEffort: mocks.deleteHostedStoredDispatchPayloadBestEffort,
-    maybeStageHostedExecutionDispatchPayload: mocks.maybeStageHostedExecutionDispatchPayload,
   };
 });
 
@@ -147,7 +111,6 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.stagedDispatches.clear();
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -156,12 +119,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
-    mocks.maybeStageHostedExecutionDispatchPayload.mockImplementation(
-      async (dispatch: HostedExecutionDispatchRequest) => {
-        mocks.stagedDispatches.set(dispatch.eventId, dispatch);
-        return createStagedPayload(dispatch);
-      },
-    );
   });
 
   it("reuses an existing transaction when dispatching active-member Linq messages", async () => {
@@ -1640,15 +1597,6 @@ function buildHostedLinqWebhookBody(input: {
     event_id: input.eventId ?? "evt_123",
     event_type: "message.received",
   });
-}
-
-function createStagedPayload(
-  dispatch: HostedExecutionDispatchRequest,
-) {
-  return {
-    dispatch,
-    storage: "inline" as const,
-  };
 }
 
 function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefined): Record<string, unknown>[] {

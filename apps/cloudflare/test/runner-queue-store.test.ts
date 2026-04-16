@@ -303,7 +303,7 @@ describe("RunnerQueueStore", () => {
     expect(bucket.deleted).toHaveLength(1);
   });
 
-  it("reuses an adopted staged payload id when enqueueing a stored reference dispatch", async () => {
+  it("reuses an adopted staged payload id when enqueueing a staged dispatch blob", async () => {
     const state = createState();
     const { bucket, dispatchPayloadStore, store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
@@ -323,11 +323,7 @@ describe("RunnerQueueStore", () => {
       occurredAt: "2026-03-29T10:00:00.000Z",
     };
 
-    const storedPayload = await dispatchPayloadStore.writeStoredDispatch(dispatch);
-    expect(storedPayload.storage).toBe("reference");
-    if (storedPayload.storage !== "reference") {
-      throw new Error("Expected device-sync wake payloads to use reference storage.");
-    }
+    const storedPayload = await dispatchPayloadStore.writeDispatchPayload(dispatch);
     expect(bucket.objects.size).toBe(1);
 
     const result = await store.enqueueDispatch(dispatch, storedPayload.stagedPayloadId);
