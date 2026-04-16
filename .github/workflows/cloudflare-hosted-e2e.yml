@@ -62,6 +62,44 @@ jobs:
           path: .artifacts/cloudflare-hosted-e2e/linq-delivery.log
           if-no-files-found: warn
 
+  telegram-delivery:
+    name: Telegram delivery E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    concurrency:
+      group: cloudflare-hosted-e2e-telegram-${{ github.event.pull_request.number || github.ref || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Telegram delivery hosted E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/cloudflare-hosted-e2e
+          pnpm --dir apps/cloudflare test:e2e:telegram:local 2>&1 \
+            | tee .artifacts/cloudflare-hosted-e2e/telegram-delivery.log
+
+      - name: Upload Telegram delivery E2E logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: cloudflare-hosted-e2e-telegram-delivery-logs
+          path: .artifacts/cloudflare-hosted-e2e/telegram-delivery.log
+          if-no-files-found: warn
+
   duplicate-commit:
     name: Duplicate commit E2E
     runs-on: ubuntu-latest

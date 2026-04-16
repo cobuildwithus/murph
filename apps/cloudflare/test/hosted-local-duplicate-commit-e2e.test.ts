@@ -67,19 +67,26 @@ describe("hosted local duplicate commit e2e", () => {
     expect(dispatchResult).toMatchObject({
       event: {
         eventId: activationDispatch.eventId,
-        state: "completed",
+        state: "queued",
       },
       status: {
-        lastEventId: activationDispatch.eventId,
-        pendingEventCount: 0,
-        retryingEventId: null,
+        pendingEventCount: 1,
+        retryingEventId: activationDispatch.eventId,
         userId,
       },
     });
 
-    const finalStatus = await worker.client.getJson(`/__test/status?userId=${encodeURIComponent(userId)}`);
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await worker.client.postJson("/__test/alarm", { userId });
+    }
+
+    const finalStatus = await worker.waitForUserStatus(
+      userId,
+      (status) => status.pendingEventCount === 0 && status.retryingEventId === null,
+    );
     expect(finalStatus).toMatchObject({
-      lastEventId: activationDispatch.eventId,
+      lastEventId: expect.stringMatching(/^alarm:/u),
       pendingEventCount: 0,
       retryingEventId: null,
       userId,

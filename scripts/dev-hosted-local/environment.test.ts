@@ -243,6 +243,7 @@ describe("buildWranglerVarArgs", () => {
   it("emits only allowlisted non-empty values", () => {
     expect(
       buildWranglerVarArgs({
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
@@ -255,6 +256,8 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
       "--var",
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS:60000",
+      "--var",
+      "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL:http://127.0.0.1:4010/.well-known/jwks",
     ]);
   });
 });

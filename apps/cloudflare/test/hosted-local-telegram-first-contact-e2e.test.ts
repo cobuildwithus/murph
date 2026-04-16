@@ -17,6 +17,10 @@ import {
   type HostedLocalDevHarness,
 } from "./helpers/hosted-local-dev-harness.js";
 import {
+  startHostedLocalOidcFixture,
+  type HostedLocalOidcFixture,
+} from "./helpers/hosted-local-oidc-support.js";
+import {
   readRequestBody,
   requireBoundTcpPort,
   reserveLocalTcpPort,
@@ -51,6 +55,7 @@ let telegramApiBaseUrl = "";
 let assistantProviderServer: ReturnType<typeof createServer> | null = null;
 let assistantProviderBaseUrl = "";
 let localHarness: HostedLocalDevHarness | null = null;
+let oidcFixture: HostedLocalOidcFixture | null = null;
 
 it("derives stable numeric suffixes from the full Telegram user id", () => {
   expect(buildStableTelegramNumericSuffix("member_local_telegram_reply_20260408", 7)).not.toBe(
@@ -81,6 +86,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
         assistantProviderBaseUrl,
       });
     }
+    oidcFixture = await startHostedLocalOidcFixture();
 
     const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
       process.env,
@@ -96,6 +102,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
         process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
         "telegram",
       ),
+      HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: requireOidcFixture().jwksUrl,
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
       MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
       MURPH_DEV_SKIP_WEB: "1",
@@ -104,6 +111,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       NEXT_DIST_DIR_MODE: "smoke",
       TELEGRAM_API_BASE_URL: telegramApiBaseUrl,
       TELEGRAM_BOT_TOKEN: telegramBotToken,
+      VERCEL_OIDC_TOKEN: requireOidcFixture().token,
     };
 
     localHarness = await startHostedLocalDevHarness({
@@ -122,6 +130,8 @@ describe("hosted local Telegram auto-reply e2e", () => {
     logDebug("tearing down hosted local Telegram e2e");
     await localHarness?.stop();
     localHarness = null;
+    await oidcFixture?.stop();
+    oidcFixture = null;
     await stopHttpStubServer(telegramServer);
     await stopHttpStubServer(assistantProviderServer);
   });
@@ -293,6 +303,14 @@ function requireHarness(): HostedLocalDevHarness {
   }
 
   return localHarness;
+}
+
+function requireOidcFixture(): HostedLocalOidcFixture {
+  if (!oidcFixture) {
+    throw new Error("Hosted local OIDC fixture was not initialized.");
+  }
+
+  return oidcFixture;
 }
 
 function logDebug(message: string, details?: Record<string, unknown>): void {

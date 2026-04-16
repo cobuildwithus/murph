@@ -15,6 +15,12 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 type RemoteJwkSet = ReturnType<typeof createRemoteJWKSet>;
 
 const remoteJwkSetCache = new Map<string, RemoteJwkSet>();
+const HOSTED_EXECUTION_LOCAL_JWKS_HOSTS = new Set([
+  "127.0.0.1",
+  "::1",
+  "host.docker.internal",
+  "localhost",
+]);
 
 export type HostedExecutionVercelOidcEnvironmentName =
   (typeof HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENTS)[number];
@@ -61,12 +67,42 @@ export function readHostedExecutionVercelOidcValidationEnvironment(
   const environment = parseHostedExecutionVercelOidcEnvironmentName(
     source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT,
   ) ?? "production";
-
-  return createHostedExecutionVercelOidcValidationEnvironment({
+  const jwksUrlOverride = normalizeOptionalString(source.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL);
+  const validation = createHostedExecutionVercelOidcValidationEnvironment({
     environment,
     projectName,
     teamSlug,
   });
+
+  if (!jwksUrlOverride) {
+    return validation;
+  }
+
+  if (environment !== "development") {
+    throw new TypeError(
+      "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL is only supported when HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=development.",
+    );
+  }
+
+  let parsedJwksUrl: URL;
+  try {
+    parsedJwksUrl = new URL(jwksUrlOverride);
+  } catch (error) {
+    throw new TypeError(
+      `HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL must be a valid absolute URL: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (!HOSTED_EXECUTION_LOCAL_JWKS_HOSTS.has(parsedJwksUrl.hostname)) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL must use a local loopback or bridge hostname in development.",
+    );
+  }
+
+  return {
+    ...validation,
+    jwksUrl: parsedJwksUrl.toString(),
+  };
 }
 
 export function requireHostedExecutionVercelOidcValidationEnvironment(
