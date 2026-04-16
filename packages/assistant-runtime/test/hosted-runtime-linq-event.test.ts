@@ -77,7 +77,20 @@ describe("ingestHostedLinqMessage", () => {
       parsed: true,
     };
     const capture = {
+      accountId: "raw-recipient-phone",
+      externalId: "linq:msg_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      raw: {},
       source: "linq",
+      text: "hello",
+      thread: {
+        id: "chat_123",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      attachments: [],
     };
     const processCapture = vi.fn(async () => {});
 
@@ -101,7 +114,10 @@ describe("ingestHostedLinqMessage", () => {
       }),
       event: parsedEvent,
     });
-    expect(processCapture).toHaveBeenCalledWith(capture);
+    expect(processCapture).toHaveBeenCalledWith({
+      ...capture,
+      accountId: "15551234567",
+    });
   });
 });
 

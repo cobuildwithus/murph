@@ -1,3 +1,5 @@
+import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { SharePack } from '@murphai/contracts'
 import { normalizeNullableString } from './shared.js'
 
@@ -26,6 +28,7 @@ export interface AssistantHostedShareLinkRequest {
 }
 
 export interface AssistantHostedExecutionContext {
+  defaultTarget?: AssistantModelTarget | null
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
@@ -46,6 +49,7 @@ export function normalizeAssistantExecutionContext(
 ): AssistantExecutionContext {
   const hosted = input?.hosted
   const memberId = normalizeNullableString(hosted?.memberId)
+  const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   if (!memberId) {
     return {
       hosted: null,
@@ -64,6 +68,11 @@ export function normalizeAssistantExecutionContext(
             issueShareLink: hosted.issueShareLink,
           }
         : {}),
+      ...(defaultTarget
+        ? {
+            defaultTarget,
+          }
+        : {}),
       memberId,
       userEnvKeys:
         hosted?.userEnvKeys
@@ -71,4 +80,11 @@ export function normalizeAssistantExecutionContext(
           .filter((key): key is string => key !== null) ?? [],
     },
   }
+}
+
+export function resolveAssistantExecutionDefaultTarget(input: {
+  executionContext: AssistantExecutionContext | null | undefined
+  fallbackTarget: AssistantModelTarget
+}): AssistantModelTarget {
+  return input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget
 }

@@ -49,6 +49,7 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
+import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import {
   extractRecoveredAssistantSession,
 } from './provider-turn-recovery.js'
@@ -139,13 +140,17 @@ export async function sendAssistantMessageLocal(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
+  const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
+    executionContext,
+    fallbackTarget: createDefaultLocalAssistantModelTarget(),
+  })
   const defaults = await resolveAssistantOperatorDefaults()
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
       const resolved = await resolveAssistantMessageSession({
-        boundaryDefaultTarget: createDefaultLocalAssistantModelTarget(),
+        boundaryDefaultTarget,
         defaults,
         message: input,
       })
