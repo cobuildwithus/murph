@@ -30,6 +30,8 @@ agent-docs/generated/doc-inventory.md
 
 # Local Cloudflare runner secrets
 apps/cloudflare/.dev.vars*
+apps/cloudflare/.wrangler/local-dev.generated.json
+apps/cloudflare/.wrangler/.wrangler/
 apps/cloudflare/.runner.env*
 apps/cloudflare/.deploy
 .vercel

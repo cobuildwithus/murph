@@ -204,6 +204,45 @@ describe("hosted local dev main", () => {
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
   });
 
+  it("emits the structured ready token when the caller requests it", async () => {
+    const createChild = (input: {
+      exitCode: number | null;
+      pid: number;
+    }): HostedLocalChildProcess => ({
+      exitCode: input.exitCode,
+      kill: vi.fn(() => true),
+      once: vi.fn(function once(this: HostedLocalChildProcess) {
+        return this;
+      }),
+      pid: input.pid,
+    });
+    const cloudflareChild = {
+      child: createChild({ exitCode: null, pid: 501 }),
+      name: "cloudflare" as const,
+    } satisfies NamedChildProcess;
+    const webChild = {
+      child: createChild({ exitCode: 0, pid: 502 }),
+      name: "web" as const,
+    } satisfies NamedChildProcess;
+    const readyToken = "token-ready-for-tests";
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(webChild);
+    waitForFirstChildExit.mockResolvedValue(webChild);
+    vi.stubEnv("MURPH_DEV_READY_TOKEN", readyToken);
+
+    const { main } = await import("./main.ts");
+
+    await main();
+
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      expect.stringContaining(`__MURPH_HOSTED_LOCAL_READY__ ${readyToken}`),
+    );
+    stdoutWrite.mockRestore();
+  });
+
   it("reuses a caller-provided temp dir for generated local worker inputs", async () => {
     const createChild = (input: {
       exitCode: number | null;
