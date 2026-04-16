@@ -646,6 +646,10 @@ export const vaultCliCommandDescriptors = [
         path: ['food', 'schedule'],
         description: 'Schedule one remembered food for daily auto-log meal creation.',
       },
+      {
+        path: ['food', 'unschedule'],
+        description: 'Unschedule one remembered food from daily auto-log meal creation.',
+      },
     ],
     directVaultServiceBindings: {
       core: ['scaffoldFood', 'upsertFood', 'addDailyFood'],

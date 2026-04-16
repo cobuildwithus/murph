@@ -391,13 +391,29 @@ export function registerInboxCommands(
   source.command('list', {
     args: emptyArgsSchema,
     description: 'List configured inbox connectors from the local runtime config.',
-    options: withBaseOptions(),
+    options: withBaseOptions({
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .optional()
+        .describe('Optional maximum number of connectors to return.'),
+    }),
     output: inboxSourceListResultSchema,
     async run(context) {
-      return services.sourceList({
+      const result = await services.sourceList({
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
       })
+
+      return {
+        ...result,
+        connectors:
+          context.options.limit === undefined
+            ? result.connectors
+            : result.connectors.slice(0, context.options.limit),
+      }
     },
   })
 
@@ -668,7 +684,8 @@ export function registerInboxCommands(
   })
 
   const attachment = Cli.create('attachment', {
-    description: 'Inspect stored inbox attachments and their runtime parse state.',
+    description:
+      'Inspect stored inbox attachments, decoded content, and their runtime parse state.',
   })
 
   attachment.command('list', {
@@ -676,13 +693,48 @@ export function registerInboxCommands(
       captureId: z.string().min(1).describe('Inbox capture id to inspect.'),
     }),
     description: 'List stored attachments for one inbox capture.',
-    options: withBaseOptions(),
+    options: withBaseOptions({
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .optional()
+        .describe('Optional maximum number of attachments to return.'),
+    }),
     output: inboxAttachmentListResultSchema,
     async run(context) {
-      return services.listAttachments({
+      const result = await services.listAttachments({
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
         captureId: context.args.captureId,
+      })
+
+      return {
+        ...result,
+        attachments:
+          context.options.limit === undefined
+            ? result.attachments
+            : result.attachments.slice(0, context.options.limit),
+      }
+    },
+  })
+
+  attachment.command('inspect', {
+    args: z.object({
+      attachmentId: z.string().min(1).describe('Inbox attachment id to inspect.'),
+    }),
+    description:
+      'Inspect one stored inbox attachment and its extracted content by runtime attachment id.',
+    hint:
+      'Use `inspect` first when you want the stored attachment details and extracted text; successful inbox parsing already puts QR/barcode text here when it was decoded.',
+    options: withBaseOptions(),
+    output: inboxAttachmentShowResultSchema,
+    async run(context) {
+      return services.showAttachment({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        attachmentId: context.args.attachmentId,
       })
     },
   })
@@ -703,6 +755,24 @@ export function registerInboxCommands(
     },
   })
 
+  attachment.command('status', {
+    args: z.object({
+      attachmentId: z.string().min(1).describe('Inbox attachment id to inspect.'),
+    }),
+    description: 'Show the current runtime parse status for one inbox attachment.',
+    hint:
+      'Use `status` when you want the current parser state without draining or requeueing jobs.',
+    options: withBaseOptions(),
+    output: inboxAttachmentStatusResultSchema,
+    async run(context) {
+      return services.showAttachmentStatus({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        attachmentId: context.args.attachmentId,
+      })
+    },
+  })
+
   attachment.command('show-status', {
     args: z.object({
       attachmentId: z.string().min(1).describe('Inbox attachment id to inspect.'),
@@ -712,6 +782,25 @@ export function registerInboxCommands(
     output: inboxAttachmentStatusResultSchema,
     async run(context) {
       return services.showAttachmentStatus({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        attachmentId: context.args.attachmentId,
+      })
+    },
+  })
+
+  attachment.command('decode', {
+    args: z.object({
+      attachmentId: z.string().min(1).describe('Inbox attachment id to parse now.'),
+    }),
+    description:
+      'Run the attachment parse/decode pipeline now when existing extracted text is missing or needs a fresh parse.',
+    hint:
+      'Use `decode` only when you need an explicit parse run. Normal inbox parsing already scans images for QR/barcode payloads and stores decoded text for `inspect` when available.',
+    options: withBaseOptions(),
+    output: inboxAttachmentParseResultSchema,
+    async run(context) {
+      return services.parseAttachment({
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
         attachmentId: context.args.attachmentId,

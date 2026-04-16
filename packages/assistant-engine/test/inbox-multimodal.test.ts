@@ -23,7 +23,7 @@ describe('buildInboxModelAttachmentBundle', () => {
 
     expect(bundle.fragments[0]?.kind).toBe('attachment_metadata')
     expect(bundle.fragments[0]?.text).toContain(
-      'automaticImageCodeScan: image attachments are automatically scanned for QR and barcode payloads during parsing; decoded values appear in extracted text when found',
+      'automaticImageCodeScan: if inbox parsing succeeds, image attachments are scanned for QR and barcode payloads; treat decoded values as available only when they appear in extracted text fragments',
     )
     expect(bundle.combinedText).toContain('automaticImageCodeScan:')
   })

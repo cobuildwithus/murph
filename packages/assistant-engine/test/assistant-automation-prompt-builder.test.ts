@@ -449,7 +449,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed attachment text is available. Use attached image or PDF evidence if present.',
+        'No parsed attachment text is available. Use attached image or PDF evidence if present, but do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
       ),
       userMessageContent,
     })

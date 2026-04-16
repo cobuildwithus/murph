@@ -289,6 +289,12 @@ test.sequential(
               mime: 'application/pdf',
               originalPath: pdfPath,
             },
+            {
+              kind: 'image',
+              fileName: 'barcode.png',
+              mime: 'image/png',
+              originalPath: fixture.photoPath,
+            },
           ],
           raw: {},
         },
@@ -328,12 +334,22 @@ test.sequential(
             derivedPath: string | null
           }>
         }>(
-          ['inbox', 'attachment', 'list', capture.captureId, '--vault', fixture.vaultRoot],
+          [
+            'inbox',
+            'attachment',
+            'list',
+            capture.captureId,
+            '--limit',
+            '1',
+            '--vault',
+            fixture.vaultRoot,
+          ],
           services,
         ),
       )
       assert.equal(listed.captureId, capture.captureId)
-      assert.equal(listed.attachmentCount, 1)
+      assert.equal(listed.attachmentCount, 2)
+      assert.equal(listed.attachments.length, 1)
       assert.equal(listed.attachments[0]?.attachmentId, attachmentId)
       assert.equal(listed.attachments[0]?.parseState, 'succeeded')
 
@@ -346,7 +362,7 @@ test.sequential(
             extractedText: string | null
           }
         }>(
-          ['inbox', 'attachment', 'show', attachmentId, '--vault', fixture.vaultRoot],
+          ['inbox', 'attachment', 'inspect', attachmentId, '--vault', fixture.vaultRoot],
           services,
         ),
       )
@@ -365,7 +381,7 @@ test.sequential(
             resultPath: string | null
           }>
         }>(
-          ['inbox', 'attachment', 'show-status', attachmentId, '--vault', fixture.vaultRoot],
+          ['inbox', 'attachment', 'status', attachmentId, '--vault', fixture.vaultRoot],
           services,
         ),
       )
@@ -389,7 +405,7 @@ test.sequential(
             attachmentId: string
           }>
         }>(
-          ['inbox', 'attachment', 'parse', attachmentId, '--vault', fixture.vaultRoot],
+          ['inbox', 'attachment', 'decode', attachmentId, '--vault', fixture.vaultRoot],
           services,
         ),
       )
@@ -450,6 +466,70 @@ test.sequential(
     }
   },
 )
+
+test.sequential('inbox source list respects limit while preserving connector config', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-source-limit')
+  const services = createIntegratedInboxServices({
+    enableJournalPromotion: true,
+    loadCoreModule: loadBuiltCoreRuntime as never,
+    loadInboxModule: loadBuiltInboxRuntime as never,
+    loadParsersModule: async () => createFakeParsersModule() as never,
+  })
+
+  try {
+    await initializeInbox({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    await runInProcessInboxCli(
+      [
+        'inbox',
+        'source',
+        'add',
+        'telegram',
+        '--id',
+        'telegram:bot-1',
+        '--account',
+        'bot',
+        '--vault',
+        fixture.vaultRoot,
+      ],
+      services,
+    )
+
+    await runInProcessInboxCli(
+      [
+        'inbox',
+        'source',
+        'add',
+        'linq',
+        '--id',
+        'linq:default-1',
+        '--account',
+        'default',
+        '--vault',
+        fixture.vaultRoot,
+      ],
+      services,
+    )
+
+    const listed = requireData(
+      await runInProcessInboxCli<{
+        connectors: Array<{
+          id: string
+        }>
+      }>(
+        ['inbox', 'source', 'list', '--limit', '1', '--vault', fixture.vaultRoot],
+        services,
+      ),
+    )
+
+    assert.equal(listed.connectors.length, 1)
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
 
 test.sequential(
   'inbox journal and experiment-note promotions are idempotent',

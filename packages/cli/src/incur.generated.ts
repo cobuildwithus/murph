@@ -79,6 +79,7 @@ declare module 'incur' {
       'food scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'food schedule': { args: { title: string }; options: { vault: string; requestId?: string; time: string; note?: string; slug?: string } }
       'food show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'food unschedule': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'genetics list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'genetics scaffold': { args: {}; options: { vault: string; requestId?: string } }
@@ -88,11 +89,14 @@ declare module 'incur' {
       'goal scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'goal show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'goal upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
-      'inbox attachment list': { args: { captureId: string }; options: { vault: string; requestId?: string } }
+      'inbox attachment decode': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
+      'inbox attachment inspect': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
+      'inbox attachment list': { args: { captureId: string }; options: { vault: string; requestId?: string; limit?: number } }
       'inbox attachment parse': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox attachment reparse': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox attachment show': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox attachment show-status': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
+      'inbox attachment status': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox backfill': { args: {}; options: { vault: string; requestId?: string; source: string; limit?: number; parse?: boolean } }
       'inbox bootstrap': { args: {}; options: { vault: string; requestId?: string; rebuild?: boolean; ffmpegCommand?: string; whisperCommand?: string; whisperModelPath?: string; strict?: boolean } }
       'inbox doctor': { args: { sourceId?: string }; options: { vault: string; requestId?: string } }
@@ -111,7 +115,7 @@ declare module 'incur' {
       'inbox setup': { args: {}; options: { vault: string; requestId?: string; ffmpegCommand?: string; whisperCommand?: string; whisperModelPath?: string } }
       'inbox show': { args: { captureId: string }; options: { vault: string; requestId?: string } }
       'inbox source add': { args: { source: "telegram" | "linq" | "email" }; options: { vault: string; requestId?: string; id: string; account?: string; address?: string; backfillLimit: number; provision?: boolean; emailDisplayName?: string; emailUsername?: string; emailDomain?: string; emailClientId?: string; linqWebhookHost?: string; linqWebhookPath?: string; linqWebhookPort?: number; enableAutoReply?: boolean } }
-      'inbox source list': { args: {}; options: { vault: string; requestId?: string } }
+      'inbox source list': { args: {}; options: { vault: string; requestId?: string; limit?: number } }
       'inbox source remove': { args: { id: string }; options: { vault: string; requestId?: string } }
       'inbox status': { args: {}; options: { vault: string; requestId?: string } }
       'inbox stop': { args: {}; options: { vault: string; requestId?: string } }

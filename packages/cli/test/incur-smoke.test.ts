@@ -1236,6 +1236,66 @@ test('food help exposes schedule and no longer exposes add-daily', async () => {
   assert.doesNotMatch(help, /add-daily/u)
 })
 
+test('inbox attachment help exposes inspect, status, and decode commands', async () => {
+  const help = await runSourceCliRaw(['inbox', 'attachment', '--help'])
+  const inspectHelp = await runSourceCliRaw(['inbox', 'attachment', 'inspect', '--help'])
+  const statusHelp = await runSourceCliRaw(['inbox', 'attachment', 'status', '--help'])
+  const decodeHelp = await runSourceCliRaw(['inbox', 'attachment', 'decode', '--help'])
+
+  assert.match(help, /inspect\s+Inspect one stored inbox attachment/u)
+  assert.match(help, /status\s+Show the current runtime parse status/u)
+  assert.match(
+    help,
+    /decode\s+Run the attachment parse\/decode pipeline now when existing extracted text is missing or needs a fresh parse/u,
+  )
+  assert.match(
+    inspectHelp,
+    /Use `inspect` first when you want the stored attachment details and extracted text/u,
+  )
+  assert.match(
+    statusHelp,
+    /Use `status` when you want the current parser state/u,
+  )
+  assert.match(
+    decodeHelp,
+    /Use `decode` only when you need an explicit parse run/u,
+  )
+})
+
+test('inbox source list schema exposes the list limit option', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['inbox', 'source', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('limit' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
+})
+
+test('inbox attachment list schema exposes the list limit option', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['inbox', 'attachment', 'list', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('captureId' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['captureId'])
+  assert.equal('limit' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
+})
+
 test('goal show help exposes only the global format flag', async () => {
   const help = await runRawCli(['goal', 'show', '--help'])
 
