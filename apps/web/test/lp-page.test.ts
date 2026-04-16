@@ -94,7 +94,7 @@ test("LandingPage threads the server-side auth snapshot into the nav, hero, and 
     markup,
     /data-landing-auth-actions-label="See what works for your body"/,
   );
-  assert.match(markup, /Run one experiment\. See what changed\./);
+  assert.match(markup, /Figure out what actually makes you healthier\./);
   assert.match(markup, /data-landing-auth-actions-label="Create your account"/);
   assert.match(
     markup,
@@ -131,5 +131,5 @@ test("LandingPage switches the mid-page CTA copy into account language for authe
   );
   assert.match(markup, /You’re already set up\./);
   assert.match(markup, /Subscription and billing/);
-  assert.doesNotMatch(markup, /Run one experiment\. See what changed\./);
+  assert.doesNotMatch(markup, /Figure out what actually makes you healthier\./);
 });
