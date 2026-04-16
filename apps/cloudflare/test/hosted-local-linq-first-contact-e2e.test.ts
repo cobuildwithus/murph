@@ -22,10 +22,13 @@ interface ObservedLinqRequest {
   url: string;
 }
 
+type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boolean;
+
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 
 const observedLinqRequests: ObservedLinqRequest[] = [];
+const observedLinqChatIdsByRecipient = new Map<string, string>();
 const devEnv: NodeJS.ProcessEnv = {
   ...process.env,
   MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
@@ -37,10 +40,9 @@ const devEnv: NodeJS.ProcessEnv = {
 };
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const debugE2E = process.env.MURPH_E2E_DEBUG_PROGRESS === "1";
-const useAssistantProviderStub = process.env.MURPH_E2E_STUB_ASSISTANT_PROVIDER !== "0";
+const useAssistantProviderStub = shouldUseAssistantProviderStub(process.env);
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
-const expectedLinqChatPath = `/chats/${encodeURIComponent(`chat:${userId}`)}/messages`;
-const expectedDirectReplyChatPath = `/chats/${encodeURIComponent(`chat:${directReplyUserId}`)}/messages`;
+const expectedLinqCreateChatPath = "/chats";
 
 let linqServer: ReturnType<typeof createServer> | null = null;
 let linqServerBaseUrl = "";
@@ -54,6 +56,7 @@ describe("hosted local Linq first-contact e2e", () => {
   beforeAll(async () => {
     logDebug("starting hosted local Linq e2e setup");
     observedLinqRequests.length = 0;
+    observedLinqChatIdsByRecipient.clear();
     linqServer = await startLinqStubServer();
     const address = linqServer.address();
     if (!address || typeof address === "string") {
@@ -126,12 +129,16 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(finalStatus.pendingEventCount).toBe(0);
 
     const sendRequest = await waitForLinqSend({
-      expectedPath: expectedLinqChatPath,
+      expectedPath: expectedLinqCreateChatPath,
+      matchRequest: createLinqCreateChatRequestMatcher(userId),
       userId,
     });
+    expect(requireObservedLinqChatId(userId)).toEqual(expect.any(String));
     expect(sendRequest.method).toBe("POST");
-    expect(sendRequest.url).toBe(expectedLinqChatPath);
+    expect(sendRequest.url).toBe(expectedLinqCreateChatPath);
     expect(JSON.parse(sendRequest.body)).toMatchObject({
+      from: buildLinqHomePhoneNumber(userId),
+      to: [buildLinqRecipientPhoneNumber(userId)],
       message: {
         idempotency_key: expect.stringContaining("assistant-first-contact"),
         parts: [
@@ -160,10 +167,14 @@ describe("hosted local Linq first-contact e2e", () => {
     await requireHarness().waitForHostedCompletion(directReplyUserId);
     logDebug("direct-reply activation completed", { userId: directReplyUserId });
     await waitForLinqSend({
-      expectedPath: expectedDirectReplyChatPath,
+      expectedPath: expectedLinqCreateChatPath,
+      matchRequest: createLinqCreateChatRequestMatcher(directReplyUserId),
       userId: directReplyUserId,
     });
 
+    const materializedChatId = requireObservedLinqChatId(directReplyUserId);
+    const expectedDirectReplyChatPath =
+      `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = countObservedLinqSends(expectedDirectReplyChatPath);
     logDebug("dispatching later inbound Linq message", {
       baselineSendCount: outboundCountBeforeReply,
@@ -171,7 +182,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     const inboundDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
       eventId: `linq.message.received:local:${directReplyUserId}:evt_direct_reply`,
-      linqEvent: buildInboundLinqEvent(directReplyUserId),
+      linqEvent: buildInboundLinqEvent(directReplyUserId, materializedChatId),
       linqMessageId: `msg_local_${directReplyUserId}`,
       occurredAt: new Date().toISOString(),
       phoneLookupKey: directReplyUserId,
@@ -223,6 +234,7 @@ describe("hosted local Linq first-contact e2e", () => {
 
 async function waitForLinqSend(input: {
     expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
     userId: string;
   }): Promise<ObservedLinqRequest> {
     const startedAt = Date.now();
@@ -230,8 +242,7 @@ async function waitForLinqSend(input: {
 
     while ((Date.now() - startedAt) < 30_000) {
       const sendRequest = observedLinqRequests.find((request) =>
-        request.method === "POST"
-        && request.url === input.expectedPath
+        isMatchingObservedLinqSend(request, input.expectedPath, input.matchRequest)
       );
 
       if (sendRequest) {
@@ -247,7 +258,10 @@ async function waitForLinqSend(input: {
         logDebug("waiting for first Linq send", {
           elapsedMs: Date.now() - startedAt,
           expectedPath: input.expectedPath,
-          observedSendCount: countObservedLinqSends(input.expectedPath),
+          observedSendCount: countObservedLinqSends(
+            input.expectedPath,
+            input.matchRequest,
+          ),
           userId: input.userId,
         });
         nextProgressLogAt = Date.now() + 5_000;
@@ -269,6 +283,7 @@ async function waitForLinqSend(input: {
 async function waitForAdditionalLinqSend(input: {
     baselineCount: number;
     expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
     userId: string;
   }): Promise<ObservedLinqRequest> {
     const startedAt = Date.now();
@@ -276,8 +291,7 @@ async function waitForAdditionalLinqSend(input: {
 
     while ((Date.now() - startedAt) < 60_000) {
       const matchingRequests = observedLinqRequests.filter((request) =>
-        request.method === "POST"
-        && request.url === input.expectedPath
+        isMatchingObservedLinqSend(request, input.expectedPath, input.matchRequest)
       );
 
       if (matchingRequests.length > input.baselineCount) {
@@ -346,9 +360,10 @@ function buildActivationDispatch(nextUserId: string) {
     eventId: `member.activated:local:${nextUserId}:evt_linq_first_contact`,
     firstContact: {
       channel: "linq",
+      fromPhoneNumber: buildLinqHomePhoneNumber(nextUserId),
       identityId: `linq:${nextUserId}`,
-      threadId: `chat:${nextUserId}`,
-      threadIsDirect: true,
+      kind: "linq-materialize-home-thread",
+      toPhoneNumber: buildLinqRecipientPhoneNumber(nextUserId),
     },
     memberId: nextUserId,
     memberChannels: {
@@ -360,26 +375,26 @@ function buildActivationDispatch(nextUserId: string) {
   });
 }
 
-function buildInboundLinqEvent(nextUserId: string) {
+function buildInboundLinqEvent(nextUserId: string, chatId: string) {
   return {
     api_version: "v3",
     created_at: new Date().toISOString(),
     data: {
       chat: {
-        id: `chat:${nextUserId}`,
+        id: chatId,
         is_group: false,
         owner_handle: {
-          handle: "+15555559876",
+          handle: buildLinqHomePhoneNumber(nextUserId),
           id: `handle_owner_${nextUserId}`,
           is_me: true,
           service: "SMS",
         },
       },
-      chat_id: `chat:${nextUserId}`,
+      chat_id: chatId,
       direction: "inbound",
-      from: "+15555550123",
+      from: buildLinqRecipientPhoneNumber(nextUserId),
       from_handle: {
-        handle: "+15555550123",
+        handle: buildLinqRecipientPhoneNumber(nextUserId),
         id: `handle_sender_${nextUserId}`,
         service: "SMS",
       },
@@ -394,15 +409,15 @@ function buildInboundLinqEvent(nextUserId: string) {
         ],
       },
       recipient_handle: {
-        handle: "+15555559876",
+        handle: buildLinqHomePhoneNumber(nextUserId),
         id: `handle_owner_${nextUserId}`,
         is_me: true,
         service: "SMS",
       },
-      recipient_phone: "+15555559876",
+      recipient_phone: buildLinqHomePhoneNumber(nextUserId),
       received_at: new Date().toISOString(),
       sender_handle: {
-        handle: "+15555550123",
+        handle: buildLinqRecipientPhoneNumber(nextUserId),
         id: `handle_sender_${nextUserId}`,
         service: "SMS",
       },
@@ -414,14 +429,58 @@ function buildInboundLinqEvent(nextUserId: string) {
   };
 }
 
-function countObservedLinqSends(expectedPath: string): number {
+function countObservedLinqSends(
+  expectedPath: string,
+  matchRequest?: ObservedLinqRequestMatcher,
+): number {
   return observedLinqRequests.filter((request) =>
-    request.method === "POST"
-    && request.url === expectedPath
+    isMatchingObservedLinqSend(request, expectedPath, matchRequest)
   ).length;
 }
 
+function isMatchingObservedLinqSend(
+  request: ObservedLinqRequest,
+  expectedPath: string,
+  matchRequest?: ObservedLinqRequestMatcher,
+): boolean {
+  return (
+    request.method === "POST"
+    && request.url === expectedPath
+    && (matchRequest ? matchRequest(request) : true)
+  );
+}
+
+function createLinqCreateChatRequestMatcher(nextUserId: string): ObservedLinqRequestMatcher {
+  const expectedFrom = buildLinqHomePhoneNumber(nextUserId);
+  const expectedTo = buildLinqRecipientPhoneNumber(nextUserId);
+
+  return (request) => {
+    const parsed = parseObservedLinqJson(request.body);
+    if (!parsed || typeof parsed !== "object") {
+      return false;
+    }
+
+    const from = "from" in parsed ? parsed.from : null;
+    const to = "to" in parsed ? parsed.to : null;
+    return (
+      from === expectedFrom
+      && Array.isArray(to)
+      && to[0] === expectedTo
+    );
+  };
+}
+
+function parseObservedLinqJson(body: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 async function startLinqStubServer(): Promise<ReturnType<typeof createServer>> {
+  let nextObservedChatSequence = 0;
+
   const server = createServer(async (request, response) => {
     const body = await readRequestBody(request);
     observedLinqRequests.push({
@@ -429,6 +488,26 @@ async function startLinqStubServer(): Promise<ReturnType<typeof createServer>> {
       method: request.method ?? "GET",
       url: request.url ?? "/",
     });
+
+    if (request.method === "POST" && request.url === "/chats") {
+      const parsedBody = JSON.parse(body) as {
+        from?: string;
+        message?: { parts?: Array<{ type?: string; value?: string }> };
+        to?: string[];
+      };
+      const recipient = parsedBody.to?.[0] ?? "unknown";
+      const chatId = `chat_local_${++nextObservedChatSequence}`;
+      observedLinqChatIdsByRecipient.set(recipient, chatId);
+      writeJsonResponse(response, 200, {
+        chat: {
+          id: chatId,
+          message: {
+            id: `linq_msg_${Date.now()}`,
+          },
+        },
+      });
+      return;
+    }
 
     if (
       request.method === "POST"
@@ -590,4 +669,40 @@ function resolveHostedAssistantLocalDevEnv(
       "Set HOSTED_ASSISTANT_PROVIDER and HOSTED_ASSISTANT_MODEL, or provide OPENAI_API_KEY for the local fallback profile.",
     ].join(" "),
   );
+}
+
+function shouldUseAssistantProviderStub(source: NodeJS.ProcessEnv): boolean {
+  const explicit = source.MURPH_E2E_STUB_ASSISTANT_PROVIDER?.trim();
+  if (explicit) {
+    return explicit !== "0";
+  }
+
+  return !(
+    source.HOSTED_ASSISTANT_PROVIDER?.trim()
+    && source.HOSTED_ASSISTANT_MODEL?.trim()
+  );
+}
+
+function requireObservedLinqChatId(nextUserId: string): string {
+  const recipientPhoneNumber = buildLinqRecipientPhoneNumber(nextUserId);
+  const chatId = observedLinqChatIdsByRecipient.get(recipientPhoneNumber);
+  if (!chatId) {
+    throw new Error(`Expected a materialized Linq chat id for ${nextUserId}.`);
+  }
+
+  return chatId;
+}
+
+function buildLinqHomePhoneNumber(nextUserId: string): string {
+  return buildStableTestPhoneNumber(nextUserId, "598");
+}
+
+function buildLinqRecipientPhoneNumber(nextUserId: string): string {
+  return buildStableTestPhoneNumber(nextUserId, "501");
+}
+
+function buildStableTestPhoneNumber(nextUserId: string, prefix: string): string {
+  const digits = nextUserId.replace(/\D/gu, "");
+  const suffix = digits.slice(-7).padStart(7, "0");
+  return `+1555${prefix}${suffix}`;
 }
