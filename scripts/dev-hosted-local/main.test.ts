@@ -204,6 +204,44 @@ describe("hosted local dev main", () => {
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
   });
 
+  it("skips Vercel link and env pull when the caller already provides a Vercel OIDC token", async () => {
+    const createChild = (input: {
+      exitCode: number | null;
+      pid: number;
+    }): HostedLocalChildProcess => ({
+      exitCode: input.exitCode,
+      kill: vi.fn(() => true),
+      once: vi.fn(function once(this: HostedLocalChildProcess) {
+        return this;
+      }),
+      pid: input.pid,
+    });
+    const cloudflareChild = {
+      child: createChild({ exitCode: 0, pid: 451 }),
+      name: "cloudflare" as const,
+    } satisfies NamedChildProcess;
+
+    const configModule = await import("./config.ts");
+    const vercelModule = await import("./vercel.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipPrismaMigrate: true,
+      skipWeb: true,
+    });
+    spawnChildProcess.mockReturnValueOnce(cloudflareChild);
+    waitForFirstChildExit.mockResolvedValue(cloudflareChild);
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "provided-oidc-token");
+
+    const { main } = await import("./main.ts");
+
+    await main();
+
+    expect(vi.mocked(vercelModule.ensureVercelLinkExists)).not.toHaveBeenCalled();
+    const sawVercelSetup = (runCommand.mock.calls as unknown[][])
+      .some((call) => call[0] === "vercel");
+    expect(sawVercelSetup).toBe(false);
+  });
+
   it("emits the structured ready token when the caller requests it", async () => {
     const createChild = (input: {
       exitCode: number | null;
