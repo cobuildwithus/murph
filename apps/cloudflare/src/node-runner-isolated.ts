@@ -26,6 +26,8 @@ export interface HostedExecutionIsolatedRunnerInput {
   job: HostedAssistantRuntimeJobInput;
 }
 
+const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
+
 export async function runHostedExecutionJobIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
@@ -69,8 +71,24 @@ export async function runHostedExecutionJobIsolatedDetailed(
     child.stderr.setEncoding("utf8");
 
     const stdoutChunks: string[] = [];
+    let stdoutRemainder = "";
+    let stderrRemainder = "";
     child.stdout.on("data", (chunk: string) => {
       stdoutChunks.push(chunk);
+      stdoutRemainder = forwardHostedRuntimeChildOutputChunk({
+        chunk,
+        remainder: stdoutRemainder,
+        sink: process.stdout,
+        suppressResultPayload: true,
+      });
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderrRemainder = forwardHostedRuntimeChildOutputChunk({
+        chunk,
+        remainder: stderrRemainder,
+        sink: process.stderr,
+        suppressResultPayload: false,
+      });
     });
 
     const terminateChild = () => {
@@ -87,6 +105,16 @@ export async function runHostedExecutionJobIsolatedDetailed(
       const code = await new Promise<number | null>((resolve, reject) => {
         child.once("error", reject);
         child.once("close", resolve);
+      });
+      flushHostedRuntimeChildOutputRemainder({
+        remainder: stdoutRemainder,
+        sink: process.stdout,
+        suppressResultPayload: true,
+      });
+      flushHostedRuntimeChildOutputRemainder({
+        remainder: stderrRemainder,
+        sink: process.stderr,
+        suppressResultPayload: false,
       });
       const childResult = parseHostedRuntimeChildResult(stdoutChunks.join(""));
 
@@ -187,4 +215,58 @@ function isHostedAssistantRuntimeJobResult(
 
   const runnerResult = candidate.result as Record<string, unknown>;
   return "bundle" in runnerResult && "result" in runnerResult;
+}
+
+function forwardHostedRuntimeChildOutputChunk(input: {
+  chunk: string;
+  remainder: string;
+  sink: Pick<NodeJS.WriteStream, "write">;
+  suppressResultPayload: boolean;
+}): string {
+  const combined = input.remainder + input.chunk;
+  const lines = combined.split(/\r?\n/u);
+  const nextRemainder = lines.pop() ?? "";
+
+  for (const line of lines) {
+    writeHostedRuntimeChildOutputLine({
+      line,
+      sink: input.sink,
+      suppressResultPayload: input.suppressResultPayload,
+    });
+  }
+
+  return nextRemainder;
+}
+
+function flushHostedRuntimeChildOutputRemainder(input: {
+  remainder: string;
+  sink: Pick<NodeJS.WriteStream, "write">;
+  suppressResultPayload: boolean;
+}): void {
+  if (input.remainder.length === 0) {
+    return;
+  }
+
+  writeHostedRuntimeChildOutputLine({
+    line: input.remainder,
+    sink: input.sink,
+    suppressResultPayload: input.suppressResultPayload,
+  });
+}
+
+function writeHostedRuntimeChildOutputLine(input: {
+  line: string;
+  sink: Pick<NodeJS.WriteStream, "write">;
+  suppressResultPayload: boolean;
+}): void {
+  const trimmed = input.line.trim();
+  if (trimmed.length === 0) {
+    return;
+  }
+
+  if (input.suppressResultPayload && trimmed.startsWith(HOSTED_RUNTIME_CHILD_RESULT_PREFIX)) {
+    return;
+  }
+
+  input.sink.write(`${input.line}\n`);
 }
