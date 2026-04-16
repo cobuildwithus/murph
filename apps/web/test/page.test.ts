@@ -17,13 +17,13 @@ const mocks = vi.hoisted(() => ({
         "div",
         {
           "data-root-landing-auth-actions-authenticated": String(
-            props.authenticated,
+            props.authenticated
           ),
           "data-root-landing-auth-actions-context": props.context,
           "data-root-landing-auth-actions-label": props.signupLabel,
         },
-        "Landing auth actions",
-      ),
+        "Landing auth actions"
+      )
   ),
 }));
 
@@ -60,7 +60,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       context: "nav",
       signupLabel: "Sign up",
     },
-    undefined,
+    undefined
   );
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     2,
@@ -70,7 +70,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       showSignIn: false,
       signupLabel: "See what works for your body",
     },
-    undefined,
+    undefined
   );
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     3,
@@ -80,7 +80,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       showSignIn: false,
       signupLabel: "Create your account",
     },
-    undefined,
+    undefined
   );
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     4,
@@ -89,7 +89,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       context: "footer",
       signupLabel: "Start your first experiment",
     },
-    undefined,
+    undefined
   );
   assert.match(markup, /#global-footer \{ display: none; \}/);
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
@@ -98,18 +98,21 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /data-root-landing-auth-actions-label="Sign up"/);
   assert.match(
     markup,
-    /data-root-landing-auth-actions-label="See what works for your body"/,
+    /data-root-landing-auth-actions-label="See what works for your body"/
   );
   assert.match(markup, /Figure out what actually makes you healthier\./);
-  assert.match(markup, /data-root-landing-auth-actions-label="Create your account"/);
   assert.match(
     markup,
-    /data-root-landing-auth-actions-label="Start your first experiment"/,
+    /data-root-landing-auth-actions-label="Create your account"/
   );
-  assert.match(markup, /Quick start/);
   assert.match(
     markup,
-    /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/,
+    /data-root-landing-auth-actions-label="Start your first experiment"/
+  );
+  assert.match(markup, /Run Murph Locally/);
+  assert.match(
+    markup,
+    /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/
   );
   assert.match(markup, /murph chat/);
 });
@@ -139,7 +142,7 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
       showSignIn: false,
       signupLabel: "Open settings",
     },
-    undefined,
+    undefined
   );
   assert.match(markup, /You’re already set up\./);
   assert.doesNotMatch(markup, /Figure out what actually makes you healthier\./);
