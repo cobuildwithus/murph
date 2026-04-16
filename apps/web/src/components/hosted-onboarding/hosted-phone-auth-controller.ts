@@ -25,6 +25,7 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-client";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedPrivyClientSessionInput } from "./hosted-auth-completion";
 
 import {
   createHostedPhoneVerificationAttempt,
@@ -165,6 +166,11 @@ export function useHostedPhoneAuthController({
       : intent === "link"
         ? "Keep this tab open. We are verifying your number and linking it to your account."
         : "Keep this tab open. We are verifying your number and preparing your account.";
+  const authSession: HostedPrivyClientSessionInput = {
+    createWallet,
+    refreshUser,
+    user,
+  };
 
   const sharedFlowProps = {
     activeAttempt: phoneVerificationAttempt,
@@ -314,7 +320,6 @@ export function useHostedPhoneAuthController({
 
     try {
       await loginWithCode({ code: submittedCode });
-      await refreshUser().catch(() => null);
       await runHostedPrivyFinalization(intent === "link" ? "continue" : "verify-code");
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
@@ -378,11 +383,10 @@ export function useHostedPhoneAuthController({
         }
 
         await finalizeHostedPrivyVerification({
-          createWallet,
           inviteCode,
           intent,
           onCompleted,
-          user,
+          ...authSession,
         });
       },
       getFinalizationState: () => finalizationStateRef.current,

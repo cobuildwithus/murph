@@ -6,7 +6,10 @@ import {
 } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
-import { completeHostedPrivyAuth } from "./hosted-auth-completion";
+import {
+  completeHostedPrivyAuth,
+  type HostedPrivyClientSessionInput,
+} from "./hosted-auth-completion";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import type {
   HostedPhoneAuthIntent,
@@ -90,17 +93,16 @@ export function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | und
   return typeof value === "string" ? value : null;
 }
 
-export async function finalizeHostedPrivyVerification(input: {
-  createWallet: () => Promise<unknown>;
+export async function finalizeHostedPrivyVerification(input: HostedPrivyClientSessionInput & {
   inviteCode?: string | null;
   intent: HostedPhoneAuthIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
-  user: { linkedAccounts?: unknown } | null;
 }) {
   const result = await completeHostedPrivyAuth({
     createWallet: input.createWallet,
     intent: input.intent,
     inviteCode: input.inviteCode,
+    refreshUser: input.refreshUser,
     requirePhone: true,
     user: input.user,
   });

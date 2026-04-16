@@ -731,6 +731,69 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/checkout");
   });
 
+  it("prefers a refreshed Privy user snapshot before checking SMS wallet readiness", async () => {
+    vi.resetModules();
+
+    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
+    const requestHostedOnboardingJson = vi.fn()
+      .mockResolvedValueOnce({
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "active",
+      });
+    const refreshUser = vi.fn().mockResolvedValue({
+      linkedAccounts: [{ type: "phone" }],
+    });
+    const assign = vi.fn();
+
+    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
+      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0],
+      ensureHostedPrivyPhoneReady,
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+      HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
+        code: string | null = null;
+        retryable = false;
+      },
+      requestHostedBillingCheckout(input: { inviteCode: string }) {
+        return requestHostedOnboardingJson({
+          payload: input,
+          url: "/api/hosted-onboarding/billing/checkout",
+        });
+      },
+      requestHostedOnboardingJson,
+    }));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    try {
+      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      await finalizeHostedPrivyVerification({
+        createWallet: vi.fn(),
+        intent: "signup",
+        refreshUser,
+        user: null,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    assert.equal(refreshUser.mock.calls.length, 1);
+    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
+    assert.equal(typeof ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.createWallet, "function");
+    assert.deepEqual(ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.user, {
+      linkedAccounts: [{ type: "phone" }],
+    });
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.equal(assign.mock.calls.length, 1);
+    assert.equal(assign.mock.calls[0]?.[0], "/settings");
+  });
+
   it("retries hosted completion once when the Privy cookie has not propagated yet", async () => {
     vi.resetModules();
 
