@@ -278,48 +278,65 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
   });
 
-  it("rejects Telegram webhooks whose configured secret token is missing", async () => {
+  it("accepts Telegram webhooks whose secret header is missing", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const hostedMemberRoutingFindUnique = vi.fn();
+    const hostedMemberRoutingFindUnique = vi.fn().mockResolvedValue({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_telegram_123",
+        invitedAt: "2026-03-01T00:00:00.000Z",
+        paymentGraceEndsAt: null,
+        stripeCurrentPeriodEndsAt: "2026-04-01T00:00:00.000Z",
+        stripeSubscriptionStatus: "active",
+        suspendedAt: null,
+      },
+    });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-        updateMany: vi.fn(),
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 321,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
-    await expect(
-      handleHostedOnboardingTelegramWebhook({
-        prisma,
-        rawBody: JSON.stringify({
-          message: {
-            chat: {
-              id: 123,
-              type: "private",
-            },
-            date: 1_774_522_600,
-            from: {
-              first_name: "Alice",
-              id: 456,
-            },
-            message_id: 1,
-            text: "hello",
+    const response = await handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
           },
-          update_id: 321,
-        }),
-        secretToken: null,
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "hello",
+        },
+        update_id: 321,
       }),
-    ).rejects.toMatchObject({
-      code: "TELEGRAM_WEBHOOK_SECRET_REQUIRED",
-      httpStatus: 401,
+      secretToken: null,
     });
-    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "dispatched-active-member",
+    });
+    expect(hostedMemberRoutingFindUnique).toHaveBeenCalled();
   });
 
   it("rejects Telegram webhooks when the server-side secret is not configured", async () => {
