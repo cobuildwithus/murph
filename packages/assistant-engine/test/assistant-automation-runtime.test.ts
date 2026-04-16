@@ -3117,6 +3117,51 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
+  it('drops opaque hosted Linq ids instead of sending them as reply targets', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            source: 'linq',
+            externalId: 'linq:hbid:linq.message:v1:opaque',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          source: 'linq',
+          externalId: 'linq:hbid:linq.message:v1:opaque',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryReplyToMessageId: null,
+      }),
+    )
+  })
+
   it('turns unconfirmed outbound deliveries into failed reply outcomes that advance the cursor', async () => {
     replyMocks.sendAssistantMessage.mockResolvedValue({
       delivery: null,

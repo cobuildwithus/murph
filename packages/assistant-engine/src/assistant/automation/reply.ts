@@ -883,7 +883,12 @@ function readLinqReplyToMessageId(capture: InboxShowResult['capture']): string |
     return null
   }
 
-  return normalizeNullableString(externalId.slice('linq:'.length))
+  const messageId = normalizeNullableString(externalId.slice('linq:'.length))
+  if (!messageId || messageId.startsWith('hbid:linq.message:')) {
+    return null
+  }
+
+  return messageId
 }
 
 function resolveAssistantAutoReplySendResult(input: {

@@ -26,6 +26,10 @@ export async function ingestHostedLinqMessage(
   const hostedCapture = {
     ...capture,
     accountId: dispatch.event.phoneLookupKey,
+    externalId: resolveHostedLinqCaptureExternalId({
+      fallbackExternalId: capture.externalId,
+      linqMessageId: dispatch.event.linqMessageId ?? null,
+    }),
   };
 
   await withHostedInboxPipeline(vaultRoot, async (pipeline) => {
@@ -59,6 +63,27 @@ export function createHostedLinqAttachmentDownloadDriver(): LinqAttachmentDownlo
       return new Uint8Array(await response.arrayBuffer());
     },
   };
+}
+
+function resolveHostedLinqCaptureExternalId(input: {
+  fallbackExternalId: string;
+  linqMessageId: string | null;
+}): string {
+  const linqMessageId = normalizeHostedLinqText(input.linqMessageId);
+  if (linqMessageId) {
+    return `linq:${linqMessageId}`;
+  }
+
+  return normalizeHostedLinqText(input.fallbackExternalId) ?? input.fallbackExternalId;
+}
+
+function normalizeHostedLinqText(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 export function normalizeHostedLinqAttachmentUrl(value: string | null | undefined): string | null {
