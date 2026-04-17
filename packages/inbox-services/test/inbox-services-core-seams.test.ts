@@ -318,6 +318,7 @@ test('capture and attachment helpers summarize runtime records', () => {
     actorName: 'Inbox user',
     actorIsSelf: false,
     occurredAt: '2026-04-08T10:11:12.000Z',
+    createdAt: '2026-04-08T10:12:30.000Z',
     receivedAt: '2026-04-08T10:12:00.000Z',
     text: 'hello',
     attachmentCount: 1,

@@ -125,15 +125,21 @@ export async function scheduleHostedExecutionDispatchTx(
   input: EnqueueHostedExecutionOutboxInput,
 ): Promise<HostedExecutionDispatchScheduleResult> {
   if (shouldRouteHostedDispatchToWake(input.dispatch)) {
-    await appendHostedExecutionDispatchWakeTx({
-      dispatch: input.dispatch,
-      tx: input.tx,
-    });
+    try {
+      await appendHostedExecutionDispatchWakeTx({
+        dispatch: input.dispatch,
+        tx: input.tx,
+      });
 
-    return {
-      eventId: input.dispatch.eventId,
-      route: "wake",
-    };
+      return {
+        eventId: input.dispatch.eventId,
+        route: "wake",
+      };
+    } catch (error) {
+      if (!(error instanceof RangeError)) {
+        throw error;
+      }
+    }
   }
 
   const record = await enqueueHostedExecutionOutbox(input);

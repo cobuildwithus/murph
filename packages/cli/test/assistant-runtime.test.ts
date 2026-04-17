@@ -246,6 +246,7 @@ type AssistantAutoReplyScanActual = Omit<
 
 type AssistantAutomationCursorSnapshot = {
   captureId: string
+  createdAt?: string | null
   occurredAt: string
 } | null
 
@@ -1707,7 +1708,9 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
 
   const events: Array<{ type: string; captureId?: string; details?: string }> = []
   const listCalls: unknown[] = []
-  const cursorProgress: Array<{ occurredAt: string; captureId: string } | null> = []
+  const cursorProgress: Array<
+    { occurredAt: string; captureId: string; createdAt?: string | null } | null
+  > = []
   const inboxServices = {
     list: async (input: unknown) => {
       listCalls.push(input)
@@ -1836,6 +1839,7 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
   ])
   assert.deepEqual(cursorProgress, [
     {
+      createdAt: null,
       occurredAt: '2026-03-16T16:06:00Z',
       captureId: 'cap-show-fail',
     },
@@ -2765,6 +2769,7 @@ test('scanAssistantAutomationOnce advances each enabled channel cursor independe
       {
         channel: 'email',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:00:00Z',
           captureId: 'cap-email-backlog',
         },
@@ -2775,6 +2780,7 @@ test('scanAssistantAutomationOnce advances each enabled channel cursor independe
       },
     ],
     autoReplyScanCursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-email-backlog',
     },
@@ -2786,6 +2792,7 @@ test('scanAssistantAutomationOnce advances each enabled channel cursor independe
       {
         channel: 'email',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:00:00Z',
           captureId: 'cap-email-backlog',
         },
@@ -2793,12 +2800,14 @@ test('scanAssistantAutomationOnce advances each enabled channel cursor independe
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:05:00Z',
           captureId: 'cap-telegram-new',
         },
       },
     ],
     autoReplyScanCursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-email-backlog',
     },
@@ -3056,6 +3065,7 @@ test('scanAssistantAutomationOnce keeps per-channel reply cursors authoritative 
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:05:00Z',
           captureId: 'cap-telegram-new',
         },
@@ -3291,12 +3301,14 @@ test('scanAssistantAutomationOnce pages past interleaved other-channel captures 
       {
         channel: 'email',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:01:00Z',
           captureId: 'cap-email-backlog-later',
         },
       },
     ],
     autoReplyScanCursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:01:00Z',
       captureId: 'cap-email-backlog-later',
     },
@@ -3578,6 +3590,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
       {
         channel: 'email',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:04:30Z',
           captureId: 'cap-unified-2',
         },
@@ -3588,6 +3601,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
       },
     ],
     autoReplyScanCursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:04:30Z',
       captureId: 'cap-unified-2',
     },
@@ -3598,6 +3612,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
       {
         channel: 'email',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:04:30Z',
           captureId: 'cap-unified-2',
         },
@@ -3605,12 +3620,14 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:05:00Z',
           captureId: 'cap-unified-later',
         },
       },
     ],
     autoReplyScanCursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:04:30Z',
       captureId: 'cap-unified-2',
     },
@@ -3842,12 +3859,14 @@ test('scanAssistantAutoReplyOnce replies to offline Telegram messages after the 
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:05:00Z',
           captureId: 'cap-new',
         },
       },
     ],
     cursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:05:00Z',
       captureId: 'cap-new',
     },
@@ -4012,12 +4031,14 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:05:00Z',
           captureId: 'cap-new',
         },
       },
     ],
     cursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:05:00Z',
       captureId: 'cap-new',
     },
@@ -4438,12 +4459,14 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email offline catch-up in
       {
         channel: 'email',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:00:00Z',
           captureId: 'cap-email-3',
         },
       },
     ],
     cursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-email-3',
     },
@@ -5030,12 +5053,14 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
         {
           channel: 'telegram',
           cursor: {
+            createdAt: null,
             occurredAt: '2026-03-18T09:01:00Z',
             captureId: 'cap-skip',
           },
         },
       ],
       cursor: {
+        createdAt: null,
         occurredAt: '2026-03-18T09:01:00Z',
         captureId: 'cap-skip',
       },
@@ -5562,12 +5587,14 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
       {
         channel: 'email',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:02:30Z',
           captureId: 'cap-partial-2',
         },
       },
     ],
     cursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:02:30Z',
       captureId: 'cap-partial-2',
     },
@@ -5770,12 +5797,14 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
         {
           channel: 'email',
           cursor: {
+            createdAt: null,
             occurredAt: '2026-03-18T09:02:00Z',
             captureId: 'cap-zero-artifact',
           },
         },
       ],
       cursor: {
+        createdAt: null,
         occurredAt: '2026-03-18T09:02:00Z',
         captureId: 'cap-zero-artifact',
       },
@@ -6205,12 +6234,14 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:10:00Z',
           captureId: 'cap-stall',
         },
       },
     ],
     cursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:10:00Z',
       captureId: 'cap-stall',
     },
@@ -6801,12 +6832,14 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:01:00Z',
           captureId: 'cap-pass',
         },
       },
     ],
     cursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:01:00Z',
       captureId: 'cap-pass',
     },
@@ -7020,12 +7053,14 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
       {
         channel: 'telegram',
         cursor: {
+          createdAt: null,
           occurredAt: '2026-03-18T09:00:00Z',
           captureId: 'cap-usage-limit',
         },
       },
     ],
     cursor: {
+      createdAt: null,
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-usage-limit',
     },
@@ -7660,6 +7695,7 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
 
   const state = await readAssistantAutomationState(vaultRoot)
   assert.deepEqual(state.inboxScanCursor, {
+    createdAt: null,
     occurredAt: '2026-03-18T09:05:00Z',
     captureId: 'cap-new',
   })
@@ -7667,6 +7703,7 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
     {
       channel: 'telegram',
       cursor: {
+        createdAt: null,
         occurredAt: '2026-03-18T09:05:00Z',
         captureId: 'cap-new',
       },

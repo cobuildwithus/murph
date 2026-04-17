@@ -79,6 +79,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberRouting",
   "HostedRevnetIssuance",
   "HostedWake",
+  "HostedWakePayload",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -111,12 +112,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedWakePayloadSpillMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604172330_hosted_wake_payload_spill/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "202604141730_hosted_member_identity_optional_phone",
       "202604161130_hosted_web_owner_slices",
       "202604161430_device_sync_web_owner_runtime_state",
       "202604171900_hosted_wake_substrate",
+      "202604172330_hosted_wake_payload_spill",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
@@ -145,6 +154,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(deviceSyncRuntimeStateMigrationSql).toContain(
       'ADD COLUMN "refresh_token_encrypted" TEXT',
+    );
+    expect(hostedWakePayloadSpillMigrationSql).toContain(
+      'CREATE TABLE "hosted_wake_payload"',
+    );
+    expect(hostedWakePayloadSpillMigrationSql).toContain(
+      'CREATE INDEX "hosted_wake_payload_user_id_idx"',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
