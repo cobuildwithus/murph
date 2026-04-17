@@ -40,6 +40,7 @@ describe("browser vault session route", () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn().mockResolvedValue({
       rootKeyEnvelope: null,
+      snapshotAad: null,
       snapshotEnvelope: null,
     });
 
@@ -61,6 +62,7 @@ describe("browser vault session route", () => {
     );
     await expect(response.json()).resolves.toEqual({
       rootKeyEnvelope: null,
+      snapshotAad: null,
       snapshotEnvelope: null,
     });
   });
