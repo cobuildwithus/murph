@@ -8,7 +8,7 @@ import {
   hostedRunnerRuntimePackageName,
 } from "../runner-bundle-contract.js";
 
-import { runPnpmCommand } from "./process.js";
+import { runNpmCommand, runPnpmCommand } from "./process.js";
 
 interface WorkspacePackageManifest {
   dependencies?: Record<string, string>;
@@ -119,18 +119,11 @@ async function packWorkspacePackage(
   },
 ): Promise<string> {
   const before = new Set(await readdir(tarballsDir));
+  const packageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
 
-  await runPnpmCommand(
-    [
-      "--config.node-linker=hoisted",
-      "--filter",
-      packageName,
-      "pack",
-      "--pack-destination",
-      tarballsDir,
-    ],
-    { cwd: input.repoRoot },
-  );
+  await runNpmCommand(["pack", "--pack-destination", tarballsDir], {
+    cwd: packageDir,
+  });
 
   const tarballName = (await readdir(tarballsDir)).find(
     (entry) => !before.has(entry) && entry.endsWith(".tgz"),
@@ -141,6 +134,36 @@ async function packWorkspacePackage(
   }
 
   return path.join(tarballsDir, tarballName);
+}
+
+async function resolveWorkspacePackageDirectory(
+  repoRoot: string,
+  packageName: string,
+): Promise<string> {
+  for (const memberType of ["apps", "packages"]) {
+    const membersDir = path.join(repoRoot, memberType);
+    for (const entry of await readdir(membersDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const candidateDir = path.join(membersDir, entry.name);
+      const packageJsonPath = path.join(candidateDir, "package.json");
+
+      try {
+        const packageJson = JSON.parse(
+          await readFile(packageJsonPath, "utf8"),
+        ) as { name?: string };
+        if (packageJson.name === packageName) {
+          return candidateDir;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  throw new Error(`Could not resolve workspace package directory for ${packageName}.`);
 }
 
 function createBundleOnlyWorkspaceDependencySpecs<
