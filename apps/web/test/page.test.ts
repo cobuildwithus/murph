@@ -100,7 +100,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /data-root-landing-auth-actions-label="See what works for your body"/
   );
-  assert.match(markup, /Figure out what actually makes you healthier\./);
+  assert.match(markup, /Discover what actually makes you healthier\./);
   assert.match(
     markup,
     /data-root-landing-auth-actions-label="Create your account"/
@@ -145,5 +145,5 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
     undefined
   );
   assert.match(markup, /You’re already set up\./);
-  assert.doesNotMatch(markup, /Figure out what actually makes you healthier\./);
+  assert.doesNotMatch(markup, /Discover what actually makes you healthier\./);
 });
