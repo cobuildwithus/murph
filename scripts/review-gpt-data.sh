@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 vault_override=""
 has_send_override=0
+chat_url=""
 declare -a forward_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -20,6 +21,20 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vault=*)
       vault_override="${1#*=}"
+      shift
+      ;;
+    --chat-url)
+      [[ $# -ge 2 ]] || {
+        echo "Error: --chat-url requires a value." >&2
+        exit 1
+      }
+      chat_url="$2"
+      forward_args+=("$1" "$2")
+      shift 2
+      ;;
+    --chat-url=*)
+      chat_url="${1#*=}"
+      forward_args+=("$1")
       shift
       ;;
     --send|--submit|--no-send)
@@ -42,4 +57,30 @@ if [[ "$has_send_override" == "0" ]]; then
   forward_args=(--send "${forward_args[@]}")
 fi
 
-exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.data.config.sh "${forward_args[@]}"
+tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt-data.XXXXXX.log")"
+
+set +e
+pnpm exec cobuild-review-gpt --config scripts/review-gpt.data.config.sh "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
+command_status="${PIPESTATUS[0]}"
+set -e
+
+if [[ "$command_status" -ne 0 && -n "$chat_url" ]]; then
+  set +e
+  diagnostics_dir="$(
+    node scripts/review-gpt-diagnostics.mjs \
+      --chat-url "$chat_url" \
+      --command-label review:gpt:data \
+      --exit-code "$command_status" \
+      --log-file "$tmp_log_path"
+  )"
+  diagnostics_status=$?
+  set -e
+  if [[ "$diagnostics_status" -eq 0 && -n "$diagnostics_dir" ]]; then
+    echo "review:gpt:data diagnostics: ${diagnostics_dir}" >&2
+  else
+    echo "review:gpt:data diagnostics failed" >&2
+  fi
+fi
+
+rm -f "$tmp_log_path"
+exit "$command_status"
