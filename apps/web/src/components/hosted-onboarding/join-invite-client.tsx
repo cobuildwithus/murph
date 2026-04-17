@@ -4,7 +4,6 @@ import { useEffect, useEffectEvent, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type {
   HostedInviteStatusPayload,
@@ -175,57 +174,53 @@ export function JoinInviteClient({
   }
 
   return (
-    <div className="space-y-5">
-      <Card className="border-[#c4a882]/20 bg-[#fefdf8] shadow-sm">
-        <CardHeader className="gap-4">
-          <Badge variant="secondary" className="w-fit">
-            Murph signup
-          </Badge>
-          <div className="space-y-3">
-            <CardTitle className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
-              {resolveJoinInviteTitle(status)}
-            </CardTitle>
-            <CardDescription className="text-base leading-relaxed text-muted-foreground">
-              {resolveJoinInviteSubtitle(status)}
-            </CardDescription>
-          </div>
-        </CardHeader>
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-4">
+        <Badge variant="secondary" className="w-fit">
+          Murph signup
+        </Badge>
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
+          {resolveJoinInviteTitle(status)}
+        </h1>
+        <p className="text-base leading-relaxed text-muted-foreground">
+          {resolveJoinInviteSubtitle(status)}
+        </p>
+      </div>
 
-        <CardContent className="flex flex-col gap-4">
-          {errorMessage ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to continue</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          ) : null}
+      <div className="flex flex-col gap-4">
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>Unable to continue</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
 
-          {sharePreview ? (
-            <JoinInviteSharePreviewAlert sharePreview={sharePreview} />
-          ) : null}
+        {sharePreview ? (
+          <JoinInviteSharePreviewAlert sharePreview={sharePreview} />
+        ) : null}
 
-          <JoinInviteStageContent
-            authenticated={status.session.authenticated}
-            awaitingInviteSessionResolution={awaitingInviteSessionResolution}
-            checkoutPending={checkoutPending}
-            initialLinkedAccounts={initialLinkedAccounts}
-            inviteCode={inviteCode}
-            pendingAction={pendingAction}
-            shareImportState={shareImportState}
-            sharePreview={sharePreview}
-            status={status}
-            statusRefreshErrorMessage={statusRefreshErrorMessage}
-            statusRefreshRetryPending={statusRefreshRetryPending}
-            onAcceptShare={handleAcceptShare}
-            onCheckout={startCheckout}
-            onPhoneVerified={handlePhoneVerified}
-            onRefreshStatus={refreshStatus}
-            onRetryStatusRefresh={handleRetryStatusRefresh}
-            onSignOut={async () => {
-              await refreshStatus();
-            }}
-          />
-        </CardContent>
-      </Card>
+        <JoinInviteStageContent
+          authenticated={status.session.authenticated}
+          awaitingInviteSessionResolution={awaitingInviteSessionResolution}
+          checkoutPending={checkoutPending}
+          initialLinkedAccounts={initialLinkedAccounts}
+          inviteCode={inviteCode}
+          pendingAction={pendingAction}
+          shareImportState={shareImportState}
+          sharePreview={sharePreview}
+          status={status}
+          statusRefreshErrorMessage={statusRefreshErrorMessage}
+          statusRefreshRetryPending={statusRefreshRetryPending}
+          onAcceptShare={handleAcceptShare}
+          onCheckout={startCheckout}
+          onPhoneVerified={handlePhoneVerified}
+          onRefreshStatus={refreshStatus}
+          onRetryStatusRefresh={handleRetryStatusRefresh}
+          onSignOut={async () => {
+            await refreshStatus();
+          }}
+        />
+      </div>
     </div>
   );
 }

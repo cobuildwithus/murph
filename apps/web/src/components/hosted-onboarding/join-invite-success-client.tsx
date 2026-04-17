@@ -7,7 +7,6 @@ import { AlertCircleIcon, CheckCircleIcon, LoaderCircleIcon } from "lucide-react
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
@@ -94,43 +93,47 @@ export function JoinInviteSuccessClient({
   const successState = resolveHostedInviteSuccessState(status);
 
   return (
-    <Card className="border-[#c4a882]/20 bg-[#fefdf8] shadow-sm">
-      <CardHeader className="gap-5">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-olive/10">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
           {successState.variant === "active" ? (
-            <CheckCircleIcon className="h-6 w-6 text-olive" />
+            <CheckCircleIcon className="size-4" />
           ) : successState.variant === "pending" ? (
-            <LoaderCircleIcon className="h-6 w-6 animate-spin text-olive" />
+            <LoaderCircleIcon className="size-4 animate-spin" />
           ) : (
-            <AlertCircleIcon className="h-6 w-6 text-olive" />
+            <AlertCircleIcon className="size-4" />
           )}
+          <span>
+            {successState.variant === "active"
+              ? "Ready"
+              : successState.variant === "pending"
+              ? "Working on it"
+              : "Something went wrong"}
+          </span>
         </div>
-        <div className="space-y-3">
-          <CardTitle className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
-            {successState.title}
-          </CardTitle>
-          <CardDescription className="leading-relaxed text-muted-foreground">{successState.description}</CardDescription>
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
+          {successState.title}
+        </h1>
+        <p className="leading-relaxed text-muted-foreground">{successState.description}</p>
+      </div>
+
+      {successState.pending ? (
+        <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
+          We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {successState.pending ? (
-          <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
-            We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
-          </div>
-        ) : null}
+      ) : null}
 
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to refresh status</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to refresh status</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
 
-        <Button render={<Link href={href} />} nativeButton={false} size="lg">
-          {successState.buttonLabel}
-        </Button>
-      </CardContent>
-    </Card>
+      <Button render={<Link href={href} />} nativeButton={false} size="lg" className="w-fit">
+        {successState.buttonLabel}
+      </Button>
+    </div>
   );
 }
 
