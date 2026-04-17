@@ -3,7 +3,6 @@
 import { useEffect, useEffectEvent, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type {
   HostedInviteStatusPayload,
@@ -175,10 +174,11 @@ export function JoinInviteClient({
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-4">
-        <Badge variant="secondary" className="w-fit">
-          Murph signup
-        </Badge>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
+          <span className="size-1 rounded-full bg-olive/70" />
+          <span>Murph signup</span>
+        </div>
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
           {resolveJoinInviteTitle(status)}
         </h1>
