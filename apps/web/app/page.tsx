@@ -54,7 +54,7 @@ export default async function HomePage() {
         metaItems: ["$5/month early access", "Oura, WHOOP, Strava, and Garmin"],
         note: null,
         signupLabel: "Create your account",
-        title: "Figure out what actually makes you healthier.",
+        title: "Discover what actually makes you healthier.",
       };
 
   return (
