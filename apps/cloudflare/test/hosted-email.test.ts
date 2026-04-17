@@ -230,8 +230,16 @@ describe("hosted email routing and transport", () => {
     expect((sentMessage as { raw: string }).raw).toContain(threadTarget?.replyAliasAddress ?? "");
   });
 
-  it("rejects participant-target sends on the hosted email bridge", async () => {
+  it("rejects thread subject overrides on the hosted email bridge", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
+    const threadTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
+      cc: [],
+      lastMessageId: "<thread@example.test>",
+      references: ["<thread@example.test>"],
+      replyAliasAddress: "reply@mail.example.test",
+      subject: "Existing subject",
+      to: ["owner@example.com"],
+    }));
 
     await expect(sendHostedEmailMessage({
       bucket,
@@ -244,11 +252,12 @@ describe("hosted email routing and transport", () => {
       request: {
         identityId: null,
         message: "hello from murph",
-        target: "participant_123",
-        targetKind: "participant",
+        subject: "Should be rejected",
+        target: threadTarget,
+        targetKind: "thread",
       },
       userId: "user_123",
-    })).rejects.toThrow(/participant delivery is not supported/u);
+    })).rejects.toThrow(/preserves the existing subject/u);
   });
 
   it("collapses thread-target sends to the primary recipient while preserving reply headers", async () => {

@@ -359,6 +359,32 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
+  it('rejects direct outbox intent creation for email thread subjects before persisting', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-intent-thread-subject-')
+
+    await expect(
+      createAssistantOutboxIntent({
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'thread-email-intent',
+        },
+        channel: 'email',
+        identityId: 'assistant@example.com',
+        message: 'queue this email thread reply',
+        sessionId: 'session-intent-email',
+        subject: 'Should be rejected',
+        threadId: 'thread-email-intent',
+        threadIsDirect: true,
+        turnId: 'turn-intent-email',
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow(
+      'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+    )
+
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
+  })
+
   it('materializes Linq first-contact chats from receipt metadata and upgrades the session binding', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-first-contact-')
 
