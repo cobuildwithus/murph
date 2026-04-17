@@ -4,7 +4,7 @@ import {
   entityRelationTargetIds,
   listEntities,
   type VaultReadModel,
-} from "./model.ts";
+} from "./read-model.ts";
 import {
   summarizeDailySamples,
   type DailySampleSummary,

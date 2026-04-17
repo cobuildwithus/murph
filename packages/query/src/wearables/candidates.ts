@@ -1,7 +1,7 @@
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import type { VaultReadModel } from "../model.ts";
+import type { VaultReadModel } from "../read-model.ts";
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
 import { formatProviderName } from "./provider-policy.ts";
 import {

@@ -43,10 +43,12 @@ import {
 } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
 import type { HostedExecutionContainerNamespaceLike } from "./runner-container.ts";
-import { hostedBrowserVaultSnapshotObjectKey } from "./storage-paths.ts";
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
-import { createHostedBrowserVaultSnapshotStore } from "./browser-vault-store.ts";
+import {
+  createHostedBrowserVaultSnapshotStore,
+  resolveHostedBrowserVaultSnapshotStorageRef,
+} from "./browser-vault-store.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -345,7 +347,6 @@ async function handleBrowserVaultSessionRoute(
     bucket: context.env.BUNDLES,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
   });
   const snapshotEnvelope = await snapshotStore.readBrowserVaultSnapshotEnvelope(userId);
 
@@ -358,7 +359,10 @@ async function handleBrowserVaultSessionRoute(
   }
 
   const nowIso = new Date().toISOString();
-  const snapshotObjectKey = await hostedBrowserVaultSnapshotObjectKey(crypto.rootKey, userId);
+  const snapshotStorageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
+    rootKey: crypto.rootKey,
+    userId,
+  });
   const recipient = await wrapHostedUserRootKeyRecipient({
     recipient: {
       keyId: `browser-session:${globalThis.crypto.randomUUID()}`,
@@ -380,9 +384,7 @@ async function handleBrowserVaultSessionRoute(
       userId,
     },
     snapshotAad: {
-      key: snapshotObjectKey,
-      purpose: "browser-vault-snapshot",
-      userId,
+      ...snapshotStorageRef.aadFields,
     },
     snapshotEnvelope,
   });

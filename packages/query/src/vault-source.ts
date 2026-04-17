@@ -24,8 +24,9 @@ import { walkRelativeFiles } from "./health/loaders.ts";
 import { collapseEventLedgerEntities } from "./health/projectors/history.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import { parseMarkdownDocument } from "./markdown.ts";
+import type { QueryRecordData } from "./query-record-data.ts";
 
-export type QueryRecordData = Record<string, unknown>;
+export type { QueryRecordData } from "./query-record-data.ts";
 
 type FrontmatterRecordType = "core" | "experiment" | "journal";
 type JsonRecordType = "audit" | "event" | "sample";
