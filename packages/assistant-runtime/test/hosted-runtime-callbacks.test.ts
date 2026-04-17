@@ -214,6 +214,35 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("rejects hosted email participant routes before collecting committed delivery effects", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "participant", target: "user@example.com" },
+        channel: "email",
+        dedupeKey: "dedupe_email_participant",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "assistant@example.com",
+        intentId: "intent_email_participant",
+        message: "hello 1",
+        replyToMessageId: null,
+        sessionId: "session_1",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+    ]);
+
+    await expect(
+      collectHostedAssistantDeliverySideEffects("/tmp/vault"),
+    ).rejects.toMatchObject({
+      code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
+    });
+  });
+
   it("returns sent without re-sending when the journal already has a sent record", async () => {
     const effect = createEffect();
     const effectsPort = createHostedRuntimeEffectsPortStub({
@@ -438,6 +467,35 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     );
+  });
+
+  it("rejects hosted email participant routes before journaling or sending", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "participant",
+      bindingDeliveryTarget: "user@example.com",
+      channel: "email",
+      explicitTarget: null,
+      identityId: "assistant@example.com",
+    });
+    const writeAssistantDeliveryRecord = vi.fn(async (record: HostedAssistantDeliveryRecord) => record);
+    const effectsPort = createHostedRuntimeEffectsPortStub({
+      async writeAssistantDeliveryRecord(record) {
+        return await writeAssistantDeliveryRecord(record);
+      },
+    });
+
+    await expect(
+      drainHostedCommittedAssistantDeliveriesAfterCommit({
+        assistantDeliveryEffects: [effect],
+        dispatch: HOSTED_DISPATCH.dispatch,
+        effectsPort,
+        vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
+    });
+    expect(writeAssistantDeliveryRecord).not.toHaveBeenCalled();
+    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
   });
 
   it("marks non-idempotent ambiguous send failures terminal without auto-retry", async () => {

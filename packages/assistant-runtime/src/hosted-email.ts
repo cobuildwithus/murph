@@ -1,11 +1,6 @@
-import {
-  gatewayDeliveryTargetKindValues,
-  type GatewayDeliveryTargetKind,
-} from "@murphai/gateway-core";
+export const hostedEmailSendTargetKindValues = ["explicit", "thread"] as const;
 
-export const hostedEmailSendTargetKindValues = gatewayDeliveryTargetKindValues;
-
-export type HostedEmailSendTargetKind = GatewayDeliveryTargetKind;
+export type HostedEmailSendTargetKind = (typeof hostedEmailSendTargetKindValues)[number];
 
 export interface HostedEmailSendRequest {
   identityId: string | null;
@@ -87,5 +82,5 @@ function requireHostedEmailSendTargetKind(
     return targetKind as HostedEmailSendTargetKind;
   }
 
-  throw new TypeError(`${label} must be explicit, participant, or thread.`);
+  throw new TypeError(`${label} must be explicit or thread.`);
 }
