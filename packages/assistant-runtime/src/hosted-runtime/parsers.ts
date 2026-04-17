@@ -1,5 +1,5 @@
 import {
-  parseSerializableConfiguredDeviceSyncProviderConfigs,
+  parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
 import type {
   HostedExecutionRunnerResult,
@@ -148,23 +148,7 @@ function parseHostedAssistantRuntimeDeviceSyncConfig(
   value: unknown,
   label: string,
 ): HostedAssistantRuntimeDeviceSyncConfig {
-  const record = requireObject(value, label);
-
-  return {
-    providerConfigs: parseConfiguredDeviceSyncProviderConfigs(
-      record.providerConfigs,
-      `${label}.providerConfigs`,
-    ),
-    publicBaseUrl: requireString(record.publicBaseUrl, `${label}.publicBaseUrl`),
-    secret: requireString(record.secret, `${label}.secret`),
-  };
-}
-
-function parseConfiguredDeviceSyncProviderConfigs(
-  value: unknown,
-  label: string,
-): HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"] {
-  return parseSerializableConfiguredDeviceSyncProviderConfigs(value, label);
+  return parseConfiguredDeviceSyncRuntimeConfig(value, label);
 }
 
 function parseHostedAssistantRuntimeResume(
