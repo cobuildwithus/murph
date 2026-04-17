@@ -2,7 +2,25 @@
 
 import { useEffect, useEffectEvent, useState } from "react";
 
+import { AlertCircleIcon } from "lucide-react";
+
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { cn } from "@/src/lib/utils";
+
+function resolveJoinInviteEyebrow(
+  stage: HostedInviteStatusPayload["stage"],
+): { label: string; tone: "default" | "danger" } {
+  switch (stage) {
+    case "invalid":
+      return { label: "Invite not valid", tone: "danger" };
+    case "expired":
+      return { label: "Invite expired", tone: "danger" };
+    case "blocked":
+      return { label: "Account blocked", tone: "danger" };
+    default:
+      return { label: "Murph signup", tone: "default" };
+  }
+}
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type {
   HostedInviteStatusPayload,
@@ -175,12 +193,23 @@ export function JoinInviteClient({
     );
   }
 
+  const eyebrow = resolveJoinInviteEyebrow(status.stage);
+
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
-          <span className="size-1 rounded-full bg-olive/70" />
-          <span>Murph signup</span>
+        <div
+          className={cn(
+            "flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em]",
+            eyebrow.tone === "danger" ? "text-destructive" : "text-olive/80",
+          )}
+        >
+          {eyebrow.tone === "danger" ? (
+            <AlertCircleIcon className="size-3.5" />
+          ) : (
+            <span className="size-1 rounded-full bg-olive/70" />
+          )}
+          <span>{eyebrow.label}</span>
         </div>
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
           {resolveJoinInviteTitle(status)}
