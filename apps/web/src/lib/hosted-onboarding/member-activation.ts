@@ -13,6 +13,12 @@ import {
   enqueueHostedExecutionOutbox,
 } from "../hosted-execution/outbox";
 import {
+  appendHostedOrderedDispatchWakeTx,
+} from "../hosted-wake/dispatch";
+import {
+  isHostedWakeSimpleProducerDualWriteEnabled,
+} from "../hosted-wake/flags";
+import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
@@ -90,16 +96,25 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       sourceEventId: input.sourceEventId,
       sourceType: input.sourceType,
     });
+    const wakeDualWriteEnabled = isHostedWakeSimpleProducerDualWriteEnabled();
+
     await enqueueHostedExecutionOutbox({
       dispatch,
       sourceId: input.sourceEventId,
       sourceType: "hosted_revnet_issuance",
       tx: input.prisma,
     });
+    if (wakeDualWriteEnabled) {
+      await appendHostedOrderedDispatchWakeTx({
+        dispatch,
+        tx: input.prisma,
+      });
+    }
 
     finishHostedOnboardingTiming(timing, "completed", {
       activated: true,
       outboxEnqueued: true,
+      wakeAppended: wakeDualWriteEnabled,
     });
 
     return {
@@ -220,12 +235,20 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
+  const wakeDualWriteEnabled = isHostedWakeSimpleProducerDualWriteEnabled();
   const outboxRecord = await enqueueHostedExecutionOutbox({
     dispatch,
     sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
     sourceType: "hosted_stripe_event",
     tx: input.prisma,
   });
+
+  if (wakeDualWriteEnabled) {
+    await appendHostedOrderedDispatchWakeTx({
+      dispatch,
+      tx: input.prisma,
+    });
+  }
 
   return {
     activated: true,

@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedCoalescingDispatchWakeTx: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
@@ -11,6 +12,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+}));
+
+vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
+  appendHostedCoalescingDispatchWakeTx: mocks.appendHostedCoalescingDispatchWakeTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -44,10 +49,38 @@ import {
 describe("hosted onboarding member channel sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
+    mocks.appendHostedCoalescingDispatchWakeTx.mockResolvedValue({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: {
+        behavior: "coalescing",
+        coalescingKey: "member.channels.updated:member_123",
+        createdAt: "2026-04-15T00:00:00.000Z",
+        dedupeKey: "dispatch:member.channels.updated:member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+        id: "wake_123",
+        kind: "member.channels.updated",
+        occurredAt: "2026-04-15T00:00:00.000Z",
+        payloadBytes: 1,
+        payloadInlineCiphertext: "ciphertext",
+        payloadRef: null,
+        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        quarantineCode: null,
+        quarantinedAt: null,
+        seq: "1",
+        updatedAt: "2026-04-15T00:00:00.000Z",
+        userId: "member_123",
+      },
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
   });
 
   it("treats a verified Privy email as authoritative without consulting canonical email authorization", async () => {
@@ -151,6 +184,41 @@ describe("hosted onboarding member channel sync", () => {
       tx,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
+    expect(mocks.appendHostedCoalescingDispatchWakeTx).not.toHaveBeenCalled();
+  });
+
+  it("dual-writes a coalescing hosted wake only when the shadow producer flag is enabled", async () => {
+    process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE = "true";
+
+    const tx = {
+      label: "test-prisma-tx",
+    };
+
+    await enqueueHostedMemberChannelsUpdatedTx({
+      emailLinked: true,
+      memberId: "member_123",
+      occurredAt: "2026-04-15T00:00:00.000Z",
+      prisma: tx as never,
+      sourceType: "settings.phone.sync",
+    });
+
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedCoalescingDispatchWakeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedCoalescingDispatchWakeTx).toHaveBeenCalledWith({
+      coalescingKey: "member.channels.updated:member_123",
+      dispatch: expect.objectContaining({
+        eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+        event: expect.objectContaining({
+          kind: "member.channels.updated",
+          memberChannels: {
+            email: true,
+            linq: true,
+            telegram: true,
+          },
+        }),
+      }),
+      tx,
+    });
   });
 });
 

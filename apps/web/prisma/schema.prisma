@@ -203,6 +203,12 @@ enum HostedWebhookReceiptSideEffectStatus {
   sent_unconfirmed
 }
 
+enum HostedWakeBehavior {
+  ordered
+  coalescing
+  edge_triggered
+}
+
 model HostedMember {
   id              String                  @id
   billingStatus   HostedBillingStatus     @default(not_started) @map("billing_status")
@@ -217,6 +223,8 @@ model HostedMember {
   routing         HostedMemberRouting?
   billingRef      HostedMemberBillingRef?
   emailAuthorization HostedMemberEmailAuthorization?
+  executionCursor HostedExecutionCursor?
+  hostedWakes     HostedWake[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -295,6 +303,45 @@ model HostedMemberEmailAuthorization {
   member                           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_email_authorization")
+}
+
+model HostedExecutionCursor {
+  userId       String       @id @map("user_id")
+  nextSeq      BigInt       @default(1) @map("next_seq")
+  committedSeq BigInt       @default(0) @map("committed_seq")
+  snapshotRef  Json?        @map("snapshot_ref")
+  version      BigInt       @default(0) @map("version")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  member       HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_execution_cursor")
+}
+
+model HostedWake {
+  id                    String             @id
+  userId                String             @map("user_id")
+  seq                   BigInt             @map("seq")
+  kind                  String
+  behavior              HostedWakeBehavior
+  dedupeKey             String?            @unique @map("dedupe_key")
+  coalescingKey         String?            @map("coalescing_key")
+  occurredAt            DateTime           @map("occurred_at")
+  payloadSchema         String             @map("payload_schema")
+  payloadInlineCiphertext String?          @map("payload_inline_ciphertext")
+  payloadRef            String?            @map("payload_ref")
+  payloadBytes          Int?               @map("payload_bytes")
+  quarantinedAt         DateTime?          @map("quarantined_at")
+  quarantineCode        String?            @map("quarantine_code")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  member                HostedMember       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, seq])
+  @@index([userId, seq])
+  @@index([userId, coalescingKey, seq])
+  @@index([userId, kind, seq])
+  @@map("hosted_wake")
 }
 
 model HostedInvite {

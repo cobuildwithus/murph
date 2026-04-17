@@ -8,6 +8,10 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
+import {
+  HOSTED_WAKE_BEHAVIORS,
+} from "./contracts.ts";
+
 import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionDispatchLifecycleState,
@@ -21,6 +25,7 @@ import type {
   HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionEvent,
   HostedExecutionGatewayMessageSendEvent,
+  HostedExecutionCursorState,
   HostedExecutionMemberActivatedEvent,
   HostedExecutionTelegramMessageReceivedEvent,
   HostedExecutionRunnerRequest,
@@ -29,6 +34,10 @@ import type {
   HostedExecutionShareReference,
   HostedExecutionUserStatus,
   HostedExecutionVaultShareAcceptedEvent,
+  HostedWakeBehavior,
+  HostedWakeCommitResponse,
+  HostedWakeFetchResponse,
+  HostedWakeRecord,
 } from "./contracts.ts";
 import {
   type HostedExecutionBundlePayload,
@@ -549,6 +558,109 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
   value: unknown,
 ): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   return parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse(value);
+}
+
+export function parseHostedExecutionCursorState(
+  value: unknown,
+): HostedExecutionCursorState {
+  const record = requireObject(value, "Hosted execution cursor state");
+
+  return {
+    committedSeq: requireBigIntString(
+      record.committedSeq,
+      "Hosted execution cursor state committedSeq",
+    ),
+    createdAt: requireString(record.createdAt, "Hosted execution cursor state createdAt"),
+    nextSeq: requireBigIntString(record.nextSeq, "Hosted execution cursor state nextSeq"),
+    snapshotRef: record.snapshotRef ?? null,
+    updatedAt: requireString(record.updatedAt, "Hosted execution cursor state updatedAt"),
+    userId: requireString(record.userId, "Hosted execution cursor state userId"),
+    version: requireBigIntString(record.version, "Hosted execution cursor state version"),
+  };
+}
+
+export function parseHostedWakeRecord(
+  value: unknown,
+): HostedWakeRecord {
+  const record = requireObject(value, "Hosted wake record");
+
+  return {
+    behavior: parseHostedWakeBehavior(record.behavior),
+    coalescingKey: readOptionalNullableString(
+      record.coalescingKey,
+      "Hosted wake record coalescingKey",
+    ),
+    createdAt: requireString(record.createdAt, "Hosted wake record createdAt"),
+    dedupeKey: readOptionalNullableString(record.dedupeKey, "Hosted wake record dedupeKey"),
+    id: requireString(record.id, "Hosted wake record id"),
+    kind: requireString(record.kind, "Hosted wake record kind"),
+    occurredAt: requireString(record.occurredAt, "Hosted wake record occurredAt"),
+    payloadBytes: record.payloadBytes === undefined || record.payloadBytes === null
+      ? null
+      : requireNumber(record.payloadBytes, "Hosted wake record payloadBytes"),
+    payloadInlineCiphertext: readOptionalNullableString(
+      record.payloadInlineCiphertext,
+      "Hosted wake record payloadInlineCiphertext",
+    ),
+    payloadRef: readOptionalNullableString(record.payloadRef, "Hosted wake record payloadRef"),
+    payloadSchema: requireString(record.payloadSchema, "Hosted wake record payloadSchema"),
+    quarantineCode: readOptionalNullableString(
+      record.quarantineCode,
+      "Hosted wake record quarantineCode",
+    ),
+    quarantinedAt: readOptionalNullableString(
+      record.quarantinedAt,
+      "Hosted wake record quarantinedAt",
+    ),
+    seq: requireBigIntString(record.seq, "Hosted wake record seq"),
+    updatedAt: requireString(record.updatedAt, "Hosted wake record updatedAt"),
+    userId: requireString(record.userId, "Hosted wake record userId"),
+  };
+}
+
+export function parseHostedWakeFetchResponse(
+  value: unknown,
+): HostedWakeFetchResponse {
+  const record = requireObject(value, "Hosted wake fetch response");
+
+  return {
+    cursor: parseHostedExecutionCursorState(record.cursor),
+    wakes: requireArray(record.wakes, "Hosted wake fetch response wakes")
+      .map((entry) => parseHostedWakeRecord(entry)),
+  };
+}
+
+export function parseHostedWakeCommitResponse(
+  value: unknown,
+): HostedWakeCommitResponse {
+  const record = requireObject(value, "Hosted wake commit response");
+
+  return {
+    committed: requireBoolean(record.committed, "Hosted wake commit response committed"),
+    cursor: parseHostedExecutionCursorState(record.cursor),
+  };
+}
+
+function parseHostedWakeBehavior(value: unknown): HostedWakeBehavior {
+  const behavior = requireString(value, "Hosted wake record behavior");
+
+  if (HOSTED_WAKE_BEHAVIORS.includes(behavior as HostedWakeBehavior)) {
+    return behavior as HostedWakeBehavior;
+  }
+
+  throw new TypeError(`Unsupported hosted wake behavior: ${behavior}`);
+}
+
+function requireBigIntString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  try {
+    BigInt(text);
+  } catch {
+    throw new TypeError(`${label} must be a base-10 integer string.`);
+  }
+
+  return text;
 }
 
 function parseHostedExecutionDispatchLifecycleState(
