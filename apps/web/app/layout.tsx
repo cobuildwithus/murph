@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, DM_Sans, DM_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import Script from "next/script";
 
 import { Providers } from "./providers";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
@@ -78,6 +79,9 @@ export default function RootLayout(input: { children: React.ReactNode }) {
         </Providers>
         <Analytics />
         <SpeedInsights />
+        {process.env.NODE_ENV === "development" ? (
+          <Script src="https://ui.sh/ui-picker.js" />
+        ) : null}
       </body>
     </html>
   );

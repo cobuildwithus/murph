@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/ta
 import { Progress } from "@/src/components/ui/progress";
 import { Separator } from "@/src/components/ui/separator";
 import { Input } from "@/src/components/ui/input";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
 import { Label } from "@/src/components/ui/label";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
@@ -83,6 +84,24 @@ export function ComponentsContent() {
               <Label htmlFor="disabled-ds">Disabled</Label>
               <Input id="disabled-ds" placeholder="Can't edit this" disabled />
             </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Input OTP">
+          <div className="grid gap-2">
+            <Label htmlFor="otp-ds">Verification code</Label>
+            <InputOTP id="otp-ds" maxLength={6} autoComplete="one-time-code">
+              <InputOTPGroup>
+                <InputOTPSlot index={0} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={1} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={2} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={3} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={4} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={5} className="size-11 bg-card text-base" />
+              </InputOTPGroup>
+            </InputOTP>
           </div>
         </Section>
 
