@@ -43,6 +43,7 @@ import {
 } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
 import type { HostedExecutionContainerNamespaceLike } from "./runner-container.ts";
+import { hostedBrowserVaultSnapshotObjectKey } from "./storage-paths.ts";
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import { createHostedBrowserVaultSnapshotStore } from "./browser-vault-store.ts";
@@ -351,11 +352,13 @@ async function handleBrowserVaultSessionRoute(
   if (!snapshotEnvelope) {
     return json({
       rootKeyEnvelope: null,
+      snapshotAad: null,
       snapshotEnvelope: null,
     });
   }
 
   const nowIso = new Date().toISOString();
+  const snapshotObjectKey = await hostedBrowserVaultSnapshotObjectKey(crypto.rootKey, userId);
   const recipient = await wrapHostedUserRootKeyRecipient({
     recipient: {
       keyId: `browser-session:${globalThis.crypto.randomUUID()}`,
@@ -374,6 +377,11 @@ async function handleBrowserVaultSessionRoute(
       rootKeyId: crypto.rootKeyId,
       schema: HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
       updatedAt: nowIso,
+      userId,
+    },
+    snapshotAad: {
+      key: snapshotObjectKey,
+      purpose: "browser-vault-snapshot",
       userId,
     },
     snapshotEnvelope,

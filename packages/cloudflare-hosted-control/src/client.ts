@@ -25,7 +25,14 @@ import {
 
 export interface CloudflareHostedControlBrowserVaultSession {
   rootKeyEnvelope: HostedUserRootKeyEnvelope | null;
+  snapshotAad: CloudflareHostedControlBrowserVaultSnapshotAad | null;
   snapshotEnvelope: HostedCipherEnvelope | null;
+}
+
+export interface CloudflareHostedControlBrowserVaultSnapshotAad {
+  key: string;
+  purpose: "browser-vault-snapshot";
+  userId: string;
 }
 
 export interface CloudflareHostedControlClient {
@@ -117,9 +124,33 @@ function parseCloudflareHostedControlBrowserVaultSession(
     rootKeyEnvelope: record.rootKeyEnvelope === null || record.rootKeyEnvelope === undefined
       ? null
       : parseHostedUserRootKeyEnvelope(record.rootKeyEnvelope, "Cloudflare browser vault session rootKeyEnvelope"),
+    snapshotAad: record.snapshotAad === null || record.snapshotAad === undefined
+      ? null
+      : parseCloudflareHostedControlBrowserVaultSnapshotAad(
+        record.snapshotAad,
+        "Cloudflare browser vault session snapshotAad",
+      ),
     snapshotEnvelope: record.snapshotEnvelope === null || record.snapshotEnvelope === undefined
       ? null
       : parseHostedCipherEnvelope(record.snapshotEnvelope, "Cloudflare browser vault session snapshotEnvelope"),
+  };
+}
+
+function parseCloudflareHostedControlBrowserVaultSnapshotAad(
+  value: unknown,
+  label: string,
+): CloudflareHostedControlBrowserVaultSnapshotAad {
+  const record = requireRecord(value, label);
+  const purpose = requireString(record.purpose, `${label}.purpose`);
+
+  if (purpose !== "browser-vault-snapshot") {
+    throw new TypeError(`${label}.purpose must be browser-vault-snapshot.`);
+  }
+
+  return {
+    key: requireString(record.key, `${label}.key`),
+    purpose,
+    userId: requireString(record.userId, `${label}.userId`),
   };
 }
 
@@ -213,4 +244,12 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }

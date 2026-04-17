@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  buildHostedStorageAad,
   decryptHostedStoragePayload,
   generateHostedUserRecipientKeyPair,
   parseHostedCipherEnvelope,
@@ -139,22 +140,36 @@ async function loadBrowserVaultSnapshot(): Promise<{
   }
 
   const session = parseBrowserVaultSessionResponse(await response.json());
+  const rootKeyEnvelope = session.rootKeyEnvelope;
+  const snapshotAad = session.snapshotAad;
+  const snapshotEnvelope = session.snapshotEnvelope;
 
-  if (!session.rootKeyEnvelope || !session.snapshotEnvelope) {
+  if (rootKeyEnvelope === null && snapshotEnvelope === null && snapshotAad === null) {
     return {
       snapshot: null,
       vault: createEmptyBrowserVaultReadModel(),
     };
   }
 
+  if (rootKeyEnvelope === null || snapshotEnvelope === null || snapshotAad === null) {
+    throw new Error(
+      "Browser vault session must include rootKeyEnvelope, snapshotEnvelope, and snapshotAad together.",
+    );
+  }
+
   const rootKey = await unwrapHostedUserRootKeyForKind({
-    envelope: session.rootKeyEnvelope,
+    envelope: rootKeyEnvelope,
     kind: "user-unlock",
     recipientPrivateKeyJwk: privateKeyJwk,
   });
   const plaintext = await decryptHostedStoragePayload({
-    envelope: session.snapshotEnvelope,
-    expectedKeyId: session.rootKeyEnvelope.rootKeyId,
+    aad: buildHostedStorageAad({
+      key: snapshotAad.key,
+      purpose: snapshotAad.purpose,
+      userId: snapshotAad.userId,
+    }),
+    envelope: snapshotEnvelope,
+    expectedKeyId: rootKeyEnvelope.rootKeyId,
     key: rootKey,
     scope: "browser-vault-snapshot",
   });
@@ -182,6 +197,7 @@ function createEmptyBrowserVaultReadModel(): VaultReadModel {
 
 function parseBrowserVaultSessionResponse(value: unknown): {
   rootKeyEnvelope: HostedUserRootKeyEnvelope | null;
+  snapshotAad: BrowserVaultSnapshotAad | null;
   snapshotEnvelope: HostedCipherEnvelope | null;
 } {
   const record = requireRecord(value, "Browser vault session response");
@@ -193,12 +209,39 @@ function parseBrowserVaultSessionResponse(value: unknown): {
         record.rootKeyEnvelope,
         "Browser vault session response rootKeyEnvelope",
       ),
+    snapshotAad: record.snapshotAad === null || record.snapshotAad === undefined
+      ? null
+      : parseBrowserVaultSnapshotAad(
+        record.snapshotAad,
+        "Browser vault session response snapshotAad",
+      ),
     snapshotEnvelope: record.snapshotEnvelope === null || record.snapshotEnvelope === undefined
       ? null
       : parseHostedCipherEnvelope(
         record.snapshotEnvelope,
         "Browser vault session response snapshotEnvelope",
       ),
+  };
+}
+
+interface BrowserVaultSnapshotAad {
+  key: string;
+  purpose: "browser-vault-snapshot";
+  userId: string;
+}
+
+function parseBrowserVaultSnapshotAad(value: unknown, label: string): BrowserVaultSnapshotAad {
+  const record = requireRecord(value, label);
+  const purpose = requireNonEmptyString(record.purpose, `${label}.purpose`);
+
+  if (purpose !== "browser-vault-snapshot") {
+    throw new TypeError(`${label}.purpose must be browser-vault-snapshot.`);
+  }
+
+  return {
+    key: requireNonEmptyString(record.key, `${label}.key`),
+    purpose,
+    userId: requireNonEmptyString(record.userId, `${label}.userId`),
   };
 }
 
@@ -227,4 +270,12 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+function requireNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }

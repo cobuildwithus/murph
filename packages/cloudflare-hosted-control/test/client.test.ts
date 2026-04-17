@@ -17,6 +17,7 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     expect(Object.keys(client).sort()).toEqual([
+      "createBrowserVaultSession",
       "getEventStatus",
       "getStatus",
     ]);
@@ -108,6 +109,56 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.method).toBe("GET");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+  });
+
+  it("fetches browser vault sessions with the expected request and parses snapshotAad", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse({
+          rootKeyEnvelope: null,
+          snapshotAad: {
+            key: "users/browser-vault-snapshots/opaque.json",
+            purpose: "browser-vault-snapshot",
+            userId: "user_123",
+          },
+          snapshotEnvelope: null,
+        });
+      }) as typeof fetch,
+      getBearerToken: async () => "token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.createBrowserVaultSession("user_123", {
+      crv: "P-256",
+      kty: "EC",
+      x: "x-value",
+      y: "y-value",
+    })).resolves.toEqual({
+      rootKeyEnvelope: null,
+      snapshotAad: {
+        key: "users/browser-vault-snapshots/opaque.json",
+        purpose: "browser-vault-snapshot",
+        userId: "user_123",
+      },
+      snapshotEnvelope: null,
+    });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/browser-vault/session");
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.body).toBe(JSON.stringify({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+    }));
   });
 
   it("fetches user status with the expected request shape", async () => {
