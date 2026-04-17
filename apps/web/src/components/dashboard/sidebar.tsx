@@ -9,11 +9,9 @@ import { Sheet, SheetContent, SheetTrigger } from "@/src/components/ui/sheet";
 import { cn } from "@/src/lib/utils";
 
 const navItems = [
-  { label: "Overview", href: "/overview", icon: "◆" },
-  { label: "Experiments", href: "/experiments", icon: "●" },
-  { label: "Signals", href: "/signals", icon: "◇" },
-  { label: "History", href: "/history", icon: "○" },
-  { label: "Settings", href: "/settings", icon: "◉" },
+  { label: "Overview", href: "/overview" },
+  { label: "Experiments", href: "/experiments" },
+  { label: "Settings", href: "/settings" },
 ];
 
 function NavList({
@@ -36,13 +34,12 @@ function NavList({
             href={item.href}
             onClick={onNavigate}
             className={cn(
-              "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+              "rounded-lg px-3 py-2 text-sm transition-colors",
               isActive
                 ? "bg-white/10 font-semibold text-white"
                 : "text-white/60 hover:bg-white/5 hover:text-white/80"
             )}
           >
-            <span className="text-[10px]">{item.icon}</span>
             {item.label}
           </Link>
         );
