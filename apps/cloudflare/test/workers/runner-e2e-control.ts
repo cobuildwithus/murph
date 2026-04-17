@@ -12,6 +12,20 @@ type StoredPauseState = {
   request: HostedAssistantRuntimeJobRequest | null;
 };
 
+type StoredDispatchPayloadReadPauseState = {
+  cleared?: boolean;
+  entered: boolean;
+  eventId: string;
+  expectedKey: string;
+  key: string | null;
+  released: boolean;
+};
+
+type StoredRunnerInvocationState = {
+  count: number;
+  eventIds: string[];
+};
+
 const pollIntervalMs = 50;
 
 export async function armRunnerCommitPause(
@@ -74,6 +88,166 @@ export async function clearRunnerCommitPause(
     released: false,
     request: null,
   } satisfies StoredPauseState));
+}
+
+export async function armDispatchPayloadReadPause(
+  input: {
+    bucket: R2BucketLike;
+    eventId: string;
+    expectedKey: string;
+  },
+): Promise<void> {
+  await writeDispatchPayloadReadPauseState(input.bucket, {
+    entered: false,
+    eventId: input.eventId,
+    expectedKey: input.expectedKey,
+    key: null,
+    released: false,
+  });
+}
+
+export async function readDispatchPayloadReadPauseState(
+  bucket: R2BucketLike,
+  eventId: string,
+): Promise<{
+  armed: boolean;
+  entered: boolean;
+  hasKey: boolean;
+  matchedExpectedKey: boolean;
+}> {
+  const state = await readDispatchPayloadReadPauseStateObject(bucket);
+
+  if (!state || state.eventId !== eventId) {
+    return {
+      armed: false,
+      entered: false,
+      hasKey: false,
+      matchedExpectedKey: false,
+    };
+  }
+
+  return {
+    armed: true,
+    entered: state.entered,
+    hasKey: state.key !== null,
+    matchedExpectedKey: state.key === state.expectedKey,
+  };
+}
+
+export async function releaseDispatchPayloadReadPause(
+  bucket: R2BucketLike,
+  eventId: string,
+): Promise<boolean> {
+  const state = await readDispatchPayloadReadPauseStateObject(bucket);
+
+  if (!state || state.eventId !== eventId) {
+    return false;
+  }
+
+  await writeDispatchPayloadReadPauseState(bucket, {
+    ...state,
+    released: true,
+  });
+  return true;
+}
+
+export async function clearDispatchPayloadReadPause(
+  bucket: R2BucketLike,
+  eventId: string,
+): Promise<void> {
+  const state = await readDispatchPayloadReadPauseStateObject(bucket);
+
+  if (!state || state.eventId !== eventId) {
+    return;
+  }
+
+  if (bucket.delete) {
+    await bucket.delete(dispatchPayloadReadPauseStateObjectKey());
+    return;
+  }
+
+  await bucket.put(dispatchPayloadReadPauseStateObjectKey(), JSON.stringify({
+    ...state,
+    cleared: true,
+    entered: false,
+    key: null,
+    released: false,
+  } satisfies StoredDispatchPayloadReadPauseState));
+}
+
+export async function pauseDispatchPayloadReadIfArmed(input: {
+  bucket: R2BucketLike;
+  key: string;
+}): Promise<void> {
+  const state = await readDispatchPayloadReadPauseStateObject(input.bucket);
+
+  if (
+    !state
+    || state.entered
+    || state.released
+    || input.key !== state.expectedKey
+  ) {
+    return;
+  }
+
+  await writeDispatchPayloadReadPauseState(input.bucket, {
+    ...state,
+    entered: true,
+    key: input.key,
+  });
+
+  while (true) {
+    const nextState = await readDispatchPayloadReadPauseStateObject(input.bucket);
+
+    if (!nextState || nextState.released) {
+      return;
+    }
+
+    await sleep(pollIntervalMs);
+  }
+}
+
+export async function readRunnerInvocationState(
+  bucket: R2BucketLike,
+  userId: string,
+): Promise<StoredRunnerInvocationState> {
+  const object = await bucket.get(runnerInvocationStateObjectKey(userId));
+
+  if (!object) {
+    return {
+      count: 0,
+      eventIds: [],
+    };
+  }
+
+  return JSON.parse(new TextDecoder().decode(await object.arrayBuffer())) as StoredRunnerInvocationState;
+}
+
+export async function recordRunnerInvocation(input: {
+  bucket: R2BucketLike;
+  eventId: string;
+  userId: string;
+}): Promise<void> {
+  const current = await readRunnerInvocationState(input.bucket, input.userId);
+  await input.bucket.put(runnerInvocationStateObjectKey(input.userId), JSON.stringify({
+    count: current.count + 1,
+    eventIds: [...current.eventIds, input.eventId],
+  } satisfies StoredRunnerInvocationState));
+}
+
+export async function clearRunnerInvocationState(
+  bucket: R2BucketLike,
+  userId: string,
+): Promise<void> {
+  if (bucket.delete) {
+    await bucket.delete(runnerInvocationStateObjectKey(userId));
+    return;
+  }
+
+  await bucket.put(runnerInvocationStateObjectKey(userId), JSON.stringify({
+    count: 0,
+    eventIds: [],
+  } satisfies StoredRunnerInvocationState));
 }
 
 export async function pauseRunnerCommitIfArmed(input: {
@@ -243,6 +417,37 @@ async function writePauseState(
 
 function pauseStateObjectKey(eventId: string): string {
   return `test/runner-pauses/${encodeURIComponent(eventId)}.json`;
+}
+
+async function readDispatchPayloadReadPauseStateObject(
+  bucket: R2BucketLike,
+): Promise<StoredDispatchPayloadReadPauseState | null> {
+  const object = await bucket.get(dispatchPayloadReadPauseStateObjectKey());
+
+  if (!object) {
+    return null;
+  }
+
+  const parsed = JSON.parse(
+    new TextDecoder().decode(await object.arrayBuffer()),
+  ) as StoredDispatchPayloadReadPauseState;
+
+  return parsed.cleared ? null : parsed;
+}
+
+async function writeDispatchPayloadReadPauseState(
+  bucket: R2BucketLike,
+  state: StoredDispatchPayloadReadPauseState,
+): Promise<void> {
+  await bucket.put(dispatchPayloadReadPauseStateObjectKey(), JSON.stringify(state));
+}
+
+function dispatchPayloadReadPauseStateObjectKey(): string {
+  return "test/dispatch-payload-read-pause.json";
+}
+
+function runnerInvocationStateObjectKey(userId: string): string {
+  return `test/runner-invocations/${encodeURIComponent(userId)}.json`;
 }
 
 function resolveSyntheticGeneratedAt(request: HostedAssistantRuntimeJobRequest): string {

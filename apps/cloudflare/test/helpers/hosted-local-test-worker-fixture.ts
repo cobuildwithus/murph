@@ -20,6 +20,7 @@ export interface HostedLocalTestWorkerClient {
 export interface HostedLocalTestWorkerFixture {
   client: HostedLocalTestWorkerClient;
   dispose(): Promise<void>;
+  waitForRunnerPayloadReadPauseEntry(eventId: string): Promise<void>;
   waitForRunnerPauseEntry(eventId: string): Promise<void>;
   waitForUserStatus(
     userId: string,
@@ -109,6 +110,30 @@ export async function startHostedLocalTestWorkerFixture(input: {
     return {
       client,
       dispose,
+      waitForRunnerPayloadReadPauseEntry: async (eventId: string): Promise<void> => {
+        const startedAt = Date.now();
+
+        while ((Date.now() - startedAt) < 180_000) {
+          const state = await client.getJson(
+            `/__test/runner/payload-read-pause?eventId=${encodeURIComponent(eventId)}`,
+          );
+
+          if (
+            isRunnerPayloadReadPauseState(state)
+            && state.entered === true
+            && state.hasKey === true
+            && state.matchedExpectedKey === true
+          ) {
+            return;
+          }
+
+          await sleep(250);
+        }
+
+        throw new Error(formatFailure([
+          `Timed out waiting for the paused dispatch-payload read for ${eventId}.`,
+        ], stdout, stderr));
+      },
       waitForRunnerPauseEntry: async (eventId: string): Promise<void> => {
         const startedAt = Date.now();
 
@@ -252,6 +277,21 @@ function isHostedExecutionUserStatus(value: unknown): value is HostedExecutionUs
     && "pendingEventCount" in value
     && typeof (value as { pendingEventCount?: unknown }).pendingEventCount === "number"
     && "retryingEventId" in value;
+}
+
+function isRunnerPayloadReadPauseState(value: unknown): value is {
+  entered: boolean;
+  hasKey: boolean;
+  matchedExpectedKey: boolean;
+} {
+  return typeof value === "object"
+    && value !== null
+    && "entered" in value
+    && typeof (value as { entered?: unknown }).entered === "boolean"
+    && "hasKey" in value
+    && typeof (value as { hasKey?: unknown }).hasKey === "boolean"
+    && "matchedExpectedKey" in value
+    && typeof (value as { matchedExpectedKey?: unknown }).matchedExpectedKey === "boolean";
 }
 
 function formatFailure(lines: string[], stdout: string, stderr: string): string {

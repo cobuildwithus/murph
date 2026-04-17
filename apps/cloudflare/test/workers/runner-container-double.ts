@@ -9,6 +9,7 @@ import {
   buildSyntheticCommittedRunnerResult,
   buildSyntheticCompletedRunnerResult,
   pauseRunnerCommitIfArmed,
+  recordRunnerInvocation,
 } from "./runner-e2e-control.ts";
 
 interface RunnerContainerInvokePayload {
@@ -22,6 +23,12 @@ export class RunnerContainerTestDouble extends DurableObject {
     if (payload.internalWorkerProxyToken === "") {
       throw new Error("Expected a non-empty internal worker proxy token.");
     }
+
+    await recordRunnerInvocation({
+      bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
+      eventId: payload.job.request.dispatch.eventId,
+      userId: payload.userId,
+    });
 
     await pauseRunnerCommitIfArmed({
       bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
