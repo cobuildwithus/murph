@@ -9,9 +9,10 @@ share facts, device-sync control-plane authority, the hosted AI usage ledger,
 and the canonical dispatch lifecycle around `execution_outbox`.
 
 The repo also carries a staged `HostedWake` / `HostedExecutionCursor` substrate
-for the long-term web-owned wake queue cutover. While
-`HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE` remains disabled, that substrate is
-shadow state only and does not replace `execution_outbox` yet.
+for the long-term web-owned wake queue cutover. The simple `member.activated`
+and `member.channels.updated` producers can be routed onto that lane behind
+their explicit `HOSTED_WAKE_MEMBER_*` flags, while `execution_outbox` remains
+the default dispatch owner for the broader hosted execution surface.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs one
@@ -98,9 +99,11 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
-- `HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE` to shadow-write `member.activated` and
-  `member.channels.updated` into the new `HostedWake` substrate without cutting
-  traffic off `execution_outbox`
+- `HOSTED_WAKE_MEMBER_ACTIVATED_ENABLED` to route `member.activated` directly to
+  `HostedWake` with `execution_outbox` fallback when wake payload storage cannot
+  accept the dispatch
+- `HOSTED_WAKE_MEMBER_CHANNELS_UPDATED_ENABLED` to route
+  `member.channels.updated` directly to `HostedWake` with the same fallback
 
 Provider-owned webhook-admin settings:
 

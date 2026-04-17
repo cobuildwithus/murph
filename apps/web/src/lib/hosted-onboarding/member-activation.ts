@@ -10,14 +10,9 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  enqueueHostedExecutionOutbox,
+  findHostedExecutionScheduledEventIdTx,
+  scheduleHostedExecutionDispatchTx,
 } from "../hosted-execution/outbox";
-import {
-  appendHostedOrderedDispatchWakeTx,
-} from "../hosted-wake/dispatch";
-import {
-  isHostedWakeSimpleProducerDualWriteEnabled,
-} from "../hosted-wake/flags";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
@@ -96,30 +91,22 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       sourceEventId: input.sourceEventId,
       sourceType: input.sourceType,
     });
-    const wakeDualWriteEnabled = isHostedWakeSimpleProducerDualWriteEnabled();
-
-    await enqueueHostedExecutionOutbox({
+    const scheduledDispatch = await scheduleHostedExecutionDispatchTx({
       dispatch,
       sourceId: input.sourceEventId,
       sourceType: "hosted_revnet_issuance",
       tx: input.prisma,
     });
-    if (wakeDualWriteEnabled) {
-      await appendHostedOrderedDispatchWakeTx({
-        dispatch,
-        tx: input.prisma,
-      });
-    }
 
     finishHostedOnboardingTiming(timing, "completed", {
       activated: true,
-      outboxEnqueued: true,
-      wakeAppended: wakeDualWriteEnabled,
+      dispatchRoute: scheduledDispatch.route,
+      dispatchScheduled: true,
     });
 
     return {
       activated: true,
-      hostedExecutionEventId: dispatch.eventId,
+      hostedExecutionEventId: scheduledDispatch.eventId,
       memberId: input.member.core.id,
     };
   } catch (error) {
@@ -184,23 +171,19 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const existingDispatch = await input.prisma.executionOutbox.findUnique({
-    where: {
-      eventId: activationEventId,
-    },
-    select: {
-      eventId: true,
-    },
+  const existingDispatchEventId = await findHostedExecutionScheduledEventIdTx({
+    eventId: activationEventId,
+    tx: input.prisma,
   });
 
   if (
     input.skipIfBillingAlreadyActive &&
     currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
-    if (existingDispatch) {
+    if (existingDispatchEventId) {
       return {
         activated: false,
-        hostedExecutionEventId: existingDispatch.eventId,
+        hostedExecutionEventId: existingDispatchEventId,
         memberId: currentMember.core.id,
       };
     }
@@ -235,24 +218,16 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const wakeDualWriteEnabled = isHostedWakeSimpleProducerDualWriteEnabled();
-  const outboxRecord = await enqueueHostedExecutionOutbox({
+  const scheduledDispatch = await scheduleHostedExecutionDispatchTx({
     dispatch,
     sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
     sourceType: "hosted_stripe_event",
     tx: input.prisma,
   });
 
-  if (wakeDualWriteEnabled) {
-    await appendHostedOrderedDispatchWakeTx({
-      dispatch,
-      tx: input.prisma,
-    });
-  }
-
   return {
     activated: true,
-    hostedExecutionEventId: outboxRecord.eventId,
+    hostedExecutionEventId: scheduledDispatch.eventId,
     memberId: currentMember.core.id,
   };
 }

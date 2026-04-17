@@ -1,21 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedCoalescingDispatchWakeTx: vi.fn(),
-  enqueueHostedExecutionOutbox: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
+  scheduleHostedExecutionDispatchTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-}));
-
-vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
-  appendHostedCoalescingDispatchWakeTx: mocks.appendHostedCoalescingDispatchWakeTx,
+  scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -49,38 +44,13 @@ import {
 describe("hosted onboarding member channel sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
-    mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
-    mocks.appendHostedCoalescingDispatchWakeTx.mockResolvedValue({
-      duplicate: false,
-      inserted: true,
-      updatedExisting: false,
-      wake: {
-        behavior: "coalescing",
-        coalescingKey: "member.channels.updated:member_123",
-        createdAt: "2026-04-15T00:00:00.000Z",
-        dedupeKey: "dispatch:member.channels.updated:member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-        id: "wake_123",
-        kind: "member.channels.updated",
-        occurredAt: "2026-04-15T00:00:00.000Z",
-        payloadBytes: 1,
-        payloadInlineCiphertext: "ciphertext",
-        payloadRef: null,
-        payloadSchema: "murph.hosted-wake-dispatch.v1",
-        quarantineCode: null,
-        quarantinedAt: null,
-        seq: "1",
-        updatedAt: "2026-04-15T00:00:00.000Z",
-        userId: "member_123",
-      },
+    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+      route: "outbox",
     });
-  });
-
-  afterEach(() => {
-    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
   });
 
   it("treats a verified Privy email as authoritative without consulting canonical email authorization", async () => {
@@ -138,7 +108,7 @@ describe("hosted onboarding member channel sync", () => {
     });
   });
 
-  it("enqueues an occurrence-scoped member.channels.updated dispatch with the resolved channel snapshot", async () => {
+  it("schedules an occurrence-scoped member.channels.updated dispatch with the resolved channel snapshot", async () => {
     const tx = {
       label: "test-prisma-tx",
     };
@@ -165,7 +135,7 @@ describe("hosted onboarding member channel sync", () => {
       occurredAt: "2026-04-15T00:00:00.000Z",
     });
 
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
       dispatch: {
         event: {
           kind: "member.channels.updated",
@@ -184,28 +154,40 @@ describe("hosted onboarding member channel sync", () => {
       tx,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
-    expect(mocks.appendHostedCoalescingDispatchWakeTx).not.toHaveBeenCalled();
   });
 
-  it("dual-writes a coalescing hosted wake only when the shadow producer flag is enabled", async () => {
-    process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE = "true";
-
+  it("accepts a wake-routed schedule result without changing the returned dispatch", async () => {
     const tx = {
       label: "test-prisma-tx",
     };
-
-    await enqueueHostedMemberChannelsUpdatedTx({
-      emailLinked: true,
-      memberId: "member_123",
-      occurredAt: "2026-04-15T00:00:00.000Z",
-      prisma: tx as never,
-      sourceType: "settings.phone.sync",
+    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+      route: "wake",
     });
 
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedCoalescingDispatchWakeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedCoalescingDispatchWakeTx).toHaveBeenCalledWith({
-      coalescingKey: "member.channels.updated:member_123",
+    await expect(
+      enqueueHostedMemberChannelsUpdatedTx({
+        emailLinked: true,
+        memberId: "member_123",
+        occurredAt: "2026-04-15T00:00:00.000Z",
+        prisma: tx as never,
+        sourceType: "settings.phone.sync",
+      }),
+    ).resolves.toEqual({
+      event: {
+        kind: "member.channels.updated",
+        memberChannels: {
+          email: true,
+          linq: true,
+          telegram: true,
+        },
+        userId: "member_123",
+      },
+      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+      occurredAt: "2026-04-15T00:00:00.000Z",
+    });
+
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         event: expect.objectContaining({
@@ -217,6 +199,8 @@ describe("hosted onboarding member channel sync", () => {
           },
         }),
       }),
+      sourceId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+      sourceType: "settings.phone.sync",
       tx,
     });
   });

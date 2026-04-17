@@ -15,6 +15,13 @@ import {
 import {
   dispatchHostedExecutionStatus,
 } from "./dispatch";
+import {
+  appendHostedExecutionDispatchWakeTx,
+  findHostedExecutionWakeEventIdTx,
+} from "../hosted-wake/dispatch";
+import {
+  shouldRouteHostedSimpleProducerDispatchToWake,
+} from "../hosted-wake/flags";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import {
   areHostedExecutionOutboxPayloadsEquivalent,
@@ -45,6 +52,13 @@ export interface EnqueueHostedExecutionOutboxInput {
   sourceId?: string | null;
   sourceType: string;
   tx: HostedExecutionOutboxClient;
+}
+
+export type HostedExecutionDispatchRoute = "outbox" | "wake";
+
+export interface HostedExecutionDispatchScheduleResult {
+  eventId: string;
+  route: HostedExecutionDispatchRoute;
 }
 
 export function readExecutionLifecycleState(
@@ -96,6 +110,57 @@ export async function enqueueHostedExecutionOutbox(
     sourceId: input.sourceId ?? null,
     sourceType: input.sourceType,
     tx: input.tx,
+  });
+}
+
+export async function scheduleHostedExecutionDispatchTx(
+  input: EnqueueHostedExecutionOutboxInput,
+): Promise<HostedExecutionDispatchScheduleResult> {
+  if (shouldRouteHostedSimpleProducerDispatchToWake(input.dispatch)) {
+    try {
+      await appendHostedExecutionDispatchWakeTx({
+        dispatch: input.dispatch,
+        tx: input.tx,
+      });
+
+      return {
+        eventId: input.dispatch.eventId,
+        route: "wake",
+      };
+    } catch (error) {
+      if (!(error instanceof RangeError)) {
+        throw error;
+      }
+    }
+  }
+
+  const record = await enqueueHostedExecutionOutbox(input);
+  return {
+    eventId: record.eventId,
+    route: "outbox",
+  };
+}
+
+export async function findHostedExecutionScheduledEventIdTx(input: {
+  eventId: string;
+  tx: HostedExecutionOutboxClient;
+}): Promise<string | null> {
+  const outboxRecord = await input.tx.executionOutbox.findUnique({
+    select: {
+      eventId: true,
+    },
+    where: {
+      eventId: input.eventId,
+    },
+  });
+
+  if (outboxRecord) {
+    return outboxRecord.eventId;
+  }
+
+  return findHostedExecutionWakeEventIdTx({
+    eventId: input.eventId,
+    tx: input.tx as Prisma.TransactionClient,
   });
 }
 

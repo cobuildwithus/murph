@@ -76,6 +76,11 @@ export interface AppendHostedWakeResult {
   wake: HostedWakeRecord;
 }
 
+export interface HostedWakeLifecycleRecord {
+  eventId: string;
+  state: "completed" | "queued";
+}
+
 export interface ListHostedWakesInput {
   afterSeq?: bigint | null;
   limit?: number;
@@ -118,19 +123,6 @@ export async function appendHostedWakeTx(
   input: AppendHostedWakeInput,
 ): Promise<AppendHostedWakeResult> {
   const occurredAt = requireOccurredAtDate(input.occurredAt);
-  const existingDuplicate = await findHostedWakeByDedupeKeyTx({
-    dedupeKey: input.dedupeKey ?? null,
-    tx: input.tx,
-  });
-
-  if (existingDuplicate) {
-    return {
-      duplicate: true,
-      inserted: false,
-      updatedExisting: false,
-      wake: projectHostedWakeRecord(existingDuplicate),
-    };
-  }
 
   await ensureHostedExecutionCursorRowTx({
     tx: input.tx,
@@ -140,6 +132,23 @@ export async function appendHostedWakeTx(
     tx: input.tx,
     userId: input.userId,
   });
+
+  if (input.dedupeKey) {
+    const existingDuplicate = await findHostedWakeByDedupeKeyTx({
+      dedupeKey: input.dedupeKey,
+      tx: input.tx,
+    });
+
+    if (existingDuplicate) {
+      assertHostedWakeUserMatch(existingDuplicate, input.userId, input.dedupeKey);
+      return {
+        duplicate: true,
+        inserted: false,
+        updatedExisting: false,
+        wake: projectHostedWakeRecord(existingDuplicate),
+      };
+    }
+  }
 
   if (input.behavior === "coalescing") {
     const unresolved = await findUncommittedWakeByCoalescingKeyTx({
@@ -241,7 +250,10 @@ export async function listHostedWakesAfterSeq(
     tx: prisma,
     userId: input.userId,
   });
-  const afterSeq = input.afterSeq ?? cursor.committedSeq;
+  const requestedAfterSeq = input.afterSeq ?? cursor.committedSeq;
+  const afterSeq = requestedAfterSeq > cursor.committedSeq
+    ? requestedAfterSeq
+    : cursor.committedSeq;
   const wakes = await prisma.hostedWake.findMany({
     where: {
       quarantinedAt: null,
@@ -313,6 +325,53 @@ export async function commitHostedExecutionCursorTx(input: {
   return {
     committed: updated.count === 1,
     cursor: projectHostedExecutionCursorRecord(current),
+  };
+}
+
+export async function findHostedWakeEventIdByDedupeKeyTx(input: {
+  dedupeKey: string;
+  tx: HostedWakeStoreClient;
+}): Promise<string | null> {
+  const row = await findHostedWakeByDedupeKeyTx({
+    dedupeKey: input.dedupeKey,
+    tx: input.tx,
+  });
+
+  if (!row) {
+    return null;
+  }
+
+  return row.dedupeKey ?? row.id;
+}
+
+export async function readLatestHostedWakeLifecycleByKind(input: {
+  kind: string;
+  prisma?: HostedWakeStoreClient;
+  userId: string;
+}): Promise<HostedWakeLifecycleRecord | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: prisma,
+    userId: input.userId,
+  });
+  const wake = await prisma.hostedWake.findFirst({
+    where: {
+      kind: input.kind,
+      quarantinedAt: null,
+      userId: input.userId,
+    },
+    orderBy: {
+      seq: "desc",
+    },
+  });
+
+  if (!wake) {
+    return null;
+  }
+
+  return {
+    eventId: wake.dedupeKey ?? wake.id,
+    state: wake.seq > cursor.committedSeq ? "queued" : "completed",
   };
 }
 
@@ -418,6 +477,7 @@ async function createHostedWakeTx(
       });
 
       if (existing) {
+        assertHostedWakeUserMatch(existing, input.userId, input.dedupeKey);
         return {
           duplicate: true,
           inserted: false,
@@ -508,4 +568,18 @@ async function findUncommittedWakeByCoalescingKeyTx(input: {
       seq: "desc",
     },
   });
+}
+
+function assertHostedWakeUserMatch(
+  wake: HostedWakeRow,
+  userId: string,
+  dedupeKey: string,
+): void {
+  if (wake.userId === userId) {
+    return;
+  }
+
+  throw new Error(
+    `Hosted wake dedupe key ${JSON.stringify(dedupeKey)} is already owned by ${wake.userId}, not ${userId}.`,
+  );
 }

@@ -9,6 +9,9 @@ import {
   isExecutionLifecycleTerminal,
   readExecutionLifecycleState,
 } from "../hosted-execution/outbox";
+import {
+  readLatestHostedWakeLifecycleByKind,
+} from "../hosted-wake/store";
 
 type HostedActivationProgressPrismaClient = PrismaClient | Prisma.TransactionClient;
 
@@ -75,10 +78,29 @@ async function readLatestHostedMemberActivationLifecycle(input: {
     },
   });
 
-  return activationOutbox
-    ? {
-        eventId: activationOutbox.eventId,
-        state: readExecutionLifecycleState(activationOutbox.dispatchState),
-      }
-    : null;
+  if (activationOutbox) {
+    return {
+      eventId: activationOutbox.eventId,
+      state: readExecutionLifecycleState(activationOutbox.dispatchState),
+    };
+  }
+
+  if (!supportsHostedWakeLifecycleReads(input.prisma)) {
+    return null;
+  }
+
+  return readLatestHostedWakeLifecycleByKind({
+    kind: HOSTED_MEMBER_ACTIVATION_EVENT_KIND,
+    prisma: input.prisma,
+    userId: input.memberId,
+  });
+}
+
+function supportsHostedWakeLifecycleReads(
+  prisma: HostedActivationProgressPrismaClient,
+): prisma is HostedActivationProgressPrismaClient & {
+  hostedExecutionCursor: object;
+  hostedWake: object;
+} {
+  return "hostedExecutionCursor" in prisma && "hostedWake" in prisma;
 }

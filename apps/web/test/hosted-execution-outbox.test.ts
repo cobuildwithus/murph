@@ -13,22 +13,35 @@ import {
 } from "@/src/lib/hosted-execution/outbox-payload";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedExecutionDispatchWakeTx: vi.fn(),
   dispatchHostedExecutionStatus: vi.fn(),
+  findHostedExecutionWakeEventIdTx: vi.fn(),
+  shouldRouteHostedSimpleProducerDispatchToWake: vi.fn(() => false),
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
   dispatchHostedExecutionStatus: mocks.dispatchHostedExecutionStatus,
 }));
+vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
+  appendHostedExecutionDispatchWakeTx: mocks.appendHostedExecutionDispatchWakeTx,
+  findHostedExecutionWakeEventIdTx: mocks.findHostedExecutionWakeEventIdTx,
+}));
+vi.mock("@/src/lib/hosted-wake/flags", () => ({
+  shouldRouteHostedSimpleProducerDispatchToWake: mocks.shouldRouteHostedSimpleProducerDispatchToWake,
+}));
 
 import {
   drainHostedExecutionOutbox,
   enqueueHostedExecutionOutbox,
+  findHostedExecutionScheduledEventIdTx,
   pruneHostedExecutionOutbox,
+  scheduleHostedExecutionDispatchTx,
 } from "@/src/lib/hosted-execution/outbox";
 
 describe("hosted execution outbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.shouldRouteHostedSimpleProducerDispatchToWake.mockReturnValue(false);
   });
 
   it("persists direct enqueue payloads inline even for events that previously used staged payload refs", async () => {
@@ -159,6 +172,86 @@ describe("hosted execution outbox", () => {
       },
     });
   });
+
+  it("routes flagged simple producers directly to HostedWake", async () => {
+    const dispatch = createMemberActivatedDispatch();
+    const prisma = createEnqueueOutboxPrisma(createOutboxRecord(dispatch));
+    mocks.shouldRouteHostedSimpleProducerDispatchToWake.mockReturnValue(true);
+    mocks.appendHostedExecutionDispatchWakeTx.mockResolvedValue({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: {
+        behavior: "ordered",
+        coalescingKey: null,
+        createdAt: dispatch.occurredAt,
+        dedupeKey: `dispatch:${dispatch.event.kind}:${dispatch.eventId}`,
+        id: "wake_123",
+        kind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        payloadBytes: 1,
+        payloadInlineCiphertext: "ciphertext",
+        payloadRef: null,
+        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        quarantineCode: null,
+        quarantinedAt: null,
+        seq: "1",
+        updatedAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+    });
+
+    await expect(scheduleHostedExecutionDispatchTx({
+      dispatch,
+      sourceType: "hosted_execution",
+      tx: prisma as PrismaClient,
+    })).resolves.toEqual({
+      eventId: dispatch.eventId,
+      route: "wake",
+    });
+
+    expect(mocks.appendHostedExecutionDispatchWakeTx).toHaveBeenCalledWith({
+      dispatch,
+      tx: expect.anything(),
+    });
+  });
+
+  it("falls back to execution_outbox when wake routing cannot store the payload inline", async () => {
+    const dispatch = createMemberChannelsUpdatedDispatch();
+    const prisma = createEnqueueOutboxPrisma(createOutboxRecord(dispatch));
+    mocks.shouldRouteHostedSimpleProducerDispatchToWake.mockReturnValue(true);
+    mocks.appendHostedExecutionDispatchWakeTx.mockRejectedValue(
+      new RangeError("payload too large"),
+    );
+
+    await expect(scheduleHostedExecutionDispatchTx({
+      dispatch,
+      sourceType: "hosted_execution",
+      tx: prisma as PrismaClient,
+    })).resolves.toEqual({
+      eventId: dispatch.eventId,
+      route: "outbox",
+    });
+  });
+
+  it("finds scheduled event ids in HostedWake when the outbox row is absent", async () => {
+    const dispatch = createMemberActivatedDispatch();
+    const prisma = {
+      executionOutbox: {
+        findUnique: vi.fn(async () => null),
+      },
+    } as unknown as PrismaClient;
+    mocks.findHostedExecutionWakeEventIdTx.mockResolvedValue(dispatch.eventId);
+
+    await expect(findHostedExecutionScheduledEventIdTx({
+      eventId: dispatch.eventId,
+      tx: prisma,
+    })).resolves.toBe(dispatch.eventId);
+    expect(mocks.findHostedExecutionWakeEventIdTx).toHaveBeenCalledWith({
+      eventId: dispatch.eventId,
+      tx: prisma,
+    });
+  });
 });
 
 function createCronDispatch(): HostedExecutionDispatchRequest {
@@ -184,6 +277,38 @@ function createGatewaySendDispatch(): HostedExecutionDispatchRequest {
       userId: "member_123",
     },
     eventId: "evt_gateway_send",
+    occurredAt: "2026-03-28T11:00:00.000Z",
+  };
+}
+
+function createMemberActivatedDispatch(): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      kind: "member.activated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      userId: "member_123",
+    },
+    eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+    occurredAt: "2026-03-28T11:00:00.000Z",
+  };
+}
+
+function createMemberChannelsUpdatedDispatch(): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: false,
+      },
+      userId: "member_123",
+    },
+    eventId: "member.channels.updated:settings.phone.sync:member_123:2026-03-28T11:00:00.000Z",
     occurredAt: "2026-03-28T11:00:00.000Z",
   };
 }
