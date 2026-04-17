@@ -211,6 +211,7 @@ export function sanitizeHostedLinqEventForStorage(
   value: Record<string, unknown>,
   options: {
     omitRecipientPhone?: boolean;
+    preserveFrom?: boolean;
   } = {},
 ): Record<string, unknown> {
   const clone = cloneHostedJsonRecord(value);
@@ -221,7 +222,7 @@ export function sanitizeHostedLinqEventForStorage(
   }
 
   const from = normalizeHostedOpaqueInput(data.from);
-  if (from) {
+  if (from && !options.preserveFrom) {
     data.from = createHostedOpaqueIdentifier("linq.from", normalizePhoneNumber(from) ?? from);
   }
 
