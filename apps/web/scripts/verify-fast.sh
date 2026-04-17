@@ -127,7 +127,7 @@ pnpm prisma:generate
 if [[ "$verify_step_parallel" != "1" ]]; then
   pnpm test
   pnpm lint
-  pnpm dev:smoke
+  MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 pnpm dev:smoke
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   NODE_OPTIONS="$next_build_node_options" next build
   exit 0
@@ -144,7 +144,7 @@ register_background_pid "$test_pid"
 pnpm lint &
 lint_pid="$!"
 register_background_pid "$lint_pid"
-pnpm dev:smoke
+MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 pnpm dev:smoke
 next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
 NODE_OPTIONS="$next_build_node_options" next build
 wait_for_background_jobs "$test_pid" "$lint_pid"

@@ -483,7 +483,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     ) as {
       autoReply: Array<{
         channel: string
-        cursor: { captureId: string; occurredAt: string } | null
+        cursor: { captureId: string; createdAt: string | null; occurredAt: string } | null
       }>
     }
 
@@ -492,6 +492,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
         channel: 'telegram',
         cursor: {
           captureId: 'capture-latest',
+          createdAt: null,
           occurredAt: '2026-04-08T00:05:00.000Z',
         },
       },
@@ -631,7 +632,7 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
     ) as {
       autoReply: Array<{
         channel: string
-        cursor: { captureId: string; occurredAt: string } | null
+        cursor: { captureId: string; createdAt: string | null; occurredAt: string } | null
       }>
     }
 
@@ -641,6 +642,7 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
         channel: 'telegram',
         cursor: {
           captureId: 'capture-latest',
+          createdAt: null,
           occurredAt: '2026-04-08T00:05:00.000Z',
         },
       },
