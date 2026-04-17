@@ -95,7 +95,11 @@ interface RunnerDispatchProcessorDependencies {
   scheduler: RunnerScheduler;
 }
 
+const LIVE_COMMIT_LEASE_RECOVERY_GRACE_MS = 15_000;
+
 export class RunnerDispatchProcessor {
+  private runLoopPromise: Promise<HostedExecutionUserStatus> | null = null;
+
   constructor(
     private readonly dependencies: RunnerDispatchProcessorDependencies,
   ) {}
@@ -119,10 +123,19 @@ export class RunnerDispatchProcessor {
         || isCommittedResultFresh(committed, COMMITTED_RESULT_FRESH_WINDOW_MS)
       ) {
         if (!isCommittedResultFinalized(committed)) {
-          const synced = await commitRecovery.syncCommittedBundlesWithoutConsuming(
-            input.event.userId,
-            committed,
-          );
+          const liveLease = await this.readRecentActiveRunLease();
+          const recoveryRun = liveLease?.eventId === input.eventId
+            ? liveLease.run
+            : this.resolveRunContext(
+              await commitRecovery.syncCommittedBundlesWithoutConsuming(
+                input.event.userId,
+                committed,
+              ),
+              {
+                eventId: input.eventId,
+                startedAt: committed.committedAt,
+              },
+            );
           await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
 
           return toUserStatus(
@@ -131,10 +144,7 @@ export class RunnerDispatchProcessor {
               dispatch: input,
               message: "Recovered a durable commit awaiting finalize.",
               phase: "commit.recorded",
-              run: this.resolveRunContext(synced, {
-                eventId: input.eventId,
-                startedAt: committed.committedAt,
-              }),
+              run: recoveryRun,
             }),
           );
         }
@@ -174,9 +184,24 @@ export class RunnerDispatchProcessor {
   }
 
   async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
+    if (this.runLoopPromise) {
+      return toUserStatus(await this.dependencies.queueStore.readState());
+    }
+
+    const runLoop = this.runQueuedEventsInternal(userId);
+    const wrappedRunLoop = runLoop.finally(() => {
+      if (this.runLoopPromise === wrappedRunLoop) {
+        this.runLoopPromise = null;
+      }
+    });
+    this.runLoopPromise = wrappedRunLoop;
+    return await wrappedRunLoop;
+  }
+
+  private async runQueuedEventsInternal(userId: string): Promise<HostedExecutionUserStatus> {
     await this.dependencies.ensureRunnerStores(userId);
     let record = await this.dependencies.queueStore.readState();
-    if (record.inFlight && record.run) {
+    if (record.inFlight && (record.run || await this.readRecentActiveRunLease())) {
       return toUserStatus(record);
     }
 
@@ -820,6 +845,28 @@ export class RunnerDispatchProcessor {
       runId: crypto.randomUUID(),
       startedAt: input.startedAt,
     };
+  }
+
+  private async readRecentActiveRunLease(): Promise<{
+    eventId: string;
+    run: HostedExecutionRunContext;
+  } | null> {
+    const activeLease = await this.dependencies.queueStore.readActiveRunLease();
+    if (!activeLease) {
+      return null;
+    }
+
+    const startedAtMs = Date.parse(activeLease.run.startedAt);
+    if (!Number.isFinite(startedAtMs)) {
+      return null;
+    }
+
+    return (Date.now() - startedAtMs) < Math.min(
+      this.dependencies.env.runnerTimeoutMs,
+      LIVE_COMMIT_LEASE_RECOVERY_GRACE_MS,
+    )
+      ? activeLease
+      : null;
   }
 
   private async advanceRunPhase(input: {
