@@ -12,6 +12,8 @@ import {
 const workerPort = 8912;
 const userId = "member_duplicate_commit_local_e2e";
 const stabilityUserId = "member_duplicate_commit_local_smoke_stability";
+const overlapUserId = "member_overlap_claim_local_e2e";
+const overlapEventId = "evt_serialized_run_loop_claim_local_e2e";
 const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
   eventId: `member.activated:stripe.invoice.paid:${userId}:evt_duplicate_local_e2e`,
   firstContact: {
@@ -182,6 +184,98 @@ describe("hosted local duplicate commit e2e", () => {
 
     await worker.client.postJson("/__test/runner/clear", {
       eventId: stabilityActivationDispatch.eventId,
+    });
+  });
+
+  it("serializes overlapping run loops before the pending dispatch lease is written", async () => {
+    const worker = workerFixture;
+    if (worker === null) {
+      throw new Error("Expected the hosted local test worker fixture to be initialized.");
+    }
+
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick" as const,
+        reason: "manual" as const,
+        userId: overlapUserId,
+      },
+      eventId: overlapEventId,
+      occurredAt: "2026-04-17T03:30:00.000Z",
+    };
+
+    await worker.client.postJson("/__test/bootstrap-user", {
+      userId: overlapUserId,
+    });
+    await worker.client.postJson("/__test/runner/invocations/clear", {
+      userId: overlapUserId,
+    });
+    await worker.client.postJson("/__test/runner/payload-read-pause", {
+      dispatch,
+    });
+
+    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", dispatch);
+    await worker.waitForRunnerPayloadReadPauseEntry(overlapEventId);
+
+    const alarmResult = await worker.client.postJson("/__test/alarm", {
+      userId: overlapUserId,
+    });
+    expect(alarmResult).toMatchObject({
+      ok: true,
+      userId: overlapUserId,
+    });
+
+    const invocationsWhilePaused = await worker.client.getJson(
+      `/__test/runner/invocations?userId=${encodeURIComponent(overlapUserId)}`,
+    );
+    expect(invocationsWhilePaused).toMatchObject({
+      count: 0,
+      eventIds: [],
+    });
+
+    await worker.client.postJson("/__test/runner/payload-read-release", {
+      eventId: overlapEventId,
+    });
+
+    const dispatchResult = await dispatchPromise;
+    expect(dispatchResult).toMatchObject({
+      event: {
+        eventId: overlapEventId,
+        lastError: null,
+        state: "completed",
+        userId: overlapUserId,
+      },
+      status: {
+        lastError: null,
+        pendingEventCount: 0,
+        retryingEventId: null,
+        userId: overlapUserId,
+      },
+    });
+
+    const finalStatus = await worker.waitForUserStatus(
+      overlapUserId,
+      (status) => status.pendingEventCount === 0 && status.retryingEventId === null,
+    );
+    expect(finalStatus).toMatchObject({
+      lastError: null,
+      pendingEventCount: 0,
+      retryingEventId: null,
+      userId: overlapUserId,
+    });
+
+    const finalInvocations = await worker.client.getJson(
+      `/__test/runner/invocations?userId=${encodeURIComponent(overlapUserId)}`,
+    );
+    expect(finalInvocations).toMatchObject({
+      count: 2,
+      eventIds: [overlapEventId, overlapEventId],
+    });
+
+    await worker.client.postJson("/__test/runner/payload-read-clear", {
+      eventId: overlapEventId,
+    });
+    await worker.client.postJson("/__test/runner/invocations/clear", {
+      userId: overlapUserId,
     });
   });
 });
