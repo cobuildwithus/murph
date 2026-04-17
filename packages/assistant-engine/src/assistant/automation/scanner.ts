@@ -328,6 +328,7 @@ async function listAssistantAutomationCandidates(input: {
           requestId: input.requestId,
           limit,
           sourceId: null,
+          afterCreatedAt: input.scanState.inboxScanCursor?.createdAt ?? null,
           afterOccurredAt: input.scanState.inboxScanCursor?.occurredAt ?? null,
           afterCaptureId: input.scanState.inboxScanCursor?.captureId ?? null,
           oldestFirst: true,
@@ -369,6 +370,7 @@ async function listAssistantReplyCandidates(input: {
           requestId: input.requestId,
           limit: input.limit,
           sourceId: null,
+          afterCreatedAt: cursor?.createdAt ?? null,
           afterOccurredAt: cursor?.occurredAt ?? null,
           afterCaptureId: cursor?.captureId ?? null,
           oldestFirst: true,
@@ -443,6 +445,7 @@ function createEmptyAssistantInboxListResult(
     filters: {
       sourceId: null,
       limit,
+      afterCreatedAt: cursor?.createdAt ?? null,
       afterOccurredAt: cursor?.occurredAt ?? null,
       afterCaptureId: cursor?.captureId ?? null,
       oldestFirst: true,

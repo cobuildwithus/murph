@@ -8,8 +8,8 @@ import {
   appendHostedCoalescingWakeTx,
   appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx,
-  findHostedWakeEventIdByDedupeKeyTx,
-  readHostedWakeScheduleByDedupeKeyTx,
+  findHostedWakeEventIdByEventIdTx,
+  readHostedWakeScheduleByEventIdTx,
   type AppendHostedWakeResult,
 } from "./store";
 
@@ -83,8 +83,8 @@ export async function findHostedExecutionWakeEventIdTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
 }): Promise<string | null> {
-  return findHostedWakeEventIdByDedupeKeyTx({
-    dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId),
+  return findHostedWakeEventIdByEventIdTx({
+    eventId: input.eventId,
     tx: input.tx,
   });
 }
@@ -97,8 +97,8 @@ export async function readHostedExecutionWakeScheduleTx(input: {
   seq: string;
   userId: string;
 } | null> {
-  return readHostedWakeScheduleByDedupeKeyTx({
-    dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId),
+  return readHostedWakeScheduleByEventIdTx({
+    eventId: input.eventId,
     tx: input.tx,
   });
 }
@@ -107,11 +107,6 @@ export function buildHostedWakeDispatchDedupeKey(
   dispatch: HostedExecutionDispatchRequest,
 ): string {
   return `dispatch:${dispatch.event.kind}:${dispatch.eventId}`;
-}
-
-export function buildHostedWakeDispatchDedupeKeyFromEventId(eventId: string): string {
-  const [kind = eventId] = eventId.split(":", 1);
-  return `dispatch:${kind}:${eventId}`;
 }
 
 export function buildHostedWakeDispatchCoalescingKey(

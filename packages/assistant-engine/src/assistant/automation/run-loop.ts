@@ -422,6 +422,7 @@ function sameAssistantAutomationCursor(
 ): boolean {
   return (
     left?.captureId === right?.captureId &&
+    (left?.createdAt ?? null) === (right?.createdAt ?? null) &&
     left?.occurredAt === right?.occurredAt
   )
 }

@@ -14,8 +14,8 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
-  decodeHostedWakeInlinePayload,
-  encodeHostedWakeInlinePayload,
+  decodeHostedWakeStoredPayload,
+  encodeHostedWakeStoredPayload,
 } from "./payload";
 
 type HostedWakeStoreClient = PrismaClient | Prisma.TransactionClient;
@@ -58,6 +58,16 @@ interface HostedWakeRow {
   seq: bigint;
   updatedAt: Date;
   userId: string;
+}
+
+interface HostedWakePayloadRow {
+  createdAt: Date;
+  payloadBytes: number;
+  payloadCiphertext: string;
+  payloadSchema: string;
+  updatedAt: Date;
+  userId: string;
+  wakeId: string;
 }
 
 export interface AppendHostedWakeInput {
@@ -156,7 +166,10 @@ export async function appendHostedWakeTx(
         duplicate: true,
         inserted: false,
         updatedExisting: false,
-        wake: projectHostedWakeRecord(existingDuplicate),
+        wake: await hydrateHostedWakeRecordTx({
+          record: existingDuplicate,
+          tx: input.tx,
+        }),
       };
     }
   }
@@ -174,7 +187,10 @@ export async function appendHostedWakeTx(
           duplicate: true,
           inserted: false,
           updatedExisting: false,
-          wake: projectHostedWakeRecord(unresolved),
+          wake: await hydrateHostedWakeRecordTx({
+            record: unresolved,
+            tx: input.tx,
+          }),
         };
       }
 
@@ -183,13 +199,23 @@ export async function appendHostedWakeTx(
           duplicate: false,
           inserted: false,
           updatedExisting: false,
-          wake: projectHostedWakeRecord(unresolved),
+          wake: await hydrateHostedWakeRecordTx({
+            record: unresolved,
+            tx: input.tx,
+          }),
         };
       }
 
-      const encodedPayload = encodeHostedWakeInlinePayload({
+      const encodedPayload = encodeHostedWakeStoredPayload({
         userId: input.userId,
         value: input.payload,
+      });
+      await writeHostedWakePayloadStorageTx({
+        payload: encodedPayload,
+        payloadSchema: input.payloadSchema,
+        tx: input.tx,
+        userId: input.userId,
+        wakeId: unresolved.id,
       });
       const updated = await input.tx.hostedWake.update({
         where: {
@@ -201,7 +227,7 @@ export async function appendHostedWakeTx(
           occurredAt,
           payloadBytes: encodedPayload.payloadBytes,
           payloadInlineCiphertext: encodedPayload.payloadInlineCiphertext,
-          payloadRef: null,
+          payloadRef: encodedPayload.storage === "ref" ? unresolved.id : null,
           payloadSchema: input.payloadSchema,
           quarantineCode: null,
           quarantinedAt: null,
@@ -212,7 +238,10 @@ export async function appendHostedWakeTx(
         duplicate: false,
         inserted: false,
         updatedExisting: true,
-        wake: projectHostedWakeRecord(updated),
+        wake: await hydrateHostedWakeRecordTx({
+          record: updated,
+          tx: input.tx,
+        }),
       };
     }
   }
@@ -229,7 +258,10 @@ export async function appendHostedWakeTx(
         duplicate: false,
         inserted: false,
         updatedExisting: false,
-        wake: projectHostedWakeRecord(unresolved),
+        wake: await hydrateHostedWakeRecordTx({
+          record: unresolved,
+          tx: input.tx,
+        }),
       };
     }
   }
@@ -281,7 +313,10 @@ export async function listHostedWakesAfterSeq(
 
   return {
     cursor: projectHostedExecutionCursorRecord(cursor),
-    wakes: wakes.map((wake) => projectHostedWakeRecord(wake)),
+    wakes: await hydrateHostedWakeRecordsTx({
+      records: wakes,
+      tx: prisma,
+    }),
   };
 }
 
@@ -297,7 +332,7 @@ export async function commitHostedExecutionCursorTx(input: {
     userId: input.userId,
   });
 
-  if (input.committedSeq < cursor.committedSeq) {
+  if (input.committedSeq <= cursor.committedSeq) {
     return {
       committed: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
@@ -311,9 +346,7 @@ export async function commitHostedExecutionCursorTx(input: {
     : input.snapshotRef ?? Prisma.DbNull;
   const updated = await input.tx.hostedExecutionCursor.updateMany({
     where: {
-      committedSeq: {
-        lte: input.committedSeq,
-      },
+      committedSeq: cursor.committedSeq,
       nextSeq: {
         gt: input.committedSeq,
       },
@@ -364,41 +397,35 @@ export async function quarantineHostedWakeTx(input: {
   return updated.count === 1;
 }
 
-export async function findHostedWakeEventIdByDedupeKeyTx(input: {
-  dedupeKey: string;
+export async function findHostedWakeEventIdByEventIdTx(input: {
+  eventId: string;
   tx: HostedWakeStoreClient;
 }): Promise<string | null> {
-  const row = await findHostedWakeByDedupeKeyTx({
-    dedupeKey: input.dedupeKey,
-    tx: input.tx,
-  });
+  const row = await findHostedWakeByEventIdTx(input);
 
   if (!row) {
     return null;
   }
 
-  return row.dedupeKey ?? row.id;
+  return resolveHostedWakeEventId(row);
 }
 
-export async function readHostedWakeScheduleByDedupeKeyTx(input: {
-  dedupeKey: string;
+export async function readHostedWakeScheduleByEventIdTx(input: {
+  eventId: string;
   tx: HostedWakeStoreClient;
 }): Promise<{
   eventId: string;
   seq: string;
   userId: string;
 } | null> {
-  const row = await findHostedWakeByDedupeKeyTx({
-    dedupeKey: input.dedupeKey,
-    tx: input.tx,
-  });
+  const row = await findHostedWakeByEventIdTx(input);
 
   if (!row) {
     return null;
   }
 
   return {
-    eventId: row.dedupeKey ?? row.id,
+    eventId: resolveHostedWakeEventId(row),
     seq: row.seq.toString(),
     userId: row.userId,
   };
@@ -430,7 +457,7 @@ export async function readLatestHostedWakeLifecycleByKind(input: {
   }
 
   return {
-    eventId: wake.dedupeKey ?? wake.id,
+    eventId: resolveHostedWakeEventId(wake),
     state: wake.seq > cursor.committedSeq ? "queued" : "completed",
   };
 }
@@ -500,12 +527,8 @@ export function projectHostedExecutionCursorRecord(
 
 export function projectHostedWakeRecord(
   record: HostedWakeRow,
+  payloadJson: unknown | null = null,
 ): HostedWakeRecord {
-  const payloadJson = decodeHostedWakeInlinePayload({
-    payloadInlineCiphertext: record.payloadInlineCiphertext,
-    userId: record.userId,
-  });
-
   return {
     behavior: record.behavior,
     coalescingKey: record.coalescingKey,
@@ -527,12 +550,45 @@ export function projectHostedWakeRecord(
   };
 }
 
+async function hydrateHostedWakeRecordTx(input: {
+  record: HostedWakeRow;
+  tx: HostedWakeStoreClient;
+}): Promise<HostedWakeRecord> {
+  const payloadJson = await resolveHostedWakePayloadJson(input.record, input.tx);
+  return projectHostedWakeRecord(input.record, payloadJson);
+}
+
+async function hydrateHostedWakeRecordsTx(input: {
+  records: HostedWakeRow[];
+  tx: HostedWakeStoreClient;
+}): Promise<HostedWakeRecord[]> {
+  if (input.records.length === 0) {
+    return [];
+  }
+
+  const payloadRowsByWakeId = await readHostedWakePayloadRowsByWakeIdTx({
+    tx: input.tx,
+    userId: input.records[0].userId,
+    wakeIds: input.records
+      .map((record) => record.payloadRef)
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  });
+
+  return input.records.map((record) => {
+    const payloadJson = resolveHostedWakePayloadJsonSync(
+      record,
+      payloadRowsByWakeId.get(record.payloadRef ?? "") ?? null,
+    );
+    return projectHostedWakeRecord(record, payloadJson);
+  });
+}
+
 
 async function createHostedWakeTx(
   input: AppendHostedWakeInput,
 ): Promise<AppendHostedWakeResult> {
   const occurredAt = requireOccurredAtDate(input.occurredAt);
-  const encodedPayload = encodeHostedWakeInlinePayload({
+  const encodedPayload = encodeHostedWakeStoredPayload({
     userId: input.userId,
     value: input.payload,
   });
@@ -540,6 +596,7 @@ async function createHostedWakeTx(
     tx: input.tx,
     userId: input.userId,
   });
+  const wakeId = randomUUID();
 
   try {
     const wake = await input.tx.hostedWake.create({
@@ -547,23 +604,33 @@ async function createHostedWakeTx(
         behavior: input.behavior,
         coalescingKey: input.coalescingKey ?? null,
         dedupeKey: input.dedupeKey ?? null,
-        id: randomUUID(),
+        id: wakeId,
         kind: input.kind,
         occurredAt,
         payloadBytes: encodedPayload.payloadBytes,
         payloadInlineCiphertext: encodedPayload.payloadInlineCiphertext,
-        payloadRef: null,
+        payloadRef: encodedPayload.storage === "ref" ? wakeId : null,
         payloadSchema: input.payloadSchema,
         seq,
         userId: input.userId,
       },
+    });
+    await writeHostedWakePayloadStorageTx({
+      payload: encodedPayload,
+      payloadSchema: input.payloadSchema,
+      tx: input.tx,
+      userId: input.userId,
+      wakeId,
     });
 
     return {
       duplicate: false,
       inserted: true,
       updatedExisting: false,
-      wake: projectHostedWakeRecord(wake),
+      wake: await hydrateHostedWakeRecordTx({
+        record: wake,
+        tx: input.tx,
+      }),
     };
   } catch (error) {
     if (
@@ -582,13 +649,119 @@ async function createHostedWakeTx(
           duplicate: true,
           inserted: false,
           updatedExisting: false,
-          wake: projectHostedWakeRecord(existing),
+          wake: await hydrateHostedWakeRecordTx({
+            record: existing,
+            tx: input.tx,
+          }),
         };
       }
     }
 
     throw error;
   }
+}
+
+async function writeHostedWakePayloadStorageTx(input: {
+  payload: ReturnType<typeof encodeHostedWakeStoredPayload>;
+  payloadSchema: string;
+  tx: HostedWakeMutationTx;
+  userId: string;
+  wakeId: string;
+}): Promise<void> {
+  if (input.payload.storage === "inline") {
+    await input.tx.hostedWakePayload.deleteMany({
+      where: {
+        wakeId: input.wakeId,
+      },
+    });
+    return;
+  }
+
+  if (!input.payload.payloadRefCiphertext) {
+    throw new TypeError("Hosted wake payload spill storage requires ciphertext.");
+  }
+
+  await input.tx.hostedWakePayload.upsert({
+    where: {
+      wakeId: input.wakeId,
+    },
+    create: {
+      payloadBytes: input.payload.payloadBytes,
+      payloadCiphertext: input.payload.payloadRefCiphertext,
+      payloadSchema: input.payloadSchema,
+      userId: input.userId,
+      wakeId: input.wakeId,
+    },
+    update: {
+      payloadBytes: input.payload.payloadBytes,
+      payloadCiphertext: input.payload.payloadRefCiphertext,
+      payloadSchema: input.payloadSchema,
+      userId: input.userId,
+    },
+  });
+}
+
+async function resolveHostedWakePayloadJson(
+  record: HostedWakeRow,
+  tx: HostedWakeStoreClient,
+): Promise<unknown | null> {
+  if (record.payloadInlineCiphertext) {
+    return resolveHostedWakePayloadJsonSync(record, null);
+  }
+
+  if (!record.payloadRef) {
+    return null;
+  }
+
+  const payloadRow = await tx.hostedWakePayload.findUnique({
+    where: {
+      wakeId: record.payloadRef,
+    },
+  });
+
+  return resolveHostedWakePayloadJsonSync(record, payloadRow);
+}
+
+function resolveHostedWakePayloadJsonSync(
+  record: HostedWakeRow,
+  payloadRow: HostedWakePayloadRow | null,
+): unknown | null {
+  if (record.payloadInlineCiphertext) {
+    return decodeHostedWakeStoredPayload({
+      payloadInlineCiphertext: record.payloadInlineCiphertext,
+      userId: record.userId,
+    });
+  }
+
+  if (!record.payloadRef || !payloadRow || payloadRow.userId !== record.userId) {
+    return null;
+  }
+
+  return decodeHostedWakeStoredPayload({
+    payloadRefCiphertext: payloadRow.payloadCiphertext,
+    userId: record.userId,
+  });
+}
+
+async function readHostedWakePayloadRowsByWakeIdTx(input: {
+  tx: HostedWakeStoreClient;
+  userId: string;
+  wakeIds: string[];
+}): Promise<Map<string, HostedWakePayloadRow>> {
+  if (input.wakeIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await input.tx.hostedWakePayload.findMany({
+    where: {
+      userId: input.userId,
+      wakeId: {
+        in: input.wakeIds,
+      },
+    },
+  });
+
+  return new Map(rows.map((row) => [row.wakeId, row]));
 }
 
 async function lockHostedExecutionCursorRowTx(input: {
@@ -628,7 +801,7 @@ async function allocateHostedWakeSeqTx(input: {
 
 async function findHostedWakeByDedupeKeyTx(input: {
   dedupeKey: string | null;
-  tx: HostedWakeMutationTx;
+  tx: HostedWakeStoreClient;
 }): Promise<HostedWakeRow | null> {
   if (!input.dedupeKey) {
     return null;
@@ -639,6 +812,26 @@ async function findHostedWakeByDedupeKeyTx(input: {
       dedupeKey: input.dedupeKey,
     },
   });
+}
+
+async function findHostedWakeByEventIdTx(input: {
+  eventId: string;
+  tx: HostedWakeStoreClient;
+}): Promise<HostedWakeRow | null> {
+  if (!input.eventId.trim()) {
+    return null;
+  }
+
+  const rows = await input.tx.hostedWake.findMany({
+    where: {
+      dedupeKey: {
+        endsWith: `:${input.eventId}`,
+        startsWith: "dispatch:",
+      },
+    },
+  });
+
+  return rows.find((row) => resolveHostedWakeEventId(row) === input.eventId) ?? null;
 }
 
 async function findUncommittedWakeByCoalescingKeyTx(input: {
@@ -682,4 +875,20 @@ function assertHostedWakeUserMatch(
   throw new Error(
     `Hosted wake dedupe key ${JSON.stringify(dedupeKey)} is already owned by ${wake.userId}, not ${userId}.`,
   );
+}
+
+function resolveHostedWakeEventId(
+  wake: Pick<HostedWakeRow, "dedupeKey" | "id" | "kind">,
+): string {
+  if (wake.dedupeKey) {
+    const dispatchPrefix = `dispatch:${wake.kind}:`;
+
+    if (wake.dedupeKey.startsWith(dispatchPrefix)) {
+      return wake.dedupeKey.slice(dispatchPrefix.length);
+    }
+
+    return wake.dedupeKey;
+  }
+
+  return wake.id;
 }

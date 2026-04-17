@@ -129,6 +129,77 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["2"]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_poison"]);
   });
+
+  it("skips local post-commit cleanup after losing the cursor compare-and-swap race", async () => {
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "0",
+          nextSeq: "2",
+          version: "cursor_v1",
+        }),
+        wakes: [
+          createHostedWakeRecord({
+            payloadJson: createDispatch("evt_stale_commit"),
+            seq: "1",
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "0",
+          nextSeq: "2",
+          updatedAt: "2026-03-26T12:00:02.000Z",
+          version: "cursor_v2",
+        }),
+        wakes: [],
+      });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb.mockResolvedValueOnce({
+      committed: false,
+      cursor: createCursorState({
+        committedSeq: "0",
+        nextSeq: "2",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+    });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const dispatchProcessor = Reflect.get(runner, "dispatchProcessor");
+
+    if (
+      !dispatchProcessor
+      || typeof dispatchProcessor !== "object"
+      || !("finalizeNativeWakeDispatchAfterCursorCommit" in dispatchProcessor)
+    ) {
+      throw new Error("Expected HostedUserRunner dispatch processor test internals to be available.");
+    }
+
+    const finalizeNativeWakeDispatchAfterCursorCommit = vi.spyOn(
+      dispatchProcessor,
+      "finalizeNativeWakeDispatchAfterCursorCommit",
+    );
+
+    await runner.wakeHostedWakes();
+
+    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1"]);
+    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_stale_commit"]);
+    expect(finalizeNativeWakeDispatchAfterCursorCommit).not.toHaveBeenCalled();
+  });
 });
 
 function createDispatch(eventId: string) {

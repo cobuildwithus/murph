@@ -142,6 +142,8 @@ function ensureInboxRuntimeSchema(database: DatabaseSync): void {
 
     create index if not exists capture_occurred_at_idx on capture (occurred_at desc, capture_id desc);
     create index if not exists capture_source_idx on capture (source, account_id, occurred_at desc);
+    create index if not exists capture_created_at_idx on capture (created_at desc, capture_id desc);
+    create index if not exists capture_source_created_idx on capture (source, account_id, created_at desc, capture_id desc);
     create table if not exists capture_mutation_counter (
       singleton integer primary key check (singleton = 1),
       next_cursor integer not null
@@ -486,6 +488,22 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
       limit ?
     `,
   );
+  const listCapturesAscendingByCreatedStatement = database.prepare(
+    `
+      select *
+      from capture
+      where (? is null or source = ?)
+        and (? is null or account_id = ?)
+        and (
+          ? is null
+          or ? is null
+          or created_at > ?
+          or (created_at = ? and capture_id > ?)
+        )
+      order by created_at asc, capture_id asc
+      limit ?
+    `,
+  );
   const listCapturesDescendingStatement = database.prepare(
     `
       select *
@@ -499,6 +517,22 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
           or (occurred_at = ? and capture_id > ?)
         )
       order by occurred_at desc, capture_id desc
+      limit ?
+    `,
+  );
+  const listCapturesDescendingByCreatedStatement = database.prepare(
+    `
+      select *
+      from capture
+      where (? is null or source = ?)
+        and (? is null or account_id = ?)
+        and (
+          ? is null
+          or ? is null
+          or created_at > ?
+          or (created_at = ? and capture_id > ?)
+        )
+      order by created_at desc, capture_id desc
       limit ?
     `,
   );
@@ -688,18 +722,28 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
     },
     listCaptures(filters = {}) {
       const normalizedFilters = normalizeCaptureFilters(filters);
-      const statement = normalizedFilters.oldestFirst
-        ? listCapturesAscendingStatement
-        : listCapturesDescendingStatement;
+      const statement = normalizedFilters.afterCreatedAt
+        ? (
+            normalizedFilters.oldestFirst
+              ? listCapturesAscendingByCreatedStatement
+              : listCapturesDescendingByCreatedStatement
+          )
+        : (
+            normalizedFilters.oldestFirst
+              ? listCapturesAscendingStatement
+              : listCapturesDescendingStatement
+          );
+      const afterTime =
+        normalizedFilters.afterCreatedAt ?? normalizedFilters.afterOccurredAt;
       const rows = statement.all(
         normalizedFilters.source,
         normalizedFilters.source,
         normalizedFilters.accountId,
         normalizedFilters.accountId,
-        normalizedFilters.afterOccurredAt,
+        afterTime,
         normalizedFilters.afterCaptureId,
-        normalizedFilters.afterOccurredAt,
-        normalizedFilters.afterOccurredAt,
+        afterTime,
+        afterTime,
         normalizedFilters.afterCaptureId,
         normalizedFilters.limit,
       );
@@ -782,6 +826,7 @@ function normalizeCaptureFilters(
   source: string | null;
   accountId: string | null;
   afterCaptureId: string | null;
+  afterCreatedAt: string | null;
   afterOccurredAt: string | null;
   limit: number;
   oldestFirst: boolean;
@@ -790,6 +835,7 @@ function normalizeCaptureFilters(
     source: normalizeNullable(filters.source),
     accountId: normalizeNullable(filters.accountId),
     afterCaptureId: normalizeNullable(filters.afterCaptureId),
+    afterCreatedAt: normalizeNullable(filters.afterCreatedAt),
     afterOccurredAt: normalizeNullable(filters.afterOccurredAt),
     limit: normalizeLimit(filters.limit, fallbackLimit),
     oldestFirst: filters.oldestFirst === true,

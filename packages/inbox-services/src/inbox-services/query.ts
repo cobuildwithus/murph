@@ -69,6 +69,7 @@ export function summarizeCapture(
     attachmentCount: capture.attachments.length,
     envelopePath: capture.envelopePath,
     eventId: capture.eventId,
+    createdAt: capture.createdAt,
     promotions,
   }
 }

@@ -379,6 +379,94 @@ export class RunnerQueueStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async beginWakeRun(input: {
+    eventId: string;
+    run: HostedExecutionRunContext;
+    userId: string;
+  }): Promise<RunnerStateRecord> {
+    await this.ready;
+    await this.bootstrapUser(input.userId);
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.requireMetaRowSync();
+    meta.in_flight = 1;
+    this.assignActiveRunMetaSync(meta, input.eventId, input.run);
+    this.volatileRun = {
+      attempt: input.run.attempt,
+      eventId: input.eventId,
+      phase: "claimed",
+      runId: input.run.runId,
+      startedAt: input.run.startedAt,
+      updatedAt: input.run.startedAt,
+    };
+    this.clearLastErrorMetaSync(meta);
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async completeWakeRun(input: {
+    eventId: string;
+    finishedAt?: string | null;
+    leaseOwner: RunnerLeaseOwnerInput;
+  }): Promise<RunnerStateRecord> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.requireMetaRowSync();
+    this.clearActiveRunLeaseSync(meta, input.leaseOwner);
+    this.clearLastErrorMetaSync(meta);
+    meta.last_run_at = input.finishedAt ?? new Date().toISOString();
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async failWakeRun(input: {
+    error: unknown;
+    eventId: string;
+    finishedAt?: string | null;
+    leaseOwner: RunnerLeaseOwnerInput;
+  }): Promise<RunnerStateRecord> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.requireMetaRowSync();
+    this.clearActiveRunLeaseSync(meta, input.leaseOwner);
+    meta.last_error_at = input.finishedAt ?? new Date().toISOString();
+    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async syncBundleRefCache(
+    nextBundleRef: RunnerStateRecord["bundleRef"],
+  ): Promise<RunnerStateRecord> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.requireMetaRowSync();
+    const bundleState = this.selectBundleStateSync();
+    assignRunnerBundleRefs(bundleState, nextBundleRef);
+    this.writeBundleStateSync(bundleState);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async markRuntimeBootstrapped(): Promise<RunnerStateRecord> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.requireMetaRowSync();
+    if (meta.runtime_bootstrapped !== 1) {
+      meta.runtime_bootstrapped = 1;
+      this.writeMetaRowSync(meta);
+    }
+
+    return this.readStateFromMetaSync(meta);
+  }
+
   async reschedulePendingFailure(input: {
     error: unknown;
     eventId: string;

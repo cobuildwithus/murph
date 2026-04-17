@@ -225,6 +225,7 @@ model HostedMember {
   emailAuthorization HostedMemberEmailAuthorization?
   executionCursor HostedExecutionCursor?
   hostedWakes     HostedWake[]
+  hostedWakePayloads HostedWakePayload[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -336,12 +337,28 @@ model HostedWake {
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
   member                HostedMember       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payload               HostedWakePayload?
 
   @@unique([userId, seq])
   @@index([userId, seq])
   @@index([userId, coalescingKey, seq])
   @@index([userId, kind, seq])
   @@map("hosted_wake")
+}
+
+model HostedWakePayload {
+  wakeId            String       @id @map("wake_id")
+  userId            String       @map("user_id")
+  payloadCiphertext String       @map("payload_ciphertext")
+  payloadSchema     String       @map("payload_schema")
+  payloadBytes      Int          @map("payload_bytes")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wake              HostedWake   @relation(fields: [wakeId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("hosted_wake_payload")
 }
 
 model HostedInvite {

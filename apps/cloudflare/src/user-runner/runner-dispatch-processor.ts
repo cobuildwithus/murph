@@ -1,5 +1,6 @@
 import type {
   HostedExecutionBundleRef,
+  HostedExecutionDispatchLifecycleState,
   HostedExecutionDispatchRequest,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
@@ -180,6 +181,248 @@ export class RunnerDispatchProcessor {
     }
 
     return this.runQueuedEvents(record.userId);
+  }
+
+  async executeNativeWakeDispatch(
+    dispatch: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionDispatchLifecycleState> {
+    const userId = dispatch.event.userId;
+    const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
+    const committed = await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
+
+    if (committed && isCommittedResultFinalized(committed)) {
+      await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, committed, {
+        policy: "same-event",
+        run: null,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          existingCommittedAt: committed.committedAt,
+          existingFinalizedAt: committed.finalizedAt,
+        },
+        dispatch,
+        message: "Hosted wake execution reused an already-finalized durable commit.",
+        phase: "completed",
+        run: null,
+      });
+      return "completed";
+    }
+
+    const activeLease = await this.readRecentActiveRunLease();
+    if (activeLease && activeLease.eventId !== dispatch.eventId) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          activeRunEventId: activeLease.eventId,
+          activeRunId: activeLease.run.runId,
+        },
+        dispatch,
+        level: "info",
+        message: "Hosted wake execution deferred because another active run still owns the user lease.",
+        phase: "dispatch.running",
+        run: null,
+      });
+      return "backpressured";
+    }
+
+    const run = this.resolveRunContext(
+      await this.dependencies.queueStore.readState(),
+      {
+        eventId: dispatch.eventId,
+        startedAt: new Date().toISOString(),
+      },
+    );
+    const leaseOwner: RunnerLeaseOwnerInput = {
+      eventId: dispatch.eventId,
+      run,
+    };
+
+    await this.dependencies.queueStore.beginWakeRun({
+      eventId: dispatch.eventId,
+      run,
+      userId,
+    });
+    await this.advanceRunPhase({
+      clearError: true,
+      dispatch,
+      message: committed && !isCommittedResultFinalized(committed)
+        ? "Resuming direct hosted wake execution from a durable commit."
+        : "Invoking direct hosted wake execution.",
+      phase: "claimed",
+      run,
+    });
+
+    try {
+      await this.advanceRunPhase({
+        clearError: true,
+        dispatch,
+        message: committed && !isCommittedResultFinalized(committed)
+          ? "Resuming hosted wake finalize from a durable commit."
+          : "Running hosted wake directly from the canonical wake queue.",
+        phase: "dispatch.running",
+        run,
+      });
+      const runnerResult = await this.invokeRunner(
+        userId,
+        dispatch,
+        run,
+        committed && !isCommittedResultFinalized(committed)
+          ? {
+            committedResult: {
+              assistantDeliveryEffects: committed.assistantDeliveryEffects,
+              result: committed.result,
+            },
+          }
+          : null,
+      );
+      const durableCommit = runnerResult.phase === "committed"
+        ? await this.persistReturnedRunnerCommit({
+          assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
+          currentBundleRef: (await this.dependencies.queueStore.readBundleMetaState()).bundleRef,
+          dispatch,
+          gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
+          result: runnerResult.result,
+          run,
+        })
+        : await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
+
+      if (!durableCommit) {
+        throw new Error("Hosted wake execution returned before recording a durable commit.");
+      }
+
+      await this.advanceRunPhase({
+        clearError: true,
+        dispatch,
+        message: "Hosted wake execution recorded a durable commit.",
+        phase: "commit.recorded",
+        run,
+      });
+      await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, durableCommit, { run });
+
+      const finalRunnerResult = runnerResult.phase === "completed"
+        ? runnerResult
+        : await this.invokeRunner(
+          userId,
+          dispatch,
+          run,
+          {
+            committedResult: {
+              assistantDeliveryEffects: durableCommit.assistantDeliveryEffects,
+              result: durableCommit.result,
+            },
+          },
+        );
+
+      if (finalRunnerResult.phase !== "completed") {
+        throw new Error("Hosted wake execution returned a duplicate committed result during finalize.");
+      }
+
+      await this.finalizeReturnedRunnerResult({
+        eventId: dispatch.eventId,
+        finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
+        result: finalRunnerResult.result,
+        run,
+      });
+      await this.persistBrowserVaultSnapshotBestEffort(
+        userId,
+        finalRunnerResult.browserVaultSnapshot ?? null,
+      );
+
+      const finalizedCommit = await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
+      if (!finalizedCommit) {
+        throw new Error("Hosted wake execution lost its durable commit before direct completion.");
+      }
+
+      await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, finalizedCommit, { run });
+      await this.dependencies.queueStore.completeWakeRun({
+        eventId: dispatch.eventId,
+        finishedAt: finalizedCommit.finalizedAt ?? finalizedCommit.committedAt,
+        leaseOwner,
+      });
+      await this.advanceRunPhase({
+        clearError: true,
+        dispatch,
+        message: "Hosted wake execution completed and is awaiting cursor commit.",
+        phase: "completed",
+        run,
+      });
+      return "completed";
+    } catch (error) {
+      if (error instanceof HostedExecutionObsoleteRunResultError) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            obsoleteRunId: error.runId,
+            runElapsedMs: computeHostedRunElapsedMs(run),
+          },
+          dispatch,
+          error,
+          level: "warn",
+          message: "Hosted wake execution returned a stale result for an obsolete run lease.",
+          phase: "dispatch.running",
+          run,
+        });
+        await this.dependencies.queueStore.failWakeRun({
+          error,
+          eventId: dispatch.eventId,
+          leaseOwner,
+        });
+        return "backpressured";
+      }
+
+      const recoveredCommitted = await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
+      if (recoveredCommitted && isCommittedResultFinalized(recoveredCommitted)) {
+        await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, recoveredCommitted, {
+          policy: "same-event",
+          run: null,
+        });
+        await this.dependencies.queueStore.completeWakeRun({
+          eventId: dispatch.eventId,
+          finishedAt: recoveredCommitted.finalizedAt ?? recoveredCommitted.committedAt,
+          leaseOwner,
+        });
+        await this.advanceRunPhase({
+          clearError: true,
+          dispatch,
+          message: "Hosted wake execution recovered a finalized durable commit after a transient failure.",
+          phase: "completed",
+          run,
+        });
+        return "completed";
+      }
+
+      await this.dependencies.queueStore.failWakeRun({
+        error,
+        eventId: dispatch.eventId,
+        leaseOwner,
+      });
+      await this.dependencies.scheduler.syncNextWake(recoveredCommitted?.result.nextWakeAt ?? null);
+      await this.advanceRunPhase({
+        dispatch,
+        error,
+        level: error instanceof HostedExecutionConfigurationError ? "warn" : "error",
+        message: recoveredCommitted
+          ? "Hosted wake execution preserved a durable commit for a later finalize retry."
+          : error instanceof HostedExecutionConfigurationError
+          ? "Hosted wake execution deferred because the runtime is not configured yet."
+          : "Hosted wake execution deferred after a direct runner failure.",
+        phase: "retry.scheduled",
+        run,
+      });
+      return "backpressured";
+    }
+  }
+
+  async finalizeNativeWakeDispatchAfterCursorCommit(input: {
+    dispatch: HostedExecutionDispatchRequest;
+  }): Promise<void> {
+    await this.dependencies.queueStore.markRuntimeBootstrapped();
+    await this.rememberCommittedEventAndCleanup(
+      input.dispatch.event.userId,
+      input.dispatch.eventId,
+      input.dispatch,
+    );
   }
 
   async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {

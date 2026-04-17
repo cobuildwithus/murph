@@ -53,6 +53,7 @@ export function sameAssistantAutoReplyState(
       return (
         other?.channel === entry.channel &&
         other.cursor?.captureId === entry.cursor?.captureId &&
+        (other.cursor?.createdAt ?? null) === (entry.cursor?.createdAt ?? null) &&
         other.cursor?.occurredAt === entry.cursor?.occurredAt
       )
     })

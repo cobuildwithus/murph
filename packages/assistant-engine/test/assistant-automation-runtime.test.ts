@@ -817,11 +817,13 @@ describe('assistant automation shared helpers', () => {
 
     const earlier = {
       captureId: 'capture-1',
+      createdAt: '2026-04-08T00:00:01.000Z',
       occurredAt: '2026-04-08T00:00:00.000Z',
     }
     const later = {
       captureId: 'capture-2',
-      occurredAt: '2026-04-08T00:01:00.000Z',
+      createdAt: '2026-04-08T00:00:02.000Z',
+      occurredAt: '2026-04-08T00:00:00.000Z',
     }
 
     expect(shared.cursorFromCapture(later)).toEqual(later)
@@ -831,6 +833,16 @@ describe('assistant automation shared helpers', () => {
     expect(shared.isAssistantCaptureAfterCursor(later, earlier)).toBe(true)
     expect(shared.isAssistantCaptureAfterCursor(earlier, later)).toBe(false)
     expect(shared.isAssistantCaptureAfterCursor(earlier, null)).toBe(true)
+    expect(
+      shared.compareAssistantCaptureOrder(
+        {
+          captureId: 'capture-3',
+          createdAt: '2026-04-08T00:00:03.000Z',
+          occurredAt: '2026-04-07T23:59:59.000Z',
+        },
+        later,
+      ),
+    ).toBeGreaterThan(0)
     expect(shared.normalizeEnabledChannels([' telegram ', '', 'telegram', 'linq '])).toEqual([
       'telegram',
       'linq',
@@ -1156,6 +1168,7 @@ describe('assistant inbox routing', () => {
     expect(cursorUpdates).toEqual([
       {
         captureId: 'capture-2',
+        createdAt: '2026-04-08T00:00:01.000Z',
         occurredAt: '2026-04-08T00:02:00.000Z',
       },
     ])
@@ -1593,6 +1606,7 @@ describe('assistant auto-reply runtime', () => {
             channel: 'telegram',
             cursor: {
               captureId: 'capture-latest',
+              createdAt: '2026-04-08T00:00:01.000Z',
               occurredAt: '2026-04-08T00:03:00.000Z',
             },
           },
@@ -1761,6 +1775,7 @@ describe('assistant auto-reply runtime', () => {
             channel: 'telegram',
             cursor: {
               captureId: 'capture-2',
+              createdAt: '2026-04-08T00:00:01.000Z',
               occurredAt: '2026-04-08T00:02:00.000Z',
             },
           },
@@ -1885,6 +1900,7 @@ describe('assistant auto-reply runtime', () => {
       items: [first, second],
       lastCursor: {
         captureId: 'capture-2',
+        createdAt: '2026-04-08T00:00:01.000Z',
         occurredAt: '2026-04-08T00:02:00.000Z',
       },
     })
@@ -1940,6 +1956,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(nextCursor).toEqual({
       captureId: 'capture-1',
+      createdAt: '2026-04-08T00:00:01.000Z',
       occurredAt: '2026-04-08T00:01:00.000Z',
     })
     expect(stopScanning).toBe(true)

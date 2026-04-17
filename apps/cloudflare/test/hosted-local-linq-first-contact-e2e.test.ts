@@ -29,7 +29,7 @@ import {
   stopHttpStubServer,
   writeJsonResponse,
 } from "./helpers/hosted-local-e2e-support.js";
-import { createHostedPhoneLookupKey } from "../../web/src/lib/hosted-onboarding/contact-privacy";
+import { createHostedPhoneLookupKey } from "./helpers/hosted-contact-privacy.js";
 
 interface ObservedLinqRequest {
   body: string;

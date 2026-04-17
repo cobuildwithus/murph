@@ -573,6 +573,7 @@ export interface BackfillInput extends CommandContext {
 
 export interface ListInput extends CommandContext {
   afterCaptureId?: string | null
+  afterCreatedAt?: string | null
   afterOccurredAt?: string | null
   oldestFirst?: boolean
   sourceId?: string | null

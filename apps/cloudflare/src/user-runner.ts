@@ -1,5 +1,4 @@
 import type {
-  HostedExecutionDispatchLifecycleState,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchStatus,
@@ -10,6 +9,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedExecutionBundleRef,
   parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/parsers";
 
@@ -65,10 +65,16 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
 const HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS = 5_000;
-const HOSTED_WAKE_DISPATCH_POLL_INTERVAL_MS = 250;
+const HOSTED_WAKE_BACKPRESSURE_RETRY_DELAY_MS = 250;
 const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
 const HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH = "invalid-dispatch-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "dispatch-user-mismatch";
+
+interface HostedWakeDrainOutcome {
+  dispatch: HostedExecutionDispatchRequest | null;
+  seq: bigint;
+  state: HostedWakeDrainState;
+}
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
   emitHostedExecutionStructuredLog({
@@ -407,6 +413,7 @@ export class HostedUserRunner {
       });
       afterSeq = batch.cursor.committedSeq;
       expectedVersion = batch.cursor.version;
+      await this.syncHostedWakeBundleCacheToCursor(batch.cursor.snapshotRef);
 
       if (batch.wakes.length === 0) {
         if (targetSeqHint && BigInt(batch.cursor.committedSeq) < targetSeqHint) {
@@ -424,23 +431,30 @@ export class HostedUserRunner {
 
       let highestCommittedWakeSeq: string | null = null;
       let advancedWakeCount = 0;
+      const advancedWakes: HostedWakeDrainOutcome[] = [];
       let stoppingState: HostedWakeDrainState | null = null;
 
       for (const wake of batch.wakes) {
-        const state = await this.dispatchHostedWakeRecord(wake);
+        const outcome = await this.dispatchHostedWakeRecord(wake);
 
-        if (shouldAdvanceHostedWakeCursor(state)) {
+        if (shouldAdvanceHostedWakeCursor(outcome.state)) {
           highestCommittedWakeSeq = wake.seq;
           advancedWakeCount += 1;
+          advancedWakes.push(outcome);
         }
 
-        if (!shouldAdvanceHostedWakeCursor(state)) {
-          stoppingState = state;
+        if (!shouldAdvanceHostedWakeCursor(outcome.state)) {
+          stoppingState = outcome.state;
           break;
         }
       }
 
       if (!highestCommittedWakeSeq || !expectedVersion) {
+        if (stoppingState === "backpressured") {
+          await sleep(HOSTED_WAKE_BACKPRESSURE_RETRY_DELAY_MS);
+          continue;
+        }
+
         break;
       }
 
@@ -459,6 +473,13 @@ export class HostedUserRunner {
 
       afterSeq = commit.cursor.committedSeq;
       expectedVersion = commit.cursor.version;
+      await this.syncHostedWakeBundleCacheToCursor(commit.cursor.snapshotRef);
+      if (commit.committed) {
+        await this.finalizeCommittedHostedWakesLocally({
+          committedThroughSeq: BigInt(commit.cursor.committedSeq),
+          dispatches: advancedWakes,
+        });
+      }
 
       if (!commit.committed) {
         emitHostedExecutionStructuredLog({
@@ -471,7 +492,10 @@ export class HostedUserRunner {
       }
 
       if (advancedWakeCount < batch.wakes.length) {
-        if (stoppingState === "poisoned") {
+        if (
+          stoppingState === "poisoned"
+          || (stoppingState === "backpressured" && advancedWakeCount > 0)
+        ) {
           continue;
         }
 
@@ -493,8 +517,9 @@ export class HostedUserRunner {
     id: string;
     payloadJson?: unknown;
     seq: string;
-  }): Promise<HostedWakeDrainState> {
+  }): Promise<HostedWakeDrainOutcome> {
     const userId = await this.requireBoundUserId();
+    const seq = BigInt(wake.seq);
     let dispatch: HostedExecutionDispatchRequest;
 
     try {
@@ -512,8 +537,8 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH,
       )
-        ? "quarantined"
-        : "backpressured";
+        ? { dispatch: null, seq, state: "quarantined" }
+        : { dispatch: null, seq, state: "backpressured" };
     }
 
     if (dispatch.event.userId !== userId) {
@@ -529,21 +554,17 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
       )
-        ? "quarantined"
-        : "backpressured";
+        ? { dispatch: null, seq, state: "quarantined" }
+        : { dispatch: null, seq, state: "backpressured" };
     }
 
-    const result = await this.dispatchWithOutcome(dispatch);
+    const state = await this.dispatchProcessor.executeNativeWakeDispatch(dispatch);
 
-    if (
-      result.event.state === "completed"
-      || result.event.state === "poisoned"
-      || result.event.state === "backpressured"
-    ) {
-      return result.event.state;
-    }
-
-    return this.waitForHostedDispatchCompletion(dispatch.eventId);
+    return {
+      dispatch,
+      seq,
+      state,
+    };
   }
 
   private async quarantineHostedWakeRecord(
@@ -581,26 +602,41 @@ export class HostedUserRunner {
     }
   }
 
-  private async waitForHostedDispatchCompletion(
-    eventId: string,
-  ): Promise<HostedExecutionDispatchLifecycleState> {
-    const deadline = Date.now() + this.env.runnerTimeoutMs;
-
-    while (Date.now() < deadline) {
-      const status = await this.queueStore.readEventDispatchStatus(eventId);
-
-      if (
-        status?.state === "completed"
-        || status?.state === "poisoned"
-        || status?.state === "backpressured"
-      ) {
-        return status.state;
+  private async finalizeCommittedHostedWakesLocally(input: {
+    committedThroughSeq: bigint;
+    dispatches: readonly HostedWakeDrainOutcome[];
+  }): Promise<void> {
+    for (const outcome of input.dispatches) {
+      if (!outcome.dispatch || outcome.seq > input.committedThroughSeq) {
+        continue;
       }
 
-      await delay(HOSTED_WAKE_DISPATCH_POLL_INTERVAL_MS);
+      try {
+        await this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
+          dispatch: outcome.dispatch,
+        });
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.user-runner",
+          dispatch: outcome.dispatch,
+          error,
+          level: "warn",
+          message: "Hosted wake local cleanup failed after the cursor had already advanced.",
+          phase: "completed",
+          userId: outcome.dispatch.event.userId,
+        });
+      }
     }
+  }
 
-    return (await this.queueStore.readEventDispatchStatus(eventId))?.state ?? "queued";
+  private async syncHostedWakeBundleCacheToCursor(
+    snapshotRef: unknown,
+  ): Promise<void> {
+    const nextBundleRef = parseHostedExecutionBundleRef(
+      snapshotRef === undefined ? null : snapshotRef,
+      "Hosted wake cursor snapshotRef",
+    );
+    await this.queueStore.syncBundleRefCache(nextBundleRef);
   }
 
   private async applyHostedTransition<T>(input: {
@@ -782,9 +818,9 @@ function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | 
   }
 }
 
-async function delay(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
   });
 }
 

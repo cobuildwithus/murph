@@ -132,6 +132,7 @@ export function createInboxReadOps(
         async ({ paths, runtime, config, promotionsByCapture }) => {
           const sourceFilter = resolveSourceFilter(config, input.sourceId ?? null)
           const limit = normalizeLimit(input.limit, 50, 200)
+          const afterCreatedAt = input.afterCreatedAt?.trim() || null
           const afterOccurredAt = input.afterOccurredAt?.trim() || null
           const afterCaptureId = input.afterCaptureId?.trim() || null
           const oldestFirst = input.oldestFirst ?? false
@@ -139,6 +140,7 @@ export function createInboxReadOps(
             source: sourceFilter?.source,
             accountId: sourceFilter?.accountId,
             limit,
+            afterCreatedAt,
             afterOccurredAt,
             afterCaptureId,
             oldestFirst,
@@ -149,6 +151,7 @@ export function createInboxReadOps(
             filters: {
               sourceId: input.sourceId ?? null,
               limit,
+              afterCreatedAt,
               afterOccurredAt,
               afterCaptureId,
               oldestFirst,

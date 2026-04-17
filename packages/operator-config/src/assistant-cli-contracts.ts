@@ -1145,6 +1145,7 @@ export const assistantStopResultSchema = z.object({
 })
 
 export const assistantAutomationCursorSchema = z.object({
+  createdAt: isoTimestampSchema.nullable().optional(),
   occurredAt: isoTimestampSchema,
   captureId: z.string().min(1),
 })
