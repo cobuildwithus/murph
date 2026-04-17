@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.65
-        version: 0.5.65(@cfworker/json-schema@4.1.1)
+        specifier: ^0.5.66
+        version: 0.5.66(@cfworker/json-schema@4.1.1)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -108,6 +108,9 @@ importers:
       '@murphai/messaging-ingress':
         specifier: workspace:*
         version: link:../../packages/messaging-ingress
+      '@murphai/query':
+        specifier: workspace:*
+        version: link:../../packages/query
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../../packages/runtime-state
@@ -320,6 +323,9 @@ importers:
       '@murphai/parsers':
         specifier: workspace:*
         version: link:../parsers
+      '@murphai/query':
+        specifier: workspace:*
+        version: link:../query
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
@@ -454,6 +460,9 @@ importers:
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../hosted-execution
+      '@murphai/runtime-state':
+        specifier: workspace:*
+        version: link:../runtime-state
 
   packages/contracts:
     dependencies:
@@ -1000,8 +1009,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.65':
-    resolution: {integrity: sha512-WQav43jkNM6AiZu8Ujg6quY+dsG3lrVRkeaQjDWFmwHynwcSHce0OZAtHNY/ZhY1ElmNHQDS03z44J4wEY7DTQ==}
+  '@cobuild/review-gpt@0.5.66':
+    resolution: {integrity: sha512-KDc0FTvZ79d/U0TYH0LgekUg3kDrzyC3uF5veDvSle2XF4TYorXQslaOdUIpZkATJGVDC3Strk+LNhEphgaR6A==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -8628,7 +8637,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.65(@cfworker/json-schema@4.1.1)':
+  '@cobuild/review-gpt@0.5.66(@cfworker/json-schema@4.1.1)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(@cfworker/json-schema@4.1.1)(openapi-types@12.1.3)
