@@ -71,7 +71,7 @@ export async function sendHostedEmailMessage(input: {
     binding: input.emailBinding,
     fromAddress: prepared.fromAddress,
     mimeMessage: prepared.mimeMessage,
-    recipients: prepared.recipients,
+    recipient: prepared.recipient,
   });
 
   return {
@@ -97,41 +97,21 @@ async function sendHostedEmailMimeMessage(input: {
   binding: WorkerSendEmailBindingLike;
   fromAddress: string;
   mimeMessage: string;
-  recipients: string[];
+  recipient: string;
 }): Promise<void> {
-  // Cloudflare's raw MIME EmailMessage constructor targets one envelope
-  // recipient at a time, so fan out the same MIME payload across recipients.
-  const deliveryResults = await Promise.allSettled(
-    input.recipients.map((recipient) =>
-      input.binding.send(new EmailMessage(input.fromAddress, recipient, input.mimeMessage))
-    ),
-  );
-
-  const failures = deliveryResults.flatMap((result, index) => {
-    if (result.status === "fulfilled") {
-      return [];
-    }
-
-    return [formatHostedEmailSendError(input.recipients[index], result.reason)];
-  });
-
-  if (failures.length > 0) {
-    throw new Error(
-      failures.length === 1
-        ? failures[0] ?? "Hosted email send failed."
-        : `Hosted email send failed for ${failures.length} recipient(s): ${failures.join("; ")}`,
+  try {
+    await input.binding.send(
+      new EmailMessage(input.fromAddress, input.recipient, input.mimeMessage),
     );
+  } catch (error) {
+    const details = error instanceof Error
+      ? error.message.trim()
+      : typeof error === "string"
+        ? error.trim()
+        : "Hosted email send failed.";
+    const normalizedDetails = details.length > 0 ? details : "Hosted email send failed.";
+    throw new Error(`${input.recipient}: ${normalizedDetails}`);
   }
-}
-
-function formatHostedEmailSendError(recipient: string | undefined, error: unknown): string {
-  const details = error instanceof Error
-    ? error.message.trim()
-    : typeof error === "string"
-      ? error.trim()
-      : "Hosted email send failed.";
-  const normalizedDetails = details.length > 0 ? details : "Hosted email send failed.";
-  return recipient ? `${recipient}: ${normalizedDetails}` : normalizedDetails;
 }
 
 async function prepareHostedEmailSend(input: {
@@ -143,7 +123,7 @@ async function prepareHostedEmailSend(input: {
 }): Promise<{
   fromAddress: string;
   mimeMessage: string;
-  recipients: string[];
+  recipient: string;
   threadTarget: HostedEmailThreadTarget;
 }> {
   const fromAddress = normalizeHostedEmailAddress(input.config.fromAddress);
@@ -171,15 +151,21 @@ async function prepareHostedEmailSend(input: {
     );
   }
 
-  const to = existingThreadTarget
-    ? existingThreadTarget.to
-    : normalizeHostedEmailAddressList([input.target]);
-  const cc = existingThreadTarget?.cc ?? [];
-  if (to.length === 0) {
+  // Hosted email stays owner-only by default. Even when inbound normalization
+  // captured reply-all participants, outbound replies collapse back to the
+  // primary recipient so send retries remain atomic.
+  const threadPrimaryRecipient = existingThreadTarget?.to[0] ?? null;
+  const explicitRecipient = input.targetKind === "explicit"
+    ? normalizeHostedEmailAddressList([input.target])[0] ?? null
+    : null;
+  const primaryRecipient = existingThreadTarget ? threadPrimaryRecipient : explicitRecipient;
+  if (!primaryRecipient) {
     throw new HostedEmailSendValidationError(
       "Hosted email delivery requires at least one recipient email address.",
     );
   }
+  const to = [primaryRecipient];
+  const cc: string[] = [];
 
   const subject = existingThreadTarget
     ? ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
@@ -211,7 +197,7 @@ async function prepareHostedEmailSend(input: {
       subject,
       to,
     }),
-    recipients: normalizeHostedEmailAddressList([...to, ...cc]),
+    recipient: primaryRecipient,
     threadTarget,
   };
 }

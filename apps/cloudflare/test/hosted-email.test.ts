@@ -251,7 +251,7 @@ describe("hosted email routing and transport", () => {
     })).rejects.toThrow(/participant delivery is not supported/u);
   });
 
-  it("fans out thread-target sends across To and Cc recipients while preserving reply headers", async () => {
+  it("collapses thread-target sends to the primary recipient while preserving reply headers", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
@@ -275,15 +275,15 @@ describe("hosted email routing and transport", () => {
     expect(initialThreadTarget).not.toBeNull();
 
     const threadedTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
-      cc: ["cc@example.com"],
+      cc: ["carol@example.com"],
       lastMessageId: initialThreadTarget?.lastMessageId ?? "<prev@example.test>",
       references: [initialThreadTarget?.lastMessageId ?? "<prev@example.test>"],
       replyAliasAddress: initialThreadTarget?.replyAliasAddress ?? "assistant+reply@mail.example.test",
       subject: initialThreadTarget?.subject ?? "Murph update",
-      to: initialThreadTarget?.to ?? ["owner@example.com"],
+      to: ["owner@example.com", "bob@example.com"],
     }));
 
-    await sendHostedEmailMessage({
+    const followUp = await sendHostedEmailMessage({
       bucket,
       config: TEST_CONFIG,
       emailBinding,
@@ -298,21 +298,20 @@ describe("hosted email routing and transport", () => {
       userId: "user_123",
     });
 
-    expect(emailBinding.send).toHaveBeenCalledTimes(3);
-    const followUpMessages = emailBinding.send.mock.calls.slice(1).map((call) => call[0] as {
+    expect(emailBinding.send).toHaveBeenCalledTimes(2);
+    const followUpMessage = emailBinding.send.mock.calls[1]?.[0] as {
       raw: string;
       to: string;
-    });
-    expect(followUpMessages.map((message) => message.to)).toEqual([
-      "owner@example.com",
-      "cc@example.com",
-    ]);
-    for (const message of followUpMessages) {
-      expect(message.raw).toContain(`Reply-To: ${initialThreadTarget?.replyAliasAddress}`);
-      expect(message.raw).toContain("In-Reply-To: ");
-      expect(message.raw).toContain("References: ");
-      expect(message.raw).toContain("Cc: cc@example.com");
-    }
+    };
+    expect(followUpMessage.to).toBe("owner@example.com");
+    expect(followUpMessage.raw).toContain(`Reply-To: ${initialThreadTarget?.replyAliasAddress}`);
+    expect(followUpMessage.raw).toContain("In-Reply-To: ");
+    expect(followUpMessage.raw).toContain("References: ");
+    expect(followUpMessage.raw).not.toContain("Cc:");
+
+    const collapsedThreadTarget = parseHostedEmailThreadTarget(followUp.target);
+    expect(collapsedThreadTarget?.to).toEqual(["owner@example.com"]);
+    expect(collapsedThreadTarget?.cc).toEqual([]);
   });
 
   it("rejects sender overrides when the caller tries to bypass the configured sender identity", async () => {
@@ -334,5 +333,59 @@ describe("hosted email routing and transport", () => {
       },
       userId: "user_123",
     })).rejects.toThrow(/sender identity is config-owned/u);
+  });
+
+  it("surfaces the primary recipient when the native binding send fails", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+
+    await expect(sendHostedEmailMessage({
+      bucket,
+      config: TEST_CONFIG,
+      emailBinding: {
+        send: vi.fn(async (_message: unknown) => {
+          throw new Error("binding unavailable");
+        }),
+      },
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      request: {
+        identityId: null,
+        message: "hello from murph",
+        target: "owner@example.com",
+        targetKind: "explicit",
+      },
+      userId: "user_123",
+    })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
+  });
+
+  it("surfaces the collapsed primary recipient when a threaded binding send fails", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const initialThreadTarget = createHostedEmailThreadTarget({
+      cc: ["carol@example.com"],
+      lastMessageId: "<prev@example.test>",
+      references: ["<older@example.test>"],
+      replyAliasAddress: "assistant+reply@mail.example.test",
+      subject: "Murph update",
+      to: ["owner@example.com", "bob@example.com"],
+    });
+
+    await expect(sendHostedEmailMessage({
+      bucket,
+      config: TEST_CONFIG,
+      emailBinding: {
+        send: vi.fn(async (_message: unknown) => {
+          throw new Error("binding unavailable");
+        }),
+      },
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      request: {
+        identityId: null,
+        message: "follow up",
+        target: serializeHostedEmailThreadTarget(initialThreadTarget),
+        targetKind: "thread",
+      },
+      userId: "user_123",
+    })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
   });
 });
