@@ -176,16 +176,16 @@ export function JoinInviteClient({
 
   return (
     <div className="space-y-5">
-      <Card className="shadow-sm">
-        <CardHeader className="gap-3">
+      <Card className="border-[#c4a882]/20 bg-[#fefdf8] shadow-sm">
+        <CardHeader className="gap-4">
           <Badge variant="secondary" className="w-fit">
             Murph signup
           </Badge>
           <div className="space-y-3">
-            <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
+            <CardTitle className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
               {resolveJoinInviteTitle(status)}
             </CardTitle>
-            <CardDescription className="max-w-lg text-lg leading-relaxed text-stone-500">
+            <CardDescription className="text-base leading-relaxed text-muted-foreground">
               {resolveJoinInviteSubtitle(status)}
             </CardDescription>
           </div>

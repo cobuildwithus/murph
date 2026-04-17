@@ -111,7 +111,7 @@ export function JoinInviteVerificationPanel({
     }
 
     return (
-      <Alert className="border-stone-200 bg-stone-50">
+      <Alert className="border-[#c4a882]/20 bg-[#f5f0e8]/40">
         <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
         <AlertDescription>One moment while we pick up your session.</AlertDescription>
@@ -120,7 +120,7 @@ export function JoinInviteVerificationPanel({
   }
 
   return (
-    <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+    <div className="rounded-xl border border-[#c4a882]/20 bg-[#f5f0e8]/40 p-5">
       <HostedInvitePhoneAuth
         inviteCode={inviteCode}
         onSignOut={async () => {
@@ -163,7 +163,7 @@ export function JoinInviteMessagingSetupPanel({
       </Alert>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+        <div className="rounded-xl border border-[#c4a882]/20 bg-[#f5f0e8]/40 p-5">
           <HostedPhoneSettings
             authenticated={authenticated}
             autoOpen
@@ -173,7 +173,7 @@ export function JoinInviteMessagingSetupPanel({
             }}
           />
         </div>
-        <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+        <div className="rounded-xl border border-[#c4a882]/20 bg-[#f5f0e8]/40 p-5">
           <HostedTelegramSettings
             authenticated={authenticated}
             initialLinkedAccounts={initialLinkedAccounts}
@@ -246,13 +246,13 @@ export function JoinInviteActivePanel({
 
       <div>
         <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-olive">Things Murph can help with</p>
-        <div className="grid gap-px overflow-hidden rounded-xl border border-stone-200 bg-stone-200 sm:grid-cols-2">
+        <div className="grid gap-px overflow-hidden rounded-xl border border-[#c4a882]/20 bg-[#c4a882]/20 sm:grid-cols-2">
           {JOIN_INVITE_ACTIVE_FEATURE_CARDS.map((item) => (
-            <div key={item.title} className="flex gap-3 bg-white p-5">
+            <div key={item.title} className="flex gap-3 bg-[#fefdf8] p-5">
               <item.icon className="mt-0.5 h-5 w-5 shrink-0 text-olive-light" />
               <div>
-                <p className="text-sm font-semibold text-stone-900">{item.title}</p>
-                <p className="mt-0.5 text-sm leading-relaxed text-stone-400">{item.body}</p>
+                <p className="text-sm font-semibold text-[#2d3436]">{item.title}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{item.body}</p>
               </div>
             </div>
           ))}
@@ -282,7 +282,7 @@ export function JoinInviteActivePanel({
           nativeButton={false}
           variant="link"
           size="sm"
-          className="h-auto p-0 text-sm font-medium text-stone-500 hover:text-stone-900"
+          className="h-auto p-0 text-sm font-medium text-muted-foreground hover:text-[#2d3436]"
         >
           Manage settings
         </Button>

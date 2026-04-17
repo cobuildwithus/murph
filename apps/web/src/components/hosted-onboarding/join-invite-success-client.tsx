@@ -7,7 +7,7 @@ import { AlertCircleIcon, CheckCircleIcon, LoaderCircleIcon } from "lucide-react
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
@@ -94,9 +94,9 @@ export function JoinInviteSuccessClient({
   const successState = resolveHostedInviteSuccessState(status);
 
   return (
-    <>
+    <Card className="border-[#c4a882]/20 bg-[#fefdf8] shadow-sm">
       <CardHeader className="gap-5">
-        <div className="flex h-12 w-12 items-center justify-center rounded bg-olive/10">
+        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-olive/10">
           {successState.variant === "active" ? (
             <CheckCircleIcon className="h-6 w-6 text-olive" />
           ) : successState.variant === "pending" ? (
@@ -105,11 +105,11 @@ export function JoinInviteSuccessClient({
             <AlertCircleIcon className="h-6 w-6 text-olive" />
           )}
         </div>
-        <div className="space-y-5">
-          <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
+        <div className="space-y-3">
+          <CardTitle className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
             {successState.title}
           </CardTitle>
-          <CardDescription className="leading-relaxed text-stone-500">{successState.description}</CardDescription>
+          <CardDescription className="leading-relaxed text-muted-foreground">{successState.description}</CardDescription>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -130,7 +130,7 @@ export function JoinInviteSuccessClient({
           {successState.buttonLabel}
         </Button>
       </CardContent>
-    </>
+    </Card>
   );
 }
 

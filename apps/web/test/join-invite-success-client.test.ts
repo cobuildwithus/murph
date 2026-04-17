@@ -24,7 +24,7 @@ vi.mock("next/link", () => ({
   },
 }));
 
-import { JoinInviteSuccessShell } from "@/src/components/hosted-onboarding/join-invite-success-shell";
+import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 const activeJoinInviteSuccessClientCleanups = new Set<() => Promise<void> | void>();
@@ -46,7 +46,7 @@ afterEach(async () => {
 
 test("verify-stage success page keeps the copy neutral while sign-in settles", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessShell, {
+    createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("verify"),
       inviteCode: "invite-code",
       sessionId: null,
@@ -62,7 +62,7 @@ test("verify-stage success page keeps the copy neutral while sign-in settles", (
 
 test("blocked success page does not pretend setup is still running", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessShell, {
+    createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("blocked"),
       inviteCode: "invite-code",
       sessionId: null,
@@ -78,7 +78,7 @@ test("blocked success page does not pretend setup is still running", () => {
 
 test("active success page explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessShell, {
+    createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("active", true),
       inviteCode: "invite-code",
       sessionId: null,
@@ -154,7 +154,7 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
 
   await act(async () => {
     root?.render(
-      createElement(JoinInviteSuccessShell, {
+      createElement(JoinInviteSuccessClient, {
         initialStatus: input?.initialStatus ?? createStatus("checkout"),
         inviteCode: "invite-code",
         sessionId: input?.sessionId ?? "cs_123",
