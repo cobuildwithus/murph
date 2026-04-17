@@ -2,8 +2,10 @@ import type { ReactNode, Ref } from "react";
 import { useId } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
+
+const CODE_LENGTH = 6;
 
 export function HostedVerificationCodeStep({
   autoFocus = true,
@@ -11,9 +13,7 @@ export function HostedVerificationCodeStep({
   codeLabel = "Verification code",
   description,
   disabled,
-  inputMode = "numeric",
   pendingAction,
-  placeholder = "123456",
   primaryActionLabel,
   primaryActionPendingLabel,
   secondaryAction = null,
@@ -27,9 +27,7 @@ export function HostedVerificationCodeStep({
   codeLabel?: string;
   description: string;
   disabled: boolean;
-  inputMode?: "numeric" | "text";
   pendingAction: "send-code" | "verify-code" | null;
-  placeholder?: string;
   primaryActionLabel: string;
   primaryActionPendingLabel: string;
   secondaryAction?: ReactNode;
@@ -56,17 +54,27 @@ export function HostedVerificationCodeStep({
             {pendingAction === "send-code" ? "Sending..." : "Resend code"}
           </Button>
         </div>
-        <Input
+        <InputOTP
           id={codeInputId}
           autoFocus={autoFocus}
           autoComplete="one-time-code"
-          inputMode={inputMode}
-          placeholder={placeholder}
+          maxLength={CODE_LENGTH}
           ref={inputRef}
           value={code}
-          onChange={(event) => onCodeChange(event.currentTarget.value)}
-          className="h-14 px-4 text-lg md:text-base"
-        />
+          disabled={disabled}
+          onChange={onCodeChange}
+          onComplete={onSubmit}
+        >
+          <InputOTPGroup className="w-full justify-between gap-2">
+            {Array.from({ length: CODE_LENGTH }, (_, index) => (
+              <InputOTPSlot
+                key={index}
+                index={index}
+                className="size-12 flex-1 rounded-lg border text-lg"
+              />
+            ))}
+          </InputOTPGroup>
+        </InputOTP>
         <p className="text-sm text-stone-500">{description}</p>
       </div>
       <div className="flex flex-wrap gap-3">
