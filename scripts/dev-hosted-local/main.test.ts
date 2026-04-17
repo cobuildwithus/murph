@@ -158,6 +158,7 @@ describe("hosted local dev main", () => {
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_ASSISTANT_PROVIDER: "venice",
+        TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
     );
