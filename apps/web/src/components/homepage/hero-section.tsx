@@ -21,7 +21,7 @@ export function HeroSection({
           <h1 className="font-serif text-[clamp(2.5rem,5.2vw,4.5rem)] font-semibold leading-[0.95] tracking-[-0.04em] text-balance text-white">
             You measure
             <br />
-            everything.
+            your health.
             <br />
             <span className="text-[#d4b87a]">Now act on it.</span>
           </h1>

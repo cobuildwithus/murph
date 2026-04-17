@@ -1,71 +1,310 @@
-const STEPS = [
-  {
-    accent: "bg-[#f5f0e8]/90",
-    badge: "bg-[#d4c4a8]/40 text-[#5a4d3a]",
-    desc: "Link your Oura or Whoop. Murph reads your sleep, HRV, heart rate, and recovery data automatically.",
-    n: "01",
-    title: "Connect your wearable",
-  },
-  {
-    accent: "bg-[#e8ede0]/90",
-    badge: "bg-[#7a8c6e]/25 text-[#3d5028]",
-    desc: "Sleep, recovery, nutrition, supplements, and more. Each experiment shows expected outcomes and the research behind it.",
-    n: "02",
-    title: "Browse the library",
-  },
-  {
-    accent: "bg-[#f0ebe0]/90",
-    badge: "bg-[#c4a882]/30 text-[#5a4d3a]",
-    desc: "7 days of baseline so you know what’s real, then 2–4 weeks of protocol. Murph texts reminders and logs sessions.",
-    n: "03",
-    title: "Run your experiment",
-  },
-  {
-    accent: "bg-[#e0e8d8]/90",
-    badge: "bg-[#5a6e32]/20 text-[#3d5028]",
-    desc: "Baseline vs experiment. Your HRV, sleep, heart rate — what moved, whether it matters, and what to try next.",
-    n: "04",
-    title: "See what changed",
-  },
+const WEARABLES: ReadonlyArray<{
+  name: string;
+  selected?: boolean;
+  sub: string;
+}> = [
+  { name: "Oura", selected: true, sub: "Ring · HRV, sleep, recovery" },
+  { name: "WHOOP", sub: "Band · Strain, recovery" },
+  { name: "Garmin", sub: "Watch · HR, activity, sleep" },
+  { name: "Strava", sub: "App · Workouts, effort" },
+];
+
+const DOMAINS = [
+  { examples: "deep sleep, circadian rhythm", n: 8, name: "Sleep" },
+  { examples: "HRV, resting HR, sauna", n: 9, name: "Recovery" },
+  { examples: "meal timing, protein", n: 7, name: "Nutrition" },
+  { examples: "magnesium, creatine, omega-3", n: 6, name: "Supplements" },
+  { examples: "zone 2, strength, mobility", n: 6, name: "Exercise" },
+  { examples: "cold exposure, box breathing", n: 4, name: "Breathwork" },
+] as const;
+
+const METRICS = [
+  { change: "+12.0%", label: "HRV", unit: "ms", value: "52.1" },
+  { change: "-3.7%", label: "Resting HR", unit: "bpm", value: "61.8" },
+  { change: "+15.9%", label: "Deep sleep", unit: "", value: "1h42m" },
 ] as const;
 
 export function HowItWorksSection() {
   return (
     <section
       id="how"
-      className="bg-[#2a2520] px-6 py-14 sm:px-10 lg:px-16 lg:py-20"
+      className="bg-[#f5f0e8] px-6 py-16 sm:px-10 lg:px-16 lg:py-24"
     >
       <div className="mx-auto max-w-[1080px]">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#5a6e32]">
           How it works
         </span>
-        <h2 className="mt-5 max-w-[24ch] font-serif text-[clamp(1.75rem,3.5vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#f5f0e8]">
-          Connect, browse, experiment, learn.
+        <h2 className="mt-5 max-w-[20ch] font-serif text-[clamp(1.75rem,3.5vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
+          Improve your health, one experiment at a time.
         </h2>
-        <p className="mt-5 max-w-[48ch] text-base leading-[1.7] text-pretty text-[#f5f0e8]/55">
-          A web dashboard to browse experiments and track results. A chat
-          assistant that guides you through them daily via iMessage, Telegram,
-          or email.
+        <p className="mt-5 max-w-[48ch] text-base leading-[1.7] text-pretty text-[#635a48]">
+          Connect your wearable. Run one experiment. See what changes in a few
+          weeks.
         </p>
 
-        <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {STEPS.map((step) => (
-            <div key={step.n} className={`rounded-2xl p-7 ${step.accent}`}>
+        <div className="mt-12 grid gap-4 sm:gap-5 lg:mt-14 md:grid-cols-12">
+          <ConnectCard />
+          <BrowseCard />
+          <RunCard />
+          <LearnCard />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StepBadge({
+  badgeClass,
+  n,
+  title,
+}: {
+  badgeClass: string;
+  n: string;
+  title: string;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span
+        className={`inline-flex size-8 items-center justify-center rounded-full font-mono text-[11px] font-semibold ${badgeClass}`}
+      >
+        {n}
+      </span>
+      <h3 className="font-serif text-[1.25rem] font-semibold text-[#2d3436]">
+        {title}
+      </h3>
+    </div>
+  );
+}
+
+function ConnectCard() {
+  return (
+    <div className="flex flex-col gap-6 rounded-2xl border border-[#c4a882]/15 bg-[#fffcf6] p-7 md:col-span-5">
+      <StepBadge
+        badgeClass="bg-[#c4a882]/25 text-[#5a4d3a]"
+        n="01"
+        title="Connect"
+      />
+      <div className="flex-1 space-y-2">
+        {WEARABLES.map((w) => (
+          <div
+            key={w.name}
+            className={`flex items-center justify-between rounded-xl px-4 py-3 transition-colors ${
+              w.selected
+                ? "border border-[#5a6e32]/30 bg-[#f5f0e8]"
+                : "border border-[#c4a882]/15 bg-[#f5f0e8]/50"
+            }`}
+          >
+            <div className="flex items-center gap-3">
               <span
-                className={`inline-flex size-8 items-center justify-center rounded-full font-mono text-[11px] font-semibold ${step.badge}`}
+                className={`flex size-4 items-center justify-center rounded-full border-2 ${
+                  w.selected
+                    ? "border-[#5a6e32] bg-[#5a6e32]"
+                    : "border-[#2d3436]/20 bg-transparent"
+                }`}
               >
-                {step.n}
+                {w.selected ? (
+                  <span className="size-1.5 rounded-full bg-[#fffcf6]" />
+                ) : null}
               </span>
-              <h3 className="mt-4 font-serif text-[1.1875rem] font-semibold text-[#2d3436]">
-                {step.title}
-              </h3>
-              <p className="mt-2.5 text-sm leading-[1.75] text-[#736a58]">
-                {step.desc}
+              <div>
+                <p className="text-sm font-semibold text-[#2d3436]">{w.name}</p>
+                <p className="text-[0.6875rem] text-[#736a58]">{w.sub}</p>
+              </div>
+            </div>
+            {w.selected ? (
+              <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#5a6e32]">
+                Synced
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
+        Link your ring or watch. Murph reads the data.
+      </p>
+    </div>
+  );
+}
+
+function BrowseCard() {
+  return (
+    <div className="flex flex-col gap-6 rounded-2xl border border-[#7a8c6e]/20 bg-[#fffcf6] p-7 md:col-span-7">
+      <StepBadge
+        badgeClass="bg-[#7a8c6e]/20 text-[#3d5028]"
+        n="02"
+        title="Browse the library"
+      />
+      <div className="flex-1">
+        <div className="mb-4 flex items-baseline gap-3 text-[#2d3436]">
+          <span className="font-serif text-[2rem] font-semibold leading-none tracking-tight">
+            40+
+          </span>
+          <span className="text-[0.8125rem] text-[#736a58]">
+            experiments · 6 domains · peer-reviewed
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {DOMAINS.map((d) => (
+            <div
+              key={d.name}
+              className="rounded-xl border border-[#c4a882]/15 bg-[#f5f0e8]/60 px-3.5 py-2.5"
+            >
+              <div className="flex items-baseline justify-between">
+                <p className="text-[0.8125rem] font-semibold text-[#2d3436]">
+                  {d.name}
+                </p>
+                <span className="font-mono text-[10px] text-[#5a6e32]">
+                  {d.n}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[0.6875rem] leading-[1.5] text-[#736a58]">
+                {d.examples}
               </p>
             </div>
           ))}
         </div>
       </div>
-    </section>
+      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
+        Every protocol cites the research behind it.
+      </p>
+    </div>
+  );
+}
+
+function RunCard() {
+  return (
+    <div className="flex flex-col gap-6 rounded-2xl border border-[#c4a882]/20 bg-[#fffcf6] p-7 md:col-span-7">
+      <StepBadge
+        badgeClass="bg-[#c4a882]/25 text-[#5a4d3a]"
+        n="03"
+        title="Run the protocol"
+      />
+      <div className="flex-1 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-serif text-[1rem] font-semibold text-[#2d3436]">
+              Finnish Sauna Protocol
+            </p>
+            <p className="mt-0.5 text-[0.75rem] text-[#736a58]">
+              Recovery · 21 days · Day 8
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-[#5a6e32]/10 px-2.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#5a6e32]">
+            Active
+          </span>
+        </div>
+
+        <div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+            <span className="font-mono font-medium uppercase tracking-[0.1em] text-[#5a6e32]">
+              Baseline · 7d ✓
+            </span>
+            <span className="font-mono font-medium uppercase tracking-[0.1em] text-[#2d3436]">
+              Active · Day 1 of 14
+            </span>
+            <span className="ml-auto font-mono uppercase tracking-[0.1em] text-[#736a58]/40">
+              Analysis
+            </span>
+          </div>
+          <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-[#2d3436]/10">
+            <div className="w-[33%] rounded-full bg-[#5a6e32]" />
+            <div className="w-[5%] bg-[#5a6e32]/30" />
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-[#f5f0e8]/70 px-5 py-4">
+          <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+            Next step · Today evening
+          </span>
+          <p className="mt-1.5 text-[0.9375rem] font-semibold text-[#2d3436]">
+            Sauna session · 15–20 min @ 80–100°C
+          </p>
+          <p className="mt-1 text-[0.75rem] text-[#736a58]">
+            Stay hydrated, replace electrolytes after · Session 2 of 3
+          </p>
+        </div>
+      </div>
+      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
+        Murph texts reminders. No app to open.
+      </p>
+    </div>
+  );
+}
+
+function LearnCard() {
+  return (
+    <div className="flex flex-col gap-6 rounded-2xl border border-[#5a6e32]/20 bg-[#fffcf6] p-7 md:col-span-5">
+      <StepBadge
+        badgeClass="bg-[#5a6e32]/15 text-[#3d5028]"
+        n="04"
+        title="See what changed"
+      />
+      <div className="flex-1 space-y-4">
+        <div className="grid grid-cols-3 gap-2">
+          {METRICS.map((m) => (
+            <div
+              key={m.label}
+              className="rounded-xl border border-[#c4a882]/15 bg-[#f5f0e8]/60 px-3 py-3"
+            >
+              <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
+                {m.label}
+              </span>
+              <p className="mt-1.5 font-serif text-[1.05rem] font-semibold leading-none tracking-tight text-[#2d3436]">
+                {m.value}
+                {m.unit ? (
+                  <span className="ml-0.5 text-[0.6875rem] font-normal text-[#736a58]">
+                    {m.unit}
+                  </span>
+                ) : null}
+              </p>
+              <p className="mt-1.5 text-[0.6875rem] text-[#5a6e32]">
+                {m.change}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="rounded-xl border border-[#c4a882]/15 bg-[#f5f0e8]/60 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
+              HRV trend · 21d
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1 text-[0.625rem] text-[#736a58]/60">
+                <span className="inline-block h-px w-2.5 border-t border-dashed border-[#c4a882]" />
+                Baseline
+              </span>
+              <span className="flex items-center gap-1 text-[0.625rem] text-[#736a58]">
+                <span className="inline-block h-0.5 w-2.5 rounded-full bg-[#5a6e32]" />
+                Active
+              </span>
+            </div>
+          </div>
+          <svg
+            viewBox="0 0 300 40"
+            fill="none"
+            className="mt-2 w-full"
+            aria-hidden="true"
+          >
+            <path
+              d="M8 28 L30 26 L50 28 L70 25 L90 26"
+              stroke="#d4c4a8"
+              strokeWidth="1.25"
+              strokeDasharray="3 2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M95 26 L115 22 L140 19 L165 15 L190 16 L215 12 L240 11 L265 8 L290 5"
+              stroke="#5a6e32"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+            />
+            <circle cx="290" cy="5" r="2.25" fill="#5a6e32" />
+          </svg>
+        </div>
+      </div>
+      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
+        Baseline vs experiment. What moved, what didn&apos;t.
+      </p>
+    </div>
   );
 }
