@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
-import { ExperimentsSection } from "@/src/components/homepage/experiments-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroSection } from "@/src/components/homepage/hero-section";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
@@ -64,7 +63,6 @@ export default async function HomePage() {
         <StickyNav authenticated={authenticated} />
         <HeroSection authenticated={authenticated} />
         <HowItWorksSection />
-        <ExperimentsSection />
         <AssistantSection />
         <FaqSection />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
