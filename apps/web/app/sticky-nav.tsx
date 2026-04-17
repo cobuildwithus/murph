@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { LandingAuthActions } from "./auth-controls";
 
@@ -22,12 +23,24 @@ export function StickyNav({ authenticated }: { authenticated: boolean }) {
           : ""
       }`}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/logo-dark.svg"
-        alt="Murph"
-        className="h-6"
-      />
+      <Link
+        href="/"
+        aria-label="Murph home"
+        className="inline-flex items-center"
+        onClick={(event) => {
+          if (window.location.pathname === "/") {
+            event.preventDefault();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo-dark.svg"
+          alt="Murph"
+          className="h-6"
+        />
+      </Link>
       <div className="flex items-center gap-4 sm:gap-6">
         {[
           { href: "#how", label: "How it works" },
