@@ -2,6 +2,10 @@ import { spawn } from "node:child_process";
 
 import { resolvePnpmCommand } from "../wrangler-runner.js";
 
+function resolveNpmCommand(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
 export async function runPnpmCommand(
   args: string[],
   options: {
@@ -10,6 +14,16 @@ export async function runPnpmCommand(
   },
 ): Promise<void> {
   await runProcess(resolvePnpmCommand(), args, options);
+}
+
+export async function runNpmCommand(
+  args: string[],
+  options: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+  },
+): Promise<void> {
+  await runProcess(resolveNpmCommand(), args, options);
 }
 
 async function runProcess(
