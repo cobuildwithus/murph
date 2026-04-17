@@ -47,6 +47,7 @@ export async function main(): Promise<void> {
   const config = resolveHostedLocalDevConfig(process.env);
   const tempDirOverride = process.env.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = process.env.VERCEL_OIDC_TOKEN?.trim() || null;
+  const tsxTsconfigPath = path.join(repoRoot, "tsconfig.base.json");
 
   if (!config.skipVercelPull && !providedVercelOidcToken) {
     await ensureVercelLinkExists();
@@ -119,6 +120,7 @@ export async function main(): Promise<void> {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
       ...localOverrides,
+      TSX_TSCONFIG_PATH: tsxTsconfigPath,
       VERCEL_OIDC_TOKEN: vercelOidcToken,
     };
     const workerRuntimeEnv: NodeJS.ProcessEnv = {
