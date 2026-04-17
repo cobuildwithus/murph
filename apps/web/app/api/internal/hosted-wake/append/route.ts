@@ -1,0 +1,32 @@
+import {
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
+
+import {
+  requireHostedCloudflareCallbackRequest,
+} from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { readOptionalJsonObject } from "@/src/lib/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { getPrisma } from "@/src/lib/prisma";
+import {
+  appendHostedExecutionDispatchWakeTx,
+} from "@/src/lib/hosted-wake/dispatch";
+
+export const POST = withJsonError(async (request: Request) => {
+  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const body = await readOptionalJsonObject(request);
+  const dispatch = parseHostedExecutionDispatchRequest(body.dispatch);
+
+  if (dispatch.event.userId !== userId) {
+    throw new TypeError("Hosted wake append dispatch userId must match the bound callback user.");
+  }
+
+  const response = await getPrisma().$transaction((tx) => {
+    return appendHostedExecutionDispatchWakeTx({
+      dispatch,
+      tx,
+    });
+  });
+
+  return jsonOk(response);
+});

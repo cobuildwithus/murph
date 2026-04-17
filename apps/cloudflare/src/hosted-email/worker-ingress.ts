@@ -26,6 +26,7 @@ import {
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import { buildHostedExecutionEmailMessageReceivedDispatch } from "@murphai/hosted-execution";
 import {
+  appendHostedWakeDispatchInWeb,
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
@@ -110,7 +111,6 @@ export async function handleHostedEmailIngress(
     return;
   }
 
-  const stub = await resolveUserRunnerStub(env, route.userId);
   const userCrypto = await resolveHostedExecutionUserCryptoContext({
     bucket: env.BUNDLES,
     environment,
@@ -125,14 +125,43 @@ export async function handleHostedEmailIngress(
     userId: route.userId,
   });
   const eventId = `email:${rawMessageKey}`;
-  await stub.dispatch(buildHostedExecutionEmailMessageReceivedDispatch({
+  const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
     eventId,
     identityId: route.identityId,
     occurredAt: new Date().toISOString(),
     rawMessageKey,
     selfAddress: route.routeAddress,
     userId: route.userId,
-  }));
+  });
+
+  if (!webControlBaseUrl || !environment.webCallbackSigning) {
+    const stub = await resolveUserRunnerStub(env, route.userId);
+    await stub.dispatch(dispatch);
+    return;
+  }
+
+  const append = await appendHostedWakeDispatchInWeb({
+    baseUrl: webControlBaseUrl,
+    boundUserId: route.userId,
+    callbackSigning: environment.webCallbackSigning,
+    dispatch,
+    fetchImpl: fetch,
+    timeoutMs: environment.runnerTimeoutMs,
+  });
+
+  try {
+    const stub = await resolveUserRunnerStub(env, route.userId);
+    await stub.wakeHostedWakes({
+      targetSeqHint: append.wake.seq,
+    });
+  } catch (error) {
+    console.error("Hosted email wake nudge failed after appending the canonical wake.", {
+      error,
+      eventId,
+      userId: route.userId,
+      wakeSeq: append.wake.seq,
+    });
+  }
 }
 
 async function authorizeHostedEmailIngress(input: {

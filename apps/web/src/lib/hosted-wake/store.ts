@@ -84,6 +84,14 @@ export interface HostedWakeLifecycleRecord {
   state: "completed" | "queued";
 }
 
+export interface HostedWakeRepairCandidate {
+  committedSeq: string;
+  nextSeq: string;
+  pendingWakeCount: number;
+  targetSeqHint: string;
+  userId: string;
+}
+
 export interface ListHostedWakesInput {
   afterSeq?: bigint | null;
   limit?: number;
@@ -331,6 +339,31 @@ export async function commitHostedExecutionCursorTx(input: {
   };
 }
 
+export async function quarantineHostedWakeTx(input: {
+  quarantineCode: string;
+  tx: HostedWakeMutationTx;
+  userId: string;
+  wakeId: string;
+}): Promise<boolean> {
+  if (!input.quarantineCode.trim()) {
+    throw new TypeError("quarantineCode must not be blank.");
+  }
+
+  const updated = await input.tx.hostedWake.updateMany({
+    where: {
+      id: input.wakeId,
+      quarantinedAt: null,
+      userId: input.userId,
+    },
+    data: {
+      quarantineCode: input.quarantineCode.trim(),
+      quarantinedAt: new Date(),
+    },
+  });
+
+  return updated.count === 1;
+}
+
 export async function findHostedWakeEventIdByDedupeKeyTx(input: {
   dedupeKey: string;
   tx: HostedWakeStoreClient;
@@ -400,6 +433,40 @@ export async function readLatestHostedWakeLifecycleByKind(input: {
     eventId: wake.dedupeKey ?? wake.id,
     state: wake.seq > cursor.committedSeq ? "queued" : "completed",
   };
+}
+
+export async function listHostedWakeRepairCandidates(input: {
+  limit?: number;
+  olderThan: Date;
+  prisma?: HostedWakeStoreClient;
+}): Promise<HostedWakeRepairCandidate[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const rows = await prisma.$queryRaw<Array<{
+    committed_seq: bigint;
+    next_seq: bigint;
+    pending_wake_count: bigint;
+    target_seq_hint: bigint;
+    user_id: string;
+  }>>`
+    SELECT committed_seq,
+           next_seq,
+           GREATEST(next_seq - committed_seq - 1, 0) AS pending_wake_count,
+           next_seq - 1 AS target_seq_hint,
+           user_id
+    FROM hosted_execution_cursor
+    WHERE next_seq > committed_seq + 1
+      AND updated_at < ${input.olderThan}
+    ORDER BY updated_at ASC
+    LIMIT ${Math.max(1, input.limit ?? 128)}
+  `;
+
+  return rows.map((row) => ({
+    committedSeq: row.committed_seq.toString(),
+    nextSeq: row.next_seq.toString(),
+    pendingWakeCount: Number(row.pending_wake_count),
+    targetSeqHint: row.target_seq_hint.toString(),
+    userId: row.user_id,
+  }));
 }
 
 export async function ensureHostedExecutionCursorRowTx(input: {

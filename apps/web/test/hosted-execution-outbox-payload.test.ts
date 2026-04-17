@@ -104,38 +104,41 @@ describe("hosted execution outbox payload storage", () => {
     expect(JSON.stringify(payload)).toContain("\"memberChannels\"");
   });
 
-  it("stores gateway message sends inline when the web layer serializes them directly", () => {
+  it("stores Linq webhook payloads inline when the web layer serializes them directly", () => {
     const payload = serializeHostedExecutionOutboxPayload({
       event: {
-        clientRequestId: "req_123",
-        kind: "gateway.message.send",
-        replyToMessageId: null,
-        sessionKey: "gwcs_secret_123",
-        text: "private outbound message",
+        kind: "linq.message.received",
+        linqEvent: {
+          body: "private inbound message",
+          sender: "+15551234567",
+        },
+        linqMessageId: "linq_msg_123",
+        phoneLookupKey: "hbidx:phone:v1:secret",
         userId: "member_123",
       },
-      eventId: "evt_gateway_123",
+      eventId: "evt_linq_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
     });
 
     expect((payload as { storage?: unknown }).storage).toBe("inline");
     expect(payload).not.toHaveProperty("stagedPayloadId");
-    expect(JSON.stringify(payload)).toContain("private outbound message");
-    expect(JSON.stringify(payload)).toContain("gwcs_secret_123");
-    expect(JSON.stringify(payload)).toContain("req_123");
+    expect(JSON.stringify(payload)).toContain("private inbound message");
+    expect(JSON.stringify(payload)).toContain("+15551234567");
+    expect(JSON.stringify(payload)).toContain("linq_msg_123");
   });
 
   it("ignores legacy storage hints and still serializes direct outbox payloads inline", () => {
     const payload = serializeHostedExecutionOutboxPayload({
       event: {
-        clientRequestId: null,
-        kind: "gateway.message.send",
-        replyToMessageId: null,
-        sessionKey: "gwcs_secret_456",
-        text: "still private",
+        kind: "linq.message.received",
+        linqEvent: {
+          body: "still private",
+        },
+        linqMessageId: null,
+        phoneLookupKey: "hbidx:phone:v1:legacy",
         userId: "member_123",
       },
-      eventId: "evt_gateway_456",
+      eventId: "evt_linq_456",
       occurredAt: "2026-04-04T00:00:00.000Z",
     });
 
@@ -217,17 +220,19 @@ describe("hosted execution outbox payload storage", () => {
     }, serialized)).toBe(false);
   });
 
-  it("treats pruned inline gateway payload summaries as idempotent equivalents", () => {
+  it("treats pruned inline Linq payload summaries as idempotent equivalents", () => {
     const serialized = serializeHostedExecutionOutboxPayload({
       event: {
-        clientRequestId: "req_123",
-        kind: "gateway.message.send",
-        replyToMessageId: null,
-        sessionKey: "gwcs_secret_123",
-        text: "private outbound message",
+        kind: "linq.message.received",
+        linqEvent: {
+          body: "private inbound message",
+          sender: "+15551234567",
+        },
+        linqMessageId: "linq_msg_123",
+        phoneLookupKey: "hbidx:phone:v1:secret",
         userId: "member_123",
       },
-      eventId: "evt_gateway_123",
+      eventId: "evt_linq_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
     });
     const payload = readHostedExecutionOutboxPayload(serialized);
@@ -241,8 +246,8 @@ describe("hosted execution outbox payload storage", () => {
 
     expect(summary).toEqual({
       dispatchRef: {
-        eventId: "evt_gateway_123",
-        eventKind: "gateway.message.send",
+        eventId: "evt_linq_123",
+        eventKind: "linq.message.received",
         occurredAt: "2026-04-04T00:00:00.000Z",
         userId: "member_123",
       },

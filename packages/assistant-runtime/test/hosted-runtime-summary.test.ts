@@ -7,7 +7,6 @@ import {
   buildHostedExecutionDeviceSyncWakeDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
-  buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
@@ -224,29 +223,6 @@ describe("summarizeDispatch", () => {
         shareImportTitle: null,
       }),
       "Imported share pack \"share_123\" (0 foods, 0 protocols, 0 recipes). Parser jobs: 1. Device sync jobs: 0.",
-    );
-  });
-
-  it("includes the targeted gateway session in hosted reply summaries", () => {
-    const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
-      eventId: "evt_gateway_send",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      sessionKey: "session_123",
-      text: "hello",
-      userId: "member_123",
-    });
-
-    assert.equal(
-      summarizeDispatch(dispatch, {
-        bootstrapResult: null,
-        deviceSyncProcessed: 3,
-        deviceSyncSkipped: false,
-        nextWakeAt: null,
-        parserProcessed: 4,
-        shareImportResult: null,
-        shareImportTitle: null,
-      }),
-      "Queued a hosted gateway reply for session_123 and ran the hosted maintenance loop. Parser jobs: 4. Device sync jobs: 3.",
     );
   });
 

@@ -241,12 +241,13 @@ describe("RunnerQueueStore", () => {
 
     await store.enqueueDispatch({
       event: {
-        kind: "gateway.message.send",
+        kind: "linq.message.received",
+        linqEvent: {
+          body: "super secret gateway message",
+        },
+        linqMessageId: "linq-secret",
+        phoneLookupKey: "phone-secret",
         userId: "member_secret",
-        clientRequestId: "client-secret",
-        replyToMessageId: null,
-        sessionKey: "session-secret",
-        text: "super secret gateway message",
       },
       eventId: "evt_secret_payload",
       occurredAt: "2026-03-29T10:00:00.000Z",
@@ -270,7 +271,7 @@ describe("RunnerQueueStore", () => {
     ]);
     expectOpaqueStrings([JSON.stringify(row)], [
       "super secret gateway message",
-      "session-secret",
+      "phone-secret",
     ]);
   });
 

@@ -366,14 +366,6 @@ describe("hosted execution parsers coverage", () => {
         reason: "device-sync",
         userId: "user_123",
       });
-      const gatewayEvent = parseHostedExecutionEvent({
-        clientRequestId: null,
-        kind: "gateway.message.send",
-        replyToMessageId: "msg_123",
-        sessionKey: "session_123",
-        text: "Hello from hosted execution",
-        userId: "user_123",
-      });
       const deviceSyncEvent = parseHostedExecutionEvent({
         connectionId: "conn_123",
         hint: {
@@ -428,14 +420,6 @@ describe("hosted execution parsers coverage", () => {
       expect(cronEvent).toEqual({
         kind: "assistant.cron.tick",
         reason: "device-sync",
-        userId: "user_123",
-      });
-      expect(gatewayEvent).toEqual({
-        clientRequestId: null,
-        kind: "gateway.message.send",
-        replyToMessageId: "msg_123",
-        sessionKey: "session_123",
-        text: "Hello from hosted execution",
         userId: "user_123",
       });
       expect(deviceSyncEvent).toEqual({

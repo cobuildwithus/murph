@@ -17,12 +17,13 @@ describe("hosted dispatch payload store confidentiality", () => {
     });
     const dispatch = {
       event: {
-        kind: "gateway.message.send",
+        kind: "linq.message.received",
         userId: "user_live_123",
-        clientRequestId: "client-1",
-        replyToMessageId: null,
-        sessionKey: "session-secret",
-        text: "super secret gateway message",
+        linqEvent: {
+          body: "super secret gateway message",
+        },
+        linqMessageId: "linq-1",
+        phoneLookupKey: "phone-secret",
       },
       eventId: "evt_gateway_1",
       occurredAt: "2026-04-03T00:00:00.000Z",
@@ -30,7 +31,7 @@ describe("hosted dispatch payload store confidentiality", () => {
 
     const payloadRef = await store.writeDispatchPayload(dispatch);
 
-    expectOpaqueStrings([JSON.stringify(payloadRef)], ["super secret gateway message", "session-secret"]);
+    expectOpaqueStrings([JSON.stringify(payloadRef)], ["super secret gateway message", "phone-secret"]);
     expect([...bucket.objects.keys()]).toHaveLength(1);
     expect(await store.readDispatchPayload(payloadRef)).toEqual(dispatch);
 

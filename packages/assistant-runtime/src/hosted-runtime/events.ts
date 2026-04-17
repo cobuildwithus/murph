@@ -5,12 +5,6 @@ import type {
 } from "@murphai/hosted-execution";
 import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
 import {
-  assistantGatewayLocalMessageSender,
-  assistantGatewayLocalProjectionSourceReader,
-} from "@murphai/assistant-engine/gateway-local-adapter";
-import { sendGatewayMessageLocal } from "@murphai/gateway-local";
-
-import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedDispatchContext,
 } from "./context.ts";
@@ -125,18 +119,6 @@ async function handleHostedDispatchEvent(input: {
         sharePack: input.sharePack,
         vaultRoot: input.vaultRoot,
       });
-    case "gateway.message.send":
-      await sendGatewayMessageLocal({
-        clientRequestId: dispatch.event.clientRequestId,
-        dispatchMode: "queue-only",
-        messageSender: assistantGatewayLocalMessageSender,
-        replyToMessageId: dispatch.event.replyToMessageId,
-        sessionKey: dispatch.event.sessionKey,
-        sourceReader: assistantGatewayLocalProjectionSourceReader,
-        text: dispatch.event.text,
-        vault: input.vaultRoot,
-      });
-      return createNoopDispatchEffect();
     default:
       return assertNever(dispatch.event);
   }
