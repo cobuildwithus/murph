@@ -22,7 +22,19 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  return jsonOk(
-    await client.createBrowserVaultSession(auth.member.id, browserPublicKeyJwk),
-  );
+  try {
+    return jsonOk(
+      await client.createBrowserVaultSession(auth.member.id, browserPublicKeyJwk),
+    );
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw hostedOnboardingError({
+        code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
+        message: "Hosted execution control plane returned an invalid browser vault session.",
+        httpStatus: 502,
+      });
+    }
+
+    throw error;
+  }
 });

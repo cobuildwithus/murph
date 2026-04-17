@@ -113,19 +113,16 @@ describe("createCloudflareHostedControlClient", () => {
 
   it("fetches browser vault sessions with the expected request and parses snapshotAad", async () => {
     let observedRequest: ObservedRequest | null = null;
+    const responseBody = createBrowserVaultSession({
+      rootKeyEnvelope: createRootKeyEnvelope(),
+      snapshotAad: createSnapshotAad(),
+      snapshotEnvelope: createSnapshotEnvelope(),
+    });
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
         observedRequest = { init, url: String(url) };
-        return createJsonResponse({
-          rootKeyEnvelope: null,
-          snapshotAad: {
-            key: "users/browser-vault-snapshots/opaque.json",
-            purpose: "browser-vault-snapshot",
-            userId: "user_123",
-          },
-          snapshotEnvelope: null,
-        });
+        return createJsonResponse(responseBody);
       }) as typeof fetch,
       getBearerToken: async () => "token-123",
       timeoutMs: 2_500,
@@ -136,15 +133,7 @@ describe("createCloudflareHostedControlClient", () => {
       kty: "EC",
       x: "x-value",
       y: "y-value",
-    })).resolves.toEqual({
-      rootKeyEnvelope: null,
-      snapshotAad: {
-        key: "users/browser-vault-snapshots/opaque.json",
-        purpose: "browser-vault-snapshot",
-        userId: "user_123",
-      },
-      snapshotEnvelope: null,
-    });
+    })).resolves.toEqual(responseBody);
 
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/browser-vault/session");
@@ -159,6 +148,67 @@ describe("createCloudflareHostedControlClient", () => {
         y: "y-value",
       },
     }));
+  });
+
+  it("accepts an all-null browser vault session response", async () => {
+    const responseBody = createBrowserVaultSession({
+      rootKeyEnvelope: null,
+      snapshotAad: null,
+      snapshotEnvelope: null,
+    });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse(responseBody)) as typeof fetch,
+      getBearerToken: async () => "token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.createBrowserVaultSession("user_123", {
+      crv: "P-256",
+      kty: "EC",
+      x: "x-value",
+      y: "y-value",
+    })).resolves.toEqual(responseBody);
+  });
+
+  it("rejects browser vault sessions that omit all triad fields entirely", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse({})) as typeof fetch,
+      getBearerToken: async () => "token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.createBrowserVaultSession("user_123", {
+      crv: "P-256",
+      kty: "EC",
+      x: "x-value",
+      y: "y-value",
+    })).rejects.toThrow(
+      "Cloudflare browser vault session must include rootKeyEnvelope, snapshotAad, and snapshotEnvelope together.",
+    );
+  });
+
+  it("rejects partial browser vault sessions that omit either envelope or snapshotAad", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse({
+        rootKeyEnvelope: null,
+        snapshotAad: createSnapshotAad(),
+        snapshotEnvelope: null,
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.createBrowserVaultSession("user_123", {
+      crv: "P-256",
+      kty: "EC",
+      x: "x-value",
+      y: "y-value",
+    })).rejects.toThrow(
+      "Cloudflare browser vault session must include rootKeyEnvelope, snapshotAad, and snapshotEnvelope together.",
+    );
   });
 
   it("fetches user status with the expected request shape", async () => {
@@ -201,6 +251,61 @@ function requireObservedRequest(request: ObservedRequest | null): ObservedReques
   }
 
   return request;
+}
+
+function createBrowserVaultSession(input: {
+  rootKeyEnvelope: unknown;
+  snapshotAad: unknown;
+  snapshotEnvelope: unknown;
+}) {
+  return {
+    rootKeyEnvelope: input.rootKeyEnvelope,
+    snapshotAad: input.snapshotAad,
+    snapshotEnvelope: input.snapshotEnvelope,
+  };
+}
+
+function createRootKeyEnvelope() {
+  return {
+    createdAt: "2026-04-17T08:10:36.000Z",
+    recipients: [
+      {
+        ciphertext: "ciphertext",
+        ephemeralPublicKeyJwk: {
+          crv: "P-256",
+          kty: "EC",
+          x: "ephemeral-x",
+          y: "ephemeral-y",
+        },
+        iv: "iv",
+        keyId: "browser-session:test",
+        kind: "user-unlock",
+      },
+    ],
+    rootKeyId: "urk:test",
+    schema: "murph.hosted-user-root-key-envelope.v1",
+    updatedAt: "2026-04-17T08:10:36.000Z",
+    userId: "user_123",
+  };
+}
+
+function createSnapshotAad() {
+  return {
+    key: "users/browser-vault-snapshots/opaque.json",
+    purpose: "browser-vault-snapshot" as const,
+    userId: "user_123",
+  };
+}
+
+function createSnapshotEnvelope() {
+  return {
+    algorithm: "AES-GCM" as const,
+    ciphertext: "ciphertext",
+    iv: "iv",
+    keyId: "urk:test",
+    schema: "murph.hosted-cipher.v1",
+    scope: "browser-vault-snapshot" as const,
+  };
 }
 
 function createUserStatus(
