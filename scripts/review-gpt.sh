@@ -15,6 +15,19 @@ while [[ $# -gt 0 ]]; do
       list_presets=1
       shift
       ;;
+    --prompt-only)
+      if [[ $# -ge 2 && ( "$2" == "true" || "$2" == "false" ) ]]; then
+        shift 2
+      else
+        shift
+      fi
+      echo "Error: --prompt-only is disabled in this repo. Use the attached-file review flow instead." >&2
+      exit 1
+      ;;
+    --prompt-only=*)
+      echo "Error: --prompt-only is disabled in this repo. Use the attached-file review flow instead." >&2
+      exit 1
+      ;;
     --chat-url)
       [[ $# -ge 2 ]] || {
         echo "Error: --chat-url requires a value." >&2

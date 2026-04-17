@@ -9,7 +9,6 @@ chat=""
 label=""
 response_file=""
 prompt=""
-has_no_zip_override=0
 has_send_override=0
 has_wait_override=0
 has_response_file_override=0
@@ -171,6 +170,19 @@ while [[ $# -gt 0 ]]; do
       forward_args+=("$1")
       shift
       ;;
+    --prompt-only)
+      if [[ $# -ge 2 && ( "$2" == "true" || "$2" == "false" ) ]]; then
+        shift 2
+      else
+        shift
+      fi
+      echo "Error: --prompt-only is disabled in this repo. Use the attached-file review flow instead." >&2
+      exit 1
+      ;;
+    --prompt-only=*)
+      echo "Error: --prompt-only is disabled in this repo. Use the attached-file review flow instead." >&2
+      exit 1
+      ;;
     --preset)
       [[ $# -ge 2 ]] || {
         echo "Error: --preset requires a value." >&2
@@ -186,7 +198,6 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --no-zip|--noZip|--zip)
-      has_no_zip_override=1
       forward_args+=("$1")
       shift
       ;;
@@ -246,10 +257,6 @@ if [[ "$has_prompt_override" == "0" ]]; then
     echo "Error: for a new delayed send, pass --prompt, --prompt-file, or a preset." >&2
     exit 1
   fi
-fi
-
-if [[ -n "$chat" && "$has_no_zip_override" == "0" ]]; then
-  forward_args+=(--prompt-only true)
 fi
 
 if [[ "$has_send_override" == "0" ]]; then
