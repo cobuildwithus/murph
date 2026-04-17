@@ -1845,6 +1845,7 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
+    vi.setSystemTime(new Date("2026-03-26T12:00:16.000Z"));
     await runner.alarm();
 
     const status = await runner.status();
@@ -1912,6 +1913,190 @@ describe("HostedUserRunner", () => {
     releaseFirstRunner.resolve();
     await firstDispatch;
     expect((await runner.status()).pendingEventCount).toBe(0);
+  });
+
+  it("does not steal a live commit lease after a runner restart before finalize completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick" as const,
+        reason: "manual" as const,
+        userId: "member_123",
+      },
+      eventId: "evt_restart_live_commit_guard",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    };
+    const committedPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-committed").toString("base64"),
+      summary: "committed",
+      vault: Buffer.from("vault-committed").toString("base64"),
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-final").toString("base64"),
+      summary: "final",
+      vault: Buffer.from("vault-final").toString("base64"),
+    });
+    const firstCommitRecorded = createDeferred<void>();
+    const releaseFirstRunner = createDeferred<void>();
+    const fetchSpy = vi.fn(async (_url, init) => {
+      const requestBody = JSON.parse(String(init?.body));
+      await commitResultForRunnerRequest({
+        bucket,
+        environment,
+        payload: committedPayload,
+        requestBody,
+      });
+      firstCommitRecorded.resolve();
+      await releaseFirstRunner.promise;
+      await finalizeResultForRunnerRequest({
+        bucket,
+        environment,
+        payload: finalPayload,
+        requestBody,
+      });
+
+      return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(firstRunner, "member_123");
+
+    const firstDispatch = firstRunner.dispatch(dispatch);
+    await firstCommitRecorded.promise;
+
+    const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await restartedRunner.alarm();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(await restartedRunner.status()).toMatchObject({
+      inFlight: true,
+      pendingEventCount: 1,
+      retryingEventId: null,
+    });
+
+    releaseFirstRunner.resolve();
+    const finalStatus = await firstDispatch;
+    expect(finalStatus.lastError).toBeNull();
+    expect(finalStatus.pendingEventCount).toBe(0);
+    expect((await restartedRunner.status()).pendingEventCount).toBe(0);
+  });
+
+  it("does not clear a live commit lease when the same event is redispatched before finalize completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick" as const,
+        reason: "manual" as const,
+        userId: "member_123",
+      },
+      eventId: "evt_restart_dispatch_guard",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    };
+    const committedPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-committed").toString("base64"),
+      summary: "committed",
+      vault: Buffer.from("vault-committed").toString("base64"),
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-final").toString("base64"),
+      summary: "final",
+      vault: Buffer.from("vault-final").toString("base64"),
+    });
+    const firstCommitRecorded = createDeferred<void>();
+    const releaseFirstRunner = createDeferred<void>();
+    const fetchSpy = vi.fn(async (_url, init) => {
+      const requestBody = JSON.parse(String(init?.body));
+      await commitResultForRunnerRequest({
+        bucket,
+        environment,
+        payload: committedPayload,
+        requestBody,
+      });
+      firstCommitRecorded.resolve();
+      await releaseFirstRunner.promise;
+      await finalizeResultForRunnerRequest({
+        bucket,
+        environment,
+        payload: finalPayload,
+        requestBody,
+      });
+
+      return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(firstRunner, "member_123");
+
+    const firstDispatch = firstRunner.dispatch(dispatch);
+    await firstCommitRecorded.promise;
+
+    const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const duplicateStatus = await restartedRunner.dispatch(dispatch);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(duplicateStatus).toMatchObject({
+      inFlight: true,
+      pendingEventCount: 1,
+      retryingEventId: null,
+    });
+
+    releaseFirstRunner.resolve();
+    const finalStatus = await firstDispatch;
+    expect(finalStatus.lastError).toBeNull();
+    expect(finalStatus.pendingEventCount).toBe(0);
+  });
+
+  it("serializes overlapping run loops before a pending dispatch lease is written", async () => {
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick" as const,
+        reason: "manual" as const,
+        userId: "member_123",
+      },
+      eventId: "evt_serialized_run_loop_claim",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    };
+    const payloadReadStarted = createDeferred<void>();
+    const releasePayloadRead = createDeferred<void>();
+    const originalBucketGet = bucket.api.get.bind(bucket.api);
+    let gatedDispatchPayloadRead = false;
+
+    bucket.api.get = vi.fn(async (key: string) => {
+      if (!gatedDispatchPayloadRead && key.includes("transient/dispatch-payloads/")) {
+        gatedDispatchPayloadRead = true;
+        payloadReadStarted.resolve();
+        await releasePayloadRead.promise;
+      }
+
+      return await originalBucketGet(key);
+    });
+
+    const fetchSpy = vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
+      bucket,
+      environment,
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    const firstDispatch = runner.dispatch(dispatch);
+    await payloadReadStarted.promise;
+
+    await runner.alarm();
+    releasePayloadRead.resolve();
+
+    const finalStatus = await firstDispatch;
+    expect(finalStatus.lastError).toBeNull();
+    expect(finalStatus.pendingEventCount).toBe(0);
+    expect(readDispatchedEventIds(fetchSpy)).toEqual(["evt_serialized_run_loop_claim"]);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
   });
 
 

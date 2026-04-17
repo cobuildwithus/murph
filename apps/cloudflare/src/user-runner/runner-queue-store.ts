@@ -635,6 +635,29 @@ export class RunnerQueueStore {
     return this.hasActiveRunLeaseSync(this.requireMetaRowSync(), owner);
   }
 
+  async readActiveRunLease(): Promise<{
+    eventId: string;
+    run: HostedExecutionRunContext;
+  } | null> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.selectMetaRowSync();
+    if (!meta?.active_run_event_id) {
+      return null;
+    }
+
+    const run = this.readActiveRunContextSync(meta);
+    if (!run) {
+      return null;
+    }
+
+    return {
+      eventId: meta.active_run_event_id,
+      run,
+    };
+  }
+
   async syncNextWake(input: {
     preferredWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
