@@ -8,6 +8,8 @@ import {
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
 
+const LINQ_WEBHOOK_INLINE_DRAIN_TIMEOUT_MS = 8_000;
+
 export async function GET() {
   return jsonOk({
     ok: true,
@@ -52,6 +54,7 @@ export const POST = withJsonError(async (request: Request) => {
         });
       },
       rawBody,
+      maxInlineDrainMs: LINQ_WEBHOOK_INLINE_DRAIN_TIMEOUT_MS,
       signature,
       signal: request.signal,
       timestamp,

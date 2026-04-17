@@ -47,6 +47,7 @@ export type HostedStripeWebhookResponse = {
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
+  maxInlineDrainMs?: number;
   rawBody: string;
   signature: string | null;
   timestamp: string | null;
@@ -121,6 +122,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     await maybeDrainHostedExecutionWebhookDispatch({
       defer: input.defer,
       eventId: event.event_id,
+      maxInlineDrainMs: input.maxInlineDrainMs,
       prisma,
       response,
       source: "linq",
