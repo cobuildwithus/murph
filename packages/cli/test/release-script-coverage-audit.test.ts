@@ -54,7 +54,7 @@ source scripts/repo-tools.config.sh
 export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'
-export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS=''
+export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="$COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
   "config" \
   "packages" \
@@ -263,11 +263,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'")
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'")
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'")
+    expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS')
+    expect(repoToolsConfig).toContain('"apps/*/public/design-assets/**"')
+    expect(repoToolsConfig).toContain('"docs/assets/*.jpg"')
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS')
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'")
-    expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS=''")
+    expect(fullPackageScript).toContain(
+      'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
+    )
   })
 
   it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {
@@ -289,6 +294,10 @@ describe('monorepo release flow coverage audit', () => {
       expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
       expect(leanEntries).not.toContain('docs/device-sync-hosted-control-plane.md')
       expect(leanEntries).not.toContain('.github/workflows/release.yml')
+      expect(leanEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
+      expect(leanEntries).not.toContain('apps/web/public/hero.jpg')
+      expect(leanEntries).not.toContain('apps/web/public/legal/privacy.pdf')
+      expect(leanEntries).not.toContain('docs/assets/readme-hero.jpg')
 
       expect(fullEntries).toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
@@ -296,6 +305,10 @@ describe('monorepo release flow coverage audit', () => {
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
       expect(fullEntries).toContain('agent-docs/prompts/task-finish-review.md')
+      expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
+      expect(fullEntries).not.toContain('apps/web/public/hero.jpg')
+      expect(fullEntries).not.toContain('apps/web/public/legal/privacy.pdf')
+      expect(fullEntries).not.toContain('docs/assets/readme-hero.jpg')
       expect(leanEntries.length).toBeLessThan(fullEntries.length)
     } finally {
       rmSync(leanBundle.outDir, { force: true, recursive: true })

@@ -64,7 +64,22 @@ export COBUILD_AUDIT_CONTEXT_REPO_LABEL='murph'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'
+audit_context_binary_exclude_globs=(
+  "apps/*/public/design-assets/**"
+  "apps/*/public/legal/*.pdf"
+  "apps/*/public/*.jpg"
+  "apps/*/public/*.jpeg"
+  "apps/*/public/*.png"
+  "apps/*/public/*.webp"
+  "docs/assets/*.jpg"
+  "docs/assets/*.jpeg"
+  "docs/assets/*.png"
+  "docs/assets/*.webp"
+)
+repo_tools_join_lines COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS \
+  "${audit_context_binary_exclude_globs[@]}"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
+  "${audit_context_binary_exclude_globs[@]}" \
   "agent-docs/generated/**" \
   "agent-docs/exec-plans/completed/**" \
   "agent-docs/prompts/**" \
