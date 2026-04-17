@@ -6,12 +6,27 @@ cd "$ROOT_DIR"
 
 config_path="$ROOT_DIR/scripts/review-gpt.config.sh"
 list_presets=0
+chat_url=""
 declare -a forward_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --list-presets)
       list_presets=1
+      shift
+      ;;
+    --chat-url)
+      [[ $# -ge 2 ]] || {
+        echo "Error: --chat-url requires a value." >&2
+        exit 1
+      }
+      chat_url="$2"
+      forward_args+=("$1" "$2")
+      shift 2
+      ;;
+    --chat-url=*)
+      chat_url="${1#*=}"
+      forward_args+=("$1")
       shift
       ;;
     *)
@@ -110,8 +125,35 @@ if [[ "$list_presets" == "1" ]]; then
   exit 0
 fi
 
+tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt.XXXXXX.log")"
+
+set +e
 if [[ "${#forward_args[@]}" -gt 0 ]]; then
-  exec pnpm exec cobuild-review-gpt --config "$config_path" "${forward_args[@]}"
+  pnpm exec cobuild-review-gpt --config "$config_path" "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
+  command_status="${PIPESTATUS[0]}"
+else
+  pnpm exec cobuild-review-gpt --config "$config_path" 2>&1 | tee "$tmp_log_path"
+  command_status="${PIPESTATUS[0]}"
+fi
+set -e
+
+if [[ "$command_status" -ne 0 && -n "$chat_url" ]]; then
+  set +e
+  diagnostics_dir="$(
+    node scripts/review-gpt-diagnostics.mjs \
+      --chat-url "$chat_url" \
+      --command-label review:gpt \
+      --exit-code "$command_status" \
+      --log-file "$tmp_log_path"
+  )"
+  diagnostics_status=$?
+  set -e
+  if [[ "$diagnostics_status" -eq 0 && -n "$diagnostics_dir" ]]; then
+    echo "review:gpt diagnostics: ${diagnostics_dir}" >&2
+  else
+    echo "review:gpt diagnostics failed" >&2
+  fi
 fi
 
-exec pnpm exec cobuild-review-gpt --config "$config_path"
+rm -f "$tmp_log_path"
+exit "$command_status"
