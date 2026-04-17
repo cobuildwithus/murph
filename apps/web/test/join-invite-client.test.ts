@@ -88,7 +88,7 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
   );
 
   assert.match(markup, /Murph signup/);
-  assert.match(markup, /Verify the number that messaged Murph to finish joining\./);
+  assert.match(markup, /Verify the number you texted Murph from\./);
   assert.doesNotMatch(markup, /What happens next/);
   assert.doesNotMatch(markup, /Invite for/);
   assert.doesNotMatch(markup, /\+1 415 555 2671/);
@@ -439,7 +439,7 @@ test("already-active checkout refreshes return to verify when the invite session
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
-  assert.match(view.container.textContent ?? "", /Finish joining Murph/);
+  assert.match(view.container.textContent ?? "", /Confirm your number/);
   assert.match(view.container.textContent ?? "", /Hosted invite phone auth/);
 
   await view.cleanup();
@@ -465,7 +465,7 @@ test("active invite state renders message and settings actions with client navig
     }),
   );
 
-  assert.match(markup, /Murph should reach out shortly\. Just reply there to start chatting\./);
+  assert.match(markup, /Murph will text you shortly\. Reply to start\./);
   assert.ok(markup.includes('href="sms:+15550100001"'));
   assert.match(markup, /Text Murph/);
   assert.ok(markup.includes('download="Murph.vcf"'));
@@ -493,7 +493,7 @@ test("active invite state omits Murph contact actions when no assigned number is
     }),
   );
 
-  assert.doesNotMatch(markup, /Text Murph/);
+  assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /Add Murph to Contacts/);
   assert.ok(markup.includes('href="/settings"'));
 });
@@ -528,13 +528,10 @@ test("active invite state explains when vault and assistant setup is still runni
   );
 
   assert.match(markup, /Welcome to Murph/);
-  assert.match(markup, /Your personal health home is almost ready\./);
-  assert.match(markup, /Your account is ready\. Murph is getting your space ready\./);
-  assert.match(
-    markup,
-    /We’re setting up your private, encrypted vault and getting your Murph assistant ready to text you\./,
-  );
-  assert.match(markup, /We’ll add your shared bundle as soon as your vault is ready\./);
+  assert.match(markup, /Setup finishes in about a minute\./);
+  assert.match(markup, /Setting up your vault and assistant/);
+  assert.match(markup, /This takes about a minute\. We’ll update here when it’s done\./);
+  assert.match(markup, /We’ll add your shared bundle once setup finishes\./);
 });
 
 test("invite share preview renders the generic bundle copy from the tiny summary", () => {

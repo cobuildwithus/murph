@@ -94,15 +94,15 @@ export function buildHostedShareStatusUrl(input: {
 export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): string {
   switch (status.stage) {
     case "invalid":
-      return "That invite link is not valid";
+      return "Invite link not valid";
     case "expired":
-      return "That invite link expired";
+      return "Invite link expired";
     case "verify":
-      return "Finish joining Murph";
+      return "Confirm your number";
     case "checkout":
       return "One last step";
     case "blocked":
-      return "This account is blocked";
+      return "Account blocked";
     case "active":
       return "Welcome to Murph";
     default:
@@ -113,21 +113,23 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
 export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): string {
   switch (status.stage) {
     case "invalid":
-      return "Text the Murph number again and we’ll send you a fresh link.";
     case "expired":
-      return "Text the Murph number again and we’ll send you a fresh link.";
+      return "Text Murph again for a fresh link.";
     case "verify":
-      return "Verify the number that messaged Murph to finish joining.";
+      return "Verify the number you texted Murph from.";
     case "checkout":
       return status.messagingSetupRequired
-        ? "Before checkout, add a phone number or connect Telegram so Murph can message you after payment."
-        : "Your account is ready for checkout. Finish payment to start using Murph.";
+        ? "Add a phone number or Telegram so Murph can reach you after payment."
+        : "Finish payment to start using Murph.";
     case "blocked":
-      return "This account can’t continue from this invite right now. Contact support and we’ll help restore access.";
+      return "This account can’t continue from this invite.";
     case "active":
-      return status.activationPending
-        ? JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle
-        : "Congrats, you’re all set. Here’s what to expect next.";
+      if (status.activationPending) {
+        return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;
+      }
+      return status.murphPhoneNumber
+        ? "Text Murph below to start."
+        : "You’re all set.";
     default:
       return "Murph signup";
   }

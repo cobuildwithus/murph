@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import { AlertCircleIcon, CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
+import { CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
@@ -19,6 +19,7 @@ interface JoinInviteSuccessClientProps {
   inviteCode: string;
   sessionId: string | null;
   shareCode: string | null;
+  preview?: boolean;
 }
 
 interface HostedInviteSuccessState {
@@ -34,6 +35,7 @@ export function JoinInviteSuccessClient({
   inviteCode,
   sessionId,
   shareCode,
+  preview = false,
 }: JoinInviteSuccessClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -50,10 +52,12 @@ export function JoinInviteSuccessClient({
       setStatus(payload);
     },
     shouldPoll,
+    disabled: preview,
   });
 
   useEffect(() => {
     if (
+      preview ||
       successSyncStartedRef.current ||
       !sessionId ||
       !status.session.matchesInvite ||
@@ -94,43 +98,43 @@ export function JoinInviteSuccessClient({
   const successState = resolveHostedInviteSuccessState(status);
 
   return (
-    <>
-      <CardHeader className="gap-5">
-        <div className="flex h-12 w-12 items-center justify-center rounded bg-olive/10">
-          {successState.variant === "active" ? (
-            <CheckCircleIcon className="h-6 w-6 text-olive" />
-          ) : successState.variant === "pending" ? (
-            <LoaderCircleIcon className="h-6 w-6 animate-spin text-olive" />
-          ) : (
-            <AlertCircleIcon className="h-6 w-6 text-olive" />
-          )}
-        </div>
-        <div className="space-y-5">
-          <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
-            {successState.title}
-          </CardTitle>
-          <CardDescription className="leading-relaxed text-stone-500">{successState.description}</CardDescription>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {successState.pending ? (
-          <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
-            We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-3">
+        {successState.variant === "terminal" ? (
+          <JoinInviteEyebrow label="Something went wrong" tone="danger" />
+        ) : (
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
+            {successState.variant === "active" ? (
+              <CheckCircleIcon className="size-4" />
+            ) : (
+              <LoaderCircleIcon className="size-4 animate-spin" />
+            )}
+            <span>{successState.variant === "active" ? "Ready" : "Working on it"}</span>
           </div>
-        ) : null}
+        )}
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
+          {successState.title}
+        </h1>
+        <p className="leading-relaxed text-muted-foreground">{successState.description}</p>
+      </div>
 
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to refresh status</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
+      {successState.pending ? (
+        <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
+          We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
+        </div>
+      ) : null}
 
-        <Button render={<Link href={href} />} nativeButton={false} size="lg">
-          {successState.buttonLabel}
-        </Button>
-      </CardContent>
-    </>
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to refresh status</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Button render={<Link href={href} />} nativeButton={false} size="lg" className="w-fit">
+        {successState.buttonLabel}
+      </Button>
+    </div>
   );
 }
 
@@ -141,15 +145,15 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         buttonLabel: "Continue",
         description: status.activationPending
           ? JOIN_INVITE_ACTIVATION_PENDING_COPY.successDescription
-          : "Murph finished setting things up. Head back to your invite page to continue.",
+          : "Head back to your invite to start.",
         pending: false,
-        title: "Your account is ready",
+        title: "You’re all set",
         variant: "active",
       };
     case "verify":
       return {
         buttonLabel: "Back to invite",
-        description: "We’re finishing sign-in and checking your setup status now.",
+        description: "Checking your signup status.",
         pending: true,
         title: "Finishing sign-in",
         variant: "pending",
@@ -157,7 +161,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "checkout":
       return {
         buttonLabel: "Back to invite",
-        description: "We’re confirming your subscription and setting up your encrypted vault and assistant now.",
+        description: "Setting up your vault and assistant. This takes about a minute.",
         pending: true,
         title: "Payment received",
         variant: "pending",
@@ -165,7 +169,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "expired":
       return {
         buttonLabel: "Back to invite",
-        description: "This invite link expired. Return to the original invite message for a fresh link.",
+        description: "Text Murph again for a fresh link.",
         pending: false,
         title: "Invite expired",
         variant: "terminal",
@@ -173,7 +177,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "invalid":
       return {
         buttonLabel: "Back to invite",
-        description: "This invite link is no longer valid. Return to the original invite message for a fresh link.",
+        description: "Text Murph again for a fresh link.",
         pending: false,
         title: "Invite not found",
         variant: "terminal",
@@ -181,9 +185,9 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "blocked":
       return {
         buttonLabel: "Back to invite",
-        description: "We couldn’t finish setup automatically. Head back to your invite page for the latest status.",
+        description: "Head back to your invite for next steps.",
         pending: false,
-        title: "Unable to continue",
+        title: "Account blocked",
         variant: "terminal",
       };
   }

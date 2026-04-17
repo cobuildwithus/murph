@@ -1,10 +1,10 @@
 export const JOIN_INVITE_ACTIVATION_PENDING_COPY = {
+  subtitle: "Setup finishes in about a minute.",
+  activePanelTitle: "Setting up your vault and assistant",
   activePanelDescription:
-    "We’re setting up your private, encrypted vault and getting your Murph assistant ready to text you. You can continue below while that finishes.",
-  activePanelTitle: "Your account is ready. Murph is getting your space ready.",
+    "This takes about a minute. We’ll update here when it’s done.",
   shareImportDescription:
-    "We’ll add your shared bundle as soon as your vault is ready.",
-  subtitle: "Your personal health home is almost ready.",
+    "We’ll add your shared bundle once setup finishes.",
   successDescription:
-    "Payment is confirmed. We’re setting up your private, encrypted vault and getting your Murph assistant ready to text you. You can continue now while that finishes.",
+    "Payment confirmed. Setup finishes in about a minute — continue below.",
 } as const;

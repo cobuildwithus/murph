@@ -124,7 +124,7 @@ export function LandingAuthActions({
     return (
       <div className={styles.container}>
         <a href="/settings" className={styles.settings}>
-          Open settings
+          Your account
         </a>
       </div>
     );
