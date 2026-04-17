@@ -94,12 +94,12 @@ export function ComponentsContent() {
             <Label htmlFor="otp-ds">Verification code</Label>
             <InputOTP id="otp-ds" maxLength={6} autoComplete="one-time-code">
               <InputOTPGroup>
-                <InputOTPSlot index={0} className="size-11 text-base" />
-                <InputOTPSlot index={1} className="size-11 text-base" />
-                <InputOTPSlot index={2} className="size-11 text-base" />
-                <InputOTPSlot index={3} className="size-11 text-base" />
-                <InputOTPSlot index={4} className="size-11 text-base" />
-                <InputOTPSlot index={5} className="size-11 text-base" />
+                <InputOTPSlot index={0} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={1} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={2} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={3} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={4} className="size-11 bg-card text-base" />
+                <InputOTPSlot index={5} className="size-11 bg-card text-base" />
               </InputOTPGroup>
             </InputOTP>
           </div>

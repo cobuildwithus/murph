@@ -32,6 +32,10 @@ const FAQ_ITEMS = [
     "Your conversations never train AI models. Cloud inference runs through Venice AI with zero data retention — nothing is stored on their side. Hosted runs use encrypted snapshots with privacy-first defaults, so only you can access them.",
   ],
   [
+    "Can I self-host Murph?",
+    "Yes. Murph is open source under Apache 2.0. Run it locally with one command and bring your own models — OpenAI, Anthropic, Ollama, whatever. The hosted version is for people who'd rather not run anything themselves.",
+  ],
+  [
     "Can I cancel anytime?",
     "Yes. No contracts. $5/month, cancel whenever. Your data stays yours.",
   ],
