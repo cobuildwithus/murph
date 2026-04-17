@@ -19,6 +19,7 @@ export function useHostedInviteStatusRefresh(input: {
   onError?: (error: unknown) => void;
   onStatus: (payload: HostedInviteStatusPayload) => void;
   shouldPoll: boolean;
+  disabled?: boolean;
 }) {
   const refreshStatusEffect = useEffectEvent(() => {
     void fetchHostedInviteStatus(input.inviteCode)
@@ -29,11 +30,14 @@ export function useHostedInviteStatusRefresh(input: {
   });
 
   useEffect(() => {
+    if (input.disabled) {
+      return;
+    }
     refreshStatusEffect();
-  }, [input.inviteCode]);
+  }, [input.inviteCode, input.disabled]);
 
   useEffect(() => {
-    if (!input.shouldPoll) {
+    if (input.disabled || !input.shouldPoll) {
       return;
     }
 
@@ -44,7 +48,7 @@ export function useHostedInviteStatusRefresh(input: {
     return () => {
       window.clearInterval(timer);
     };
-  }, [input.inviteCode, input.shouldPoll]);
+  }, [input.inviteCode, input.shouldPoll, input.disabled]);
 }
 
 function buildHostedInviteStatusUrl(inviteCode: string): string {

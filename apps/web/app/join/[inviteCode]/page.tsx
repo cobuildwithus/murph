@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
+import {
+  buildJoinInvitePreviewStatus,
+  parseJoinInvitePreviewStage,
+} from "@/src/components/hosted-onboarding/join-invite-preview";
 import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-shell";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
@@ -22,11 +26,32 @@ export const metadata: Metadata = {
 
 export default async function JoinInvitePage(input: {
   params: Promise<{ inviteCode: string }>;
-  searchParams: Promise<{ share?: string }>;
+  searchParams: Promise<{ share?: string; preview?: string }>;
 }) {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
+  const previewStage =
+    process.env.NODE_ENV !== "production"
+      ? parseJoinInvitePreviewStage(searchParams.preview)
+      : null;
+
+  if (previewStage) {
+    return (
+      <JoinInviteShell>
+        <JoinInviteClient
+          authenticated
+          initialLinkedAccounts={[]}
+          inviteCode={decodedInviteCode}
+          initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
+          shareCode={null}
+          sharePreview={null}
+          preview
+        />
+      </JoinInviteShell>
+    );
+  }
+
   const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
   const initialStatus = await buildHostedInvitePageData({
     authenticatedMember,

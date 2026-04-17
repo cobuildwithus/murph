@@ -35,6 +35,7 @@ interface JoinInviteClientProps {
   inviteCode: string;
   shareCode: string | null;
   sharePreview: HostedSharePreview | null;
+  preview?: boolean;
 }
 
 export function JoinInviteClient({
@@ -44,6 +45,7 @@ export function JoinInviteClient({
   inviteCode,
   shareCode,
   sharePreview,
+  preview = false,
 }: JoinInviteClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [hasCompletedInitialRefresh, setHasCompletedInitialRefresh] = useState(
@@ -90,6 +92,7 @@ export function JoinInviteClient({
       }
     },
     shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.activationPending,
+    disabled: preview,
   });
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
