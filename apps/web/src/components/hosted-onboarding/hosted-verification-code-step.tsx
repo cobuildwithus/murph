@@ -49,7 +49,7 @@ export function HostedVerificationCodeStep({
             disabled={disabled}
             variant="link"
             size="xs"
-            className="h-auto p-0 text-xs text-stone-500"
+            className="h-auto p-0 text-xs text-muted-foreground"
           >
             {pendingAction === "send-code" ? "Sending..." : "Resend code"}
           </Button>
@@ -65,17 +65,17 @@ export function HostedVerificationCodeStep({
           onChange={onCodeChange}
           onComplete={onSubmit}
         >
-          <InputOTPGroup className="w-full justify-between gap-2">
+          <InputOTPGroup className="w-full gap-2">
             {Array.from({ length: CODE_LENGTH }, (_, index) => (
               <InputOTPSlot
                 key={index}
                 index={index}
-                className="size-12 flex-1 rounded-lg border text-lg"
+                className="h-12 flex-1 min-w-0 rounded-lg border text-lg"
               />
             ))}
           </InputOTPGroup>
         </InputOTP>
-        <p className="text-sm text-stone-500">{description}</p>
+        <p className="text-sm text-muted-foreground">{description}</p>
       </div>
       <div className="flex flex-wrap gap-3">
         <Button
