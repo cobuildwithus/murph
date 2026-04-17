@@ -86,4 +86,30 @@ describe("browser vault session route", () => {
       },
     });
   });
+
+  it("returns a 502 when hosted execution control returns an invalid browser vault session", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new TypeError("Cloudflare browser vault session must include rootKeyEnvelope, snapshotAad, and snapshotEnvelope together."),
+    );
+
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
+        message: "Hosted execution control plane returned an invalid browser vault session.",
+        retryable: false,
+      },
+    });
+  });
 });

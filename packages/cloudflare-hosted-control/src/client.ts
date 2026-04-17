@@ -23,11 +23,17 @@ import {
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
 
-export interface CloudflareHostedControlBrowserVaultSession {
-  rootKeyEnvelope: HostedUserRootKeyEnvelope | null;
-  snapshotAad: CloudflareHostedControlBrowserVaultSnapshotAad | null;
-  snapshotEnvelope: HostedCipherEnvelope | null;
-}
+export type CloudflareHostedControlBrowserVaultSession =
+  | {
+      rootKeyEnvelope: null;
+      snapshotAad: null;
+      snapshotEnvelope: null;
+    }
+  | {
+      rootKeyEnvelope: HostedUserRootKeyEnvelope;
+      snapshotAad: CloudflareHostedControlBrowserVaultSnapshotAad;
+      snapshotEnvelope: HostedCipherEnvelope;
+    };
 
 export interface CloudflareHostedControlBrowserVaultSnapshotAad {
   key: string;
@@ -119,20 +125,53 @@ function parseCloudflareHostedControlBrowserVaultSession(
   value: unknown,
 ): CloudflareHostedControlBrowserVaultSession {
   const record = requireRecord(value, "Cloudflare browser vault session");
+  const hasRootKeyEnvelope = Object.hasOwn(record, "rootKeyEnvelope");
+  const hasSnapshotAad = Object.hasOwn(record, "snapshotAad");
+  const hasSnapshotEnvelope = Object.hasOwn(record, "snapshotEnvelope");
+  const rootKeyEnvelope = record.rootKeyEnvelope === null || record.rootKeyEnvelope === undefined
+    ? null
+    : parseHostedUserRootKeyEnvelope(
+      record.rootKeyEnvelope,
+      "Cloudflare browser vault session rootKeyEnvelope",
+    );
+  const snapshotAad = record.snapshotAad === null || record.snapshotAad === undefined
+    ? null
+    : parseCloudflareHostedControlBrowserVaultSnapshotAad(
+      record.snapshotAad,
+      "Cloudflare browser vault session snapshotAad",
+    );
+  const snapshotEnvelope = record.snapshotEnvelope === null || record.snapshotEnvelope === undefined
+    ? null
+    : parseHostedCipherEnvelope(
+      record.snapshotEnvelope,
+      "Cloudflare browser vault session snapshotEnvelope",
+    );
+
+  if (
+    hasRootKeyEnvelope &&
+    hasSnapshotAad &&
+    hasSnapshotEnvelope &&
+    rootKeyEnvelope === null &&
+    snapshotAad === null &&
+    snapshotEnvelope === null
+  ) {
+    return {
+      rootKeyEnvelope: null,
+      snapshotAad: null,
+      snapshotEnvelope: null,
+    };
+  }
+
+  if (rootKeyEnvelope === null || snapshotAad === null || snapshotEnvelope === null) {
+    throw new TypeError(
+      "Cloudflare browser vault session must include rootKeyEnvelope, snapshotAad, and snapshotEnvelope together.",
+    );
+  }
 
   return {
-    rootKeyEnvelope: record.rootKeyEnvelope === null || record.rootKeyEnvelope === undefined
-      ? null
-      : parseHostedUserRootKeyEnvelope(record.rootKeyEnvelope, "Cloudflare browser vault session rootKeyEnvelope"),
-    snapshotAad: record.snapshotAad === null || record.snapshotAad === undefined
-      ? null
-      : parseCloudflareHostedControlBrowserVaultSnapshotAad(
-        record.snapshotAad,
-        "Cloudflare browser vault session snapshotAad",
-      ),
-    snapshotEnvelope: record.snapshotEnvelope === null || record.snapshotEnvelope === undefined
-      ? null
-      : parseHostedCipherEnvelope(record.snapshotEnvelope, "Cloudflare browser vault session snapshotEnvelope"),
+    rootKeyEnvelope,
+    snapshotAad,
+    snapshotEnvelope,
   };
 }
 
