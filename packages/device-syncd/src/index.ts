@@ -24,6 +24,7 @@ export {
   hasConfiguredDeviceSyncProviderConfigs,
   listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
+  parseConfiguredDeviceSyncRuntimeConfig,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncProviderConfigs,

@@ -15,6 +15,7 @@ import {
   hasConfiguredDeviceSyncProviderConfigs,
   listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
+  parseConfiguredDeviceSyncRuntimeConfig,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncProviderConfigs,
@@ -255,6 +256,50 @@ test("readConfiguredDeviceSyncRuntimeConfig keeps only the shared hosted runtime
       "webhookVerificationToken",
     ),
     false,
+  );
+});
+
+test("parseConfiguredDeviceSyncRuntimeConfig accepts the shared hosted runtime shape", () => {
+  const parsed = parseConfiguredDeviceSyncRuntimeConfig(
+    {
+      providerConfigs: {
+        strava: {
+          clientId: "strava-client-id",
+          clientSecret: "strava-client-secret",
+          scopes: ["activity:read"],
+        },
+      },
+      publicBaseUrl: "https://device-sync.example.test",
+      secret: "codec-secret",
+    },
+    "runtime.deviceSync",
+  );
+
+  assert.equal(parsed.publicBaseUrl, "https://device-sync.example.test");
+  assert.equal(parsed.secret, "codec-secret");
+  assert.deepEqual(parsed.providerConfigs.strava?.clientId, "strava-client-id");
+  assert.deepEqual(parsed.providerConfigs.strava?.clientSecret, "strava-client-secret");
+  assert.deepEqual(parsed.providerConfigs.strava?.scopes, ["activity:read"]);
+});
+
+test("parseConfiguredDeviceSyncRuntimeConfig rejects unknown top-level runtime fields", () => {
+  assert.throws(
+    () =>
+      parseConfiguredDeviceSyncRuntimeConfig(
+        {
+          providerConfigs: {
+            strava: {
+              clientId: "strava-client-id",
+              clientSecret: "strava-client-secret",
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "codec-secret",
+          unexpectedField: "nope",
+        },
+        "runtime.deviceSync",
+      ),
+    /runtime\.deviceSync\.unexpectedField/u,
   );
 });
 

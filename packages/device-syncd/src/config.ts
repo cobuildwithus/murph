@@ -178,6 +178,11 @@ const STRAVA_SCOPES_ENV_KEYS = ["STRAVA_SCOPES"] as const;
 const STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS = [
   "STRAVA_WEBHOOK_VERIFY_TOKEN",
 ] as const;
+const DEVICE_SYNC_RUNTIME_CONFIG_KEYS = [
+  "providerConfigs",
+  "publicBaseUrl",
+  "secret",
+] as const;
 
 const GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
   ...GARMIN_CLIENT_ID_ENV_KEYS,
@@ -386,6 +391,22 @@ export function readConfiguredDeviceSyncRuntimeConfig(
     providerConfigs,
     publicBaseUrl,
     secret,
+  };
+}
+
+export function parseConfiguredDeviceSyncRuntimeConfig(
+  value: unknown,
+  label: string,
+): ConfiguredDeviceSyncRuntimeConfig {
+  const record = requireSerializableDeviceSyncRuntimeConfigRecord(value, label);
+
+  return {
+    providerConfigs: parseSerializableConfiguredDeviceSyncProviderConfigs(
+      record.providerConfigs,
+      `${label}.providerConfigs`,
+    ),
+    publicBaseUrl: requireSerializableString(record.publicBaseUrl, `${label}.publicBaseUrl`),
+    secret: requireSerializableString(record.secret, `${label}.secret`),
   };
 }
 
@@ -859,6 +880,22 @@ function requireSerializableConfiguredDeviceSyncProviderConfigsRecord(
   for (const key of Object.keys(record)) {
     if (!supportedProviders.has(key)) {
       throw new TypeError(`${label}.${key} is not a supported device-sync provider config.`);
+    }
+  }
+
+  return record;
+}
+
+function requireSerializableDeviceSyncRuntimeConfigRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  const record = requireSerializableConfigObject(value, label);
+  const supportedKeys = new Set<string>(DEVICE_SYNC_RUNTIME_CONFIG_KEYS);
+
+  for (const key of Object.keys(record)) {
+    if (!supportedKeys.has(key)) {
+      throw new TypeError(`${label}.${key} is not supported in serialized runtime config.`);
     }
   }
 
