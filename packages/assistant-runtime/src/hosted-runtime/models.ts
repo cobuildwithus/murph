@@ -16,6 +16,7 @@ import type {
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
+import type { BrowserVaultSnapshot } from "@murphai/query";
 
 export interface HostedAssistantRuntimeChannelCapabilities {
   emailSendReady: boolean;
@@ -118,6 +119,7 @@ export interface HostedAssistantRuntimeCommittedJobResult {
 
 export interface HostedAssistantRuntimeCompletedJobResult {
   assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
+  browserVaultSnapshot?: BrowserVaultSnapshot | null;
   committedAssistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
   committedGatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;

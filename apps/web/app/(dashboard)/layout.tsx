@@ -1,12 +1,15 @@
+import type { ReactNode } from "react";
+
 import { Sidebar } from "@/src/components/dashboard/sidebar";
+import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 
 export default function DashboardLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <>
+    <BrowserVaultProvider>
       <style>{`#global-footer { display: none; }`}</style>
       <div className="flex min-h-screen">
         <Sidebar />
@@ -14,6 +17,6 @@ export default function DashboardLayout({
           {children}
         </main>
       </div>
-    </>
+    </BrowserVaultProvider>
   );
 }

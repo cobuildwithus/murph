@@ -5,6 +5,11 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
+  parseHostedUserRecipientPublicKeyJwk,
+  wrapHostedUserRootKeyRecipient,
+} from "@murphai/runtime-state";
+import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionDispatchRequest,
@@ -40,6 +45,7 @@ export { RunnerContainer } from "./runner-container.ts";
 import type { HostedExecutionContainerNamespaceLike } from "./runner-container.ts";
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
+import { createHostedBrowserVaultSnapshotStore } from "./browser-vault-store.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -51,6 +57,7 @@ import {
 import {
   decodeRouteParam,
   readCachedRequestText,
+  resolveHostedExecutionUserCryptoContext,
   resolveUserRunnerStub,
   type UserRunnerDurableObjectStubLike,
   type WorkerEnvironmentSource,
@@ -93,6 +100,17 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchExactPath("/internal/dispatch"),
     methods: ["POST"],
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
+    async handle(context, params) {
+      return handleBrowserVaultSessionRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/browser-vault\/session$/u),
+    methods: ["POST"],
+    wrongMethodResponse: "method-not-allowed",
   },
   {
     authorizeBeforeMethod: true,
@@ -309,6 +327,72 @@ async function handleEventStatusRoute(
   return json(await stub.getEventStatus({ eventId }));
 }
 
+async function handleBrowserVaultSessionRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const body = parseBrowserVaultSessionRequest(
+    JSON.parse(await readCachedRequestText(context)) as unknown,
+  );
+  const crypto = await resolveHostedExecutionUserCryptoContext({
+    bucket: context.env.BUNDLES,
+    environment: context.environment,
+    userId,
+  });
+  const snapshotStore = createHostedBrowserVaultSnapshotStore({
+    bucket: context.env.BUNDLES,
+    key: crypto.rootKey,
+    keyId: crypto.rootKeyId,
+    keysById: crypto.keysById,
+  });
+  const snapshotEnvelope = await snapshotStore.readBrowserVaultSnapshotEnvelope(userId);
+
+  if (!snapshotEnvelope) {
+    return json({
+      rootKeyEnvelope: null,
+      snapshotEnvelope: null,
+    });
+  }
+
+  const nowIso = new Date().toISOString();
+  const recipient = await wrapHostedUserRootKeyRecipient({
+    recipient: {
+      keyId: `browser-session:${globalThis.crypto.randomUUID()}`,
+      kind: "user-unlock",
+      publicKeyJwk: body.browserPublicKeyJwk,
+    },
+    rootKey: crypto.rootKey,
+    rootKeyId: crypto.rootKeyId,
+    userId,
+  });
+
+  return json({
+    rootKeyEnvelope: {
+      createdAt: nowIso,
+      recipients: [recipient],
+      rootKeyId: crypto.rootKeyId,
+      schema: HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
+      updatedAt: nowIso,
+      userId,
+    },
+    snapshotEnvelope,
+  });
+}
+
+function parseBrowserVaultSessionRequest(value: unknown): {
+  browserPublicKeyJwk: ReturnType<typeof parseHostedUserRecipientPublicKeyJwk>;
+} {
+  const record = requireJsonRecord(value, "Browser vault session request");
+
+  return {
+    browserPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(
+      record.browserPublicKeyJwk,
+      "Browser vault session request browserPublicKeyJwk",
+    ),
+  };
+}
+
 function requireBoundInternalRouteUser(
   context: Pick<WorkerRouteContext, "request">,
   params: RouteParams,
@@ -351,6 +435,14 @@ function readHostedExecutionBoundUserId(request: Request): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function requireJsonRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
 }
 
 interface InternalProxyRequestInit extends RequestInit {

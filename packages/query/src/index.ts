@@ -14,9 +14,11 @@ export {
   listExperiments,
   listJournalEntries,
   lookupEntityById,
+} from "./model.ts";
+export {
   readVault,
   readVaultTolerant,
-} from "./model.ts";
+} from "./vault-reader.ts";
 export type {
   EntityFilter,
   ExperimentFilter,
@@ -24,6 +26,12 @@ export type {
   VaultEntitiesByFamily,
   VaultReadModel,
 } from "./model.ts";
+export {
+  BROWSER_VAULT_SNAPSHOT_SCHEMA,
+  createBrowserVaultSnapshot,
+  parseBrowserVaultSnapshot,
+} from "./browser-snapshot.ts";
+export type { BrowserVaultSnapshot } from "./browser-snapshot.ts";
 export type {
   CanonicalEntity,
   CanonicalEntityFamily,
@@ -39,6 +47,7 @@ export {
 } from "./id-families.ts";
 export {
   buildOverviewMetrics,
+  isActiveOverviewExperimentStatus,
   buildOverviewWeeklyStats,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,

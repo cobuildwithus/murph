@@ -52,6 +52,20 @@ export async function hostedRunnerSecretsObjectKey(
   return `users/runner-secrets/${userSegment}.json`;
 }
 
+export async function hostedBrowserVaultSnapshotObjectKey(
+  rootKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "browser-vault-snapshot-path",
+    value: `user:${userId}`,
+  });
+
+  return `users/browser-vault-snapshots/${userSegment}.json`;
+}
+
 export async function hostedExecutionJournalObjectKey(
   rootKey: Uint8Array,
   userId: string,

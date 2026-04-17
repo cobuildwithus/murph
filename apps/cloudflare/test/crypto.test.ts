@@ -96,7 +96,7 @@ describe("readEncryptedR2Payload", () => {
       expectedKeyId: "k-current",
       key: "bundles/vault/test.bundle.json",
       scope: "bundle",
-    })).rejects.toThrow("Hosted bundle envelope scope mismatch");
+    })).rejects.toThrow("Hosted bundle envelope.scope must be a non-empty string.");
   });
 
   it("fails closed when a stored payload is rebound without the expected AAD", async () => {

@@ -5,12 +5,16 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "../src/routes.ts";
 
 describe("cloudflare hosted control routes", () => {
   it("builds the narrowed internal routes with encoded identifiers", () => {
+    expect(buildCloudflareHostedControlBrowserVaultSessionPath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/browser-vault/session",
+    );
     expect(buildCloudflareHostedControlUserEventStatusPath("user/a b", "evt/1 2")).toBe(
       "/internal/users/user%2Fa%20b/events/evt%2F1%202/status",
     );
@@ -48,6 +52,7 @@ describe("cloudflare hosted control routes", () => {
       createCloudflareHostedControlClient: expect.any(Function),
     });
     await expect(import("@murphai/cloudflare-hosted-control/routes")).resolves.toMatchObject({
+      buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
       buildCloudflareHostedControlUserEventStatusPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
     });

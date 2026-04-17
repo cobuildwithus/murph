@@ -79,6 +79,12 @@
       "@murphai/runtime-state/*": [
         "packages/runtime-state/src/*"
       ],
+      "@murphai/query": [
+        "packages/query/src/index.ts"
+      ],
+      "@murphai/query/*": [
+        "packages/query/src/*"
+      ],
       "@murphai/core": [
         "packages/core/src/index.ts"
       ],

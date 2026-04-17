@@ -1,4 +1,12 @@
 import {
+  parseHostedCipherEnvelope,
+  parseHostedUserRecipientPublicKeyJwk,
+  parseHostedUserRootKeyEnvelope,
+  type HostedCipherEnvelope,
+  type HostedUserRecipientPublicKeyJwk,
+  type HostedUserRootKeyEnvelope,
+} from "@murphai/runtime-state";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionDispatchStatus,
   type HostedExecutionUserStatus,
@@ -10,11 +18,21 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
+  buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
 
+export interface CloudflareHostedControlBrowserVaultSession {
+  rootKeyEnvelope: HostedUserRootKeyEnvelope | null;
+  snapshotEnvelope: HostedCipherEnvelope | null;
+}
+
 export interface CloudflareHostedControlClient {
+  createBrowserVaultSession(
+    userId: string,
+    browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk,
+  ): Promise<CloudflareHostedControlBrowserVaultSession>;
   getEventStatus(userId: string, eventId: string): Promise<HostedExecutionDispatchStatus | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
 }
@@ -38,6 +56,29 @@ export function createCloudflareHostedControlClient(
   );
 
   return {
+    createBrowserVaultSession(userId, browserPublicKeyJwk) {
+      const body = JSON.stringify({
+        browserPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(browserPublicKeyJwk),
+      });
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "browser vault session",
+        parse: parseCloudflareHostedControlBrowserVaultSession,
+        path: buildCloudflareHostedControlBrowserVaultSessionPath(userId),
+        request: {
+          body,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     getEventStatus(userId, eventId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -64,6 +105,21 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+  };
+}
+
+function parseCloudflareHostedControlBrowserVaultSession(
+  value: unknown,
+): CloudflareHostedControlBrowserVaultSession {
+  const record = requireRecord(value, "Cloudflare browser vault session");
+
+  return {
+    rootKeyEnvelope: record.rootKeyEnvelope === null || record.rootKeyEnvelope === undefined
+      ? null
+      : parseHostedUserRootKeyEnvelope(record.rootKeyEnvelope, "Cloudflare browser vault session rootKeyEnvelope"),
+    snapshotEnvelope: record.snapshotEnvelope === null || record.snapshotEnvelope === undefined
+      ? null
+      : parseHostedCipherEnvelope(record.snapshotEnvelope, "Cloudflare browser vault session snapshotEnvelope"),
   };
 }
 
@@ -123,7 +179,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   };
   timeoutMs: number | undefined;
 }): Promise<TResponse> {
-  const url = new URL(input.path.replace(/^\/+/u, ""), `${input.baseUrl}/`);
+  const url = new URL(input.path.replace(/^\/+/, ""), `${input.baseUrl}/`);
 
   if (input.request.search) {
     url.search = input.request.search;
@@ -149,4 +205,12 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   return input.parse(await response.json());
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
 }

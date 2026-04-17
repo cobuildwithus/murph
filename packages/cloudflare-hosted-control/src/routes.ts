@@ -8,3 +8,7 @@ export function buildCloudflareHostedControlUserEventStatusPath(
 export function buildCloudflareHostedControlUserStatusPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/status`;
 }
+
+export function buildCloudflareHostedControlBrowserVaultSessionPath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/browser-vault/session`;
+}
