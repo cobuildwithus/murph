@@ -11,6 +11,7 @@ import {
 
 const workerPort = 8912;
 const userId = "member_duplicate_commit_local_e2e";
+const stabilityUserId = "member_duplicate_commit_local_smoke_stability";
 const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
   eventId: `member.activated:stripe.invoice.paid:${userId}:evt_duplicate_local_e2e`,
   firstContact: {
@@ -20,6 +21,22 @@ const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
     threadIsDirect: true,
   },
   memberId: userId,
+  memberChannels: {
+    email: false,
+    linq: true,
+    telegram: false,
+  },
+  occurredAt: new Date().toISOString(),
+});
+const stabilityActivationDispatch = buildHostedExecutionMemberActivatedDispatch({
+  eventId: `member.activated:stripe.invoice.paid:${stabilityUserId}:evt_duplicate_local_smoke_stability`,
+  firstContact: {
+    channel: "linq",
+    identityId: `linq:${stabilityUserId}`,
+    threadId: `thread:${stabilityUserId}`,
+    threadIsDirect: true,
+  },
+  memberId: stabilityUserId,
   memberChannels: {
     email: false,
     linq: true,
@@ -94,6 +111,77 @@ describe("hosted local duplicate commit e2e", () => {
 
     await worker.client.postJson("/__test/runner/clear", {
       eventId: activationDispatch.eventId,
+    });
+  });
+
+  it("stays drained when extra alarms arrive after duplicate-commit recovery", async () => {
+    const worker = workerFixture;
+    if (worker === null) {
+      throw new Error("Expected the hosted local test worker fixture to be initialized.");
+    }
+
+    await worker.client.postJson("/__test/runner/pause", {
+      eventId: stabilityActivationDispatch.eventId,
+    });
+
+    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", stabilityActivationDispatch);
+
+    await worker.waitForRunnerPauseEntry(stabilityActivationDispatch.eventId);
+    await worker.client.postJson("/__test/seed-duplicate-commit", {
+      eventId: stabilityActivationDispatch.eventId,
+      userId: stabilityUserId,
+    });
+    await worker.client.postJson("/__test/runner/release", {
+      eventId: stabilityActivationDispatch.eventId,
+    });
+
+    const dispatchResult = await dispatchPromise;
+    expect(dispatchResult).toMatchObject({
+      event: {
+        eventId: stabilityActivationDispatch.eventId,
+        state: "queued",
+      },
+      status: {
+        pendingEventCount: 1,
+        retryingEventId: stabilityActivationDispatch.eventId,
+        userId: stabilityUserId,
+      },
+    });
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await worker.client.postJson("/__test/alarm", { userId: stabilityUserId });
+    }
+
+    const recoveredStatus = await worker.waitForUserStatus(
+      stabilityUserId,
+      (status) => status.pendingEventCount === 0 && status.retryingEventId === null,
+    );
+    expect(recoveredStatus).toMatchObject({
+      lastError: null,
+      pendingEventCount: 0,
+      retryingEventId: null,
+      userId: stabilityUserId,
+    });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await worker.client.postJson("/__test/alarm", { userId: stabilityUserId });
+    }
+
+    const stableStatus = await worker.waitForUserStatus(
+      stabilityUserId,
+      (status) => status.pendingEventCount === 0 && status.retryingEventId === null && status.inFlight === false,
+    );
+    expect(stableStatus).toMatchObject({
+      lastError: null,
+      pendingEventCount: 0,
+      retryingEventId: null,
+      userId: stabilityUserId,
+    });
+    expect(stableStatus.bundleRef).toEqual(recoveredStatus.bundleRef);
+
+    await worker.client.postJson("/__test/runner/clear", {
+      eventId: stabilityActivationDispatch.eventId,
     });
   });
 });
