@@ -17,8 +17,9 @@ export interface HostedEmailConfig {
 export function readHostedEmailConfig(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): HostedEmailConfig {
-  const domain = normalizeOptionalString(source.HOSTED_EMAIL_DOMAIN);
-  const localPart = normalizeOptionalString(source.HOSTED_EMAIL_LOCAL_PART) ?? "assistant";
+  const domain = normalizeOptionalLowercaseString(source.HOSTED_EMAIL_DOMAIN);
+  const localPart = normalizeOptionalLowercaseString(source.HOSTED_EMAIL_LOCAL_PART)
+    ?? "assistant";
   const fromAddress = resolveHostedEmailSenderIdentity(source);
 
   return {
@@ -33,4 +34,8 @@ export function readHostedEmailConfig(
 function normalizeOptionalString(value: string | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeOptionalLowercaseString(value: string | undefined): string | null {
+  return normalizeOptionalString(value)?.toLowerCase() ?? null;
 }

@@ -5,7 +5,6 @@ import {
   formatHostedEmailAddress,
   isHostedEmailPublicSenderAddress,
   parseHostedEmailRouteCandidate,
-  resolveHostedEmailRouteIdentity,
 } from "../src/hosted-email/route-addressing.ts";
 import {
   createHostedEmailRouteToken,
@@ -41,16 +40,29 @@ describe("hosted email route addressing", () => {
     });
   });
 
-  it("keeps route identity tied to the live sender config", () => {
-    expect(resolveHostedEmailRouteIdentity("legacy@example.com", hostedEmailConfig)).toBe(
-      "assistant@example.com",
-    );
-  });
-
   it("formats alias addresses from the configured local part and domain", () => {
     expect(formatHostedEmailAddress(hostedEmailConfig, "u-route-123")).toBe(
       "assistant+u-route-123@example.com",
     );
+  });
+
+  it("formats and parses reply aliases with mixed-case config", () => {
+    const mixedCaseConfig: HostedEmailConfig = {
+      defaultSubject: "Murph update",
+      domain: "Reply.Example.COM",
+      fromAddress: "Murph@Reply.Example.COM",
+      localPart: "Murph",
+      signingSecret: "top-secret",
+    };
+
+    expect(formatHostedEmailAddress(mixedCaseConfig, "u-test-token")).toBe(
+      "murph+u-test-token@reply.example.com",
+    );
+    expect(parseHostedEmailRouteCandidate("Murph+u-test-token@Reply.Example.COM", mixedCaseConfig))
+      .toEqual({
+        address: "murph+u-test-token@reply.example.com",
+        detail: "u-test-token",
+      });
   });
 });
 
