@@ -1846,7 +1846,7 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    vi.setSystemTime(new Date("2026-03-26T12:00:16.000Z"));
+    vi.setSystemTime(new Date("2026-03-26T12:01:01.000Z"));
     await runner.alarm();
 
     const status = await runner.status();
@@ -1908,6 +1908,7 @@ describe("HostedUserRunner", () => {
     const firstDispatch = runner.dispatch(dispatch);
     await firstCommitRecorded.promise;
 
+    vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
     await runner.alarm();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
@@ -1968,6 +1969,7 @@ describe("HostedUserRunner", () => {
     const firstDispatch = firstRunner.dispatch(dispatch);
     await firstCommitRecorded.promise;
 
+    vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await restartedRunner.alarm();
 
@@ -2037,6 +2039,7 @@ describe("HostedUserRunner", () => {
     const firstDispatch = firstRunner.dispatch(dispatch);
     await firstCommitRecorded.promise;
 
+    vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     const duplicateStatus = await restartedRunner.dispatch(dispatch);
 
@@ -2098,6 +2101,70 @@ describe("HostedUserRunner", () => {
     expect(finalStatus.pendingEventCount).toBe(0);
     expect(readDispatchedEventIds(fetchSpy)).toEqual(["evt_serialized_run_loop_claim"]);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
+  });
+
+  it("keeps the active run lease through a long commit-to-finalize handoff so alarms do not start a duplicate finalize", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const commitInvokeStarted = createDeferred<void>();
+    const releaseCommitPhase = createDeferred<void>();
+    const resumeInvokeStarted = createDeferred<void>();
+    const releaseFinalizePhase = createDeferred<void>();
+    let resumeInvokeCount = 0;
+    const committedPayload = createRunnerSuccessPayload({
+      summary: "committed",
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      summary: "completed",
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => {
+      const request = readRunnerJobRequest(JSON.parse(String(init?.body)));
+
+      if (request.resume) {
+        resumeInvokeCount += 1;
+        if (resumeInvokeCount === 1) {
+          resumeInvokeStarted.resolve();
+        }
+        await releaseFinalizePhase.promise;
+        return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
+          status: 200,
+        });
+      }
+
+      commitInvokeStarted.resolve();
+      await releaseCommitPhase.promise;
+      return new Response(JSON.stringify(serializeRunnerCommittedPayload(committedPayload)), {
+        status: 200,
+      });
+    }));
+
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const dispatch = createDispatch("evt_long_finalize_lease");
+
+    const firstDispatch = runner.dispatch(dispatch);
+    await commitInvokeStarted.promise;
+
+    vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
+    releaseCommitPhase.resolve();
+    await resumeInvokeStarted.promise;
+
+    const alarmPromise = runner.alarm();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
+
+    releaseFinalizePhase.resolve();
+    const [finalStatus] = await Promise.all([firstDispatch, alarmPromise]);
+
+    expect(finalStatus.lastError).toBeNull();
+    expect(finalStatus.pendingEventCount).toBe(0);
+    expect(finalStatus.run).toMatchObject({
+      eventId: "evt_long_finalize_lease",
+      phase: "completed",
+    });
   });
 
 
