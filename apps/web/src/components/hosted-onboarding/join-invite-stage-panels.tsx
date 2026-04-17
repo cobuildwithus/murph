@@ -162,7 +162,7 @@ export function JoinInviteMessagingSetupPanel({
         </AlertDescription>
       </Alert>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4">
         <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
           <HostedPhoneSettings
             authenticated={authenticated}
