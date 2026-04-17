@@ -331,28 +331,31 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
-  it('drops queue-only email subjects for thread-bound sends before persisting', async () => {
+  it('rejects queue-only email thread subjects before persisting', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-queue-thread-subject-')
 
-    const queued = await deliverAssistantOutboxMessage({
-      bindingDelivery: {
-        kind: 'thread',
-        target: 'thread-email-queue',
-      },
-      channel: 'email',
-      dispatchMode: 'queue-only',
-      identityId: 'assistant@example.com',
-      message: 'queue this email thread reply',
-      sessionId: 'session-queue-email',
-      subject: 'Should be dropped',
-      threadId: 'thread-email-queue',
-      threadIsDirect: true,
-      turnId: 'turn-queue-email',
-      vault: vaultRoot,
-    })
+    await expect(
+      deliverAssistantOutboxMessage({
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'thread-email-queue',
+        },
+        channel: 'email',
+        dispatchMode: 'queue-only',
+        identityId: 'assistant@example.com',
+        message: 'queue this email thread reply',
+        sessionId: 'session-queue-email',
+        subject: 'Should be rejected',
+        threadId: 'thread-email-queue',
+        threadIsDirect: true,
+        turnId: 'turn-queue-email',
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow(
+      'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+    )
 
-    expect(queued.kind).toBe('queued')
-    expect(queued.intent.subject).toBeNull()
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 

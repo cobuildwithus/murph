@@ -38,6 +38,7 @@ import type {
 import {
   assistantChannelDeliverySchema,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import type {
   HostedCommittedExecutionState,
@@ -308,6 +309,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       });
     }
 
+    assertSupportedHostedAssistantDeliveryPayload(input.assistantDeliveryEffect.payload);
     attempt = buildHostedAssistantDeliveryAttemptFromEffect(
       input.assistantDeliveryEffect,
       new Date().toISOString(),
@@ -332,8 +334,22 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
 
     const delivered = await sendAssistantOutboxPayload({
       dependencies: {
-        sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
-          input.effectsPort.sendEmail(request),
+        sendEmail: async (request) => {
+          if (request.targetKind === "participant") {
+            throw new VaultCliError(
+              "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
+              "Hosted email participant delivery is not supported. Use an explicit recipient or a serialized thread target.",
+            );
+          }
+
+          return await input.effectsPort.sendEmail({
+            identityId: request.identityId ?? null,
+            message: request.message,
+            subject: request.subject ?? null,
+            target: request.target,
+            targetKind: request.targetKind,
+          });
+        },
       },
       payload: buildAssistantOutboxDispatchPayload(input.assistantDeliveryEffect.payload),
       vault: input.vaultRoot,
@@ -635,7 +651,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "turnId"
   >,
 ): HostedAssistantDeliveryPayload {
-  return {
+  const payload = {
     actorId: intent.actorId ?? null,
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
@@ -652,6 +668,9 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     transportIdempotent: intent.deliveryTransportIdempotent || intent.channel === "linq",
     turnId: intent.turnId,
   };
+
+  assertSupportedHostedAssistantDeliveryPayload(payload);
+  return payload;
 }
 
 function buildAssistantOutboxDispatchPayload(
@@ -1099,6 +1118,30 @@ function buildHostedAssistantDeliveryOutcome(input: {
     target: input.delivery?.target ?? null,
     targetKind: input.delivery?.targetKind ?? null,
   };
+}
+
+function assertSupportedHostedAssistantDeliveryPayload(
+  payload: Pick<
+    HostedAssistantDeliveryPayload,
+    "bindingDeliveryKind" | "channel" | "explicitTarget"
+  >,
+): void {
+  if (payload.channel !== "email") {
+    return;
+  }
+
+  if (
+    payload.explicitTarget
+    || payload.bindingDeliveryKind === "thread"
+    || payload.bindingDeliveryKind === null
+  ) {
+    return;
+  }
+
+  throw new VaultCliError(
+    "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
+    "Hosted email participant delivery is not supported. Use an explicit recipient or a serialized thread target.",
+  );
 }
 
 function readHostedAssistantDeliveryRetryableFlag(error: unknown): boolean | null {

@@ -2,15 +2,13 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { gatewayDeliveryTargetKindValues } from "@murphai/gateway-core";
-
 import {
   hostedEmailSendTargetKindValues,
   parseHostedEmailSendRequest,
 } from "../src/hosted-email.ts";
 
-test("hosted email send parsing accepts every gateway-owned target kind", () => {
-  assert.deepEqual(hostedEmailSendTargetKindValues, gatewayDeliveryTargetKindValues);
+test("hosted email send parsing accepts only hosted-supported target kinds", () => {
+  assert.deepEqual(hostedEmailSendTargetKindValues, ["explicit", "thread"]);
 
   for (const targetKind of hostedEmailSendTargetKindValues) {
     assert.equal(
@@ -109,6 +107,15 @@ test("hosted email send parsing rejects unsupported target kinds", () => {
       target: "user@example.com",
       targetKind: "broadcast",
     }),
-    /must be explicit, participant, or thread/u,
+    /must be explicit or thread/u,
+  );
+  assert.throws(
+    () => parseHostedEmailSendRequest({
+      identityId: null,
+      message: "hello",
+      target: "user@example.com",
+      targetKind: "participant",
+    }),
+    /must be explicit or thread/u,
   );
 });

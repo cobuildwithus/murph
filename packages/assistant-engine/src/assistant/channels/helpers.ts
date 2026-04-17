@@ -170,7 +170,15 @@ export function normalizeAssistantDeliverySubject(input: {
     bindingDelivery: input.bindingDelivery,
     explicitTarget: input.explicitTarget,
   })[0] ?? null
-  return candidate?.kind === 'thread' ? null : subject
+  if (candidate?.kind === 'thread') {
+    throw new VaultCliError(
+      'ASSISTANT_EMAIL_THREAD_SUBJECT_UNSUPPORTED',
+      'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+      { threadId: candidate.target },
+    )
+  }
+
+  return subject
 }
 
 export function createAssistantBindingDelivery(

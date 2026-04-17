@@ -68,8 +68,8 @@ describe('assistant email subject support', () => {
     ).toBe('Custom subject')
   })
 
-  it('suppresses generated subjects for email thread replies', () => {
-    expect(
+  it('rejects generated subjects for email thread replies', () => {
+    expect(() =>
       resolveAssistantNotificationDeliverySubject({
         bindingDelivery: {
           kind: 'thread',
@@ -80,11 +80,13 @@ describe('assistant email subject support', () => {
         explicitTarget: null,
         inputDeliverySubject: null,
       }),
-    ).toBeNull()
+    ).toThrow(
+      'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+    )
   })
 
-  it('suppresses a manually configured subject when the email target is a thread', () => {
-    expect(
+  it('rejects a manually configured subject when the email target is a thread', () => {
+    expect(() =>
       resolveAssistantNotificationDeliverySubject({
         bindingDelivery: {
           kind: 'thread',
@@ -95,7 +97,9 @@ describe('assistant email subject support', () => {
         explicitTarget: null,
         inputDeliverySubject: 'Manual subject',
       }),
-    ).toBeNull()
+    ).toThrow(
+      'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+    )
   })
 
   it('drops generated subjects for non-email channels', () => {
