@@ -688,6 +688,85 @@ describe("RunnerQueueStore", () => {
     })).resolves.toBe(true);
   });
 
+  it("does not clear a newer active lease when a stale finalize retry is rescheduled", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_stale_finalize_lease",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    const firstClaim = await store.claimNextDuePendingDispatch(Date.now());
+    if (!firstClaim.run) {
+      throw new Error("Expected the first claim to return an active run.");
+    }
+
+    const committed: HostedExecutionCommittedResult = {
+      assistantDeliveryEffects: [],
+      bundleRef: null,
+      committedAt: "2026-03-29T10:00:01.000Z",
+      eventId: "evt_stale_finalize_lease",
+      finalizedAt: null,
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+      userId: "member_123",
+    };
+
+    await store.rescheduleCommittedFinalizeRetry({
+      attempts: 1,
+      committed,
+      error: new Error("finalize failed"),
+      leaseOwner: {
+        eventId: committed.eventId,
+        run: firstClaim.run,
+      },
+      retryDelayMs: 0,
+    });
+
+    const secondClaim = await store.claimNextDuePendingDispatch(Date.now());
+    if (!secondClaim.run) {
+      throw new Error("Expected the second claim to return an active run.");
+    }
+
+    await store.rescheduleCommittedFinalizeRetry({
+      attempts: 2,
+      committed,
+      error: new Error("stale finalize result"),
+      leaseOwner: {
+        eventId: committed.eventId,
+        run: firstClaim.run,
+      },
+      retryDelayMs: 0,
+    });
+
+    await expect(store.hasActiveRunLease({
+      eventId: committed.eventId,
+      run: secondClaim.run,
+    })).resolves.toBe(true);
+    await expect(store.hasActiveRunLease({
+      eventId: committed.eventId,
+      run: firstClaim.run,
+    })).resolves.toBe(false);
+
+    const record = await store.readState();
+    expect(record.inFlight).toBe(true);
+    expect(record.retryingEventId).toBe(committed.eventId);
+    expect(record.run).toMatchObject({
+      attempt: secondClaim.run.attempt,
+      eventId: committed.eventId,
+      runId: secondClaim.run.runId,
+    });
+  });
+
   it("records a bounded run trace and derives stable error codes", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);

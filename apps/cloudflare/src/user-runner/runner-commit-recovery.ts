@@ -161,12 +161,14 @@ export class RunnerCommitRecovery {
     attempts: number;
     committed: HostedExecutionCommittedResult;
     error: unknown;
+    leaseOwner?: CommitLeaseOwner | null;
     retryDelayMs: number;
   }): Promise<RunnerStateRecord> {
     await this.queueStore.rescheduleCommittedFinalizeRetry({
       attempts: input.attempts,
       committed: input.committed,
       error: input.error,
+      leaseOwner: resolveCommitLeaseOwner(input.committed.eventId, input.leaseOwner ?? null),
       retryDelayMs: input.retryDelayMs,
     });
     return this.scheduler.syncNextWake(
