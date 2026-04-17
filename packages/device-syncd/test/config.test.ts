@@ -5,6 +5,7 @@ import { Writable } from "node:stream";
 import { test } from "vitest";
 
 import {
+  cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
   configuredDeviceSyncProviderKeys,
   createConsoleDeviceSyncLogger,
@@ -15,6 +16,7 @@ import {
   listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredStravaDeviceSyncProviderConfig,
@@ -226,6 +228,80 @@ test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only 
       scopes: ["activity:read", "activity:read_all"],
     },
   });
+});
+
+test("readConfiguredDeviceSyncRuntimeConfig keeps only the shared hosted runtime subset", () => {
+  const runtimeConfig = readConfiguredDeviceSyncRuntimeConfig({
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+    DEVICE_SYNC_SECRET: "runtime-codec-secret",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+    OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",
+  });
+
+  assert.deepEqual(runtimeConfig, {
+    providerConfigs: {
+      oura: {
+        clientId: "oura-client-id",
+        clientSecret: "oura-client-secret",
+      },
+    },
+    publicBaseUrl: "https://device-sync.example.test",
+    secret: "runtime-codec-secret",
+  });
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      requireValue(runtimeConfig)?.providerConfigs.oura ?? {},
+      "webhookVerificationToken",
+    ),
+    false,
+  );
+});
+
+test("readConfiguredDeviceSyncRuntimeConfig returns null when hosted runtime prerequisites are incomplete", () => {
+  assert.equal(
+    readConfiguredDeviceSyncRuntimeConfig({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+      OURA_CLIENT_ID: "oura-client-id",
+      OURA_CLIENT_SECRET: "oura-client-secret",
+    }),
+    null,
+  );
+  assert.equal(
+    readConfiguredDeviceSyncRuntimeConfig({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+      DEVICE_SYNC_SECRET: "runtime-codec-secret",
+    }),
+    null,
+  );
+});
+
+test("cloneConfiguredDeviceSyncRuntimeConfig preserves the runtime-safe shape and clones arrays", () => {
+  const runtimeConfig = {
+    providerConfigs: {
+      whoop: {
+        clientId: "whoop-client-id",
+        clientSecret: "whoop-client-secret",
+        scopes: ["read:profile"],
+      },
+    },
+    publicBaseUrl: "https://device-sync.example.test",
+    secret: "runtime-codec-secret",
+  };
+  const cloned = cloneConfiguredDeviceSyncRuntimeConfig(runtimeConfig);
+
+  assert.deepEqual(cloned, {
+    providerConfigs: {
+      whoop: {
+        clientId: "whoop-client-id",
+        clientSecret: "whoop-client-secret",
+        scopes: ["read:profile"],
+      },
+    },
+    publicBaseUrl: "https://device-sync.example.test",
+    secret: "runtime-codec-secret",
+  });
+  assert.notEqual(cloned.providerConfigs.whoop?.scopes, runtimeConfig.providerConfigs.whoop?.scopes);
 });
 
 test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted runtime subset", () => {

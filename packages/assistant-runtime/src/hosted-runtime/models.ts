@@ -1,7 +1,7 @@
 import { importSharePackIntoVault } from "@murphai/core";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import type {
-  SerializableConfiguredDeviceSyncProviderConfigs,
+  ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
 import type {
   HostedExecutionDispatchRequest,
@@ -22,11 +22,7 @@ export interface HostedAssistantRuntimeChannelCapabilities {
   telegramBotConfigured: boolean;
 }
 
-export interface HostedAssistantRuntimeDeviceSyncConfig {
-  providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
-  publicBaseUrl: string;
-  secret: string;
-}
+export type HostedAssistantRuntimeDeviceSyncConfig = ConfiguredDeviceSyncRuntimeConfig;
 
 export interface HostedAssistantRuntimeResolvedConfig {
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities;

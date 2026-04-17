@@ -412,6 +412,34 @@ describe("buildHostedRunnerResolvedConfig", () => {
       },
     });
   });
+
+  it("reuses the shared device-sync runtime config helper and strips provider-only fields", () => {
+    const resolved = buildHostedRunnerResolvedConfig({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+      DEVICE_SYNC_SECRET: "secret_123",
+      OURA_CLIENT_ID: "oura-client",
+      OURA_CLIENT_SECRET: "oura-secret",
+      OURA_WEBHOOK_VERIFICATION_TOKEN: "verification-token",
+    });
+
+    expect(resolved).toEqual({
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: {
+        providerConfigs: {
+          oura: {
+            clientId: "oura-client",
+            clientSecret: "oura-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+    });
+    expect(resolved.deviceSync?.providerConfigs.oura).not.toHaveProperty("webhookVerificationToken");
+  });
 });
 
 describe("hosted deploy automation device-sync surface", () => {
