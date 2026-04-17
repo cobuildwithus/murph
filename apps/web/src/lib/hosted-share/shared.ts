@@ -16,11 +16,10 @@ import {
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 
-import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import {
   isExecutionLifecycleTerminal,
-  readExecutionLifecycleStateFromOutbox,
-} from "../hosted-execution/outbox";
+  readHostedExecutionLifecycleStateFromWake,
+} from "../hosted-execution/dispatch-lifecycle";
 import {
   requireHostedOnboardingPublicBaseUrl,
 } from "../hosted-onboarding/runtime";
@@ -42,7 +41,6 @@ const MAX_HOSTED_SHARE_TTL_HOURS = 24;
 const HOSTED_SHARE_CODE_BYTES = 24;
 export const HOSTED_SHARE_PAYLOAD_SCHEMA = "murph.hosted-share-payload.v1";
 const HOSTED_SHARE_PAYLOAD_FIELD = "hosted-share.payload";
-const HOSTED_SHARE_EVENT_STATUS_TIMEOUT_MS = 1_500;
 
 export function createHostedShareMinimalPreview(): HostedSharePreview {
   return {
@@ -283,33 +281,10 @@ export async function readHostedShareExecutionLifecycleState(input: {
   memberId: string;
   prisma: HostedSharePrismaClient;
 }): Promise<HostedExecutionDispatchLifecycleState> {
-  const state = await readExecutionLifecycleStateFromOutbox({
+  return readHostedExecutionLifecycleStateFromWake({
     eventId: input.eventId,
     prisma: input.prisma,
   });
-
-  if (isExecutionLifecycleTerminal(state)) {
-    return state;
-  }
-
-  const controlClient = readHostedExecutionControlClientIfConfigured(
-    HOSTED_SHARE_EVENT_STATUS_TIMEOUT_MS,
-  );
-
-  if (!controlClient) {
-    return state;
-  }
-
-  try {
-    const eventStatus = await controlClient.getEventStatus(
-      input.memberId,
-      input.eventId,
-    );
-
-    return eventStatus?.state ?? state;
-  } catch {
-    return state;
-  }
 }
 
 export async function reconcileHostedShareAcceptanceLifecycle(input: {

@@ -929,12 +929,11 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
     | undefined;
-  const executionOutbox = prismaWithQueryRaw.executionOutbox as unknown as
+  const hostedWake = prismaWithQueryRaw.hostedWake as unknown as
     | {
         findFirst?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
     | undefined;
-
   if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
     Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
       configurable: true,
@@ -1025,16 +1024,6 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         }),
       });
     }
-  }
-
-  if (!("executionOutbox" in prismaWithQueryRaw) || !prismaWithQueryRaw.executionOutbox || typeof executionOutbox?.findFirst !== "function") {
-    Object.defineProperty(prismaWithQueryRaw, "executionOutbox", {
-      configurable: true,
-      value: {
-        ...(executionOutbox ?? {}),
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-    });
   }
 
   if (!("hostedMemberRouting" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMemberRouting) {
@@ -1267,6 +1256,16 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         })),
       });
     }
+  }
+
+  if (!("hostedWake" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedWake) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedWake", {
+      configurable: true,
+      value: {
+        ...(hostedWake ?? {}),
+        findFirst: vi.fn(async () => null),
+      },
+    });
   }
 
   if (!("$queryRaw" in prismaWithQueryRaw)) {

@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import type {
   HostedExecutionCursorState,
+  HostedExecutionDispatchLifecycleState,
   HostedWakeBehavior,
   HostedWakeCommitResponse,
   HostedWakeFetchResponse,
@@ -91,7 +92,7 @@ export interface AppendHostedWakeResult {
 
 export interface HostedWakeLifecycleRecord {
   eventId: string;
-  state: "completed" | "queued";
+  state: HostedExecutionDispatchLifecycleState;
 }
 
 export interface HostedWakeRepairCandidate {
@@ -410,6 +411,28 @@ export async function findHostedWakeEventIdByEventIdTx(input: {
   return resolveHostedWakeEventId(row);
 }
 
+export async function readHostedWakeLifecycleByDedupeKeyTx(input: {
+  dedupeKey: string;
+  tx: HostedWakeStoreClient;
+}): Promise<HostedWakeLifecycleRecord | null> {
+  const row = await findHostedWakeByDedupeKeyTx({
+    dedupeKey: input.dedupeKey,
+    tx: input.tx,
+  });
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    eventId: row.dedupeKey ?? row.id,
+    state: await resolveHostedWakeLifecycleStateTx({
+      record: row,
+      tx: input.tx,
+    }),
+  };
+}
+
 export async function readHostedWakeScheduleByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
@@ -437,14 +460,9 @@ export async function readLatestHostedWakeLifecycleByKind(input: {
   userId: string;
 }): Promise<HostedWakeLifecycleRecord | null> {
   const prisma = input.prisma ?? getPrisma();
-  const cursor = await ensureHostedExecutionCursorRowTx({
-    tx: prisma,
-    userId: input.userId,
-  });
   const wake = await prisma.hostedWake.findFirst({
     where: {
       kind: input.kind,
-      quarantinedAt: null,
       userId: input.userId,
     },
     orderBy: {
@@ -458,7 +476,10 @@ export async function readLatestHostedWakeLifecycleByKind(input: {
 
   return {
     eventId: resolveHostedWakeEventId(wake),
-    state: wake.seq > cursor.committedSeq ? "queued" : "completed",
+    state: await resolveHostedWakeLifecycleStateTx({
+      record: wake,
+      tx: prisma,
+    }),
   };
 }
 
@@ -509,6 +530,22 @@ export async function ensureHostedExecutionCursorRowTx(input: {
     },
     update: {},
   });
+}
+
+async function resolveHostedWakeLifecycleStateTx(input: {
+  record: HostedWakeRow;
+  tx: HostedWakeStoreClient;
+}): Promise<HostedExecutionDispatchLifecycleState> {
+  if (input.record.quarantinedAt) {
+    return "poisoned";
+  }
+
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.record.userId,
+  });
+
+  return input.record.seq > cursor.committedSeq ? "queued" : "completed";
 }
 
 export function projectHostedExecutionCursorRecord(

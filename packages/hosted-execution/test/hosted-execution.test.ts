@@ -8,7 +8,6 @@ import {
   readHostedExecutionSignatureHeaders,
 } from "../src/auth.ts";
 import { buildHostedExecutionMemberActivatedDispatch } from "../src/builders.ts";
-import { createHostedExecutionDispatchClient } from "../src/client.ts";
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
@@ -177,6 +176,7 @@ describe("hosted execution coverage gaps", () => {
     };
 
     expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./dispatch-ref");
+    expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./client");
     expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./outbox-payload");
 
     const importBySpecifier = new Function(
@@ -185,155 +185,10 @@ describe("hosted execution coverage gaps", () => {
     ) as (specifier: string) => Promise<unknown>;
     const rootModule = await import("@murphai/hosted-execution");
 
+    expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
     await expect(importBySpecifier("@murphai/hosted-execution/dispatch-ref")).rejects.toThrow();
+    await expect(importBySpecifier("@murphai/hosted-execution/client")).rejects.toThrow();
     await expect(importBySpecifier("@murphai/hosted-execution/outbox-payload")).rejects.toThrow();
-  });
-
-  it("dispatches hosted execution requests through the client and handles failures", async () => {
-    const successfulResponse = {
-      event: {
-        eventId: "evt_123",
-        lastError: null,
-        state: "queued",
-        userId: "user_123",
-      },
-      status: {
-        bundleRef: null,
-        inFlight: false,
-        lastError: null,
-        lastEventId: null,
-        lastRunAt: null,
-        nextWakeAt: null,
-        pendingEventCount: 0,
-        poisonedEventIds: [],
-        retryingEventId: null,
-        userId: "user_123",
-      },
-    };
-
-    let observedRequest!: { init?: RequestInit; url: string };
-    let observedRequestSeen = false;
-    const fetchImpl: typeof fetch = async (url, init) => {
-      observedRequestSeen = true;
-      observedRequest = { init, url: String(url) };
-      return new Response(JSON.stringify(successfulResponse), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
-      });
-    };
-
-    const client = createHostedExecutionDispatchClient({
-      baseUrl: "https://dispatch.example.com/root/",
-      fetchImpl,
-      getBearerToken: async () => "  Bearer token-123  ",
-      timeoutMs: 2500,
-    });
-
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
-      eventId: "evt_123",
-      memberId: "user_123",
-      memberChannels: {
-        email: false,
-        linq: false,
-        telegram: false,
-      },
-      occurredAt: "2026-04-07T00:00:00.000Z",
-    });
-
-    await expect(client.dispatch(dispatch)).resolves.toEqual(successfulResponse);
-    if (!observedRequestSeen) {
-      throw new Error("Expected dispatch client to issue a fetch request.");
-    }
-
-    expect(observedRequest.url).toBe(
-      "https://dispatch.example.com/root/internal/dispatch",
-    );
-    expect(observedRequest.init?.method).toBe("POST");
-    expect(observedRequest.init?.redirect).toBe("error");
-    expect(observedRequest.init?.signal).toBeInstanceOf(AbortSignal);
-    expect(new Headers(observedRequest.init?.headers).get("authorization")).toBe(
-      "Bearer token-123",
-    );
-    expect(new Headers(observedRequest.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(
-      "user_123",
-    );
-    expect(new Headers(observedRequest.init?.headers).get("content-type")).toBe(
-      "application/json; charset=utf-8",
-    );
-    expect(observedRequest.init?.body).toBe(JSON.stringify(dispatch));
-
-    const blankTokenClient = createHostedExecutionDispatchClient({
-      baseUrl: "https://dispatch.example.com",
-      fetchImpl,
-      getBearerToken: async () => "   ",
-    });
-
-    await expect(blankTokenClient.dispatch(dispatch)).rejects.toThrow(
-      /bearer token must be configured/i,
-    );
-
-    const whitespaceErrorBody = "   ";
-    const failureFetchImpl: typeof fetch = async () =>
-      new Response(whitespaceErrorBody, { status: 503 });
-    const failureClient = createHostedExecutionDispatchClient({
-      baseUrl: "https://dispatch.example.com",
-      fetchImpl: failureFetchImpl,
-      getBearerToken: async () => "token-123",
-    });
-
-    await expect(failureClient.dispatch(dispatch)).rejects.toThrow(
-      "Hosted execution dispatch failed with HTTP 503.",
-    );
-
-    const longErrorBody = `  ${"x".repeat(600)}  `;
-    const longErrorFetchImpl: typeof fetch = async () =>
-      new Response(longErrorBody, { status: 502 });
-    const longErrorClient = createHostedExecutionDispatchClient({
-      baseUrl: "https://dispatch.example.com",
-      fetchImpl: longErrorFetchImpl,
-      getBearerToken: async () => "token-123",
-    });
-    const longErrorPromise = longErrorClient.dispatch(dispatch);
-
-    await expect(longErrorPromise).rejects.toThrow(
-      "Hosted execution dispatch failed with HTTP 502.",
-    );
-    await expect(longErrorPromise).rejects.not.toThrow(/x{20}/u);
-
-    const localhostClient = createHostedExecutionDispatchClient({
-      allowHttpLocalhost: true,
-      baseUrl: "http://127.0.0.1:8787/root/",
-      fetchImpl,
-      getBearerToken: async () => "token-123",
-    });
-
-    await expect(localhostClient.dispatch(dispatch)).resolves.toEqual(successfulResponse);
-  });
-
-  it("rejects invalid hosted execution client configuration", () => {
-    expect(() =>
-      createHostedExecutionDispatchClient({
-        baseUrl: "  ",
-        fetchImpl: async () =>
-          new Response(JSON.stringify({}), {
-            headers: { "content-type": "application/json" },
-            status: 200,
-          }),
-        getBearerToken: async () => "token-123",
-      }),
-    ).toThrow(/baseUrl must be configured/i);
-
-    expect(() =>
-      createHostedExecutionDispatchClient({
-        baseUrl: "https://dispatch.example.com",
-        fetchImpl: async () =>
-          new Response(JSON.stringify({}), {
-            headers: { "content-type": "application/json" },
-            status: 200,
-          }),
-        getBearerToken: undefined as unknown as () => Promise<string>,
-      }),
-    ).toThrow(/getBearerToken must be configured/i);
   });
 });

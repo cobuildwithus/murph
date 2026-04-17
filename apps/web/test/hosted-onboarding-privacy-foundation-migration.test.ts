@@ -126,6 +126,7 @@ describe("hosted Prisma baseline migration", () => {
       "202604161430_device_sync_web_owner_runtime_state",
       "202604171900_hosted_wake_substrate",
       "202604172330_hosted_wake_payload_spill",
+      "202604180100_drop_execution_outbox",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');

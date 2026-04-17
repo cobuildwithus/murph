@@ -18,7 +18,6 @@ describe("createCloudflareHostedControlClient", () => {
 
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
-      "getEventStatus",
       "getStatus",
       "wakeUser",
     ]);
@@ -75,41 +74,6 @@ describe("createCloudflareHostedControlClient", () => {
 
     await expect(promise).rejects.toThrow("Hosted execution status failed with HTTP 500.");
     await expect(promise).rejects.not.toThrow(/provider_token/u);
-  });
-
-  it("fetches event status with the expected request shape", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse({
-          eventId: "member.activated:evt_123",
-          lastError: null,
-          state: "completed",
-          userId: "user_123",
-        });
-      }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-      timeoutMs: 2_500,
-    });
-
-    await expect(
-      client.getEventStatus("user_123", "member.activated:evt_123"),
-    ).resolves.toEqual({
-      eventId: "member.activated:evt_123",
-      lastError: null,
-      state: "completed",
-      userId: "user_123",
-    });
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe(
-      "https://runner.example.test/root/internal/users/user_123/events/member.activated%3Aevt_123/status",
-    );
-    expect(request.init?.method).toBe("GET");
-    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
   });
 
   it("fetches browser vault sessions with the expected request and parses snapshotAad", async () => {

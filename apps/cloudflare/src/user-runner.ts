@@ -1,7 +1,7 @@
 import type {
   HostedExecutionDispatchResult,
-  HostedExecutionDispatchRequest,
   HostedExecutionDispatchStatus,
+  HostedExecutionDispatchRequest,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
@@ -252,35 +252,6 @@ export class HostedUserRunner {
     return { userId };
   }
 
-  async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
-    await this.queueStore.bootstrapUser(input.event.userId);
-    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
-    await this.ensureRunnerStores(input.event.userId);
-    return this.dispatchProcessor.dispatchBootstrapped(input);
-  }
-
-  async dispatchWithOutcome(
-    input: HostedExecutionDispatchRequest,
-    stagedPayloadId: string | null = null,
-  ): Promise<HostedExecutionDispatchResult> {
-    await this.queueStore.bootstrapUser(input.event.userId);
-    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
-    await this.ensureRunnerStores(input.event.userId);
-    const initialStatus = await this.queueStore.readEventDispatchStatus(input.eventId);
-    const status = await this.dispatchProcessor.dispatchBootstrapped(input, stagedPayloadId);
-    const nextStatus = await this.queueStore.readEventDispatchStatus(input.eventId);
-
-    return {
-      event: resolveHostedExecutionDispatchStatus({
-        eventId: input.eventId,
-        initialStatus,
-        nextStatus,
-        userId: input.event.userId,
-      }),
-      status,
-    };
-  }
-
   private async ensureManagedUserCryptoForActivationIfNeeded(
     input: HostedExecutionDispatchRequest,
   ): Promise<void> {
@@ -300,78 +271,79 @@ export class HostedUserRunner {
     }
 
     record = await this.queueStore.clearNextWakeIfDue(Date.now());
-    if (!record.runtimeBootstrapped && record.pendingEventCount === 0) {
+    if (!record.runtimeBootstrapped) {
       return;
     }
 
     const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-    if (record.runtimeBootstrapped && !(await this.queueStore.hasDuePendingDispatch(Date.now()))) {
-      if (record.userId && hostedWebBaseUrl && this.env.webCallbackSigning) {
-        try {
-          const dispatch = buildHostedExecutionAssistantCronTickDispatch({
-            eventId: `alarm:${Date.now()}`,
-            occurredAt: new Date().toISOString(),
-            reason: "alarm",
-            userId: record.userId,
-          });
-          const append = await appendHostedWakeDispatchInWeb({
-            baseUrl: hostedWebBaseUrl,
-            boundUserId: record.userId,
-            callbackSigning: this.env.webCallbackSigning,
-            dispatch,
-            timeoutMs: this.env.runnerTimeoutMs,
-          });
-          await this.wakeHostedWakes({
-            targetSeqHint: append.wake.seq,
-          });
-          record = await this.queueStore.readState();
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "hosted.user-runner",
-            error,
-            level: "warn",
-            message: "Hosted cron wake append failed; scheduling a retry.",
-            phase: "dispatch.running",
-            userId: record.userId,
-          });
-          record = await this.scheduler.syncNextWake(
-            new Date(Date.now() + HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS).toISOString(),
-          );
-        }
-      } else {
-        const enqueueResult = await this.queueStore.enqueueDispatch({
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "alarm",
-            userId: record.userId,
-          },
-          eventId: `alarm:${Date.now()}`,
-          occurredAt: new Date().toISOString(),
-        });
-
-        if (enqueueResult.accepted) {
-          record = await this.scheduler.syncNextWake();
-        } else {
-          record = enqueueResult.record;
-        }
-      }
-    }
-
-    if (!record.runtimeBootstrapped && record.pendingEventCount === 0) {
+    if (!record.userId || !hostedWebBaseUrl || !this.env.webCallbackSigning) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        level: "warn",
+        message: "Hosted cron wake append skipped because the canonical hosted-web callback path is not configured.",
+        phase: "dispatch.running",
+        userId: record.userId ?? null,
+      });
+      await this.scheduler.syncNextWake(
+        new Date(Date.now() + HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS).toISOString(),
+      );
       return;
     }
 
-    await this.dispatchProcessor.runQueuedEvents(record.userId);
+    try {
+      const dispatch = buildHostedExecutionAssistantCronTickDispatch({
+        eventId: `alarm:${Date.now()}`,
+        occurredAt: new Date().toISOString(),
+        reason: "alarm",
+        userId: record.userId,
+      });
+      const append = await appendHostedWakeDispatchInWeb({
+        baseUrl: hostedWebBaseUrl,
+        boundUserId: record.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        dispatch,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+      await this.wakeHostedWakes({
+        targetSeqHint: append.wake.seq,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        error,
+        level: "warn",
+        message: "Hosted cron wake append failed; scheduling a retry.",
+        phase: "dispatch.running",
+        userId: record.userId,
+      });
+      await this.scheduler.syncNextWake(
+        new Date(Date.now() + HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS).toISOString(),
+      );
+    }
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
     return toUserStatus(await this.queueStore.readState());
   }
 
-  async getEventStatus(input: {
-    eventId: string;
-  }): Promise<HostedExecutionDispatchStatus | null> {
-    return this.queueStore.readEventDispatchStatus(input.eventId);
+  async dispatch(
+    input: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionUserStatus> {
+    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
+    return this.dispatchProcessor.dispatchBootstrapped(input);
+  }
+
+  async dispatchWithOutcome(
+    input: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionDispatchResult> {
+    const status = await this.dispatch(input);
+    const event = await this.queueStore.readEventDispatchStatus(input.eventId)
+      ?? buildLegacyDispatchStatus(input);
+
+    return {
+      event,
+      status,
+    };
   }
 
   async wakeHostedWakes(input: {
@@ -558,6 +530,7 @@ export class HostedUserRunner {
         : { dispatch: null, seq, state: "backpressured" };
     }
 
+    await this.ensureManagedUserCryptoForActivationIfNeeded(dispatch);
     const state = await this.dispatchProcessor.executeNativeWakeDispatch(dispatch);
 
     return {
@@ -818,51 +791,19 @@ function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | 
   }
 }
 
+function buildLegacyDispatchStatus(
+  input: HostedExecutionDispatchRequest,
+): HostedExecutionDispatchStatus {
+  return {
+    eventId: input.eventId,
+    lastError: null,
+    state: "queued",
+    userId: input.event.userId,
+  };
+}
+
 function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
-}
-
-function resolveHostedExecutionDispatchStatus(input: {
-  eventId: string;
-  initialStatus: HostedExecutionDispatchStatus | null;
-  nextStatus: HostedExecutionDispatchStatus | null;
-  userId: string;
-}): HostedExecutionDispatchStatus {
-  const currentStatus = input.nextStatus ?? input.initialStatus;
-
-  if (input.nextStatus?.state === "poisoned") {
-    return {
-      eventId: input.eventId,
-      lastError: input.nextStatus.lastError,
-      state: "poisoned",
-      userId: input.userId,
-    };
-  }
-
-  if (input.nextStatus?.state === "backpressured") {
-    return {
-      eventId: input.eventId,
-      lastError: input.nextStatus.lastError,
-      state: "backpressured",
-      userId: input.userId,
-    };
-  }
-
-  if (input.nextStatus?.state === "completed" || input.initialStatus?.state === "completed") {
-    return {
-      eventId: input.eventId,
-      lastError: input.nextStatus?.lastError ?? input.initialStatus?.lastError ?? null,
-      state: "completed",
-      userId: input.userId,
-    };
-  }
-
-  return {
-    eventId: input.eventId,
-    lastError: currentStatus?.lastError ?? null,
-    state: "queued",
-    userId: input.userId,
-  };
 }

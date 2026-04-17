@@ -6,13 +6,11 @@ Hosted integration control plane for Vercel deployments.
 in Postgres here, not in Cloudflare worker control storage. In particular,
 `apps/web` owns hosted member identity, routing, billing, email authorization,
 share facts, device-sync control-plane authority, the hosted AI usage ledger,
-and the canonical dispatch lifecycle around `execution_outbox`.
+and the canonical web-owned `HostedWake` / `HostedExecutionCursor` execution queue.
 
-The repo also carries a staged `HostedWake` / `HostedExecutionCursor` substrate
-for the long-term web-owned wake queue cutover. The simple `member.activated`
-and `member.channels.updated` producers can be routed onto that lane behind
-their explicit `HOSTED_WAKE_MEMBER_*` flags, while `execution_outbox` remains
-the default dispatch owner for the broader hosted execution surface.
+Every hosted producer now appends canonical wakes in Postgres and hands execution
+off to Cloudflare with a narrow authenticated wake call. There is no parallel
+`execution_outbox` dispatch architecture.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs one
@@ -31,7 +29,7 @@ instead of maintaining an app-local provider list or provider-config object.
 - per-user device connection ownership mapping plus token audit history
 - hosted member core, identity, routing, billing, and email-authorization slices
 - hosted share link metadata, canonical hosted share payloads, and share-claim state
-- durable `execution_outbox` rows as the canonical hosted dispatch intent/lifecycle seam
+- durable `HostedWake` rows plus `HostedExecutionCursor` as the canonical hosted wake/cursor seam
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -57,8 +55,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedMemberEmailAuthorization` owns verified-email and sender-authorization facts
 - `HostedShareLink` owns public share-link UX metadata and claim lifecycle
 - `HostedSharePayload` owns canonical encrypted share payloads in Postgres
-- `ExecutionOutbox` owns canonical dispatch intent and lifecycle state today
-- `HostedExecutionCursor` and `HostedWake` stage the future web-owned wake queue substrate
+- `HostedExecutionCursor` owns the canonical committed high-water and snapshot fence
+- `HostedWake` owns the canonical ordered hosted wake queue
 - `HostedAiUsage` owns the canonical hosted usage ledger
 
 ## Key environment variables
@@ -99,20 +97,6 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
-- `HOSTED_WAKE_MEMBER_ACTIVATED_ENABLED` to route `member.activated` directly to
-  `HostedWake` with `execution_outbox` fallback when wake payload storage cannot
-  accept the dispatch
-- `HOSTED_WAKE_MEMBER_CHANNELS_UPDATED_ENABLED` to route
-  `member.channels.updated` directly to `HostedWake` with the same fallback
-- `HOSTED_WAKE_LINQ_MESSAGE_RECEIVED_ENABLED` to route
-  `linq.message.received` directly to `HostedWake` with the same fallback
-- `HOSTED_WAKE_TELEGRAM_MESSAGE_RECEIVED_ENABLED` to route
-  `telegram.message.received` directly to `HostedWake` with the same fallback
-- `HOSTED_WAKE_DEVICE_SYNC_WAKE_ENABLED` to route `device-sync.wake` directly to
-  `HostedWake`, coalesced per user and connection/provider when possible
-- `HOSTED_WAKE_VAULT_SHARE_ACCEPTED_ENABLED` to route
-  `vault.share.accepted` directly to `HostedWake` with the same fallback
-
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
@@ -140,8 +124,8 @@ Hosted onboarding extras:
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
-- `HOSTED_EXECUTION_DISPATCH_URL`
-- `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
+- `HOSTED_EXECUTION_CONTROL_URL`
+- `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
 Optional hosted AI usage metering:
 
@@ -246,7 +230,7 @@ pnpm --dir apps/web prisma:migrate:deploy
 
 The hosted schema now includes the canonical member slices, hosted email
 authorization, hosted share payload ownership, device-sync web ownership
-models, and explicit `execution_outbox.dispatch_state`.
+models, plus the canonical `HostedWake` / `HostedExecutionCursor` fence.
 
 ## Local verification
 
@@ -265,10 +249,10 @@ Notes:
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` use `apps/web/.next`.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as
   generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted execution outbox draining, usage metering, Stripe recovery, and webhook
+- Hosted wake repair, usage metering, Stripe recovery, and webhook
   receipt recovery accept only Vercel cron bearer auth via `CRON_SECRET`.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
-  `member.activated` outbox facts first, then performs post-commit managed-user
+  `member.activated` HostedWake facts first, then performs post-commit managed-user
   crypto provisioning in the activation path.
 
 ## Main routes
@@ -311,7 +295,6 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/providers/:provider/connect-link`
 - `POST /api/internal/device-sync/runtime/snapshot`
 - `POST /api/internal/device-sync/runtime/apply`
-- `GET /api/internal/hosted-execution/outbox/cron`
 - `GET /api/internal/hosted-execution/share/:shareId/payload`
 - `GET /api/internal/hosted-execution/usage/cron`
 - `POST /api/internal/hosted-execution/usage/record`
@@ -320,10 +303,10 @@ Internal hosted maintenance and Cloudflare callback routes:
 
 The old staged-payload and share-import completion/release callback routes are
 gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
-share-pack CRUD, or a pending-usage store. It still uses narrow signed
+share-pack CRUD, or an outbox drain route. It still uses narrow signed
 hosted-web callbacks for execution-time device-sync authority reads/writes,
-device connect-link starts, canonical hosted share payload reads, and direct
-hosted usage recording.
+device connect-link starts, canonical hosted share payload reads, direct
+hosted usage recording, and canonical HostedWake append/fetch/commit calls.
 
 ## Hosted onboarding and share routes
 
@@ -358,9 +341,9 @@ The onboarding lane is intentionally thin:
 - Hosted share payloads are canonically stored in Postgres; Cloudflare fetches
   them through the signed internal payload route immediately before import.
 - Hosted share acceptance writes canonical claim state plus an inline
-  `vault.share.accepted` outbox fact in the same transaction.
+  `vault.share.accepted` HostedWake in the same transaction.
 - Cloudflare-bound execution from onboarding, share acceptance, and hosted
-  device-sync wake paths always lands in `execution_outbox` first.
+  device-sync wake paths always appends canonical `HostedWake` rows first.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 

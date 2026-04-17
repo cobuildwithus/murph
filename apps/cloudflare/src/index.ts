@@ -14,12 +14,8 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
-  type HostedExecutionDispatchStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
-import {
-  parseHostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution/parsers";
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -98,14 +94,6 @@ const workerPublicRoutes: readonly DeclarativeRoute<{
 
 const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
-    authorization: "vercel-oidc",
-    async handle(context) {
-      return handleDispatchRoute(context);
-    },
-    match: matchExactPath("/internal/dispatch"),
-    methods: ["POST"],
-  },
-  {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     beforeMethod: requireBoundInternalRouteUser,
@@ -125,17 +113,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/browser-vault\/session$/u),
     methods: ["POST"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod: requireBoundInternalRouteUser,
-    async handle(context, params) {
-      return handleEventStatusRoute(context, params.userId, params.eventId);
-    },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/events\/(?<eventId>[^/]+)\/status$/u),
-    methods: ["GET"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -213,22 +190,18 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.bootstrapUser(userId);
   }
 
-  async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
-    return this.runner.dispatch(input);
-  }
-
-  async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
-    return this.runner.dispatchWithOutcome(input);
-  }
-
   async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
   }
 
-  async getEventStatus(input: {
-    eventId: string;
-  }): Promise<HostedExecutionDispatchStatus | null> {
-    return this.runner.getEventStatus(input);
+  async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
+    return this.runner.dispatch(input);
+  }
+
+  async dispatchWithOutcome(
+    input: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionDispatchResult> {
+    return this.runner.dispatchWithOutcome(input);
   }
 
   async wakeHostedWakes(input?: {
@@ -311,23 +284,6 @@ async function authorizeRoute(
   }
 }
 
-async function handleDispatchRoute(context: WorkerRouteContext): Promise<Response> {
-  const payload = await readCachedRequestText(context);
-  const dispatch = parseHostedExecutionDispatchRequest(JSON.parse(payload) as unknown);
-  const boundUserError = requireHostedExecutionBoundUserResponse(
-    context.request,
-    dispatch.event.userId,
-    "Hosted execution bound user does not match the dispatch user.",
-  );
-
-  if (boundUserError) {
-    return boundUserError;
-  }
-
-  const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatchWithOutcome(dispatch);
-  return result.event.state === "backpressured" ? json(result, 429) : json(result);
-}
-
 async function handleStatusRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -346,17 +302,6 @@ async function handleWakeRoute(
   const targetSeqHint = parseOptionalWakeTargetSeqHint(body.targetSeqHint);
   const stub = await resolveUserRunnerStub(context.env, userId);
   return json(await stub.wakeHostedWakes({ targetSeqHint }));
-}
-
-async function handleEventStatusRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-  encodedEventId: string,
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  const eventId = decodeRouteParam(encodedEventId);
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(await stub.getEventStatus({ eventId }));
 }
 
 async function handleBrowserVaultSessionRoute(

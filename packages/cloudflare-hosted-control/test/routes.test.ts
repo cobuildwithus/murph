@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserStatusPath,
+  buildCloudflareHostedControlUserWakePath,
 } from "../src/routes.ts";
 
 describe("cloudflare hosted control routes", () => {
@@ -15,11 +15,11 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlBrowserVaultSessionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/browser-vault/session",
     );
-    expect(buildCloudflareHostedControlUserEventStatusPath("user/a b", "evt/1 2")).toBe(
-      "/internal/users/user%2Fa%20b/events/evt%2F1%202/status",
-    );
     expect(buildCloudflareHostedControlUserStatusPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/status",
+    );
+    expect(buildCloudflareHostedControlUserWakePath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/wake",
     );
   });
 
@@ -53,8 +53,8 @@ describe("cloudflare hosted control routes", () => {
     });
     await expect(import("@murphai/cloudflare-hosted-control/routes")).resolves.toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
-      buildCloudflareHostedControlUserEventStatusPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
+      buildCloudflareHostedControlUserWakePath: expect.any(Function),
     });
     await expect(importBySpecifier("@murphai/cloudflare-hosted-control/contracts")).rejects.toThrow();
     await expect(importBySpecifier("@murphai/cloudflare-hosted-control/parsers")).rejects.toThrow();

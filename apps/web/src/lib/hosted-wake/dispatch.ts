@@ -1,5 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionDispatchLifecycleState,
+  HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
@@ -9,6 +12,7 @@ import {
   appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx,
   findHostedWakeEventIdByEventIdTx,
+  readHostedWakeLifecycleByDedupeKeyTx,
   readHostedWakeScheduleByEventIdTx,
   type AppendHostedWakeResult,
 } from "./store";
@@ -103,10 +107,22 @@ export async function readHostedExecutionWakeScheduleTx(input: {
   });
 }
 
+export async function readHostedExecutionWakeLifecycleStateTx(input: {
+  eventId: string;
+  tx: Prisma.TransactionClient | PrismaClient;
+}): Promise<HostedExecutionDispatchLifecycleState | null> {
+  const lifecycle = await readHostedWakeLifecycleByDedupeKeyTx({
+    dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId),
+    tx: input.tx,
+  });
+
+  return lifecycle?.state ?? null;
+}
+
 export function buildHostedWakeDispatchDedupeKey(
   dispatch: HostedExecutionDispatchRequest,
 ): string {
-  return `dispatch:${dispatch.event.kind}:${dispatch.eventId}`;
+  return buildHostedWakeDispatchDedupeKeyFromEventId(dispatch.eventId, dispatch.event.kind);
 }
 
 export function buildHostedWakeDispatchCoalescingKey(
@@ -117,4 +133,11 @@ export function buildHostedWakeDispatchCoalescingKey(
   }
 
   return `${dispatch.event.kind}:${dispatch.event.userId}`;
+}
+
+function buildHostedWakeDispatchDedupeKeyFromEventId(
+  eventId: string,
+  eventKind = "unknown",
+): string {
+  return `dispatch:${eventKind}:${eventId}`;
 }

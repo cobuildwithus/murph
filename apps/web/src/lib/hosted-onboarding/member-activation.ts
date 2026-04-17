@@ -12,7 +12,7 @@ import {
 import {
   findHostedExecutionScheduledEventIdTx,
   scheduleHostedExecutionDispatchTx,
-} from "../hosted-execution/outbox";
+} from "../hosted-execution/dispatch-lifecycle";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,

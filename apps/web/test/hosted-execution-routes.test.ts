@@ -4,12 +4,9 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedSharePageData: vi.fn(),
-  drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
   drainHostedOnboardingWebhookReceipts: vi.fn(),
   getPrisma: vi.fn(),
-  readExecutionLifecycleState: vi.fn((value: string | null | undefined) => value ?? "queued"),
-  pruneHostedExecutionOutbox: vi.fn(),
   pruneHostedWebhookReceiptHistory: vi.fn(),
   requireVercelCronRequest: vi.fn(),
   getPrivyMemberAuth: vi.fn(),
@@ -17,12 +14,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
   requireVercelCronRequest: mocks.requireVercelCronRequest,
-}));
-
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutbox: mocks.drainHostedExecutionOutbox,
-  pruneHostedExecutionOutbox: mocks.pruneHostedExecutionOutbox,
-  readExecutionLifecycleState: mocks.readExecutionLifecycleState,
 }));
 
 vi.mock("@/src/lib/hosted-execution/stripe-metering", () => ({
@@ -49,19 +40,16 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   getPrivyMemberAuth: mocks.getPrivyMemberAuth,
 }));
 
-type HostedExecutionCronRouteModule = typeof import("../app/api/internal/hosted-execution/outbox/cron/route");
 type HostedExecutionUsageCronRouteModule = typeof import("../app/api/internal/hosted-execution/usage/cron/route");
 type HostedOnboardingWebhookReceiptCronRouteModule = typeof import("../app/api/internal/hosted-onboarding/webhook-receipts/cron/route");
 type HostedShareStatusRouteModule = typeof import("../app/api/hosted-share/[shareCode]/status/route");
 
-let hostedExecutionCronRoute: HostedExecutionCronRouteModule;
 let hostedExecutionUsageCronRoute: HostedExecutionUsageCronRouteModule;
 let hostedOnboardingWebhookReceiptCronRoute: HostedOnboardingWebhookReceiptCronRouteModule;
 let hostedShareStatusRoute: HostedShareStatusRouteModule;
 
 describe("hosted execution async routes", () => {
   beforeAll(async () => {
-    hostedExecutionCronRoute = await import("../app/api/internal/hosted-execution/outbox/cron/route");
     hostedExecutionUsageCronRoute = await import("../app/api/internal/hosted-execution/usage/cron/route");
     hostedOnboardingWebhookReceiptCronRoute = await import("../app/api/internal/hosted-onboarding/webhook-receipts/cron/route");
     hostedShareStatusRoute = await import("../app/api/hosted-share/[shareCode]/status/route");
@@ -85,17 +73,6 @@ describe("hosted execution async routes", () => {
       share: null,
       stage: "invalid",
     });
-    mocks.drainHostedExecutionOutbox.mockResolvedValue([
-      {
-        dispatchState: "queued",
-        eventId: "evt_1",
-      },
-      {
-        dispatchState: "backpressured",
-        eventId: "evt_2",
-      },
-    ]);
-    mocks.pruneHostedExecutionOutbox.mockResolvedValue(4);
     mocks.drainHostedAiUsageStripeMetering.mockResolvedValue({
       configured: true,
       failed: 0,
@@ -120,77 +97,6 @@ describe("hosted execution async routes", () => {
       },
     ]);
     mocks.pruneHostedWebhookReceiptHistory.mockResolvedValue(2);
-  });
-
-  it("returns aggregate hosted execution cron counts without event identifiers", async () => {
-    const response = await hostedExecutionCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
-        headers: {
-          authorization: "Bearer cron-token",
-        },
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireVercelCronRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.drainHostedExecutionOutbox).toHaveBeenCalledTimes(1);
-    expect(mocks.pruneHostedExecutionOutbox).toHaveBeenCalledTimes(1);
-    await expect(response.json()).resolves.toEqual({
-      drained: 2,
-      pruned: 4,
-      stateCounts: {
-        backpressured: 1,
-        queued: 1,
-      },
-    });
-  });
-
-  it("maps missing signing secret configuration to a 500", async () => {
-    mocks.requireVercelCronRequest.mockImplementation(() => {
-      throw hostedOnboardingError({
-        code: "CRON_SECRET_REQUIRED",
-        httpStatus: 500,
-        message: "CRON_SECRET must be configured for hosted cron routes.",
-      });
-    });
-
-    const response = await hostedExecutionCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
-    );
-
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "CRON_SECRET_REQUIRED",
-        message: "CRON_SECRET must be configured for hosted cron routes.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("maps a bad Vercel cron request to a 401", async () => {
-    mocks.requireVercelCronRequest.mockImplementation(() => {
-      throw hostedOnboardingError({
-        code: "VERCEL_CRON_UNAUTHORIZED",
-        httpStatus: 401,
-        message: "Unauthorized Vercel cron request.",
-      });
-    });
-
-    const response = await hostedExecutionCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron"),
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "VERCEL_CRON_UNAUTHORIZED",
-        message: "Unauthorized Vercel cron request.",
-        retryable: false,
-      },
-    });
   });
 
   it("returns the hosted Stripe metering cron summary", async () => {

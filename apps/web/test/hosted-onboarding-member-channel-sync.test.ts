@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   scheduleHostedExecutionDispatchTx: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
   scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
 }));
 

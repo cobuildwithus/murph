@@ -1,4 +1,3 @@
-export const HOSTED_EXECUTION_DISPATCH_PATH = "/internal/dispatch";
 export const HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH = "/send";
 
 export function buildHostedExecutionRunnerCommitPath(eventId: string): string {

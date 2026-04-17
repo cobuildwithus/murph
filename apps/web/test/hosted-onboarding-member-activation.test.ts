@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   updateHostedMemberCoreState: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
   findHostedExecutionScheduledEventIdTx: mocks.findHostedExecutionScheduledEventIdTx,
   scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
 }));

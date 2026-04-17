@@ -111,6 +111,11 @@ export async function handleHostedEmailIngress(
     return;
   }
 
+  if (!webControlBaseUrl || !environment.webCallbackSigning) {
+    message.setReject?.("Hosted email canonical wake routing is not configured.");
+    return;
+  }
+
   const userCrypto = await resolveHostedExecutionUserCryptoContext({
     bucket: env.BUNDLES,
     environment,
@@ -133,12 +138,6 @@ export async function handleHostedEmailIngress(
     selfAddress: route.routeAddress,
     userId: route.userId,
   });
-
-  if (!webControlBaseUrl || !environment.webCallbackSigning) {
-    const stub = await resolveUserRunnerStub(env, route.userId);
-    await stub.dispatch(dispatch);
-    return;
-  }
 
   const append = await appendHostedWakeDispatchInWeb({
     baseUrl: webControlBaseUrl,

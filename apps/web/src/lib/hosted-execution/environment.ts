@@ -3,37 +3,35 @@ import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 
-export interface HostedExecutionDispatchEnvironment {
-  dispatchTimeoutMs: number;
-  dispatchUrl: string | null;
+export interface HostedExecutionControlEnvironment {
+  controlBaseUrl: string | null;
+  controlTimeoutMs: number;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
-export function readHostedExecutionDispatchEnvironment(
+export function readHostedExecutionControlEnvironment(
   source: EnvSource = process.env,
-): HostedExecutionDispatchEnvironment {
-  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL, {
+): HostedExecutionControlEnvironment {
+  const controlBaseUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_CONTROL_URL, {
     allowHttpLocalhost: true,
   });
-  const dispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS);
+  const controlTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_TIMEOUT_MS);
 
   return {
-    dispatchTimeoutMs: parsePositiveInteger(
-      dispatchTimeout,
+    controlBaseUrl,
+    controlTimeoutMs: parsePositiveInteger(
+      controlTimeout,
       30_000,
-      "HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS",
+      "HOSTED_EXECUTION_CONTROL_TIMEOUT_MS",
     ),
-    dispatchUrl,
   };
 }
 
 export function readHostedExecutionControlBaseUrl(
   source: EnvSource = process.env,
 ): string | null {
-  return normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL, {
-    allowHttpLocalhost: true,
-  });
+  return readHostedExecutionControlEnvironment(source).controlBaseUrl;
 }
 
 function parsePositiveInteger(value: string | null, fallback: number, label: string): number {

@@ -1,5 +1,5 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { drainHostedExecutionOutboxBestEffort } from "@/src/lib/hosted-execution/outbox";
+import { handoffHostedExecutionScheduledEventBestEffort } from "@/src/lib/hosted-wake/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -55,8 +55,9 @@ export const POST = withJsonError(async (request: Request) => {
       })
     );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  await drainHostedExecutionOutboxBestEffort({
-    eventIds: [channelSyncDispatch.eventId],
+  await handoffHostedExecutionScheduledEventBestEffort({
+    context: "settings.email.sync",
+    eventId: channelSyncDispatch.eventId,
   });
 
   return jsonOk({

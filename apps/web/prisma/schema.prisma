@@ -516,29 +516,6 @@ model HostedWebhookReceiptSideEffect {
   @@map("hosted_webhook_receipt_side_effect")
 }
 
-model ExecutionOutbox {
-  id             String                @id
-  userId         String                @map("user_id")
-  sourceType     String                @map("source_type")
-  sourceId       String?               @map("source_id")
-  eventId        String                @unique @map("event_id")
-  eventKind      String                @map("event_kind")
-  payloadJson    Json                  @map("payload_json")
-  dispatchState  String                @default("queued") @map("dispatch_state")
-  attemptCount   Int                   @default(0) @map("attempt_count")
-  lastAttemptAt  DateTime?             @map("last_attempt_at")
-  nextAttemptAt  DateTime?             @default(now()) @map("next_attempt_at")
-  claimToken     String?               @map("claim_token")
-  claimExpiresAt DateTime?             @map("claim_expires_at")
-  lastError      String?               @map("last_error")
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
-
-  @@index([nextAttemptAt, createdAt])
-  @@index([userId, createdAt])
-  @@map("execution_outbox")
-}
-
 model HostedAiUsage {
   id                    String       @id
   memberId              String       @map("member_id")

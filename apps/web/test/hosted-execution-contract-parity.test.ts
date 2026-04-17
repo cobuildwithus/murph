@@ -18,11 +18,11 @@ import {
 import {
   buildHostedExecutionDispatchRef,
   readHostedExecutionDispatchRef,
-  serializeHostedExecutionOutboxPayload,
-} from "@/src/lib/hosted-execution/outbox-payload";
+  serializeHostedExecutionDispatchPayload,
+} from "@/src/lib/hosted-execution/dispatch-payload";
 
 describe("hosted execution contract parity", () => {
-  it("keeps builder, parser, and app-local outbox serialization aligned for every event kind", () => {
+  it("keeps builder, parser, and app-local dispatch serialization aligned for every event kind", () => {
     const dispatchBuilders: Record<HostedExecutionEventKind, () => HostedExecutionDispatchRequest> = {
       "assistant.cron.tick": () => buildHostedExecutionAssistantCronTickDispatch({
         eventId: "evt_cron",
@@ -119,7 +119,7 @@ describe("hosted execution contract parity", () => {
     for (const kind of HOSTED_EXECUTION_EVENT_KINDS) {
       const dispatch = dispatchBuilders[kind]();
       const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
-      const payload = serializeHostedExecutionOutboxPayload(dispatch);
+      const payload = serializeHostedExecutionDispatchPayload(dispatch);
       const parsedDispatchRef = readHostedExecutionDispatchRef(payload);
 
       expect(dispatch.event.kind).toBe(kind);
