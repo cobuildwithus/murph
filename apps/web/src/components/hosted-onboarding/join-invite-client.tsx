@@ -2,14 +2,19 @@
 
 import { useEffect, useEffectEvent, useState } from "react";
 
-import { AlertCircleIcon } from "lucide-react";
-
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { cn } from "@/src/lib/utils";
+import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
+import type {
+  HostedInviteStatusPayload,
+  HostedPrivyCompletionPayload,
+} from "@/src/lib/hosted-onboarding/types";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
+
+import { JoinInviteEyebrow, type JoinInviteEyebrowTone } from "./join-invite-eyebrow";
 
 function resolveJoinInviteEyebrow(
   stage: HostedInviteStatusPayload["stage"],
-): { label: string; tone: "default" | "danger" } {
+): { label: string; tone: JoinInviteEyebrowTone } {
   switch (stage) {
     case "invalid":
     case "expired":
@@ -20,12 +25,6 @@ function resolveJoinInviteEyebrow(
       return { label: "Murph signup", tone: "default" };
   }
 }
-import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
-import type {
-  HostedInviteStatusPayload,
-  HostedPrivyCompletionPayload,
-} from "@/src/lib/hosted-onboarding/types";
-import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { requestHostedBillingCheckout } from "./client-api";
 import {
@@ -197,19 +196,7 @@ export function JoinInviteClient({
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <div
-          className={cn(
-            "flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em]",
-            eyebrow.tone === "danger" ? "text-destructive" : "text-olive/80",
-          )}
-        >
-          {eyebrow.tone === "danger" ? (
-            <AlertCircleIcon className="size-3.5" />
-          ) : (
-            <span className="size-1 rounded-full bg-olive/70" />
-          )}
-          <span>{eyebrow.label}</span>
-        </div>
+        <JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
           {resolveJoinInviteTitle(status)}
         </h1>

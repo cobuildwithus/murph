@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import { AlertCircleIcon, CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
+import { CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
@@ -99,22 +100,18 @@ export function JoinInviteSuccessClient({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
-          {successState.variant === "active" ? (
-            <CheckCircleIcon className="size-4" />
-          ) : successState.variant === "pending" ? (
-            <LoaderCircleIcon className="size-4 animate-spin" />
-          ) : (
-            <AlertCircleIcon className="size-4" />
-          )}
-          <span>
-            {successState.variant === "active"
-              ? "Ready"
-              : successState.variant === "pending"
-              ? "Working on it"
-              : "Something went wrong"}
-          </span>
-        </div>
+        {successState.variant === "terminal" ? (
+          <JoinInviteEyebrow label="Something went wrong" tone="danger" />
+        ) : (
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
+            {successState.variant === "active" ? (
+              <CheckCircleIcon className="size-4" />
+            ) : (
+              <LoaderCircleIcon className="size-4 animate-spin" />
+            )}
+            <span>{successState.variant === "active" ? "Ready" : "Working on it"}</span>
+          </div>
+        )}
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
           {successState.title}
         </h1>

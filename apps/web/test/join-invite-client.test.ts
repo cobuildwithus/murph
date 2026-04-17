@@ -493,7 +493,7 @@ test("active invite state omits Murph contact actions when no assigned number is
     }),
   );
 
-  assert.doesNotMatch(markup, /Text Murph/);
+  assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /Add Murph to Contacts/);
   assert.ok(markup.includes('href="/settings"'));
 });

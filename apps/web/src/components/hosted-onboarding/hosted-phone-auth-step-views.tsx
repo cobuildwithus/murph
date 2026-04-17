@@ -52,14 +52,12 @@ export function HostedInviteShortcutStep({
       >
         {pendingAction === "send-code" ? "Sending…" : "Send code"}
       </Button>
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <HostedUseDifferentNumberButton
-          disabled={disabled}
-          pendingAction={pendingAction}
-          size="sm"
-          onClick={onUseDifferentNumber}
-        />
-      </div>
+      <HostedUseDifferentNumberButton
+        disabled={disabled}
+        pendingAction={pendingAction}
+        size="sm"
+        onClick={onUseDifferentNumber}
+      />
       <HostedAuthLegalNotice className="border-t border-[#c4a882]/20 pt-3" />
     </div>
   );

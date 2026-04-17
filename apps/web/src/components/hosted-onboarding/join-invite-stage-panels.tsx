@@ -132,18 +132,6 @@ export function JoinInviteVerificationPanel({
   );
 }
 
-export function JoinInviteBlockedAlert() {
-  return (
-    <Alert className="border-destructive/30 bg-destructive/5 text-destructive">
-      <AlertTitle className="text-destructive">This account needs support.</AlertTitle>
-      <AlertDescription className="text-destructive/85">
-        This account can&apos;t continue from this invite right now. Contact support and we&apos;ll help restore
-        access.
-      </AlertDescription>
-    </Alert>
-  );
-}
-
 export function JoinInviteMessagingSetupPanel({
   authenticated,
   initialLinkedAccounts,
@@ -154,34 +142,25 @@ export function JoinInviteMessagingSetupPanel({
   onRefreshStatus: () => Promise<HostedInviteStatusPayload>;
 }) {
   return (
-    <div className="space-y-4">
-      <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-        <AlertTitle>Add a message channel before checkout</AlertTitle>
-        <AlertDescription>
-          Murph needs a phone number or Telegram connection before payment so the bot knows where to reach you right after signup.
-        </AlertDescription>
-      </Alert>
-
-      <div className="grid gap-4">
-        <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
-          <HostedPhoneSettings
-            authenticated={authenticated}
-            autoOpen
-            initialLinkedAccounts={initialLinkedAccounts}
-            onLinked={async () => {
-              await onRefreshStatus();
-            }}
-          />
-        </div>
-        <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
-          <HostedTelegramSettings
-            authenticated={authenticated}
-            initialLinkedAccounts={initialLinkedAccounts}
-            onSynced={async () => {
-              await onRefreshStatus();
-            }}
-          />
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+        <HostedPhoneSettings
+          authenticated={authenticated}
+          autoOpen
+          initialLinkedAccounts={initialLinkedAccounts}
+          onLinked={async () => {
+            await onRefreshStatus();
+          }}
+        />
+      </div>
+      <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+        <HostedTelegramSettings
+          authenticated={authenticated}
+          initialLinkedAccounts={initialLinkedAccounts}
+          onSynced={async () => {
+            await onRefreshStatus();
+          }}
+        />
       </div>
     </div>
   );
@@ -250,9 +229,7 @@ export function JoinInviteActivePanel({
         </div>
       )}
 
-      <div className="flex flex-col gap-3">
-        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
-      </div>
+      <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
 
       {sharePreview ? (
         <div>

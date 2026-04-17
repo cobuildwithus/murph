@@ -9,7 +9,6 @@ import {
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import {
   JoinInviteActivePanel,
-  JoinInviteBlockedAlert,
   JoinInviteCheckoutButton,
   JoinInviteMessagingSetupPanel,
   JoinInviteSignedInMismatchAlert,
