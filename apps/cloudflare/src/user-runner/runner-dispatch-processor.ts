@@ -96,8 +96,6 @@ interface RunnerDispatchProcessorDependencies {
   scheduler: RunnerScheduler;
 }
 
-const LIVE_COMMIT_LEASE_RECOVERY_GRACE_MS = 15_000;
-
 export class RunnerDispatchProcessor {
   private runLoopPromise: Promise<HostedExecutionUserStatus> | null = null;
 
@@ -780,7 +778,6 @@ export class RunnerDispatchProcessor {
         bucket: this.dependencies.bucket,
         key: crypto.rootKey,
         keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
       });
 
       await store.writeBrowserVaultSnapshot(userId, browserVaultSnapshot);
@@ -902,10 +899,7 @@ export class RunnerDispatchProcessor {
       return null;
     }
 
-    return (Date.now() - startedAtMs) < Math.min(
-      this.dependencies.env.runnerTimeoutMs,
-      LIVE_COMMIT_LEASE_RECOVERY_GRACE_MS,
-    )
+    return (Date.now() - startedAtMs) < this.dependencies.env.runnerTimeoutMs
       ? activeLease
       : null;
   }

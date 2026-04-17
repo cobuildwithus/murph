@@ -5,7 +5,7 @@ import type {
   CanonicalEntityLinkType,
   CanonicalRecordClass,
 } from "./canonical-entities.ts";
-import type { QueryRecordData } from "./vault-source.ts";
+import type { QueryRecordData } from "./query-record-data.ts";
 
 export const BROWSER_VAULT_SNAPSHOT_SCHEMA = "murph.browser-vault-snapshot.v1";
 

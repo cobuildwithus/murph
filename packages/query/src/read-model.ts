@@ -7,7 +7,7 @@ import {
   type CanonicalRecordClass,
 } from "./canonical-entities.ts";
 import { ALL_QUERY_ENTITY_FAMILIES } from "./entity-families.ts";
-import type { QueryRecordData } from "./vault-source.ts";
+import type { QueryRecordData } from "./query-record-data.ts";
 
 type VaultReadModelFamilyViews = {
   [K in VaultManyViewKey]: CanonicalEntity[];

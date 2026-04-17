@@ -1,4 +1,4 @@
-import type { VaultReadModel } from "./model.ts";
+import type { VaultReadModel } from "./read-model.ts";
 import {
   materializeSafeSearchDocuments,
   materializeSearchDocuments,

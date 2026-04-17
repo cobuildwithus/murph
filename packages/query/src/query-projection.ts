@@ -26,10 +26,10 @@ import {
 import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
-  type QueryRecordData,
   type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
+import type { QueryRecordData } from "./query-record-data.ts";
 import type {
   QueryProjectionStatus,
   RebuildQueryProjectionResult,

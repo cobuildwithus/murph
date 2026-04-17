@@ -2,16 +2,22 @@ import { describe, expect, it } from "vitest";
 
 import { createBrowserVaultSnapshot, parseBrowserVaultSnapshot } from "@murphai/query/browser";
 
-import { createHostedBrowserVaultSnapshotStore } from "../src/browser-vault-store.js";
+import {
+  createHostedBrowserVaultSnapshotStore,
+  resolveHostedBrowserVaultSnapshotStorageRef,
+} from "../src/browser-vault-store.js";
+import { buildHostedStorageAad } from "../src/crypto-context.js";
+import { readEncryptedR2Payload } from "../src/crypto.js";
 import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 describe("hosted browser vault snapshot store", () => {
   it("round-trips browser vault snapshots through the browser-vault-snapshot scope", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
+    const rootKey = createTestRootKey(29);
     const store = createHostedBrowserVaultSnapshotStore({
       bucket,
-      key: createTestRootKey(29),
+      key: rootKey,
       keyId: "k-current",
     });
     type BrowserVaultEntity = Parameters<typeof createBrowserVaultSnapshot>[0]["entities"][number];
@@ -69,7 +75,20 @@ describe("hosted browser vault snapshot store", () => {
       scope: "browser-vault-snapshot",
     });
 
-    const loaded = await store.readBrowserVaultSnapshot("user_123");
+    const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
+      rootKey,
+      userId: "user_123",
+    });
+    const loadedBytes = await readEncryptedR2Payload({
+      aad: buildHostedStorageAad(storageRef.aadFields),
+      bucket,
+      cryptoKey: rootKey,
+      expectedKeyId: "k-current",
+      key: storageRef.objectKey,
+      scope: "browser-vault-snapshot",
+    });
+    expect(loadedBytes).not.toBeNull();
+    const loaded = JSON.parse(new TextDecoder().decode(loadedBytes ?? undefined)) as unknown;
     expect(loaded).toEqual(snapshot);
     expect(parseBrowserVaultSnapshot(loaded)).toEqual(snapshot);
     expect(snapshot.entities[0]?.tags).toEqual(["browser"]);
