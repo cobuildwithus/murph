@@ -339,8 +339,8 @@ async function persistHostedDeviceSyncWake(input: {
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
   complete?(tx: HostedPrismaTransactionClient): Promise<void>;
 }): Promise<void> {
-  // Webhook retries rebuild fresh signal rows, so the outbox identity must stay tied to
-  // the stable wake event id instead of the transient signal primary key.
+  // Webhook retries rebuild fresh signal rows, so the canonical wake identity must stay
+  // tied to the stable wake event id instead of the transient signal primary key.
   await input.store.prisma.$transaction(async (tx) => {
     await input.persist(tx);
     await scheduleHostedExecutionDispatchTx({
