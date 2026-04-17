@@ -267,7 +267,7 @@ export async function enqueueHostedWebhookDispatchSideEffects(input: {
     if (!dispatch) {
       throw hostedOnboardingError({
         code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_INVALID",
-        message: `Hosted webhook dispatch side effect ${sideEffect.effectId} could not be rebuilt as an inline outbox dispatch.`,
+        message: `Hosted webhook dispatch side effect ${sideEffect.effectId} could not be rebuilt as an inline hosted wake dispatch.`,
         httpStatus: 500,
         retryable: false,
       });

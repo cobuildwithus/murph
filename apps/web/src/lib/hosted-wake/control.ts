@@ -51,31 +51,39 @@ export async function handoffHostedExecutionScheduledEventBestEffort(input: {
   outboxLimit?: number;
   prisma?: PrismaClient;
   timeoutMs?: number;
-}): Promise<"missing" | "wake"> {
-  const prisma = input.prisma ?? getPrisma();
-  const target = await readHostedExecutionScheduledDispatchTarget({
-    eventId: input.eventId,
-    prisma,
-  });
-
-  if (!target) {
-    return "missing";
-  }
-
-  const nudge = () => triggerHostedWakeUserBestEffort({
-    context: input.context,
-    targetSeqHint: target.seq ?? null,
-    timeoutMs: input.timeoutMs,
-    userId: target.userId,
-  });
-
-  if (input.defer) {
-    await input.defer(async () => {
-      await nudge();
+}): Promise<void> {
+  try {
+    const prisma = input.prisma ?? getPrisma();
+    const target = await readHostedExecutionScheduledDispatchTarget({
+      eventId: input.eventId,
+      prisma,
     });
-  } else {
-    await nudge();
-  }
 
-  return target.route;
+    if (!target) {
+      return;
+    }
+
+    const nudge = () => triggerHostedWakeUserBestEffort({
+      context: input.context,
+      targetSeqHint: target.seq ?? null,
+      timeoutMs: input.timeoutMs,
+      userId: target.userId,
+    });
+
+    if (input.defer) {
+      await input.defer(async () => {
+        await nudge();
+      });
+      return;
+    }
+
+    await nudge();
+  } catch (error) {
+    console.error(
+      input.context
+        ? `Hosted wake handoff failed (${input.context}).`
+        : "Hosted wake handoff failed.",
+      formatHostedExecutionSafeLogError(error),
+    );
+  }
 }
