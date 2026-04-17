@@ -29,6 +29,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
   "@murphai/operator-config": "../operator-config/src/index.ts",
   "@murphai/parsers": "../parsers/src/index.ts",
+  "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
   "@murphai/vault-usecases": "../vault-usecases/src/index.ts",
 } as const;

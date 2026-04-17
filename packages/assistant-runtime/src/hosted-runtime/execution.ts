@@ -2,6 +2,7 @@ import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   listHostedBundleArtifacts,
+  sha256HostedBundleHex,
   snapshotHostedExecutionContext,
   type HostedBundleArtifactLocation,
 } from "@murphai/runtime-state/node";
@@ -40,6 +41,7 @@ import type {
 } from "./models.ts";
 import { summarizeDispatch } from "./summary.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
+import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
 
 export async function executeHostedDispatchForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
@@ -270,9 +272,14 @@ export async function completeHostedExecutionAfterCommit(input: {
     bundle: encodeHostedBundleBase64(finalSnapshot.bundle),
     result: input.committedExecution.committedResult.result,
   };
+  const browserVaultSnapshot = await exportHostedBrowserVaultSnapshot({
+    sourceVersion: sha256HostedBundleHex(finalSnapshot.bundle),
+    vaultRoot: input.restored.vaultRoot,
+  });
 
   return {
     assistantDeliveryOutcomes,
+    browserVaultSnapshot,
     finalGatewayProjectionSnapshot,
     phase: "completed",
     result: finalResult,

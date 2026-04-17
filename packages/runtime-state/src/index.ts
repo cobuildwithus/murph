@@ -8,6 +8,7 @@ export {
   type HostedExecutionBundleRefIdentity,
 } from "./hosted-bundle-ref.ts";
 export * from "./hosted-email.ts";
+export * from "./hosted-storage.ts";
 export * from "./hosted-user-keys.ts";
 export * from "./loopback-control-plane.ts";
 export * from "./ulid.ts";

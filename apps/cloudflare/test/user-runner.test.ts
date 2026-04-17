@@ -206,7 +206,7 @@ describe("HostedUserRunner", () => {
     }).writeBundle("vault", plaintext);
 
     await expect(bundleStore.readBundle(legacyRef)).rejects.toThrow(
-      "Hosted bundle envelope keyId mismatch: expected v2, got v1. No keyring is configured for multi-key decryption.",
+      "Hosted cipher envelope keyId mismatch: expected v2, got v1. No keyring is configured for multi-key decryption.",
     );
   });
 

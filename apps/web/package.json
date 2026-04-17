@@ -31,6 +31,7 @@
     "@murphai/device-syncd": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
+    "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",

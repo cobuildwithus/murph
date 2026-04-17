@@ -19,6 +19,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "../bundle-store.js";
+import { createHostedBrowserVaultSnapshotStore } from "../browser-vault-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
   persistHostedExecutionCommit,
@@ -353,6 +354,10 @@ export class RunnerDispatchProcessor {
           result: finalRunnerResult.result,
           run,
         });
+        await this.persistBrowserVaultSnapshotBestEffort(
+          record.userId,
+          finalRunnerResult.browserVaultSnapshot ?? null,
+        );
         const finalizedCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
           .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
         if (!finalizedCommit) {
@@ -759,6 +764,42 @@ export class RunnerDispatchProcessor {
         });
       },
     });
+  }
+
+  private async persistBrowserVaultSnapshotBestEffort(
+    userId: string,
+    browserVaultSnapshot: unknown | null,
+  ): Promise<void> {
+    if (!browserVaultSnapshot) {
+      return;
+    }
+
+    try {
+      const { crypto } = await this.dependencies.ensureRunnerStores(userId);
+      const store = createHostedBrowserVaultSnapshotStore({
+        bucket: this.dependencies.bucket,
+        key: crypto.rootKey,
+        keyId: crypto.rootKeyId,
+        keysById: crypto.keysById,
+      });
+
+      await store.writeBrowserVaultSnapshot(userId, browserVaultSnapshot);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          error: formatHostedExecutionLogMessage(
+            "Browser vault snapshot persistence failed.",
+            error,
+          ),
+        },
+        eventId: "browser-vault-snapshot",
+        message: "Failed to persist browser vault snapshot sidecar.",
+        phase: "completed",
+        run: null,
+        userId,
+      });
+    }
   }
 
   private async recoverCommittedPendingDispatchAndCleanup(

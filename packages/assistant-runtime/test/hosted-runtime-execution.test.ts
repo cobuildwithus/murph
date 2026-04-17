@@ -604,7 +604,13 @@ describe("completeHostedExecutionAfterCommit", () => {
       ],
       vaultRoot: "/tmp/vault-root",
     });
-    assert.deepEqual(result, {
+    assert.ok(result.browserVaultSnapshot);
+    assert.equal(result.browserVaultSnapshot.schema, "murph.browser-vault-snapshot.v1");
+    assert.equal(Array.isArray(result.browserVaultSnapshot.entities), true);
+    assert.equal(result.browserVaultSnapshot.metadata, null);
+    assert.match(result.browserVaultSnapshot.generatedAt, /^\d{4}-\d{2}-\d{2}T/u);
+    assert.match(result.browserVaultSnapshot.sourceVersion, /^[a-f0-9]{64}$/u);
+    assert.deepEqual({ ...result, browserVaultSnapshot: undefined }, {
       assistantDeliveryOutcomes: [
         {
           deliveryChannel: "linq",
@@ -621,6 +627,7 @@ describe("completeHostedExecutionAfterCommit", () => {
           targetKind: "thread",
         },
       ],
+      browserVaultSnapshot: undefined,
       finalGatewayProjectionSnapshot: {
         schema: "murph.gateway-projection-snapshot.v1",
         generatedAt: "2026-04-08T00:10:00.000Z",

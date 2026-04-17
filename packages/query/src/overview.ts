@@ -32,6 +32,16 @@ export interface OverviewWeeklyStat {
   unit: string | null;
 }
 
+export function isActiveOverviewExperimentStatus(status: string | null | undefined): boolean {
+  if (!status) {
+    return false;
+  }
+
+  return new Set(["active", "in_progress", "running", "ongoing", "open"]).has(
+    status.trim().toLowerCase(),
+  );
+}
+
 export function buildOverviewMetrics(vault: VaultReadModel): OverviewMetric[] {
   const registryCount =
     vault.goals.length +
@@ -187,8 +197,8 @@ export function summarizeOverviewExperiments(
     compareLatestStrings(right.occurredAt ?? right.date, left.occurredAt ?? left.date),
   );
   const prioritizedExperiments = [
-    ...sortedExperiments.filter((entry) => isActiveExperimentStatus(entry.status)),
-    ...sortedExperiments.filter((entry) => !isActiveExperimentStatus(entry.status)),
+    ...sortedExperiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status)),
+    ...sortedExperiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status)),
   ];
 
   return prioritizedExperiments.slice(0, normalizeLimit(limit, 6)).map((entry) => ({
@@ -255,10 +265,6 @@ function averageValues(values: readonly number[] | null): number | null {
   }
 
   return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function isActiveExperimentStatus(status: string | null | undefined): boolean {
-  return status?.trim().toLowerCase() === "active";
 }
 
 function normalizeLimit(value: number, fallback: number): number {
