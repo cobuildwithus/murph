@@ -70,7 +70,7 @@ export function HostedVerificationCodeStep({
               <InputOTPSlot
                 key={index}
                 index={index}
-                className="h-12 flex-1 min-w-0 rounded-lg border text-lg"
+                className="h-12 flex-1 min-w-0 rounded-lg border bg-card text-lg"
               />
             ))}
           </InputOTPGroup>
