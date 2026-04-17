@@ -9,6 +9,7 @@ const navItems = [
   { label: "Experiments", href: "/experiments", icon: "●" },
   { label: "Signals", href: "/signals", icon: "◇" },
   { label: "History", href: "/history", icon: "○" },
+  { label: "Settings", href: "/settings", icon: "◈" },
 ];
 
 export function Sidebar() {

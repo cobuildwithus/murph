@@ -28,6 +28,10 @@ const FAQ_ITEMS = [
     "No. Murph helps you run self-experiments using published research. It’s not a substitute for medical care. Talk to your doctor about health concerns.",
   ],
   [
+    "What happens to my data?",
+    "Your conversations never train AI models. Cloud inference runs through Venice AI with zero data retention — nothing is stored on their side. Hosted runs use encrypted snapshots with privacy-first defaults, so only you can access them.",
+  ],
+  [
     "Can I cancel anytime?",
     "Yes. No contracts. $5/month, cancel whenever. Your data stays yours.",
   ],
