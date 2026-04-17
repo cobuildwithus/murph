@@ -6,13 +6,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
-import {
-  appendHostedCoalescingDispatchWakeTx,
-} from "../hosted-wake/dispatch";
-import {
-  isHostedWakeSimpleProducerDualWriteEnabled,
-} from "../hosted-wake/flags";
+import { scheduleHostedExecutionDispatchTx } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberEmailAuthorization,
@@ -78,22 +72,12 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
     occurredAt: input.occurredAt,
   });
 
-  const wakeDualWriteEnabled = isHostedWakeSimpleProducerDualWriteEnabled();
-
-  await enqueueHostedExecutionOutbox({
+  await scheduleHostedExecutionDispatchTx({
     dispatch,
     sourceId: dispatch.eventId,
     sourceType: input.sourceType,
     tx: input.prisma,
   });
-
-  if (wakeDualWriteEnabled) {
-    await appendHostedCoalescingDispatchWakeTx({
-      coalescingKey: `member.channels.updated:${input.memberId}`,
-      dispatch,
-      tx: input.prisma,
-    });
-  }
 
   return dispatch;
 }

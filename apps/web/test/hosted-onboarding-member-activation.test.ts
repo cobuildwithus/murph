@@ -1,24 +1,21 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import type { HostedStripeDispatchContext } from "@/src/lib/hosted-onboarding/stripe-dispatch";
 
 const mocks = vi.hoisted(() => ({
-  enqueueHostedExecutionOutbox: vi.fn(),
-  appendHostedOrderedDispatchWakeTx: vi.fn(),
+  findHostedExecutionScheduledEventIdTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
+  scheduleHostedExecutionDispatchTx: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-}));
-
-vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
-  appendHostedOrderedDispatchWakeTx: mocks.appendHostedOrderedDispatchWakeTx,
+  findHostedExecutionScheduledEventIdTx: mocks.findHostedExecutionScheduledEventIdTx,
+  scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -57,9 +54,9 @@ import {
 describe("hosted onboarding member activation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
     vi.spyOn(console, "info").mockImplementation(() => {});
 
+    mocks.findHostedExecutionScheduledEventIdTx.mockResolvedValue(null);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
@@ -70,6 +67,10 @@ describe("hosted onboarding member activation", () => {
         threadIsDirect: true,
       },
     });
+    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+      eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+      route: "outbox",
+    });
     mocks.updateHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       createdAt: new Date("2026-04-12T00:00:00.000Z"),
@@ -77,36 +78,6 @@ describe("hosted onboarding member activation", () => {
       suspendedAt: null,
       updatedAt: new Date("2026-04-12T00:00:00.000Z"),
     });
-    mocks.enqueueHostedExecutionOutbox.mockResolvedValue({
-      eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-    });
-    mocks.appendHostedOrderedDispatchWakeTx.mockResolvedValue({
-      duplicate: false,
-      inserted: true,
-      updatedExisting: false,
-      wake: {
-        behavior: "ordered",
-        coalescingKey: null,
-        createdAt: "2026-04-12T00:00:00.000Z",
-        dedupeKey: "dispatch:member.activated:member.activated:stripe.invoice.paid:member_123:evt_123",
-        id: "wake_123",
-        kind: "member.activated",
-        occurredAt: "2026-04-12T00:00:00.000Z",
-        payloadBytes: 1,
-        payloadInlineCiphertext: "ciphertext",
-        payloadRef: null,
-        payloadSchema: "murph.hosted-wake-dispatch.v1",
-        quarantineCode: null,
-        quarantinedAt: null,
-        seq: "1",
-        updatedAt: "2026-04-12T00:00:00.000Z",
-        userId: "member_123",
-      },
-    });
-  });
-
-  afterEach(() => {
-    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
   });
 
   it("keeps the Linq routing lookup and activation dispatch ownership together for Stripe activations", async () => {
@@ -135,7 +106,7 @@ describe("hosted onboarding member activation", () => {
       member,
       prisma: expect.anything(),
     });
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
         event: expect.objectContaining({
@@ -157,7 +128,6 @@ describe("hosted onboarding member activation", () => {
       sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
-    expect(mocks.appendHostedOrderedDispatchWakeTx).not.toHaveBeenCalled();
   });
 
   it("keeps the revnet confirmation path on the same activation owner", async () => {
@@ -173,7 +143,7 @@ describe("hosted onboarding member activation", () => {
       }),
     ).resolves.toEqual({
       activated: true,
-      hostedExecutionEventId: "member.activated:hosted.revnet.issuance.confirmed:member_123:revnet_evt_123",
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
       memberId: "member_123",
     });
 
@@ -181,7 +151,7 @@ describe("hosted onboarding member activation", () => {
       member,
       prisma: expect.anything(),
     });
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceId: "revnet_evt_123",
         sourceType: "hosted_revnet_issuance",
@@ -218,7 +188,7 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         event: expect.objectContaining({
           firstContact: {
@@ -234,7 +204,6 @@ describe("hosted onboarding member activation", () => {
       sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
-    expect(mocks.appendHostedOrderedDispatchWakeTx).not.toHaveBeenCalled();
   });
 
   it("emits Telegram first-contact without a Linq lookup for phone-less members", async () => {
@@ -273,7 +242,7 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         event: expect.objectContaining({
           firstContact: {
@@ -355,7 +324,7 @@ describe("hosted onboarding member activation", () => {
       prisma: makeTransactionHarness() as never,
     });
 
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         event: expect.objectContaining({
           kind: "member.activated",
@@ -370,12 +339,9 @@ describe("hosted onboarding member activation", () => {
       sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
-    expect(mocks.appendHostedOrderedDispatchWakeTx).not.toHaveBeenCalled();
   });
 
-  it("dual-writes a hosted wake only when the shadow producer flag is enabled", async () => {
-    process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE = "true";
-
+  it("returns the scheduled wake event id when routing chooses HostedWake", async () => {
     const member = makeMemberSnapshot({
       identity: {
         phoneLookupKey: null,
@@ -392,8 +358,12 @@ describe("hosted onboarding member activation", () => {
       },
     });
     mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+      eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
+      route: "wake",
+    });
 
-    await activateHostedMemberForPositiveSourceTx({
+    await expect(activateHostedMemberForPositiveSourceTx({
       dispatchContext: {
         eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
         occurredAt: "2026-04-12T00:00:00.000Z",
@@ -402,11 +372,13 @@ describe("hosted onboarding member activation", () => {
       },
       member,
       prisma: makeTransactionHarness() as never,
+    })).resolves.toEqual({
+      activated: true,
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
+      memberId: "member_123",
     });
 
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedOrderedDispatchWakeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedOrderedDispatchWakeTx).toHaveBeenCalledWith({
+    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
         event: expect.objectContaining({
@@ -418,22 +390,22 @@ describe("hosted onboarding member activation", () => {
           },
         }),
       }),
+      sourceId: "stripe:evt_member_channels",
+      sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
   });
 
-  it("returns the existing activation event when billing is already active and the outbox row exists", async () => {
+  it("returns the existing activation event when billing is already active and a scheduled event already exists", async () => {
     const member = makeMemberSnapshot({
       core: {
         billingStatus: HostedBillingStatus.active,
       },
     });
-    const transaction = makeTransactionHarness({
-      existingDispatch: {
-        eventId: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
-      },
-    });
     mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+    mocks.findHostedExecutionScheduledEventIdTx.mockResolvedValue(
+      "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
+    );
 
     await expect(
       activateHostedMemberForPositiveSourceTx({
@@ -444,7 +416,7 @@ describe("hosted onboarding member activation", () => {
           sourceType: "stripe.customer.subscription.updated",
         },
         member,
-        prisma: transaction as never,
+        prisma: makeTransactionHarness() as never,
         skipIfBillingAlreadyActive: true,
       }),
     ).resolves.toEqual({
@@ -455,7 +427,7 @@ describe("hosted onboarding member activation", () => {
 
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedExecutionDispatchTx).not.toHaveBeenCalled();
   });
 });
 
@@ -497,12 +469,6 @@ function makeMemberSnapshot(overrides?: {
   };
 }
 
-function makeTransactionHarness(options?: {
-  existingDispatch?: { eventId: string } | null;
-}) {
-  return {
-    executionOutbox: {
-      findUnique: vi.fn().mockResolvedValue(options?.existingDispatch ?? null),
-    },
-  };
+function makeTransactionHarness() {
+  return {};
 }

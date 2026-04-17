@@ -6,7 +6,9 @@ import {
 } from "./payload";
 import {
   appendHostedCoalescingWakeTx,
+  appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx,
+  findHostedWakeEventIdByDedupeKeyTx,
   type AppendHostedWakeResult,
 } from "./store";
 
@@ -23,6 +25,22 @@ export async function appendHostedOrderedDispatchWakeTx(input: {
     tx: input.tx,
     userId: input.dispatch.event.userId,
   });
+}
+
+export async function appendHostedExecutionDispatchWakeTx(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  tx: Prisma.TransactionClient;
+}): Promise<AppendHostedWakeResult> {
+  switch (input.dispatch.event.kind) {
+    case "member.channels.updated":
+      return appendHostedCoalescingDispatchWakeTx({
+        coalescingKey: buildHostedWakeDispatchCoalescingKey(input.dispatch),
+        dispatch: input.dispatch,
+        tx: input.tx,
+      });
+    default:
+      return appendHostedOrderedDispatchWakeTx(input);
+  }
 }
 
 export async function appendHostedCoalescingDispatchWakeTx(input: {
@@ -42,8 +60,46 @@ export async function appendHostedCoalescingDispatchWakeTx(input: {
   });
 }
 
+export async function appendHostedEdgeTriggeredDispatchWakeTx(input: {
+  coalescingKey: string;
+  dispatch: HostedExecutionDispatchRequest;
+  tx: Prisma.TransactionClient;
+}): Promise<AppendHostedWakeResult> {
+  return appendHostedEdgeTriggeredWakeTx({
+    coalescingKey: input.coalescingKey,
+    dedupeKey: buildHostedWakeDispatchDedupeKey(input.dispatch),
+    kind: input.dispatch.event.kind,
+    occurredAt: input.dispatch.occurredAt,
+    payload: input.dispatch,
+    payloadSchema: HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
+    tx: input.tx,
+    userId: input.dispatch.event.userId,
+  });
+}
+
+export async function findHostedExecutionWakeEventIdTx(input: {
+  eventId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<string | null> {
+  return findHostedWakeEventIdByDedupeKeyTx({
+    dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId),
+    tx: input.tx,
+  });
+}
+
 export function buildHostedWakeDispatchDedupeKey(
   dispatch: HostedExecutionDispatchRequest,
 ): string {
   return `dispatch:${dispatch.event.kind}:${dispatch.eventId}`;
+}
+
+export function buildHostedWakeDispatchDedupeKeyFromEventId(eventId: string): string {
+  const [kind = eventId] = eventId.split(":", 1);
+  return `dispatch:${kind}:${eventId}`;
+}
+
+export function buildHostedWakeDispatchCoalescingKey(
+  dispatch: HostedExecutionDispatchRequest,
+): string {
+  return `${dispatch.event.kind}:${dispatch.event.userId}`;
 }

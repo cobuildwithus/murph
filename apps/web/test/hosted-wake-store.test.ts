@@ -6,9 +6,10 @@ import { encodeHostedWakeInlinePayload } from "@/src/lib/hosted-wake/payload";
 import {
   appendHostedCoalescingWakeTx,
   appendHostedEdgeTriggeredWakeTx,
+  appendHostedOrderedWakeTx,
   commitHostedExecutionCursorTx,
   listHostedWakesAfterSeq,
-  type AppendHostedWakeResult,
+  readHostedExecutionCursor,
 } from "@/src/lib/hosted-wake/store";
 
 interface TestCursorState {
@@ -211,6 +212,85 @@ describe("hosted wake store", () => {
 
     expect(listed.wakes).toHaveLength(1);
     expect(listed.wakes[0]?.dedupeKey).toBe("dispatch:member.channels.updated:first");
+  });
+
+  it("does not allocate a new seq when a duplicate dedupe key is discovered after the cursor lock", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 2n,
+        userId: "member_123",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "dispatch:member.activated:member.activated:stripe.invoice.paid:member_123:evt_123",
+          kind: "member.activated",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload: {
+            revision: 1,
+          },
+          seq: 1n,
+          userId: "member_123",
+        },
+      ],
+    });
+
+    const result = await appendHostedOrderedWakeTx({
+      dedupeKey: "dispatch:member.activated:member.activated:stripe.invoice.paid:member_123:evt_123",
+      kind: "member.activated",
+      occurredAt: "2026-04-17T00:01:00.000Z",
+      payload: {
+        revision: 2,
+      },
+      payloadSchema: "murph.hosted-wake-dispatch.v1",
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result.duplicate).toBe(true);
+    await expect(readHostedExecutionCursor({
+      prisma: tx,
+      userId: "member_123",
+    })).resolves.toEqual(expect.objectContaining({
+      committedSeq: "0",
+      nextSeq: "2",
+      userId: "member_123",
+    }));
+  });
+
+  it("floors unseen wake reads at the committed cursor position", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 3n,
+        nextSeq: 5n,
+        userId: "member_123",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "dispatch:assistant.cron.tick:evt_4",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload: {
+            revision: 4,
+          },
+          seq: 4n,
+          userId: "member_123",
+        },
+      ],
+    });
+
+    const listed = await listHostedWakesAfterSeq({
+      afterSeq: 1n,
+      prisma: tx,
+      userId: "member_123",
+    });
+
+    expect(listed.wakes).toHaveLength(1);
+    expect(listed.wakes[0]?.seq).toBe("4");
   });
 });
 

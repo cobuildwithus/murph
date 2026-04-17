@@ -8,10 +8,14 @@ const mocks = vi.hoisted(() => ({
   getEventStatus: vi.fn(),
   getPrisma: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
+  readLatestHostedWakeLifecycleByKind: vi.fn(),
 }));
 
 vi.mock("../hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: mocks.readHostedExecutionControlClientIfConfigured,
+}));
+vi.mock("../hosted-wake/store", () => ({
+  readLatestHostedWakeLifecycleByKind: mocks.readLatestHostedWakeLifecycleByKind,
 }));
 vi.mock("../prisma", () => ({
   getPrisma: mocks.getPrisma,
@@ -23,6 +27,7 @@ describe("hosted member activation progress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.readLatestHostedWakeLifecycleByKind.mockResolvedValue(null);
   });
 
   it("keeps activation pending when the canonical lifecycle is non-terminal and Cloudflare has no fresh hint", async () => {
@@ -65,18 +70,41 @@ describe("hosted member activation progress", () => {
     })).resolves.toBe(false);
     expect(mocks.getEventStatus).toHaveBeenCalledWith("member_123", "evt_activation");
   });
+
+  it("falls back to the latest hosted wake lifecycle when the outbox row is absent", async () => {
+    const prisma = createActivationPrisma(null);
+    mocks.readLatestHostedWakeLifecycleByKind.mockResolvedValue({
+      eventId: "evt_activation_from_wake",
+      state: "queued",
+    });
+
+    await expect(isHostedMemberActivationPending({
+      billingStatus: HostedBillingStatus.active,
+      memberId: "member_123",
+      prisma,
+    })).resolves.toBe(true);
+    expect(mocks.readLatestHostedWakeLifecycleByKind).toHaveBeenCalledWith({
+      kind: "member.activated",
+      prisma,
+      userId: "member_123",
+    });
+  });
 });
 
 function createActivationPrisma(record: {
   dispatchState: string;
   eventId: string;
-}): PrismaClient {
+} | null): PrismaClient {
   return {
     executionOutbox: {
-      findFirst: vi.fn(async () => ({
-        dispatchState: record.dispatchState,
-        eventId: record.eventId,
-      })),
+      findFirst: vi.fn(async () => (
+        record
+          ? {
+              dispatchState: record.dispatchState,
+              eventId: record.eventId,
+            }
+          : null
+      )),
     },
   } as unknown as PrismaClient;
 }
