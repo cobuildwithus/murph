@@ -307,6 +307,55 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects unsupported queue-only subjects before persisting an outbox intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-queue-subject-invalid-')
+
+    await expect(
+      deliverAssistantOutboxMessage({
+        channel: 'telegram',
+        dispatchMode: 'queue-only',
+        identityId: 'participant-queue',
+        message: 'queue this',
+        sessionId: 'session-queue',
+        subject: 'Not supported',
+        threadId: 'thread-queue',
+        threadIsDirect: true,
+        turnId: 'turn-queue',
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow(
+      'Only email delivery supports a subject override. Received subject for telegram.',
+    )
+
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('drops queue-only email subjects for thread-bound sends before persisting', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-queue-thread-subject-')
+
+    const queued = await deliverAssistantOutboxMessage({
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'thread-email-queue',
+      },
+      channel: 'email',
+      dispatchMode: 'queue-only',
+      identityId: 'assistant@example.com',
+      message: 'queue this email thread reply',
+      sessionId: 'session-queue-email',
+      subject: 'Should be dropped',
+      threadId: 'thread-email-queue',
+      threadIsDirect: true,
+      turnId: 'turn-queue-email',
+      vault: vaultRoot,
+    })
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.subject).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
   it('materializes Linq first-contact chats from receipt metadata and upgrades the session binding', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-first-contact-')
 

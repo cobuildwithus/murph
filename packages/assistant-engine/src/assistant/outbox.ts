@@ -12,6 +12,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
 import {
   getAssistantChannelAdapter,
+  normalizeAssistantDeliverySubject,
   sendLinqMessage,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
@@ -91,6 +92,7 @@ export interface AssistantOutboxDispatchPayload {
   explicitTarget?: string | null
   identityId?: string | null
   message: string
+  subject?: string | null
   replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
@@ -153,6 +155,7 @@ export async function createAssistantOutboxIntent(input: {
   explicitTarget?: string | null
   identityId?: string | null
   message: string
+  subject?: string | null
   replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
@@ -164,10 +167,17 @@ export async function createAssistantOutboxIntent(input: {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
     const message = normalizeRequiredMessage(input.message)
+    const subject = normalizeAssistantDeliverySubject({
+      bindingDelivery: input.bindingDelivery ?? null,
+      channel: input.channel ?? null,
+      explicitTarget: input.explicitTarget ?? null,
+      subject: input.subject ?? null,
+    })
     const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(input)
     const dedupeKey = hashAssistantOutboxIdentity({
       dedupeToken: input.dedupeToken,
       message,
+      subject,
       sessionId: input.sessionId,
       turnId: input.turnId,
       ...rawTargetIdentity,
@@ -190,6 +200,7 @@ export async function createAssistantOutboxIntent(input: {
       attemptCount: 0,
       status: 'pending',
       message,
+      subject,
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...buildAssistantOutboxPersistedTarget(input),
@@ -503,6 +514,7 @@ export async function deliverAssistantOutboxMessage(input: {
   explicitTarget?: string | null
   identityId?: string | null
   message: string
+  subject?: string | null
   replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
@@ -519,6 +531,7 @@ export async function deliverAssistantOutboxMessage(input: {
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     message: input.message,
+    subject: input.subject,
     replyToMessageId: input.replyToMessageId,
     sessionId: input.sessionId,
     threadId: input.threadId,
@@ -664,11 +677,19 @@ export async function sendAssistantOutboxPayload(input: {
   payload: AssistantOutboxDispatchPayload
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
+  const subject = normalizeAssistantDeliverySubject({
+    bindingDelivery: input.payload.bindingDelivery ?? null,
+    channel: input.payload.channel ?? null,
+    explicitTarget: input.payload.explicitTarget ?? null,
+    subject: input.payload.subject ?? null,
+  })
+
   return await maybeDeliverAssistantFirstContactLinqMaterialization(input)
     ?? await deliverAssistantMessageOverBinding({
       vault: input.vault,
       sessionId: input.payload.sessionId,
       message: input.payload.message,
+      subject,
       channel: input.payload.channel,
       idempotencyKey: input.payload.deliveryIdempotencyKey,
       identityId: input.payload.identityId,

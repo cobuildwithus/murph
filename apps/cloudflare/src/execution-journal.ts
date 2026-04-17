@@ -567,6 +567,7 @@ type HostedAssistantDeliveryPayloadSummary = {
   identityId: string | null;
   idempotencyKey: string;
   message: string;
+  subject: string | null;
   replyToMessageId: string | null;
   sessionId: string;
   threadId: string | null;
@@ -587,6 +588,7 @@ function summarizeHostedAssistantDeliveryPayload(
     identityId: payload.identityId,
     idempotencyKey: payload.idempotencyKey,
     message: payload.message,
+    subject: payload.subject,
     replyToMessageId: payload.replyToMessageId,
     sessionId: payload.sessionId,
     threadId: payload.threadId,

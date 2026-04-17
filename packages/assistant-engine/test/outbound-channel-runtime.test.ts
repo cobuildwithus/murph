@@ -20,6 +20,9 @@ const outboundMocks = vi.hoisted(() => ({
         : binding.delivery,
   })),
   normalizeAssistantDeliveryError: vi.fn(),
+  normalizeAssistantDeliverySubject: vi.fn((input: { subject?: string | null }) =>
+    input.subject?.trim() ? input.subject.trim() : null,
+  ),
   normalizeRequiredText: vi.fn((value: string) => value.trim()),
   parse: vi.fn((value) => value),
   readAssistantOutboxIntent: vi.fn(),
@@ -43,6 +46,7 @@ vi.mock('@murphai/operator-config/assistant-cli-contracts', () => ({
 
 vi.mock('../src/assistant/channel-adapters.js', () => ({
   getAssistantChannelAdapter: outboundMocks.getAssistantChannelAdapter,
+  normalizeAssistantDeliverySubject: outboundMocks.normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates: outboundMocks.resolveDeliveryCandidates,
   sendEmailMessage: outboundMocks.sendEmailMessage,
   sendLinqMessage: outboundMocks.sendLinqMessage,
@@ -611,6 +615,7 @@ describe('outbound channel runtime', () => {
         identityId: 'identity-1',
         message: 'hello binding',
         replyToMessageId: 'reply-over-binding',
+        subject: null,
       },
       {},
     )

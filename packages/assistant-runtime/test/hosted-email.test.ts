@@ -36,6 +36,7 @@ test("hosted email send parsing trims blank optional identity ids to null", () =
     {
       identityId: null,
       message: "hello",
+      subject: null,
       target: "user@example.com",
       targetKind: "explicit",
     },
@@ -52,6 +53,7 @@ test("hosted email send parsing treats an omitted identity id as null", () => {
     {
       identityId: null,
       message: "hello",
+      subject: null,
       target: "user@example.com",
       targetKind: "explicit",
     },

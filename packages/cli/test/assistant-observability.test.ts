@@ -368,6 +368,7 @@ test('assistant outbox inventory paths quarantine legacy intent payloads without
       targetKind: 'thread',
       messageLength: 42,
       messageSha256: 'legacy-message-sha',
+      subject: null,
       status: 'sent',
       createdAt: '2026-03-26T02:46:10.117Z',
       updatedAt: '2026-03-26T02:46:11.497Z',

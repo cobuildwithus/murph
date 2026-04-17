@@ -117,6 +117,7 @@ const TEST_OUTBOX_INTENT = {
   attemptCount: 0,
   status: 'pending',
   message: 'hello',
+  subject: null,
   dedupeKey: 'dedupe_123',
   targetFingerprint: 'target_123',
   channel: 'local',

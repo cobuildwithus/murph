@@ -318,6 +318,7 @@ describe('channel helper seams', () => {
       identityId: 'identity-7',
       message: 'hello there',
       replyToMessageId: 'reply-7',
+      subject: null,
     })
     expect(delivery).toMatchObject({
       channel: 'telegram',
@@ -511,6 +512,7 @@ describe('channel helper seams', () => {
       identityId: 'identity-email',
       message: 'email hello',
       replyToMessageId: 'reply-email',
+      subject: null,
       target: 'preferred@example.com',
       targetKind: 'explicit',
     })

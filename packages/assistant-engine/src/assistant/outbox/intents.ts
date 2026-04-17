@@ -86,6 +86,7 @@ export function hashAssistantOutboxIdentity(input: {
   explicitTarget?: string | null
   identityId?: string | null
   message: string
+  subject?: string | null
   replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
@@ -102,6 +103,7 @@ export function hashAssistantOutboxIdentity(input: {
     .update(
       JSON.stringify({
         message: input.message,
+        subject: normalizeNullableString(input.subject),
         sessionId: input.sessionId,
         dedupeToken: null,
         turnId: input.turnId,

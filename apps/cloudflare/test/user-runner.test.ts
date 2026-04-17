@@ -122,6 +122,7 @@ describe("HostedUserRunner", () => {
         idempotencyKey: `assistant-outbox:${input.effectId}`,
         identityId: "identity_123",
         message: "hello from hosted runner",
+        subject: null,
         replyToMessageId: null,
         sessionId: `session_${input.effectId}`,
         threadId: "thread_123",

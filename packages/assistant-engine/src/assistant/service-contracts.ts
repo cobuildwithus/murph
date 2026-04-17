@@ -69,6 +69,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryReplyToMessageId?: string | null
+  deliverySubject?: string | null
   deliveryTarget?: string | null
   executionContext?: AssistantExecutionContext | null
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null

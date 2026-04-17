@@ -627,6 +627,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "identityId"
     | "intentId"
     | "message"
+    | "subject"
     | "replyToMessageId"
     | "sessionId"
     | "threadId"
@@ -643,6 +644,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,
     message: intent.message,
+    subject: intent.subject ?? null,
     replyToMessageId: intent.replyToMessageId ?? null,
     sessionId: intent.sessionId,
     threadId: intent.threadId ?? null,
@@ -668,6 +670,7 @@ function buildAssistantOutboxDispatchPayload(
     explicitTarget: payload.explicitTarget,
     identityId: payload.identityId,
     message: payload.message,
+    subject: payload.subject,
     replyToMessageId: payload.replyToMessageId,
     sessionId: payload.sessionId,
     threadId: payload.threadId,

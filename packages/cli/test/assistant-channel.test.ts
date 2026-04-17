@@ -603,6 +603,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
     targetKind: 'thread',
     message: 'Email thread reply.',
     replyToMessageId: null,
+    subject: null,
   })
   assert.equal(result.delivery.channel, 'email')
   assert.equal(result.delivery.target, 'thread_123')
@@ -665,6 +666,7 @@ test('deliverAssistantMessage persists canonical email thread targets returned b
     target: 'thread_123',
     targetKind: 'thread',
     replyToMessageId: null,
+    subject: null,
   })
   assert.equal(result.delivery.target, canonicalTarget)
   assert.equal(result.delivery.targetKind, 'thread')

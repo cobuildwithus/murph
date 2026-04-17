@@ -71,6 +71,7 @@ export interface AssistantChannelDependencies {
     identityId: string | null
     message: string
     replyToMessageId?: string | null
+    subject?: string | null
     target: string
     targetKind: AssistantDeliveryCandidate['kind']
   }) => Promise<
@@ -115,6 +116,7 @@ export interface AssistantChannelAdapter {
       identityId: string | null
       message: string
       replyToMessageId?: string | null
+      subject?: string | null
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
@@ -141,6 +143,7 @@ export interface AssistantChannelAdapterSpec {
     identityId: string | null
     message: string
     replyToMessageId?: string | null
+    subject?: string | null
   }) => Promise<
     | {
         providerMessageId?: string | null

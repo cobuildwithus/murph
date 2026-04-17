@@ -165,6 +165,7 @@ function createIntent(
     lastAttemptAt: null,
     lastError: null,
     message: 'hello',
+    subject: null,
     nextAttemptAt: '2026-04-08T10:00:00.000Z',
     replyToMessageId: null,
     schema: 'murph.assistant-outbox-intent.v1',

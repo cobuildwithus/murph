@@ -217,10 +217,12 @@ function buildAssistantNotificationDecisionGuidanceText(
 - Use one of these shapes:
   {"kind":"skip","privateSummary":"..."}
   {"kind":"send_message","text":"...","privateSummary":"..."}
+  {"kind":"send_message","text":"...","subject":"...","privateSummary":"..."}
 - \`text\` must contain only the final user-facing message to send once on the bound channel.
+- \`subject\` is optional and only applies to email sends that start a new outbound message. Omit it for non-email channels and for ordinary email replies that should keep the existing thread subject.
 - \`privateSummary\` is for internal run notes only.
 - Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in \`text\` unless the user-facing message genuinely needs it.
-- Keep \`text\` brief, natural, and channel-appropriate.`
+- Keep \`text\` brief, natural, and channel-appropriate. Keep \`subject\` concise and useful when you include it.`
   );
 }
 
