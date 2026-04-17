@@ -7,6 +7,7 @@
 import {
   HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
 } from "@murphai/hosted-execution/hosted-email";
+import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "../bundle-store.ts";
 import {
@@ -16,7 +17,6 @@ import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.t
 import type { HostedEmailConfig } from "./config.ts";
 import {
   formatHostedEmailAddress,
-  resolveHostedEmailRouteIdentity,
   isHostedEmailPublicSenderAddress,
   parseHostedEmailRouteCandidate,
 } from "./route-addressing.ts";
@@ -103,7 +103,6 @@ export async function createHostedEmailUserAddress(input: {
   if (!existing) {
     await store.writeUserRoute({
       aliasKey,
-      identityId: input.config.fromAddress,
       userId: input.userId,
     });
   }
@@ -122,7 +121,8 @@ export async function resolveHostedEmailInboundRoute(input: {
   keysById?: Readonly<Record<string, Uint8Array>>;
   to: string;
 }): Promise<HostedEmailInboundRoute | null> {
-  if (!input.config.domain || !input.config.signingSecret) {
+  const configuredSender = normalizeHostedEmailAddress(input.config.fromAddress);
+  if (!input.config.domain || !input.config.signingSecret || !configuredSender) {
     return null;
   }
 
@@ -148,7 +148,7 @@ export async function resolveHostedEmailInboundRoute(input: {
 
   return {
     authorization: "verified-email",
-    identityId: resolveHostedEmailRouteIdentity(record.identityId, input.config),
+    identityId: configuredSender,
     routeAddress: candidate.address,
     userId: record.userId,
   };
@@ -161,7 +161,8 @@ async function resolveHostedEmailPublicSenderIngressRoute(
     to: string;
   },
 ): Promise<HostedEmailInboundRoute | null> {
-  if (!input.config.fromAddress || !input.webCallbackSigning || !input.webControlBaseUrl) {
+  const configuredSender = normalizeHostedEmailAddress(input.config.fromAddress);
+  if (!configuredSender || !input.webCallbackSigning || !input.webControlBaseUrl) {
     return null;
   }
 
@@ -196,7 +197,7 @@ async function resolveHostedEmailPublicSenderIngressRoute(
 
     return {
       authorization: "direct-public-sender",
-      identityId: resolveHostedEmailRouteIdentity(input.config.fromAddress, input.config),
+      identityId: configuredSender,
       routeAddress: input.to,
       userId,
     };

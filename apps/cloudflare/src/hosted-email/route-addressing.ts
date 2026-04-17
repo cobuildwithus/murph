@@ -18,13 +18,6 @@ export function isHostedEmailPublicSenderAddress(
   return publicSenderAddress !== null && normalizedAddress === publicSenderAddress;
 }
 
-export function resolveHostedEmailRouteIdentity(
-  fallbackIdentityId: string,
-  config: HostedEmailConfig,
-): string {
-  return normalizeHostedEmailAddress(config.fromAddress) ?? fallbackIdentityId;
-}
-
 export function parseHostedEmailRouteCandidate(
   value: string | null | undefined,
   config: HostedEmailConfig,
@@ -50,11 +43,17 @@ export function parseHostedEmailRouteCandidate(
 }
 
 export function formatHostedEmailAddress(config: HostedEmailConfig, detail: string): string {
-  if (!config.domain) {
+  const domain = normalizeHostedEmailRouteDomain(config.domain);
+  if (!domain) {
     throw new Error("Hosted email domain is not configured.");
   }
 
-  return `${config.localPart}+${detail}@${config.domain}`;
+  const localPart = normalizeHostedEmailRouteLocalPart(config.localPart);
+  if (!localPart) {
+    throw new Error("Hosted email local part is not configured.");
+  }
+
+  return `${localPart}+${detail}@${domain}`;
 }
 
 function parseHostedEmailAddressCandidate(
@@ -62,22 +61,24 @@ function parseHostedEmailAddressCandidate(
   config: HostedEmailConfig,
 ): { address: string; detail: string } | null {
   const address = normalizeHostedEmailAddress(value);
-  if (!address || !config.domain) {
+  const domain = normalizeHostedEmailRouteDomain(config.domain);
+  const configuredLocalPart = normalizeHostedEmailRouteLocalPart(config.localPart);
+  if (!address || !domain || !configuredLocalPart) {
     return null;
   }
 
-  const expectedSuffix = `@${config.domain}`;
+  const expectedSuffix = `@${domain}`;
   if (!address.endsWith(expectedSuffix)) {
     return null;
   }
 
-  const localPart = address.slice(0, -expectedSuffix.length);
-  const prefix = `${config.localPart}+`;
-  if (!localPart.startsWith(prefix)) {
+  const addressLocalPart = address.slice(0, -expectedSuffix.length);
+  const prefix = `${configuredLocalPart}+`;
+  if (!addressLocalPart.startsWith(prefix)) {
     return null;
   }
 
-  const detail = localPart.slice(prefix.length).trim();
+  const detail = addressLocalPart.slice(prefix.length).trim();
   if (!detail) {
     return null;
   }
@@ -86,4 +87,14 @@ function parseHostedEmailAddressCandidate(
     address,
     detail,
   };
+}
+
+function normalizeHostedEmailRouteDomain(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeHostedEmailRouteLocalPart(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }

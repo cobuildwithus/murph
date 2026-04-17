@@ -14,8 +14,7 @@ import {
 } from "../crypto.ts";
 
 export interface HostedEmailUserRouteRecord {
-  identityId: string;
-  schema: "murph.hosted-email-user-route.v1";
+  schema: "murph.hosted-email-user-route.v2";
   userId: string;
 }
 
@@ -23,7 +22,6 @@ export interface HostedEmailRouteStore {
   readUserRoute(aliasKey: string): Promise<HostedEmailUserRouteRecord | null>;
   writeUserRoute(input: {
     aliasKey: string;
-    identityId: string;
     userId: string;
   }): Promise<void>;
 }
@@ -35,7 +33,7 @@ interface HostedEmailRouteStoreInput {
   cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
 }
 
-const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v1";
+const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v2";
 
 export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): HostedEmailRouteStore {
   return {
@@ -75,7 +73,6 @@ export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): 
         keyId: input.cryptoKeyId,
         scope: "email-route",
         value: {
-          identityId: writeInput.identityId,
           schema: HOSTED_EMAIL_USER_ROUTE_SCHEMA,
           userId: writeInput.userId,
         } satisfies HostedEmailUserRouteRecord,
@@ -102,7 +99,6 @@ function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRe
   }
 
   return {
-    identityId: requireHostedEmailRecordString(record.identityId, "Hosted email user route identityId"),
     schema: HOSTED_EMAIL_USER_ROUTE_SCHEMA,
     userId: requireHostedEmailRecordString(record.userId, "Hosted email user route userId"),
   };

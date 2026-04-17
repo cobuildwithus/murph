@@ -18,4 +18,19 @@ describe("readHostedEmailConfig", () => {
       }).fromAddress,
     ).toBe("assistant@mail.example.test");
   });
+
+  it("normalizes hosted email routing segments to lowercase", () => {
+    expect(readHostedEmailConfig({
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "  Murph update  ",
+      HOSTED_EMAIL_DOMAIN: " Reply.Example.COM ",
+      HOSTED_EMAIL_LOCAL_PART: " Murph ",
+      HOSTED_EMAIL_SIGNING_SECRET: " secret ",
+    })).toEqual({
+      defaultSubject: "Murph update",
+      domain: "reply.example.com",
+      fromAddress: "murph@reply.example.com",
+      localPart: "murph",
+      signingSecret: "secret",
+    });
+  });
 });
