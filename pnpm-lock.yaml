@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.63
-        version: 0.5.63(@cfworker/json-schema@4.1.1)
+        specifier: ^0.5.64
+        version: 0.5.64(@cfworker/json-schema@4.1.1)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -1000,8 +1000,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.63':
-    resolution: {integrity: sha512-g/41BuGCymJtnIshiCLVXYHwu6JZs7wlgvntHUHDfYJDilaNUWjpc4a29UcMsldz99FJdHXrOr+P4j8ywZUrDA==}
+  '@cobuild/review-gpt@0.5.64':
+    resolution: {integrity: sha512-B1cmzB9E3ndL4MtD6P2frVGBUOo2ultHG8L0+1zB7XQUEUPoKuGmd1MZzbjudGWUf87PTXgUZXcxLapq01Jc7Q==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -8628,7 +8628,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.63(@cfworker/json-schema@4.1.1)':
+  '@cobuild/review-gpt@0.5.64(@cfworker/json-schema@4.1.1)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(@cfworker/json-schema@4.1.1)(openapi-types@12.1.3)
