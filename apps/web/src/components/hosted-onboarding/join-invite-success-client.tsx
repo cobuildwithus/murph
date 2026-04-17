@@ -18,6 +18,7 @@ interface JoinInviteSuccessClientProps {
   inviteCode: string;
   sessionId: string | null;
   shareCode: string | null;
+  preview?: boolean;
 }
 
 interface HostedInviteSuccessState {
@@ -33,6 +34,7 @@ export function JoinInviteSuccessClient({
   inviteCode,
   sessionId,
   shareCode,
+  preview = false,
 }: JoinInviteSuccessClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -49,10 +51,12 @@ export function JoinInviteSuccessClient({
       setStatus(payload);
     },
     shouldPoll,
+    disabled: preview,
   });
 
   useEffect(() => {
     if (
+      preview ||
       successSyncStartedRef.current ||
       !sessionId ||
       !status.session.matchesInvite ||
