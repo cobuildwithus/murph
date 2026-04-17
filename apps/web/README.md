@@ -8,6 +8,11 @@ in Postgres here, not in Cloudflare worker control storage. In particular,
 share facts, device-sync control-plane authority, the hosted AI usage ledger,
 and the canonical dispatch lifecycle around `execution_outbox`.
 
+The repo also carries a staged `HostedWake` / `HostedExecutionCursor` substrate
+for the long-term web-owned wake queue cutover. While
+`HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE` remains disabled, that substrate is
+shadow state only and does not replace `execution_outbox` yet.
+
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs one
 hosted job, and commits the next encrypted workspace snapshot. It may hold
@@ -51,7 +56,8 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedMemberEmailAuthorization` owns verified-email and sender-authorization facts
 - `HostedShareLink` owns public share-link UX metadata and claim lifecycle
 - `HostedSharePayload` owns canonical encrypted share payloads in Postgres
-- `ExecutionOutbox` owns canonical dispatch intent and lifecycle state
+- `ExecutionOutbox` owns canonical dispatch intent and lifecycle state today
+- `HostedExecutionCursor` and `HostedWake` stage the future web-owned wake queue substrate
 - `HostedAiUsage` owns the canonical hosted usage ledger
 
 ## Key environment variables
@@ -92,6 +98,9 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+- `HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE` to shadow-write `member.activated` and
+  `member.channels.updated` into the new `HostedWake` substrate without cutting
+  traffic off `execution_outbox`
 
 Provider-owned webhook-admin settings:
 

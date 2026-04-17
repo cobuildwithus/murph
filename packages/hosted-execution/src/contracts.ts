@@ -240,6 +240,65 @@ export interface HostedExecutionDispatchResult {
   status: HostedExecutionUserStatus;
 }
 
+export const HOSTED_WAKE_BEHAVIORS = [
+  "ordered",
+  "coalescing",
+  "edge_triggered",
+] as const;
+
+export type HostedWakeBehavior =
+  (typeof HOSTED_WAKE_BEHAVIORS)[number];
+
+export interface HostedExecutionCursorState {
+  committedSeq: string;
+  createdAt: string;
+  nextSeq: string;
+  snapshotRef: unknown | null;
+  updatedAt: string;
+  userId: string;
+  version: string;
+}
+
+export interface HostedWakeRecord {
+  behavior: HostedWakeBehavior;
+  coalescingKey?: string | null;
+  createdAt: string;
+  dedupeKey?: string | null;
+  id: string;
+  kind: string;
+  occurredAt: string;
+  payloadBytes?: number | null;
+  payloadInlineCiphertext?: string | null;
+  payloadRef?: string | null;
+  payloadSchema: string;
+  quarantineCode?: string | null;
+  quarantinedAt?: string | null;
+  seq: string;
+  updatedAt: string;
+  userId: string;
+}
+
+export interface HostedWakeFetchRequest {
+  afterSeq?: string | null;
+  limit?: number | null;
+}
+
+export interface HostedWakeFetchResponse {
+  cursor: HostedExecutionCursorState;
+  wakes: HostedWakeRecord[];
+}
+
+export interface HostedWakeCommitRequest {
+  committedSeq: string;
+  expectedVersion: string;
+  snapshotRef?: unknown | null;
+}
+
+export interface HostedWakeCommitResponse {
+  committed: boolean;
+  cursor: HostedExecutionCursorState;
+}
+
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";

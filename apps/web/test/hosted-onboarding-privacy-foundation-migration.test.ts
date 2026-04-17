@@ -71,12 +71,14 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsage",
   "HostedInvite",
   "HostedLinqDailyState",
+  "HostedExecutionCursor",
   "HostedMember",
   "HostedMemberBillingRef",
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
   "HostedRevnetIssuance",
+  "HostedWake",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -114,6 +116,7 @@ describe("hosted Prisma baseline migration", () => {
       "202604141730_hosted_member_identity_optional_phone",
       "202604161130_hosted_web_owner_slices",
       "202604161430_device_sync_web_owner_runtime_state",
+      "202604171900_hosted_wake_substrate",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');

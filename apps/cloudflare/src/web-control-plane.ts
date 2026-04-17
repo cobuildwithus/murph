@@ -1,6 +1,14 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedWakeCommitRequest,
+  type HostedWakeCommitResponse,
+  type HostedWakeFetchRequest,
+  type HostedWakeFetchResponse,
 } from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedWakeCommitResponse,
+  parseHostedWakeFetchResponse,
+} from "@murphai/hosted-execution/parsers";
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
@@ -59,8 +67,12 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
       userId: input.boundUserId,
     });
 
-    for (const [key, value] of Object.entries(signatureHeaders)) {
-      headers.set(key, value);
+    for (const key of Object.keys(signatureHeaders)) {
+      const value = signatureHeaders[key];
+
+      if (typeof value === "string") {
+        headers.set(key, value);
+      }
     }
   }
 
@@ -71,6 +83,66 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     redirect: "error",
     signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
   });
+}
+
+const HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH = "/api/internal/hosted-wake/commit";
+const HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH = "/api/internal/hosted-wake/unseen";
+
+export async function fetchHostedWakeBatchFromWeb(input: {
+  afterSeq?: string | null;
+  baseUrl: string;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  limit?: number | null;
+  timeoutMs: number | null;
+}): Promise<HostedWakeFetchResponse> {
+  const body = JSON.stringify({
+    ...(input.afterSeq === undefined ? {} : { afterSeq: input.afterSeq }),
+    ...(input.limit === undefined ? {} : { limit: input.limit }),
+  } satisfies HostedWakeFetchRequest);
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body,
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted wake batch fetch failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedWakeFetchResponse(await response.json());
+}
+
+export async function commitHostedWakeCursorToWeb(input: {
+  baseUrl: string;
+  body: HostedWakeCommitRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedWakeCommitResponse> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body: JSON.stringify(input.body),
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted wake cursor commit failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedWakeCommitResponse(await response.json());
 }
 
 function requireHostedWebControlBaseUrl(value: string): string {

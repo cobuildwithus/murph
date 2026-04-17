@@ -1,11 +1,12 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import type { HostedStripeDispatchContext } from "@/src/lib/hosted-onboarding/stripe-dispatch";
 
 const mocks = vi.hoisted(() => ({
   enqueueHostedExecutionOutbox: vi.fn(),
+  appendHostedOrderedDispatchWakeTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
@@ -14,6 +15,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+}));
+
+vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
+  appendHostedOrderedDispatchWakeTx: mocks.appendHostedOrderedDispatchWakeTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -52,6 +57,7 @@ import {
 describe("hosted onboarding member activation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
     vi.spyOn(console, "info").mockImplementation(() => {});
 
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
@@ -74,6 +80,33 @@ describe("hosted onboarding member activation", () => {
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue({
       eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
     });
+    mocks.appendHostedOrderedDispatchWakeTx.mockResolvedValue({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: {
+        behavior: "ordered",
+        coalescingKey: null,
+        createdAt: "2026-04-12T00:00:00.000Z",
+        dedupeKey: "dispatch:member.activated:member.activated:stripe.invoice.paid:member_123:evt_123",
+        id: "wake_123",
+        kind: "member.activated",
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        payloadBytes: 1,
+        payloadInlineCiphertext: "ciphertext",
+        payloadRef: null,
+        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        quarantineCode: null,
+        quarantinedAt: null,
+        seq: "1",
+        updatedAt: "2026-04-12T00:00:00.000Z",
+        userId: "member_123",
+      },
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE;
   });
 
   it("keeps the Linq routing lookup and activation dispatch ownership together for Stripe activations", async () => {
@@ -124,6 +157,7 @@ describe("hosted onboarding member activation", () => {
       sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
+    expect(mocks.appendHostedOrderedDispatchWakeTx).not.toHaveBeenCalled();
   });
 
   it("keeps the revnet confirmation path on the same activation owner", async () => {
@@ -200,6 +234,7 @@ describe("hosted onboarding member activation", () => {
       sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
+    expect(mocks.appendHostedOrderedDispatchWakeTx).not.toHaveBeenCalled();
   });
 
   it("emits Telegram first-contact without a Linq lookup for phone-less members", async () => {
@@ -333,6 +368,56 @@ describe("hosted onboarding member activation", () => {
       }),
       sourceId: "stripe:evt_member_channels",
       sourceType: "hosted_stripe_event",
+      tx: expect.anything(),
+    });
+    expect(mocks.appendHostedOrderedDispatchWakeTx).not.toHaveBeenCalled();
+  });
+
+  it("dual-writes a hosted wake only when the shadow producer flag is enabled", async () => {
+    process.env.HOSTED_WAKE_SIMPLE_PRODUCER_DUALWRITE = "true";
+
+    const member = makeMemberSnapshot({
+      identity: {
+        phoneLookupKey: null,
+        phoneNumber: null,
+      },
+      routing: {
+        linqChatId: null,
+        linqRecipientPhone: null,
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqRecipientPhone: null,
+        telegramUserId: "telegram_user_456",
+        telegramUserLookupKey: "telegram_lookup_456",
+      },
+    });
+    mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+
+    await activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_member_channels",
+        sourceType: "stripe.invoice.paid",
+      },
+      member,
+      prisma: makeTransactionHarness() as never,
+    });
+
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedOrderedDispatchWakeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedOrderedDispatchWakeTx).toHaveBeenCalledWith({
+      dispatch: expect.objectContaining({
+        eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
+        event: expect.objectContaining({
+          kind: "member.activated",
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: true,
+          },
+        }),
+      }),
       tx: expect.anything(),
     });
   });
