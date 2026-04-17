@@ -6,6 +6,7 @@ import {
 import {
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
 } from "./member-activation";
+import { handoffHostedExecutionScheduledEventBestEffort } from "../hosted-wake/control";
 import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
@@ -66,7 +67,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       continue;
     }
 
-    await input.prisma.$transaction(async (transaction) => {
+    const activationEventId = await input.prisma.$transaction(async (transaction) => {
       await transaction.hostedRevnetIssuance.update({
         where: {
           id: issuance.id,
@@ -88,7 +89,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         return;
       }
 
-      await activateHostedMemberFromConfirmedRevnetIssuanceTx({
+      const activation = await activateHostedMemberFromConfirmedRevnetIssuanceTx({
         emailLinked: await resolveHostedMemberEmailLinked({
           memberId: issuance.memberId,
         }),
@@ -98,7 +99,17 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         sourceEventId: issuance.id,
         sourceType: "hosted.revnet.issuance.confirmed",
       });
+
+      return activation.hostedExecutionEventId;
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+    if (activationEventId) {
+      await handoffHostedExecutionScheduledEventBestEffort({
+        context: "stripe-revnet-reconciliation",
+        eventId: activationEventId,
+        prisma: input.prisma,
+      });
+    }
 
     confirmedIssuanceIds.push(issuance.id);
   }

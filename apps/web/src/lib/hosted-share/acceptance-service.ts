@@ -7,9 +7,9 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
-  drainHostedExecutionOutboxBestEffort,
-  enqueueHostedExecutionOutbox,
+  scheduleHostedExecutionDispatchTx,
 } from "../hosted-execution/outbox";
+import { handoffHostedExecutionScheduledEventBestEffort } from "../hosted-wake/control";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
@@ -141,7 +141,7 @@ export async function acceptHostedShareLink(input: {
           },
         });
 
-    await enqueueHostedExecutionOutbox({
+    await scheduleHostedExecutionDispatchTx({
       dispatch: buildHostedShareAcceptanceDispatch({
         acceptedAt: acceptedAt.toISOString(),
         eventId,
@@ -170,11 +170,9 @@ export async function acceptHostedShareLink(input: {
     };
   }
 
-  void drainHostedExecutionOutboxBestEffort({
-    eventIds: [
-      claim.eventId,
-    ],
-    limit: 1,
+  void handoffHostedExecutionScheduledEventBestEffort({
+    context: "hosted-share.acceptance",
+    eventId: claim.eventId,
     prisma,
   });
 

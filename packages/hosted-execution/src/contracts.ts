@@ -267,6 +267,7 @@ export interface HostedWakeRecord {
   id: string;
   kind: string;
   occurredAt: string;
+  payloadJson?: unknown;
   payloadBytes?: number | null;
   payloadInlineCiphertext?: string | null;
   payloadRef?: string | null;

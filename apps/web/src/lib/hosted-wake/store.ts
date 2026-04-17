@@ -13,7 +13,10 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 
 import { getPrisma } from "../prisma";
-import { encodeHostedWakeInlinePayload } from "./payload";
+import {
+  decodeHostedWakeInlinePayload,
+  encodeHostedWakeInlinePayload,
+} from "./payload";
 
 type HostedWakeStoreClient = PrismaClient | Prisma.TransactionClient;
 type HostedWakeMutationTx = Prisma.TransactionClient;
@@ -344,6 +347,30 @@ export async function findHostedWakeEventIdByDedupeKeyTx(input: {
   return row.dedupeKey ?? row.id;
 }
 
+export async function readHostedWakeScheduleByDedupeKeyTx(input: {
+  dedupeKey: string;
+  tx: HostedWakeStoreClient;
+}): Promise<{
+  eventId: string;
+  seq: string;
+  userId: string;
+} | null> {
+  const row = await findHostedWakeByDedupeKeyTx({
+    dedupeKey: input.dedupeKey,
+    tx: input.tx,
+  });
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    eventId: row.dedupeKey ?? row.id,
+    seq: row.seq.toString(),
+    userId: row.userId,
+  };
+}
+
 export async function readLatestHostedWakeLifecycleByKind(input: {
   kind: string;
   prisma?: HostedWakeStoreClient;
@@ -407,6 +434,11 @@ export function projectHostedExecutionCursorRecord(
 export function projectHostedWakeRecord(
   record: HostedWakeRow,
 ): HostedWakeRecord {
+  const payloadJson = decodeHostedWakeInlinePayload({
+    payloadInlineCiphertext: record.payloadInlineCiphertext,
+    userId: record.userId,
+  });
+
   return {
     behavior: record.behavior,
     coalescingKey: record.coalescingKey,
@@ -415,6 +447,7 @@ export function projectHostedWakeRecord(
     id: record.id,
     kind: record.kind,
     occurredAt: record.occurredAt.toISOString(),
+    ...(payloadJson === null ? {} : { payloadJson }),
     payloadBytes: record.payloadBytes,
     payloadInlineCiphertext: record.payloadInlineCiphertext,
     payloadRef: record.payloadRef,

@@ -21,6 +21,9 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   getEventStatus(input: { eventId: string }): Promise<HostedExecutionDispatchStatus | null>;
   status(): Promise<HostedExecutionUserStatus>;
+  wakeHostedWakes(input?: {
+    targetSeqHint?: string | null;
+  }): Promise<HostedExecutionUserStatus>;
 }
 
 export interface WorkerEnvironmentSource

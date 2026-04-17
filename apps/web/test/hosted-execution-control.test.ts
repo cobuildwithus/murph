@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   createCloudflareHostedControlClient: vi.fn(),
   createHostedExecutionVercelOidcBearerTokenProvider: vi.fn(),
   readHostedExecutionControlBaseUrl: vi.fn(),
+  readHostedExecutionDispatchEnvironment: vi.fn(),
   tokenProvider: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ vi.mock("@murphai/cloudflare-hosted-control/client", () => ({
 
 vi.mock("@/src/lib/hosted-execution/environment", () => ({
   readHostedExecutionControlBaseUrl: mocks.readHostedExecutionControlBaseUrl,
+  readHostedExecutionDispatchEnvironment: mocks.readHostedExecutionDispatchEnvironment,
 }));
 
 vi.mock("@/src/lib/hosted-execution/auth-adapter", () => ({
@@ -24,11 +26,14 @@ describe("hosted execution control client", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readHostedExecutionControlBaseUrl.mockReturnValue("https://dispatch.example.test");
+    mocks.readHostedExecutionDispatchEnvironment.mockReturnValue({
+      dispatchTimeoutMs: 30_000,
+    });
     mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
     mocks.createCloudflareHostedControlClient.mockReturnValue({
       getEventStatus: vi.fn(),
       getStatus: vi.fn(),
-      run: vi.fn(),
+      wakeUser: vi.fn(),
     });
   });
 
@@ -44,6 +49,7 @@ describe("hosted execution control client", () => {
       allowHttpLocalhost: true,
       baseUrl: "https://dispatch.example.test",
       getBearerToken: mocks.tokenProvider,
+      timeoutMs: 30_000,
     });
   });
 

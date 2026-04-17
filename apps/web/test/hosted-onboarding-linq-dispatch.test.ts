@@ -7,22 +7,40 @@ import {
   buildHostedLinqConversationHomeRedirectReply,
 } from "@/src/lib/hosted-onboarding/linq";
 
-const mocks = vi.hoisted(() => ({
-  deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
-  claimHostedLinqOnboardingLinkNotice: vi.fn(),
-  claimHostedLinqQuotaReplyNotice: vi.fn(),
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
-  enqueueHostedExecutionOutbox: vi.fn(),
-  finishHostedOnboardingTiming: vi.fn(),
-  incrementHostedLinqInboundDailyState: vi.fn(),
-  incrementHostedLinqOutboundDailyState: vi.fn(),
-  sendHostedLinqChatMessage: vi.fn(),
-  startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
-    baseDetails,
-    startedAtMs: 0,
-    step,
-  })),
-}));
+const mocks = vi.hoisted(() => {
+  const state = {
+    deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
+    claimHostedLinqOnboardingLinkNotice: vi.fn(),
+    claimHostedLinqQuotaReplyNotice: vi.fn(),
+    drainHostedExecutionOutboxBestEffort: vi.fn(),
+    enqueueHostedExecutionOutbox: vi.fn(),
+    finishHostedOnboardingTiming: vi.fn(),
+    incrementHostedLinqInboundDailyState: vi.fn(),
+    incrementHostedLinqOutboundDailyState: vi.fn(),
+    sendHostedLinqChatMessage: vi.fn(),
+    startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
+      baseDetails,
+      startedAtMs: 0,
+      step,
+    })),
+    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string }) => ({
+      eventId: input.eventId,
+      route: "outbox" as const,
+      userId: "member_123",
+    })),
+    scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
+      dispatch: { eventId: string };
+    }) => {
+      await state.enqueueHostedExecutionOutbox(input);
+      return {
+        eventId: input.dispatch.eventId,
+        route: "outbox" as const,
+      };
+    }),
+  };
+
+  return state;
+});
 
 vi.mock("@/src/lib/hosted-execution/outbox", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
@@ -33,6 +51,8 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
     ...actual,
     drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+    readHostedExecutionScheduledDispatchTarget: mocks.readHostedExecutionScheduledDispatchTarget,
+    scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
   };
 });
 

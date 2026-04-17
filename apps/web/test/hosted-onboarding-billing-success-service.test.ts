@@ -16,11 +16,22 @@ const mocks = vi.hoisted(() => {
     },
   };
 
-  return {
+  const state = {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
+    handoffHostedExecutionScheduledEventBestEffort: vi.fn(async (input: {
+      eventId: string;
+      prisma?: unknown;
+    }) => {
+      await state.drainHostedExecutionOutboxBestEffort({
+        eventIds: [input.eventId],
+        limit: 1,
+        prisma: input.prisma,
+      });
+      return "outbox";
+    }),
     readHostedMemberSnapshot: vi.fn(),
     resolveHostedMemberEmailLinked: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
@@ -29,10 +40,15 @@ const mocks = vi.hoisted(() => {
     updateHostedMemberStripeBillingIfFresh: vi.fn(),
     writeHostedMemberStripeBillingRef: vi.fn(),
   };
+
+  return state;
 });
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+}));
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({

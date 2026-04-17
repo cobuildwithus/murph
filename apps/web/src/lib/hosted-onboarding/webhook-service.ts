@@ -10,7 +10,14 @@ import {
 import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
-import { drainHostedExecutionOutboxBestEffort } from "../hosted-execution/outbox";
+import {
+  drainHostedExecutionOutboxBestEffort,
+  readHostedExecutionScheduledDispatchTarget,
+} from "../hosted-execution/outbox";
+import {
+  handoffHostedExecutionScheduledEventBestEffort,
+  triggerHostedWakeUserBestEffort,
+} from "../hosted-wake/control";
 import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
@@ -242,21 +249,17 @@ export async function handleHostedStripeWebhook(input: {
 
     if (hostedExecutionEventId) {
       if (input.defer) {
-        await input.defer(() =>
-          drainHostedExecutionOutboxBestEffort({
-            eventIds: [
-              hostedExecutionEventId,
-            ],
-            limit: 1,
+        await input.defer(async () => {
+          await handoffHostedExecutionScheduledEventBestEffort({
+            context: "stripe.webhook",
+            eventId: hostedExecutionEventId,
             prisma,
-          }),
-        );
+          });
+        });
       } else {
-        await drainHostedExecutionOutboxBestEffort({
-          eventIds: [
-            hostedExecutionEventId,
-          ],
-          limit: 1,
+        await handoffHostedExecutionScheduledEventBestEffort({
+          context: "stripe.webhook",
+          eventId: hostedExecutionEventId,
           prisma,
         });
       }
@@ -446,15 +449,99 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
     return;
   }
 
+  const scheduledTarget = await readHostedExecutionScheduledDispatchTarget({
+    eventId: input.eventId,
+    prisma: input.prisma,
+  });
+
+  if (!scheduledTarget) {
+    return;
+  }
+
   const handoffTiming = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.outbox-handoff`,
+    `hosted-onboarding.webhook.${input.source}.${scheduledTarget.route}-handoff`,
     {
       deferred: Boolean(input.defer),
       eventId: input.eventId,
       inlineTimeoutMs: input.maxInlineDrainMs ?? null,
+      route: scheduledTarget.route,
       responseReason: input.response.reason,
     },
   );
+
+  if (scheduledTarget.route === "wake") {
+    if (typeof input.maxInlineDrainMs === "number" && input.maxInlineDrainMs > 0) {
+      const completedInline = await waitForHostedExecutionWebhookWake({
+        eventId: input.eventId,
+        responseReason: input.response.reason,
+        source: input.source,
+        targetSeqHint: scheduledTarget.seq ?? null,
+        timeoutMs: input.maxInlineDrainMs,
+        userId: scheduledTarget.userId,
+      });
+
+      if (completedInline) {
+        finishHostedOnboardingTiming(handoffTiming, "completed", {
+          deferred: false,
+        });
+        return;
+      }
+
+      if (input.defer) {
+        await input.defer(() =>
+          drainHostedExecutionWebhookWake({
+            deferred: true,
+            eventId: input.eventId,
+            responseReason: input.response.reason,
+            source: input.source,
+            targetSeqHint: scheduledTarget.seq ?? null,
+            userId: scheduledTarget.userId,
+          }),
+        );
+        finishHostedOnboardingTiming(handoffTiming, "scheduled", {
+          deferred: true,
+          timedOut: true,
+        });
+        return;
+      }
+
+      finishHostedOnboardingTiming(handoffTiming, "completed", {
+        deferred: false,
+        timedOut: true,
+      });
+      return;
+    }
+
+    if (input.defer) {
+      await input.defer(() =>
+        drainHostedExecutionWebhookWake({
+          deferred: true,
+          eventId: input.eventId,
+          responseReason: input.response.reason,
+          source: input.source,
+          targetSeqHint: scheduledTarget.seq ?? null,
+          userId: scheduledTarget.userId,
+        }),
+      );
+      finishHostedOnboardingTiming(handoffTiming, "scheduled", {
+        deferred: true,
+      });
+      return;
+    }
+
+    await drainHostedExecutionWebhookWake({
+      deferred: false,
+      eventId: input.eventId,
+      responseReason: input.response.reason,
+      source: input.source,
+      targetSeqHint: scheduledTarget.seq ?? null,
+      userId: scheduledTarget.userId,
+    });
+    finishHostedOnboardingTiming(handoffTiming, "completed", {
+      deferred: false,
+    });
+    return;
+  }
 
   if (typeof input.maxInlineDrainMs === "number" && input.maxInlineDrainMs > 0) {
     const completedInline = await waitForHostedExecutionWebhookDrain({
@@ -549,6 +636,32 @@ async function drainHostedExecutionWebhookOutbox(input: {
   finishHostedOnboardingTiming(drainTiming, "completed");
 }
 
+async function drainHostedExecutionWebhookWake(input: {
+  deferred: boolean;
+  eventId: string;
+  responseReason: string | undefined;
+  source: "linq" | "telegram";
+  targetSeqHint: string | null;
+  userId: string;
+}): Promise<void> {
+  const drainTiming = startHostedOnboardingTiming(
+    `hosted-onboarding.webhook.${input.source}.wake-drain`,
+    {
+      deferred: input.deferred,
+      eventId: input.eventId,
+      responseReason: input.responseReason,
+      targetSeqHint: input.targetSeqHint,
+      userId: input.userId,
+    },
+  );
+  await triggerHostedWakeUserBestEffort({
+    context: `webhook:${input.source}`,
+    targetSeqHint: input.targetSeqHint,
+    userId: input.userId,
+  });
+  finishHostedOnboardingTiming(drainTiming, "completed");
+}
+
 async function waitForHostedExecutionWebhookDrain(input: {
   eventId: string;
   prisma: PrismaClient;
@@ -582,4 +695,26 @@ async function waitForHostedExecutionWebhookDrain(input: {
       clearTimeout(timer);
     }
   }
+}
+
+async function waitForHostedExecutionWebhookWake(input: {
+  eventId: string;
+  responseReason: string | undefined;
+  source: "linq" | "telegram";
+  targetSeqHint: string | null;
+  timeoutMs: number;
+  userId: string;
+}): Promise<boolean> {
+  const timeoutMs = Math.max(1, Math.floor(input.timeoutMs));
+
+  if (!Number.isFinite(timeoutMs)) {
+    return false;
+  }
+
+  return triggerHostedWakeUserBestEffort({
+    context: `webhook:${input.source}`,
+    targetSeqHint: input.targetSeqHint,
+    timeoutMs,
+    userId: input.userId,
+  });
 }

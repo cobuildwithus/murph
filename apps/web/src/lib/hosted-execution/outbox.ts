@@ -18,9 +18,10 @@ import {
 import {
   appendHostedExecutionDispatchWakeTx,
   findHostedExecutionWakeEventIdTx,
+  readHostedExecutionWakeScheduleTx,
 } from "../hosted-wake/dispatch";
 import {
-  shouldRouteHostedSimpleProducerDispatchToWake,
+  shouldRouteHostedDispatchToWake,
 } from "../hosted-wake/flags";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import {
@@ -59,6 +60,13 @@ export type HostedExecutionDispatchRoute = "outbox" | "wake";
 export interface HostedExecutionDispatchScheduleResult {
   eventId: string;
   route: HostedExecutionDispatchRoute;
+}
+
+export interface HostedExecutionScheduledDispatchTarget {
+  eventId: string;
+  route: HostedExecutionDispatchRoute;
+  seq?: string;
+  userId: string;
 }
 
 export function readExecutionLifecycleState(
@@ -116,7 +124,7 @@ export async function enqueueHostedExecutionOutbox(
 export async function scheduleHostedExecutionDispatchTx(
   input: EnqueueHostedExecutionOutboxInput,
 ): Promise<HostedExecutionDispatchScheduleResult> {
-  if (shouldRouteHostedSimpleProducerDispatchToWake(input.dispatch)) {
+  if (shouldRouteHostedDispatchToWake(input.dispatch)) {
     try {
       await appendHostedExecutionDispatchWakeTx({
         dispatch: input.dispatch,
@@ -141,6 +149,50 @@ export async function scheduleHostedExecutionDispatchTx(
   };
 }
 
+export async function readHostedExecutionScheduledDispatchTarget(input: {
+  eventId: string;
+  prisma?: HostedExecutionOutboxClient;
+}): Promise<HostedExecutionScheduledDispatchTarget | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const outboxRecord = await prisma.executionOutbox.findUnique({
+    select: {
+      eventId: true,
+      payloadJson: true,
+    },
+    where: {
+      eventId: input.eventId,
+    },
+  });
+
+  if (outboxRecord) {
+    const payload = readHostedExecutionOutboxPayload(outboxRecord.payloadJson);
+
+    return payload
+      ? {
+        eventId: outboxRecord.eventId,
+        route: "outbox",
+        userId: payload.dispatch.event.userId,
+      }
+      : null;
+  }
+
+  const wakeRecord = await readHostedExecutionWakeScheduleTx({
+    eventId: input.eventId,
+    tx: prisma,
+  });
+
+  if (!wakeRecord) {
+    return null;
+  }
+
+  return {
+    eventId: wakeRecord.eventId,
+    route: "wake",
+    seq: wakeRecord.seq,
+    userId: wakeRecord.userId,
+  };
+}
+
 export async function findHostedExecutionScheduledEventIdTx(input: {
   eventId: string;
   tx: HostedExecutionOutboxClient;
@@ -160,7 +212,7 @@ export async function findHostedExecutionScheduledEventIdTx(input: {
 
   return findHostedExecutionWakeEventIdTx({
     eventId: input.eventId,
-    tx: input.tx as Prisma.TransactionClient,
+    tx: input.tx,
   });
 }
 

@@ -1,32 +1,56 @@
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  completeWebhookTrace: vi.fn(),
-  createDeviceSyncPublicIngress: vi.fn(),
-  createSignal: vi.fn(),
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
-  ensureWebhookSubscriptions: vi.fn(),
-  enqueueHostedExecutionOutbox: vi.fn(),
-  getConnectionForUser: vi.fn(),
-  getConnectionOwnerId: vi.fn(),
-  getStoredConnectionAccountForUser: vi.fn(),
-  listConnectionsForUser: vi.fn(),
-  persistStoredConnectionTokenBundle: vi.fn(),
-  readHostedDeviceSyncEnvironment: vi.fn(),
-  registryGet: vi.fn(),
-  registryList: vi.fn(),
-  syncDurableConnectionState: vi.fn(),
-  prismaTx: {
-    __tx: true,
-    deviceSyncSignal: {
-      create: vi.fn(),
+const mocks = vi.hoisted(() => {
+  const state = {
+    completeWebhookTrace: vi.fn(),
+    createDeviceSyncPublicIngress: vi.fn(),
+    createSignal: vi.fn(),
+    drainHostedExecutionOutboxBestEffort: vi.fn(),
+    ensureWebhookSubscriptions: vi.fn(),
+    enqueueHostedExecutionOutbox: vi.fn(),
+    getConnectionForUser: vi.fn(),
+    getConnectionOwnerId: vi.fn(),
+    getStoredConnectionAccountForUser: vi.fn(),
+    listConnectionsForUser: vi.fn(),
+    persistStoredConnectionTokenBundle: vi.fn(),
+    readHostedDeviceSyncEnvironment: vi.fn(),
+    registryGet: vi.fn(),
+    registryList: vi.fn(),
+    syncDurableConnectionState: vi.fn(),
+    prismaTx: {
+      __tx: true,
+      deviceSyncSignal: {
+        create: vi.fn(),
+      },
     },
-  },
-  prisma: {
-    $transaction: vi.fn(),
-  },
-}));
+    prisma: {
+      $transaction: vi.fn(),
+    },
+    handoffHostedExecutionScheduledEventBestEffort: vi.fn(async (input: {
+      eventId: string;
+      prisma?: unknown;
+    }) => {
+      await state.drainHostedExecutionOutboxBestEffort({
+        eventIds: [input.eventId],
+        limit: 1,
+        prisma: input.prisma,
+      });
+      return "outbox";
+    }),
+    scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
+      dispatch: { eventId: string };
+    }) => {
+      await state.enqueueHostedExecutionOutbox(input);
+      return {
+        eventId: input.dispatch.eventId,
+        route: "outbox" as const,
+      };
+    }),
+  };
+
+  return state;
+});
 
 vi.mock("@murphai/device-syncd/public-ingress", async () => {
   const actual = await vi.importActual<typeof import("@murphai/device-syncd/public-ingress")>("@murphai/device-syncd/public-ingress");
@@ -45,6 +69,11 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+  scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
+}));
+
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({

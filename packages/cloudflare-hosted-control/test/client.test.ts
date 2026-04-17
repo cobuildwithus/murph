@@ -20,6 +20,7 @@ describe("createCloudflareHostedControlClient", () => {
       "createBrowserVaultSession",
       "getEventStatus",
       "getStatus",
+      "wakeUser",
     ]);
   });
 
@@ -234,6 +235,32 @@ describe("createCloudflareHostedControlClient", () => {
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.redirect).toBe("error");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("posts wake requests with an optional target sequence hint", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(createUserStatus({ userId: "user_123" }));
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(
+      client.wakeUser("user_123", { targetSeqHint: "42" }),
+    ).resolves.toEqual(createUserStatus({ userId: "user_123" }));
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/wake");
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.body).toBe(JSON.stringify({
+      targetSeqHint: "42",
+    }));
   });
 
 });

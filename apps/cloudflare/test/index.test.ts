@@ -1363,6 +1363,19 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       retryingEventId: null,
       userId: "member_123",
     })),
+    wakeHostedWakes: vi.fn(async () => ({
+      backpressuredEventIds: [],
+      bundleRef: null,
+      inFlight: false,
+      lastError: null,
+      lastEventId: null,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId: "member_123",
+    })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;
 }

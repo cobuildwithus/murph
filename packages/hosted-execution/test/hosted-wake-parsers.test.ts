@@ -30,6 +30,9 @@ describe("hosted wake parser contracts", () => {
           id: "wake-1",
           kind: "member.channels.updated",
           occurredAt: "2026-04-17T00:00:00.000Z",
+          payloadJson: {
+            eventId: "evt_123",
+          },
           payloadBytes: 88,
           payloadInlineCiphertext: "ciphertext",
           payloadRef: null,
@@ -47,6 +50,9 @@ describe("hosted wake parser contracts", () => {
     expect(parsed.wakes[0]).toMatchObject({
       behavior: "coalescing",
       kind: "member.channels.updated",
+      payloadJson: {
+        eventId: "evt_123",
+      },
       seq: "12",
     });
   });

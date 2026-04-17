@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
+import { scheduleHostedExecutionDispatchTx } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedWebhookReceiptState,
@@ -273,7 +273,7 @@ export async function enqueueHostedWebhookDispatchSideEffects(input: {
       });
     }
 
-    await enqueueHostedExecutionOutbox({
+    await scheduleHostedExecutionDispatchTx({
       dispatch,
       sourceId: `${input.source}:${input.eventId}`,
       sourceType: "hosted_webhook_receipt",
