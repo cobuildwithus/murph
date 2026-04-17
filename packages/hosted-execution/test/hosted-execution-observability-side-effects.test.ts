@@ -45,6 +45,7 @@ function createHostedAssistantDeliveryPayload(
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
     message: "hello from hosted execution",
+    subject: null,
     replyToMessageId: null,
     sessionId: "session_123",
     threadId: "thread_123",

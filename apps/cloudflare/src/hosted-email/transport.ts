@@ -63,6 +63,7 @@ export async function sendHostedEmailMessage(input: {
     config: input.config,
     message: input.request.message,
     replyAddress,
+    subject: input.request.subject ?? null,
     target: input.request.target,
     targetKind: input.request.targetKind,
   });
@@ -118,6 +119,7 @@ async function prepareHostedEmailSend(input: {
   config: HostedEmailConfig;
   message: string;
   replyAddress: string;
+  subject: string | null;
   target: string;
   targetKind: HostedEmailSendRequest["targetKind"];
 }): Promise<{
@@ -145,6 +147,7 @@ async function prepareHostedEmailSend(input: {
   const existingThreadTarget = input.targetKind === "thread"
     ? parseHostedEmailThreadTarget(input.target)
     : null;
+  const requestedSubject = normalizeHostedEmailSubject(input.subject);
   if (input.targetKind === "thread" && !existingThreadTarget) {
     throw new HostedEmailSendValidationError(
       "Hosted email thread delivery requires a serialized thread target.",
@@ -167,9 +170,15 @@ async function prepareHostedEmailSend(input: {
   const to = [primaryRecipient];
   const cc: string[] = [];
 
+  if (existingThreadTarget && requestedSubject) {
+    throw new HostedEmailSendValidationError(
+      "Hosted email thread delivery preserves the existing subject. Do not provide a subject override when replying to a thread.",
+    );
+  }
+
   const subject = existingThreadTarget
     ? ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
-    : normalizeHostedEmailSubject(input.config.defaultSubject) ?? "Murph update";
+    : requestedSubject ?? normalizeHostedEmailSubject(input.config.defaultSubject) ?? "Murph update";
   const messageId = createHostedEmailMessageId(fromAddress);
   const threadTarget = createHostedEmailThreadTarget({
     cc,

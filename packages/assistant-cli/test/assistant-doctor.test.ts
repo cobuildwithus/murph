@@ -167,6 +167,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   attemptCount: 1,
   status: 'sent',
   message: 'hello',
+  subject: null,
   dedupeKey: 'dedupe_demo',
   targetFingerprint: 'target_demo',
   channel: 'local',

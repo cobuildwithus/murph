@@ -19,12 +19,15 @@ import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { prioritizeAssistantRoutesForRichUserMessageContent } from './rich-content-routing.js'
 import { createAssistantTurnId } from './turns.js'
 import { sanitizeAssistantOutboundReply } from './reply-sanitizer.js'
+import {
+  normalizeAssistantDeliverySubject,
+} from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
-import { normalizeRequiredText } from './shared.js'
+import { normalizeNullableString, normalizeRequiredText } from './shared.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -37,6 +40,7 @@ const assistantNotificationSendDecisionSchema = z
   .object({
     kind: z.literal('send_message'),
     text: z.string().min(1),
+    subject: z.string().trim().min(1).nullable().optional(),
     privateSummary: z.string().min(1),
   })
   .strict()
@@ -64,6 +68,7 @@ export interface AssistantNotificationInput
       | 'codexCommand'
       | 'deliveryDispatchMode'
       | 'deliveryReplyToMessageId'
+      | 'deliverySubject'
       | 'deliveryTarget'
       | 'executionContext'
       | 'failoverRoutes'
@@ -164,6 +169,7 @@ export async function sendAssistantNotificationLocal(
       })
       await deliverAssistantNotificationMessage({
         dedupeToken: input.deliveryDedupeToken ?? null,
+        decisionSubject: decision.subject ?? null,
         input: messageInput,
         message: sanitizedResponse,
         session: savedSession,
@@ -195,6 +201,7 @@ function buildAssistantNotificationMessageInput(
     deliverResponse: true,
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId ?? null,
+    deliverySubject: input.deliverySubject ?? null,
     deliveryTarget: input.deliveryTarget ?? null,
     executionContext: input.executionContext,
     failoverRoutes: input.failoverRoutes,
@@ -213,6 +220,7 @@ function buildAssistantNotificationMessageInput(
 
 async function deliverAssistantNotificationMessage(input: {
   dedupeToken: string | null
+  decisionSubject: string | null
   input: AssistantMessageInput
   message: string
   session: AssistantSession
@@ -221,6 +229,14 @@ async function deliverAssistantNotificationMessage(input: {
 }): Promise<void> {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
+  const explicitTarget = audience.explicitTarget ?? input.input.deliveryTarget ?? null
+  const subject = resolveAssistantNotificationDeliverySubject({
+    bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
+    channel: audience.channel ?? input.session.binding.channel,
+    decisionSubject: input.decisionSubject,
+    explicitTarget,
+    inputDeliverySubject: input.input.deliverySubject ?? null,
+  })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
@@ -232,9 +248,10 @@ async function deliverAssistantNotificationMessage(input: {
     threadId: audience.threadId ?? input.session.binding.threadId,
     threadIsDirect: audience.threadIsDirect ?? input.session.binding.threadIsDirect,
     bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
-    explicitTarget: audience.explicitTarget ?? input.input.deliveryTarget ?? null,
+    explicitTarget,
     replyToMessageId:
       audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
+    subject,
     dispatchMode: input.input.deliveryDispatchMode,
   })
 
@@ -250,6 +267,25 @@ async function deliverAssistantNotificationMessage(input: {
         'Assistant outbound delivery did not complete successfully.',
       )
   }
+}
+
+export function resolveAssistantNotificationDeliverySubject(input: {
+  bindingDelivery: AssistantSession['binding']['delivery']
+  channel: string | null | undefined
+  decisionSubject: string | null | undefined
+  explicitTarget: string | null | undefined
+  inputDeliverySubject: string | null | undefined
+}): string | null {
+  const configuredSubject = normalizeNullableString(input.inputDeliverySubject)
+  const generatedSubject = normalizeNullableString(input.decisionSubject)
+  return normalizeAssistantDeliverySubject({
+    bindingDelivery: input.bindingDelivery ?? null,
+    channel: input.channel ?? null,
+    explicitTarget: input.explicitTarget ?? null,
+    subject:
+      configuredSubject ??
+      (normalizeNullableString(input.channel) === 'email' ? generatedSubject : null),
+  })
 }
 
 export function parseAssistantNotificationDecision(

@@ -104,6 +104,7 @@ const TEST_OUTBOX_INTENT = {
   attemptCount: 0,
   status: 'pending',
   message: 'queued hello',
+  subject: null,
   dedupeKey: 'dedupe-key',
   targetFingerprint: 'target-fingerprint',
   channel: 'telegram',

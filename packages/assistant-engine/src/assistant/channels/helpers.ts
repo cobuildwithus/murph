@@ -75,6 +75,7 @@ export function createAssistantChannelAdapter(
         identityId: normalizeOptionalText(input.identityId),
         message: input.message,
         replyToMessageId: normalizeOptionalText(input.replyToMessageId),
+        subject: normalizeOptionalText(input.subject),
       })
 
       return assistantChannelDeliverySchema.parse({
@@ -144,6 +145,32 @@ export function resolveDeliveryCandidates(input: {
       target: input.bindingDelivery.target,
     },
   ]
+}
+
+export function normalizeAssistantDeliverySubject(input: {
+  bindingDelivery?: AssistantBindingDelivery | null
+  channel?: string | null
+  explicitTarget?: string | null
+  subject?: string | null
+}): string | null {
+  const subject = normalizeOptionalText(input.subject)
+  if (!subject) {
+    return null
+  }
+
+  const channel = normalizeOptionalText(input.channel)
+  if (channel !== 'email') {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_SUBJECT_UNSUPPORTED',
+      `Only email delivery supports a subject override. Received subject for ${channel ?? 'unknown channel'}.`,
+    )
+  }
+
+  const candidate = resolveDeliveryCandidates({
+    bindingDelivery: input.bindingDelivery,
+    explicitTarget: input.explicitTarget,
+  })[0] ?? null
+  return candidate?.kind === 'thread' ? null : subject
 }
 
 export function createAssistantBindingDelivery(

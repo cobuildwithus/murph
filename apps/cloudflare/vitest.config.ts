@@ -16,6 +16,13 @@ const nodeOnlyAliases = [
       "test/stubs/cloudflare-workers.ts",
     ),
   },
+  {
+    find: "cloudflare:email",
+    replacement: path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "test/stubs/cloudflare-email.ts",
+    ),
+  },
 ];
 
 export default defineProject({

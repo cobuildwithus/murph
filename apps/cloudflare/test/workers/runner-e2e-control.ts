@@ -381,6 +381,7 @@ function buildSyntheticAssistantDeliveryEffects(
         idempotencyKey: `assistant-outbox:${effectId}`,
         identityId: "identity_123",
         message: "hello from runner e2e",
+        subject: null,
         replyToMessageId: null,
         sessionId: `session_${request.dispatch.eventId}`,
         threadId: "thread_123",

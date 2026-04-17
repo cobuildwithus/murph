@@ -5,6 +5,7 @@ import type {
 import type { ConversationRef } from '../conversation-ref.js'
 import {
   inferBindingDeliveryForChannel,
+  normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
 } from './helpers.js'
 import { ASSISTANT_CHANNEL_ADAPTERS } from './descriptors.js'
@@ -32,7 +33,10 @@ export function getAssistantChannelAdapter(
   return ASSISTANT_CHANNEL_ADAPTERS[channel as AssistantChannelName] ?? null
 }
 
-export { resolveDeliveryCandidates }
+export {
+  normalizeAssistantDeliverySubject,
+  resolveDeliveryCandidates,
+}
 
 export function inferAssistantBindingDelivery(input: {
   channel?: string | null

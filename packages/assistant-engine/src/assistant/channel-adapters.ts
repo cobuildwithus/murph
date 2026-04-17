@@ -9,6 +9,7 @@ export {
   inferAssistantBindingDelivery,
   listAssistantChannelAdapters,
   listAssistantChannelNames,
+  normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
 } from './channels/registry.js'
 export {

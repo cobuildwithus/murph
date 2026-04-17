@@ -822,6 +822,7 @@ describe("assistant delivery orchestration seam", () => {
       message: "sanitized:reply body",
       replyToMessageId: "reply-audience",
       sessionId: session.sessionId,
+      subject: null,
       threadId: "audience-thread",
       threadIsDirect: false,
       turnId: "turn-2",

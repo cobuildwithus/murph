@@ -10,6 +10,7 @@ export type HostedEmailSendTargetKind = GatewayDeliveryTargetKind;
 export interface HostedEmailSendRequest {
   identityId: string | null;
   message: string;
+  subject?: string | null;
   target: string;
   targetKind: HostedEmailSendTargetKind;
   timeoutMs?: number | null;
@@ -26,6 +27,10 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
     message: requireHostedEmailSendRequestString(
       record.message,
       "Hosted email send request message",
+    ),
+    subject: readOptionalHostedEmailSendRequestString(
+      record.subject ?? null,
+      "Hosted email send request subject",
     ),
     target: requireHostedEmailSendRequestString(
       record.target,

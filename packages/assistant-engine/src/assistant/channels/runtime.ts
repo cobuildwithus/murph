@@ -261,6 +261,7 @@ export async function sendEmailMessage(
     )
   }
 
+  const subject = normalizeOptionalText(input.subject)
   const env = dependencies.env ?? process.env
   const apiKey = resolveAgentmailApiKey(env)
   if (!apiKey) {
@@ -276,6 +277,14 @@ export async function sendEmailMessage(
   })
 
   if (input.targetKind === 'thread') {
+    if (subject) {
+      throw new VaultCliError(
+        'ASSISTANT_EMAIL_THREAD_SUBJECT_UNSUPPORTED',
+        'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+        { threadId: target },
+      )
+    }
+
     const thread = await client.getThread(target)
     const messageId = resolveAgentmailThreadReplyMessageId(thread)
     if (!messageId) {
@@ -301,7 +310,7 @@ export async function sendEmailMessage(
   const delivered = await client.sendMessage({
     inboxId: identityId,
     to: target,
-    subject: input.subject?.trim() ? input.subject.trim() : 'Murph update',
+    subject: subject ?? 'Murph update',
     text: input.message,
   })
 

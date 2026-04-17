@@ -6,6 +6,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   getAssistantChannelAdapter,
+  normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
   sendEmailMessage,
   sendLinqMessage,
@@ -236,6 +237,7 @@ export async function deliverAssistantMessageOverBinding(
     identityId?: string | null
     message: string
     replyToMessageId?: string | null
+    subject?: string | null
     sessionId?: string | null
     session?: Pick<AssistantSession, 'binding'>
     target?: string | null
@@ -271,6 +273,13 @@ export async function deliverAssistantMessageOverBinding(
   }
 
   const explicitTarget = input.target?.trim() ? input.target.trim() : null
+  const subject = normalizeAssistantDeliverySubject({
+    bindingDelivery: binding.delivery,
+    channel,
+    explicitTarget,
+    subject: input.subject ?? null,
+  })
+
   resolveDeliveryCandidates({
     bindingDelivery: binding.delivery,
     explicitTarget,
@@ -285,6 +294,7 @@ export async function deliverAssistantMessageOverBinding(
       identityId: binding.identityId,
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
+      subject,
     },
     dependencies,
   )

@@ -55,6 +55,7 @@ export interface HostedAssistantDeliveryPayload {
   idempotencyKey: string;
   identityId: string | null;
   message: string;
+  subject: string | null;
   replyToMessageId: string | null;
   sessionId: string;
   threadId: string | null;
@@ -654,6 +655,7 @@ function parseHostedAssistantDeliveryPayload(
     idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
     message: requireString(record.message, `${label}.message`),
+    subject: requireNullableString(record.subject ?? null, `${label}.subject`),
     replyToMessageId: requireNullableString(
       record.replyToMessageId ?? null,
       `${label}.replyToMessageId`,

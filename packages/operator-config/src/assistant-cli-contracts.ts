@@ -584,6 +584,7 @@ export const assistantOutboxIntentSchema = z
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string().min(1),
+    subject: z.string().trim().min(1).nullable().default(null),
     dedupeKey: z.string().min(1),
     targetFingerprint: z.string().min(1),
     channel: z.string().min(1).nullable(),

@@ -99,6 +99,7 @@ function parseAssistantMessageRequestBody(payload: unknown): AssistantMessageReq
   }
   assertOptionalNullableStringField(record, 'deliveryTarget', 'message')
   assertOptionalNullableStringField(record, 'deliveryReplyToMessageId', 'message')
+  assertOptionalNullableStringField(record, 'deliverySubject', 'message')
   assertOptionalNullableStringField(record, 'operatorAuthority', 'message')
   assertOptionalNullableStringField(record, 'turnTrigger', 'message')
   assertOptionalBooleanField(record, 'deliverResponse', 'message')

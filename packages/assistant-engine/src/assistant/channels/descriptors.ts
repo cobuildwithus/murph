@@ -132,7 +132,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Email delivery requires an explicit recipient or a stored delivery binding.',
-  async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message, replyToMessageId }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message, replyToMessageId, subject }) {
     const send = dependencies.sendEmail ?? sendEmailMessage
     if (!identityId && !dependencies.sendEmail) {
       throw new VaultCliError(
@@ -146,6 +146,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
       targetKind: candidate.kind,
       replyToMessageId: replyToMessageId ?? null,
+      subject: subject ?? null,
       message,
     })
     const deliveredTarget =
