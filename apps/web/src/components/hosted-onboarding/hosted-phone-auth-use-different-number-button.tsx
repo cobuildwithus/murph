@@ -14,8 +14,15 @@ export function HostedUseDifferentNumberButton({
   size: "sm" | "lg";
 }) {
   return (
-    <Button type="button" onClick={onClick} disabled={disabled} variant="link" size={size} className="w-full">
-      {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
+    <Button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      variant="link"
+      size={size}
+      className="h-auto p-0 text-xs font-medium text-muted-foreground hover:text-foreground"
+    >
+      {pendingAction === "logout" ? "Signing out…" : "Use a different number"}
     </Button>
   );
 }
