@@ -342,6 +342,23 @@ export class RunnerDispatchProcessor {
         );
         processedDispatch = true;
       } catch (error) {
+        if (error instanceof HostedExecutionObsoleteRunResultError) {
+          emitHostedExecutionStructuredLog({
+            component: "runner",
+            details: {
+              obsoleteRunId: error.runId,
+              runElapsedMs: computeHostedRunElapsedMs(run),
+            },
+            dispatch: nextPending.dispatch,
+            error,
+            level: "warn",
+            message: "Hosted runner returned a stale result for an obsolete run lease.",
+            phase: "dispatch.running",
+            run,
+          });
+          return toUserStatus(await this.dependencies.queueStore.readState());
+        }
+
         const committed = await (await this.dependencies.ensureRunnerStores(record.userId))
           .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
 
@@ -361,6 +378,9 @@ export class RunnerDispatchProcessor {
                   attempts: nextPending.attempts + 1,
                   committed,
                   error: finalizeError,
+                  leaseOwner: {
+                    run,
+                  },
                   retryDelayMs: computeRetryDelayMs(
                     this.dependencies.env.retryDelayMs,
                     nextPending.attempts + 1,
@@ -383,6 +403,9 @@ export class RunnerDispatchProcessor {
               attempts: nextPending.attempts + 1,
               committed,
               error,
+              leaseOwner: {
+                run,
+              },
               retryDelayMs: computeRetryDelayMs(
                 this.dependencies.env.retryDelayMs,
                 nextPending.attempts + 1,
@@ -397,23 +420,6 @@ export class RunnerDispatchProcessor {
             run,
           });
           continue;
-        }
-
-        if (error instanceof HostedExecutionObsoleteRunResultError) {
-          emitHostedExecutionStructuredLog({
-            component: "runner",
-            details: {
-              obsoleteRunId: error.runId,
-              runElapsedMs: computeHostedRunElapsedMs(run),
-            },
-            dispatch: nextPending.dispatch,
-            error,
-            level: "warn",
-            message: "Hosted runner returned a stale result for an obsolete run lease.",
-            phase: "dispatch.running",
-            run,
-          });
-          return toUserStatus(await this.dependencies.queueStore.readState());
         }
 
         if (error instanceof HostedExecutionConfigurationError) {

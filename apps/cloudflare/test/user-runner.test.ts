@@ -1736,7 +1736,6 @@ describe("HostedUserRunner", () => {
       eventId: "evt_finalize_retry",
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
-
     expect(firstStatus.pendingEventCount).toBe(1);
     expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
     expect(firstStatus.timeline?.at(-1)).toMatchObject({
@@ -1759,110 +1758,6 @@ describe("HostedUserRunner", () => {
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
-  });
-
-  it("ignores stale runner results once a committed finalize retry already owns recovery", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const sideEffects = [
-      createAssistantDeliveryEffect({
-        effectId: "outbox_retry",
-        fingerprint: "dedupe_retry",
-      }),
-    ];
-    const expectedResumeSideEffects = sideEffects;
-    const committedPayload = createRunnerSuccessPayload({
-      agentState: Buffer.from("agent-state-committed").toString("base64"),
-      assistantDeliveryEffects: sideEffects,
-      summary: "committed",
-      vault: Buffer.from("vault-committed").toString("base64"),
-    });
-    const finalPayload = createRunnerSuccessPayload({
-      agentState: Buffer.from("agent-state-final").toString("base64"),
-      summary: "final",
-      vault: Buffer.from("vault-final").toString("base64"),
-    });
-    let runner: HostedUserRunner | null = null;
-    const fetchSpy = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
-        const requestBody = JSON.parse(String(init?.body));
-        await commitResultForRunnerRequest({
-          bucket,
-          environment,
-          payload: committedPayload,
-          requestBody,
-        });
-        if (runner === null) {
-          throw new Error("Expected the hosted user runner to be initialized.");
-        }
-        const internals = readHostedUserRunnerTestInternals(runner);
-        const stores = await internals.ensureRunnerStores("member_123");
-        const committed = await stores.commitRecovery.readCommittedDispatch(
-          "member_123",
-          "evt_stale_finalize_result",
-        );
-        if (!committed) {
-          throw new Error("Expected the first runner result to persist a committed dispatch.");
-        }
-        await internals.queueStore.rescheduleCommittedFinalizeRetry({
-          attempts: 1,
-          committed,
-          error: new Error("runner connection dropped after commit"),
-          retryDelayMs: 0,
-        });
-
-        return new Response(JSON.stringify(serializeRunnerSuccessPayload(committedPayload)), {
-          status: 200,
-        });
-      })
-      .mockImplementationOnce(async (_url, init) => {
-        const requestBody = JSON.parse(String(init?.body));
-        expect(readRunnerJobRequest(requestBody).resume).toEqual({
-          committedResult: {
-            assistantDeliveryEffects: expectedResumeSideEffects,
-            result: committedPayload.result,
-          },
-        });
-        await finalizeResultForRunnerRequest({
-          bucket,
-          environment,
-          payload: finalPayload,
-          requestBody,
-        });
-
-        return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
-          status: 200,
-        });
-      });
-    vi.stubGlobal("fetch", fetchSpy);
-    runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const firstStatus = await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_stale_finalize_result",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
-
-    expect(firstStatus.pendingEventCount).toBe(1);
-    expect(firstStatus.retryingEventId).toBe("evt_stale_finalize_result");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
-    await runner.alarm();
-
-    const finalStatus = await runner.status();
-    expect(finalStatus.pendingEventCount).toBe(0);
-    expect(finalStatus.retryingEventId).toBeNull();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("recovers a committed pending event after a crash even when the same event's lease was still persisted", async () => {

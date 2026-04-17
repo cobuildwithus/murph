@@ -480,6 +480,7 @@ export class RunnerQueueStore {
     attempts: number;
     committed: HostedExecutionCommittedResult;
     error: unknown;
+    leaseOwner?: RunnerLeaseOwnerInput | null;
     retryDelayMs: number;
   }): Promise<RunnerStateRecord> {
     await this.ready;
@@ -490,8 +491,10 @@ export class RunnerQueueStore {
     const bundleState = this.selectBundleStateSync();
     const errorCode = deriveHostedExecutionErrorCode(input.error);
     assignRunnerBundleRefs(bundleState, input.committed.bundleRef);
-    meta.in_flight = 0;
-    this.clearActiveRunMetaSync(meta);
+    this.clearActiveRunLeaseSync(meta, input.leaseOwner ?? {
+      eventId: input.committed.eventId,
+      run: null,
+    });
     meta.last_error_at = new Date().toISOString();
     meta.last_error_code = errorCode;
     meta.last_run_at = input.committed.committedAt;
