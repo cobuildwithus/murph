@@ -79,9 +79,11 @@ export interface AssistantAutomationPassResult {
 
 export function cursorFromCapture(capture: {
   captureId: string
+  createdAt?: string | null
   occurredAt: string
 }): AssistantAutomationCursor {
   return {
+    createdAt: capture.createdAt ?? null,
     occurredAt: capture.occurredAt,
     captureId: capture.captureId,
   }
@@ -91,14 +93,19 @@ export function compareAssistantAutomationCursor(
   left: AssistantAutomationCursor,
   right: AssistantAutomationCursor,
 ): number {
-  return left.occurredAt === right.occurredAt
+  const leftTimestamp =
+    left.createdAt && right.createdAt ? left.createdAt : left.occurredAt
+  const rightTimestamp =
+    left.createdAt && right.createdAt ? right.createdAt : right.occurredAt
+
+  return leftTimestamp === rightTimestamp
     ? left.captureId.localeCompare(right.captureId)
-    : left.occurredAt.localeCompare(right.occurredAt)
+    : leftTimestamp.localeCompare(rightTimestamp)
 }
 
 export function compareAssistantCaptureOrder(
-  left: { captureId: string; occurredAt: string },
-  right: { captureId: string; occurredAt: string },
+  left: { captureId: string; createdAt?: string | null; occurredAt: string },
+  right: { captureId: string; createdAt?: string | null; occurredAt: string },
 ): number {
   return compareAssistantAutomationCursor(
     cursorFromCapture(left),
@@ -107,7 +114,7 @@ export function compareAssistantCaptureOrder(
 }
 
 export function isAssistantCaptureAfterCursor(
-  capture: { captureId: string; occurredAt: string },
+  capture: { captureId: string; createdAt?: string | null; occurredAt: string },
   cursor?: AssistantAutomationCursor | null,
 ): boolean {
   if (!cursor) {

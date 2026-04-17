@@ -6,18 +6,24 @@ import {
 } from "../hosted-web/encryption";
 
 export const HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA = "murph.hosted-wake-dispatch.v1";
-const HOSTED_WAKE_INLINE_PAYLOAD_FIELD = "hosted-wake-inline-payload";
-const HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES = 16 * 1024;
+export const HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES = 16 * 1024;
 
-export interface HostedWakeInlinePayload {
+const HOSTED_WAKE_INLINE_PAYLOAD_FIELD = "hosted-wake-inline-payload";
+const HOSTED_WAKE_REF_PAYLOAD_FIELD = "hosted-wake-ref-payload";
+
+export type HostedWakePayloadStorage = "inline" | "ref";
+
+export interface EncodedHostedWakeStoredPayload {
   payloadBytes: number;
-  payloadInlineCiphertext: string;
+  payloadInlineCiphertext: string | null;
+  payloadRefCiphertext: string | null;
+  storage: HostedWakePayloadStorage;
 }
 
-export function encodeHostedWakeInlinePayload(input: {
+export function encodeHostedWakeStoredPayload(input: {
   userId: string;
   value: unknown;
-}): HostedWakeInlinePayload {
+}): EncodedHostedWakeStoredPayload {
   const serialized = JSON.stringify(input.value);
 
   if (typeof serialized !== "string" || serialized.length === 0) {
@@ -26,36 +32,61 @@ export function encodeHostedWakeInlinePayload(input: {
 
   const payloadBytes = Buffer.byteLength(serialized, "utf8");
 
-  if (payloadBytes > HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES) {
-    throw new RangeError(
-      `Hosted wake payload exceeds the ${HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES} byte inline limit.`,
-    );
+  if (payloadBytes <= HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES) {
+    const payloadInlineCiphertext = encryptHostedWebNullableString({
+      field: HOSTED_WAKE_INLINE_PAYLOAD_FIELD,
+      memberId: input.userId,
+      value: serialized,
+    });
+
+    if (!payloadInlineCiphertext) {
+      throw new TypeError("Hosted wake payload encryption returned an empty ciphertext.");
+    }
+
+    return {
+      payloadBytes,
+      payloadInlineCiphertext,
+      payloadRefCiphertext: null,
+      storage: "inline",
+    };
   }
 
-  const payloadInlineCiphertext = encryptHostedWebNullableString({
-    field: HOSTED_WAKE_INLINE_PAYLOAD_FIELD,
+  const payloadRefCiphertext = encryptHostedWebNullableString({
+    field: HOSTED_WAKE_REF_PAYLOAD_FIELD,
     memberId: input.userId,
     value: serialized,
   });
 
-  if (!payloadInlineCiphertext) {
-    throw new TypeError("Hosted wake payload encryption returned an empty ciphertext.");
+  if (!payloadRefCiphertext) {
+    throw new TypeError("Hosted wake payload spill encryption returned an empty ciphertext.");
   }
 
   return {
     payloadBytes,
-    payloadInlineCiphertext,
+    payloadInlineCiphertext: null,
+    payloadRefCiphertext,
+    storage: "ref",
   };
 }
 
-export function decodeHostedWakeInlinePayload(input: {
-  payloadInlineCiphertext: string | null | undefined;
+export function decodeHostedWakeStoredPayload(input: {
+  payloadInlineCiphertext?: string | null;
+  payloadRefCiphertext?: string | null;
   userId: string;
 }): unknown | null {
+  const encryptedValue = input.payloadInlineCiphertext ?? input.payloadRefCiphertext ?? null;
+
+  if (!encryptedValue) {
+    return null;
+  }
+
+  const field = input.payloadInlineCiphertext
+    ? HOSTED_WAKE_INLINE_PAYLOAD_FIELD
+    : HOSTED_WAKE_REF_PAYLOAD_FIELD;
   const decrypted = decryptHostedWebNullableString({
-    field: HOSTED_WAKE_INLINE_PAYLOAD_FIELD,
+    field,
     memberId: input.userId,
-    value: input.payloadInlineCiphertext,
+    value: encryptedValue,
   });
 
   if (!decrypted) {

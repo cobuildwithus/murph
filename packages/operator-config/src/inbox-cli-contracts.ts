@@ -119,6 +119,7 @@ export const inboxCaptureSummarySchema = z.object({
   attachmentCount: z.number().int().nonnegative(),
   envelopePath: pathSchema,
   eventId: z.string().min(1),
+  createdAt: isoTimestampSchema.optional(),
   promotions: z.array(inboxPromotionEntrySchema),
 })
 
@@ -268,6 +269,7 @@ export const inboxListResultSchema = z.object({
   filters: z.object({
     sourceId: z.string().min(1).nullable(),
     limit: z.number().int().positive().max(200),
+    afterCreatedAt: isoTimestampSchema.nullable().optional(),
     afterOccurredAt: isoTimestampSchema.nullable(),
     afterCaptureId: z.string().min(1).nullable(),
     oldestFirst: z.boolean(),

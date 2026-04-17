@@ -1,44 +1,58 @@
+import { Buffer } from "node:buffer";
+
 import { describe, expect, it } from "vitest";
 
 import {
-  decodeHostedWakeInlinePayload,
-  encodeHostedWakeInlinePayload,
+  decodeHostedWakeStoredPayload,
+  encodeHostedWakeStoredPayload,
+  HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES,
 } from "@/src/lib/hosted-wake/payload";
 
-describe("hosted wake inline payload codec", () => {
-  it("round-trips an encrypted inline wake payload for the owning user", () => {
+describe("Hosted wake payload storage", () => {
+  it("keeps small payloads inline and decryptable", () => {
     const value = {
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      kind: "member.channels.updated",
-      memberChannels: {
-        email: true,
-        linq: false,
-        telegram: true,
+      kind: "member.activated",
+      nested: {
+        count: 1,
+        ok: true,
       },
-      userId: "member_123",
     };
-
-    const encoded = encodeHostedWakeInlinePayload({
-      userId: "member_123",
+    const encoded = encodeHostedWakeStoredPayload({
+      userId: "member-inline",
       value,
     });
 
-    expect(encoded.payloadBytes).toBeGreaterThan(0);
-    expect(encoded.payloadInlineCiphertext).not.toHaveLength(0);
-    expect(decodeHostedWakeInlinePayload({
+    expect(encoded.storage).toBe("inline");
+    expect(encoded.payloadInlineCiphertext).toEqual(expect.any(String));
+    expect(encoded.payloadRefCiphertext).toBeNull();
+    expect(encoded.payloadBytes).toBe(Buffer.byteLength(JSON.stringify(value), "utf8"));
+    expect(decodeHostedWakeStoredPayload({
       payloadInlineCiphertext: encoded.payloadInlineCiphertext,
-      userId: "member_123",
+      userId: "member-inline",
     })).toEqual(value);
   });
 
-  it("rejects inline wake payloads that exceed the maximum serialized size", () => {
-    expect(() =>
-      encodeHostedWakeInlinePayload({
-        userId: "member_123",
-        value: {
-          body: "x".repeat(16 * 1024 + 1),
-        },
-      }),
-    ).toThrow("Hosted wake payload exceeds the 16384 byte inline limit.");
+  it("spills oversized payloads to ref ciphertext and round-trips them", () => {
+    const value = {
+      kind: "telegram.message.received",
+      text: "x".repeat(HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES + 256),
+    };
+    const encoded = encodeHostedWakeStoredPayload({
+      userId: "member-spill",
+      value,
+    });
+
+    expect(encoded.storage).toBe("ref");
+    expect(encoded.payloadInlineCiphertext).toBeNull();
+    expect(encoded.payloadRefCiphertext).toEqual(expect.any(String));
+    expect(encoded.payloadBytes).toBeGreaterThan(HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES);
+    expect(decodeHostedWakeStoredPayload({
+      payloadRefCiphertext: encoded.payloadRefCiphertext,
+      userId: "member-spill",
+    })).toEqual(value);
+  });
+
+  it("returns null when no encrypted payload is present", () => {
+    expect(decodeHostedWakeStoredPayload({ userId: "member-empty" })).toBeNull();
   });
 });

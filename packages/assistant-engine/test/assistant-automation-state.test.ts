@@ -30,6 +30,7 @@ function createInboxListResult(
     filters: {
       sourceId: null,
       limit: 1,
+      afterCreatedAt: null,
       afterOccurredAt: null,
       afterCaptureId: null,
       oldestFirst: false,
@@ -47,6 +48,7 @@ function createListCapture(
     filters: {
       sourceId: null,
       limit: 1,
+      afterCreatedAt: null,
       afterOccurredAt: null,
       afterCaptureId: null,
       oldestFirst: false,
@@ -63,6 +65,7 @@ function createListCapture(
         actorId: 'actor-1',
         actorName: 'Taylor',
         actorIsSelf: false,
+        createdAt: '2026-04-10T02:00:01.000Z',
         occurredAt: '2026-04-10T02:00:00.000Z',
         receivedAt: null,
         text: 'hello',
@@ -225,6 +228,7 @@ test('readLatestPersistedInboxCaptureCursor returns the latest stored cursor whe
         filters: {
           sourceId: input.sourceId ?? null,
           limit: input.limit ?? 1,
+          afterCreatedAt: input.afterCreatedAt ?? null,
           afterOccurredAt: input.afterOccurredAt ?? null,
           afterCaptureId: input.afterCaptureId ?? null,
           oldestFirst: input.oldestFirst ?? false,
@@ -237,6 +241,7 @@ test('readLatestPersistedInboxCaptureCursor returns the latest stored cursor whe
   assert.deepEqual(calls, [
     {
       afterCaptureId: null,
+      afterCreatedAt: null,
       afterOccurredAt: null,
       limit: 1,
       oldestFirst: false,
@@ -247,6 +252,7 @@ test('readLatestPersistedInboxCaptureCursor returns the latest stored cursor whe
   ])
   assert.deepEqual(cursor, {
     captureId: 'cap-latest',
+    createdAt: '2026-04-10T02:00:01.000Z',
     occurredAt: '2026-04-10T02:00:00.000Z',
   })
 })
@@ -259,6 +265,7 @@ test('readLatestPersistedInboxCaptureCursor returns null when no captures exist'
         filters: {
           sourceId: input.sourceId ?? null,
           limit: input.limit ?? 1,
+          afterCreatedAt: input.afterCreatedAt ?? null,
           afterOccurredAt: input.afterOccurredAt ?? null,
           afterCaptureId: input.afterCaptureId ?? null,
           oldestFirst: input.oldestFirst ?? false,
@@ -299,6 +306,7 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
             filters: {
               sourceId: input.sourceId ?? null,
               limit: input.limit ?? 1,
+              afterCreatedAt: input.afterCreatedAt ?? null,
               afterOccurredAt: input.afterOccurredAt ?? null,
               afterCaptureId: input.afterCaptureId ?? null,
               oldestFirst: input.oldestFirst ?? false,
@@ -306,6 +314,7 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
             items: [
               createListCapture({
                 captureId: 'cap-latest',
+                createdAt: '2026-04-10T03:00:01.000Z',
                 occurredAt: '2026-04-10T03:00:00.000Z',
               }),
             ],
@@ -328,6 +337,7 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
         channel: 'telegram',
         cursor: {
           captureId: 'cap-latest',
+          createdAt: '2026-04-10T03:00:01.000Z',
           occurredAt: '2026-04-10T03:00:00.000Z',
         },
       },
@@ -355,6 +365,7 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cu
     }
     const explicitCursor = {
       captureId: 'cap-explicit',
+      createdAt: '2026-04-10T04:00:01.000Z',
       occurredAt: '2026-04-10T04:00:00.000Z',
     }
 

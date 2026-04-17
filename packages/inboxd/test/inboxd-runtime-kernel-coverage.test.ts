@@ -55,7 +55,7 @@ test("runtime and package barrels expose the same inbox runtime seam", async () 
   }
 });
 
-test("sqlite runtime mutation head follows the latest capture state and oldest-first paging breaks same-timestamp ties by capture id", async () => {
+test("sqlite runtime mutation head follows the latest capture state and created-at paging surfaces later inserts that share an occurredAt", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-runtime-mutations");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
@@ -126,6 +126,17 @@ test("sqlite runtime mutation head follows the latest capture state and oldest-f
         accountId: "bot",
         oldestFirst: true,
         afterOccurredAt: occurredAt,
+        afterCaptureId: "cap-alpha",
+        limit: 5,
+      }).map((capture) => capture.captureId),
+      ["cap-beta"],
+    );
+    assert.deepEqual(
+      runtime.listCaptures({
+        source: "telegram",
+        accountId: "bot",
+        oldestFirst: true,
+        afterCreatedAt: alpha.stored.storedAt,
         afterCaptureId: "cap-alpha",
         limit: 5,
       }).map((capture) => capture.captureId),

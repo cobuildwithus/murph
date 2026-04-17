@@ -68,6 +68,7 @@ export async function readLatestPersistedInboxCaptureCursor(
   const latestCapture = (
     await inboxServices.list({
       afterCaptureId: null,
+      afterCreatedAt: null,
       afterOccurredAt: null,
       limit: 1,
       oldestFirst: false,
@@ -80,6 +81,7 @@ export async function readLatestPersistedInboxCaptureCursor(
   return latestCapture
     ? {
         captureId: latestCapture.captureId,
+        createdAt: latestCapture.createdAt ?? null,
         occurredAt: latestCapture.occurredAt,
       }
     : null
