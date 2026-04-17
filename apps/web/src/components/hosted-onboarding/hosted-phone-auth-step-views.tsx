@@ -48,7 +48,7 @@ export function HostedInviteShortcutStep({
         onClick={onSendCode}
         disabled={disabled}
         size="lg"
-        className="w-full"
+        className="w-fit"
       >
         {pendingAction === "send-code" ? "Sending…" : "Send code"}
       </Button>

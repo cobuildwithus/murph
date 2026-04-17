@@ -197,9 +197,15 @@ export function JoinInviteCheckoutButton({
   onCheckout: () => Promise<void>;
 }) {
   return (
-    <Button type="button" onClick={onCheckout} disabled={checkoutPending || !billingReady} size="lg">
+    <Button
+      type="button"
+      onClick={onCheckout}
+      disabled={checkoutPending || !billingReady}
+      size="lg"
+      className="w-fit"
+    >
       {checkoutPending
-        ? "Opening checkout..."
+        ? "Opening checkout…"
         : billingReady
           ? "Continue to checkout"
           : "Billing is not configured yet"}
