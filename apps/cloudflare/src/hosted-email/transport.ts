@@ -133,11 +133,6 @@ async function prepareHostedEmailSend(input: {
     throw new Error("Hosted email sender identity is not configured.");
   }
 
-  if (input.targetKind === "participant") {
-    throw new HostedEmailSendValidationError(
-      "Hosted email participant delivery is not supported. Use an explicit recipient or a serialized thread target.",
-    );
-  }
   if (input.targetKind !== "explicit" && input.targetKind !== "thread") {
     throw new HostedEmailSendValidationError(
       "Hosted email delivery requires an explicit recipient or a serialized thread target.",
