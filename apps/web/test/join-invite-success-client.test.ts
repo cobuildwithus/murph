@@ -55,7 +55,7 @@ test("verify-stage success page keeps the copy neutral while sign-in settles", (
   );
 
   assert.match(markup, /Finishing sign-in/);
-  assert.match(markup, /We’re finishing sign-in and checking your setup status now\./);
+  assert.match(markup, /Checking your signup status\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.match(markup, /Back to invite/);
 });
@@ -70,8 +70,8 @@ test("blocked success page does not pretend setup is still running", () => {
     }),
   );
 
-  assert.match(markup, /Unable to continue/);
-  assert.match(markup, /We couldn’t finish setup automatically\./);
+  assert.match(markup, /Account blocked/);
+  assert.match(markup, /Head back to your invite for next steps\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
@@ -86,9 +86,9 @@ test("active success page explains when vault and assistant setup is still runni
     }),
   );
 
-  assert.match(markup, /Your account is ready/);
-  assert.match(markup, /Payment is confirmed\./);
-  assert.match(markup, /setting up your private, encrypted vault/);
+  assert.match(markup, /You’re all set/);
+  assert.match(markup, /Payment confirmed\./);
+  assert.match(markup, /Setup finishes in about a minute/);
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
 

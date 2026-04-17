@@ -148,15 +148,15 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         buttonLabel: "Continue",
         description: status.activationPending
           ? JOIN_INVITE_ACTIVATION_PENDING_COPY.successDescription
-          : "Murph finished setting things up. Head back to your invite page to continue.",
+          : "Head back to your invite to start.",
         pending: false,
-        title: "Your account is ready",
+        title: "You’re all set",
         variant: "active",
       };
     case "verify":
       return {
         buttonLabel: "Back to invite",
-        description: "We’re finishing sign-in and checking your setup status now.",
+        description: "Checking your signup status.",
         pending: true,
         title: "Finishing sign-in",
         variant: "pending",
@@ -164,7 +164,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "checkout":
       return {
         buttonLabel: "Back to invite",
-        description: "We’re confirming your subscription and setting up your encrypted vault and assistant now.",
+        description: "Setting up your vault and assistant. This takes about a minute.",
         pending: true,
         title: "Payment received",
         variant: "pending",
@@ -172,7 +172,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "expired":
       return {
         buttonLabel: "Back to invite",
-        description: "This invite link expired. Return to the original invite message for a fresh link.",
+        description: "Text Murph again for a fresh link.",
         pending: false,
         title: "Invite expired",
         variant: "terminal",
@@ -180,7 +180,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "invalid":
       return {
         buttonLabel: "Back to invite",
-        description: "This invite link is no longer valid. Return to the original invite message for a fresh link.",
+        description: "Text Murph again for a fresh link.",
         pending: false,
         title: "Invite not found",
         variant: "terminal",
@@ -188,9 +188,9 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "blocked":
       return {
         buttonLabel: "Back to invite",
-        description: "We couldn’t finish setup automatically. Head back to your invite page for the latest status.",
+        description: "Head back to your invite for next steps.",
         pending: false,
-        title: "Unable to continue",
+        title: "Account blocked",
         variant: "terminal",
       };
   }

@@ -12,11 +12,10 @@ function resolveJoinInviteEyebrow(
 ): { label: string; tone: "default" | "danger" } {
   switch (stage) {
     case "invalid":
-      return { label: "Invite not valid", tone: "danger" };
     case "expired":
-      return { label: "Invite expired", tone: "danger" };
+      return { label: "Link no longer works", tone: "danger" };
     case "blocked":
-      return { label: "Account blocked", tone: "danger" };
+      return { label: "Needs support", tone: "danger" };
     default:
       return { label: "Murph signup", tone: "default" };
   }

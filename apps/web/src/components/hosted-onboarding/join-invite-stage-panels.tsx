@@ -239,7 +239,7 @@ export function JoinInviteActivePanel({
         <div className="flex items-center gap-2.5 text-sm text-olive">
           <CheckCircleIcon className="size-4 shrink-0" />
           <p className="leading-relaxed">
-            Murph should reach out shortly. Just reply there to start chatting.
+            Murph will text you shortly. Reply to start.
           </p>
         </div>
       )}

@@ -104,7 +104,7 @@ export function JoinInviteStageContent({
           <a href="mailto:support@withmurph.ai" className="font-semibold text-olive underline-offset-4 hover:underline">
             support@withmurph.ai
           </a>{" "}
-          and we&apos;ll help restore access.
+          to restore access.
         </div>
       ) : null}
 
