@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { cloneSerializableConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
+import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/config";
 
 import type {
   HostedAssistantRuntimeResolvedConfig,
@@ -59,13 +59,7 @@ function cloneHostedAssistantRuntimeResolvedConfig(
       emailSendReady: input?.channelCapabilities.emailSendReady ?? false,
       telegramBotConfigured: input?.channelCapabilities.telegramBotConfigured ?? false,
     },
-    deviceSync: input?.deviceSync
-      ? {
-          providerConfigs: cloneSerializableConfiguredDeviceSyncProviderConfigs(input.deviceSync.providerConfigs),
-          publicBaseUrl: input.deviceSync.publicBaseUrl,
-          secret: input.deviceSync.secret,
-        }
-      : null,
+    deviceSync: input?.deviceSync ? cloneConfiguredDeviceSyncRuntimeConfig(input.deviceSync) : null,
   };
 }
 

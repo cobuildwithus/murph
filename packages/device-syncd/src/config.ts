@@ -52,6 +52,11 @@ export type ConfiguredDeviceSyncProviderKey = keyof ConfiguredDeviceSyncProvider
 export type ConfiguredDeviceSyncProviderConfigs = Partial<ConfiguredDeviceSyncProviderConfigByKey>;
 export type SerializableConfiguredDeviceSyncProviderConfigs =
   Partial<SerializableConfiguredDeviceSyncProviderConfigByKey>;
+export interface ConfiguredDeviceSyncRuntimeConfig {
+  providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
+  publicBaseUrl: string;
+  secret: string;
+}
 
 type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
 type ConfiguredDeviceSyncProviderPresence =
@@ -364,6 +369,36 @@ export function readConfiguredDeviceSyncProviderConfigs(
   return configs;
 }
 
+export function readConfiguredDeviceSyncRuntimeConfig(
+  env: DeviceSyncEnvSource,
+): ConfiguredDeviceSyncRuntimeConfig | null {
+  const providerConfigs = cloneSerializableConfiguredDeviceSyncProviderConfigs(
+    readConfiguredDeviceSyncProviderConfigs(env),
+  );
+  const publicBaseUrl = optionalEnv(env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS);
+  const secret = optionalEnv(env, DEVICE_SYNC_SECRET_ENV_KEYS);
+
+  if (!publicBaseUrl || !secret || !hasConfiguredDeviceSyncProviderConfigs(providerConfigs)) {
+    return null;
+  }
+
+  return {
+    providerConfigs,
+    publicBaseUrl,
+    secret,
+  };
+}
+
+export function cloneConfiguredDeviceSyncRuntimeConfig(
+  config: ConfiguredDeviceSyncRuntimeConfig,
+): ConfiguredDeviceSyncRuntimeConfig {
+  return {
+    providerConfigs: cloneSerializableConfiguredDeviceSyncProviderConfigs(config.providerConfigs),
+    publicBaseUrl: config.publicBaseUrl,
+    secret: config.secret,
+  };
+}
+
 export function hasConfiguredDeviceSyncProviderConfigs(
   configs: ConfiguredDeviceSyncProviderPresence,
 ): boolean {
@@ -564,6 +599,55 @@ export const configuredDeviceSyncProviderKeys = Object.freeze(
   Object.keys(configuredDeviceSyncProviderConfigHandlers) as ConfiguredDeviceSyncProviderKey[],
 );
 
+const GARMIN_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
+  "apiBaseUrl",
+  "authBaseUrl",
+  "backfillDays",
+  "clientId",
+  "clientSecret",
+  "reconcileDays",
+  "reconcileIntervalMs",
+  "requestTimeoutMs",
+  "tokenBaseUrl",
+] as const satisfies readonly (keyof GarminDeviceSyncProviderConfig)[];
+
+const OURA_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
+  "apiBaseUrl",
+  "authBaseUrl",
+  "backfillDays",
+  "clientId",
+  "clientSecret",
+  "reconcileDays",
+  "reconcileIntervalMs",
+  "requestTimeoutMs",
+  "scopes",
+  "webhookTimestampToleranceMs",
+] as const satisfies readonly (keyof OuraDeviceSyncProviderConfig)[];
+
+const STRAVA_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
+  "apiBaseUrl",
+  "authBaseUrl",
+  "backfillDays",
+  "clientId",
+  "clientSecret",
+  "reconcileDays",
+  "reconcileIntervalMs",
+  "requestTimeoutMs",
+  "scopes",
+] as const satisfies readonly (keyof StravaDeviceSyncProviderConfig)[];
+
+const WHOOP_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
+  "backfillDays",
+  "baseUrl",
+  "clientId",
+  "clientSecret",
+  "reconcileDays",
+  "reconcileIntervalMs",
+  "requestTimeoutMs",
+  "scopes",
+  "webhookTimestampToleranceMs",
+] as const satisfies readonly (keyof WhoopDeviceSyncProviderConfig)[];
+
 function createConfiguredDeviceSyncProviderFromConfig(
   provider: ConfiguredDeviceSyncProviderKey,
   config: ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey],
@@ -592,52 +676,25 @@ function parseSerializableConfiguredDeviceSyncProviderConfig(
 function cloneGarminDeviceSyncProviderConfig(
   config: GarminDeviceSyncProviderConfig,
 ): SerializableConfiguredDeviceSyncProviderConfigByKey["garmin"] {
-  const { fetchImpl: _fetchImpl, ...serializableConfig } = config;
-
-  return {
-    ...serializableConfig,
-  };
+  return cloneSerializableProviderConfig(config, GARMIN_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
 }
 
 function cloneOuraDeviceSyncProviderConfig(
   config: OuraDeviceSyncProviderConfig,
 ): SerializableConfiguredDeviceSyncProviderConfigByKey["oura"] {
-  const {
-    fetchImpl: _fetchImpl,
-    webhookVerificationToken: _webhookVerificationToken,
-    ...serializableConfig
-  } = config;
-
-  return {
-    ...serializableConfig,
-    ...(config.scopes ? { scopes: [...config.scopes] } : {}),
-  };
+  return cloneSerializableProviderConfig(config, OURA_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
 }
 
 function cloneStravaDeviceSyncProviderConfig(
   config: StravaDeviceSyncProviderConfig,
 ): SerializableConfiguredDeviceSyncProviderConfigByKey["strava"] {
-  const {
-    fetchImpl: _fetchImpl,
-    webhookVerifyToken: _webhookVerifyToken,
-    ...serializableConfig
-  } = config;
-
-  return {
-    ...serializableConfig,
-    ...(config.scopes ? { scopes: [...config.scopes] } : {}),
-  };
+  return cloneSerializableProviderConfig(config, STRAVA_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
 }
 
 function cloneWhoopDeviceSyncProviderConfig(
   config: WhoopDeviceSyncProviderConfig,
 ): SerializableConfiguredDeviceSyncProviderConfigByKey["whoop"] {
-  const { fetchImpl: _fetchImpl, ...serializableConfig } = config;
-
-  return {
-    ...serializableConfig,
-    ...(config.scopes ? { scopes: [...config.scopes] } : {}),
-  };
+  return cloneSerializableProviderConfig(config, WHOOP_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
 }
 
 function parseSerializableGarminDeviceSyncProviderConfig(
@@ -839,6 +896,28 @@ function requireSerializableProviderConfigRecord(
   }
 
   return record;
+}
+
+function cloneSerializableProviderConfig<
+  TConfig extends object,
+  const TKeys extends readonly (keyof TConfig)[],
+>(
+  config: TConfig,
+  keys: TKeys,
+): Pick<TConfig, TKeys[number]> {
+  const cloned = {} as Pick<TConfig, TKeys[number]>;
+
+  for (const key of keys) {
+    const value = config[key];
+
+    if (value === undefined) {
+      continue;
+    }
+
+    cloned[key] = (Array.isArray(value) ? [...value] : value) as Pick<TConfig, TKeys[number]>[typeof key];
+  }
+
+  return cloned;
 }
 
 function requireSerializableConfigObject(value: unknown, label: string): Record<string, unknown> {

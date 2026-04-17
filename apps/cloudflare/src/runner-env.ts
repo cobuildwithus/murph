@@ -4,9 +4,7 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { readHostedRunnerCommitTimeoutMs } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  cloneSerializableConfiguredDeviceSyncProviderConfigs,
-  hasConfiguredDeviceSyncProviderConfigs,
-  readConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
 import {
   readHostedEmailCapabilities,
@@ -64,30 +62,15 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
 export function buildHostedRunnerResolvedConfig(
   configSource: Readonly<Record<string, string | undefined>>,
 ): HostedAssistantRuntimeResolvedConfig {
-  const providerConfigs = cloneSerializableConfiguredDeviceSyncProviderConfigs(
-    readConfiguredDeviceSyncProviderConfigs(configSource),
-  );
   const emailCapabilities = readHostedEmailCapabilities(configSource);
-  const deviceSyncPublicBaseUrl = normalizeEnvString(configSource.DEVICE_SYNC_PUBLIC_BASE_URL);
-  // This codec secret protects hosted device-sync token bundles inside the runner.
-  // It is distinct from the local daemon's DEVICE_SYNC_CONTROL_TOKEN contract.
-  const deviceSyncCodecSecret = normalizeEnvString(configSource.DEVICE_SYNC_SECRET);
+  const deviceSync = readConfiguredDeviceSyncRuntimeConfig(configSource);
 
   return {
     channelCapabilities: {
       emailSendReady: emailCapabilities.sendReady,
       telegramBotConfigured: normalizeEnvString(configSource.TELEGRAM_BOT_TOKEN) !== null,
     },
-    deviceSync:
-      deviceSyncPublicBaseUrl
-      && deviceSyncCodecSecret
-      && hasConfiguredDeviceSyncProviderConfigs(providerConfigs)
-        ? {
-            providerConfigs,
-            publicBaseUrl: deviceSyncPublicBaseUrl,
-            secret: deviceSyncCodecSecret,
-          }
-        : null,
+    deviceSync,
   };
 }
 

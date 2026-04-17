@@ -11,6 +11,7 @@ export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verificatio
 export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService } from "./service.ts";
 export type { CreateDeviceSyncServiceInput } from "./service.ts";
 export {
+  cloneConfiguredDeviceSyncRuntimeConfig,
   createConfiguredDeviceSyncRegistry,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
   createConfiguredDeviceSyncRegistryFromConfigs,
@@ -24,6 +25,7 @@ export {
   listConfiguredDeviceSyncProviderNames,
   loadDeviceSyncEnvironment,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
@@ -34,6 +36,7 @@ export type {
   ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
+  ConfiguredDeviceSyncRuntimeConfig,
   LoadedDeviceSyncEnvironment,
   SerializableConfiguredDeviceSyncProviderConfigByKey,
   SerializableConfiguredDeviceSyncProviderConfigs,
