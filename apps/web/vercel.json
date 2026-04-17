@@ -16,6 +16,10 @@
     {
       "path": "/api/internal/hosted-execution/usage/cron",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-wake/repair",
+      "schedule": "* * * * *"
     }
   ]
 }

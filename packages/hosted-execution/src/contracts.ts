@@ -37,7 +37,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.cron.tick",
   "device-sync.wake",
   "vault.share.accepted",
-  "gateway.message.send",
 ] as const;
 
 export type HostedExecutionEventKind =
@@ -155,14 +154,6 @@ export interface HostedExecutionRunnerSharePack {
   shareId: string;
 }
 
-export interface HostedExecutionGatewayMessageSendEvent extends HostedExecutionBaseEvent {
-  clientRequestId: string | null;
-  kind: "gateway.message.send";
-  replyToMessageId: string | null;
-  sessionKey: string;
-  text: string;
-}
-
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
@@ -171,8 +162,7 @@ export type HostedExecutionEvent =
   | HostedExecutionEmailMessageReceivedEvent
   | HostedExecutionAssistantCronTickEvent
   | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionVaultShareAcceptedEvent
-  | HostedExecutionGatewayMessageSendEvent;
+  | HostedExecutionVaultShareAcceptedEvent;
 
 export interface HostedExecutionDispatchRequest {
   event: HostedExecutionEvent;
@@ -298,6 +288,26 @@ export interface HostedWakeCommitRequest {
 export interface HostedWakeCommitResponse {
   committed: boolean;
   cursor: HostedExecutionCursorState;
+}
+
+export interface HostedWakeAppendRequest {
+  dispatch: HostedExecutionDispatchRequest;
+}
+
+export interface HostedWakeAppendResponse {
+  duplicate: boolean;
+  inserted: boolean;
+  updatedExisting: boolean;
+  wake: HostedWakeRecord;
+}
+
+export interface HostedWakeQuarantineRequest {
+  quarantineCode: string;
+  wakeId: string;
+}
+
+export interface HostedWakeQuarantineResponse {
+  quarantined: boolean;
 }
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";

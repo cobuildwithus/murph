@@ -1,13 +1,20 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionDispatchRequest,
+  type HostedWakeAppendRequest,
+  type HostedWakeAppendResponse,
   type HostedWakeCommitRequest,
   type HostedWakeCommitResponse,
   type HostedWakeFetchRequest,
   type HostedWakeFetchResponse,
+  type HostedWakeQuarantineRequest,
+  type HostedWakeQuarantineResponse,
 } from "@murphai/hosted-execution/contracts";
 import {
+  parseHostedWakeAppendResponse,
   parseHostedWakeCommitResponse,
   parseHostedWakeFetchResponse,
+  parseHostedWakeQuarantineResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -85,8 +92,39 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   });
 }
 
+const HOSTED_WEB_HOSTED_WAKE_APPEND_PATH = "/api/internal/hosted-wake/append";
 const HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH = "/api/internal/hosted-wake/commit";
+const HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH = "/api/internal/hosted-wake/quarantine";
 const HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH = "/api/internal/hosted-wake/unseen";
+
+export async function appendHostedWakeDispatchInWeb(input: {
+  baseUrl: string;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  dispatch: HostedExecutionDispatchRequest;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedWakeAppendResponse> {
+  const body = JSON.stringify({
+    dispatch: input.dispatch,
+  } satisfies HostedWakeAppendRequest);
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body,
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_HOSTED_WAKE_APPEND_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted wake append failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedWakeAppendResponse(await response.json());
+}
 
 export async function fetchHostedWakeBatchFromWeb(input: {
   afterSeq?: string | null;
@@ -143,6 +181,37 @@ export async function commitHostedWakeCursorToWeb(input: {
   }
 
   return parseHostedWakeCommitResponse(await response.json());
+}
+
+export async function quarantineHostedWakeInWeb(input: {
+  baseUrl: string;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  quarantineCode: string;
+  timeoutMs: number | null;
+  wakeId: string;
+}): Promise<HostedWakeQuarantineResponse> {
+  const body = JSON.stringify({
+    quarantineCode: input.quarantineCode,
+    wakeId: input.wakeId,
+  } satisfies HostedWakeQuarantineRequest);
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body,
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted wake quarantine failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedWakeQuarantineResponse(await response.json());
 }
 
 function requireHostedWebControlBaseUrl(value: string): string {

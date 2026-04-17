@@ -5,7 +5,6 @@ import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
 import {
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
-  buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionMemberChannelsUpdatedDispatch,
@@ -271,28 +270,6 @@ describe("hosted execution builders", () => {
     });
   });
 
-  it("normalizes gateway message send nullable ids to null", () => {
-    expect(
-      buildHostedExecutionGatewayMessageSendDispatch({
-        eventId: "gateway-send-1",
-        occurredAt,
-        sessionKey: "session_123",
-        text: "hello from gateway",
-        userId: "user_123",
-      }),
-    ).toEqual({
-      event: {
-        clientRequestId: null,
-        kind: "gateway.message.send",
-        replyToMessageId: null,
-        sessionKey: "session_123",
-        text: "hello from gateway",
-        userId: "user_123",
-      },
-      eventId: "gateway-send-1",
-      occurredAt,
-    });
-  });
 });
 
 describe("hosted email helpers", () => {

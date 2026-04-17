@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedExecutionDispatchWakeTx: vi.fn(),
   commitHostedExecutionCursorTx: vi.fn(),
   getPrisma: vi.fn(),
+  listHostedWakeRepairCandidates: vi.fn(),
   listHostedWakesAfterSeq: vi.fn(),
   readOptionalJsonObject: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  requireVercelCronRequest: vi.fn(),
+  triggerHostedWakeUserBestEffort: vi.fn(),
+  quarantineHostedWakeTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -28,18 +33,65 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
+vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
+  requireVercelCronRequest: mocks.requireVercelCronRequest,
+}));
+
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
+  appendHostedExecutionDispatchWakeTx: mocks.appendHostedExecutionDispatchWakeTx,
+}));
+
 vi.mock("@/src/lib/hosted-wake/store", () => ({
   commitHostedExecutionCursorTx: mocks.commitHostedExecutionCursorTx,
+  listHostedWakeRepairCandidates: mocks.listHostedWakeRepairCandidates,
   listHostedWakesAfterSeq: mocks.listHostedWakesAfterSeq,
+  quarantineHostedWakeTx: mocks.quarantineHostedWakeTx,
 }));
 
 describe("hosted wake internal routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.requireVercelCronRequest.mockReturnValue(undefined);
+    mocks.triggerHostedWakeUserBestEffort.mockResolvedValue(true);
     mocks.getPrisma.mockReturnValue({
       $transaction: vi.fn(async (callback: (tx: { label: string }) => Promise<unknown>) =>
         callback({ label: "wake-route-tx" })),
+    });
+    mocks.appendHostedExecutionDispatchWakeTx.mockResolvedValue({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: {
+        behavior: "ordered",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        dedupeKey: "dispatch:assistant.cron.tick:evt_tick",
+        id: "wake_24",
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+        payloadBytes: 1,
+        payloadInlineCiphertext: "ciphertext",
+        payloadJson: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+        },
+        payloadRef: null,
+        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        quarantineCode: null,
+        quarantinedAt: null,
+        seq: "24",
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+      },
     });
     mocks.listHostedWakesAfterSeq.mockResolvedValue({
       cursor: {
@@ -64,6 +116,58 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "4",
       },
+    });
+    mocks.quarantineHostedWakeTx.mockResolvedValue(true);
+    mocks.listHostedWakeRepairCandidates.mockResolvedValue([
+      {
+        committedSeq: "24",
+        nextSeq: "26",
+        pendingWakeCount: 1,
+        targetSeqHint: "25",
+        userId: "member_123",
+      },
+    ]);
+  });
+
+  it("parses and forwards wake append requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_tick",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+      },
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/append/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: expect.objectContaining({
+        id: "wake_24",
+        seq: "24",
+      }),
+    });
+    expect(mocks.appendHostedExecutionDispatchWakeTx).toHaveBeenCalledWith({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_tick",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+      },
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
     });
   });
 
@@ -136,6 +240,51 @@ describe("hosted wake internal routes", () => {
       tx: expect.objectContaining({
         label: "wake-route-tx",
       }),
+      userId: "member_123",
+    });
+  });
+
+  it("parses and forwards wake quarantine requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      quarantineCode: "invalid-dispatch-payload",
+      wakeId: "wake_24",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/quarantine/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      quarantined: true,
+    });
+    expect(mocks.quarantineHostedWakeTx).toHaveBeenCalledWith({
+      quarantineCode: "invalid-dispatch-payload",
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      userId: "member_123",
+      wakeId: "wake_24",
+    });
+  });
+
+  it("repairs stale wake cursors through the hosted wake control client", async () => {
+    const { GET } = await import("../app/api/internal/hosted-wake/repair/route");
+    const response = await GET(new Request("https://example.test", { method: "GET" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      examined: 1,
+      nudged: 1,
+      staleAfterMs: 60_000,
+    });
+    expect(mocks.requireVercelCronRequest).toHaveBeenCalledOnce();
+    expect(mocks.listHostedWakeRepairCandidates).toHaveBeenCalledWith({
+      limit: 128,
+      olderThan: expect.any(Date),
+    });
+    expect(mocks.triggerHostedWakeUserBestEffort).toHaveBeenCalledWith({
+      context: "hosted-wake.repair",
+      targetSeqHint: "25",
       userId: "member_123",
     });
   });

@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionEmailMessageReceivedDispatch,
-  buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionMemberChannelsUpdatedDispatch,
@@ -17,10 +16,6 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
-  assistantGatewayLocalMessageSender: Symbol("assistantGatewayLocalMessageSender"),
-  assistantGatewayLocalProjectionSourceReader: Symbol(
-    "assistantGatewayLocalProjectionSourceReader",
-  ),
   handleHostedShareAcceptedDispatch: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   ingestHostedEmailMessage: vi.fn(),
@@ -28,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   ingestHostedTelegramMessage: vi.fn(),
   prepareHostedDispatchContext: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
-  sendGatewayMessageLocal: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -38,15 +32,6 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 
 vi.mock("@murphai/assistant-engine", () => ({
   queueAssistantFirstContactWelcome: mocks.queueAssistantFirstContactWelcome,
-}));
-
-vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
-  assistantGatewayLocalMessageSender: mocks.assistantGatewayLocalMessageSender,
-  assistantGatewayLocalProjectionSourceReader: mocks.assistantGatewayLocalProjectionSourceReader,
-}));
-
-vi.mock("@murphai/gateway-local", () => ({
-  sendGatewayMessageLocal: mocks.sendGatewayMessageLocal,
 }));
 
 vi.mock("../src/hosted-runtime/events/email.ts", () => ({
@@ -389,34 +374,4 @@ describe("executeHostedDispatchEvent", () => {
     expect(mocks.handleHostedShareAcceptedDispatch).not.toHaveBeenCalled();
   });
 
-  it("delegates gateway sends through the local gateway adapter", async () => {
-    const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
-      clientRequestId: "client_123",
-      eventId: "evt_gateway_send",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      replyToMessageId: "msg_parent",
-      sessionKey: "session_123",
-      text: "hello from hosted runtime",
-      userId: "member_123",
-    });
-
-    await executeHostedDispatchEvent({
-      dispatch,
-      executionContext,
-      runtime: createRuntime(),
-      runtimeEnv: {},
-      vaultRoot: "/tmp/assistant-runtime-events",
-    });
-
-    expect(mocks.sendGatewayMessageLocal).toHaveBeenCalledWith({
-      clientRequestId: "client_123",
-      dispatchMode: "queue-only",
-      messageSender: mocks.assistantGatewayLocalMessageSender,
-      replyToMessageId: "msg_parent",
-      sessionKey: "session_123",
-      sourceReader: mocks.assistantGatewayLocalProjectionSourceReader,
-      text: "hello from hosted runtime",
-      vault: "/tmp/assistant-runtime-events",
-    });
-  });
 });

@@ -24,7 +24,6 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionEvent,
-  HostedExecutionGatewayMessageSendEvent,
   HostedExecutionCursorState,
   HostedExecutionMemberActivatedEvent,
   HostedExecutionTelegramMessageReceivedEvent,
@@ -35,8 +34,10 @@ import type {
   HostedExecutionUserStatus,
   HostedExecutionVaultShareAcceptedEvent,
   HostedWakeBehavior,
+  HostedWakeAppendResponse,
   HostedWakeCommitResponse,
   HostedWakeFetchResponse,
+  HostedWakeQuarantineResponse,
   HostedWakeRecord,
 } from "./contracts.ts";
 import {
@@ -418,24 +419,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         share: parseHostedExecutionShareReference(record.share),
         userId,
       } satisfies HostedExecutionVaultShareAcceptedEvent;
-    case "gateway.message.send":
-      return {
-        kind,
-        clientRequestId: readNullableString(
-          record.clientRequestId,
-          "Hosted execution gateway.message.send clientRequestId",
-        ),
-        replyToMessageId: readNullableString(
-          record.replyToMessageId,
-          "Hosted execution gateway.message.send replyToMessageId",
-        ),
-        sessionKey: requireString(
-          record.sessionKey,
-          "Hosted execution gateway.message.send sessionKey",
-        ),
-        text: requireString(record.text, "Hosted execution gateway.message.send text"),
-        userId,
-      } satisfies HostedExecutionGatewayMessageSendEvent;
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
@@ -639,6 +622,32 @@ export function parseHostedWakeCommitResponse(
   return {
     committed: requireBoolean(record.committed, "Hosted wake commit response committed"),
     cursor: parseHostedExecutionCursorState(record.cursor),
+  };
+}
+
+export function parseHostedWakeAppendResponse(
+  value: unknown,
+): HostedWakeAppendResponse {
+  const record = requireObject(value, "Hosted wake append response");
+
+  return {
+    duplicate: requireBoolean(record.duplicate, "Hosted wake append response duplicate"),
+    inserted: requireBoolean(record.inserted, "Hosted wake append response inserted"),
+    updatedExisting: requireBoolean(
+      record.updatedExisting,
+      "Hosted wake append response updatedExisting",
+    ),
+    wake: parseHostedWakeRecord(record.wake),
+  };
+}
+
+export function parseHostedWakeQuarantineResponse(
+  value: unknown,
+): HostedWakeQuarantineResponse {
+  const record = requireObject(value, "Hosted wake quarantine response");
+
+  return {
+    quarantined: requireBoolean(record.quarantined, "Hosted wake quarantine response quarantined"),
   };
 }
 

@@ -146,7 +146,6 @@ describe("hosted execution coverage gaps", () => {
       "assistant.cron.tick",
       "device-sync.wake",
       "vault.share.accepted",
-      "gateway.message.send",
     ]);
     expect(HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES).toEqual([
       "queued",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionGatewayMessageSendDispatch,
+  buildHostedExecutionAssistantCronTickDispatch,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
@@ -70,11 +70,10 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const HOSTED_DISPATCH = {
-  dispatch: buildHostedExecutionGatewayMessageSendDispatch({
+  dispatch: buildHostedExecutionAssistantCronTickDispatch({
     eventId: "evt_123",
     occurredAt: "2026-04-08T00:00:00.000Z",
-    sessionKey: "session-key_123",
-    text: "send",
+    reason: "manual",
     userId: "member_123",
   }),
   vaultRoot: "/tmp/hosted-vault",

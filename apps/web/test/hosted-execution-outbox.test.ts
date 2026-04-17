@@ -48,7 +48,7 @@ describe("hosted execution outbox", () => {
   });
 
   it("persists direct enqueue payloads inline even for events that previously used staged payload refs", async () => {
-    const dispatch = createGatewaySendDispatch();
+    const dispatch = createLinqDispatch();
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord(dispatch));
 
     const record = await enqueueHostedExecutionOutbox({
@@ -90,7 +90,7 @@ describe("hosted execution outbox", () => {
   );
 
   it("summarizes settled accepted rows once no further web retry work remains", async () => {
-    const dispatch = createGatewaySendDispatch();
+    const dispatch = createLinqDispatch();
     const initialPayload = serializeHostedExecutionOutboxPayload(dispatch) as Prisma.JsonValue;
     const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
       payloadJson: initialPayload,
@@ -117,7 +117,7 @@ describe("hosted execution outbox", () => {
   });
 
   it("fails closed when a legacy reference payload survives into the canonical outbox", async () => {
-    const dispatch = createGatewaySendDispatch();
+    const dispatch = createLinqDispatch();
     const prisma = createOutboxPrisma(createOutboxRecord(dispatch, {
       payloadJson: {
         dispatchRef: {
@@ -293,17 +293,19 @@ function createCronDispatch(): HostedExecutionDispatchRequest {
   };
 }
 
-function createGatewaySendDispatch(): HostedExecutionDispatchRequest {
+function createLinqDispatch(): HostedExecutionDispatchRequest {
   return {
     event: {
-      clientRequestId: "req_123",
-      kind: "gateway.message.send",
-      replyToMessageId: "5001",
-      sessionKey: "gwcs_secret",
-      text: "Please keep this private.",
+      kind: "linq.message.received",
+      linqEvent: {
+        body: "Please keep this private.",
+        sender: "+15551234567",
+      },
+      linqMessageId: "linq_123",
+      phoneLookupKey: "hbidx:phone:v1:secret",
       userId: "member_123",
     },
-    eventId: "evt_gateway_send",
+    eventId: "evt_linq_receive",
     occurredAt: "2026-03-28T11:00:00.000Z",
   };
 }

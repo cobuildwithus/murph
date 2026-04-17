@@ -88,20 +88,6 @@ describe("HostedUserRunner hosted wake drain", () => {
       })
       .mockResolvedValueOnce({
         cursor: createCursorState({
-          committedSeq: "1",
-          nextSeq: "3",
-          updatedAt: "2026-03-26T12:00:01.000Z",
-          version: "cursor_v2",
-        }),
-        wakes: [
-          createHostedWakeRecord({
-            payloadJson: createDispatch("evt_after_poison"),
-            seq: "2",
-          }),
-        ],
-      })
-      .mockResolvedValueOnce({
-        cursor: createCursorState({
           committedSeq: "2",
           nextSeq: "3",
           updatedAt: "2026-03-26T12:00:02.000Z",
@@ -109,26 +95,20 @@ describe("HostedUserRunner hosted wake drain", () => {
         }),
         wakes: [],
       });
+    const quarantineHostedWakeInWeb = vi.spyOn(webControlPlane, "quarantineHostedWakeInWeb");
+    quarantineHostedWakeInWeb.mockResolvedValue({
+      quarantined: true,
+    });
     const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
-    commitHostedWakeCursorToWeb
-      .mockResolvedValueOnce({
-        committed: true,
-        cursor: createCursorState({
-          committedSeq: "1",
-          nextSeq: "3",
-          updatedAt: "2026-03-26T12:00:01.000Z",
-          version: "cursor_v2",
-        }),
-      })
-      .mockResolvedValueOnce({
-        committed: true,
-        cursor: createCursorState({
-          committedSeq: "2",
-          nextSeq: "3",
-          updatedAt: "2026-03-26T12:00:02.000Z",
-          version: "cursor_v3",
-        }),
-      });
+    commitHostedWakeCursorToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: "2",
+        nextSeq: "3",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v3",
+      }),
+    });
 
     const runner = new HostedUserRunner(
       storage.state,
@@ -142,10 +122,11 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     await runner.wakeHostedWakes();
 
-    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual([
-      "1",
-      "2",
-    ]);
+    expect(quarantineHostedWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      quarantineCode: "invalid-dispatch-payload",
+      wakeId: "wake_1",
+    }));
+    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["2"]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_poison"]);
   });
 });

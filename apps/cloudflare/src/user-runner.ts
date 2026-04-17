@@ -6,6 +6,7 @@ import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedExecutionAssistantCronTickDispatch,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -35,8 +36,10 @@ import {
   createRunnerCommitRecovery,
 } from "./user-runner/runner-commit-recovery.js";
 import {
+  appendHostedWakeDispatchInWeb,
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
+  quarantineHostedWakeInWeb,
 } from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
@@ -49,6 +52,10 @@ import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import { RunnerQueueStore } from "./user-runner/runner-queue-store.js";
 import { RunnerScheduler } from "./user-runner/runner-scheduler.js";
 import {
+  shouldAdvanceHostedWakeCursor,
+  type HostedWakeDrainState,
+} from "./user-runner/runner-wake-state.js";
+import {
   toUserStatus,
   type DurableObjectStateLike,
   type RunnerStateRecord,
@@ -57,8 +64,11 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
+const HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS = 5_000;
 const HOSTED_WAKE_DISPATCH_POLL_INTERVAL_MS = 250;
 const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
+const HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH = "invalid-dispatch-payload";
+const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "dispatch-user-mismatch";
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
   emitHostedExecutionStructuredLog({
@@ -288,21 +298,56 @@ export class HostedUserRunner {
       return;
     }
 
+    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
     if (record.runtimeBootstrapped && !(await this.queueStore.hasDuePendingDispatch(Date.now()))) {
-      const enqueueResult = await this.queueStore.enqueueDispatch({
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "alarm",
-          userId: record.userId,
-        },
-        eventId: `alarm:${Date.now()}`,
-        occurredAt: new Date().toISOString(),
-      });
-
-      if (enqueueResult.accepted) {
-        record = await this.scheduler.syncNextWake();
+      if (record.userId && hostedWebBaseUrl && this.env.webCallbackSigning) {
+        try {
+          const dispatch = buildHostedExecutionAssistantCronTickDispatch({
+            eventId: `alarm:${Date.now()}`,
+            occurredAt: new Date().toISOString(),
+            reason: "alarm",
+            userId: record.userId,
+          });
+          const append = await appendHostedWakeDispatchInWeb({
+            baseUrl: hostedWebBaseUrl,
+            boundUserId: record.userId,
+            callbackSigning: this.env.webCallbackSigning,
+            dispatch,
+            timeoutMs: this.env.runnerTimeoutMs,
+          });
+          await this.wakeHostedWakes({
+            targetSeqHint: append.wake.seq,
+          });
+          record = await this.queueStore.readState();
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.user-runner",
+            error,
+            level: "warn",
+            message: "Hosted cron wake append failed; scheduling a retry.",
+            phase: "dispatch.running",
+            userId: record.userId,
+          });
+          record = await this.scheduler.syncNextWake(
+            new Date(Date.now() + HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS).toISOString(),
+          );
+        }
       } else {
-        record = enqueueResult.record;
+        const enqueueResult = await this.queueStore.enqueueDispatch({
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "alarm",
+            userId: record.userId,
+          },
+          eventId: `alarm:${Date.now()}`,
+          occurredAt: new Date().toISOString(),
+        });
+
+        if (enqueueResult.accepted) {
+          record = await this.scheduler.syncNextWake();
+        } else {
+          record = enqueueResult.record;
+        }
       }
     }
 
@@ -379,17 +424,17 @@ export class HostedUserRunner {
 
       let highestCommittedWakeSeq: string | null = null;
       let advancedWakeCount = 0;
-      let stoppingState: HostedExecutionDispatchLifecycleState | null = null;
+      let stoppingState: HostedWakeDrainState | null = null;
 
       for (const wake of batch.wakes) {
         const state = await this.dispatchHostedWakeRecord(wake);
 
-        if (state === "completed" || state === "poisoned") {
+        if (shouldAdvanceHostedWakeCursor(state)) {
           highestCommittedWakeSeq = wake.seq;
           advancedWakeCount += 1;
         }
 
-        if (state !== "completed") {
+        if (!shouldAdvanceHostedWakeCursor(state)) {
           stoppingState = state;
           break;
         }
@@ -445,9 +490,10 @@ export class HostedUserRunner {
   }
 
   private async dispatchHostedWakeRecord(wake: {
+    id: string;
     payloadJson?: unknown;
     seq: string;
-  }): Promise<HostedExecutionDispatchLifecycleState> {
+  }): Promise<HostedWakeDrainState> {
     const userId = await this.requireBoundUserId();
     let dispatch: HostedExecutionDispatchRequest;
 
@@ -461,7 +507,13 @@ export class HostedUserRunner {
         phase: "dispatch.running",
         userId,
       });
-      return "poisoned";
+      return await this.quarantineHostedWakeRecord(
+        userId,
+        wake.id,
+        HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH,
+      )
+        ? "quarantined"
+        : "backpressured";
     }
 
     if (dispatch.event.userId !== userId) {
@@ -472,7 +524,13 @@ export class HostedUserRunner {
         phase: "dispatch.running",
         userId,
       });
-      return "poisoned";
+      return await this.quarantineHostedWakeRecord(
+        userId,
+        wake.id,
+        HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
+      )
+        ? "quarantined"
+        : "backpressured";
     }
 
     const result = await this.dispatchWithOutcome(dispatch);
@@ -486,6 +544,41 @@ export class HostedUserRunner {
     }
 
     return this.waitForHostedDispatchCompletion(dispatch.eventId);
+  }
+
+  private async quarantineHostedWakeRecord(
+    userId: string,
+    wakeId: string,
+    quarantineCode: string,
+  ): Promise<boolean> {
+    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
+
+    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
+      return false;
+    }
+
+    try {
+      const response = await quarantineHostedWakeInWeb({
+        baseUrl: hostedWebBaseUrl,
+        boundUserId: userId,
+        callbackSigning: this.env.webCallbackSigning,
+        quarantineCode,
+        timeoutMs: this.env.runnerTimeoutMs,
+        wakeId,
+      });
+
+      return response.quarantined;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        error,
+        level: "warn",
+        message: `Failed to quarantine hosted wake ${wakeId}.`,
+        phase: "dispatch.running",
+        userId,
+      });
+      return false;
+    }
   }
 
   private async waitForHostedDispatchCompletion(
