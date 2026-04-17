@@ -6,7 +6,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { scheduleHostedExecutionDispatchTx } from "../hosted-execution/outbox";
+import { scheduleHostedExecutionDispatchTx } from "../hosted-execution/dispatch-lifecycle";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberEmailAuthorization,

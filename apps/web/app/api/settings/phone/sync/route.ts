@@ -1,5 +1,5 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { drainHostedExecutionOutboxBestEffort } from "@/src/lib/hosted-execution/outbox";
+import { handoffHostedExecutionScheduledEventBestEffort } from "@/src/lib/hosted-wake/control";
 import { readHostedPhoneHint } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hasHostedMemberActiveAccess } from "@/src/lib/hosted-onboarding/entitlement";
@@ -58,8 +58,9 @@ export const POST = withJsonError(async (request: Request) => {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (channelSyncDispatch) {
-    await drainHostedExecutionOutboxBestEffort({
-      eventIds: [channelSyncDispatch.eventId],
+    await handoffHostedExecutionScheduledEventBestEffort({
+      context: "settings.phone.sync",
+      eventId: channelSyncDispatch.eventId,
     });
   }
 

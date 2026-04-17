@@ -37,7 +37,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns HTTP 429 when signed dispatch backpressures a full per-user queue", async () => {
+  it("keeps the removed dispatch route unavailable even when a user queue is already full", async () => {
     const harness = createUserRunnerDurableObject();
     await seedFullRunnerQueue(harness, "member_123");
     await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
@@ -47,16 +47,9 @@ describe("cloudflare worker queue backpressure routes", () => {
       harness.env as never,
     );
 
-    expect(overflowResponse.status).toBe(429);
-    await expect(overflowResponse.json()).resolves.toMatchObject({
-      event: {
-        eventId: "evt_overflow",
-        state: "backpressured",
-      },
-      status: {
-        backpressuredEventIds: ["evt_overflow"],
-        poisonedEventIds: [],
-      },
+    expect(overflowResponse.status).toBe(404);
+    await expect(overflowResponse.json()).resolves.toEqual({
+      error: "Not found",
     });
   });
 

@@ -1,5 +1,5 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { drainHostedExecutionOutboxBestEffort } from "@/src/lib/hosted-execution/outbox";
+import { handoffHostedExecutionScheduledEventBestEffort } from "@/src/lib/hosted-wake/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hasHostedMemberActiveAccess } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -82,8 +82,9 @@ export const POST = withJsonError(async (request: Request) => {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (channelSyncDispatch) {
-    await drainHostedExecutionOutboxBestEffort({
-      eventIds: [channelSyncDispatch.eventId],
+    await handoffHostedExecutionScheduledEventBestEffort({
+      context: "settings.telegram.sync",
+      eventId: channelSyncDispatch.eventId,
     });
   }
 

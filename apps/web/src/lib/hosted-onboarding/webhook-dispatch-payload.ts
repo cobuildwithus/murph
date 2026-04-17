@@ -7,13 +7,13 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
-  type HostedExecutionOutboxPayload,
-  readHostedExecutionOutboxPayload,
-} from "../hosted-execution/outbox-payload";
+  type HostedExecutionDispatchPayload,
+  readHostedExecutionDispatchPayload,
+} from "../hosted-execution/dispatch-payload";
 import { hostedOnboardingError } from "./errors";
 
-export type HostedWebhookDispatchSideEffectPayload = HostedExecutionOutboxPayload;
-export type HostedWebhookStoredDispatchSideEffectPayload = HostedExecutionOutboxPayload;
+export type HostedWebhookDispatchSideEffectPayload = HostedExecutionDispatchPayload;
+export type HostedWebhookStoredDispatchSideEffectPayload = HostedExecutionDispatchPayload;
 
 export function createHostedWebhookDispatchSideEffectPayload(
   dispatch: HostedExecutionDispatchRequest,
@@ -27,7 +27,7 @@ export function createHostedWebhookDispatchSideEffectPayload(
 export function readHostedWebhookStoredDispatchSideEffectPayload(
   value: unknown,
 ): HostedWebhookStoredDispatchSideEffectPayload | null {
-  return readHostedExecutionOutboxPayload(value as Prisma.InputJsonValue | Prisma.JsonValue | null);
+  return readHostedExecutionDispatchPayload(value as Prisma.InputJsonValue | Prisma.JsonValue | null);
 }
 
 export function requireHostedWebhookStoredDispatchSideEffectPayload(

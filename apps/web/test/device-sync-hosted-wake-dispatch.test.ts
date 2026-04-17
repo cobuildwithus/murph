@@ -66,9 +66,7 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
 }));
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
-  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
   scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
 }));
 

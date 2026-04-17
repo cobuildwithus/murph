@@ -1205,7 +1205,7 @@ describe("HostedUserRunner", () => {
     });
   });
 
-  it("does not reuse stale past nextWakeAt values after an alarm run returns no next wake", async () => {
+  it("reschedules the next wake when alarm handling requires the hosted web callback path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     vi.stubGlobal(
@@ -1251,10 +1251,11 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     const status = await runner.status();
-    expect(status.lastEventId).toMatch(/^alarm:/u);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(status.lastEventId).toBe("evt_seed_wake");
     expect(status.nextWakeAt).not.toBe("2026-03-26T12:00:05.000Z");
-    expect(status.nextWakeAt).toBeNull();
-    expect(storage.lastAlarm).toBeNull();
+    expect(status.nextWakeAt).toBe("2026-03-26T12:00:15.000Z");
+    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:00:15.000Z"));
   });
 
   it("passes the worker commit callback metadata through the runner container invoke request", async () => {
@@ -1670,7 +1671,7 @@ describe("HostedUserRunner", () => {
     });
   });
 
-  it("keeps committed events retryable until durable finalize succeeds", async () => {
+  it("keeps committed events pending until the hosted web callback path can resume finalize retries", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const sideEffects = [
@@ -1753,15 +1754,16 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     const finalStatus = await runner.status();
-    expect(finalStatus.pendingEventCount).toBe(0);
-    expect(finalStatus.retryingEventId).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(finalStatus.pendingEventCount).toBe(1);
+    expect(finalStatus.retryingEventId).toBe("evt_finalize_retry");
     expect(finalStatus.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
 
-  it("recovers a committed pending event after a crash even when the same event's lease was still persisted", async () => {
+  it("leaves committed pending crash recovery to the hosted web callback path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const dispatch = {
@@ -1850,10 +1852,10 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     const status = await runner.status();
-    expect(status.pendingEventCount).toBe(0);
+    expect(status.pendingEventCount).toBe(1);
     expect(status.retryingEventId).toBeNull();
-    expect(status.inFlight).toBe(false);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(status.inFlight).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("does not launch a second resumed run while the first runner is still alive after commit", async () => {
@@ -2228,7 +2230,7 @@ describe("HostedUserRunner", () => {
     expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 3);
   });
 
-  it("retries failed events and eventually poisons them after repeated runner failures", async () => {
+  it("does not locally poison retrying events once alarm handling depends on hosted web wakes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     vi.stubGlobal(
@@ -2279,22 +2281,22 @@ describe("HostedUserRunner", () => {
 
     const final = await runner.status();
 
-    expect(final.pendingEventCount).toBe(0);
-    expect(final.poisonedEventIds).toEqual(["evt_retry_1"]);
-    expect(final.retryingEventId).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(final.pendingEventCount).toBe(1);
+    expect(final.poisonedEventIds).toEqual([]);
+    expect(final.retryingEventId).toBe("evt_retry_1");
     expect(final.lastError).toBe("Hosted runner container returned an HTTP error.");
     expect(final.lastErrorCode).toBe("runner_http_error");
     expect(final.run).toMatchObject({
-      attempt: 3,
+      attempt: 1,
       eventId: "evt_retry_1",
-      phase: "poisoned",
+      phase: "retry.scheduled",
     });
     expect(final.timeline?.slice(-3).map((entry) => entry.phase)).toEqual([
       "claimed",
       "dispatch.running",
-      "poisoned",
+      "retry.scheduled",
     ]);
-    expect(new Set((final.timeline ?? []).slice(-3).map((entry) => entry.runId)).size).toBe(1);
   });
 
   it("redacts retryable runner failures before persisting hosted status", async () => {
@@ -2327,7 +2329,7 @@ describe("HostedUserRunner", () => {
     expect(status.retryingEventId).toBe("evt_secret_failure");
   });
 
-  it("continues past a rescheduled head event and runs later due work in the same pass", async () => {
+  it("does not drain queued work locally from alarm without the hosted web callback path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const fetchMock = vi.fn(async (_url, init) => {
@@ -2372,10 +2374,9 @@ describe("HostedUserRunner", () => {
 
     await runner.alarm();
 
-    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_retry_head", "evt_tail"]);
+    expect(readDispatchedEventIds(fetchMock)).toEqual([]);
     await expect(runner.status()).resolves.toMatchObject({
-      lastEventId: "evt_tail",
-      pendingEventCount: 1,
+      pendingEventCount: 2,
       poisonedEventIds: [],
     });
   });
@@ -2764,31 +2765,29 @@ describe("HostedUserRunner", () => {
   });
 
   it("reports poisoned events through the shared dispatch outcome surface without rerunning them", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const failingFetch = vi.fn().mockResolvedValue(
-      new Response("runner failed", {
-        status: 503,
-      }),
-    );
-    vi.stubGlobal("fetch", failingFetch);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = createDispatch("evt_duplicate_poisoned");
-
-    await runner.dispatch(dispatch);
-    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
-    await runner.alarm();
-    vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
-    await runner.alarm();
-
+    await seedRunnerQueueState({
+      bucket,
+      environment,
+      lastError: "Hosted runner container returned an HTTP error.",
+      lastErrorAt: "2026-03-26T12:00:30.000Z",
+      poisonedEvents: [{
+        eventId: dispatch.eventId,
+        lastError: "Hosted runner container returned an HTTP error.",
+        poisonedAt: "2026-03-26T12:00:30.000Z",
+      }],
+      storage,
+      userId: dispatch.event.userId,
+    });
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     const replayFetch = vi.fn();
     vi.stubGlobal("fetch", replayFetch);
+
     const replayed = await runner.dispatchWithOutcome(dispatch);
 
     expect(replayed.event).toEqual({
       eventId: "evt_duplicate_poisoned",
-      lastError: "Hosted runner container returned an HTTP error.",
+      lastError: "Hosted execution runtime failed.",
       state: "poisoned",
       userId: "member_123",
     });
@@ -3070,30 +3069,20 @@ describe("HostedUserRunner", () => {
   it("keeps poisoned event ids blocked even after the old replay TTL window passes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response("runner failed", {
-          status: 503,
-        }),
-      ),
-    );
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_poison_expiry",
-      occurredAt: "2026-03-26T12:00:00.000Z",
+    await seedRunnerQueueState({
+      bucket,
+      environment,
+      lastError: "Hosted runner container returned an HTTP error.",
+      lastErrorAt: "2026-03-26T12:00:30.000Z",
+      poisonedEvents: [{
+        eventId: "evt_poison_expiry",
+        lastError: "Hosted runner container returned an HTTP error.",
+        poisonedAt: "2026-03-26T12:00:30.000Z",
+      }],
+      storage,
+      userId: "member_123",
     });
-    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
-    await runner.alarm();
-    vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
-    await runner.alarm();
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
     expect((await runner.status()).poisonedEventIds).toContain("evt_poison_expiry");
 
@@ -3306,7 +3295,9 @@ describe("HostedUserRunner", () => {
     );
   });
 
-  it("clears the durable-object alarm when no next wake remains", async () => {
+  it("reschedules the durable-object alarm when no hosted web callback path is configured", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const resultPayload = {
       bundles: {
         agentState: Buffer.from("agent-state").toString("base64"),
@@ -3351,7 +3342,7 @@ describe("HostedUserRunner", () => {
     storage.lastAlarm = Date.parse("2026-03-26T12:05:00.000Z");
     await runner.alarm();
 
-    expect(storage.lastAlarm).toBeNull();
+    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:00:05.000Z"));
   });
 });
 

@@ -36,11 +36,17 @@ const mocks = vi.hoisted(() => {
     stripeChargesRetrieve,
     stripeConstructEvent,
     stripePaymentIntentsRetrieve,
-    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string }) => ({
-      eventId: input.eventId,
-      route: "outbox" as const,
-      userId: "member_123",
-    })),
+    lastScheduledDispatchEventId: null as string | null,
+    lastScheduledDispatchPrisma: null as unknown,
+    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
+      state.lastScheduledDispatchEventId = input.eventId;
+      state.lastScheduledDispatchPrisma = input.prisma ?? null;
+      return {
+        eventId: input.eventId,
+        route: "outbox" as const,
+        userId: "member_123",
+      };
+    }),
     scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
       dispatch: { eventId: string };
     }) => {
@@ -61,27 +67,47 @@ const mocks = vi.hoisted(() => {
       });
       return "outbox";
     }),
+    triggerHostedWakeUserBestEffort: vi.fn(async (input?: { timeoutMs?: number }) => {
+      if (!state.lastScheduledDispatchEventId) {
+        return false;
+      }
+
+      const drainPromise = Promise.resolve(state.drainHostedExecutionOutboxBestEffort({
+        eventIds: [state.lastScheduledDispatchEventId],
+        limit: 1,
+        prisma: state.lastScheduledDispatchPrisma,
+      })).then(() => true);
+
+      if (typeof input?.timeoutMs === "number" && input.timeoutMs > 0) {
+        return await Promise.race([
+          drainPromise,
+          new Promise<boolean>((resolve) => {
+            setTimeout(() => resolve(false), input.timeoutMs);
+          }),
+        ]);
+      }
+
+      return await drainPromise;
+    }),
   };
 
   return state;
 });
 
-vi.mock("@/src/lib/hosted-execution/outbox", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
-    "@/src/lib/hosted-execution/outbox",
+vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/dispatch-lifecycle")>(
+    "@/src/lib/hosted-execution/dispatch-lifecycle",
   );
 
   return {
     ...actual,
-    drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
-    enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
     readHostedExecutionScheduledDispatchTarget: mocks.readHostedExecutionScheduledDispatchTarget,
     scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
   };
 });
 vi.mock("@/src/lib/hosted-wake/control", () => ({
   handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
-  triggerHostedWakeUserBestEffort: vi.fn(async () => true),
+  triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
@@ -185,6 +211,8 @@ type HostedWebhookPrisma = Parameters<typeof handleHostedOnboardingLinqWebhook>[
 
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
+    mocks.lastScheduledDispatchEventId = null;
+    mocks.lastScheduledDispatchPrisma = null;
     mocks.claimHostedLinqOnboardingLinkNotice.mockReset();
     mocks.claimHostedLinqQuotaReplyNotice.mockReset();
     mocks.drainHostedExecutionOutboxBestEffort.mockReset();

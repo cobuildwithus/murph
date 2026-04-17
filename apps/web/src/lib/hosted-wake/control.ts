@@ -3,9 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
 import {
-  drainHostedExecutionOutboxBestEffort,
   readHostedExecutionScheduledDispatchTarget,
-} from "../hosted-execution/outbox";
+} from "../hosted-execution/dispatch-lifecycle";
 import { getPrisma } from "../prisma";
 
 export async function triggerHostedWakeUser(input: {
@@ -52,7 +51,7 @@ export async function handoffHostedExecutionScheduledEventBestEffort(input: {
   outboxLimit?: number;
   prisma?: PrismaClient;
   timeoutMs?: number;
-}): Promise<"missing" | "outbox" | "wake"> {
+}): Promise<"missing" | "wake"> {
   const prisma = input.prisma ?? getPrisma();
   const target = await readHostedExecutionScheduledDispatchTarget({
     eventId: input.eventId,
@@ -61,22 +60,6 @@ export async function handoffHostedExecutionScheduledEventBestEffort(input: {
 
   if (!target) {
     return "missing";
-  }
-
-  if (target.route === "outbox") {
-    const drain = () => drainHostedExecutionOutboxBestEffort({
-      eventIds: [input.eventId],
-      limit: input.outboxLimit ?? 1,
-      prisma,
-    });
-
-    if (input.defer) {
-      await input.defer(drain);
-    } else {
-      await drain();
-    }
-
-    return "outbox";
   }
 
   const nudge = () => triggerHostedWakeUserBestEffort({
@@ -94,5 +77,5 @@ export async function handoffHostedExecutionScheduledEventBestEffort(input: {
     await nudge();
   }
 
-  return "wake";
+  return target.route;
 }

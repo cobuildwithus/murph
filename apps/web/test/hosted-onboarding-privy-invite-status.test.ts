@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 
 const mocks = vi.hoisted(() => ({
-  readHostedExecutionControlClientIfConfigured: vi.fn(),
+  isHostedMemberActivationPending: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -27,8 +27,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
 
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  readHostedExecutionControlClientIfConfigured: mocks.readHostedExecutionControlClientIfConfigured,
+vi.mock("@/src/lib/hosted-onboarding/activation-progress", () => ({
+  isHostedMemberActivationPending: mocks.isHostedMemberActivationPending,
 }));
 
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
@@ -38,7 +38,7 @@ const NOW = new Date("2026-04-06T12:00:00.000Z");
 describe("getHostedInviteStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.isHostedMemberActivationPending.mockResolvedValue(false);
   });
 
   it("loads the identity relation when reading invite status", async () => {
@@ -102,12 +102,6 @@ describe("getHostedInviteStatus", () => {
 
   it("keeps the invite active while exposing queued background activation after transport handoff", async () => {
     const prisma = {
-      executionOutbox: {
-        findFirst: vi.fn().mockResolvedValue({
-          dispatchState: "queued",
-          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        }),
-      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -117,6 +111,7 @@ describe("getHostedInviteStatus", () => {
         })),
       },
     } as never;
+    mocks.isHostedMemberActivationPending.mockResolvedValue(true);
 
     await expect(
       getHostedInviteStatus({
@@ -138,9 +133,6 @@ describe("getHostedInviteStatus", () => {
 
   it("returns the assigned Murph phone number only for matched active sessions", async () => {
     const prisma = {
-      executionOutbox: {
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -203,23 +195,8 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("resolves back to active when live Cloudflare status shows the activation event poisoned", async () => {
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      getEventStatus: vi.fn().mockResolvedValue({
-        eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        lastError: "poisoned by runner",
-        state: "poisoned",
-        userId: "member_123",
-      }),
-    });
-
+  it("stays active once activation is no longer pending", async () => {
     const prisma = {
-      executionOutbox: {
-        findFirst: vi.fn().mockResolvedValue({
-          dispatchState: "queued",
-          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        }),
-      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -229,6 +206,7 @@ describe("getHostedInviteStatus", () => {
         })),
       },
     } as never;
+    mocks.isHostedMemberActivationPending.mockResolvedValue(false);
 
     await expect(
       getHostedInviteStatus({
@@ -243,76 +221,6 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("resolves back to active when the specific activation event is already completed", async () => {
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      getEventStatus: vi.fn().mockResolvedValue({
-        eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        lastError: null,
-        state: "completed",
-        userId: "member_123",
-      }),
-    });
-
-    const prisma = {
-      executionOutbox: {
-        findFirst: vi.fn().mockResolvedValue({
-          dispatchState: "queued",
-          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        }),
-      },
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(createInvite({
-          member: createMember({
-            billingStatus: HostedBillingStatus.active,
-            identity: createIdentity(),
-          }),
-        })),
-      },
-    } as never;
-
-    await expect(
-      getHostedInviteStatus({
-        authenticatedMember: createAuthenticatedMember(),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      activationPending: false,
-      stage: "active",
-    });
-  });
-
-  it("treats persisted poisoned activation outcomes as terminal even without a live Cloudflare status read", async () => {
-    const prisma = {
-      executionOutbox: {
-        findFirst: vi.fn().mockResolvedValue({
-          dispatchState: "poisoned",
-          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        }),
-      },
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(createInvite({
-          member: createMember({
-            billingStatus: HostedBillingStatus.active,
-            identity: createIdentity(),
-          }),
-        })),
-      },
-    } as never;
-
-    await expect(
-      getHostedInviteStatus({
-        authenticatedMember: createAuthenticatedMember(),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      activationPending: false,
-      stage: "active",
-    });
-  });
 });
 
 function createInvite(overrides: Record<string, unknown> = {}) {

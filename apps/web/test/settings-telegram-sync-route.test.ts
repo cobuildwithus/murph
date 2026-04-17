@@ -4,9 +4,9 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedTelegramBotLink: vi.fn(),
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
+  handoffHostedExecutionScheduledEventBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -37,8 +37,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
 }));
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -70,7 +70,7 @@ describe("settings telegram sync route", () => {
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
     });
-    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.handoffHostedExecutionScheduledEventBestEffort.mockResolvedValue("wake");
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
       member: {
@@ -127,8 +127,9 @@ describe("settings telegram sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.telegram.sync",
     });
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: ["member.channels.updated:settings.telegram.sync:member_123:evt_123"],
+    expect(mocks.handoffHostedExecutionScheduledEventBestEffort).toHaveBeenCalledWith({
+      context: "settings.telegram.sync",
+      eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
     });
     expect(mocks.buildHostedTelegramBotLink).toHaveBeenCalledWith("connect");
     await expect(response.json()).resolves.toEqual({
@@ -177,7 +178,7 @@ describe("settings telegram sync route", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedMemberEmailLinked).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.handoffHostedExecutionScheduledEventBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       botLink: "https://t.me/murph_bot?start=connect",
       ok: true,
@@ -225,7 +226,7 @@ describe("settings telegram sync route", () => {
     expect(response.status).toBe(200);
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.handoffHostedExecutionScheduledEventBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       botLink: "https://t.me/murph_bot?start=connect",
       ok: true,

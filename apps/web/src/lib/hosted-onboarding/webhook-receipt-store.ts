@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { scheduleHostedExecutionDispatchTx } from "../hosted-execution/outbox";
+import { scheduleHostedExecutionDispatchTx } from "../hosted-execution/dispatch-lifecycle";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedWebhookReceiptState,

@@ -20,22 +20,22 @@ export interface HostedExecutionDispatchRef {
   userId: string;
 }
 
-export interface HostedExecutionInlineOutboxPayload {
+export interface HostedExecutionInlineDispatchPayload {
   dispatch: HostedExecutionDispatchRequest;
   storage: "inline";
 }
 
-export type HostedExecutionOutboxPayload = HostedExecutionInlineOutboxPayload;
+export type HostedExecutionDispatchPayload = HostedExecutionInlineDispatchPayload;
 
-interface HostedExecutionPrunedInlineOutboxPayload {
+interface HostedExecutionPrunedInlineDispatchPayload {
   dispatchRef: HostedExecutionDispatchRef;
   payloadHash: string;
-  schema: typeof HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA;
+  schema: typeof HOSTED_EXECUTION_PRUNED_INLINE_DISPATCH_PAYLOAD_SCHEMA;
   storage: "pruned";
 }
 
-const HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA =
-  "murph.hosted-execution-inline-outbox-payload-pruned.v1";
+const HOSTED_EXECUTION_PRUNED_INLINE_DISPATCH_PAYLOAD_SCHEMA =
+  "murph.hosted-execution-inline-dispatch-payload-pruned.v1";
 const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
   HOSTED_EXECUTION_EVENT_KINDS,
 );
@@ -45,11 +45,11 @@ const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
   "occurredAt",
   "userId",
 ]);
-const HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
+const HOSTED_EXECUTION_INLINE_DISPATCH_PAYLOAD_KEYS = new Set([
   "dispatch",
   "storage",
 ]);
-const HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
+const HOSTED_EXECUTION_PRUNED_INLINE_DISPATCH_PAYLOAD_KEYS = new Set([
   "dispatchRef",
   "payloadHash",
   "schema",
@@ -67,43 +67,43 @@ export function buildHostedExecutionDispatchRef(
   };
 }
 
-export function serializeHostedExecutionOutboxPayload(
+export function serializeHostedExecutionDispatchPayload(
   dispatch: HostedExecutionDispatchRequest,
 ): Prisma.InputJsonObject {
   return toPrismaInputJsonObject({
     dispatch: parseHostedExecutionDispatchRequest(dispatch),
     storage: "inline",
-  } satisfies HostedExecutionInlineOutboxPayload);
+  } satisfies HostedExecutionInlineDispatchPayload);
 }
 
-export function summarizeHostedExecutionOutboxPayload(
-  payload: HostedExecutionOutboxPayload,
+export function summarizeHostedExecutionDispatchPayload(
+  payload: HostedExecutionDispatchPayload,
 ): Prisma.InputJsonObject {
   return toPrismaInputJsonObject({
     dispatchRef: buildHostedExecutionDispatchRef(payload.dispatch),
-    payloadHash: hashHostedExecutionOutboxPayload(payload),
-    schema: HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA,
+    payloadHash: hashHostedExecutionDispatchPayload(payload),
+    schema: HOSTED_EXECUTION_PRUNED_INLINE_DISPATCH_PAYLOAD_SCHEMA,
     storage: "pruned",
-  } satisfies HostedExecutionPrunedInlineOutboxPayload);
+  } satisfies HostedExecutionPrunedInlineDispatchPayload);
 }
 
-export function areHostedExecutionOutboxPayloadsEquivalent(
+export function areHostedExecutionDispatchPayloadsEquivalent(
   existingPayloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
   expectedPayloadJson: Prisma.InputJsonValue,
 ): boolean {
-  const existingPayload = readHostedExecutionOutboxPayload(existingPayloadJson);
-  const expectedPayload = readHostedExecutionOutboxPayload(expectedPayloadJson);
+  const existingPayload = readHostedExecutionDispatchPayload(existingPayloadJson);
+  const expectedPayload = readHostedExecutionDispatchPayload(expectedPayloadJson);
 
   if (existingPayload && expectedPayload) {
     return isDeepStrictEqual(existingPayload.dispatch, expectedPayload.dispatch);
   }
 
-  const prunedInlinePayload = readHostedExecutionPrunedInlineOutboxPayload(existingPayloadJson);
+  const prunedInlinePayload = readHostedExecutionPrunedInlineDispatchPayload(existingPayloadJson);
 
   return Boolean(
     prunedInlinePayload
       && expectedPayload
-      && prunedInlinePayload.payloadHash === hashHostedExecutionOutboxPayload(expectedPayload)
+      && prunedInlinePayload.payloadHash === hashHostedExecutionDispatchPayload(expectedPayload)
       && areHostedExecutionDispatchRefsEquivalent(
         prunedInlinePayload.dispatchRef,
         buildHostedExecutionDispatchRef(expectedPayload.dispatch),
@@ -114,22 +114,22 @@ export function areHostedExecutionOutboxPayloadsEquivalent(
 export function readHostedExecutionDispatchRef(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
 ): HostedExecutionDispatchRef | null {
-  const inlinePayload = readHostedExecutionOutboxPayload(payloadJson);
+  const inlinePayload = readHostedExecutionDispatchPayload(payloadJson);
 
-  return readHostedExecutionPrunedInlineOutboxPayload(payloadJson)?.dispatchRef
+  return readHostedExecutionPrunedInlineDispatchPayload(payloadJson)?.dispatchRef
     ?? (inlinePayload ? buildHostedExecutionDispatchRef(inlinePayload.dispatch) : null);
 }
 
-export function readHostedExecutionOutboxPayload(
+export function readHostedExecutionDispatchPayload(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): HostedExecutionOutboxPayload | null {
+): HostedExecutionDispatchPayload | null {
   const payloadObject = toHostedExecutionObject(payloadJson);
 
   if (readHostedExecutionText(payloadObject.storage) !== "inline") {
     return null;
   }
 
-  if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_INLINE_OUTBOX_PAYLOAD_KEYS)) {
+  if (!hasOnlyHostedExecutionKeys(payloadObject, HOSTED_EXECUTION_INLINE_DISPATCH_PAYLOAD_KEYS)) {
     return null;
   }
 
@@ -143,15 +143,15 @@ export function readHostedExecutionOutboxPayload(
   }
 }
 
-function readHostedExecutionPrunedInlineOutboxPayload(
+function readHostedExecutionPrunedInlineDispatchPayload(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): HostedExecutionPrunedInlineOutboxPayload | null {
+): HostedExecutionPrunedInlineDispatchPayload | null {
   const record = toHostedExecutionObject(payloadJson);
 
   if (
     readHostedExecutionText(record.storage) !== "pruned"
-    || readHostedExecutionText(record.schema) !== HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA
-    || !hasOnlyHostedExecutionKeys(record, HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_KEYS)
+    || readHostedExecutionText(record.schema) !== HOSTED_EXECUTION_PRUNED_INLINE_DISPATCH_PAYLOAD_SCHEMA
+    || !hasOnlyHostedExecutionKeys(record, HOSTED_EXECUTION_PRUNED_INLINE_DISPATCH_PAYLOAD_KEYS)
   ) {
     return null;
   }
@@ -166,7 +166,7 @@ function readHostedExecutionPrunedInlineOutboxPayload(
   return {
     dispatchRef,
     payloadHash,
-    schema: HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA,
+    schema: HOSTED_EXECUTION_PRUNED_INLINE_DISPATCH_PAYLOAD_SCHEMA,
     storage: "pruned",
   };
 }
@@ -195,7 +195,7 @@ function readHostedExecutionInlineDispatchRef(value: unknown): HostedExecutionDi
   };
 }
 
-function hashHostedExecutionOutboxPayload(payload: HostedExecutionOutboxPayload): string {
+function hashHostedExecutionDispatchPayload(payload: HostedExecutionDispatchPayload): string {
   return createHash("sha256")
     .update(stableStringify(payload))
     .digest("hex");

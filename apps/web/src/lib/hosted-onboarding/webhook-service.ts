@@ -11,9 +11,8 @@ import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
 import {
-  drainHostedExecutionOutboxBestEffort,
   readHostedExecutionScheduledDispatchTarget,
-} from "../hosted-execution/outbox";
+} from "../hosted-execution/dispatch-lifecycle";
 import {
   handoffHostedExecutionScheduledEventBestEffort,
   triggerHostedWakeUserBestEffort,
@@ -126,7 +125,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType,
       responseReason,
     });
-    await maybeDrainHostedExecutionWebhookDispatch({
+    await maybeHandoffHostedExecutionWebhookWake({
       defer: input.defer,
       eventId: event.event_id,
       maxInlineDrainMs: input.maxInlineDrainMs,
@@ -183,7 +182,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     signal: input.signal,
     source: "telegram",
   });
-  await maybeDrainHostedExecutionWebhookDispatch({
+  await maybeHandoffHostedExecutionWebhookWake({
     defer: input.defer,
     eventId: buildHostedTelegramWebhookEventId(update),
     maxInlineDrainMs: input.maxInlineDrainMs,
@@ -435,7 +434,7 @@ async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
   }
 }
 
-async function maybeDrainHostedExecutionWebhookDispatch(input: {
+async function maybeHandoffHostedExecutionWebhookWake(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
   maxInlineDrainMs?: number;
@@ -459,7 +458,7 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
   }
 
   const handoffTiming = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.${scheduledTarget.route}-handoff`,
+    `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
       deferred: Boolean(input.defer),
       eventId: input.eventId,
@@ -469,87 +468,14 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
     },
   );
 
-  if (scheduledTarget.route === "wake") {
-    if (typeof input.maxInlineDrainMs === "number" && input.maxInlineDrainMs > 0) {
-      const completedInline = await waitForHostedExecutionWebhookWake({
-        eventId: input.eventId,
-        responseReason: input.response.reason,
-        source: input.source,
-        targetSeqHint: scheduledTarget.seq ?? null,
-        timeoutMs: input.maxInlineDrainMs,
-        userId: scheduledTarget.userId,
-      });
-
-      if (completedInline) {
-        finishHostedOnboardingTiming(handoffTiming, "completed", {
-          deferred: false,
-        });
-        return;
-      }
-
-      if (input.defer) {
-        await input.defer(() =>
-          drainHostedExecutionWebhookWake({
-            deferred: true,
-            eventId: input.eventId,
-            responseReason: input.response.reason,
-            source: input.source,
-            targetSeqHint: scheduledTarget.seq ?? null,
-            userId: scheduledTarget.userId,
-          }),
-        );
-        finishHostedOnboardingTiming(handoffTiming, "scheduled", {
-          deferred: true,
-          timedOut: true,
-        });
-        return;
-      }
-
-      finishHostedOnboardingTiming(handoffTiming, "completed", {
-        deferred: false,
-        timedOut: true,
-      });
-      return;
-    }
-
-    if (input.defer) {
-      await input.defer(() =>
-        drainHostedExecutionWebhookWake({
-          deferred: true,
-          eventId: input.eventId,
-          responseReason: input.response.reason,
-          source: input.source,
-          targetSeqHint: scheduledTarget.seq ?? null,
-          userId: scheduledTarget.userId,
-        }),
-      );
-      finishHostedOnboardingTiming(handoffTiming, "scheduled", {
-        deferred: true,
-      });
-      return;
-    }
-
-    await drainHostedExecutionWebhookWake({
-      deferred: false,
+  if (typeof input.maxInlineDrainMs === "number" && input.maxInlineDrainMs > 0) {
+    const completedInline = await waitForHostedExecutionWebhookWake({
       eventId: input.eventId,
       responseReason: input.response.reason,
       source: input.source,
       targetSeqHint: scheduledTarget.seq ?? null,
-      userId: scheduledTarget.userId,
-    });
-    finishHostedOnboardingTiming(handoffTiming, "completed", {
-      deferred: false,
-    });
-    return;
-  }
-
-  if (typeof input.maxInlineDrainMs === "number" && input.maxInlineDrainMs > 0) {
-    const completedInline = await waitForHostedExecutionWebhookDrain({
-      eventId: input.eventId,
-      prisma: input.prisma,
-      responseReason: input.response.reason,
-      source: input.source,
       timeoutMs: input.maxInlineDrainMs,
+      userId: scheduledTarget.userId,
     });
 
     if (completedInline) {
@@ -561,12 +487,13 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
 
     if (input.defer) {
       await input.defer(() =>
-        drainHostedExecutionWebhookOutbox({
+        handoffHostedExecutionWebhookWake({
           deferred: true,
           eventId: input.eventId,
-          prisma: input.prisma,
           responseReason: input.response.reason,
           source: input.source,
+          targetSeqHint: scheduledTarget.seq ?? null,
+          userId: scheduledTarget.userId,
         }),
       );
       finishHostedOnboardingTiming(handoffTiming, "scheduled", {
@@ -585,12 +512,13 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
 
   if (input.defer) {
     await input.defer(() =>
-      drainHostedExecutionWebhookOutbox({
+      handoffHostedExecutionWebhookWake({
         deferred: true,
         eventId: input.eventId,
-        prisma: input.prisma,
         responseReason: input.response.reason,
         source: input.source,
+        targetSeqHint: scheduledTarget.seq ?? null,
+        userId: scheduledTarget.userId,
       }),
     );
     finishHostedOnboardingTiming(handoffTiming, "scheduled", {
@@ -599,44 +527,20 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
     return;
   }
 
-  await drainHostedExecutionWebhookOutbox({
+  await handoffHostedExecutionWebhookWake({
     deferred: false,
     eventId: input.eventId,
-    prisma: input.prisma,
     responseReason: input.response.reason,
     source: input.source,
+    targetSeqHint: scheduledTarget.seq ?? null,
+    userId: scheduledTarget.userId,
   });
   finishHostedOnboardingTiming(handoffTiming, "completed", {
     deferred: false,
   });
 }
 
-async function drainHostedExecutionWebhookOutbox(input: {
-  deferred: boolean;
-  eventId: string;
-  prisma: PrismaClient;
-  responseReason: string | undefined;
-  source: "linq" | "telegram";
-}): Promise<void> {
-  const drainTiming = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.outbox-drain`,
-    {
-      deferred: input.deferred,
-      eventId: input.eventId,
-      responseReason: input.responseReason,
-    },
-  );
-  await drainHostedExecutionOutboxBestEffort({
-    eventIds: [
-      input.eventId,
-    ],
-    limit: 1,
-    prisma: input.prisma,
-  });
-  finishHostedOnboardingTiming(drainTiming, "completed");
-}
-
-async function drainHostedExecutionWebhookWake(input: {
+async function handoffHostedExecutionWebhookWake(input: {
   deferred: boolean;
   eventId: string;
   responseReason: string | undefined;
@@ -660,41 +564,6 @@ async function drainHostedExecutionWebhookWake(input: {
     userId: input.userId,
   });
   finishHostedOnboardingTiming(drainTiming, "completed");
-}
-
-async function waitForHostedExecutionWebhookDrain(input: {
-  eventId: string;
-  prisma: PrismaClient;
-  responseReason: string | undefined;
-  source: "linq" | "telegram";
-  timeoutMs: number;
-}): Promise<boolean> {
-  const timeoutMs = Math.max(1, Math.floor(input.timeoutMs));
-
-  if (!Number.isFinite(timeoutMs)) {
-    return false;
-  }
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  try {
-    return await Promise.race([
-      drainHostedExecutionWebhookOutbox({
-        deferred: false,
-        eventId: input.eventId,
-        prisma: input.prisma,
-        responseReason: input.responseReason,
-        source: input.source,
-      }).then(() => true),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
 }
 
 async function waitForHostedExecutionWebhookWake(input: {

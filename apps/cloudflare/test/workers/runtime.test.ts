@@ -64,7 +64,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.useRealTimers();
   });
 
-  it("rejects invalid signed dispatches before they reach the user runner", async () => {
+  it("keeps the removed signed dispatch route hidden in the Workers runtime", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
@@ -74,7 +74,7 @@ describe("cloudflare worker runtime suite", () => {
       }),
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(404);
     const stub = getUserRunnerStub("member_invalid");
     await expect(stub.bootstrapUser("member_invalid")).resolves.toEqual({
       userId: "member_invalid",
@@ -86,18 +86,13 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("accepts signed dispatches in the Workers runtime and writes durable bundle state", async () => {
+  it("supports direct Durable Object RPC in the Workers runtime and writes durable bundle state", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
     const dispatch = createDispatch("evt_signed_runtime", "member_signed_runtime");
     await resolveHostedUserCryptoContext(dispatch.event.userId);
-    const response = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", dispatch),
-    );
-
-    expect(response.status).toBe(200);
-    const payload = await response.json() as HostedExecutionDispatchResult;
+    const payload = await getUserRunnerStub(dispatch.event.userId).dispatchWithOutcome(dispatch);
     expect(payload).toMatchObject({
       event: {
         eventId: "evt_signed_runtime",
@@ -139,7 +134,7 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("supports direct Durable Object RPC and alarm execution inside the Workers runtime", async () => {
+  it("supports direct Durable Object RPC and reschedules alarms through the hosted wake path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
 
@@ -155,7 +150,7 @@ describe("cloudflare worker runtime suite", () => {
     await expect(runDurableObjectAlarm(stub as never)).resolves.toBe(true);
     await vi.waitFor(async () => {
       await expect(stub.status()).resolves.toMatchObject({
-        lastEventId: expect.stringMatching(/^alarm:/u),
+        lastEventId: "evt_alarm_seed",
         pendingEventCount: 0,
         retryingEventId: null,
         userId,
@@ -167,10 +162,11 @@ describe("cloudflare worker runtime suite", () => {
     const userId = "member_journal";
     const eventId = "evt_finalize_runtime";
     await resolveHostedUserCryptoContext(userId);
-    const dispatchResponse = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", createDispatch(eventId, userId)),
-    );
-    expect(dispatchResponse.status).toBe(200);
+    await expect(getUserRunnerStub(userId).dispatch(createDispatch(eventId, userId))).resolves.toMatchObject({
+      lastEventId: eventId,
+      pendingEventCount: 0,
+      userId,
+    });
 
     const finalizeResponse = await callRunnerOutbound(
       new Request(`http://results.worker/events/${eventId}/finalize`, {

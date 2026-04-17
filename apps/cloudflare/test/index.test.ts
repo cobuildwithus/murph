@@ -394,7 +394,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("accepts OIDC bearer dispatches through the canonical internal dispatch route", async () => {
+  it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_123");
     const request = await createSignedDispatchRequest("/internal/dispatch", dispatch);
@@ -404,12 +404,14 @@ describe("cloudflare worker routes", () => {
       createWorkerEnv(stub),
     );
 
-    expect(response.status).toBe(200);
-    expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
-    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+    expect(response.status).toBe(404);
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
   });
 
-  it("rejects internal dispatch requests when the bound user header is missing or mismatched", async () => {
+  it("hard-cuts bound-user checks with a 404 before dispatch route auth runs", async () => {
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_123");
 
@@ -418,9 +420,9 @@ describe("cloudflare worker routes", () => {
       createWorkerEnv(stub),
     );
 
-    expect(missingHeaderResponse.status).toBe(401);
+    expect(missingHeaderResponse.status).toBe(404);
     await expect(missingHeaderResponse.json()).resolves.toEqual({
-      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+      error: "Not found",
     });
 
     const mismatchedHeaderResponse = await worker.fetch(
@@ -428,9 +430,9 @@ describe("cloudflare worker routes", () => {
       createWorkerEnv(stub),
     );
 
-    expect(mismatchedHeaderResponse.status).toBe(401);
+    expect(mismatchedHeaderResponse.status).toBe(404);
     await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
-      error: "Hosted execution bound user does not match the dispatch user.",
+      error: "Not found",
     });
     expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
@@ -468,7 +470,7 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
 
-  it("rejects missing, malformed, and mismatched OIDC bearer dispatch requests", async () => {
+  it("keeps the removed dispatch route hidden even for missing, malformed, and mismatched OIDC bearer requests", async () => {
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_signed");
 
@@ -482,7 +484,10 @@ describe("cloudflare worker routes", () => {
       }),
       createWorkerEnv(stub),
     );
-    expect(missingAuthorizationResponse.status).toBe(401);
+    expect(missingAuthorizationResponse.status).toBe(404);
+    await expect(missingAuthorizationResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
 
     const malformedResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/dispatch", {
@@ -495,7 +500,10 @@ describe("cloudflare worker routes", () => {
       }),
       createWorkerEnv(stub),
     );
-    expect(malformedResponse.status).toBe(401);
+    expect(malformedResponse.status).toBe(404);
+    await expect(malformedResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
 
     const wrongSubjectResponse = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", dispatch, {
@@ -503,19 +511,15 @@ describe("cloudflare worker routes", () => {
       }),
       createWorkerEnv(stub),
     );
-    expect(wrongSubjectResponse.status).toBe(401);
+    expect(wrongSubjectResponse.status).toBe(404);
+    await expect(wrongSubjectResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
     expect(stub.dispatch).not.toHaveBeenCalled();
   });
 
-  it("reads canonical per-user status and per-event status from the durable object", async () => {
+  it("reads canonical per-user status while keeping the per-event status route removed", async () => {
     const stub = createUserRunnerStub({
-      getEventStatus: vi.fn(async ({ eventId }: { eventId: string }) => ({
-        acknowledgedAt: "2026-04-16T10:05:00.000Z",
-        eventId,
-        lastError: null,
-        state: "completed",
-        userId: "member_123",
-      })),
       status: vi.fn(async () => ({
         backpressuredEventIds: [],
         bundleRef: null,
@@ -552,11 +556,9 @@ describe("cloudflare worker routes", () => {
       createWorkerEnv(stub),
     );
 
-    expect(eventStatusResponse.status).toBe(200);
-    await expect(eventStatusResponse.json()).resolves.toMatchObject({
-      acknowledgedAt: "2026-04-16T10:05:00.000Z",
-      eventId: "evt_done",
-      state: "completed",
+    expect(eventStatusResponse.status).toBe(404);
+    await expect(eventStatusResponse.json()).resolves.toEqual({
+      error: "Not found",
     });
   });
 

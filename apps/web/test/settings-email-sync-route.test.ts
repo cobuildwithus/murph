@@ -3,9 +3,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
+  handoffHostedExecutionScheduledEventBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -22,8 +22,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   upsertHostedMemberEmailAuthorization: mocks.upsertHostedMemberEmailAuthorization,
 }));
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
@@ -80,7 +80,7 @@ describe("settings email sync route", () => {
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
     });
-    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.handoffHostedExecutionScheduledEventBestEffort.mockResolvedValue("wake");
   });
 
   it("verifies the server-side Privy cookie-backed session and writes canonical verified-email facts", async () => {
@@ -116,8 +116,9 @@ describe("settings email sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.email.sync",
     });
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: ["member.channels.updated:settings.email.sync:member_123:evt_123"],
+    expect(mocks.handoffHostedExecutionScheduledEventBestEffort).toHaveBeenCalledWith({
+      context: "settings.email.sync",
+      eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
     });
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",

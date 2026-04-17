@@ -1,7 +1,6 @@
 export * from "./auth.ts";
 export * from "./builders.ts";
 export * from "./bundles.ts";
-export * from "./client.ts";
 export * from "./contracts.ts";
 export * from "./env.ts";
 export * from "./hosted-email.ts";

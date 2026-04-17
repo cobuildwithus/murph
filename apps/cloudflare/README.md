@@ -2,11 +2,11 @@
 
 Cloudflare-hosted execution plane for the hosted Murph path.
 
-`apps/web` is the canonical owner of onboarding, billing, auth, share facts, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated execution requests, restores encrypted runtime state, runs one hosted job, and commits the next encrypted snapshot.
+`apps/web` is the canonical owner of onboarding, billing, auth, share facts, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated control wakes, restores encrypted runtime state, runs one hosted job, and commits the next encrypted snapshot.
 
 ## What This App Owns
 
-- Vercel OIDC-authenticated execution dispatch from `apps/web`
+- Vercel OIDC-authenticated control wakes from `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
 - encrypted hosted workspace snapshots, externalized artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run and finalize hosted jobs in `BUNDLES`
@@ -24,13 +24,13 @@ Public routes:
 - `GET /`
 - `GET /health`
 
-Internal execution routes:
+Internal control routes:
 
-- `POST /internal/dispatch`
+- `POST /internal/users/:userId/wake`
+- `POST /internal/users/:userId/browser-vault/session`
 - `GET /internal/users/:userId/status`
-- `GET /internal/users/:userId/events/:eventId/status`
 
-The supported worker HTTP surface stops at those three execution routes plus the public banner and health checks.
+The supported worker HTTP surface stops at those three control routes plus the public banner and health checks.
 
 ## Storage Contract
 

@@ -8,18 +8,15 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionDispatchStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
-  parseHostedExecutionDispatchStatus,
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution/parsers";
 
 import {
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserStatusPath,
   buildCloudflareHostedControlUserWakePath,
 } from "./routes.ts";
@@ -47,7 +44,6 @@ export interface CloudflareHostedControlClient {
     userId: string,
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk,
   ): Promise<CloudflareHostedControlBrowserVaultSession>;
-  getEventStatus(userId: string, eventId: string): Promise<HostedExecutionDispatchStatus | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   wakeUser(
     userId: string,
@@ -96,19 +92,6 @@ export function createCloudflareHostedControlClient(
           },
           method: "POST",
         },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    getEventStatus(userId, eventId) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "event status",
-        parse: parseHostedExecutionDispatchStatusOrNull,
-        path: buildCloudflareHostedControlUserEventStatusPath(userId, eventId),
-        request: { method: "GET" },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -221,12 +204,6 @@ function parseCloudflareHostedControlBrowserVaultSnapshotAad(
     purpose,
     userId: requireString(record.userId, `${label}.userId`),
   };
-}
-
-function parseHostedExecutionDispatchStatusOrNull(
-  value: unknown,
-): HostedExecutionDispatchStatus | null {
-  return value === null ? null : parseHostedExecutionDispatchStatus(value);
 }
 
 function requireHostedExecutionBaseUrl(

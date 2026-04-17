@@ -6,13 +6,13 @@ import {
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import {
   readHostedExecutionControlBaseUrl,
-  readHostedExecutionDispatchEnvironment,
+  readHostedExecutionControlEnvironment,
 } from "./environment";
 
 export function readHostedExecutionControlClientIfConfigured(
   timeoutMs?: number,
 ): CloudflareHostedControlClient | null {
-  const { dispatchTimeoutMs } = readHostedExecutionDispatchEnvironment();
+  const { controlTimeoutMs } = readHostedExecutionControlEnvironment();
   const baseUrl = readHostedExecutionControlBaseUrl();
 
   if (!baseUrl) {
@@ -23,6 +23,6 @@ export function readHostedExecutionControlClientIfConfigured(
     allowHttpLocalhost: true,
     baseUrl,
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
-    timeoutMs: typeof timeoutMs === "number" ? timeoutMs : dispatchTimeoutMs,
+    timeoutMs: typeof timeoutMs === "number" ? timeoutMs : controlTimeoutMs,
   });
 }

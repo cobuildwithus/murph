@@ -17,17 +17,23 @@ const mocks = vi.hoisted(() => {
     finishHostedOnboardingTiming: vi.fn(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
+    lastScheduledDispatchEventId: null as string | null,
+    lastScheduledDispatchPrisma: null as unknown,
     sendHostedLinqChatMessage: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
       step,
     })),
-    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string }) => ({
-      eventId: input.eventId,
-      route: "outbox" as const,
-      userId: "member_123",
-    })),
+    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
+      state.lastScheduledDispatchEventId = input.eventId;
+      state.lastScheduledDispatchPrisma = input.prisma ?? null;
+      return {
+        eventId: input.eventId,
+        route: "outbox" as const,
+        userId: "member_123",
+      };
+    }),
     scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
       dispatch: { eventId: string };
     }) => {
@@ -37,20 +43,40 @@ const mocks = vi.hoisted(() => {
         route: "outbox" as const,
       };
     }),
+    triggerHostedWakeUserBestEffort: vi.fn(async (input?: { timeoutMs?: number }) => {
+      if (!state.lastScheduledDispatchEventId) {
+        return false;
+      }
+
+      const drainPromise = Promise.resolve(state.drainHostedExecutionOutboxBestEffort({
+        eventIds: [state.lastScheduledDispatchEventId],
+        limit: 1,
+        prisma: state.lastScheduledDispatchPrisma,
+      })).then(() => true);
+
+      if (typeof input?.timeoutMs === "number" && input.timeoutMs > 0) {
+        return await Promise.race([
+          drainPromise,
+          new Promise<boolean>((resolve) => {
+            setTimeout(() => resolve(false), input.timeoutMs);
+          }),
+        ]);
+      }
+
+      return await drainPromise;
+    }),
   };
 
   return state;
 });
 
-vi.mock("@/src/lib/hosted-execution/outbox", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
-    "@/src/lib/hosted-execution/outbox",
+vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/dispatch-lifecycle")>(
+    "@/src/lib/hosted-execution/dispatch-lifecycle",
   );
 
   return {
     ...actual,
-    drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
-    enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
     readHostedExecutionScheduledDispatchTarget: mocks.readHostedExecutionScheduledDispatchTarget,
     scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
   };
@@ -62,6 +88,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
   resolveHostedLinqDayUtc: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: vi.fn(async () => "outbox"),
+  triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -131,6 +162,8 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.lastScheduledDispatchEventId = null;
+    mocks.lastScheduledDispatchPrisma = null;
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -257,13 +290,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(
       mocks.finishHostedOnboardingTiming.mock.calls.some(
         ([handle, outcome]) =>
-          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.outbox-drain"
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-drain"
           && outcome === "completed",
       ),
     ).toBe(true);
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.outbox-handoff",
+        step: "hosted-onboarding.webhook.linq.wake-handoff",
       }),
       "completed",
       expect.objectContaining({
@@ -326,7 +359,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.outbox-handoff",
+        step: "hosted-onboarding.webhook.linq.wake-handoff",
       }),
       "scheduled",
       expect.objectContaining({
@@ -336,7 +369,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(
       mocks.finishHostedOnboardingTiming.mock.calls.some(
         ([handle, outcome]) =>
-          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.outbox-drain"
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-drain"
           && outcome === "completed",
       ),
     ).toBe(true);

@@ -1,16 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getEventStatus: vi.fn(),
-  getPrisma: vi.fn(),
-  readHostedExecutionControlClientIfConfigured: vi.fn(),
+  readHostedExecutionLifecycleStateFromWake: vi.fn(),
 }));
 
-vi.mock("../hosted-execution/control", () => ({
-  readHostedExecutionControlClientIfConfigured: mocks.readHostedExecutionControlClientIfConfigured,
-}));
-vi.mock("../prisma", () => ({
-  getPrisma: mocks.getPrisma,
+vi.mock("../hosted-execution/dispatch-lifecycle", () => ({
+  readHostedExecutionLifecycleStateFromWake: mocks.readHostedExecutionLifecycleStateFromWake,
 }));
 
 import { reconcileHostedShareAcceptanceLifecycle } from "./shared";
@@ -18,27 +13,16 @@ import { reconcileHostedShareAcceptanceLifecycle } from "./shared";
 describe("hosted share lifecycle reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      getEventStatus: mocks.getEventStatus,
-    });
   });
 
-  it("finalizes a claimed share from the canonical lifecycle without transport-status gating", async () => {
+  it("finalizes a claimed share from the wake-backed lifecycle", async () => {
     const prisma = createHostedSharePrisma({
-      executionOutboxRow: {
-        dispatchState: "queued",
-      },
       share: {
         acceptedByMemberId: "member_123",
         lastEventId: "evt_share",
       },
     });
-    mocks.getEventStatus.mockResolvedValue({
-      eventId: "evt_share",
-      lastError: null,
-      state: "completed",
-      userId: "member_123",
-    });
+    mocks.readHostedExecutionLifecycleStateFromWake.mockResolvedValue("completed");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -50,22 +34,14 @@ describe("hosted share lifecycle reconciliation", () => {
     expect(prisma.share.lastEventId).toBe("evt_share");
   });
 
-  it("releases a claimed share from the canonical lifecycle without waiting for a separate transport state", async () => {
+  it("releases a claimed share when the wake-backed lifecycle is poisoned", async () => {
     const prisma = createHostedSharePrisma({
-      executionOutboxRow: {
-        dispatchState: "queued",
-      },
       share: {
         acceptedByMemberId: "member_123",
         lastEventId: "evt_share",
       },
     });
-    mocks.getEventStatus.mockResolvedValue({
-      eventId: "evt_share",
-      lastError: "runner failed",
-      state: "poisoned",
-      userId: "member_123",
-    });
+    mocks.readHostedExecutionLifecycleStateFromWake.mockResolvedValue("poisoned");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -80,9 +56,6 @@ describe("hosted share lifecycle reconciliation", () => {
 });
 
 function createHostedSharePrisma(input: {
-  executionOutboxRow: {
-    dispatchState: string;
-  };
   share?: Partial<HostedShareRow>;
 }) {
   const share: HostedShareRow = {
@@ -97,9 +70,6 @@ function createHostedSharePrisma(input: {
   };
 
   return {
-    executionOutbox: {
-      findUnique: vi.fn(async () => input.executionOutboxRow),
-    },
     hostedShareLink: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
         where.id === share.id ? share : null),
