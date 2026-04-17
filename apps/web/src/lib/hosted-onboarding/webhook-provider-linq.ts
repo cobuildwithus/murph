@@ -171,6 +171,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
               minimizeLinqMessageReceivedEvent(messageEvent),
               {
                 omitRecipientPhone: true,
+                preserveFrom: true,
               },
             ),
             linqMessageId: summary.messageId,

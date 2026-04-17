@@ -261,6 +261,51 @@ describe("hosted contact privacy", () => {
     expect(sanitized.data).not.toHaveProperty("recipient_phone");
   });
 
+  it("can preserve the Linq sender identity for hosted dispatch continuity", () => {
+    const sanitized = sanitizeHostedLinqEventForStorage({
+      data: {
+        from: "+15551230000",
+        from_handle: {
+          handle: "+15551230000",
+          id: "handle_sender_legacy_123",
+        },
+        message: {
+          id: "msg_123",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+          ],
+        },
+        recipient_phone: "+15557654321",
+        sender_handle: {
+          handle: "+15551230000",
+          id: "handle_sender_123",
+        },
+      },
+    }, {
+      omitRecipientPhone: true,
+      preserveFrom: true,
+    });
+
+    expect(sanitized.data).toMatchObject({
+      from: "+15551230000",
+      from_handle: {
+        handle: expect.stringMatching(/^hbid:linq\.from:/u),
+        id: "handle_sender_legacy_123",
+      },
+      message: {
+        id: expect.stringMatching(/^hbid:linq\.message:/u),
+      },
+      sender_handle: {
+        handle: expect.stringMatching(/^hbid:linq\.from:/u),
+        id: "handle_sender_123",
+      },
+    });
+    expect(sanitized.data).not.toHaveProperty("recipient_phone");
+  });
+
   it("rejects duplicate connection updates in a single runtime apply request", () => {
     expect(() => parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [

@@ -29,6 +29,7 @@ import {
   stopHttpStubServer,
   writeJsonResponse,
 } from "./helpers/hosted-local-e2e-support.js";
+import { createHostedPhoneLookupKey } from "../../web/src/lib/hosted-onboarding/contact-privacy";
 
 interface ObservedLinqRequest {
   body: string;
@@ -216,7 +217,7 @@ describe("hosted local Linq first-contact e2e", () => {
       linqEvent: buildInboundLinqEvent(directReplyUserId, materializedChatId),
       linqMessageId: `msg_local_${directReplyUserId}`,
       occurredAt: new Date().toISOString(),
-      phoneLookupKey: directReplyUserId,
+      phoneLookupKey: requireLinqPhoneLookupKey(directReplyUserId),
       userId: directReplyUserId,
     });
     const inboundResult = await dispatchHostedEvent(inboundDispatch, directReplyUserId);
@@ -274,7 +275,7 @@ describe("hosted local Linq first-contact e2e", () => {
       }),
       linqMessageId: `msg_fast_name_${fastReplyUserId}`,
       occurredAt: new Date().toISOString(),
-      phoneLookupKey: fastReplyUserId,
+      phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
     });
     const firstInboundResult = await dispatchHostedEvent(firstInboundDispatch, fastReplyUserId);
@@ -293,7 +294,7 @@ describe("hosted local Linq first-contact e2e", () => {
       }),
       linqMessageId: `msg_fast_goals_${fastReplyUserId}`,
       occurredAt: new Date().toISOString(),
-      phoneLookupKey: fastReplyUserId,
+      phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
     });
     const secondInboundResult = await dispatchHostedEvent(secondInboundDispatch, fastReplyUserId);
@@ -573,7 +574,7 @@ function buildActivationDispatch(nextUserId: string) {
     firstContact: {
       channel: "linq",
       fromPhoneNumber: buildLinqHomePhoneNumber(nextUserId),
-      identityId: nextUserId,
+      identityId: requireLinqPhoneLookupKey(nextUserId),
       kind: "linq-materialize-home-thread",
       toPhoneNumber: buildLinqRecipientPhoneNumber(nextUserId),
     },
@@ -646,6 +647,15 @@ function buildInboundLinqEvent(
     event_id: `evt_linq_inbound_${nextUserId}`,
     event_type: "message.received",
   };
+}
+
+function requireLinqPhoneLookupKey(nextUserId: string): string {
+  const lookupKey = createHostedPhoneLookupKey(buildLinqRecipientPhoneNumber(nextUserId));
+  if (!lookupKey) {
+    throw new Error(`Expected Linq phone lookup key for ${nextUserId}.`);
+  }
+
+  return lookupKey;
 }
 
 function countObservedLinqSends(
