@@ -104,6 +104,14 @@ Optional but recommended:
   accept the dispatch
 - `HOSTED_WAKE_MEMBER_CHANNELS_UPDATED_ENABLED` to route
   `member.channels.updated` directly to `HostedWake` with the same fallback
+- `HOSTED_WAKE_LINQ_MESSAGE_RECEIVED_ENABLED` to route
+  `linq.message.received` directly to `HostedWake` with the same fallback
+- `HOSTED_WAKE_TELEGRAM_MESSAGE_RECEIVED_ENABLED` to route
+  `telegram.message.received` directly to `HostedWake` with the same fallback
+- `HOSTED_WAKE_DEVICE_SYNC_WAKE_ENABLED` to route `device-sync.wake` directly to
+  `HostedWake`, coalesced per user and connection/provider when possible
+- `HOSTED_WAKE_VAULT_SHARE_ACCEPTED_ENABLED` to route
+  `vault.share.accepted` directly to `HostedWake` with the same fallback
 
 Provider-owned webhook-admin settings:
 

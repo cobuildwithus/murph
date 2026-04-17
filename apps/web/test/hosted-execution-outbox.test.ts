@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   appendHostedExecutionDispatchWakeTx: vi.fn(),
   dispatchHostedExecutionStatus: vi.fn(),
   findHostedExecutionWakeEventIdTx: vi.fn(),
-  shouldRouteHostedSimpleProducerDispatchToWake: vi.fn(() => false),
+  readHostedExecutionWakeScheduleTx: vi.fn(),
+  shouldRouteHostedDispatchToWake: vi.fn(() => false),
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
@@ -25,9 +26,10 @@ vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
 vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
   appendHostedExecutionDispatchWakeTx: mocks.appendHostedExecutionDispatchWakeTx,
   findHostedExecutionWakeEventIdTx: mocks.findHostedExecutionWakeEventIdTx,
+  readHostedExecutionWakeScheduleTx: mocks.readHostedExecutionWakeScheduleTx,
 }));
 vi.mock("@/src/lib/hosted-wake/flags", () => ({
-  shouldRouteHostedSimpleProducerDispatchToWake: mocks.shouldRouteHostedSimpleProducerDispatchToWake,
+  shouldRouteHostedDispatchToWake: mocks.shouldRouteHostedDispatchToWake,
 }));
 
 import {
@@ -35,13 +37,14 @@ import {
   enqueueHostedExecutionOutbox,
   findHostedExecutionScheduledEventIdTx,
   pruneHostedExecutionOutbox,
+  readHostedExecutionScheduledDispatchTarget,
   scheduleHostedExecutionDispatchTx,
 } from "@/src/lib/hosted-execution/outbox";
 
 describe("hosted execution outbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.shouldRouteHostedSimpleProducerDispatchToWake.mockReturnValue(false);
+    mocks.shouldRouteHostedDispatchToWake.mockReturnValue(false);
   });
 
   it("persists direct enqueue payloads inline even for events that previously used staged payload refs", async () => {
@@ -176,7 +179,7 @@ describe("hosted execution outbox", () => {
   it("routes flagged simple producers directly to HostedWake", async () => {
     const dispatch = createMemberActivatedDispatch();
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord(dispatch));
-    mocks.shouldRouteHostedSimpleProducerDispatchToWake.mockReturnValue(true);
+    mocks.shouldRouteHostedDispatchToWake.mockReturnValue(true);
     mocks.appendHostedExecutionDispatchWakeTx.mockResolvedValue({
       duplicate: false,
       inserted: true,
@@ -219,7 +222,7 @@ describe("hosted execution outbox", () => {
   it("falls back to execution_outbox when wake routing cannot store the payload inline", async () => {
     const dispatch = createMemberChannelsUpdatedDispatch();
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord(dispatch));
-    mocks.shouldRouteHostedSimpleProducerDispatchToWake.mockReturnValue(true);
+    mocks.shouldRouteHostedDispatchToWake.mockReturnValue(true);
     mocks.appendHostedExecutionDispatchWakeTx.mockRejectedValue(
       new RangeError("payload too large"),
     );
@@ -250,6 +253,30 @@ describe("hosted execution outbox", () => {
     expect(mocks.findHostedExecutionWakeEventIdTx).toHaveBeenCalledWith({
       eventId: dispatch.eventId,
       tx: prisma,
+    });
+  });
+
+  it("reads wake scheduling targets when an event routes through HostedWake", async () => {
+    const dispatch = createMemberActivatedDispatch();
+    const prisma = {
+      executionOutbox: {
+        findUnique: vi.fn(async () => null),
+      },
+    } as unknown as PrismaClient;
+    mocks.readHostedExecutionWakeScheduleTx.mockResolvedValue({
+      eventId: dispatch.eventId,
+      seq: "42",
+      userId: dispatch.event.userId,
+    });
+
+    await expect(readHostedExecutionScheduledDispatchTarget({
+      eventId: dispatch.eventId,
+      prisma,
+    })).resolves.toEqual({
+      eventId: dispatch.eventId,
+      route: "wake",
+      seq: "42",
+      userId: dispatch.event.userId,
     });
   });
 });

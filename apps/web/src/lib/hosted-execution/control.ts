@@ -4,11 +4,15 @@ import {
 } from "@murphai/cloudflare-hosted-control/client";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
-import { readHostedExecutionControlBaseUrl } from "./environment";
+import {
+  readHostedExecutionControlBaseUrl,
+  readHostedExecutionDispatchEnvironment,
+} from "./environment";
 
 export function readHostedExecutionControlClientIfConfigured(
   timeoutMs?: number,
 ): CloudflareHostedControlClient | null {
+  const { dispatchTimeoutMs } = readHostedExecutionDispatchEnvironment();
   const baseUrl = readHostedExecutionControlBaseUrl();
 
   if (!baseUrl) {
@@ -19,6 +23,6 @@ export function readHostedExecutionControlClientIfConfigured(
     allowHttpLocalhost: true,
     baseUrl,
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
-    ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+    timeoutMs: typeof timeoutMs === "number" ? timeoutMs : dispatchTimeoutMs,
   });
 }

@@ -595,6 +595,7 @@ export function parseHostedWakeRecord(
     id: requireString(record.id, "Hosted wake record id"),
     kind: requireString(record.kind, "Hosted wake record kind"),
     occurredAt: requireString(record.occurredAt, "Hosted wake record occurredAt"),
+    ...(record.payloadJson === undefined ? {} : { payloadJson: record.payloadJson }),
     payloadBytes: record.payloadBytes === undefined || record.payloadBytes === null
       ? null
       : requireNumber(record.payloadBytes, "Hosted wake record payloadBytes"),

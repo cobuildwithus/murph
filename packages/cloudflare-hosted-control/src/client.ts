@@ -21,6 +21,7 @@ import {
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserStatusPath,
+  buildCloudflareHostedControlUserWakePath,
 } from "./routes.ts";
 
 export type CloudflareHostedControlBrowserVaultSession =
@@ -48,6 +49,12 @@ export interface CloudflareHostedControlClient {
   ): Promise<CloudflareHostedControlBrowserVaultSession>;
   getEventStatus(userId: string, eventId: string): Promise<HostedExecutionDispatchStatus | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
+  wakeUser(
+    userId: string,
+    options?: {
+      targetSeqHint?: string | null;
+    },
+  ): Promise<HostedExecutionUserStatus>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -115,6 +122,29 @@ export function createCloudflareHostedControlClient(
         parse: parseHostedExecutionUserStatus,
         path: buildCloudflareHostedControlUserStatusPath(userId),
         request: { method: "GET" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    wakeUser(userId, wakeOptions = {}) {
+      const body = JSON.stringify({
+        ...(wakeOptions.targetSeqHint === undefined ? {} : { targetSeqHint: wakeOptions.targetSeqHint }),
+      });
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "wake",
+        parse: parseHostedExecutionUserStatus,
+        path: buildCloudflareHostedControlUserWakePath(userId),
+        request: {
+          body,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
         timeoutMs: options.timeoutMs,
       });
     },

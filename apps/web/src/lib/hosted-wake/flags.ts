@@ -2,15 +2,27 @@ import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution/c
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
-export interface HostedWakeSimpleProducerRouting {
+export interface HostedWakeProducerRouting {
+  deviceSyncWakeEnabled: boolean;
+  linqMessageReceivedEnabled: boolean;
   memberActivatedEnabled: boolean;
   memberChannelsUpdatedEnabled: boolean;
+  telegramMessageReceivedEnabled: boolean;
+  vaultShareAcceptedEnabled: boolean;
 }
 
-export function readHostedWakeSimpleProducerRouting(
+export function readHostedWakeProducerRouting(
   source: EnvSource = process.env,
-): HostedWakeSimpleProducerRouting {
+): HostedWakeProducerRouting {
   return {
+    deviceSyncWakeEnabled: parseBooleanFlag(
+      source.HOSTED_WAKE_DEVICE_SYNC_WAKE_ENABLED,
+      "HOSTED_WAKE_DEVICE_SYNC_WAKE_ENABLED",
+    ),
+    linqMessageReceivedEnabled: parseBooleanFlag(
+      source.HOSTED_WAKE_LINQ_MESSAGE_RECEIVED_ENABLED,
+      "HOSTED_WAKE_LINQ_MESSAGE_RECEIVED_ENABLED",
+    ),
     memberActivatedEnabled: parseBooleanFlag(
       source.HOSTED_WAKE_MEMBER_ACTIVATED_ENABLED,
       "HOSTED_WAKE_MEMBER_ACTIVATED_ENABLED",
@@ -19,20 +31,36 @@ export function readHostedWakeSimpleProducerRouting(
       source.HOSTED_WAKE_MEMBER_CHANNELS_UPDATED_ENABLED,
       "HOSTED_WAKE_MEMBER_CHANNELS_UPDATED_ENABLED",
     ),
+    telegramMessageReceivedEnabled: parseBooleanFlag(
+      source.HOSTED_WAKE_TELEGRAM_MESSAGE_RECEIVED_ENABLED,
+      "HOSTED_WAKE_TELEGRAM_MESSAGE_RECEIVED_ENABLED",
+    ),
+    vaultShareAcceptedEnabled: parseBooleanFlag(
+      source.HOSTED_WAKE_VAULT_SHARE_ACCEPTED_ENABLED,
+      "HOSTED_WAKE_VAULT_SHARE_ACCEPTED_ENABLED",
+    ),
   };
 }
 
-export function shouldRouteHostedSimpleProducerDispatchToWake(
+export function shouldRouteHostedDispatchToWake(
   dispatch: HostedExecutionDispatchRequest,
   source: EnvSource = process.env,
 ): boolean {
-  const routing = readHostedWakeSimpleProducerRouting(source);
+  const routing = readHostedWakeProducerRouting(source);
 
   switch (dispatch.event.kind) {
+    case "device-sync.wake":
+      return routing.deviceSyncWakeEnabled;
+    case "linq.message.received":
+      return routing.linqMessageReceivedEnabled;
     case "member.activated":
       return routing.memberActivatedEnabled;
     case "member.channels.updated":
       return routing.memberChannelsUpdatedEnabled;
+    case "telegram.message.received":
+      return routing.telegramMessageReceivedEnabled;
+    case "vault.share.accepted":
+      return routing.vaultShareAcceptedEnabled;
     default:
       return false;
   }

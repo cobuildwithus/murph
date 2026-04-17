@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution/contracts";
 
 import {
@@ -9,6 +9,7 @@ import {
   appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx,
   findHostedWakeEventIdByDedupeKeyTx,
+  readHostedWakeScheduleByDedupeKeyTx,
   type AppendHostedWakeResult,
 } from "./store";
 
@@ -32,6 +33,7 @@ export async function appendHostedExecutionDispatchWakeTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<AppendHostedWakeResult> {
   switch (input.dispatch.event.kind) {
+    case "device-sync.wake":
     case "member.channels.updated":
       return appendHostedCoalescingDispatchWakeTx({
         coalescingKey: buildHostedWakeDispatchCoalescingKey(input.dispatch),
@@ -79,9 +81,23 @@ export async function appendHostedEdgeTriggeredDispatchWakeTx(input: {
 
 export async function findHostedExecutionWakeEventIdTx(input: {
   eventId: string;
-  tx: Prisma.TransactionClient;
+  tx: Prisma.TransactionClient | PrismaClient;
 }): Promise<string | null> {
   return findHostedWakeEventIdByDedupeKeyTx({
+    dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId),
+    tx: input.tx,
+  });
+}
+
+export async function readHostedExecutionWakeScheduleTx(input: {
+  eventId: string;
+  tx: Prisma.TransactionClient | PrismaClient;
+}): Promise<{
+  eventId: string;
+  seq: string;
+  userId: string;
+} | null> {
+  return readHostedWakeScheduleByDedupeKeyTx({
     dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId),
     tx: input.tx,
   });
@@ -101,5 +117,9 @@ export function buildHostedWakeDispatchDedupeKeyFromEventId(eventId: string): st
 export function buildHostedWakeDispatchCoalescingKey(
   dispatch: HostedExecutionDispatchRequest,
 ): string {
+  if (dispatch.event.kind === "device-sync.wake") {
+    return `${dispatch.event.kind}:${dispatch.event.userId}:${dispatch.event.connectionId ?? dispatch.event.provider ?? "global"}`;
+  }
+
   return `${dispatch.event.kind}:${dispatch.event.userId}`;
 }

@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionDispatchLifecycleState,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchStatus,
@@ -7,6 +8,9 @@ import type {
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import {
@@ -30,6 +34,10 @@ import {
 import {
   createRunnerCommitRecovery,
 } from "./user-runner/runner-commit-recovery.js";
+import {
+  commitHostedWakeCursorToWeb,
+  fetchHostedWakeBatchFromWeb,
+} from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
   RunnerDispatchProcessor,
@@ -47,6 +55,10 @@ import {
 } from "./user-runner/types.js";
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
+
+const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
+const HOSTED_WAKE_DISPATCH_POLL_INTERVAL_MS = 250;
+const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
   emitHostedExecutionStructuredLog({
@@ -67,6 +79,7 @@ export class HostedUserRunner {
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStore>;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
+  private wakeDrainLock: Promise<void> | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -310,6 +323,193 @@ export class HostedUserRunner {
     return this.queueStore.readEventDispatchStatus(input.eventId);
   }
 
+  async wakeHostedWakes(input: {
+    targetSeqHint?: string | null;
+  } = {}): Promise<HostedExecutionUserStatus> {
+    return this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
+  }
+
+  private async wakeHostedWakesInternal(input: {
+    targetSeqHint?: string | null;
+  }): Promise<HostedExecutionUserStatus> {
+    const userId = await this.requireBoundUserId();
+    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
+
+    if (!hostedWebBaseUrl) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        level: "warn",
+        message: "Hosted wake drain skipped because HOSTED_WEB_BASE_URL is not configured.",
+        phase: "dispatch.running",
+        userId,
+      });
+      return this.status();
+    }
+
+    await this.queueStore.bootstrapUser(userId);
+    const targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
+    let afterSeq: string | null = null;
+    let expectedVersion: string | null = null;
+
+    for (let round = 0; round < MAX_HOSTED_WAKE_DRAIN_ROUNDS; round += 1) {
+      const batch = await fetchHostedWakeBatchFromWeb({
+        afterSeq,
+        baseUrl: hostedWebBaseUrl,
+        boundUserId: userId,
+        callbackSigning: this.env.webCallbackSigning,
+        limit: DEFAULT_HOSTED_WAKE_BATCH_LIMIT,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+      afterSeq = batch.cursor.committedSeq;
+      expectedVersion = batch.cursor.version;
+
+      if (batch.wakes.length === 0) {
+        if (targetSeqHint && BigInt(batch.cursor.committedSeq) < targetSeqHint) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.user-runner",
+            level: "info",
+            message: "Hosted wake drain saw no unseen rows before the target sequence hint.",
+            phase: "dispatch.running",
+            userId,
+          });
+        }
+
+        break;
+      }
+
+      let highestCommittedWakeSeq: string | null = null;
+      let advancedWakeCount = 0;
+      let stoppingState: HostedExecutionDispatchLifecycleState | null = null;
+
+      for (const wake of batch.wakes) {
+        const state = await this.dispatchHostedWakeRecord(wake);
+
+        if (state === "completed" || state === "poisoned") {
+          highestCommittedWakeSeq = wake.seq;
+          advancedWakeCount += 1;
+        }
+
+        if (state !== "completed") {
+          stoppingState = state;
+          break;
+        }
+      }
+
+      if (!highestCommittedWakeSeq || !expectedVersion) {
+        break;
+      }
+
+      const bundleState = await this.queueStore.readBundleMetaState();
+      const commit = await commitHostedWakeCursorToWeb({
+        baseUrl: hostedWebBaseUrl,
+        body: {
+          committedSeq: highestCommittedWakeSeq,
+          expectedVersion,
+          snapshotRef: bundleState.bundleRef ?? null,
+        },
+        boundUserId: userId,
+        callbackSigning: this.env.webCallbackSigning,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+
+      afterSeq = commit.cursor.committedSeq;
+      expectedVersion = commit.cursor.version;
+
+      if (!commit.committed) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.user-runner",
+          level: "info",
+          message: "Hosted wake cursor commit lost a compare-and-swap race; refetching cursor state.",
+          phase: "dispatch.running",
+          userId,
+        });
+      }
+
+      if (advancedWakeCount < batch.wakes.length) {
+        if (stoppingState === "poisoned") {
+          continue;
+        }
+
+        break;
+      }
+
+      if (
+        batch.wakes.length < DEFAULT_HOSTED_WAKE_BATCH_LIMIT
+        && (!targetSeqHint || BigInt(afterSeq) >= targetSeqHint)
+      ) {
+        break;
+      }
+    }
+
+    return this.status();
+  }
+
+  private async dispatchHostedWakeRecord(wake: {
+    payloadJson?: unknown;
+    seq: string;
+  }): Promise<HostedExecutionDispatchLifecycleState> {
+    const userId = await this.requireBoundUserId();
+    let dispatch: HostedExecutionDispatchRequest;
+
+    try {
+      dispatch = parseHostedExecutionDispatchRequest(wake.payloadJson);
+    } catch {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        level: "warn",
+        message: `Hosted wake seq ${wake.seq} has an invalid dispatch payload and cannot be executed.`,
+        phase: "dispatch.running",
+        userId,
+      });
+      return "poisoned";
+    }
+
+    if (dispatch.event.userId !== userId) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        level: "warn",
+        message: `Hosted wake seq ${wake.seq} is bound to ${dispatch.event.userId}, not ${userId}.`,
+        phase: "dispatch.running",
+        userId,
+      });
+      return "poisoned";
+    }
+
+    const result = await this.dispatchWithOutcome(dispatch);
+
+    if (
+      result.event.state === "completed"
+      || result.event.state === "poisoned"
+      || result.event.state === "backpressured"
+    ) {
+      return result.event.state;
+    }
+
+    return this.waitForHostedDispatchCompletion(dispatch.eventId);
+  }
+
+  private async waitForHostedDispatchCompletion(
+    eventId: string,
+  ): Promise<HostedExecutionDispatchLifecycleState> {
+    const deadline = Date.now() + this.env.runnerTimeoutMs;
+
+    while (Date.now() < deadline) {
+      const status = await this.queueStore.readEventDispatchStatus(eventId);
+
+      if (
+        status?.state === "completed"
+        || status?.state === "poisoned"
+        || status?.state === "backpressured"
+      ) {
+        return status.state;
+      }
+
+      await delay(HOSTED_WAKE_DISPATCH_POLL_INTERVAL_MS);
+    }
+
+    return (await this.queueStore.readEventDispatchStatus(eventId))?.state ?? "queued";
+  }
+
   private async applyHostedTransition<T>(input: {
     eventId: string;
     gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
@@ -359,6 +559,10 @@ export class HostedUserRunner {
 
   private readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>> {
     return toStringEnvSource(this.runnerRuntimeEnvSource);
+  }
+
+  private readHostedWebControlBaseUrl(): string | null {
+    return this.readWorkerStringEnvSource().HOSTED_WEB_BASE_URL ?? null;
   }
 
   private async resolveRunnerSecretsServiceWhileHoldingKeyLock(
@@ -451,6 +655,44 @@ export class HostedUserRunner {
       }
     }
   }
+
+  private async withWakeDrainLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.wakeDrainLock ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.catch(() => {}).then(() => current);
+    this.wakeDrainLock = chain;
+    await previous.catch(() => {});
+
+    try {
+      return await run();
+    } finally {
+      release();
+      if (this.wakeDrainLock === chain) {
+        this.wakeDrainLock = null;
+      }
+    }
+  }
+}
+
+function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function resolveHostedExecutionDispatchStatus(input: {

@@ -2,34 +2,52 @@ import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
-  enqueueHostedExecutionOutbox: vi.fn(),
-  runtimeEnv: {
-    encryptionKeyVersion: "v1",
-    inviteTtlHours: 24,
-    isProduction: false,
-    linqApiBaseUrl: "https://linq.example.test",
-    linqApiToken: "linq-token",
-    linqWebhookSecret: null as string | null,
-    privyAppId: "privy-app-id",
-    privyVerificationKey: "privy-key",
-    publicBaseUrl: "https://join.example.test",
-    revnetChainId: null as number | null,
-    revnetProjectId: null as string | null,
-    revnetRpcUrl: null as string | null,
-    revnetStripeCurrency: null as string | null,
-    revnetTerminalAddress: null as string | null,
-    revnetTreasuryPrivateKey: null as string | null,
-    revnetWeiPerStripeMinorUnit: null as string | null,
-    stripeBillingMode: "payment" as const,
-    stripePriceId: "price_123",
-    stripeSecretKey: "sk_test_123",
-    stripeWebhookSecret: "whsec_123",
-    telegramBotUsername: "murph_bot",
-    telegramWebhookSecret: null as string | null,
-  },
-}));
+const mocks = vi.hoisted(() => {
+  const state = {
+    drainHostedExecutionOutboxBestEffort: vi.fn(),
+    enqueueHostedExecutionOutbox: vi.fn(),
+    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string }) => ({
+      eventId: input.eventId,
+      route: "outbox" as const,
+      userId: "member_telegram_123",
+    })),
+    runtimeEnv: {
+      encryptionKeyVersion: "v1",
+      inviteTtlHours: 24,
+      isProduction: false,
+      linqApiBaseUrl: "https://linq.example.test",
+      linqApiToken: "linq-token",
+      linqWebhookSecret: null as string | null,
+      privyAppId: "privy-app-id",
+      privyVerificationKey: "privy-key",
+      publicBaseUrl: "https://join.example.test",
+      revnetChainId: null as number | null,
+      revnetProjectId: null as string | null,
+      revnetRpcUrl: null as string | null,
+      revnetStripeCurrency: null as string | null,
+      revnetTerminalAddress: null as string | null,
+      revnetTreasuryPrivateKey: null as string | null,
+      revnetWeiPerStripeMinorUnit: null as string | null,
+      stripeBillingMode: "payment" as const,
+      stripePriceId: "price_123",
+      stripeSecretKey: "sk_test_123",
+      stripeWebhookSecret: "whsec_123",
+      telegramBotUsername: "murph_bot",
+      telegramWebhookSecret: null as string | null,
+    },
+    scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
+      dispatch: { eventId: string };
+    }) => {
+      await state.enqueueHostedExecutionOutbox(input);
+      return {
+        eventId: input.dispatch.eventId,
+        route: "outbox" as const,
+      };
+    }),
+  };
+
+  return state;
+});
 
 vi.mock("@/src/lib/hosted-execution/outbox", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
@@ -40,6 +58,8 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
     ...actual,
     drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+    readHostedExecutionScheduledDispatchTarget: mocks.readHostedExecutionScheduledDispatchTarget,
+    scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
   };
 });
 

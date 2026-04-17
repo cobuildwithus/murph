@@ -5,6 +5,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboardi
 
 const mocks = vi.hoisted(() => ({
   activateHostedMemberFromConfirmedRevnetIssuanceTx: vi.fn(),
+  handoffHostedExecutionScheduledEventBestEffort: vi.fn(async () => "outbox"),
   isHostedOnboardingRevnetEnabled: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   readHostedRevnetPaymentReceipt: vi.fn(),
@@ -48,6 +49,9 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
+}));
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
 }));
 
 import { reconcileSubmittedHostedRevnetIssuances } from "@/src/lib/hosted-onboarding/stripe-revnet-reconciliation";

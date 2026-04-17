@@ -2,12 +2,27 @@ import { HostedBillingStatus, type ExecutionOutbox } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const shareHarness = vi.hoisted(() => ({
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
-  getEventStatus: vi.fn(),
-  issueHostedInviteForPhone: vi.fn(),
-  readHostedExecutionControlClientIfConfigured: vi.fn(),
-}));
+const shareHarness = vi.hoisted(() => {
+  const state = {
+    drainHostedExecutionOutboxBestEffort: vi.fn(),
+    getEventStatus: vi.fn(),
+    issueHostedInviteForPhone: vi.fn(),
+    readHostedExecutionControlClientIfConfigured: vi.fn(),
+    handoffHostedExecutionScheduledEventBestEffort: vi.fn(async (input: {
+      eventId: string;
+      prisma?: unknown;
+    }) => {
+      await state.drainHostedExecutionOutboxBestEffort({
+        eventIds: [input.eventId],
+        limit: 1,
+        prisma: input.prisma,
+      });
+      return "outbox";
+    }),
+  };
+
+  return state;
+});
 
 vi.mock("@/src/lib/hosted-execution/outbox", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
@@ -26,6 +41,9 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: shareHarness.readHostedExecutionControlClientIfConfigured,
+}));
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: shareHarness.handoffHostedExecutionScheduledEventBestEffort,
 }));
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(

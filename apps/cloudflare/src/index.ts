@@ -39,6 +39,7 @@ import {
   json,
   methodNotAllowed,
   notFound,
+  readOptionalJsonObject,
   unauthorized,
 } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
@@ -103,6 +104,17 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchExactPath("/internal/dispatch"),
     methods: ["POST"],
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
+    async handle(context, params) {
+      return handleWakeRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/wake$/u),
+    methods: ["POST"],
+    wrongMethodResponse: "method-not-allowed",
   },
   {
     authorizeBeforeMethod: true,
@@ -219,6 +231,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.getEventStatus(input);
   }
 
+  async wakeHostedWakes(input?: {
+    targetSeqHint?: string | null;
+  }): Promise<HostedExecutionUserStatus> {
+    return this.runner.wakeHostedWakes(input);
+  }
+
   async fetch(): Promise<Response> {
     return notFound();
   }
@@ -319,6 +337,17 @@ async function handleStatusRoute(
   return json(await stub.status());
 }
 
+async function handleWakeRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const body = await readOptionalJsonObject(context.request);
+  const targetSeqHint = parseOptionalWakeTargetSeqHint(body.targetSeqHint);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await stub.wakeHostedWakes({ targetSeqHint }));
+}
+
 async function handleEventStatusRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -401,6 +430,24 @@ function parseBrowserVaultSessionRequest(value: unknown): {
       "Browser vault session request browserPublicKeyJwk",
     ),
   };
+}
+
+function parseOptionalWakeTargetSeqHint(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError("targetSeqHint must be a base-10 integer string.");
+  }
+
+  try {
+    BigInt(value);
+  } catch {
+    throw new TypeError("targetSeqHint must be a base-10 integer string.");
+  }
+
+  return value;
 }
 
 function requireBoundInternalRouteUser(

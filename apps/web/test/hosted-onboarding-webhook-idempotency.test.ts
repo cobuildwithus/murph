@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => {
   const stripeChargesRetrieve = vi.fn();
   const stripePaymentIntentsRetrieve = vi.fn();
 
-  return {
+  const state = {
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
@@ -36,7 +36,34 @@ const mocks = vi.hoisted(() => {
     stripeChargesRetrieve,
     stripeConstructEvent,
     stripePaymentIntentsRetrieve,
+    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string }) => ({
+      eventId: input.eventId,
+      route: "outbox" as const,
+      userId: "member_123",
+    })),
+    scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
+      dispatch: { eventId: string };
+    }) => {
+      await state.enqueueHostedExecutionOutbox(input);
+      return {
+        eventId: input.dispatch.eventId,
+        route: "outbox" as const,
+      };
+    }),
+    handoffHostedExecutionScheduledEventBestEffort: vi.fn(async (input: {
+      eventId: string;
+      prisma?: unknown;
+    }) => {
+      await state.drainHostedExecutionOutboxBestEffort({
+        eventIds: [input.eventId],
+        limit: 1,
+        prisma: input.prisma,
+      });
+      return "outbox";
+    }),
   };
+
+  return state;
 });
 
 vi.mock("@/src/lib/hosted-execution/outbox", async () => {
@@ -48,8 +75,14 @@ vi.mock("@/src/lib/hosted-execution/outbox", async () => {
     ...actual,
     drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
     enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+    readHostedExecutionScheduledDispatchTarget: mocks.readHostedExecutionScheduledDispatchTarget,
+    scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
   };
 });
+vi.mock("@/src/lib/hosted-wake/control", () => ({
+  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
+  triggerHostedWakeUserBestEffort: vi.fn(async () => true),
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
