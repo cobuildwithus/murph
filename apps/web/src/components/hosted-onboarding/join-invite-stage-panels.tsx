@@ -120,7 +120,7 @@ export function JoinInviteVerificationPanel({
   }
 
   return (
-    <div className="rounded-xl border border-[#c4a882]/20 bg-[#f5f0e8]/40 p-5">
+    <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
       <HostedInvitePhoneAuth
         inviteCode={inviteCode}
         onSignOut={async () => {
@@ -134,9 +134,9 @@ export function JoinInviteVerificationPanel({
 
 export function JoinInviteBlockedAlert() {
   return (
-    <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-      <AlertTitle>This account needs support.</AlertTitle>
-      <AlertDescription>
+    <Alert className="border-destructive/30 bg-destructive/5 text-destructive">
+      <AlertTitle className="text-destructive">This account needs support.</AlertTitle>
+      <AlertDescription className="text-destructive/85">
         This account can&apos;t continue from this invite right now. Contact support and we&apos;ll help restore
         access.
       </AlertDescription>
@@ -163,7 +163,7 @@ export function JoinInviteMessagingSetupPanel({
       </Alert>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-[#c4a882]/20 bg-[#f5f0e8]/40 p-5">
+        <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
           <HostedPhoneSettings
             authenticated={authenticated}
             autoOpen
@@ -173,7 +173,7 @@ export function JoinInviteMessagingSetupPanel({
             }}
           />
         </div>
-        <div className="rounded-xl border border-[#c4a882]/20 bg-[#f5f0e8]/40 p-5">
+        <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
           <HostedTelegramSettings
             authenticated={authenticated}
             initialLinkedAccounts={initialLinkedAccounts}
@@ -223,48 +223,37 @@ export function JoinInviteActivePanel({
   onAcceptShare: () => Promise<void>;
 }) {
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-8">
       {activationPending ? (
-        <div className="flex items-start gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-olive">
-          <LoaderCircleIcon className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
+        <div className="flex items-start gap-3 text-sm text-olive">
+          <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
           <div className="space-y-1">
-            <p className="text-sm font-semibold">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}</p>
-            <p className="text-sm leading-relaxed">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}</p>
+            <p className="font-semibold">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}</p>
+            <p className="leading-relaxed text-olive/85">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}</p>
             {sharePreview ? (
-              <p className="text-sm leading-relaxed">{JOIN_INVITE_ACTIVATION_PENDING_COPY.shareImportDescription}</p>
+              <p className="leading-relaxed text-olive/85">{JOIN_INVITE_ACTIVATION_PENDING_COPY.shareImportDescription}</p>
             ) : null}
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4">
-          <CheckCircleIcon className="h-6 w-6 shrink-0 text-olive" />
-          <p className="text-sm leading-relaxed text-olive">
+        <div className="flex items-center gap-2.5 text-sm text-olive">
+          <CheckCircleIcon className="size-4 shrink-0" />
+          <p className="leading-relaxed">
             Murph should reach out shortly. Just reply there to start chatting.
           </p>
         </div>
       )}
 
-      <div>
-        <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-olive">Things Murph can help with</p>
-        <div className="grid gap-px overflow-hidden rounded-xl border border-[#c4a882]/20 bg-[#c4a882]/20 sm:grid-cols-2">
-          {JOIN_INVITE_ACTIVE_FEATURE_CARDS.map((item) => (
-            <div key={item.title} className="flex gap-3 bg-[#fefdf8] p-5">
-              <item.icon className="mt-0.5 h-5 w-5 shrink-0 text-olive-light" />
-              <div>
-                <p className="text-sm font-semibold text-[#2d3436]">{item.title}</p>
-                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{item.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="flex flex-col gap-3">
+        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
       </div>
 
       {sharePreview ? (
-        <div className="rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-green-800">
+        <div>
           {shareImportState === "completed" ? (
-            <p className="text-sm">{describeHostedSharePreview(sharePreview)} has been added to your account.</p>
+            <p className="text-sm text-olive">{describeHostedSharePreview(sharePreview)} has been added to your account.</p>
           ) : shareImportState === "processing" ? (
-            <p className="text-sm">{describeHostedSharePreview(sharePreview)} is being added to your account.</p>
+            <p className="text-sm text-muted-foreground">{describeHostedSharePreview(sharePreview)} is being added to your account.</p>
           ) : (
             <Button type="button" onClick={onAcceptShare} disabled={pendingAction !== null} size="lg">
               {pendingAction === "share"
@@ -275,18 +264,32 @@ export function JoinInviteActivePanel({
         </div>
       ) : null}
 
-      <div className="flex flex-col items-start gap-3">
-        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
-        <Button
-          render={<Link href="/settings" />}
-          nativeButton={false}
-          variant="link"
-          size="sm"
-          className="h-auto p-0 text-sm font-medium text-muted-foreground hover:text-[#2d3436]"
-        >
-          Manage settings
-        </Button>
+      <div className="border-t border-[#c4a882]/25 pt-6">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          What Murph can help with
+        </p>
+        <div className="mt-4 grid gap-x-6 gap-y-5 sm:grid-cols-2">
+          {JOIN_INVITE_ACTIVE_FEATURE_CARDS.map((item) => (
+            <div key={item.title} className="flex gap-3">
+              <item.icon className="mt-0.5 size-4 shrink-0 text-olive-light" />
+              <div>
+                <p className="text-sm font-semibold text-[#2d3436]">{item.title}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{item.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      <Button
+        render={<Link href="/settings" />}
+        nativeButton={false}
+        variant="link"
+        size="sm"
+        className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-[#2d3436]"
+      >
+        Manage settings
+      </Button>
     </div>
   );
 }
