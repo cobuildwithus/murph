@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
+import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-shell";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -41,17 +42,15 @@ export default async function JoinInvitePage(input: {
     : null;
 
   return (
-    <main className="min-h-screen px-5 py-12 md:px-8">
-      <div className="mx-auto max-w-3xl">
-        <JoinInviteClient
-          authenticated={authenticated}
-          initialLinkedAccounts={linkedAccounts}
-          inviteCode={decodedInviteCode}
-          initialStatus={initialStatus}
-          shareCode={shareCode}
-          sharePreview={shareData?.share?.preview ?? null}
-        />
-      </div>
-    </main>
+    <JoinInviteShell>
+      <JoinInviteClient
+        authenticated={authenticated}
+        initialLinkedAccounts={linkedAccounts}
+        inviteCode={decodedInviteCode}
+        initialStatus={initialStatus}
+        shareCode={shareCode}
+        sharePreview={shareData?.share?.preview ?? null}
+      />
+    </JoinInviteShell>
   );
 }
