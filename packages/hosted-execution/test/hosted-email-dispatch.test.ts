@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionEmailConversationMessageWake,
 } from "../src/builders.ts";
 import { resolveHostedEmailSelfAddresses } from "../src/hosted-email.ts";
-import { parseHostedExecutionDispatchRequest } from "../src/parsers.ts";
+import { parseHostedExecutionWake } from "../src/parsers.ts";
 
-describe("hosted email dispatch", () => {
-  it("round-trips the optional selfAddress through the dispatch codec", () => {
-    const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+describe("hosted email wake", () => {
+  it("round-trips the optional selfAddress through the wake codec", () => {
+    const wake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_123",
       identityId: "assistant@example.com",
       occurredAt: "2026-04-03T00:00:00.000Z",
@@ -17,14 +17,17 @@ describe("hosted email dispatch", () => {
       userId: "user_123",
     });
 
-    const parsed = parseHostedExecutionDispatchRequest(dispatch);
+    const parsed = parseHostedExecutionWake(wake);
 
-    expect(parsed.event.kind).toBe("email.message.received");
-    expect(parsed.event).toMatchObject({
+    expect(parsed.kind).toBe("conversation.message");
+    if (parsed.kind !== "conversation.message" || parsed.message.channel !== "email") {
+      throw new Error("Expected an email conversation.message wake.");
+    }
+
+    expect(parsed.message).toMatchObject({
       identityId: "assistant@example.com",
       rawMessageKey: "raw_123",
       selfAddress: "assistant+route@example.com",
-      userId: "user_123",
     });
   });
 

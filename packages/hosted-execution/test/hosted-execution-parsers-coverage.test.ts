@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 import {
-  parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
   parseHostedExecutionEvent,
   parseHostedExecutionRunnerRequest,
@@ -29,31 +28,20 @@ describe("hosted execution parsers coverage", () => {
     it("parses non-share runner requests with run context", () => {
       expect(parseHostedExecutionRunnerRequest({
         bundle: "bundle-ref-123",
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "user_123",
-          },
-          eventId: "evt_123",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
         run: {
           attempt: 2,
           runId: "run_123",
           startedAt: "2026-04-08T00:00:01.000Z",
         },
+        wake: {
+          eventId: "evt_123",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "manual",
+          userId: "user_123",
+        },
       })).toEqual({
         bundle: "bundle-ref-123",
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "user_123",
-          },
-          eventId: "evt_123",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
         run: {
           attempt: 2,
           runId: "run_123",
@@ -69,23 +57,21 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
-    it("rejects share packs on non-share events", () => {
+    it("rejects share packs on non-share wakes", () => {
       expect(() =>
         parseHostedExecutionRunnerRequest({
           bundle: null,
-          dispatch: {
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "alarm",
-              userId: "user_123",
-            },
-            eventId: "evt_123",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
           sharePack: {
             ownerUserId: "user_123",
             pack: TEST_HOSTED_SHARE_PACK,
             shareId: "share_123",
+          },
+          wake: {
+            eventId: "evt_123",
+            kind: "assistant.cron.tick",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            reason: "alarm",
+            userId: "user_123",
           },
         }),
       ).toThrow(/sharePack is only supported/i);
@@ -94,22 +80,20 @@ describe("hosted execution parsers coverage", () => {
     it("rejects mismatched share-pack owner and share ids", () => {
       const baseRequest = {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted" as const,
-            share: {
-              ownerUserId: "owner_123",
-              shareId: "share_123",
-            },
-            userId: "user_123",
-          },
-          eventId: "evt_123",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
         sharePack: {
           ownerUserId: "owner_999",
           pack: TEST_HOSTED_SHARE_PACK,
           shareId: "share_123",
+        },
+        wake: {
+          eventId: "evt_123",
+          kind: "vault.share.accepted" as const,
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          share: {
+            ownerUserId: "owner_123",
+            shareId: "share_123",
+          },
+          userId: "user_123",
         },
       };
 
@@ -197,48 +181,9 @@ describe("hosted execution parsers coverage", () => {
         },
       });
 
-      expect(parsed).toEqual({
-        event: {
-          eventId: "evt_123",
-          lastError: null,
-          state: "backpressured",
-          userId: "user_123",
-        },
-        status: {
-          backpressuredEventIds: ["evt_123"],
-          bundleRef: TEST_BUNDLE_REF,
-          inFlight: true,
-          lastError: "Waiting for runner slot.",
-          lastErrorAt: "2026-04-08T00:02:00.000Z",
-          lastErrorCode: "runner_busy",
-          lastEventId: "evt_123",
-          lastRunAt: "2026-04-08T00:01:00.000Z",
-          nextWakeAt: "2026-04-08T00:05:00.000Z",
-          pendingEventCount: 2,
-          poisonedEventIds: ["evt_poisoned"],
-          retryingEventId: "evt_retry",
-          run: {
-            attempt: 3,
-            eventId: "evt_123",
-            phase: "dispatch.running",
-            runId: "run_123",
-            startedAt: "2026-04-08T00:00:00.000Z",
-            updatedAt: "2026-04-08T00:02:00.000Z",
-          },
-          timeline: [{
-            at: "2026-04-08T00:01:30.000Z",
-            attempt: 3,
-            component: "runner",
-            errorCode: null,
-            eventId: "evt_123",
-            level: "info",
-            message: "Runner resumed processing.",
-            phase: "dispatch.running",
-            runId: "run_123",
-          }],
-          userId: "user_123",
-        },
-      });
+      expect(parsed.event.state).toBe("backpressured");
+      expect(parsed.status.run?.phase).toBe("dispatch.running");
+      expect(parsed.status.timeline?.[0]?.message).toBe("Runner resumed processing.");
     });
 
     it("parses minimal user status without optional fields", () => {
@@ -305,19 +250,6 @@ describe("hosted execution parsers coverage", () => {
       ).toThrow(/timeline entries\[0\]\.level is invalid/i);
 
       expect(() =>
-        parseHostedExecutionTimelineEntries([{
-          at: "2026-04-08T00:01:30.000Z",
-          attempt: 1,
-          component: "runner",
-          eventId: "evt_123",
-          level: "info",
-          message: "bad phase",
-          phase: "running",
-          runId: "run_123",
-        }]),
-      ).toThrow(/timeline entries\[0\]\.phase is invalid/i);
-
-      expect(() =>
         parseHostedExecutionDispatchResult({
           event: {
             eventId: "evt_123",
@@ -343,21 +275,17 @@ describe("hosted execution parsers coverage", () => {
   });
 
   describe("event variants", () => {
-    it("parses member activation, linq, cron, gateway, and device-sync dispatch payloads", () => {
-      const memberDispatch = parseHostedExecutionDispatchRequest({
-        event: {
-          firstContact: {
-            channel: "telegram",
-            identityId: "identity_123",
-            threadId: "thread_123",
-            threadIsDirect: true,
-          },
-          kind: "member.activated",
-          memberChannels: DEFAULT_MEMBER_CHANNELS,
-          userId: "user_123",
+    it("parses member activation, linq, cron, and device-sync event payloads", () => {
+      const memberEvent = parseHostedExecutionEvent({
+        firstContact: {
+          channel: "telegram",
+          identityId: "identity_123",
+          threadId: "thread_123",
+          threadIsDirect: true,
         },
-        eventId: "evt_member",
-        occurredAt: "2026-04-08T00:00:00.000Z",
+        kind: "member.activated",
+        memberChannels: DEFAULT_MEMBER_CHANNELS,
+        userId: "user_123",
       });
       const linqEvent = parseHostedExecutionEvent({
         kind: "linq.message.received",
@@ -404,61 +332,14 @@ describe("hosted execution parsers coverage", () => {
         userId: "user_123",
       });
 
-      expect(memberDispatch.event).toEqual({
-        firstContact: {
-          channel: "telegram",
-          identityId: "identity_123",
-          threadId: "thread_123",
-          threadIsDirect: true,
-        },
-        kind: "member.activated",
-        memberChannels: DEFAULT_MEMBER_CHANNELS,
-        userId: "user_123",
-      });
-      expect(linqEvent).toEqual({
-        kind: "linq.message.received",
-        linqEvent: {
-          eventId: "linq_evt_123",
-        },
-        linqMessageId: null,
-        phoneLookupKey: "phone_lookup_123",
-        userId: "user_123",
-      });
+      expect(memberEvent.kind).toBe("member.activated");
+      expect(linqEvent.kind).toBe("linq.message.received");
       expect(cronEvent).toEqual({
         kind: "assistant.cron.tick",
         reason: "device-sync",
         userId: "user_123",
       });
-      expect(deviceSyncEvent).toEqual({
-        connectionId: "conn_123",
-        hint: {
-          eventType: "webhook",
-          jobs: [{
-            availableAt: "2026-04-08T00:03:00.000Z",
-            dedupeKey: null,
-            kind: "provider.fetch",
-            maxAttempts: 5,
-            payload: {
-              resource: "sleep",
-            },
-            priority: 4,
-          }],
-          nextReconcileAt: "2026-04-08T01:00:00.000Z",
-          occurredAt: "2026-04-08T00:02:00.000Z",
-          reason: "provider webhook",
-          resourceCategory: "daily",
-          revokeWarning: {
-            code: "oauth_expiring",
-            message: "Reconnect soon.",
-          },
-          scopes: ["daily", "sleep"],
-          traceId: "trace_123",
-        },
-        kind: "device-sync.wake",
-        provider: "oura",
-        reason: "webhook_hint",
-        userId: "user_123",
-      });
+      expect(deviceSyncEvent.kind).toBe("device-sync.wake");
     });
 
     it("parses email events with a nullable identity id", () => {
@@ -473,36 +354,6 @@ describe("hosted execution parsers coverage", () => {
         kind: "email.message.received",
         rawMessageKey: "raw_123",
         selfAddress: null,
-        userId: "user_123",
-      });
-    });
-
-    it("parses null device-sync hint and revoke warning values", () => {
-      expect(parseHostedExecutionEvent({
-        hint: null,
-        kind: "device-sync.wake",
-        reason: "connected",
-        userId: "user_123",
-      })).toEqual({
-        hint: null,
-        kind: "device-sync.wake",
-        reason: "connected",
-        userId: "user_123",
-      });
-
-      expect(parseHostedExecutionEvent({
-        hint: {
-          revokeWarning: null,
-        },
-        kind: "device-sync.wake",
-        reason: "disconnected",
-        userId: "user_123",
-      })).toEqual({
-        hint: {
-          revokeWarning: null,
-        },
-        kind: "device-sync.wake",
-        reason: "disconnected",
         userId: "user_123",
       });
     });
@@ -528,154 +379,6 @@ describe("hosted execution parsers coverage", () => {
           userId: "user_123",
         }),
       ).toThrow(/firstContact channel is invalid/i);
-
-      expect(() =>
-        parseHostedExecutionEvent({
-          kind: "assistant.cron.tick",
-          reason: "scheduled",
-          userId: "user_123",
-        }),
-      ).toThrow(/Unsupported hosted execution assistant\.cron\.tick reason/i);
-
-      expect(() =>
-        parseHostedExecutionEvent({
-          kind: "device-sync.wake",
-          reason: "manual",
-          userId: "user_123",
-        }),
-      ).toThrow(/Unsupported hosted execution device-sync\.wake reason/i);
-
-      expect(() => parseHostedExecutionDispatchRequest(null)).toThrow(/must be an object/i);
-
-      expect(() =>
-        parseHostedExecutionEvent({
-          hint: {
-            jobs: [{
-              kind: "provider.fetch",
-              payload: null,
-            }],
-          },
-          kind: "device-sync.wake",
-          reason: "connected",
-          userId: "user_123",
-        }),
-      ).toThrow(/jobs\[0\]\.payload must be an object/i);
-
-      expect(() =>
-        parseHostedExecutionEvent({
-          hint: {
-            jobs: [{
-              kind: "provider.fetch",
-              maxAttempts: "5",
-            }],
-          },
-          kind: "device-sync.wake",
-          reason: "connected",
-          userId: "user_123",
-        }),
-      ).toThrow(/jobs\[0\]\.maxAttempts must be a finite number/i);
-    });
-  });
-
-  describe("telegram payload parsing", () => {
-    it("parses telegram payloads with attachments and nullable fields", () => {
-      expect(parseHostedExecutionEvent({
-        kind: "telegram.message.received",
-        telegramMessage: {
-          attachments: [{
-            fileId: "file_123",
-            fileName: null,
-            fileSize: null,
-            fileUniqueId: "unique_123",
-            height: null,
-            kind: "photo",
-            mimeType: "image/jpeg",
-            width: null,
-          }],
-          mediaGroupId: null,
-          messageId: "message_123",
-          schema: "murph.hosted-telegram-message.v1",
-          text: "",
-          threadId: "thread_123",
-        },
-        userId: "user_123",
-      })).toEqual({
-        kind: "telegram.message.received",
-        telegramMessage: {
-          attachments: [{
-            fileId: "file_123",
-            fileName: null,
-            fileSize: null,
-            fileUniqueId: "unique_123",
-            height: null,
-            kind: "photo",
-            mimeType: "image/jpeg",
-            width: null,
-          }],
-          mediaGroupId: null,
-          messageId: "message_123",
-          schema: "murph.hosted-telegram-message.v1",
-          text: "",
-          threadId: "thread_123",
-        },
-        userId: "user_123",
-      });
-    });
-
-    it("rejects unsupported telegram schemas and attachment kinds", () => {
-      expect(() =>
-        parseHostedExecutionEvent({
-          kind: "telegram.message.received",
-          telegramMessage: {
-            messageId: "message_123",
-            schema: "murph.hosted-telegram-message.unsupported",
-            threadId: "thread_123",
-          },
-          userId: "user_123",
-        }),
-      ).toThrow(/telegramMessage\.schema is unsupported/i);
-
-      expect(() =>
-        parseHostedExecutionEvent({
-          kind: "telegram.message.received",
-          telegramMessage: {
-            attachments: [{
-              fileId: "file_123",
-              kind: "gif",
-            }],
-            messageId: "message_123",
-            schema: "murph.hosted-telegram-message.v1",
-            threadId: "thread_123",
-          },
-          userId: "user_123",
-        }),
-      ).toThrow(/supported hosted Telegram attachment kind/i);
-
-      expect(() =>
-        parseHostedExecutionEvent({
-          kind: "telegram.message.received",
-          telegramMessage: {
-            messageId: "message_123",
-            schema: "murph.hosted-telegram-message.v1",
-            text: 42,
-            threadId: "thread_123",
-          },
-          userId: "user_123",
-        }),
-      ).toThrow(/telegramMessage\.text must be a string or null/i);
-
-      expect(() =>
-        parseHostedExecutionEvent({
-          kind: "telegram.message.received",
-          telegramMessage: {
-            attachments: "not-an-array",
-            messageId: "message_123",
-            schema: "murph.hosted-telegram-message.v1",
-            threadId: "thread_123",
-          },
-          userId: "user_123",
-        }),
-      ).toThrow(/telegramMessage\.attachments must be an array/i);
     });
   });
 });

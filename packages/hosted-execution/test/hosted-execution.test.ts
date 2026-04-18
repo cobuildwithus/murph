@@ -7,7 +7,6 @@ import {
   encodeHostedExecutionSignedRequestPayload,
   readHostedExecutionSignatureHeaders,
 } from "../src/auth.ts";
-import { buildHostedExecutionMemberActivatedDispatch } from "../src/builders.ts";
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,

@@ -202,24 +202,6 @@ export type HostedMessageWakeEvent = Extract<
 
 export type HostedSystemWakeEvent = Exclude<HostedExecutionEvent, HostedMessageWakeEvent>;
 
-export interface HostedExecutionDispatchRequest {
-  event: HostedExecutionEvent;
-  eventId: string;
-  occurredAt: string;
-}
-
-export type HostedMessageWakeDispatch = HostedExecutionDispatchRequest & {
-  event: HostedMessageWakeEvent;
-};
-
-export type HostedSystemWakeDispatch = HostedExecutionDispatchRequest & {
-  event: HostedSystemWakeEvent;
-};
-
-export type HostedWakeDispatchPayload =
-  | HostedMessageWakeDispatch
-  | HostedSystemWakeDispatch;
-
 export interface HostedExecutionBaseWake {
   eventId: string;
   kind: HostedExecutionWakeKind;
@@ -322,7 +304,6 @@ export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
-  dispatch: HostedExecutionDispatchRequest;
   wake: HostedExecutionWake;
   run?: HostedExecutionRunContext | null;
   sharePack?: HostedExecutionRunnerSharePack | null;
@@ -564,40 +545,4 @@ export function isHostedMessageWakeEventKind(
   kind: HostedExecutionEventKind,
 ): kind is HostedMessageWakeEventKind {
   return HOSTED_MESSAGE_WAKE_EVENT_KINDS.includes(kind as HostedMessageWakeEventKind);
-}
-
-export function isHostedMessageWakeDispatch(
-  dispatch: HostedExecutionDispatchRequest,
-): dispatch is HostedMessageWakeDispatch {
-  return isHostedMessageWakeEventKind(dispatch.event.kind);
-}
-
-export function isHostedSystemWakeDispatch(
-  dispatch: HostedExecutionDispatchRequest,
-): dispatch is HostedSystemWakeDispatch {
-  return !isHostedMessageWakeDispatch(dispatch);
-}
-
-export function isHostedLinqMessageWakeDispatch(
-  dispatch: HostedExecutionDispatchRequest,
-): dispatch is HostedMessageWakeDispatch & {
-  event: HostedExecutionLinqMessageReceivedEvent;
-} {
-  return dispatch.event.kind === "linq.message.received";
-}
-
-export function isHostedTelegramMessageWakeDispatch(
-  dispatch: HostedExecutionDispatchRequest,
-): dispatch is HostedMessageWakeDispatch & {
-  event: HostedExecutionTelegramMessageReceivedEvent;
-} {
-  return dispatch.event.kind === "telegram.message.received";
-}
-
-export function isHostedEmailMessageWakeDispatch(
-  dispatch: HostedExecutionDispatchRequest,
-): dispatch is HostedMessageWakeDispatch & {
-  event: HostedExecutionEmailMessageReceivedEvent;
-} {
-  return dispatch.event.kind === "email.message.received";
 }

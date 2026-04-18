@@ -4,24 +4,20 @@ import {
   parseHostedExecutionCursorState,
   parseHostedWakeAppendResponse,
   parseHostedWakeCommitResponse,
-  parseHostedWakeDispatchPayload,
+  parseHostedWakeExecutionPayload,
   parseHostedWakeFetchResponse,
 } from "../src/parsers.ts";
 import {
-  buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionConversationMessageWake,
-  buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionLinqMessageReceivedDispatch,
-  buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionVaultShareAcceptedWake,
   buildHostedWakeEmailMessageReceivedPayload,
-  buildHostedWakeLinqMessageReceivedPayload,
   buildHostedWakeTelegramMessageReceivedPayload,
 } from "../src/builders.ts";
 import {
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 } from "../src/contracts.ts";
@@ -192,56 +188,30 @@ describe("hosted wake parser contracts", () => {
     });
   });
 
-  it("rejects message payloads labeled as system wakes", () => {
-    expect(() => parseHostedWakeDispatchPayload({
-      kind: "email.message.received",
+  it("rejects system payloads that carry a conversation wake", () => {
+    expect(() => parseHostedWakeExecutionPayload({
+      kind: "conversation.message",
       occurredAt: "2026-04-17T00:00:00.000Z",
-      payloadJson: {
-        event: {
-          kind: "email.message.received",
+      payloadJson: buildHostedExecutionConversationMessageWake({
+        eventId: "evt_email",
+        message: {
+          channel: "email",
           identityId: "assistant@example.com",
           rawMessageKey: "raw_123",
-          userId: "member-1",
         },
-        eventId: "evt_email",
         occurredAt: "2026-04-17T00:00:00.000Z",
-      },
+        userId: "member-1",
+      }),
       payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
       userId: "member-1",
     })).toThrow(/system payload schema/i);
   });
 
-  it("parses direct message wake payloads into runtime dispatches", () => {
-    const expected = buildHostedExecutionLinqMessageReceivedDispatch({
-      eventId: "evt_linq",
-      linqEvent: {
-        id: "msg_123",
-      },
-      linqMessageId: "msg_123",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      phoneLookupKey: "lookup_123",
-      userId: "member-1",
-    });
-
-    expect(parseHostedWakeDispatchPayload({
-      kind: "linq.message.received",
-      occurredAt: expected.occurredAt,
-      payloadJson: buildHostedWakeLinqMessageReceivedPayload({
-        eventId: expected.eventId,
-        linqEvent: expected.event.linqEvent,
-        linqMessageId: expected.event.linqMessageId,
-        phoneLookupKey: expected.event.phoneLookupKey,
-      }),
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-      userId: expected.event.userId,
-    })).toEqual(expected);
-  });
-
-  it("parses email direct wake payloads into runtime dispatches", () => {
+  it("parses direct message wake payloads into conversation wakes", () => {
     const occurredAt = "2026-04-17T00:00:00.000Z";
 
-    expect(parseHostedWakeDispatchPayload({
-      kind: "email.message.received",
+    expect(parseHostedWakeExecutionPayload({
+      kind: "conversation.message",
       occurredAt,
       payloadJson: buildHostedWakeEmailMessageReceivedPayload({
         eventId: "evt_email",
@@ -252,112 +222,21 @@ describe("hosted wake parser contracts", () => {
       payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
       userId: "member-1",
     })).toEqual({
-      event: {
+      eventId: "evt_email",
+      kind: "conversation.message",
+      message: {
+        channel: "email",
         identityId: "assistant@example.com",
-        kind: "email.message.received",
         rawMessageKey: "raw_123",
         selfAddress: "reply@example.com",
-        userId: "member-1",
       },
-      eventId: "evt_email",
       occurredAt,
+      userId: "member-1",
     });
   });
 
   it("parses hosted execution wakes across the supported wake kinds", () => {
     const occurredAt = "2026-04-17T00:00:00.000Z";
-
-    expect(parseHostedExecutionWake({
-      eventId: "wake_linq",
-      kind: "conversation.message",
-      message: {
-        channel: "linq",
-        linqEvent: {
-          id: "linq_123",
-        },
-        linqMessageId: null,
-        phoneLookupKey: "lookup_123",
-      },
-      occurredAt,
-      userId: "member-1",
-    })).toEqual({
-      eventId: "wake_linq",
-      kind: "conversation.message",
-      message: {
-        channel: "linq",
-        linqEvent: {
-          id: "linq_123",
-        },
-        linqMessageId: null,
-        phoneLookupKey: "lookup_123",
-      },
-      occurredAt,
-      userId: "member-1",
-    });
-
-    expect(parseHostedExecutionWake({
-      eventId: "wake_telegram",
-      kind: "conversation.message",
-      message: {
-        channel: "telegram",
-        telegramMessage: {
-          attachments: [
-            {
-              fileId: "file_123",
-              kind: "photo",
-            },
-          ],
-          messageId: "message_123",
-          schema: "murph.hosted-telegram-message.v1",
-          threadId: "thread_123",
-        },
-      },
-      occurredAt,
-      userId: "member-1",
-    })).toEqual({
-      eventId: "wake_telegram",
-      kind: "conversation.message",
-      message: {
-        channel: "telegram",
-        telegramMessage: {
-          attachments: [
-            {
-              fileId: "file_123",
-              kind: "photo",
-            },
-          ],
-          messageId: "message_123",
-          schema: "murph.hosted-telegram-message.v1",
-          threadId: "thread_123",
-        },
-      },
-      occurredAt,
-      userId: "member-1",
-    });
-
-    expect(parseHostedExecutionWake({
-      eventId: "wake_email",
-      kind: "conversation.message",
-      message: {
-        channel: "email",
-        identityId: null,
-        rawMessageKey: "raw_123",
-        selfAddress: null,
-      },
-      occurredAt,
-      userId: "member-1",
-    })).toEqual({
-      eventId: "wake_email",
-      kind: "conversation.message",
-      message: {
-        channel: "email",
-        identityId: null,
-        rawMessageKey: "raw_123",
-        selfAddress: null,
-      },
-      occurredAt,
-      userId: "member-1",
-    });
 
     expect(parseHostedExecutionWake({
       eventId: "wake_member",
@@ -417,25 +296,6 @@ describe("hosted wake parser contracts", () => {
     }));
 
     expect(parseHostedExecutionWake({
-      connectionId: null,
-      eventId: "wake_device_sync",
-      hint: null,
-      kind: "device-sync.wake",
-      occurredAt,
-      provider: null,
-      reason: "connected",
-      userId: "member-1",
-    })).toEqual(buildHostedExecutionDeviceSyncWake({
-      connectionId: null,
-      eventId: "wake_device_sync",
-      hint: null,
-      occurredAt,
-      provider: null,
-      reason: "connected",
-      userId: "member-1",
-    }));
-
-    expect(parseHostedExecutionWake({
       eventId: "wake_share",
       kind: "vault.share.accepted",
       occurredAt,
@@ -457,38 +317,6 @@ describe("hosted wake parser contracts", () => {
 
   it("parses direct wake payload helpers and rejects invalid wake contract inputs", () => {
     expect(parseHostedExecutionConversationMessagePayload({
-      channel: "linq",
-      linqEvent: {
-        id: "linq_123",
-      },
-      linqMessageId: null,
-      phoneLookupKey: "lookup_123",
-    })).toEqual({
-      channel: "linq",
-      linqEvent: {
-        id: "linq_123",
-      },
-      linqMessageId: null,
-      phoneLookupKey: "lookup_123",
-    });
-
-    expect(parseHostedExecutionConversationMessagePayload({
-      channel: "telegram",
-      telegramMessage: {
-        messageId: "message_123",
-        schema: "murph.hosted-telegram-message.v1",
-        threadId: "thread_123",
-      },
-    })).toEqual({
-      channel: "telegram",
-      telegramMessage: {
-        messageId: "message_123",
-        schema: "murph.hosted-telegram-message.v1",
-        threadId: "thread_123",
-      },
-    });
-
-    expect(parseHostedExecutionConversationMessagePayload({
       channel: "email",
       identityId: null,
       rawMessageKey: "raw_123",
@@ -506,8 +334,8 @@ describe("hosted wake parser contracts", () => {
       }),
     ).toThrow(/channel is invalid/i);
 
-    expect(parseHostedWakeDispatchPayload({
-      kind: "telegram.message.received",
+    expect(parseHostedWakeExecutionPayload({
+      kind: "conversation.message",
       occurredAt: "2026-04-17T00:00:00.000Z",
       payloadJson: buildHostedWakeTelegramMessageReceivedPayload({
         eventId: "evt_telegram_payload",
@@ -517,20 +345,21 @@ describe("hosted wake parser contracts", () => {
           threadId: "thread_123",
         },
       }),
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
       userId: "member-1",
     })).toEqual({
-      event: {
-        kind: "telegram.message.received",
+      eventId: "evt_telegram_payload",
+      kind: "conversation.message",
+      message: {
+        channel: "telegram",
         telegramMessage: {
           messageId: "message_123",
           schema: "murph.hosted-telegram-message.v1",
           threadId: "thread_123",
         },
-        userId: "member-1",
       },
-      eventId: "evt_telegram_payload",
       occurredAt: "2026-04-17T00:00:00.000Z",
+      userId: "member-1",
     });
 
     expect(() =>
@@ -562,18 +391,9 @@ describe("hosted wake parser contracts", () => {
         userId: "member-1",
       }),
     ).toThrow(/Unsupported hosted wake behavior/i);
-
-    expect(() =>
-      parseHostedExecutionWake({
-        eventId: "wake_invalid",
-        kind: "unexpected",
-        occurredAt: "2026-04-17T00:00:00.000Z",
-        userId: "member-1",
-      } as never),
-    ).toThrow(/wake kind is invalid/i);
   });
 
-  it("parses system payload wake records and rejects mismatched dispatch fallbacks", () => {
+  it("parses system payload wake records and rejects mismatches", () => {
     const memberWake = buildHostedExecutionMemberActivatedWake({
       eventId: "wake_member_system",
       firstContact: null,
@@ -585,112 +405,38 @@ describe("hosted wake parser contracts", () => {
       memberId: "member-1",
       occurredAt: "2026-04-17T00:00:00.000Z",
     });
-    const memberDispatch = buildHostedExecutionMemberActivatedDispatch({
-      eventId: "wake_member_system",
-      firstContact: null,
-      memberChannels: {
-        email: false,
-        linq: true,
-        telegram: false,
-      },
-      memberId: "member-1",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-    });
-    const cronDispatch = buildHostedExecutionAssistantCronTickDispatch({
-      eventId: "wake_cron_dispatch",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      reason: "manual",
-      userId: "member-1",
-    });
 
-    expect(parseHostedWakeDispatchPayload({
+    expect(parseHostedWakeExecutionPayload({
       kind: memberWake.kind,
       occurredAt: memberWake.occurredAt,
       payloadJson: memberWake,
       payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
-    })).toEqual(memberDispatch);
+    })).toEqual(memberWake);
 
-    expect(() => parseHostedWakeDispatchPayload({
-      kind: cronDispatch.event.kind,
-      occurredAt: cronDispatch.occurredAt,
-      payloadJson: cronDispatch,
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-      userId: "other-member",
-    })).toThrow(/dispatch payload userId must match/i);
-
-    expect(() => parseHostedWakeDispatchPayload({
-      kind: "other.kind",
-      occurredAt: cronDispatch.occurredAt,
-      payloadJson: cronDispatch,
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-      userId: cronDispatch.event.userId,
-    })).toThrow(/dispatch payload kind must match/i);
-
-    expect(() => parseHostedWakeDispatchPayload({
-      kind: cronDispatch.event.kind,
-      occurredAt: "2026-04-17T01:00:00.000Z",
-      payloadJson: cronDispatch,
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-      userId: cronDispatch.event.userId,
-    })).toThrow(/dispatch payload occurredAt must match/i);
-
-    expect(() => parseHostedWakeDispatchPayload({
-      kind: cronDispatch.event.kind,
-      occurredAt: cronDispatch.occurredAt,
-      payloadJson: cronDispatch,
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-      userId: cronDispatch.event.userId,
-    })).toThrow(/conversation wake event kind/i);
-
-    expect(() => parseHostedWakeDispatchPayload({
-      kind: "member.activated",
-      occurredAt: memberWake.occurredAt,
-      payloadJson: memberWake,
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-      userId: memberWake.userId,
-    })).toThrow(/conversation wake event kind/i);
-
-    expect(() => parseHostedWakeDispatchPayload({
-      kind: "conversation.message",
-      occurredAt: memberWake.occurredAt,
-      payloadJson: buildHostedExecutionConversationMessageWake({
-        eventId: memberWake.eventId,
-        message: {
-          channel: "email",
-          identityId: null,
-          rawMessageKey: "raw_123",
-        },
-        occurredAt: memberWake.occurredAt,
-        userId: memberWake.userId,
-      }),
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-      userId: memberWake.userId,
-    })).toThrow(/must be an object/i);
-
-    expect(() => parseHostedWakeDispatchPayload({
+    expect(() => parseHostedWakeExecutionPayload({
       kind: "member.channels.updated",
       occurredAt: memberWake.occurredAt,
       payloadJson: memberWake,
       payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
-    })).toThrow(/must be an object/i);
+    })).toThrow(/payload kind must match/i);
 
-    expect(() => parseHostedWakeDispatchPayload({
+    expect(() => parseHostedWakeExecutionPayload({
       kind: memberWake.kind,
       occurredAt: "2026-04-17T01:00:00.000Z",
       payloadJson: memberWake,
       payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
-    })).toThrow(/must be an object/i);
+    })).toThrow(/payload occurredAt must match/i);
 
-    expect(() => parseHostedWakeDispatchPayload({
+    expect(() => parseHostedWakeExecutionPayload({
       kind: memberWake.kind,
       occurredAt: memberWake.occurredAt,
       payloadJson: memberWake,
-      payloadSchema: "bogus" as never,
+      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
-    })).toThrow(/Unsupported hosted wake payload schema/i);
+    })).toThrow(/requires conversation\.message kind/i);
   });
 
   it("parses wake status responses with optional dispatch state", () => {
