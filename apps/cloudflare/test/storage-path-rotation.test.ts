@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
+
 import {
   createHostedArtifactStore,
   createHostedRunnerSecretsStore,
@@ -280,20 +282,17 @@ describe("opaque storage path rotation", () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const oldKey = createTestRootKey(7);
     const nextKey = createTestRootKey(8);
-    const dispatch = {
-      event: {
-        kind: "device-sync.wake",
-        connectionId: "conn_rotated",
-        hint: {
-          traceId: "trace_rotated",
-        },
-        provider: "oura",
-        reason: "webhook_hint",
-        userId: "user_live_share",
-      },
+    const dispatch = buildHostedExecutionDeviceSyncWake({
+      connectionId: "conn_rotated",
       eventId: "evt_share_123",
+      hint: {
+        traceId: "trace_rotated",
+      },
       occurredAt: "2026-04-04T00:00:00.000Z",
-    } as const;
+      provider: "oura",
+      reason: "webhook_hint",
+      userId: "user_live_share",
+    });
 
     const oldStore = createHostedDispatchPayloadStore({
       bucket,

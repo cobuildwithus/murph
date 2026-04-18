@@ -2,7 +2,7 @@ import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 import {
   HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionAssistantCronTickWake,
   buildHostedWakeLinqMessageReceivedPayload,
 } from "@murphai/hosted-execution";
 
@@ -88,7 +88,7 @@ describe("HostedUserRunner hosted wake drain", () => {
             seq: "1",
           }),
           createHostedWakeRecord({
-            payloadJson: buildHostedExecutionWakeFromDispatch(createDispatch("evt_after_poison")),
+            payloadJson: createWake("evt_after_poison"),
             seq: "2",
           }),
         ],
@@ -167,7 +167,7 @@ describe("HostedUserRunner hosted wake drain", () => {
             seq: "1",
           }),
           createHostedWakeRecord({
-            payloadJson: buildHostedExecutionWakeFromDispatch(createDispatch("evt_after_quarantine")),
+            payloadJson: createWake("evt_after_quarantine"),
             seq: "2",
           }),
         ],
@@ -235,7 +235,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         }),
         wakes: [
           createHostedWakeRecord({
-            payloadJson: buildHostedExecutionWakeFromDispatch(createDispatch("evt_stale_commit")),
+            payloadJson: createWake("evt_stale_commit"),
             seq: "1",
           }),
         ],
@@ -358,14 +358,12 @@ describe("HostedUserRunner hosted wake drain", () => {
       }),
       wakes: [
         {
-          dispatch: createDispatch("evt_batch_first"),
-          wake: buildHostedExecutionWakeFromDispatch(createDispatch("evt_batch_first")),
+          wake: createWake("evt_batch_first"),
           seq: 1n,
           state: "completed",
         },
         {
-          dispatch: createDispatch("evt_batch_second"),
-          wake: buildHostedExecutionWakeFromDispatch(createDispatch("evt_batch_second")),
+          wake: createWake("evt_batch_second"),
           seq: 2n,
           state: "completed",
         },
@@ -463,16 +461,13 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 });
 
-function createDispatch(eventId: string) {
-  return {
-    event: {
-      kind: "assistant.cron.tick" as const,
-      reason: "manual" as const,
-      userId: "member_123",
-    },
+function createWake(eventId: string) {
+  return buildHostedExecutionAssistantCronTickWake({
     eventId,
     occurredAt: "2026-03-26T12:00:00.000Z",
-  };
+    reason: "manual",
+    userId: "member_123",
+  });
 }
 
 function createCursorState(overrides: Partial<{
@@ -571,7 +566,7 @@ function readDispatchEventIdsFromSpy(
       !input
       || typeof input !== "object"
     ) {
-      throw new TypeError("Expected a wake or dispatch payload with an eventId.");
+      throw new TypeError("Expected a wake payload with an eventId.");
     }
 
     if (
@@ -584,17 +579,7 @@ function readDispatchEventIdsFromSpy(
       return input.wake.eventId;
     }
 
-    if (
-      "dispatch" in input
-      && input.dispatch
-      && typeof input.dispatch === "object"
-      && "eventId" in input.dispatch
-      && typeof input.dispatch.eventId === "string"
-    ) {
-      return input.dispatch.eventId;
-    }
-
-    throw new TypeError("Expected a wake or dispatch payload with an eventId.");
+    throw new TypeError("Expected a wake payload with an eventId.");
   });
 }
 
@@ -623,26 +608,13 @@ function readRunnerJobRequest(value: unknown): {
   }
 
   const requestRecord = request as {
-    dispatch?: {
-      event?: {
-        userId?: string;
-      };
-      eventId?: string;
-    };
     resume?: unknown;
     wake?: {
       eventId?: string;
       userId?: string;
     };
   };
-  const wake = requestRecord.wake ?? (
-    requestRecord.dispatch?.eventId && requestRecord.dispatch.event?.userId
-      ? {
-          eventId: requestRecord.dispatch.eventId,
-          userId: requestRecord.dispatch.event.userId,
-        }
-      : null
-  );
+  const wake = requestRecord.wake ?? null;
 
   if (!wake?.eventId || !wake.userId) {
     throw new TypeError("Expected hosted runner job request to carry a wake.");
@@ -650,7 +622,10 @@ function readRunnerJobRequest(value: unknown): {
 
   return {
     resume: requestRecord.resume,
-    wake,
+    wake: {
+      eventId: wake.eventId,
+      userId: wake.userId,
+    },
   };
 }
 

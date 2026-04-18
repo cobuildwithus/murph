@@ -37,9 +37,12 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 
 import type {
   HostedExecutionBundleRef,
-  HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
+  HostedExecutionWake,
   HostedExecutionUserStatus,
+} from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -62,8 +65,8 @@ import {
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
-  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
-  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+  wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus>;
+  wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult>;
   status(): Promise<HostedExecutionUserStatus>;
 }
 
@@ -85,7 +88,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
     const response = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_invalid"), {
+      await createSignedWakeRequest("/internal/dispatch", createWake("evt_invalid"), {
         sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
       }),
     );
@@ -106,9 +109,9 @@ describe("cloudflare worker runtime suite", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
-    const dispatch = createDispatch("evt_signed_runtime", "member_signed_runtime");
-    await resolveHostedUserCryptoContext(dispatch.event.userId);
-    const payload = await getUserRunnerStub(dispatch.event.userId).dispatchWithOutcome(dispatch);
+    const wake = createWake("evt_signed_runtime", "member_signed_runtime");
+    await resolveHostedUserCryptoContext(wake.userId);
+    const payload = await getUserRunnerStub(wake.userId).wakeWithOutcome(wake);
     expect(payload).toMatchObject({
       event: {
         eventId: "evt_signed_runtime",
@@ -121,11 +124,11 @@ describe("cloudflare worker runtime suite", () => {
         lastEventId: "evt_signed_runtime",
         nextWakeAt: "2026-03-26T12:01:00.000Z",
         retryingEventId: null,
-        userId: dispatch.event.userId,
+        userId: wake.userId,
       },
     });
-    await expect(readBundleText(dispatch.event.userId, payload.status.bundleRef)).resolves.toBe(
-      `vault:${dispatch.eventId}`,
+    await expect(readBundleText(wake.userId, payload.status.bundleRef)).resolves.toBe(
+      `vault:${wake.eventId}`,
     );
   });
 
@@ -135,7 +138,7 @@ describe("cloudflare worker runtime suite", () => {
     const userId = "member_removed_alias";
 
     const response = await worker.fetch(
-      await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias", userId)),
+      await createSignedWakeRequest("/internal/events", createWake("evt_removed_alias", userId)),
     );
 
     expect(response.status).toBe(404);
@@ -156,7 +159,7 @@ describe("cloudflare worker runtime suite", () => {
     const userId = "member_alarm";
     await resolveHostedUserCryptoContext(userId);
     const stub = getUserRunnerStub(userId);
-    const initialStatus = await stub.dispatch(createDispatch("evt_alarm_seed", userId));
+    const initialStatus = await stub.wake(createWake("evt_alarm_seed", userId));
 
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
     expect(initialStatus.nextWakeAt).toBe("2026-05-26T12:00:00.000Z");
@@ -178,7 +181,7 @@ describe("cloudflare worker runtime suite", () => {
     const userId = "member_journal";
     const eventId = "evt_finalize_runtime";
     await resolveHostedUserCryptoContext(userId);
-    await expect(getUserRunnerStub(userId).dispatch(createDispatch(eventId, userId))).resolves.toMatchObject({
+    await expect(getUserRunnerStub(userId).wake(createWake(eventId, userId))).resolves.toMatchObject({
       lastEventId: eventId,
       userId,
     });
@@ -201,23 +204,20 @@ describe("cloudflare worker runtime suite", () => {
   });
 });
 
-function createDispatch(
+function createWake(
   eventId: string,
   userId = "member_invalid",
-): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "member.activated",
-      memberChannels: {
-        email: false,
-        linq: false,
-        telegram: false,
-      },
-      userId,
-    },
+): HostedExecutionWake {
+  return buildHostedExecutionMemberActivatedWake({
     eventId,
     occurredAt: "2026-03-26T12:00:00.000Z",
-  };
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: false,
+    },
+    memberId: userId,
+  });
 }
 
 async function createSignedJsonControlRequest(
@@ -245,16 +245,16 @@ async function createSignedJsonControlRequest(
   return new Request(request, { headers });
 }
 
-async function createSignedDispatchRequest(
+async function createSignedWakeRequest(
   path: string,
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   input: {
     aud?: string;
     iss?: string;
     sub?: string;
   } = {},
 ): Promise<Request> {
-  return createSignedJsonControlRequest(path, dispatch, dispatch.event.userId, input);
+  return createSignedJsonControlRequest(path, wake, wake.userId, input);
 }
 
 function installOidcJwksFetch(delegate?: typeof fetch): void {

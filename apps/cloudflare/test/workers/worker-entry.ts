@@ -92,7 +92,7 @@ export default {
 async function handleTestRoute(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
 
-  if (url.pathname === "/__test/dispatch-with-outcome" && request.method === "POST") {
+  if (url.pathname === "/__test/wake-with-outcome" && request.method === "POST") {
     const wake = readTestWake(await request.json() as unknown);
     const runner = getUserRunnerStub(wake.userId);
     await runner.bootstrapUser(wake.userId);

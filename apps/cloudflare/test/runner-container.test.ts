@@ -1,4 +1,5 @@
 import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
+import { buildHostedExecutionAssistantCronTickWake } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -1066,15 +1067,12 @@ function createRunnerRequest(
 ) {
   return {
     bundle: null,
-    dispatch: {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
+    wake: buildHostedExecutionAssistantCronTickWake({
       eventId,
       occurredAt: "2026-03-27T00:00:00.000Z",
-    },
+      reason: "manual",
+      userId: "member_123",
+    }),
     ...(input.run ? { run: input.run } : {}),
   };
 }

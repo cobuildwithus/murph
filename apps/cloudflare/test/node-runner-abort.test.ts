@@ -1,3 +1,4 @@
+import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -42,19 +43,16 @@ describe("runHostedExecutionJob abort forwarding", () => {
     await runHostedExecutionJob({
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: {
-              email: false,
-              linq: false,
-              telegram: false,
-            },
-            userId: "member_abort_forwarding",
-          },
+        wake: buildHostedExecutionMemberActivatedWake({
           eventId: "evt_abort_forwarding",
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: false,
+          },
+          memberId: "member_abort_forwarding",
           occurredAt: "2026-03-29T10:45:00.000Z",
-        },
+        }),
       },
     }, {
       signal: controller.signal,

@@ -2,7 +2,10 @@ import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  type HostedExecutionWake,
+} from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 
@@ -42,7 +45,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
 
     const overflowResponse = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_overflow")),
+      await createSignedWakeRequest("/internal/dispatch", createWake("evt_overflow")),
       harness.env as never,
     );
 
@@ -191,21 +194,18 @@ function createStorage() {
   };
 }
 
-function createDispatch(eventId: string): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "assistant.cron.tick",
-      reason: "manual",
-      userId: "member_123",
-    },
+function createWake(eventId: string): HostedExecutionWake {
+  return buildHostedExecutionAssistantCronTickWake({
     eventId,
     occurredAt: "2026-03-26T12:00:00.000Z",
-  };
+    reason: "manual",
+    userId: "member_123",
+  });
 }
 
-async function createSignedDispatchRequest(
+async function createSignedWakeRequest(
   path: string,
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   input: {
     aud?: string;
     boundUserId?: string | null;
@@ -221,11 +221,11 @@ async function createSignedDispatchRequest(
   });
 
   if (input.boundUserId !== null) {
-    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? dispatch.event.userId);
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? wake.userId);
   }
 
   return new Request(`https://runner.example.test${path}`, {
-    body: JSON.stringify(dispatch),
+    body: JSON.stringify(wake),
     headers,
     method: "POST",
   });

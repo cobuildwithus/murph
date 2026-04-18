@@ -72,7 +72,7 @@ describe("hosted local duplicate commit e2e", () => {
       eventId: activationWake.eventId,
     });
 
-    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", activationWake);
+    const dispatchPromise = worker.client.postJson("/__test/wake-with-outcome", activationWake);
 
     await worker.waitForRunnerPauseEntry(activationWake.eventId);
     await worker.client.postJson("/__test/seed-duplicate-commit", {
@@ -127,7 +127,7 @@ describe("hosted local duplicate commit e2e", () => {
       eventId: stabilityActivationWake.eventId,
     });
 
-    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", stabilityActivationWake);
+    const dispatchPromise = worker.client.postJson("/__test/wake-with-outcome", stabilityActivationWake);
 
     await worker.waitForRunnerPauseEntry(stabilityActivationWake.eventId);
     await worker.client.postJson("/__test/seed-duplicate-commit", {
@@ -211,7 +211,7 @@ describe("hosted local duplicate commit e2e", () => {
       eventId: overlapEventId,
     });
 
-    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", wake);
+    const dispatchPromise = worker.client.postJson("/__test/wake-with-outcome", wake);
     await worker.waitForRunnerPauseEntry(overlapEventId);
 
     const alarmResult = await worker.client.postJson("/__test/alarm", {

@@ -22,7 +22,10 @@ import type {
   WorkerEnvironmentSource,
 } from "../src/worker-routes/shared.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  type HostedExecutionWake,
+} from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -396,8 +399,8 @@ describe("cloudflare worker routes", () => {
 
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
     const stub = createUserRunnerStub();
-    const dispatch = createDispatch("evt_123");
-    const request = await createSignedDispatchRequest("/internal/dispatch", dispatch);
+    const wake = createWake("evt_123");
+    const request = await createSignedWakeRequest("/internal/dispatch", wake);
 
     const response = await worker.fetch(
       request,
@@ -413,10 +416,10 @@ describe("cloudflare worker routes", () => {
 
   it("hard-cuts bound-user checks with a 404 before dispatch route auth runs", async () => {
     const stub = createUserRunnerStub();
-    const dispatch = createDispatch("evt_123");
+    const wake = createWake("evt_123");
 
     const missingHeaderResponse = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: null }),
+      await createSignedWakeRequest("/internal/dispatch", wake, { boundUserId: null }),
       createWorkerEnv(stub),
     );
 
@@ -426,7 +429,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const mismatchedHeaderResponse = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: "member_other" }),
+      await createSignedWakeRequest("/internal/dispatch", wake, { boundUserId: "member_other" }),
       createWorkerEnv(stub),
     );
 
@@ -462,7 +465,7 @@ describe("cloudflare worker routes", () => {
 
   it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
     const stub = createUserRunnerStub();
-    const request = await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias"));
+    const request = await createSignedWakeRequest("/internal/events", createWake("evt_removed_alias"));
 
     const response = await worker.fetch(request, createWorkerEnv(stub));
 
@@ -472,11 +475,11 @@ describe("cloudflare worker routes", () => {
 
   it("keeps the removed dispatch route hidden even for missing, malformed, and mismatched OIDC bearer requests", async () => {
     const stub = createUserRunnerStub();
-    const dispatch = createDispatch("evt_signed");
+    const wake = createWake("evt_signed");
 
     const missingAuthorizationResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/dispatch", {
-        body: JSON.stringify(dispatch),
+        body: JSON.stringify(wake),
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -491,7 +494,7 @@ describe("cloudflare worker routes", () => {
 
     const malformedResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/dispatch", {
-        body: JSON.stringify(dispatch),
+        body: JSON.stringify(wake),
         headers: {
           authorization: "Bearer not-a-jwt",
           "content-type": "application/json; charset=utf-8",
@@ -506,7 +509,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const wrongSubjectResponse = await worker.fetch(
-      await createSignedDispatchRequest("/internal/dispatch", dispatch, {
+      await createSignedWakeRequest("/internal/dispatch", wake, {
         sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
       }),
       createWorkerEnv(stub),
@@ -1200,16 +1203,13 @@ function createBucketStore() {
   };
 }
 
-function createDispatch(eventId: string): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "assistant.cron.tick",
-      reason: "manual",
-      userId: "member_123",
-    },
+function createWake(eventId: string): HostedExecutionWake {
+  return buildHostedExecutionAssistantCronTickWake({
     eventId,
     occurredAt: "2026-04-16T10:00:00.000Z",
-  };
+    reason: "manual",
+    userId: "member_123",
+  });
 }
 
 function createOutboxDelivery() {
@@ -1388,9 +1388,9 @@ async function createSignedJsonControlRequest(
   });
 }
 
-async function createSignedDispatchRequest(
+async function createSignedWakeRequest(
   path: string,
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   input: {
     aud?: string;
     boundUserId?: string | null;
@@ -1398,11 +1398,11 @@ async function createSignedDispatchRequest(
     sub?: string;
   } = {},
 ): Promise<Request> {
-  return createSignedJsonControlRequest(path, dispatch, {
+  return createSignedJsonControlRequest(path, wake, {
     ...input,
     boundUserId: Object.prototype.hasOwnProperty.call(input, "boundUserId")
       ? input.boundUserId
-      : dispatch.event.userId,
+      : wake.userId,
   });
 }
 
