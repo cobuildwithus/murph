@@ -6,6 +6,7 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   isHostedEmailConversationMessageWake,
 } from "@murphai/hosted-execution";
+import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
 
 import { readHostedRawEmailMessage } from "../src/hosted-runtime/events/email.ts";
 
@@ -34,7 +35,7 @@ describe("readHostedRawEmailMessage", () => {
             return null;
           },
           async sendEmail() {},
-          async writeAssistantDeliveryRecord(record: {}) {
+          async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
             return record;
           },
         },
@@ -69,7 +70,7 @@ describe("readHostedRawEmailMessage", () => {
           return null;
         },
         async sendEmail() {},
-        async writeAssistantDeliveryRecord(record: {}) {
+        async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
           return record;
         },
       },

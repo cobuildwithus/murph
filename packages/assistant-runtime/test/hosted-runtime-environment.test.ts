@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 
 import { test } from "vitest";
+import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
 
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
@@ -38,7 +39,7 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
       async sendEmail() {
         return undefined;
       },
-      async writeAssistantDeliveryRecord(record: {}) {
+      async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
         return record;
       },
     },

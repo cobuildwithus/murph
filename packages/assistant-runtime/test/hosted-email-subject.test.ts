@@ -9,6 +9,7 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
 } from '@murphai/hosted-execution'
 import { buildHostedAssistantDeliveryEffect } from '@murphai/hosted-execution/side-effects'
+import type { HostedAssistantDeliveryRecord } from '@murphai/hosted-execution/side-effects'
 
 import type { HostedEmailSendRequest } from '../src/hosted-email.js'
 import { parseHostedEmailSendRequest } from '../src/hosted-email.js'
@@ -96,7 +97,7 @@ describe('hosted runtime email subject support', () => {
               target: 'hosted-thread-target',
             }
           },
-          async writeAssistantDeliveryRecord(record: {}) {
+          async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
             return record
           },
         },

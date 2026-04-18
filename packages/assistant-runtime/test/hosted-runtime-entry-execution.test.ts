@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
@@ -309,7 +310,7 @@ describe("executeHostedWakeForCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record: {}) {
+            async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
               return record;
             },
           },
@@ -398,7 +399,7 @@ describe("completeHostedExecutionAfterCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record: {}) {
+            async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
               return record;
             },
           },
