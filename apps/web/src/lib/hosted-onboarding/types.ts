@@ -1,7 +1,15 @@
 import type { HostedOnboardingStage } from "./lifecycle";
+import type {
+  HostedBillingPlanCode,
+  HostedBillingPlanPresentation,
+} from "./billing-plans";
 
 export interface HostedInviteStatusPayload {
   activationPending: boolean;
+  billing: {
+    defaultPlanCode: HostedBillingPlanCode | null;
+    plans: readonly HostedBillingPlanPresentation[];
+  };
   capabilities: {
     billingReady: boolean;
     phoneAuthReady: boolean;

@@ -16,7 +16,10 @@ vi.mock("../src/lib/hosted-onboarding/runtime", async () => {
       ...actual.getHostedOnboardingEnvironment(),
       inviteTtlHours: 24,
       publicBaseUrl: "https://join.example.test",
-      stripePriceId: "price_123",
+      stripePriceIdsByPlan: {
+        launch_annual: "price_annual_123",
+        launch_monthly: "price_monthly_123",
+      },
       stripeSecretKey: "sk_test_123",
     }),
     requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",

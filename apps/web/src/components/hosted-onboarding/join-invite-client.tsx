@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
+import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
@@ -68,16 +69,18 @@ export function JoinInviteClient({
     initialStatus.stage !== "verify" || !initialStatus.session.authenticated,
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [billingPlanCode, setBillingPlanCode] = useState<HostedBillingPlanCode | null>(
+    initialStatus.billing.defaultPlanCode,
+  );
   const [pendingAction, setPendingAction] = useState<"checkout" | "share" | null>(null);
   const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
   const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
-  const [autoCheckoutArmed, setAutoCheckoutArmed] = useState(false);
 
   const awaitingInviteSessionResolution = shouldAwaitHostedInviteSessionResolution({
     hasCompletedInitialRefresh,
     status,
   });
-  const checkoutPending = autoCheckoutArmed || pendingAction === "checkout";
+  const checkoutPending = pendingAction === "checkout";
   const { handleAcceptShare, shareImportState } = useJoinInviteShareImport({
     inviteCode,
     onErrorMessage: setErrorMessage,
@@ -92,6 +95,19 @@ export function JoinInviteClient({
       status: currentStatus,
     }));
   }
+
+  useEffect(() => {
+    setBillingPlanCode((currentBillingPlanCode) => {
+      if (
+        currentBillingPlanCode
+        && status.billing.plans.some((plan) => plan.code === currentBillingPlanCode)
+      ) {
+        return currentBillingPlanCode;
+      }
+
+      return status.billing.defaultPlanCode;
+    });
+  }, [status.billing.defaultPlanCode, status.billing.plans]);
 
   useHostedInviteStatusRefresh({
     inviteCode,
@@ -137,12 +153,12 @@ export function JoinInviteClient({
   }
 
   async function startCheckout() {
-    setAutoCheckoutArmed(false);
     setErrorMessage(null);
     setPendingAction("checkout");
 
     try {
       const payload = await requestHostedBillingCheckout({
+        billingPlanCode,
         inviteCode,
         shareCode,
       });
@@ -164,31 +180,9 @@ export function JoinInviteClient({
     }
   }
 
-  const startAutoCheckout = useEffectEvent(() => {
-    void startCheckout();
-  });
-
-  useEffect(() => {
-    if (
-      !autoCheckoutArmed
-      || !status.capabilities.billingReady
-      || status.messagingSetupRequired
-      || pendingAction !== null
-    ) {
-      return;
-    }
-
-    startAutoCheckout();
-  }, [autoCheckoutArmed, pendingAction, startAutoCheckout, status.capabilities.billingReady, status.messagingSetupRequired]);
-
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
     const nextStatus = resolveInviteStatusAfterPrivyCompletion(status, payload);
     setStatus(nextStatus);
-    setAutoCheckoutArmed(
-      nextStatus.capabilities.billingReady
-      && payload.stage === "checkout"
-      && !payload.messagingSetupRequired,
-    );
   }
 
   const eyebrow = resolveJoinInviteEyebrow(status.stage);
@@ -220,6 +214,7 @@ export function JoinInviteClient({
         <JoinInviteStageContent
           authenticated={status.session.authenticated}
           awaitingInviteSessionResolution={awaitingInviteSessionResolution}
+          billingPlanCode={billingPlanCode}
           checkoutPending={checkoutPending}
           initialLinkedAccounts={initialLinkedAccounts}
           inviteCode={inviteCode}
@@ -231,6 +226,7 @@ export function JoinInviteClient({
           statusRefreshRetryPending={statusRefreshRetryPending}
           onAcceptShare={handleAcceptShare}
           onCheckout={startCheckout}
+          onSelectBillingPlan={setBillingPlanCode}
           onPhoneVerified={handlePhoneVerified}
           onRefreshStatus={refreshStatus}
           onRetryStatusRefresh={handleRetryStatusRefresh}

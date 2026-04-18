@@ -1,3 +1,7 @@
+import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboarding/billing-plans";
+
+const launchPricingSummary = formatHostedLandingPricingLongSummary();
+
 const FAQ_ITEMS = [
   [
     "Where do the experiments come from?",
@@ -37,7 +41,7 @@ const FAQ_ITEMS = [
   ],
   [
     "Can I cancel anytime?",
-    "Yes. No contracts. $5/month, cancel whenever. Your data stays yours.",
+    `Yes. No contracts. ${launchPricingSummary}, cancel whenever. Your data stays yours.`,
   ],
 ] as const;
 

@@ -17,7 +17,13 @@ const mocks = vi.hoisted(() => {
       };
     }),
     runtimeEnv: {
-      encryptionKeyVersion: "v1",
+      contactPrivacyKeyring: {
+        currentVersion: "v1",
+        keysByVersion: {
+          v1: Buffer.alloc(32, 7),
+        },
+        readVersions: ["v1"],
+      },
       inviteTtlHours: 24,
       isProduction: false,
       linqApiBaseUrl: "https://linq.example.test",
@@ -34,7 +40,10 @@ const mocks = vi.hoisted(() => {
       revnetTreasuryPrivateKey: null as string | null,
       revnetWeiPerStripeMinorUnit: null as string | null,
       stripeBillingMode: "payment" as const,
-      stripePriceId: "price_123",
+      stripePriceIdsByPlan: {
+        launch_annual: "price_annual_123",
+        launch_monthly: "price_monthly_123",
+      },
       stripeSecretKey: "sk_test_123",
       stripeWebhookSecret: "whsec_123",
       telegramBotUsername: "murph_bot",

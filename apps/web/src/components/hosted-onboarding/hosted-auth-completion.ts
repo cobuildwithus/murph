@@ -4,7 +4,6 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-client";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
-import { requestHostedBillingCheckout } from "./client-api";
 import { requestHostedPrivyCompletionWithRetry } from "./hosted-privy-auth-support";
 import type { HostedPhoneAuthIntent } from "./hosted-phone-auth-types";
 
@@ -66,23 +65,7 @@ async function resolveHostedAuthRedirectUrl(input: {
   payload: HostedPrivyCompletionPayload;
 }): Promise<string> {
   if (input.payload.stage === "checkout") {
-    if (input.payload.messagingSetupRequired) {
-      return input.payload.joinUrl;
-    }
-
-    const checkout = await requestHostedBillingCheckout({
-      inviteCode: input.payload.inviteCode,
-    });
-
-    if (checkout.alreadyActive) {
-      return "/settings";
-    }
-
-    if (!checkout.url) {
-      throw new Error("Checkout did not return a redirect URL.");
-    }
-
-    return checkout.url;
+    return input.payload.joinUrl;
   }
 
   if (input.intent === "signin" || input.payload.stage === "active") {

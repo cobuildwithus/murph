@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from 
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
-    encryptionKeyVersion: "v1",
+    contactPrivacyKeyring: {
+      currentVersion: "v1",
+      keysByVersion: {
+        v1: Buffer.alloc(32, 7),
+      },
+      readVersions: ["v1"],
+    },
     inviteTtlHours: 24,
     isProduction: false,
     linqApiBaseUrl: "https://linq.example.test",
@@ -13,7 +19,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqWebhookTimestampToleranceMs: Number(process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS ?? 5 * 60_000),
     publicBaseUrl: "https://join.example.test",
     stripeBillingMode: "payment",
-    stripePriceId: "price_123",
+    stripePriceIdsByPlan: {
+      launch_annual: "price_annual_123",
+      launch_monthly: "price_monthly_123",
+    },
     stripeSecretKey: "sk_test_123",
     stripeWebhookSecret: "whsec_123",
     telegramBotUsername: null,

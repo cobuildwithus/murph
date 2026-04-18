@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { HostedPhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/hosted-phone-country-code-provider";
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroSection } from "@/src/components/homepage/hero-section";
@@ -9,9 +8,9 @@ import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
+import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { readHostedPhoneCountryCodeHint } from "@/src/lib/hosted-onboarding/phone-country-hint-server";
 
 import { StickyNav } from "./sticky-nav";
 
@@ -39,9 +38,9 @@ export const metadata: Metadata = {
 
 export default async function HomePage() {
   const { authenticated } = await getHostedPageAuthSnapshot();
-  const phoneCountryCodeHint = await readHostedPhoneCountryCodeHint();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
+  const launchPricingSummary = formatHostedLandingPricingLongSummary();
   const signupCta: HomepageSignupCta = authenticated
     ? {
         body: "Manage billing and connected wearables from one place.",
@@ -54,27 +53,25 @@ export default async function HomePage() {
     : {
         body: null,
         eyebrow: "Sign up",
-        metaItems: ["$5/month early access", "Oura, WHOOP, Strava, and Garmin"],
+        metaItems: [`${launchPricingSummary} launch pricing`, "Oura, WHOOP, Strava, and Garmin"],
         note: null,
         signupLabel: "Create your account",
         title: "Discover what actually makes you healthier.",
       };
 
   return (
-    <HostedPhoneCountryCodeProvider countryCode={phoneCountryCodeHint}>
-      <>
-        <style>{`#global-footer { display: none; }`}</style>
-        <main className="min-h-screen bg-[#f5f0e8] antialiased">
-          <StickyNav authenticated={authenticated} />
-          <HeroSection authenticated={authenticated} />
-          <HowItWorksSection />
-          <AssistantSection />
-          <FaqSection />
-          <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
-          <LocalRunSection installCommandUrl={installCommandUrl} />
-          <SiteFooter authenticated={authenticated} />
-        </main>
-      </>
-    </HostedPhoneCountryCodeProvider>
+    <>
+      <style>{`#global-footer { display: none; }`}</style>
+      <main className="min-h-screen bg-[#f5f0e8] antialiased">
+        <StickyNav authenticated={authenticated} />
+        <HeroSection authenticated={authenticated} />
+        <HowItWorksSection />
+        <AssistantSection />
+        <FaqSection />
+        <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
+        <LocalRunSection installCommandUrl={installCommandUrl} />
+        <SiteFooter authenticated={authenticated} />
+      </main>
+    </>
   );
 }

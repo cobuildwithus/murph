@@ -1,4 +1,5 @@
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
+import { parseHostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -16,7 +17,14 @@ export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const auth = await requirePrivyMemberAuth(request);
     const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);
+    const billingPlanCode = parseHostedBillingPlanCode(body.billingPlanCode);
+
+    if (body.billingPlanCode !== undefined && !billingPlanCode) {
+      throw new TypeError("billingPlanCode must be one of the configured Murph billing plans.");
+    }
+
     const checkout = await createHostedBillingCheckout({
+      ...(billingPlanCode ? { billingPlanCode } : {}),
       inviteCode,
       member: auth.member,
       ...(typeof body.shareCode === "string" ? { shareCode: body.shareCode } : {}),
