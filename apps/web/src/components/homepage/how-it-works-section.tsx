@@ -1,13 +1,15 @@
-const WEARABLES: ReadonlyArray<{
+const SYNC_DEVICES: ReadonlyArray<{
+  connected?: boolean;
   name: string;
-  selected?: boolean;
-  sub: string;
 }> = [
-  { name: "Oura", selected: true, sub: "Ring · HRV, sleep, recovery" },
-  { name: "WHOOP", sub: "Band · Strain, recovery" },
-  { name: "Garmin", sub: "Watch · HR, activity, sleep" },
-  { name: "Strava", sub: "App · Workouts, effort" },
+  { connected: true, name: "Oura" },
+  { name: "WHOOP" },
+  { name: "Garmin" },
+  { name: "Strava" },
 ];
+
+const CHAT_INPUTS = ["Meals", "Supplements", "Workouts"] as const;
+const UPLOAD_INPUTS = ["Blood panels", "Body metrics"] as const;
 
 const DOMAINS = [
   { examples: "deep sleep, circadian rhythm", n: 8, name: "Sleep" },
@@ -38,8 +40,7 @@ export function HowItWorksSection() {
           Improve your health, one experiment at a time.
         </h2>
         <p className="mt-5 max-w-[48ch] text-base leading-[1.7] text-pretty text-[#635a48]">
-          Connect your wearable. Run one experiment. See what changes in a few
-          weeks.
+          Connect your data. Run an experiment. See what changes.
         </p>
 
         <div className="mt-12 grid gap-4 sm:gap-5 lg:mt-14 md:grid-cols-12">
@@ -78,49 +79,76 @@ function StepBadge({
 
 function ConnectCard() {
   return (
-    <div className="flex flex-col gap-6 rounded-2xl border border-[#c4a882]/15 bg-[#fffcf6] p-7 md:col-span-5">
+    <div className="flex flex-col gap-5 rounded-2xl border border-[#c4a882]/15 bg-[#fffcf6] p-7 md:col-span-5">
       <StepBadge
         badgeClass="bg-[#c4a882]/25 text-[#5a4d3a]"
         n="01"
         title="Connect"
       />
-      <div className="flex-1 space-y-2">
-        {WEARABLES.map((w) => (
-          <div
-            key={w.name}
-            className={`flex items-center justify-between rounded-xl px-4 py-3 transition-colors ${
-              w.selected
-                ? "border border-[#5a6e32]/30 bg-[#f5f0e8]"
-                : "border border-[#c4a882]/15 bg-[#f5f0e8]/50"
-            }`}
-          >
-            <div className="flex items-center gap-3">
+
+      <div className="flex-1 space-y-4">
+        {/* --- Sync --- */}
+        <div>
+          <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+            Sync
+          </span>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {SYNC_DEVICES.map((d) => (
               <span
-                className={`flex size-4 items-center justify-center rounded-full border-2 ${
-                  w.selected
-                    ? "border-[#5a6e32] bg-[#5a6e32]"
-                    : "border-[#2d3436]/20 bg-transparent"
+                key={d.name}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.8125rem] font-medium ${
+                  d.connected
+                    ? "border border-[#5a6e32]/30 bg-[#f5f0e8] text-[#2d3436]"
+                    : "border border-[#c4a882]/15 bg-[#f5f0e8]/50 text-[#736a58]"
                 }`}
               >
-                {w.selected ? (
-                  <span className="size-1.5 rounded-full bg-[#fffcf6]" />
+                {d.connected ? (
+                  <span className="size-1.5 rounded-full bg-[#5a6e32]" />
                 ) : null}
+                {d.name}
               </span>
-              <div>
-                <p className="text-sm font-semibold text-[#2d3436]">{w.name}</p>
-                <p className="text-[0.6875rem] text-[#736a58]">{w.sub}</p>
-              </div>
-            </div>
-            {w.selected ? (
-              <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#5a6e32]">
-                Synced
-              </span>
-            ) : null}
+            ))}
           </div>
-        ))}
+        </div>
+
+        {/* --- Text Murph --- */}
+        <div>
+          <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+            Text Murph
+          </span>
+          <div className="mt-1.5 space-y-1">
+            {CHAT_INPUTS.map((label) => (
+              <div
+                key={label}
+                className="flex items-center gap-2.5 rounded-lg border border-[#c4a882]/15 bg-[#f5f0e8]/50 px-3 py-2"
+              >
+                <span className="text-[0.75rem] text-[#736a58]">&rsaquo;</span>
+                <span className="text-[0.8125rem] text-[#2d3436]">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* --- Upload --- */}
+        <div>
+          <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+            Upload
+          </span>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {UPLOAD_INPUTS.map((label) => (
+              <span
+                key={label}
+                className="inline-flex rounded-lg border border-dashed border-[#c4a882]/30 bg-[#f5f0e8]/30 px-3 py-1.5 text-[0.8125rem] text-[#736a58]"
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
+
       <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
-        Link your ring or watch. Murph reads the data.
+        Wearables, meals, labs — Murph connects it all.
       </p>
     </div>
   );

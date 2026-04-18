@@ -14,23 +14,24 @@ import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landi
 import { StickyNav } from "./sticky-nav";
 
 export const metadata: Metadata = {
-  title: "Murph — Turn wearable data into answers about your body",
+  title: "Murph — Discover what actually makes you healthier",
   description:
-    "Expert-backed health experiments measured by your wearable. Pick a protocol, follow it, see what changed. Works with Oura, WHOOP, Strava, and Garmin.",
+    "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
-    title: "Murph — Turn wearable data into answers about your body",
+    title: "Murph — Discover what actually makes you healthier",
     description:
-      "Expert-backed health experiments measured by your wearable. Pick a protocol, follow it, see what changed.",
+      "Your personal health assistant. Pick a protocol, run it as a proper experiment, see what actually changed. Expert-backed, measured against your baseline.",
     siteName: "Murph",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Murph — Wearable data, made useful.",
-    description: "Expert-backed health experiments measured by your wearable.",
+    title: "Murph — Discover what actually makes you healthier",
+    description:
+      "Your personal health assistant. Pick a protocol, see what actually makes you healthier. Works with Oura, WHOOP, Garmin, and Strava.",
   },
 };
 
