@@ -24,6 +24,15 @@ function createPendingCommit(): RunnerPendingCommitRecord {
     },
     schemaVersion: 1,
     userId: "member_123",
+    wake: {
+      eventId: "evt_committed",
+      kind: "assistant.cron.tick",
+      occurredAt: "2026-04-18T11:59:59.000Z",
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-wake-system.v1",
+      seq: "1",
+      userId: "member_123",
+    },
   };
 }
 

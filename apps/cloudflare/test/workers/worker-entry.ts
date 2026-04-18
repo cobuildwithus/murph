@@ -1,4 +1,8 @@
 import { DurableObject, env } from "cloudflare:workers";
+import {
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import worker from "../../src/index.ts";
@@ -28,6 +32,7 @@ import type {
   HostedWakeExecutionResult,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import { encryptTestHostedWakePayload } from "../hosted-execution-fixtures.js";
 
 type TestWorkerEnvironment = WorkerEnvironmentSource & {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
@@ -102,6 +107,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
       result: input.payload.result.result,
       schemaVersion: 1,
       userId: input.userId,
+      wake: createPendingCommitWakeRecord(input.wake),
     };
     await this.stateStore.writePendingCommit(pendingCommit);
   }
@@ -348,6 +354,27 @@ async function resolveHostedUserCryptoContext(userId: string) {
 
 function readTestWake(value: unknown): HostedExecutionWake {
   return parseHostedExecutionWake(value);
+}
+
+function createPendingCommitWakeRecord(
+  wake: HostedExecutionWake,
+): RunnerPendingCommitRecord["wake"] {
+  const { payloadCiphertext } = encryptTestHostedWakePayload({
+    userId: wake.userId,
+    value: wake,
+  });
+
+  return {
+    eventId: wake.eventId,
+    kind: wake.kind,
+    occurredAt: wake.occurredAt,
+    payloadCiphertext,
+    payloadSchema: wake.kind === "conversation.message"
+      ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
+      : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+    seq: "1",
+    userId: wake.userId,
+  };
 }
 
 function createTestControlledBucket(bucket: R2BucketLike): R2BucketLike {

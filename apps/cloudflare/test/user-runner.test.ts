@@ -14,6 +14,8 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   deriveHostedExecutionErrorCode,
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
   parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution";
 import type {
@@ -63,6 +65,7 @@ import {
   TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
   TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+  encryptTestHostedWakePayload,
 } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 import {
@@ -529,8 +532,7 @@ describe("HostedUserRunner", () => {
         bucket,
         environment,
         lastEventId: "evt_recovered_gc",
-        pendingCommit: {
-          assistantDeliveryEffects: [],
+        pendingCommit: createPendingCommitRecord({
           bundleRef: previousVaultRef,
           committedAt: "2026-03-26T12:00:01.000Z",
           eventId: "evt_recovered_gc",
@@ -539,9 +541,9 @@ describe("HostedUserRunner", () => {
             eventsHandled: 1,
             summary: "recovered",
           },
-          schemaVersion: 1,
           userId: "member_recovered_gc",
-        },
+          wake: createWake("evt_recovered_gc", "member_recovered_gc", "2026-03-26T12:00:00.000Z"),
+        }),
         storage,
         userId: "member_recovered_gc",
       });
@@ -597,9 +599,7 @@ describe("HostedUserRunner", () => {
       bucket,
       environment: rotatedEnvironment,
       lastEventId: dispatch.eventId,
-      pendingCommit: {
-        assistantDeliveryEffects: [],
-        bundleRef: null,
+      pendingCommit: createPendingCommitRecord({
         committedAt: "2026-03-26T12:00:01.000Z",
         eventId: dispatch.eventId,
         finalizedAt: "2026-03-26T12:00:02.000Z",
@@ -607,9 +607,9 @@ describe("HostedUserRunner", () => {
           eventsHandled: 1,
           summary: "recovered",
         },
-        schemaVersion: 1,
         userId: dispatch.userId,
-      },
+        wake: dispatch,
+      }),
       storage,
       userId: dispatch.userId,
     });
@@ -786,9 +786,7 @@ describe("HostedUserRunner", () => {
       bucket,
       environment,
       lastEventId: dispatch.eventId,
-      pendingCommit: {
-        assistantDeliveryEffects: [],
-        bundleRef: null,
+      pendingCommit: createPendingCommitRecord({
         committedAt: "2026-03-26T12:00:01.000Z",
         eventId: dispatch.eventId,
         finalizedAt: "2026-03-26T12:00:02.000Z",
@@ -796,9 +794,9 @@ describe("HostedUserRunner", () => {
           eventsHandled: 1,
           summary: "recovered email",
         },
-        schemaVersion: 1,
         userId,
-      },
+        wake: dispatch,
+      }),
       storage,
       userId,
     });
@@ -1338,8 +1336,7 @@ describe("HostedUserRunner", () => {
       bucket,
       environment,
       lastEventId: "evt_finalized_recovery",
-      pendingCommit: {
-        assistantDeliveryEffects: [],
+      pendingCommit: createPendingCommitRecord({
         bundleRef: finalBundleRef,
         committedAt: "2026-03-26T12:00:01.000Z",
         eventId: "evt_finalized_recovery",
@@ -1348,9 +1345,9 @@ describe("HostedUserRunner", () => {
           eventsHandled: 1,
           summary: "finalized",
         },
-        schemaVersion: 1,
         userId: "member_123",
-      },
+        wake: createActivationWake("evt_finalized_recovery", "member_123"),
+      }),
       storage,
       userId: "member_123",
     });
@@ -1428,7 +1425,7 @@ describe("HostedUserRunner", () => {
     const stateStore = new RunnerStateStore(storage.state as never);
 
     const firstStatus = await runner.wake(createActivationWake("evt_finalize_retry", "member_123"));
-    expect(firstStatus.pendingWakeCount).toBe(1);
+    expect(firstStatus.pendingWakeCount).toBe(0);
     expect(firstStatus.lastEventId).toBe("evt_finalize_retry");
     expect(firstStatus.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
@@ -1479,16 +1476,13 @@ describe("HostedUserRunner", () => {
       bucket,
       environment,
       inFlight: true,
-      pendingCommit: {
-        assistantDeliveryEffects: [],
-        bundleRef: null,
+      pendingCommit: createPendingCommitRecord({
         committedAt: dispatch.occurredAt,
         eventId: dispatch.eventId,
-        finalizedAt: null,
         result: committedPayload.result,
-        schemaVersion: 1,
         userId: dispatch.userId,
-      },
+        wake: dispatch,
+      }),
       runtimeBootstrapped: true,
       storage,
       userId: dispatch.userId,
@@ -2025,7 +2019,7 @@ describe("HostedUserRunner", () => {
     const first = await runner.wake(dispatch);
     const second = await runner.wakeHostedWakes();
 
-    expect(first.pendingWakeCount).toBe(1);
+    expect(first.pendingWakeCount).toBe(0);
     expect(first.lastEventId).toBe("evt_lost_response");
     expect(second.pendingWakeCount).toBe(0);
     expect(sideEffects).toBe(2);
@@ -2253,9 +2247,7 @@ describe("HostedUserRunner", () => {
       environment,
       lastError: "timeout",
       lastEventId: dispatch.eventId,
-      pendingCommit: {
-        assistantDeliveryEffects: [],
-        bundleRef: null,
+      pendingCommit: createPendingCommitRecord({
         committedAt: dispatch.occurredAt,
         eventId: dispatch.eventId,
         finalizedAt: "2026-03-26T12:20:02.000Z",
@@ -2263,9 +2255,9 @@ describe("HostedUserRunner", () => {
           eventsHandled: 1,
           summary: "ok",
         },
-        schemaVersion: 1,
         userId: dispatch.userId,
-      },
+        wake: dispatch,
+      }),
       storage,
       userId: dispatch.userId,
     });
@@ -3093,6 +3085,50 @@ function createDeferred<T>() {
     promise,
     reject,
     resolve,
+  };
+}
+
+function createPendingCommitRecord(input: {
+  assistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
+  bundleRef?: RunnerPendingCommitRecord["bundleRef"];
+  committedAt: string;
+  eventId: string;
+  finalizedAt?: string | null;
+  result: RunnerPendingCommitRecord["result"];
+  userId: string;
+  wake: HostedExecutionWake;
+}): RunnerPendingCommitRecord {
+  return {
+    assistantDeliveryEffects: input.assistantDeliveryEffects ?? [],
+    bundleRef: input.bundleRef ?? null,
+    committedAt: input.committedAt,
+    eventId: input.eventId,
+    finalizedAt: input.finalizedAt ?? null,
+    result: input.result,
+    schemaVersion: 1,
+    userId: input.userId,
+    wake: createPendingCommitWakeRecord(input.wake),
+  };
+}
+
+function createPendingCommitWakeRecord(
+  wake: HostedExecutionWake,
+): RunnerPendingCommitRecord["wake"] {
+  const { payloadCiphertext } = encryptTestHostedWakePayload({
+    userId: wake.userId,
+    value: wake,
+  });
+
+  return {
+    eventId: wake.eventId,
+    kind: wake.kind,
+    occurredAt: wake.occurredAt,
+    payloadCiphertext,
+    payloadSchema: wake.kind === "conversation.message"
+      ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
+      : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+    seq: "1",
+    userId: wake.userId,
   };
 }
 

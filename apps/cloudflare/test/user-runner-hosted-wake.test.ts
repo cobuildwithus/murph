@@ -154,7 +154,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       quarantineCode: "invalid-wake-payload",
       wakeId: "wake_1",
     }));
-    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["2"]);
+    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_poison"]);
   });
 
@@ -227,7 +227,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     await runner.wakeHostedWakes();
 
     expect(quarantineHostedWakeInWeb).not.toHaveBeenCalled();
-    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["2"]);
+    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_quarantine"]);
   });
 
@@ -439,20 +439,20 @@ describe("HostedUserRunner hosted wake drain", () => {
     }
 
     await cleanupCommittedHostedWakesLocally.call(runner, {
-      wakes: [
-        {
-          postCursorAction: "cleanup-only",
-          wake: createWake("evt_batch_first"),
-          seq: 1n,
-          state: "completed",
-        },
-        {
-          postCursorAction: "cleanup-only",
-          wake: createWake("evt_batch_second"),
-          seq: 2n,
-          state: "completed",
-        },
-      ],
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        version: "1",
+      }),
+      wake: createWake("evt_batch_first"),
+    });
+    await cleanupCommittedHostedWakesLocally.call(runner, {
+      cursor: createCursorState({
+        committedSeq: "2",
+        nextSeq: "3",
+        version: "2",
+      }),
+      wake: createWake("evt_batch_second"),
     });
 
     expect(readDispatchEventIdsFromSpy(cleanupWakeAfterCursorCommit)).toEqual([
@@ -699,9 +699,33 @@ async function createCommittedRunnerSuccessResponse(input: {
   init?: RequestInit;
 }): Promise<Response> {
   const requestBody = JSON.parse(String(input.init?.body));
+  const request = maybeReadRunnerJobRequest(requestBody);
+
+  if (!request) {
+    const commitRequest = requestBody as {
+      committedSeq?: unknown;
+      expectedVersion?: unknown;
+    };
+
+    if (
+      typeof commitRequest.committedSeq === "string"
+      && typeof commitRequest.expectedVersion === "string"
+    ) {
+      return Response.json({
+        committed: true,
+        cursor: createCursorState({
+          committedSeq: commitRequest.committedSeq,
+          nextSeq: commitRequest.committedSeq,
+          version: "1",
+        }),
+      });
+    }
+
+    return Response.json({ ok: true });
+  }
 
   return new Response(JSON.stringify(
-    readRunnerJobRequest(requestBody).resume
+    request.resume
       ? {
         finalGatewayProjectionSnapshot: null,
         phase: "completed" as const,
@@ -755,23 +779,23 @@ async function createCompletedRunnerSuccessResponse(input: {
 function readDispatchedEventIds(fetchMock: ReturnType<typeof vi.fn>): string[] {
   return fetchMock.mock.calls.flatMap(([, init]) => {
     const body = typeof init?.body === "string" ? init.body : "";
-    const request = readRunnerJobRequest(JSON.parse(body));
+    const request = maybeReadRunnerJobRequest(JSON.parse(body));
 
-    return request.resume ? [] : [request.wake.eventId];
+    return !request || request.resume ? [] : [request.wake.eventId];
   });
 }
 
 function readDispatchEventIdsFromSpy(
   spy: ReturnType<typeof vi.spyOn>,
 ): string[] {
-  return spy.mock.calls.map((call: unknown[]) => {
+  return spy.mock.calls.flatMap((call: unknown[]) => {
     const input = call[0];
 
     if (
       !input
       || typeof input !== "object"
     ) {
-      throw new TypeError("Expected a wake payload with an eventId.");
+      return [];
     }
 
     if (
@@ -781,11 +805,19 @@ function readDispatchEventIdsFromSpy(
       && "eventId" in input.wake
       && typeof input.wake.eventId === "string"
     ) {
-      return input.wake.eventId;
+      return [input.wake.eventId];
     }
 
-    throw new TypeError("Expected a wake payload with an eventId.");
+    return [];
   });
+}
+
+function maybeReadRunnerJobRequest(value: unknown): ReturnType<typeof readRunnerJobRequest> | null {
+  try {
+    return readRunnerJobRequest(value);
+  } catch {
+    return null;
+  }
 }
 
 function readRunnerJobRequest(value: unknown): {
