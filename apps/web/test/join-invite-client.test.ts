@@ -48,6 +48,10 @@ import {
 } from "@/src/components/hosted-onboarding/join-invite-client";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import {
+  getHostedDefaultBillingPlanCode,
+  listHostedBillingPlanPresentations,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 
 const activeJoinInviteClientCleanups = new Set<() => Promise<void> | void>();
 const requireFromJoinInviteClientTest = createRequire(import.meta.url);
@@ -171,7 +175,7 @@ test("checkout stage does not auto-launch on an ordinary invite load", async () 
   await view.cleanup();
 });
 
-test("phone verification auto-launches checkout exactly once when checkout is next", async () => {
+test("phone verification returns to the checkout plan picker without auto-launching Stripe", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify({
       alreadyActive: false,
@@ -189,20 +193,15 @@ test("phone verification auto-launches checkout exactly once when checkout is ne
     await onCompleted(createCompletionPayload("checkout"));
   });
 
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/checkout", expect.objectContaining({
-    body: JSON.stringify({
-      inviteCode: "invite-code",
-    }),
-    method: "POST",
-  }));
-  expect(view.locationAssign).toHaveBeenCalledTimes(1);
-  expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/checkout");
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(view.locationAssign).not.toHaveBeenCalled();
+  assert.match(view.container.textContent ?? "", /Choose your plan/);
+  assert.match(view.container.textContent ?? "", /Continue to checkout/);
 
   await view.cleanup();
 });
 
-test("stale invite status refreshes do not block an armed auto checkout launch", async () => {
+test("stale invite status refreshes preserve the checkout plan picker", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify({
       alreadyActive: false,
@@ -232,13 +231,15 @@ test("stale invite status refreshes do not block an armed auto checkout launch",
     }));
   });
 
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/race-proof");
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(view.locationAssign).not.toHaveBeenCalled();
+  assert.match(view.container.textContent ?? "", /Choose your plan/);
+  assert.match(view.container.textContent ?? "", /Continue to checkout/);
 
   await view.cleanup();
 });
 
-test("failed auto checkout falls back to the manual checkout button", async () => {
+test("manual checkout surfaces API errors and can retry", async () => {
   const fetchMock = vi.fn<typeof fetch>()
     .mockResolvedValueOnce(new Response(JSON.stringify({
       error: {
@@ -256,21 +257,40 @@ test("failed auto checkout falls back to the manual checkout button", async () =
   vi.stubGlobal("fetch", fetchMock);
 
   const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      capabilities: {
+        billingReady: true,
+        phoneAuthReady: true,
+      },
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
     shareCode: "share-code",
   });
-  const onCompleted = readHostedInvitePhoneAuthOnCompleted();
+  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
+
+  expect(fetchMock).toHaveBeenCalledTimes(0);
+  expect(view.locationAssign).not.toHaveBeenCalled();
+  assert.equal(checkoutButton.hasAttribute("disabled"), false);
 
   await act(async () => {
-    await onCompleted(createCompletionPayload("checkout"));
+    checkoutButton.click();
   });
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.locationAssign).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/hosted-onboarding/billing/checkout", expect.objectContaining({
+    body: JSON.stringify({
+      billingPlanCode: "launch_monthly",
+      inviteCode: "invite-code",
+      shareCode: "share-code",
+    }),
+    method: "POST",
+  }));
   assert.match(view.container.innerHTML, /Checkout unavailable\./);
-
-  const checkoutButton = view.container.querySelector("button");
-  assert.ok(checkoutButton);
-  assert.match(checkoutButton.textContent ?? "", /Continue to checkout/);
   assert.equal(checkoutButton.hasAttribute("disabled"), false);
 
   await act(async () => {
@@ -278,19 +298,12 @@ test("failed auto checkout falls back to the manual checkout button", async () =
   });
 
   expect(fetchMock).toHaveBeenCalledTimes(2);
-  expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/hosted-onboarding/billing/checkout", expect.objectContaining({
-    body: JSON.stringify({
-      inviteCode: "invite-code",
-      shareCode: "share-code",
-    }),
-    method: "POST",
-  }));
   expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/retry");
 
   await view.cleanup();
 });
 
-test("stale verify refreshes still leave the manual checkout fallback available after an auto-launch failure", async () => {
+test("stale verify refreshes still leave the manual checkout fallback available after a checkout failure", async () => {
   const fetchMock = vi.fn<typeof fetch>()
     .mockResolvedValueOnce(new Response(JSON.stringify({
       error: {
@@ -307,12 +320,21 @@ test("stale verify refreshes still leave the manual checkout fallback available 
     }));
   vi.stubGlobal("fetch", fetchMock);
 
-  const view = await renderJoinInviteClientForEffects();
-  const onCompleted = readHostedInvitePhoneAuthOnCompleted();
+  const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
+  });
   const onStatus = readHostedInviteStatusRefreshOnStatus();
+  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
 
   await act(async () => {
-    await onCompleted(createCompletionPayload("checkout"));
+    checkoutButton.click();
     onStatus(createStatus({
       capabilities: {
         billingReady: true,
@@ -328,9 +350,6 @@ test("stale verify refreshes still leave the manual checkout fallback available 
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(view.locationAssign).not.toHaveBeenCalled();
-
-  const checkoutButton = view.container.querySelector("button");
-  assert.ok(checkoutButton);
   assert.match(checkoutButton.textContent ?? "", /Continue to checkout/);
 
   await act(async () => {
@@ -379,8 +398,7 @@ test("already-active checkout refreshes preserve the current stage when the retu
       stage: "checkout",
     }),
   });
-  const checkoutButton = view.container.querySelector("button");
-  assert.ok(checkoutButton);
+  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
 
   await act(async () => {
     checkoutButton.click();
@@ -389,7 +407,7 @@ test("already-active checkout refreshes preserve the current stage when the retu
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
   assert.match(view.container.textContent ?? "", /One last step/);
-  assert.match(view.container.textContent ?? "", /Continue to checkout/);
+  assert.match(view.container.textContent ?? "", /Choose your plan/);
 
   await view.cleanup();
 });
@@ -430,8 +448,7 @@ test("already-active checkout refreshes return to verify when the invite session
       stage: "checkout",
     }),
   });
-  const checkoutButton = view.container.querySelector("button");
-  assert.ok(checkoutButton);
+  const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
 
   await act(async () => {
     checkoutButton.click();
@@ -737,6 +754,10 @@ function createStatus(
 ): HostedInviteStatusPayload {
   return {
     activationPending: false,
+    billing: {
+      defaultPlanCode: getHostedDefaultBillingPlanCode(),
+      plans: listHostedBillingPlanPresentations(),
+    },
     capabilities: {
       billingReady: true,
       phoneAuthReady: false,
@@ -909,6 +930,14 @@ function readHostedInviteStatusRefreshOnStatus() {
   const onStatus = latestCall?.onStatus;
   assert.equal(typeof onStatus, "function");
   return onStatus as (payload: HostedInviteStatusPayload) => void;
+}
+
+function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find((candidate) =>
+    pattern.test(candidate.textContent ?? ""),
+  );
+  assert.ok(button);
+  return button as HTMLButtonElement;
 }
 
 function loadJoinInviteClientLinkedom(): {

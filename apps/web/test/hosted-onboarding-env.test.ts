@@ -10,7 +10,8 @@ describe("readHostedOnboardingEnvironment", () => {
   it("reads hosted onboarding defaults and surfaces Privy config", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
-      HOSTED_ONBOARDING_STRIPE_PRICE_ID: "price_123",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_annual_123",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       PRIVY_VERIFICATION_KEY: "privy-verification-key",
       STRIPE_SECRET_KEY: "sk_test_123",
@@ -21,6 +22,10 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
+    expect(environment.stripePriceIdsByPlan).toEqual({
+      launch_annual: "price_annual_123",
+      launch_monthly: "price_monthly_123",
+    });
   });
 
   it("reads explicit Linq config", () => {

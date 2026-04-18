@@ -170,7 +170,14 @@ export async function main(): Promise<void> {
 
     warnForMissingEnv("NEXT_PUBLIC_PRIVY_APP_ID", runtimeEnv.NEXT_PUBLIC_PRIVY_APP_ID);
     warnForMissingEnv("PRIVY_VERIFICATION_KEY", runtimeEnv.PRIVY_VERIFICATION_KEY);
-    warnForMissingEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID", runtimeEnv.HOSTED_ONBOARDING_STRIPE_PRICE_ID);
+    warnForMissingEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      runtimeEnv.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY,
+    );
+    warnForMissingEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
+      runtimeEnv.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL,
+    );
     warnForMissingEnv("STRIPE_SECRET_KEY", runtimeEnv.STRIPE_SECRET_KEY);
     warnForMissingEnv("STRIPE_WEBHOOK_SECRET", runtimeEnv.STRIPE_WEBHOOK_SECRET);
 

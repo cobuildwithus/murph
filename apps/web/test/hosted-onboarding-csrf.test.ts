@@ -93,7 +93,10 @@ function createHostedOnboardingEnvironment(
     privyAppId: null,
     privyVerificationKey: null,
     publicBaseUrl: null,
-    stripePriceId: null,
+    stripePriceIdsByPlan: {
+      launch_annual: null,
+      launch_monthly: null,
+    },
     stripeSecretKey: null,
     stripeWebhookSecret: null,
     telegramBotUsername: null,

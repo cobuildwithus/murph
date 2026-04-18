@@ -35,7 +35,13 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
-    encryptionKeyVersion: "v1",
+    contactPrivacyKeyring: {
+      currentVersion: "v1",
+      keysByVersion: {
+        v1: Buffer.alloc(32, 7),
+      },
+      readVersions: ["v1"],
+    },
     inviteTtlHours: 24,
     isProduction: false,
     linqApiBaseUrl: "https://linq.example.test",
@@ -44,7 +50,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     privyAppId: "cm_app_123",
     privyVerificationKey: "privy-key",
     publicBaseUrl: "https://join.example.test",
-    stripePriceId: "price_123",
+    stripePriceIdsByPlan: {
+      launch_annual: "price_annual_123",
+      launch_monthly: "price_monthly_123",
+    },
     stripeSecretKey: "sk_test_123",
     stripeWebhookSecret: "whsec_123",
     telegramBotUsername: null,
@@ -79,6 +88,7 @@ describe("createHostedBillingCheckout", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
+      billingPlanCode: "launch_monthly",
       priceId: "price_123",
       stripe: mocks.stripe,
     });
@@ -185,10 +195,12 @@ describe("createHostedBillingCheckout", () => {
         client_reference_id: "member_123",
         customer: "cus_123",
         metadata: {
+          billingPlanCode: "launch_monthly",
           memberId: "member_123",
         },
         subscription_data: {
           metadata: {
+            billingPlanCode: "launch_monthly",
             memberId: "member_123",
           },
         },

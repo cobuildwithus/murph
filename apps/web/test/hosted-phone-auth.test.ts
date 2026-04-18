@@ -732,7 +732,7 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("sends checkout-stage homepage verification straight to Stripe checkout", async () => {
+  it("sends checkout-stage homepage verification back to the invite join flow", async () => {
     vi.resetModules();
 
     const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
@@ -759,12 +759,6 @@ describe("HostedPhoneAuth", () => {
         code: string | null = null;
         retryable = false;
       },
-      requestHostedBillingCheckout(input: { inviteCode: string }) {
-        return requestHostedOnboardingJson({
-          payload: input,
-          url: "/api/hosted-onboarding/billing/checkout",
-        });
-      },
       requestHostedOnboardingJson,
     }));
     vi.stubGlobal("window", {
@@ -786,14 +780,10 @@ describe("HostedPhoneAuth", () => {
     }
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
-    assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
-    assert.equal(requestHostedOnboardingJson.mock.calls[1]?.[0]?.url, "/api/hosted-onboarding/billing/checkout");
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
-      inviteCode: "invite-code",
-    });
     assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/checkout");
+    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
   it("prefers a refreshed Privy user snapshot before checking SMS wallet readiness", async () => {
@@ -820,12 +810,6 @@ describe("HostedPhoneAuth", () => {
       HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
         code: string | null = null;
         retryable = false;
-      },
-      requestHostedBillingCheckout(input: { inviteCode: string }) {
-        return requestHostedOnboardingJson({
-          payload: input,
-          url: "/api/hosted-onboarding/billing/checkout",
-        });
       },
       requestHostedOnboardingJson,
     }));
@@ -920,9 +904,9 @@ describe("HostedPhoneAuth", () => {
     }
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
-    assert.equal(requestHostedOnboardingJson.mock.calls.length, 3);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
     assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/retry-checkout");
+    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
   it("retries hosted completion once when the verified Telegram account has not reached the server-side session yet", async () => {
@@ -963,12 +947,6 @@ describe("HostedPhoneAuth", () => {
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: TestHostedOnboardingApiError,
-      requestHostedBillingCheckout(input: { inviteCode: string }) {
-        return requestHostedOnboardingJson({
-          payload: input,
-          url: "/api/hosted-onboarding/billing/checkout",
-        });
-      },
       requestHostedOnboardingJson,
     }));
     vi.stubGlobal("window", {
@@ -990,9 +968,9 @@ describe("HostedPhoneAuth", () => {
     }
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
-    assert.equal(requestHostedOnboardingJson.mock.calls.length, 3);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
     assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/telegram-retry-checkout");
+    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
   it("uses the invite shortcut route for the first invite send-code request", async () => {

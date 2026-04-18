@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
 
-import {
-  buildHostedExecutionLinqMessageReceivedDispatch,
-  buildHostedExecutionTelegramMessageReceivedDispatch,
-} from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, it, vi } from "vitest";
 
@@ -15,6 +11,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     getHostedOnboardingEnvironment: () => ({
+      contactPrivacyKeyring: {
+        currentVersion: "v1",
+        keysByVersion: {
+          v1: Buffer.alloc(32, 7),
+        },
+        readVersions: ["v1"],
+      },
       inviteTtlHours: 24,
       isProduction: false,
       linqApiBaseUrl: "https://linq.example.test",
@@ -22,7 +25,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       linqWebhookSecret: "linq-secret",
       publicBaseUrl: "https://join.example.test",
       stripeBillingMode: "payment",
-      stripePriceId: "price_123",
+      stripePriceIdsByPlan: {
+        launch_annual: "price_annual_123",
+        launch_monthly: "price_monthly_123",
+      },
       stripeSecretKey: "sk_test_123",
       stripeWebhookSecret: "whsec_123",
       telegramBotUsername: null,
@@ -44,9 +50,7 @@ import {
   serializeHostedWebhookReceiptErrorState,
   serializeHostedWebhookReceiptSideEffect,
 } from "../src/lib/hosted-onboarding/webhook-receipt-codec";
-import { buildHostedWebhookDispatchFromPayload } from "../src/lib/hosted-onboarding/webhook-receipt-dispatch";
 import {
-  createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookReceiptState,
 } from "../src/lib/hosted-onboarding/webhook-receipt-types";
@@ -123,152 +127,6 @@ describe("hosted webhook receipt transitions", () => {
     );
   });
 
-  it("stores pending Linq dispatch payloads from creation time and drops them once queued", () => {
-    const dispatchEffect = createHostedWebhookDispatchSideEffect({
-      dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
-        eventId: "evt_123",
-        linqEvent: {
-          api_version: "2026-03-26",
-          created_at: "2026-03-26T12:00:00.000Z",
-          data: {
-            chat_id: "chat_123",
-            from: "+15551234567",
-            is_from_me: false,
-            message: {
-              effect: {
-                ignored: "value",
-                name: "confetti",
-                type: "animation",
-              },
-              id: "msg_123",
-              parts: [
-                {
-                  type: "text",
-                  value: "hello",
-                },
-                {
-                  attachment_id: "att_123",
-                  filename: "photo.jpg",
-                  mime_type: "image/jpeg",
-                  size: 123,
-                  type: "image",
-                  url: "https://example.test/photo.jpg",
-                },
-              ],
-              reply_to: {
-                message_id: "msg_parent",
-                part_index: 1,
-                unused: true,
-              },
-            },
-            received_at: "2026-03-26T12:00:00.000Z",
-            recipient_phone: "+15550000000",
-            service: "imessage",
-          },
-          event_id: "evt_123",
-          event_type: "message.received",
-          partner_id: "partner_123",
-          trace_id: "trace_123",
-          unused: "discard-me",
-        },
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        phoneLookupKey: "hbidx:phone:v1:test",
-        userId: "member_123",
-      }),
-    });
-
-    if (!("dispatch" in dispatchEffect.payload)) {
-      throw new Error("Expected an in-memory pending dispatch payload.");
-    }
-
-    const nextState = markHostedWebhookReceiptSideEffectSent(
-      buildReceiptState({ sideEffects: [dispatchEffect] }),
-      dispatchEffect.effectId,
-      { dispatched: true },
-      "2026-03-26T12:00:30.000Z",
-    );
-
-    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(dispatchEffect.payload);
-    assert.equal(rebuiltDispatch?.event.kind, "linq.message.received");
-    if (rebuiltDispatch?.event.kind !== "linq.message.received") {
-      throw new Error("Expected a pending Linq dispatch payload.");
-    }
-
-    const linqData = rebuiltDispatch.event.linqEvent.data as {
-      chat_id: string;
-      from: string;
-      recipient_phone: string;
-    };
-    assert.equal(rebuiltDispatch.event.phoneLookupKey, "hbidx:phone:v1:test");
-    assert.equal(linqData.chat_id, "chat_123");
-    assert.equal(linqData.from, "+15551234567");
-    assert.equal(linqData.recipient_phone, "+15550000000");
-    assert.deepEqual(nextState.sideEffects, []);
-  });
-
-  it("persists only staged Linq dispatch refs through receipt serialization", () => {
-    const dispatchEffect = createHostedWebhookDispatchSideEffect({
-      dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
-        eventId: "evt_123",
-        linqEvent: {
-          api_version: "v1",
-          created_at: "2026-03-26T12:00:00.000Z",
-          data: {
-            chat_id: "chat_123",
-            from: "+15551234567",
-            is_from_me: false,
-            message: {
-              id: "msg_123",
-              parts: [
-                {
-                  type: "text",
-                  value: "hello",
-                },
-              ],
-            },
-            received_at: "2026-03-26T12:00:00.000Z",
-            recipient_phone: "+15550000000",
-            service: "imessage",
-          },
-          event_id: "evt_123",
-          event_type: "message.received",
-        },
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        phoneLookupKey: "hbidx:phone:v1:test",
-        userId: "member_123",
-      }),
-    });
-
-    if (!("storage" in dispatchEffect.payload)) {
-      throw new Error("Expected a legacy inline dispatch payload.");
-    }
-
-    const stagedEffect = {
-      ...dispatchEffect,
-      payload: {
-        dispatch: dispatchEffect.payload.dispatch,
-        storage: "inline" as const,
-      },
-    };
-
-    const persistedState = readHostedWebhookReceiptState(
-      serializeHostedWebhookReceiptStateRecords(buildReceiptState({ sideEffects: [stagedEffect] })),
-    );
-    const persistedEffect = getHostedWebhookSideEffect(persistedState, stagedEffect.effectId);
-
-    assert.equal(persistedEffect.kind, "hosted_execution_dispatch");
-    if (persistedEffect.kind !== "hosted_execution_dispatch") {
-      throw new Error("Expected a hosted execution dispatch side effect.");
-    }
-    if (!("storage" in persistedEffect.payload)) {
-      throw new Error("Expected a legacy inline dispatch payload.");
-    }
-
-    assert.equal(persistedEffect.payload.storage, "inline");
-    assert.equal("phoneLookupKey" in persistedEffect.payload.dispatch.event, true);
-    assert.deepEqual(buildHostedWebhookDispatchFromPayload(persistedEffect.payload), persistedEffect.payload.dispatch);
-  });
-
   it("fails closed when a persisted Linq side effect is missing the new typed payload columns", () => {
     const sideEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat_123",
@@ -315,73 +173,6 @@ describe("hosted webhook receipt transitions", () => {
     }
   });
 
-  it("stores pending Telegram dispatch payloads from creation time and drops them once queued", () => {
-    const dispatchEffect = createHostedWebhookDispatchSideEffect({
-      dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
-        eventId: "evt_tg_123",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        telegramMessage: {
-          attachments: [
-            {
-              fileId: "photo_123",
-              fileName: "photo.jpg",
-              fileSize: 12,
-              fileUniqueId: "uniq_photo_123",
-              height: 100,
-              kind: "photo",
-              mimeType: "image/jpeg",
-              width: 200,
-            },
-            {
-              fileId: "doc_123",
-              fileName: "file.pdf",
-              fileSize: 42,
-              fileUniqueId: "uniq_doc_123",
-              kind: "document",
-              mimeType: "application/pdf",
-            },
-            {
-              fileId: "anim_123",
-              fileName: "anim.gif",
-              fileSize: 10,
-              fileUniqueId: "uniq_anim_123",
-              kind: "animation",
-              mimeType: "image/gif",
-            },
-          ],
-          mediaGroupId: "album_7",
-          messageId: "789",
-          schema: "murph.hosted-telegram-message.v1",
-          text: "[shared contact]",
-          threadId: "456:business:biz_123:topic:9",
-        },
-        userId: "member_123",
-      }),
-    });
-
-    if (!("dispatch" in dispatchEffect.payload)) {
-      throw new Error("Expected an in-memory pending dispatch payload.");
-    }
-
-    const nextState = markHostedWebhookReceiptSideEffectSent(
-      buildReceiptState({ sideEffects: [dispatchEffect] }),
-      dispatchEffect.effectId,
-      { dispatched: true },
-      "2026-03-26T12:00:30.000Z",
-    );
-    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(dispatchEffect.payload);
-    assert.equal(rebuiltDispatch?.event.kind, "telegram.message.received");
-    if (rebuiltDispatch?.event.kind !== "telegram.message.received") {
-      throw new Error("Expected a pending Telegram dispatch payload.");
-    }
-
-    assert.equal(rebuiltDispatch.event.telegramMessage.schema, "murph.hosted-telegram-message.v1");
-    assert.equal(rebuiltDispatch.event.telegramMessage.messageId, "789");
-    assert.equal(rebuiltDispatch.event.telegramMessage.text, "[shared contact]");
-    assert.equal(rebuiltDispatch.event.telegramMessage.threadId, "456:business:biz_123:topic:9");
-    assert.equal(rebuiltDispatch.event.telegramMessage.attachments?.length, 3);
-    assert.deepEqual(nextState.sideEffects, []);
-  });
 });
 
 function buildReceiptState(

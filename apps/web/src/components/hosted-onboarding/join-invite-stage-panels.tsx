@@ -12,6 +12,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
+import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
@@ -166,29 +167,89 @@ export function JoinInviteMessagingSetupPanel({
   );
 }
 
-export function JoinInviteCheckoutButton({
+export function JoinInviteCheckoutPanel({
   billingReady,
+  billingPlanCode,
+  billingPlans,
   checkoutPending,
   onCheckout,
+  onSelectBillingPlan,
 }: {
   billingReady: boolean;
+  billingPlanCode: HostedBillingPlanCode | null;
+  billingPlans: HostedInviteStatusPayload["billing"]["plans"];
   checkoutPending: boolean;
   onCheckout: () => Promise<void>;
+  onSelectBillingPlan: (billingPlanCode: HostedBillingPlanCode) => void;
 }) {
+  const selectedBillingPlan = billingPlans.find((plan) => plan.code === billingPlanCode) ?? null;
+
   return (
-    <Button
-      type="button"
-      onClick={onCheckout}
-      disabled={checkoutPending || !billingReady}
-      size="lg"
-      className="w-fit"
-    >
-      {checkoutPending
-        ? "Opening checkout…"
-        : billingReady
-          ? "Continue to checkout"
-          : "Billing is not configured yet"}
-    </Button>
+    <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-[#2d3436]">Choose your plan</p>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Murph includes the full library, before and after analysis, and the same assistant on every launch plan.
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {billingPlans.map((plan) => {
+          const selected = plan.code === billingPlanCode;
+
+          return (
+            <button
+              key={plan.code}
+              type="button"
+              onClick={() => onSelectBillingPlan(plan.code)}
+              className={[
+                "rounded-2xl border px-4 py-4 text-left transition-colors",
+                selected
+                  ? "border-olive/60 bg-olive/5 shadow-[0_1px_2px_rgba(45,52,54,0.06)]"
+                  : "border-[#c4a882]/25 bg-white hover:border-[#c4a882]/45",
+              ].join(" ")}
+              aria-pressed={selected}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[#2d3436]">{plan.displayName}</p>
+                  <p className="mt-1 font-serif text-2xl font-semibold tracking-tight text-[#2d3436]">
+                    {plan.recurringSummary}
+                  </p>
+                </div>
+                {plan.badge ? (
+                  <span className="rounded-full bg-olive/10 px-2.5 py-1 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-olive">
+                    {plan.badge}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{plan.description}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {selectedBillingPlan
+            ? `You’ll start on the ${selectedBillingPlan.displayName.toLowerCase()} plan.`
+            : "Choose a plan to continue."}
+        </p>
+        <Button
+          type="button"
+          onClick={onCheckout}
+          disabled={checkoutPending || !billingReady || !billingPlanCode}
+          size="lg"
+          className="w-full sm:w-fit"
+        >
+          {checkoutPending
+            ? "Opening checkout…"
+            : billingReady
+              ? "Continue to checkout"
+              : "Billing is not configured yet"}
+        </Button>
+      </div>
+    </div>
   );
 }
 

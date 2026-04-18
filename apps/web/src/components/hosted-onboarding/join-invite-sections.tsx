@@ -9,7 +9,7 @@ import {
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import {
   JoinInviteActivePanel,
-  JoinInviteCheckoutButton,
+  JoinInviteCheckoutPanel,
   JoinInviteMessagingSetupPanel,
   JoinInviteSignedInMismatchAlert,
   JoinInviteVerificationPanel,
@@ -23,6 +23,7 @@ interface JoinInviteSharePreviewAlertProps {
 interface JoinInviteStageContentProps {
   authenticated: boolean;
   awaitingInviteSessionResolution: boolean;
+  billingPlanCode: HostedInviteStatusPayload["billing"]["defaultPlanCode"];
   checkoutPending: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   inviteCode: string;
@@ -34,6 +35,9 @@ interface JoinInviteStageContentProps {
   statusRefreshRetryPending: boolean;
   onAcceptShare: () => Promise<void>;
   onCheckout: () => Promise<void>;
+  onSelectBillingPlan: (
+    billingPlanCode: NonNullable<HostedInviteStatusPayload["billing"]["defaultPlanCode"]>,
+  ) => void;
   onPhoneVerified: (payload: HostedPrivyCompletionPayload) => Promise<void>;
   onRefreshStatus: () => Promise<HostedInviteStatusPayload>;
   onRetryStatusRefresh: () => Promise<void>;
@@ -63,6 +67,7 @@ export function JoinInviteSharePreviewAlert({ sharePreview }: JoinInviteSharePre
 export function JoinInviteStageContent({
   authenticated,
   awaitingInviteSessionResolution,
+  billingPlanCode,
   checkoutPending,
   initialLinkedAccounts,
   inviteCode,
@@ -74,6 +79,7 @@ export function JoinInviteStageContent({
   statusRefreshRetryPending,
   onAcceptShare,
   onCheckout,
+  onSelectBillingPlan,
   onPhoneVerified,
   onRefreshStatus,
   onRetryStatusRefresh,
@@ -116,10 +122,13 @@ export function JoinInviteStageContent({
       ) : null}
 
       {status.stage === "checkout" && !status.messagingSetupRequired ? (
-        <JoinInviteCheckoutButton
+        <JoinInviteCheckoutPanel
           billingReady={status.capabilities.billingReady}
+          billingPlanCode={billingPlanCode}
+          billingPlans={status.billing.plans}
           checkoutPending={checkoutPending}
           onCheckout={onCheckout}
+          onSelectBillingPlan={onSelectBillingPlan}
         />
       ) : null}
 

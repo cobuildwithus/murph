@@ -17,6 +17,10 @@ describe("invite status client", () => {
 
   it("requests invite status from the same-origin hosted onboarding route", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValue({
+      billing: {
+        defaultPlanCode: "launch_monthly",
+        plans: [],
+      },
       capabilities: {
         billingReady: true,
         phoneAuthReady: true,

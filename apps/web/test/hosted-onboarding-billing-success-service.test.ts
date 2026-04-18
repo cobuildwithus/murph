@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import {
+  getHostedDefaultBillingPlanCode,
+  listHostedBillingPlanPresentations,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 
 const mocks = vi.hoisted(() => {
   const stripe = {
@@ -310,6 +314,10 @@ function createStatus(input?: {
 }): HostedInviteStatusPayload {
   return {
     activationPending: input?.activationPending ?? false,
+    billing: {
+      defaultPlanCode: getHostedDefaultBillingPlanCode(),
+      plans: listHostedBillingPlanPresentations(),
+    },
     capabilities: {
       billingReady: true,
       phoneAuthReady: true,

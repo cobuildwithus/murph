@@ -2,6 +2,11 @@ import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { normalizeNullableString, parseInteger } from "../device-sync/shared";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
+import {
+  getHostedBillingPlanDefinition,
+  HOSTED_BILLING_PLAN_CODES,
+  type HostedBillingPlanCode,
+} from "./billing-plans";
 import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_CONTACT_PRIVACY_VERSION_PATTERN = /^v[0-9]+$/u;
@@ -25,7 +30,7 @@ export interface HostedOnboardingEnvironment {
   privyAppId: string | null;
   privyVerificationKey: string | null;
   publicBaseUrl: string | null;
-  stripePriceId: string | null;
+  stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeSecretKey: string | null;
   stripeWebhookSecret: string | null;
   telegramBotUsername: string | null;
@@ -61,7 +66,7 @@ export function readHostedOnboardingEnvironment(
     privyAppId: readEnv(source, "NEXT_PUBLIC_PRIVY_APP_ID"),
     privyVerificationKey: readEnv(source, "PRIVY_VERIFICATION_KEY"),
     publicBaseUrl,
-    stripePriceId: readEnv(source, "HOSTED_ONBOARDING_STRIPE_PRICE_ID"),
+    stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
     stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
     telegramBotUsername: readEnv(source, "TELEGRAM_BOT_USERNAME"),
@@ -179,6 +184,17 @@ function readHostedLinqConversationPhoneNumbers(
 
 function readEnv(source: HostedOnboardingEnvSource, key: string): string | null {
   return normalizeNullableString(source[key]);
+}
+
+function readHostedStripePriceIdsByPlan(
+  source: HostedOnboardingEnvSource,
+): Record<HostedBillingPlanCode, string | null> {
+  return Object.fromEntries(
+    HOSTED_BILLING_PLAN_CODES.map((code) => {
+      const definition = getHostedBillingPlanDefinition(code);
+      return [code, readEnv(source, definition.priceIdEnvKey)];
+    }),
+  ) as Record<HostedBillingPlanCode, string | null>;
 }
 
 function readPositiveInteger(value: string | null, fallback: number, label: string): number {

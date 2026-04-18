@@ -18,7 +18,6 @@ import {
   requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
 import {
-  buildHostedMemberActivationDispatch,
 } from "@/src/lib/hosted-onboarding/member-activation";
 import {
   ensureHostedMemberForPhone,
@@ -33,8 +32,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     getHostedOnboardingEnvironment: () => ({
-      encryptionKey: "test-hosted-contact-privacy-key",
-      encryptionKeyVersion: "v1",
+      contactPrivacyKeyring: {
+        currentVersion: "v1",
+        keysByVersion: {
+          v1: Buffer.alloc(32, 7),
+        },
+        readVersions: ["v1"],
+      },
       inviteTtlHours: 24,
       isProduction: false,
       linqApiBaseUrl: "https://linq.example.test",
@@ -42,7 +46,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       linqWebhookSecret: "linq-secret",
       publicBaseUrl: "https://join.example.test",
       stripeBillingMode: "payment",
-      stripePriceId: "price_123",
+      stripePriceIdsByPlan: {
+        launch_annual: "price_annual_123",
+        launch_monthly: "price_monthly_123",
+      },
       stripeSecretKey: "sk_test_123",
       stripeWebhookSecret: "whsec_123",
       telegramBotUsername: null,
@@ -324,7 +331,6 @@ describe("hosted-onboarding member-service barrel", () => {
     expect(barrel.requireHostedInviteForAuthentication).toBe(requireHostedInviteForAuthentication);
     expect(barrel.ensureHostedMemberForPhone).toBe(ensureHostedMemberForPhone);
     expect(barrel.completeHostedPrivyVerification).toBe(completeHostedPrivyVerification);
-    expect(barrel.buildHostedMemberActivationDispatch).toBe(buildHostedMemberActivationDispatch);
   });
 });
 

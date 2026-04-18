@@ -71,16 +71,19 @@ const mocks = vi.hoisted(() => {
       eventId?: string;
       tx?: unknown;
       userId?: string;
+      wake?: { eventId: string; userId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
-      const eventId = typeof input.eventId === "string" ? input.eventId : input.dispatch?.eventId;
+      const eventId = typeof input.eventId === "string"
+        ? input.eventId
+        : input.wake?.eventId ?? input.dispatch?.eventId;
       if (!eventId) {
         throw new Error("Expected a hosted wake append eventId.");
       }
       state.seedHostedExecutionWakeTarget({
         eventId,
         prisma: input.tx ?? null,
-        userId: input.userId ?? "member_123",
+        userId: input.userId ?? input.wake?.userId ?? "member_123",
       });
       return {
         eventId,
@@ -174,6 +177,13 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
+    contactPrivacyKeyring: {
+      currentVersion: "v1",
+      keysByVersion: {
+        v1: Buffer.alloc(32, 7),
+      },
+      readVersions: ["v1"],
+    },
     inviteTtlHours: 24,
     isProduction: false,
     linqApiBaseUrl: "https://linq.example.test",
@@ -189,7 +199,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     revnetTreasuryPrivateKey: null,
     revnetWeiPerStripeMinorUnit: null,
     stripeBillingMode: "payment",
-    stripePriceId: "price_123",
+    stripePriceIdsByPlan: {
+      launch_annual: "price_annual_123",
+      launch_monthly: "price_monthly_123",
+    },
     stripeSecretKey: "sk_test_123",
     stripeWebhookSecret: "whsec_123",
     telegramBotUsername: null,
@@ -913,14 +926,13 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventId: "evt_123",
-        kind: "linq.message.received",
-        payload: expect.objectContaining({
-          eventId: "evt_123",
-        }),
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
-        userId: "member_123",
+        wake: expect.objectContaining({
+          eventId: "evt_123",
+          kind: "conversation.message",
+          userId: "member_123",
+        }),
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
@@ -1297,10 +1309,13 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventId: "evt_123",
-        kind: "linq.message.received",
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
+        wake: expect.objectContaining({
+          eventId: "evt_123",
+          kind: "conversation.message",
+          userId: "member_123",
+        }),
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({

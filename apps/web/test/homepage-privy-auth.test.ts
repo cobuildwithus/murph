@@ -2,13 +2,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   ensureHostedPrivyWalletReady: vi.fn(),
-  requestHostedBillingCheckout: vi.fn(),
   requestHostedPrivyCompletionWithRetry: vi.fn(),
   ensureHostedPrivyPhoneReady: vi.fn(),
-}));
-
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedBillingCheckout: mocks.requestHostedBillingCheckout,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-privy-auth-support", () => ({
@@ -38,10 +33,6 @@ beforeEach(() => {
     joinUrl: "https://join.example.test/join/invite-code",
     stage: "active",
   });
-  mocks.requestHostedBillingCheckout.mockResolvedValue({
-    alreadyActive: true,
-    url: null,
-  });
 });
 
 test("completeHostedPrivyAuth sends active members to settings", async () => {
@@ -70,16 +61,12 @@ test("completeHostedPrivyAuth sends active members to settings", async () => {
   });
 });
 
-test("completeHostedPrivyAuth sends checkout users into billing", async () => {
+test("completeHostedPrivyAuth sends checkout users back to the invite join flow", async () => {
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,
     inviteCode: "invite-code",
     joinUrl: "https://join.example.test/join/invite-code",
     stage: "checkout",
-  });
-  mocks.requestHostedBillingCheckout.mockResolvedValue({
-    alreadyActive: false,
-    url: "https://checkout.example.test/session_123",
   });
 
   const { completeHostedPrivyAuth } = await import(
@@ -96,7 +83,7 @@ test("completeHostedPrivyAuth sends checkout users into billing", async () => {
       },
     }),
   ).resolves.toMatchObject({
-    redirectUrl: "https://checkout.example.test/session_123",
+    redirectUrl: "https://join.example.test/join/invite-code",
   });
 });
 
@@ -122,16 +109,12 @@ test("completeHostedPrivyAuth falls back to the current user when refreshUser fa
   });
 });
 
-test("completeHostedPrivyAuth surfaces missing checkout URLs", async () => {
+test("completeHostedPrivyAuth does not prefetch checkout sessions for checkout-stage users", async () => {
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,
     inviteCode: "invite-code",
     joinUrl: "https://join.example.test/join/invite-code",
     stage: "checkout",
-  });
-  mocks.requestHostedBillingCheckout.mockResolvedValue({
-    alreadyActive: false,
-    url: null,
   });
 
   const { completeHostedPrivyAuth } = await import(
@@ -145,7 +128,9 @@ test("completeHostedPrivyAuth surfaces missing checkout URLs", async () => {
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
     }),
-  ).rejects.toThrow("Checkout did not return a redirect URL.");
+  ).resolves.toMatchObject({
+    redirectUrl: "https://join.example.test/join/invite-code",
+  });
 });
 
 test("completeHostedPrivyAuth uses the phone readiness path when requested", async () => {

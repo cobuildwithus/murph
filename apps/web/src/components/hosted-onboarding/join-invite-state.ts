@@ -120,7 +120,7 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "checkout":
       return status.messagingSetupRequired
         ? "Add a phone number or Telegram so Murph can reach you after payment."
-        : "Finish payment to start using Murph.";
+        : "Choose a plan, then finish payment to start using Murph.";
     case "blocked":
       return "This account can’t continue from this invite.";
     case "active":

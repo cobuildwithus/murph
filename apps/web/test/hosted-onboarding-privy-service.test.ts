@@ -25,7 +25,13 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
-    encryptionKeyVersion: "v1",
+    contactPrivacyKeyring: {
+      currentVersion: "v1",
+      keysByVersion: {
+        v1: Buffer.alloc(32, 7),
+      },
+      readVersions: ["v1"],
+    },
     inviteTtlHours: 24,
     isProduction: false,
     linqApiBaseUrl: "https://linq.example.test",
@@ -35,7 +41,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     privyVerificationKey: "privy-verification-key",
     publicBaseUrl: "https://join.example.test",
     stripeBillingMode: "payment",
-    stripePriceId: "price_123",
+    stripePriceIdsByPlan: {
+      launch_annual: "price_annual_123",
+      launch_monthly: "price_monthly_123",
+    },
     stripeSecretKey: "sk_test_123",
     stripeWebhookSecret: "whsec_123",
     telegramBotUsername: null,

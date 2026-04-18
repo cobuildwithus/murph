@@ -10,6 +10,12 @@ import type { HostedInviteStatusPayload } from "./types";
 
 import { getPrisma } from "../prisma";
 import { isHostedMemberActivationPending } from "./activation-progress";
+import {
+  getHostedDefaultBillingPlanCode,
+  listHostedBillingPlanPresentations,
+  resolveConfiguredHostedBillingPlanCodes,
+  resolveHostedBillingReady,
+} from "./billing-plans";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
@@ -48,12 +54,30 @@ export async function getHostedInviteStatus(input: {
   const environment = getHostedOnboardingEnvironment();
   const now = input.now ?? new Date();
   const invite = await findHostedInviteByCode(input.inviteCode, prisma);
-  const billingReady = Boolean(environment.stripeSecretKey && environment.stripePriceId);
+  const configuredBillingPlanCodes = resolveConfiguredHostedBillingPlanCodes({
+    stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
+  });
+  const billingReady = resolveHostedBillingReady({
+    stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
+    stripeSecretKey: environment.stripeSecretKey,
+  });
+  const billingPlans = listHostedBillingPlanPresentations({
+    configuredPlanCodes: configuredBillingPlanCodes,
+  });
+  const defaultBillingPlanCode = billingPlans.some(
+    (plan) => plan.code === getHostedDefaultBillingPlanCode(),
+  )
+    ? getHostedDefaultBillingPlanCode()
+    : (billingPlans[0]?.code ?? null);
   const phoneAuthReady = hasHostedPrivyPhoneAuthConfig();
 
   if (!invite) {
     return {
       activationPending: false,
+      billing: {
+        defaultPlanCode: defaultBillingPlanCode,
+        plans: billingPlans,
+      },
       capabilities: {
         billingReady,
         phoneAuthReady,
@@ -95,6 +119,10 @@ export async function getHostedInviteStatus(input: {
 
   return {
     activationPending,
+    billing: {
+      defaultPlanCode: defaultBillingPlanCode,
+      plans: billingPlans,
+    },
     capabilities: {
       billingReady,
       phoneAuthReady,

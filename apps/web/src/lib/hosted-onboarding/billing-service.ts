@@ -7,6 +7,10 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { buildStripeCancelUrl, buildStripeSuccessUrl } from "./billing";
+import {
+  getHostedDefaultBillingPlanCode,
+  type HostedBillingPlanCode,
+} from "./billing-plans";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -30,6 +34,7 @@ import {
 import { normalizeNullableString } from "./shared";
 
 export interface HostedBillingCheckoutInput {
+  billingPlanCode?: HostedBillingPlanCode;
   inviteCode: string;
   member?: HostedMember;
   now?: Date;
@@ -41,9 +46,11 @@ export async function createHostedBillingCheckout(
   input: HostedBillingCheckoutInput,
 ): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
+  const billingPlanCode = input.billingPlanCode ?? getHostedDefaultBillingPlanCode();
   const now = input.now ?? new Date();
   const shareCode = normalizeNullableString(input.shareCode);
   const timing = startHostedOnboardingTiming("hosted-onboarding.billing.create-checkout", {
+    billingPlanCode,
     shareCodeProvided: Boolean(shareCode),
   });
 
@@ -101,7 +108,9 @@ export async function createHostedBillingCheckout(
       });
     }
 
-    const { priceId, stripe } = requireHostedStripeCheckoutConfig();
+    const { priceId, stripe } = requireHostedStripeCheckoutConfig({
+      billingPlanCode,
+    });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
     const customerId = await ensureHostedStripeCustomer({
       memberId: invite.member.id,
@@ -109,6 +118,7 @@ export async function createHostedBillingCheckout(
       stripe,
     });
     const checkoutMetadata: Record<string, string> = {
+      billingPlanCode,
       memberId: invite.member.id,
     };
     const checkoutSession = await stripe.checkout.sessions.create({

@@ -1,5 +1,10 @@
 import Stripe from "stripe";
 
+import {
+  getHostedBillingPlanDefinition,
+  getHostedDefaultBillingPlanCode,
+  type HostedBillingPlanCode,
+} from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
 
@@ -65,22 +70,29 @@ export function requireHostedStripeApi(): Stripe {
   return stripe;
 }
 
-export function requireHostedStripeCheckoutConfig(): {
+export function requireHostedStripeCheckoutConfig(input?: {
+  billingPlanCode?: HostedBillingPlanCode;
+}): {
+  billingPlanCode: HostedBillingPlanCode;
   priceId: string;
   stripe: Stripe;
 } {
   const environment = getHostedOnboardingEnvironment();
+  const billingPlanCode = input?.billingPlanCode ?? getHostedDefaultBillingPlanCode();
+  const billingPlan = getHostedBillingPlanDefinition(billingPlanCode);
+  const priceId = environment.stripePriceIdsByPlan[billingPlanCode];
 
-  if (!environment.stripePriceId) {
+  if (!priceId) {
     throw hostedOnboardingError({
       code: "STRIPE_PRICE_ID_REQUIRED",
-      message: "HOSTED_ONBOARDING_STRIPE_PRICE_ID must be configured for Stripe checkout creation.",
+      message: `${billingPlan.priceIdEnvKey} must be configured for Stripe checkout creation.`,
       httpStatus: 500,
     });
   }
 
   return {
-    priceId: environment.stripePriceId,
+    billingPlanCode,
+    priceId,
     stripe: requireHostedStripeApi(),
   };
 }

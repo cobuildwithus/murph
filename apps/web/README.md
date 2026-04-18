@@ -119,7 +119,8 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
-- `HOSTED_ONBOARDING_STRIPE_PRICE_ID`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
@@ -357,6 +358,7 @@ The onboarding lane is intentionally thin:
 Current hosted billing assumptions:
 
 - Hosted checkout is always Stripe subscription mode.
+- The launch tier is sold as one Stripe product with separate monthly and annual recurring prices.
 - `invoice.paid` is the only positive activation source.
 - `checkout.session.completed` and `customer.subscription.*` do not grant access.
 - RevNet issuance code remains in-tree but is currently hard-disabled.

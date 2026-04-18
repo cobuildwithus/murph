@@ -26,6 +26,10 @@ vi.mock("next/link", () => ({
 
 import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import {
+  getHostedDefaultBillingPlanCode,
+  listHostedBillingPlanPresentations,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 
 const activeJoinInviteSuccessClientCleanups = new Set<() => Promise<void> | void>();
 const requireFromJoinInviteSuccessClientTest = createRequire(import.meta.url);
@@ -121,6 +125,10 @@ function createStatus(
 ): HostedInviteStatusPayload {
   return {
     activationPending,
+    billing: {
+      defaultPlanCode: getHostedDefaultBillingPlanCode(),
+      plans: listHostedBillingPlanPresentations(),
+    },
     capabilities: {
       billingReady: true,
       phoneAuthReady: true,

@@ -1,17 +1,24 @@
 import { LandingAuthActions } from "@/app/auth-controls";
+import {
+  formatHostedLandingAnnualEquivalentSummary,
+  formatHostedLandingPricingLongSummary,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 
 export function SiteFooter({
   authenticated,
 }: {
   authenticated: boolean;
 }) {
+  const launchPricingSummary = formatHostedLandingPricingLongSummary();
+  const annualEquivalentSummary = formatHostedLandingAnnualEquivalentSummary();
+
   return (
     <footer id="pricing" className="bg-[#2a2520] px-6 sm:px-10 lg:px-16">
       <div className="mx-auto max-w-[1080px]">
         <div className="flex flex-col items-start gap-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
           <p className="text-[0.9375rem] text-[#f5f0e8]/60">
-            <span className="font-semibold text-[#f5f0e8]">$5/month.</span>{" "}
-            Full library, before/after analysis, cancel anytime.
+            <span className="font-semibold text-[#f5f0e8]">{launchPricingSummary}.</span>{" "}
+            Full library, before and after analysis, cancel anytime. Annual works out to {annualEquivalentSummary}.
           </p>
           <LandingAuthActions
             authenticated={authenticated}

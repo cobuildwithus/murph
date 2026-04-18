@@ -1,4 +1,8 @@
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import {
+  getHostedDefaultBillingPlanCode,
+  listHostedBillingPlanPresentations,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 
 export type JoinInvitePreviewStage =
   | "invalid"
@@ -40,6 +44,10 @@ export function buildJoinInvitePreviewStatus(
   const pastIso = new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString();
   const base: HostedInviteStatusPayload = {
     activationPending: false,
+    billing: {
+      defaultPlanCode: getHostedDefaultBillingPlanCode(),
+      plans: listHostedBillingPlanPresentations(),
+    },
     capabilities: {
       billingReady: true,
       phoneAuthReady: true,
