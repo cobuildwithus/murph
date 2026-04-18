@@ -1,7 +1,4 @@
 import type {
-  HostedExecutionDispatchRequest,
-  HostedExecutionDispatchResult,
-  HostedExecutionDispatchStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 
@@ -17,9 +14,6 @@ import type {
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
-  dispatch?(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
-  dispatchWithOutcome?(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
-  getEventStatus?(input: { eventId: string }): Promise<HostedExecutionDispatchStatus | null>;
   status(): Promise<HostedExecutionUserStatus>;
   wakeHostedWakes(input?: {
     targetSeqHint?: string | null;

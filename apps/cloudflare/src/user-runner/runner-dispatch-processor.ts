@@ -1,11 +1,16 @@
 import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchLifecycleState,
-  HostedExecutionDispatchRequest,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
   HostedExecutionRunnerSharePack,
+  HostedExecutionWake,
+} from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionDispatchFromWake,
+  emitHostedExecutionStructuredLog,
+  formatHostedExecutionLogMessage,
 } from "@murphai/hosted-execution";
 import { parseHostedExecutionRunnerSharePack } from "@murphai/hosted-execution/parsers";
 import type {
@@ -13,11 +18,6 @@ import type {
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import {
-  emitHostedExecutionStructuredLog,
-  formatHostedExecutionLogMessage,
-} from "@murphai/hosted-execution";
-
 import type { R2BucketLike } from "../bundle-store.js";
 import { createHostedBrowserVaultSnapshotStore } from "../browser-vault-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
@@ -58,10 +58,7 @@ import { RunnerSecretsService } from "./runner-secrets.js";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 
 export type HostedExecutionDispatchProgressRecord =
-  Pick<HostedExecutionDispatchRequest, "eventId">
-  & {
-    event: Pick<HostedExecutionDispatchRequest["event"], "userId">;
-  };
+  Pick<HostedExecutionWake, "eventId" | "userId">;
 
 export interface RunnerUserStores {
   bundleSync: RunnerBundleSync;
@@ -98,15 +95,15 @@ export class RunnerDispatchProcessor {
   ) {}
 
   async executeNativeWakeDispatch(
-    dispatch: HostedExecutionDispatchRequest,
+    wake: HostedExecutionWake,
     options: {
       holdLeaseUntilCleanup?: boolean;
     } = {},
   ): Promise<HostedExecutionDispatchLifecycleState> {
-    const userId = dispatch.event.userId;
+    const userId = wake.userId;
     const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
     const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
-    const committed = await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
+    const committed = await commitRecovery.readCommittedDispatch(userId, wake.eventId);
 
     if (committed && isCommittedResultFinalized(committed)) {
       await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, committed, {
@@ -119,30 +116,12 @@ export class RunnerDispatchProcessor {
           existingCommittedAt: committed.committedAt,
           existingFinalizedAt: committed.finalizedAt,
         },
-        dispatch,
+        dispatch: wake,
         message: "Hosted wake execution reused an already-finalized durable commit.",
         phase: "completed",
         run: null,
       });
       return "completed";
-    }
-
-    const existingStatus = await this.dependencies.queueStore.readEventDispatchStatus(dispatch.eventId);
-    if (existingStatus) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          existingState: existingStatus.state,
-        },
-        dispatch,
-        level: "info",
-        message: existingStatus.state === "completed"
-          ? "Hosted wake execution skipped because the event already completed."
-          : "Hosted wake execution deferred because the event already has local runner state.",
-        phase: existingStatus.state === "completed" ? "completed" : "dispatch.running",
-        run: null,
-      });
-      return existingStatus.state === "completed" ? "completed" : "backpressured";
     }
 
     const activeLease = await this.readRecentActiveRunLease();
@@ -153,7 +132,7 @@ export class RunnerDispatchProcessor {
           activeRunEventId: activeLease.eventId,
           activeRunId: activeLease.run.runId,
         },
-        dispatch,
+        dispatch: wake,
         level: "info",
         message: "Hosted wake execution deferred because another active run still owns the user lease.",
         phase: "dispatch.running",
@@ -165,23 +144,23 @@ export class RunnerDispatchProcessor {
     const run = this.resolveRunContext(
       await this.dependencies.queueStore.readState(),
       {
-        eventId: dispatch.eventId,
+        eventId: wake.eventId,
         startedAt: new Date().toISOString(),
       },
     );
     const leaseOwner: RunnerLeaseOwnerInput = {
-      eventId: dispatch.eventId,
+      eventId: wake.eventId,
       run,
     };
 
     await this.dependencies.queueStore.beginWakeRun({
-      eventId: dispatch.eventId,
+      eventId: wake.eventId,
       run,
       userId,
     });
     await this.advanceRunPhase({
       clearError: true,
-      dispatch,
+      dispatch: wake,
       message: committed && !isCommittedResultFinalized(committed)
         ? "Resuming direct hosted wake execution from a durable commit."
         : "Invoking direct hosted wake execution.",
@@ -192,7 +171,7 @@ export class RunnerDispatchProcessor {
     try {
       await this.advanceRunPhase({
         clearError: true,
-        dispatch,
+        dispatch: wake,
         message: committed && !isCommittedResultFinalized(committed)
           ? "Resuming hosted wake finalize from a durable commit."
           : "Running hosted wake directly from the canonical wake queue.",
@@ -201,7 +180,7 @@ export class RunnerDispatchProcessor {
       });
       const runnerResult = await this.invokeRunner(
         userId,
-        dispatch,
+        wake,
         run,
         committed && !isCommittedResultFinalized(committed)
           ? {
@@ -216,12 +195,12 @@ export class RunnerDispatchProcessor {
         ? await this.persistReturnedRunnerCommit({
           assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
           currentBundleRef: (await this.dependencies.queueStore.readBundleMetaState()).bundleRef,
-          dispatch,
+          wake,
           gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
           result: runnerResult.result,
           run,
         })
-        : await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
+        : await commitRecovery.readCommittedDispatch(userId, wake.eventId);
 
       if (!durableCommit) {
         throw new Error("Hosted wake execution returned before recording a durable commit.");
@@ -229,7 +208,7 @@ export class RunnerDispatchProcessor {
 
       await this.advanceRunPhase({
         clearError: true,
-        dispatch,
+        dispatch: wake,
         message: "Hosted wake execution recorded a durable commit.",
         phase: "commit.recorded",
         run,
@@ -237,14 +216,14 @@ export class RunnerDispatchProcessor {
       await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, durableCommit, { run });
       if (!holdLeaseUntilCleanup) {
         await this.dependencies.queueStore.completeWakeRun({
-          eventId: dispatch.eventId,
+          eventId: wake.eventId,
           finishedAt: durableCommit.committedAt,
           leaseOwner,
         });
       }
       await this.advanceRunPhase({
         clearError: true,
-        dispatch,
+        dispatch: wake,
         message: "Hosted wake execution recorded a durable commit and is awaiting cursor commit.",
         phase: "completed",
         run,
@@ -258,7 +237,7 @@ export class RunnerDispatchProcessor {
             obsoleteRunId: error.runId,
             runElapsedMs: computeHostedRunElapsedMs(run),
           },
-          dispatch,
+          dispatch: wake,
           error,
           level: "warn",
           message: "Hosted wake execution returned a stale result for an obsolete run lease.",
@@ -267,13 +246,13 @@ export class RunnerDispatchProcessor {
         });
         await this.dependencies.queueStore.failWakeRun({
           error,
-          eventId: dispatch.eventId,
+          eventId: wake.eventId,
           leaseOwner,
         });
         return "backpressured";
       }
 
-      const recoveredCommitted = await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
+      const recoveredCommitted = await commitRecovery.readCommittedDispatch(userId, wake.eventId);
       if (recoveredCommitted && isCommittedResultFinalized(recoveredCommitted)) {
         await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, recoveredCommitted, {
           policy: "same-event",
@@ -281,14 +260,14 @@ export class RunnerDispatchProcessor {
         });
         if (!holdLeaseUntilCleanup) {
           await this.dependencies.queueStore.completeWakeRun({
-            eventId: dispatch.eventId,
+            eventId: wake.eventId,
             finishedAt: recoveredCommitted.finalizedAt ?? recoveredCommitted.committedAt,
             leaseOwner,
           });
         }
         await this.advanceRunPhase({
           clearError: true,
-          dispatch,
+          dispatch: wake,
           message: "Hosted wake execution recovered a finalized durable commit after a transient failure.",
           phase: "completed",
           run,
@@ -298,12 +277,12 @@ export class RunnerDispatchProcessor {
 
       await this.dependencies.queueStore.failWakeRun({
         error,
-        eventId: dispatch.eventId,
+            eventId: wake.eventId,
         leaseOwner,
       });
       await this.dependencies.scheduler.syncNextWake(recoveredCommitted?.result.nextWakeAt ?? null);
       await this.advanceRunPhase({
-        dispatch,
+        dispatch: wake,
         error,
         level: error instanceof HostedExecutionConfigurationError ? "warn" : "error",
         message: recoveredCommitted
@@ -319,12 +298,12 @@ export class RunnerDispatchProcessor {
   }
 
   async finalizeNativeWakeDispatchAfterCursorCommit(input: {
-    dispatch: HostedExecutionDispatchRequest;
+    wake: HostedExecutionWake;
   }): Promise<HostedExecutionCommittedResult | null> {
     await this.dependencies.queueStore.markRuntimeBootstrapped();
-    const userId = input.dispatch.event.userId;
+    const userId = input.wake.userId;
     const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
-    let committed = await commitRecovery.readCommittedDispatch(userId, input.dispatch.eventId);
+    let committed = await commitRecovery.readCommittedDispatch(userId, input.wake.eventId);
 
     if (!committed) {
       return null;
@@ -333,12 +312,12 @@ export class RunnerDispatchProcessor {
     if (!isCommittedResultFinalized(committed)) {
       const record = await this.dependencies.queueStore.readState();
       const run = this.resolveRunContext(record, {
-        eventId: input.dispatch.eventId,
+        eventId: input.wake.eventId,
         startedAt: committed.committedAt,
       });
       const finalRunnerResult = await this.invokeRunner(
         userId,
-        input.dispatch,
+        input.wake,
         run,
         {
           committedResult: {
@@ -353,7 +332,7 @@ export class RunnerDispatchProcessor {
       }
 
       await this.finalizeReturnedRunnerResult({
-        eventId: input.dispatch.eventId,
+        eventId: input.wake.eventId,
         finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
         result: finalRunnerResult.result,
         run,
@@ -362,7 +341,7 @@ export class RunnerDispatchProcessor {
         userId,
         finalRunnerResult.browserVaultSnapshot ?? null,
       );
-      committed = await commitRecovery.readCommittedDispatch(userId, input.dispatch.eventId);
+      committed = await commitRecovery.readCommittedDispatch(userId, input.wake.eventId);
       if (!committed) {
         throw new Error("Hosted wake execution lost its durable commit before finalize cleanup.");
       }
@@ -376,19 +355,19 @@ export class RunnerDispatchProcessor {
   }
 
   async cleanupNativeWakeDispatchAfterCursorCommit(input: {
-    dispatch: HostedExecutionDispatchRequest;
+    wake: HostedExecutionWake;
   }): Promise<void> {
     await this.dependencies.queueStore.markRuntimeBootstrapped();
     await this.rememberCommittedEventAndCleanup(
-      input.dispatch.event.userId,
-      input.dispatch.eventId,
-      input.dispatch,
+      input.wake.userId,
+      input.wake.eventId,
+      input.wake,
     );
   }
 
   private async invokeRunner(
     userId: string,
-    dispatch: HostedExecutionDispatchRequest,
+    wake: HostedExecutionWake,
     run: HostedExecutionRunContext,
     resume: {
       committedResult: {
@@ -408,10 +387,10 @@ export class RunnerDispatchProcessor {
     const [bundleState, runnerSecrets, sharePack] = await Promise.all([
       this.dependencies.queueStore.readBundleMetaState(),
       runnerSecretsService.readRunnerSecrets(userId),
-      dispatch.event.kind === "vault.share.accepted"
+      wake.kind === "vault.share.accepted"
         ? this.readRunnerSharePack({
-            ownerUserId: dispatch.event.share.ownerUserId,
-            shareId: dispatch.event.share.shareId,
+            ownerUserId: wake.share.ownerUserId,
+            shareId: wake.share.shareId,
           })
         : Promise.resolve(null),
     ]);
@@ -422,7 +401,8 @@ export class RunnerDispatchProcessor {
       request: {
         bundle: await bundleSync.readBundlesForRunner(),
         currentBundleRef: bundleState.bundleRef,
-        dispatch,
+        dispatch: buildHostedExecutionDispatchFromWake(wake),
+        wake,
         ...(sharePack ? { sharePack } : {}),
         run,
         ...(resume ? { resume } : {}),
@@ -517,7 +497,7 @@ export class RunnerDispatchProcessor {
         },
         runnerSecretKeyCount: Object.keys(runnerSecrets).length,
       },
-      dispatch,
+      dispatch: wake,
       message: "Hosted runner prepared container invocation.",
       phase: "dispatch.running",
       run,
@@ -534,23 +514,23 @@ export class RunnerDispatchProcessor {
   private async persistReturnedRunnerCommit(input: {
     assistantDeliveryEffects: HostedExecutionCommittedResult["assistantDeliveryEffects"];
     currentBundleRef: HostedExecutionBundleRef | null;
-    dispatch: HostedExecutionDispatchRequest;
+    wake: HostedExecutionWake;
     gatewayProjectionSnapshot: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
     result: HostedAssistantRuntimeJobResult["result"];
     run: HostedExecutionRunContext;
   }): Promise<HostedExecutionCommittedResult> {
     return this.dependencies.applyHostedTransition({
-      eventId: input.dispatch.eventId,
+      eventId: input.wake.eventId,
       gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
       leaseOwner: {
-        eventId: input.dispatch.eventId,
+        eventId: input.wake.eventId,
         run: input.run,
       },
       run: async (userId, stores) => {
         return persistHostedExecutionCommit({
           bucket: this.dependencies.bucket,
           currentBundleRef: input.currentBundleRef,
-          eventId: input.dispatch.eventId,
+          eventId: input.wake.eventId,
           key: stores.crypto.rootKey,
           keyId: stores.crypto.rootKeyId,
           keysById: stores.crypto.keysById,
@@ -751,16 +731,20 @@ export class RunnerDispatchProcessor {
   private async rememberCommittedEventAndCleanup(
     userId: string,
     eventId: string,
-    dispatch: HostedExecutionDispatchRequest | null = null,
+    wake: HostedExecutionWake | null = null,
   ): Promise<RunnerStateRecord> {
-    const record = await this.dependencies.queueStore.rememberCommittedEvent(eventId, {
+    const record = await this.dependencies.queueStore.finalizeCommittedWake({
       eventId,
-      policy: "same-event",
-      run: null,
+      finishedAt: new Date().toISOString(),
+      leaseOwner: {
+        eventId,
+        policy: "same-event",
+        run: null,
+      },
     });
     await this.deleteCommittedDispatchBestEffort(userId, eventId);
-    if (dispatch) {
-      await this.deleteTransientDispatchDataBestEffort(dispatch);
+    if (wake) {
+      await this.deleteTransientDispatchDataBestEffort(wake);
     }
     return record;
   }
@@ -778,20 +762,20 @@ export class RunnerDispatchProcessor {
   }
 
   private async deleteTransientDispatchDataBestEffort(
-    dispatch: Pick<HostedExecutionDispatchRequest, "event">,
+    wake: HostedExecutionWake,
   ): Promise<void> {
-    if (dispatch.event.kind !== "email.message.received") {
+    if (wake.kind !== "conversation.message" || wake.message.channel !== "email") {
       return;
     }
 
     try {
-      const { crypto } = await this.dependencies.ensureRunnerStores(dispatch.event.userId);
+      const { crypto } = await this.dependencies.ensureRunnerStores(wake.userId);
       await deleteHostedEmailRawMessage({
         bucket: this.dependencies.bucket,
         key: crypto.rootKey,
         keysById: crypto.keysById,
-        rawMessageKey: dispatch.event.rawMessageKey,
-        userId: dispatch.event.userId,
+        rawMessageKey: wake.message.rawMessageKey,
+        userId: wake.userId,
       });
     } catch {
       // Best-effort cleanup only; lifecycle TTL still backstops raw message deletion.

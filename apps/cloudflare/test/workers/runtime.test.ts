@@ -42,6 +42,9 @@ import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedExecutionDispatchFromWake,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedWakeAppendRequest,
   type HostedWakeCommitRequest,
@@ -49,7 +52,10 @@ import {
   type HostedWakeQuarantineRequest,
   type HostedWakeStatusRequest,
 } from "@murphai/hosted-execution/contracts";
-import { parseHostedExecutionDispatchRequest } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedExecutionDispatchRequest,
+  parseHostedWakeAppendRequest,
+} from "@murphai/hosted-execution/parsers";
 import {
   appendTestHostedWake,
   commitTestHostedWakeCursor,
@@ -119,7 +125,7 @@ describe("cloudflare worker runtime suite", () => {
         lastEventId: "evt_signed_runtime",
         nextWakeAt: "2026-03-26T12:01:00.000Z",
         pendingEventCount: 1,
-        retryingEventId: "evt_signed_runtime",
+        retryingEventId: null,
         userId: dispatch.event.userId,
       },
     });
@@ -179,7 +185,7 @@ describe("cloudflare worker runtime suite", () => {
     await resolveHostedUserCryptoContext(userId);
     await expect(getUserRunnerStub(userId).dispatch(createDispatch(eventId, userId))).resolves.toMatchObject({
       lastEventId: eventId,
-      pendingEventCount: 1,
+      pendingEventCount: 0,
       userId,
     });
 
@@ -297,10 +303,13 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
   const bucket = (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES;
 
   if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/append") {
-    const body = await request.clone().json() as HostedWakeAppendRequest;
+    const body = parseHostedWakeAppendRequest(await request.clone().json() as HostedWakeAppendRequest);
+    const dispatch = "dispatch" in body
+      ? parseHostedExecutionDispatchRequest(body.dispatch)
+      : buildHostedExecutionDispatchFromWake(body.wake);
     return Response.json(await appendTestHostedWake({
       bucket,
-      dispatch: parseHostedExecutionDispatchRequest(body.dispatch),
+      dispatch,
     }));
   }
 

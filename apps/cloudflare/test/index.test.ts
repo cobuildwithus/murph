@@ -388,7 +388,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(stub.bootstrapUser).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
@@ -405,7 +405,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+    expect(stub.bootstrapUser).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
@@ -434,7 +434,7 @@ describe("cloudflare worker routes", () => {
     await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
       error: "Not found",
     });
-    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+    expect(stub.bootstrapUser).not.toHaveBeenCalled();
   });
 
   it("keeps the removed legacy-reference dispatch route hidden from OIDC callers", async () => {
@@ -457,7 +457,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+    expect(stub.bootstrapUser).not.toHaveBeenCalled();
   });
 
   it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
@@ -467,7 +467,7 @@ describe("cloudflare worker routes", () => {
     const response = await worker.fetch(request, createWorkerEnv(stub));
 
     expect(response.status).toBe(404);
-    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+    expect(stub.bootstrapUser).not.toHaveBeenCalled();
   });
 
   it("keeps the removed dispatch route hidden even for missing, malformed, and mismatched OIDC bearer requests", async () => {
@@ -515,7 +515,7 @@ describe("cloudflare worker routes", () => {
     await expect(wrongSubjectResponse.json()).resolves.toEqual({
       error: "Not found",
     });
-    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(stub.bootstrapUser).not.toHaveBeenCalled();
   });
 
   it("reads canonical per-user status while keeping the per-event status route removed", async () => {
@@ -1330,28 +1330,6 @@ async function resolveHostedUserCryptoContextForTest(
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
     bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
-    dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
-      backpressuredEventIds: [],
-      bundleRef: null,
-      inFlight: false,
-      lastError: null,
-      lastEventId: input.eventId,
-      lastRunAt: null,
-      nextWakeAt: null,
-      pendingEventCount: 0,
-      poisonedEventIds: [],
-      retryingEventId: null,
-      userId: input.event.userId,
-    })),
-    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
-      buildDispatchResultFixture(input.event.userId, input.eventId)),
-    getEventStatus: vi.fn(async (input: { eventId: string }) => ({
-      acknowledgedAt: "2026-04-16T10:00:00.000Z",
-      eventId: input.eventId,
-      lastError: null,
-      state: "queued" as const,
-      userId: "member_123",
-    })),
     status: vi.fn(async () => ({
       backpressuredEventIds: [],
       bundleRef: null,
@@ -1380,31 +1358,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;
-}
-
-function buildDispatchResultFixture(userId: string, eventId: string) {
-  return {
-    event: {
-      acknowledgedAt: "2026-04-16T10:00:00.000Z",
-      eventId,
-      lastError: null,
-      state: "queued" as const,
-      userId,
-    },
-    status: {
-      backpressuredEventIds: [],
-      bundleRef: null,
-      inFlight: false,
-      lastError: null,
-      lastEventId: eventId,
-      lastRunAt: null,
-      nextWakeAt: null,
-      pendingEventCount: 1,
-      poisonedEventIds: [],
-      retryingEventId: null,
-      userId,
-    },
-  };
 }
 
 async function createSignedJsonControlRequest(
