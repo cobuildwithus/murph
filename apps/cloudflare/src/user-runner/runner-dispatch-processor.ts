@@ -8,7 +8,6 @@ import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedExecutionDispatchFromWake,
   emitHostedExecutionStructuredLog,
   formatHostedExecutionLogMessage,
 } from "@murphai/hosted-execution";

@@ -88,7 +88,7 @@ describe("HostedUserRunner hosted wake drain", () => {
             seq: "1",
           }),
           createHostedWakeRecord({
-            payloadJson: createDispatch("evt_after_poison"),
+            payloadJson: buildHostedExecutionWakeFromDispatch(createDispatch("evt_after_poison")),
             seq: "2",
           }),
         ],
@@ -140,7 +140,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     await runner.wakeHostedWakes();
 
     expect(quarantineHostedWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
-      quarantineCode: "invalid-dispatch-payload",
+      quarantineCode: "invalid-wake-payload",
       wakeId: "wake_1",
     }));
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["2"]);
@@ -162,12 +162,12 @@ describe("HostedUserRunner hosted wake drain", () => {
         }),
         wakes: [
           createHostedWakeRecord({
-            quarantineCode: "invalid-dispatch-payload",
+            quarantineCode: "invalid-wake-payload",
             quarantinedAt: "2026-03-26T12:00:00.500Z",
             seq: "1",
           }),
           createHostedWakeRecord({
-            payloadJson: createDispatch("evt_after_quarantine"),
+            payloadJson: buildHostedExecutionWakeFromDispatch(createDispatch("evt_after_quarantine")),
             seq: "2",
           }),
         ],
@@ -235,7 +235,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         }),
         wakes: [
           createHostedWakeRecord({
-            payloadJson: createDispatch("evt_stale_commit"),
+            payloadJson: buildHostedExecutionWakeFromDispatch(createDispatch("evt_stale_commit")),
             seq: "1",
           }),
         ],
@@ -356,7 +356,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         updatedAt: "2026-03-26T12:00:02.000Z",
         version: "cursor_v2",
       }),
-      dispatches: [
+      wakes: [
         {
           dispatch: createDispatch("evt_batch_first"),
           wake: buildHostedExecutionWakeFromDispatch(createDispatch("evt_batch_first")),
@@ -397,7 +397,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         }),
         wakes: [
           createHostedWakeRecord({
-            kind: "linq.message.received",
+            kind: "conversation.message",
             payloadJson: buildHostedWakeLinqMessageReceivedPayload({
               eventId: "evt_linq_message",
               linqEvent: {
@@ -557,7 +557,7 @@ function readDispatchedEventIds(fetchMock: ReturnType<typeof vi.fn>): string[] {
     const body = typeof init?.body === "string" ? init.body : "";
     const request = readRunnerJobRequest(JSON.parse(body));
 
-    return request.resume ? [] : [request.dispatch.eventId];
+    return request.resume ? [] : [request.wake.eventId];
   });
 }
 
@@ -599,10 +599,8 @@ function readDispatchEventIdsFromSpy(
 }
 
 function readRunnerJobRequest(value: unknown): {
-  dispatch: {
-    event: {
-      userId: string;
-    };
+  wake: {
+    userId: string;
     eventId: string;
   };
   resume?: unknown;
@@ -624,14 +622,35 @@ function readRunnerJobRequest(value: unknown): {
     throw new TypeError("Expected hosted runner job request payload to be an object.");
   }
 
-  return request as {
-    dispatch: {
-      event: {
-        userId: string;
+  const requestRecord = request as {
+    dispatch?: {
+      event?: {
+        userId?: string;
       };
-      eventId: string;
+      eventId?: string;
     };
     resume?: unknown;
+    wake?: {
+      eventId?: string;
+      userId?: string;
+    };
+  };
+  const wake = requestRecord.wake ?? (
+    requestRecord.dispatch?.eventId && requestRecord.dispatch.event?.userId
+      ? {
+          eventId: requestRecord.dispatch.eventId,
+          userId: requestRecord.dispatch.event.userId,
+        }
+      : null
+  );
+
+  if (!wake?.eventId || !wake.userId) {
+    throw new TypeError("Expected hosted runner job request to carry a wake.");
+  }
+
+  return {
+    resume: requestRecord.resume,
+    wake,
   };
 }
 
