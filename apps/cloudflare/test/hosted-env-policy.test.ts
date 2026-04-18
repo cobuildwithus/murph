@@ -14,6 +14,7 @@ const requiredWorkerSecrets = {
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-envelope",
   HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
+  HOSTED_WEB_ENCRYPTION_KEY: "hosted-web-encryption",
 } satisfies Record<string, string>;
 
 describe("buildHostedRunnerContainerEnv", () => {

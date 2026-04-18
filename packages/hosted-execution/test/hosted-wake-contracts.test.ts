@@ -37,10 +37,8 @@ describe("hosted wake contract parsers", () => {
         id: "wake-123",
         kind: wake.kind,
         occurredAt: wake.occurredAt,
-        payloadJson: {
-          eventId: wake.eventId,
-          ...wake.message,
-        },
+        payloadBytes: 96,
+        payloadCiphertext: "ciphertext:wake-123",
         payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
@@ -55,6 +53,8 @@ describe("hosted wake contract parsers", () => {
       wake: expect.objectContaining({
         id: "wake-123",
         kind: wake.kind,
+        payloadBytes: 96,
+        payloadCiphertext: "ciphertext:wake-123",
         seq: "42",
       }),
     });
@@ -82,12 +82,12 @@ describe("hosted wake contract parsers", () => {
     });
 
     expect(parseHostedWakeExecutionPayload({
-      kind: wake.kind,
-      occurredAt: wake.occurredAt,
-      payloadJson: {
+      decryptedPayload: {
         eventId: wake.eventId,
         ...wake.message,
       },
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
       payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
@@ -104,12 +104,12 @@ describe("hosted wake contract parsers", () => {
     });
 
     expect(parseHostedWakeExecutionPayload({
-      kind: wake.kind,
-      occurredAt: wake.occurredAt,
-      payloadJson: {
+      decryptedPayload: {
         eventId: wake.eventId,
         ...wake.message,
       },
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
       payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);

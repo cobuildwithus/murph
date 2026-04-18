@@ -20,12 +20,17 @@ import {
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
   isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  encryptTestHostedWakePayload,
+} from "../hosted-execution-fixtures.js";
 
 import type { R2BucketLike } from "../../src/bundle-store.js";
 
 type StoredHostedWakeRecord = HostedWakeRecord & {
   wakeState: HostedWakeLifecycleState;
   eventId: string;
+  payloadBytes?: number | null;
+  payloadCiphertext?: string | null;
 };
 
 type StoredHostedWakeControlState = {
@@ -67,10 +72,14 @@ export async function appendTestHostedWake(input: {
       id: `wake_${seq}`,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadJson: {
-        eventId: wake.eventId,
-        ...wake.message,
-      },
+      ...encryptTestHostedWakePayload({
+        field: "hosted-wake-inline-payload",
+        userId: wake.userId,
+        value: {
+          eventId: wake.eventId,
+          ...wake.message,
+        },
+      }),
       payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
       seq,
       updatedAt: now,
@@ -88,7 +97,11 @@ export async function appendTestHostedWake(input: {
       id: `wake_${seq}`,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadJson: wake,
+      ...encryptTestHostedWakePayload({
+        field: "hosted-wake-ref-payload",
+        userId: wake.userId,
+        value: wake,
+      }),
       payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
       seq,
       updatedAt: now,
@@ -278,7 +291,8 @@ function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {
       id: wake.id,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      ...(wake.payloadJson === undefined ? {} : { payloadJson: wake.payloadJson }),
+      ...(wake.payloadBytes === undefined ? {} : { payloadBytes: wake.payloadBytes }),
+      ...(wake.payloadCiphertext === undefined ? {} : { payloadCiphertext: wake.payloadCiphertext }),
       payloadSchema: wake.payloadSchema,
       ...(wake.quarantineCode === undefined ? {} : { quarantineCode: wake.quarantineCode }),
       ...(wake.quarantinedAt === undefined ? {} : { quarantinedAt: wake.quarantinedAt }),
@@ -295,7 +309,8 @@ function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {
     id: wake.id,
     kind: wake.kind,
     occurredAt: wake.occurredAt,
-    ...(wake.payloadJson === undefined ? {} : { payloadJson: wake.payloadJson }),
+    ...(wake.payloadBytes === undefined ? {} : { payloadBytes: wake.payloadBytes }),
+    ...(wake.payloadCiphertext === undefined ? {} : { payloadCiphertext: wake.payloadCiphertext }),
     payloadSchema: wake.payloadSchema,
     ...(wake.quarantineCode === undefined ? {} : { quarantineCode: wake.quarantineCode }),
     ...(wake.quarantinedAt === undefined ? {} : { quarantinedAt: wake.quarantinedAt }),

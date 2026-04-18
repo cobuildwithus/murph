@@ -59,6 +59,9 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_SIGNING_SECRET?: string;
   HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?: string;
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?: string;
+  HOSTED_WEB_ENCRYPTION_KEY?: string;
+  HOSTED_WEB_ENCRYPTION_KEYRING_JSON?: string;
+  HOSTED_WEB_ENCRYPTION_KEY_VERSION?: string;
   HOSTED_WEB_BASE_URL?: string;
   USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
 }

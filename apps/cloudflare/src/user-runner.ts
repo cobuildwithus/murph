@@ -30,6 +30,9 @@ import {
   type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
 import {
+  decryptHostedWakePayloadCiphertext,
+} from "./hosted-web-encryption.ts";
+import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
 import {
@@ -446,10 +449,14 @@ export class HostedUserRunner {
     let hostedWake: HostedExecutionWake;
 
     try {
+      const decryptedPayload = await this.decryptHostedWakeExecutionPayload(
+        wake,
+        userId,
+      );
       hostedWake = parseHostedWakeExecutionPayload({
+        decryptedPayload,
         kind: wake.kind,
         occurredAt: wake.occurredAt,
-        payloadJson: wake.payloadJson,
         payloadSchema: wake.payloadSchema,
         userId,
       });
@@ -497,6 +504,23 @@ export class HostedUserRunner {
       seq,
       state,
     };
+  }
+
+  private async decryptHostedWakeExecutionPayload(
+    wake: HostedWakeRecord,
+    userId: string,
+  ): Promise<unknown> {
+    const payloadCiphertext = wake.payloadCiphertext;
+
+    if (typeof payloadCiphertext !== "string" || payloadCiphertext.length === 0) {
+      throw new TypeError("Hosted wake payload ciphertext is required.");
+    }
+
+    return await decryptHostedWakePayloadCiphertext({
+      ciphertext: payloadCiphertext,
+      environment: this.env.hostedWebEncryption,
+      userId,
+    });
   }
 
   private async quarantineHostedWakeRecord(

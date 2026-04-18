@@ -9,6 +9,9 @@ export interface HostedExecutionWorkerEnvironment {
   automationRecipientPrivateJwkJson: string;
   automationRecipientPrivateKeyringJson: string | null;
   automationRecipientPublicJwkJson: string;
+  hostedWebEncryptionKey: string;
+  hostedWebEncryptionKeyVersion: string;
+  hostedWebEncryptionKeyringJson: string | null;
   recoveryRecipientKeyId: string;
   recoveryRecipientPublicJwkJson: string;
   teeAutomationRecipientKeyId: string | null;
@@ -43,6 +46,16 @@ export function readHostedExecutionWorkerEnvironment(
     automationRecipientPublicJwkJson: requireHostedExecutionString(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK),
       "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+    ),
+    hostedWebEncryptionKey: requireHostedExecutionString(
+      normalizeHostedExecutionString(source.HOSTED_WEB_ENCRYPTION_KEY),
+      "HOSTED_WEB_ENCRYPTION_KEY",
+    ),
+    hostedWebEncryptionKeyVersion: normalizeHostedExecutionString(
+      source.HOSTED_WEB_ENCRYPTION_KEY_VERSION,
+    ) ?? "v1",
+    hostedWebEncryptionKeyringJson: normalizeHostedExecutionString(
+      source.HOSTED_WEB_ENCRYPTION_KEYRING_JSON,
     ),
     recoveryRecipientKeyId: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID,

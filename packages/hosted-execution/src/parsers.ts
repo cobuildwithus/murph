@@ -81,6 +81,7 @@ import {
   requireObject,
   requireString,
   requireStringArray,
+  readNullableNumber,
   readNullableString,
   readNullableStringValue,
   readOptionalNullableString,
@@ -725,8 +726,10 @@ export function parseHostedWakeRecord(
   value: unknown,
 ): HostedWakeRecord {
   const record = requireObject(value, "Hosted wake record");
+  assertNoLegacyHostedWakePayloadFields(record);
   const kind = parseHostedExecutionWakeKind(record.kind, "Hosted wake record kind");
   const payloadSchema = parseHostedWakePayloadSchema(record.payloadSchema);
+  const opaquePayloadTransport = readHostedWakeOpaquePayloadTransport(record);
 
   if (kind === "conversation.message") {
     if (payloadSchema !== HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA) {
@@ -745,7 +748,7 @@ export function parseHostedWakeRecord(
       id: requireString(record.id, "Hosted wake record id"),
       kind,
       occurredAt: requireString(record.occurredAt, "Hosted wake record occurredAt"),
-      ...(record.payloadJson === undefined ? {} : { payloadJson: record.payloadJson }),
+      ...opaquePayloadTransport,
       payloadSchema,
       quarantineCode: readOptionalNullableString(
         record.quarantineCode,
@@ -778,7 +781,7 @@ export function parseHostedWakeRecord(
     id: requireString(record.id, "Hosted wake record id"),
     kind,
     occurredAt: requireString(record.occurredAt, "Hosted wake record occurredAt"),
-    ...(record.payloadJson === undefined ? {} : { payloadJson: record.payloadJson }),
+    ...opaquePayloadTransport,
     payloadSchema,
     quarantineCode: readOptionalNullableString(
       record.quarantineCode,
@@ -795,9 +798,9 @@ export function parseHostedWakeRecord(
 }
 
 export function parseHostedWakeExecutionPayload(input: {
+  decryptedPayload?: unknown;
   kind: HostedExecutionWakeKind;
   occurredAt: string;
-  payloadJson?: unknown;
   payloadSchema: HostedWakePayloadSchema;
   userId: string;
 }): HostedExecutionWake {
@@ -809,10 +812,10 @@ export function parseHostedWakeExecutionPayload(input: {
         );
       }
 
-      const payload = parseHostedExecutionConversationMessagePayload(input.payloadJson);
+      const payload = parseHostedExecutionConversationMessagePayload(input.decryptedPayload);
       return buildHostedExecutionConversationMessageWake({
         eventId: requireString(
-          requireObject(input.payloadJson, "Hosted wake conversation payload").eventId,
+          requireObject(input.decryptedPayload, "Hosted wake conversation payload").eventId,
           "Hosted wake conversation payload eventId",
         ),
         message: payload,
@@ -821,7 +824,7 @@ export function parseHostedWakeExecutionPayload(input: {
       });
     }
     case HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA: {
-      const wake = parseHostedExecutionWake(input.payloadJson);
+      const wake = parseHostedExecutionWake(input.decryptedPayload);
 
       if (wake.userId !== input.userId) {
         throw new TypeError("Hosted wake payload userId must match the wake record.");
@@ -844,6 +847,46 @@ export function parseHostedWakeExecutionPayload(input: {
       return wake;
     }
   }
+}
+
+function readHostedWakeOpaquePayloadTransport(
+  record: Record<string, unknown>,
+): Pick<HostedWakeRecord, "payloadBytes" | "payloadCiphertext"> {
+  return {
+    ...(record.payloadBytes === undefined
+      ? {}
+      : {
+          payloadBytes: readNullableNumber(
+            record.payloadBytes,
+            "Hosted wake record payloadBytes",
+          ),
+        }),
+    ...(record.payloadCiphertext === undefined
+      ? {}
+      : {
+          payloadCiphertext: readNullableString(
+            record.payloadCiphertext,
+            "Hosted wake record payloadCiphertext",
+          ),
+        }),
+  };
+}
+
+function assertNoLegacyHostedWakePayloadFields(record: Record<string, unknown>): void {
+  const legacyField = [
+    "payloadJson",
+    "payloadInlineCiphertext",
+    "payloadRef",
+    "payloadRefCiphertext",
+  ].find((field) => field in record);
+
+  if (!legacyField) {
+    return;
+  }
+
+  throw new TypeError(
+    `Hosted wake record must not include legacy fetched payload field ${legacyField}.`,
+  );
 }
 
 export function parseHostedWakeFetchResponse(
@@ -980,11 +1023,11 @@ function parseHostedWakeLifecycleState(
 }
 
 function parseHostedConversationMessagePayloadEnvelope(input: {
+  decryptedPayload?: unknown;
   occurredAt: string;
-  payloadJson?: unknown;
   userId: string;
 }): HostedExecutionConversationMessageWake {
-  const payload = requireObject(input.payloadJson, "Hosted wake conversation payload");
+  const payload = requireObject(input.decryptedPayload, "Hosted wake conversation payload");
 
   return buildHostedExecutionConversationMessageWake({
     eventId: requireString(payload.eventId, "Hosted wake conversation payload eventId"),
