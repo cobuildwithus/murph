@@ -42,6 +42,9 @@ import {
 import {
   HOSTED_PHONE_COUNTRY_OPTIONS,
 } from "./hosted-phone-country-options";
+import {
+  useHostedPhoneCountryCodeHint,
+} from "./hosted-phone-country-code-provider";
 import type {
   HostedAuthenticatedPhoneAuthView,
   HostedPhoneAuthIntent,
@@ -78,8 +81,9 @@ export function useHostedPhoneAuthController({
     useState<HostedPrivyFinalizationState>("idle");
   const [pendingAction, setPendingAction] =
     useState<HostedPrivyClientPendingAction>(null);
-  const [phoneCountryCode, setPhoneCountryCode] = useState<string>(
-    DEFAULT_HOSTED_PHONE_COUNTRY_CODE,
+  const phoneCountryCodeHint = useHostedPhoneCountryCodeHint();
+  const [phoneCountryCode, setPhoneCountryCode] = useState<string>(() =>
+    resolveInitialHostedPhoneCountryCode(phoneCountryCodeHint),
   );
   const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneVerificationAttempt, setPhoneVerificationAttempt] =
@@ -426,4 +430,18 @@ export function resolveHostedAuthenticatedPhoneAuthView(input: {
   }
 
   return null;
+}
+
+function resolveInitialHostedPhoneCountryCode(
+  value: string | null | undefined,
+): string {
+  if (typeof value === "string" && value.trim().length > 0) {
+    const normalized = value.trim().toUpperCase();
+
+    if (HOSTED_PHONE_COUNTRY_OPTIONS.some((option) => option.code === normalized)) {
+      return normalized;
+    }
+  }
+
+  return DEFAULT_HOSTED_PHONE_COUNTRY_CODE;
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { HostedPhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/hosted-phone-country-code-provider";
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
 import {
   buildJoinInvitePreviewStatus,
@@ -9,6 +10,7 @@ import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { readHostedPhoneCountryCodeHint } from "@/src/lib/hosted-onboarding/phone-country-hint-server";
 
 export const metadata: Metadata = {
   title: "Murph hosted invite",
@@ -31,6 +33,7 @@ export default async function JoinInvitePage(input: {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
+  const phoneCountryCodeHint = await readHostedPhoneCountryCodeHint();
   const previewStage =
     process.env.NODE_ENV !== "production"
       ? parseJoinInvitePreviewStage(searchParams.preview)
@@ -38,17 +41,19 @@ export default async function JoinInvitePage(input: {
 
   if (previewStage) {
     return (
-      <JoinInviteShell>
-        <JoinInviteClient
-          authenticated
-          initialLinkedAccounts={[]}
-          inviteCode={decodedInviteCode}
-          initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
-          shareCode={null}
-          sharePreview={null}
-          preview
-        />
-      </JoinInviteShell>
+      <HostedPhoneCountryCodeProvider countryCode={phoneCountryCodeHint}>
+        <JoinInviteShell>
+          <JoinInviteClient
+            authenticated
+            initialLinkedAccounts={[]}
+            inviteCode={decodedInviteCode}
+            initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
+            shareCode={null}
+            sharePreview={null}
+            preview
+          />
+        </JoinInviteShell>
+      </HostedPhoneCountryCodeProvider>
     );
   }
 
@@ -67,15 +72,17 @@ export default async function JoinInvitePage(input: {
     : null;
 
   return (
-    <JoinInviteShell>
-      <JoinInviteClient
-        authenticated={authenticated}
-        initialLinkedAccounts={linkedAccounts}
-        inviteCode={decodedInviteCode}
-        initialStatus={initialStatus}
-        shareCode={shareCode}
-        sharePreview={shareData?.share?.preview ?? null}
-      />
-    </JoinInviteShell>
+    <HostedPhoneCountryCodeProvider countryCode={phoneCountryCodeHint}>
+      <JoinInviteShell>
+        <JoinInviteClient
+          authenticated={authenticated}
+          initialLinkedAccounts={linkedAccounts}
+          inviteCode={decodedInviteCode}
+          initialStatus={initialStatus}
+          shareCode={shareCode}
+          sharePreview={shareData?.share?.preview ?? null}
+        />
+      </JoinInviteShell>
+    </HostedPhoneCountryCodeProvider>
   );
 }

@@ -6,6 +6,7 @@ import { expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  readHostedPhoneCountryCodeHint: vi.fn(),
   HostedBillingSettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted billing settings ${String(props.authenticated)}`)),
   HostedDeviceSyncSettings: vi.fn((props: {
@@ -18,6 +19,12 @@ const mocks = vi.hoisted(() => ({
       "div",
       null,
       `Hosted email settings ${String(props.authenticated)} ${String(props.initialLinkedAccounts.length)}`,
+    )),
+  HostedPhoneSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
+    React.createElement(
+      "div",
+      null,
+      `Hosted phone settings ${String(props.authenticated)} ${String(props.initialLinkedAccounts.length)}`,
     )),
   HostedTelegramSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
     React.createElement(
@@ -41,8 +48,31 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/phone-country-hint-server", () => ({
+  readHostedPhoneCountryCodeHint: mocks.readHostedPhoneCountryCodeHint,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
+  HostedPhoneCountryCodeProvider(input: {
+    children: React.ReactNode;
+    countryCode: string | null;
+  }) {
+    return React.createElement(
+      "div",
+      {
+        "data-phone-country-code": input.countryCode ?? "",
+      },
+      input.children,
+    );
+  },
+}));
+
 vi.mock("@/src/components/settings/hosted-email-settings", () => ({
   HostedEmailSettings: mocks.HostedEmailSettings,
+}));
+
+vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
+  HostedPhoneSettings: mocks.HostedPhoneSettings,
 }));
 
 vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
@@ -75,18 +105,22 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
     memberLookup: null,
     session: null,
   });
+  mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("CA");
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
   const markup = renderToStaticMarkup(await SettingsPage());
 
   assert.match(markup, /Hosted billing settings/);
+  assert.match(markup, /Hosted phone settings/);
   assert.match(markup, /Hosted email settings/);
   assert.match(markup, /Hosted Telegram settings/);
   assert.match(markup, /Hosted device sync settings/);
   assert.match(markup, /Your account/);
   assert.match(markup, /Subscription, connected accounts, and wearables\./);
+  assert.match(markup, /data-phone-country-code="CA"/);
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.readHostedPhoneCountryCodeHint).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
   }), undefined);

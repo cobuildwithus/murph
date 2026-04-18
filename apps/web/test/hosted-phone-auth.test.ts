@@ -89,6 +89,26 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Defaulting to United States/);
   });
 
+  it("seeds the initial country picker from the hosted phone country hint", async () => {
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { HostedPhoneCountryCodeProvider } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-country-code-provider"
+    );
+
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        HostedPhoneCountryCodeProvider,
+        {
+          countryCode: "GB",
+        },
+        React.createElement(HostedPhoneAuth, null),
+      ),
+    );
+
+    assert.match(markup, />\+44</);
+    assert.match(markup, /placeholder="07400 123456"/);
+  });
+
   it("can hide the passive consent notice for homepage layouts that render their own copy", async () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
