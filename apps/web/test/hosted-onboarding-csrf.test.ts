@@ -91,6 +91,7 @@ function createHostedOnboardingEnvironment(
     linqWebhookSecret: null,
     linqWebhookTimestampToleranceMs: 300_000,
     privyAppId: null,
+    privyAppSecret: null,
     privyVerificationKey: null,
     publicBaseUrl: null,
     stripePriceIdsByPlan: {

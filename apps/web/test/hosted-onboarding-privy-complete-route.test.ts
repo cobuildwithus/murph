@@ -48,6 +48,9 @@ describe("hosted onboarding Privy completion route", () => {
         userId: "did:privy:user_123",
         wallet: null,
       },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
   });
 
@@ -66,7 +69,6 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       ok: true,
@@ -82,12 +84,14 @@ describe("hosted onboarding Privy completion route", () => {
         wallet: null,
       },
       inviteCode: "invite_123",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
   });
 
   it("returns the active stage when the member is already active", async () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
-      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       memberId: "member_123",
@@ -105,7 +109,6 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       ok: true,

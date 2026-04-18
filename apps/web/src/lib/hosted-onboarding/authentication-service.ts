@@ -20,7 +20,11 @@ import {
 import {
   isHostedMemberMessagingSetupRequired,
 } from "./messaging-state";
-import { type HostedPrivyIdentity } from "./privy";
+import {
+  syncHostedPrivyMemberIdMetadata,
+  type HostedPrivyIdentity,
+  type HostedPrivyUser,
+} from "./privy";
 import {
   buildHostedInviteUrl,
   issueHostedInvite,
@@ -38,6 +42,7 @@ export async function completeHostedPrivyVerification(input: {
   inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
+  verifiedPrivyUser?: HostedPrivyUser | null;
 }): Promise<{
   inviteCode: string;
   joinUrl: string;
@@ -82,6 +87,12 @@ export async function completeHostedPrivyVerification(input: {
         telegramUserId: input.identity.telegram.telegramUserId,
       });
     }
+
+    await syncHostedPrivyMemberIdMetadata({
+      memberId: member.id,
+      privyUserId: input.identity.userId,
+      verifiedPrivyUser: input.verifiedPrivyUser ?? null,
+    }).catch(() => null);
 
     const memberSnapshot = await readHostedMemberSnapshot({
       memberId: member.id,

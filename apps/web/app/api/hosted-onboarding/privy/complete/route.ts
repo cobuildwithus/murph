@@ -18,6 +18,7 @@ export const POST = withJsonError(async (request: Request) => {
     const result = await completeHostedPrivyVerification({
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
+      verifiedPrivyUser: auth.verifiedPrivyUser,
     });
 
     finishHostedOnboardingTiming(timing, "completed", {

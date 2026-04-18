@@ -5,9 +5,10 @@ import { cache } from "react";
 
 import { getPrisma } from "../prisma";
 import { isHostedOnboardingError } from "./errors";
-import { lookupHostedMemberForPrivyIdentity, type HostedMemberPrivyIdentityLookup } from "./member-identity-service";
 import { getHostedPrivySession, type HostedPrivySession } from "./hosted-session";
 import { type PrivyLinkedAccountLike } from "./privy-shared";
+import { type HostedMemberPrivyIdentityLookup } from "./member-identity-service";
+import { resolvePrivyMemberAuthFromSession } from "./request-auth";
 
 export interface HostedPageAuthSnapshot {
   authenticated: boolean;
@@ -44,11 +45,11 @@ const resolveHostedPageAuthSnapshot = cache(async (): Promise<HostedPageAuthSnap
     return buildAnonymousHostedPageAuthSnapshot();
   }
 
-  const memberLookup = await lookupHostedMemberForPrivyIdentity({
+  const { memberLookup, member: authenticatedMember } = await resolvePrivyMemberAuthFromSession({
     identity: session.identity,
+    memberId: session.memberId,
     prisma: getPrisma(),
   });
-  const authenticatedMember = memberLookup?.core ?? null;
 
   return {
     authenticated: Boolean(authenticatedMember),

@@ -805,7 +805,6 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signin",
         payload: {
-          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
           messagingSetupRequired: false,
@@ -818,7 +817,6 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signup",
         payload: {
-          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
           messagingSetupRequired: false,
@@ -831,7 +829,6 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signup",
         payload: {
-          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "https://www.withmurph.ai/join/invite-code",
           messagingSetupRequired: false,
@@ -942,7 +939,7 @@ describe("HostedPhoneAuth", () => {
       vi.unstubAllGlobals();
     }
 
-    assert.equal(refreshUser.mock.calls.length, 1);
+    assert.equal(refreshUser.mock.calls.length, 2);
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(typeof ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.createWallet, "function");
     assert.deepEqual(ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.user, {

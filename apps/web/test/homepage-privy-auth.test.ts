@@ -39,14 +39,15 @@ test("completeHostedPrivyAuth sends active members to settings", async () => {
   const { completeHostedPrivyAuth } = await import(
     "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
+  const refreshUser = vi.fn().mockResolvedValue({
+    linkedAccounts: [],
+  });
 
   await expect(
     completeHostedPrivyAuth({
       createWallet: vi.fn(),
       intent: "signup",
-      refreshUser: vi.fn().mockResolvedValue({
-        linkedAccounts: [],
-      }),
+      refreshUser,
       user: null,
     }),
   ).resolves.toMatchObject({
@@ -59,6 +60,7 @@ test("completeHostedPrivyAuth sends active members to settings", async () => {
       linkedAccounts: [],
     },
   });
+  expect(refreshUser).toHaveBeenCalledTimes(2);
 });
 
 test("completeHostedPrivyAuth sends checkout users back to the invite join flow", async () => {
