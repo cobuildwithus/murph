@@ -251,7 +251,7 @@ fi
 
 if [[ "$has_prompt_override" == "0" ]]; then
   if [[ -n "$chat" ]]; then
-    prompt="Check whether the requested implementation or patch has been returned in this chat. If it has, restate the implementation clearly in markdown and include any available patch or diff text inline. If it has not arrived yet, say that it is still pending."
+    prompt="Check whether the requested implementation has been returned in this chat. If it has, restate the implementation clearly in markdown and summarize the concrete changes inline. Do not request or rely on any patch or diff attachment. If it has not arrived yet, say that it is still pending."
     forward_args+=(--prompt "$prompt")
   elif [[ "$has_review_input" == "0" ]]; then
     echo "Error: for a new delayed send, pass --prompt, --prompt-file, or a preset." >&2
