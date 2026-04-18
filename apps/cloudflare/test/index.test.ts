@@ -7,10 +7,8 @@ import { fileURLToPath } from "node:url";
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import {
-  buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.ts";
-import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import { createLocalInternalProxyUserToken } from "../src/local-internal-proxy-token.ts";
@@ -286,30 +284,9 @@ describe("cloudflare worker routes", () => {
       proxyTokenSecret: "local-token",
     });
 
-    const writeResponse = await worker.fetch(
-      new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
-        {
-          body: JSON.stringify(createPreparedSideEffectRecord({
-            effectId: "outbox_local_internal",
-            fingerprint: "dedupe_local_internal",
-          })),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
-            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-          },
-          method: "PUT",
-        },
-      ),
-      env,
-    );
-
-    expect(writeResponse.status).toBe(200);
-
     const missingProxyTokenResponse = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
+        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/messages/raw_local_internal",
         {
           headers: {
             [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
@@ -327,7 +304,7 @@ describe("cloudflare worker routes", () => {
 
     const readResponse = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
+        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/messages/raw_local_internal",
         {
           headers: {
             [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
@@ -339,14 +316,9 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(readResponse.status).toBe(200);
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_local_internal",
-      record: {
-        effectId: "outbox_local_internal",
-        kind: "assistant.delivery",
-        state: "sending",
-      },
+    expect(readResponse.status).toBe(404);
+    await expect(readResponse.json()).resolves.toEqual({
+      error: "Not found",
     });
   });
 
@@ -362,7 +334,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/effects/outbox_local_internal?fingerprint=dedupe_local_internal",
+        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/messages/raw_local_internal",
         {
           headers: {
             [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
@@ -733,52 +705,18 @@ describe("cloudflare worker routes", () => {
     expect(publicOutboxResponse.status).toBe(404);
   });
 
-  it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
+  it("hard-cuts the removed assistant-delivery journal route from the outbound results.worker handler", async () => {
     const env = createWorkerEnv();
 
-    const response = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_123",
-          fingerprint: "dedupe_123",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-
-    const readResponse = await callRunnerOutbound(
+    const getResponse = await callRunnerOutbound(
       new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
     );
-
-    expect(readResponse.status).toBe(200);
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_123",
-      record: {
-        effectId: "outbox_123",
-        kind: "assistant.delivery",
-        state: "sending",
-      },
-    });
-  });
-
-  it("reads side-effect journal records even when the outbound bridge drops the fingerprint query", async () => {
-    const env = createWorkerEnv();
-
-    await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_missing_fingerprint?fingerprint=dedupe_missing", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_missing_fingerprint",
-          fingerprint: "dedupe_missing",
-        })),
+    const putResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
+        body: JSON.stringify({ ignored: true }),
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -786,216 +724,16 @@ describe("cloudflare worker routes", () => {
       }),
       env,
     );
-
-    const response = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_missing_fingerprint", {
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      effectId: "outbox_missing_fingerprint",
-      record: {
-        effectId: "outbox_missing_fingerprint",
-        kind: "assistant.delivery",
-        state: "sending",
-      },
-    });
-  });
-
-  it("returns 409 when the same effect id is reused with a mismatched fingerprint", async () => {
-    const env = createWorkerEnv();
-
-    await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_123", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_a",
-          fingerprint: "dedupe_123",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    const conflictResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_conflict", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_a",
-          fingerprint: "dedupe_conflict",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    expect(conflictResponse.status).toBe(409);
-    await expect(conflictResponse.json()).resolves.toMatchObject({
-      error: expect.stringContaining("cannot change identity"),
-    });
-  });
-
-  it("deletes only non-terminal side-effect reservations through the side-effects route", async () => {
-    const env = createWorkerEnv();
-
-    await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_prepared",
-          fingerprint: "dedupe_prepared",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-    await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
-        body: JSON.stringify(createSentSideEffectRecord({
-          effectId: "outbox_sent",
-          fingerprint: "dedupe_sent",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
-    const deletePreparedResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
-        method: "DELETE",
-      }),
-      env,
-    );
-    expect(deletePreparedResponse.status).toBe(200);
-
-    const readPreparedResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
-        method: "GET",
-      }),
-      env,
-    );
-    await expect(readPreparedResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_prepared",
-      record: null,
-    });
-
-    const deleteSentResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
-        method: "DELETE",
-      }),
-      env,
-    );
-    expect(deleteSentResponse.status).toBe(200);
-
-    const readSentResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
-        method: "GET",
-      }),
-      env,
-    );
-    await expect(readSentResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_sent",
-      record: {
-        effectId: "outbox_sent",
-        kind: "assistant.delivery",
-        state: "sent",
-      },
-    });
-  });
-
-  it("deletes non-terminal side-effect reservations even when the outbound bridge omits the fingerprint query", async () => {
-    const env = createWorkerEnv();
-
-    await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_delete_missing_fingerprint?fingerprint=dedupe_delete_missing", {
-        body: JSON.stringify(createPreparedSideEffectRecord({
-          effectId: "outbox_delete_missing_fingerprint",
-          fingerprint: "dedupe_delete_missing",
-        })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "PUT",
-      }),
-      env,
-    );
-
     const deleteResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_delete_missing_fingerprint", {
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
         method: "DELETE",
       }),
       env,
     );
-    expect(deleteResponse.status).toBe(200);
 
-    const readResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_delete_missing_fingerprint", {
-        method: "GET",
-      }),
-      env,
-    );
-    await expect(readResponse.json()).resolves.toMatchObject({
-      effectId: "outbox_delete_missing_fingerprint",
-      record: null,
-    });
-  });
-
-  it("reads pre-existing side-effect journal records through the outbound route using the user's root key", async () => {
-    const env = createWorkerEnv();
-    const record = createSentSideEffectRecord({
-      effectId: "outbox_rotated",
-      fingerprint: "dedupe_rotated",
-    });
-    const crypto = await resolveHostedUserCryptoContextForTest(env, "member_123");
-    const key = await sideEffectRecordObjectKey(crypto.rootKey, "member_123", record.effectId);
-
-    await writeEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        effectId: record.effectId,
-        key,
-        purpose: "side-effect-journal",
-        userId: "member_123",
-      }),
-      bucket: env.BUNDLES,
-      cryptoKey: crypto.rootKey,
-      key,
-      keyId: crypto.rootKeyId,
-      scope: "side-effect-journal",
-      value: record,
-    });
-
-    const response = await callRunnerOutbound(
-      new Request(`http://results.worker/effects/${record.effectId}?fingerprint=${record.fingerprint}`, {
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      effectId: "outbox_rotated",
-      record: {
-        delivery: {
-          channel: "telegram",
-          target: "thread_123",
-        },
-        effectId: "outbox_rotated",
-        kind: "assistant.delivery",
-        state: "sent",
-      },
-    });
+    expect(getResponse.status).toBe(404);
+    expect(putResponse.status).toBe(404);
+    expect(deleteResponse.status).toBe(404);
   });
 
   it("keeps removed manual-run paths absent while protected outbound routes preserve existing method ordering", async () => {
@@ -1012,7 +750,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const wrongMethodOutboxResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_123", {
+      new Request("http://results.worker/messages/raw_123", {
         method: "POST",
       }),
       createWorkerEnv(),
@@ -1207,73 +945,6 @@ function createWake(eventId: string): HostedExecutionWake {
     reason: "manual",
     userId: "member_123",
   });
-}
-
-function createOutboxDelivery() {
-  return {
-    channel: "telegram",
-    idempotencyKey: "assistant-outbox:intent_123",
-    messageLength: "Queued reply".length,
-    sentAt: "2026-03-26T12:00:00.000Z",
-    target: "thread_123",
-    targetKind: "thread" as const,
-  };
-}
-
-function createPreparedSideEffectRecord(input: {
-  effectId: string;
-  fingerprint: string;
-}) {
-  return {
-    attempt: {
-      channel: "telegram",
-      idempotencyKey: `assistant-outbox:${input.effectId}`,
-      messageLength: "Queued reply".length,
-      providerMessageId: null,
-      providerThreadId: null,
-      startedAt: "2026-03-26T12:00:05.000Z",
-      target: "thread_123",
-      targetKind: "thread" as const,
-    },
-    effectId: input.effectId,
-    fingerprint: input.fingerprint,
-    kind: "assistant.delivery" as const,
-    recordedAt: "2026-03-26T12:00:05.000Z",
-    state: "sending" as const,
-  };
-}
-
-function createSentSideEffectRecord(input: {
-  effectId: string;
-  fingerprint: string;
-}) {
-  return {
-    ...createPreparedSideEffectRecord(input),
-    delivery: createOutboxDelivery(),
-    recordedAt: "2026-03-26T12:00:00.000Z",
-    state: "sent" as const,
-  };
-}
-
-async function sideEffectRecordObjectKey(
-  rootKey: Uint8Array,
-  userId: string,
-  effectId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "side-effect-path",
-    value: `user:${userId}`,
-  });
-  const effectSegment = await deriveHostedStorageOpaqueId({
-    length: 40,
-    rootKey,
-    scope: "side-effect-path",
-    value: `effect:${userId}:${effectId}`,
-  });
-
-  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
 }
 
 async function hostedArtifactObjectKeyForTest(

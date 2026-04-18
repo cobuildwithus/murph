@@ -63,7 +63,6 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
         "gateway-store.test.ts",
         "node-runner*.test.ts",
         "runner-*.test.ts",
-        "side-effect-journal.test.ts",
         "runner-secrets.test.ts",
         "user-key-store.test.ts",
         "user-runner.test.ts",

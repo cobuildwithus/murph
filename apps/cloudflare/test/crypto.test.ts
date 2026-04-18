@@ -8,9 +8,7 @@ import {
   createHostedBundleStore,
   createHostedRunnerSecretsStore,
 } from "../src/bundle-store.js";
-import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
-import { createHostedAssistantDeliveryJournalStore } from "../src/side-effect-journal.js";
 import {
   encryptHostedBundle,
   readEncryptedR2Payload,
@@ -189,47 +187,6 @@ describe("hosted storage object keys", () => {
       key.startsWith("users/runner-secrets/")
     );
     expectOpaqueStrings([storedRunnerSecretsKey], ["user_env_123"]);
-
-    const journalStore = createHostedExecutionJournalStore({
-      bucket,
-      key: rootKey,
-      keyId,
-    });
-    await journalStore.writeCommittedResult("user_journal_123", "evt_journal_1", {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-04-03T00:00:00.000Z",
-      eventId: "evt_journal_1",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "user_journal_123",
-    });
-    const storedJournalKey = findStoredObjectKey(bucket, (key) =>
-      key.startsWith("transient/execution-journal/"),
-    );
-    expectOpaqueStrings([storedJournalKey], ["user_journal_123", "evt_journal_1"]);
-
-    const sideEffectStore = createHostedAssistantDeliveryJournalStore({
-      bucket,
-      key: rootKey,
-      keyId,
-    });
-    await sideEffectStore.write({
-      userId: "user_side_effect_123",
-      record: buildHostedAssistantDeliveryPreparedRecord({
-        dedupeKey: "fingerprint_1",
-        effectId: "effect_1",
-        recordedAt: "2026-04-03T00:00:00.000Z",
-      }),
-    });
-    const storedSideEffectKey = findStoredObjectKey(bucket, (key) =>
-      key.startsWith("transient/side-effects/"),
-    );
-    expectOpaqueStrings([storedSideEffectKey], ["user_side_effect_123", "effect_1"]);
 
     const rawMessageKey = await writeHostedEmailRawMessage({
       bucket,

@@ -6,7 +6,6 @@ import {
 } from "../src/bundle-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { writeEncryptedR2Json, writeEncryptedR2Payload } from "../src/crypto.js";
-import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { readHostedEmailRawMessage, writeHostedEmailRawMessage } from "../src/hosted-email.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
@@ -174,105 +173,6 @@ describe("opaque storage path rotation", () => {
       keysById: { next: nextKey, old: oldKey },
       userId,
     }).readArtifact(sha256)).toEqual(plaintext);
-  });
-
-  it("ignores removed raw-path execution journals", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const oldKey = createTestRootKey(15);
-    const nextKey = createTestRootKey(16);
-    const userId = "user_legacy_journal";
-    const eventId = "evt_legacy_123";
-    const objectKey = `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
-
-    await writeEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        eventId,
-        key: objectKey,
-        purpose: "execution-journal",
-        userId,
-      }),
-      bucket,
-      cryptoKey: oldKey,
-      key: objectKey,
-      keyId: "old",
-      scope: "execution-journal",
-      value: {
-        assistantDeliveryEffects: [],
-        bundleRef: null,
-        committedAt: "2026-04-04T00:00:00.000Z",
-        eventId,
-        finalizedAt: null,
-        gatewayProjectionSnapshot: null,
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-        userId,
-      },
-    });
-
-    const store = createHostedExecutionJournalStore({
-      bucket,
-      key: nextKey,
-      keyId: "next",
-      keysById: { next: nextKey, old: oldKey },
-    });
-
-    expect(await store.readCommittedResult(userId, eventId)).toBeNull();
-    await store.deleteCommittedResult(userId, eventId);
-    expectOpaqueStrings(bucket.deleted, [objectKey]);
-  });
-
-  it("requires a rewrite before execution journals survive platform root-key rotation", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const oldKey = createTestRootKey(13);
-    const nextKey = createTestRootKey(14);
-    const userId = "user_live_journal";
-    const eventId = "evt_rotate_123";
-
-    await createHostedExecutionJournalStore({
-      bucket,
-      key: oldKey,
-      keyId: "old",
-      keysById: { old: oldKey },
-    }).writeCommittedResult(userId, eventId, {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-04-04T00:00:00.000Z",
-      eventId,
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId,
-    });
-
-    const rotatedStore = createHostedExecutionJournalStore({
-      bucket,
-      key: nextKey,
-      keyId: "next",
-      keysById: { next: nextKey, old: oldKey },
-    });
-
-    expect(await rotatedStore.readCommittedResult(userId, eventId)).toBeNull();
-    await rotatedStore.deleteCommittedResult(userId, eventId);
-    expect(await rotatedStore.readCommittedResult(userId, eventId)).toBeNull();
-    expect(bucket.deleted).toHaveLength(1);
-    expect(await createHostedExecutionJournalStore({
-      bucket,
-      key: oldKey,
-      keyId: "old",
-      keysById: { next: nextKey, old: oldKey },
-    }).readCommittedResult(userId, eventId)).toMatchObject({
-      eventId,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId,
-    });
   });
 
   it("requires a rewrite before hosted raw email messages survive platform root-key rotation", async () => {

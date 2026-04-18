@@ -12,7 +12,6 @@ import {
 } from "vitest";
 
 import { createHostedBundleStore } from "../../src/bundle-store.js";
-import { createHostedExecutionJournalStore } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.js";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 import { createHostedUserKeyStore } from "../../src/user-key-store.js";
@@ -199,7 +198,6 @@ describe("cloudflare worker runtime suite", () => {
     );
 
     expect(finalizeResponse.status).toBe(404);
-    await expect((await createJournalStore(userId)).readCommittedResult(userId, eventId)).resolves.toBeNull();
   });
 });
 
@@ -396,16 +394,6 @@ async function resolveHostedUserCryptoContext(userId: string) {
   });
   await store.provisionManagedUserCryptoAtActivation(userId);
   return store.requireUserCryptoContext(userId);
-}
-
-async function createJournalStore(userId: string) {
-  const crypto = await resolveHostedUserCryptoContext(userId);
-  return createHostedExecutionJournalStore({
-    bucket: (env as { BUNDLES: never }).BUNDLES,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  });
 }
 
 async function createBundleStore(userId: string) {

@@ -1,32 +1,6 @@
 {
   "rules": [
     {
-      "id": "delete-transient-execution-journal-after-6h",
-      "enabled": true,
-      "conditions": {
-        "prefix": "transient/execution-journal/"
-      },
-      "deleteObjectsTransition": {
-        "condition": {
-          "type": "Age",
-          "maxAge": 21600
-        }
-      }
-    },
-    {
-      "id": "delete-transient-side-effects-after-6h",
-      "enabled": true,
-      "conditions": {
-        "prefix": "transient/side-effects/"
-      },
-      "deleteObjectsTransition": {
-        "condition": {
-          "type": "Age",
-          "maxAge": 21600
-        }
-      }
-    },
-    {
       "id": "delete-transient-hosted-email-raw-messages-after-1h",
       "enabled": true,
       "conditions": {
