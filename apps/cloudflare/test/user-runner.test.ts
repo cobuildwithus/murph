@@ -559,20 +559,11 @@ describe("HostedUserRunner", () => {
         throw new Error("Test storage.sql is required.");
       }
       sql.exec(
-        `UPDATE runner_bundle_slots
+        `UPDATE runner_meta
          SET bundle_ref_json = ?, bundle_version = ?
-         WHERE slot = ?`,
-        JSON.stringify(previousAgentRef),
-        1,
-        "agentState",
-      );
-      sql.exec(
-        `UPDATE runner_bundle_slots
-         SET bundle_ref_json = ?, bundle_version = ?
-         WHERE slot = ?`,
+         WHERE singleton = 1`,
         JSON.stringify(previousVaultRef),
         1,
-        "vault",
       );
 
       await persistHostedExecutionCommit({
@@ -3212,7 +3203,6 @@ async function seedRunnerQueueState(
     throw new Error("Test storage.sql is required.");
   }
 
-  sql.exec("DELETE FROM runner_bundle_slots");
   sql.exec("DELETE FROM runner_meta");
 
   const seedErrorCode = input.lastErrorCode
@@ -3222,6 +3212,8 @@ async function seedRunnerQueueState(
     `INSERT INTO runner_meta (
       singleton,
       user_id,
+      bundle_ref_json,
+      bundle_version,
       active_run_event_id,
       active_run_id,
       active_run_attempt,
@@ -3233,9 +3225,11 @@ async function seedRunnerQueueState(
       last_event_id,
       last_run_at,
       next_wake_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
+    null,
+    0,
     input.activeRunLease?.eventId ?? null,
     input.activeRunLease?.runId ?? null,
     input.activeRunLease?.attempt ?? null,
@@ -3248,14 +3242,6 @@ async function seedRunnerQueueState(
       input.lastRunAt ?? null,
       input.nextWakeAt ?? null,
     );
-
-  sql.exec(
-    `INSERT INTO runner_bundle_slots (slot, bundle_ref_json, bundle_version)
-    VALUES (?, ?, ?)`,
-    "vault",
-    null,
-    0,
-  );
 }
 
 function countRunnerContainerCalls(

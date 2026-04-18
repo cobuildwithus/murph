@@ -17,6 +17,8 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
+      bundle_ref_json TEXT,
+      bundle_version INTEGER NOT NULL DEFAULT 0,
       active_run_event_id TEXT,
       active_run_id TEXT,
       active_run_attempt INTEGER,
@@ -30,13 +32,10 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       next_wake_at TEXT
     )
   `);
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS runner_bundle_slots (
-      slot TEXT PRIMARY KEY,
-      bundle_ref_json TEXT,
-      bundle_version INTEGER NOT NULL DEFAULT 0
-    )
-  `);
+  // Greenfield hard cut: the runner only persists one vault bundle pointer now,
+  // so the old slot table is deleted instead of being carried as compatibility
+  // state for dead multi-slot paths.
+  sql.exec("DROP TABLE IF EXISTS runner_bundle_slots");
   ensureRunnerMetaColumns(sql);
   assertRunnerStateTableColumns(sql, "runner_meta", {
     forbiddenColumns: [
@@ -45,6 +44,8 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     requiredColumns: [
       "singleton",
       "user_id",
+      "bundle_ref_json",
+      "bundle_version",
       "active_run_event_id",
       "active_run_id",
       "active_run_attempt",
@@ -58,18 +59,19 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "next_wake_at",
     ],
   });
-  assertRunnerStateTableColumns(sql, "runner_bundle_slots", {
-    requiredColumns: [
-      "slot",
-      "bundle_ref_json",
-      "bundle_version",
-    ],
-  });
 }
 
 function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
   const columns = new Set(readRunnerStateTableColumns(sql, "runner_meta"));
   const additions = [
+    {
+      columnName: "bundle_ref_json",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN bundle_ref_json TEXT",
+    },
+    {
+      columnName: "bundle_version",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN bundle_version INTEGER NOT NULL DEFAULT 0",
+    },
     {
       columnName: "active_run_event_id",
       ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_event_id TEXT",

@@ -70,6 +70,8 @@ function initializeSchema(database: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
+      bundle_ref_json TEXT,
+      bundle_version INTEGER NOT NULL DEFAULT 0,
       active_run_event_id TEXT,
       active_run_id TEXT,
       active_run_attempt INTEGER,
@@ -81,11 +83,6 @@ function initializeSchema(database: DatabaseSync): void {
       last_event_id TEXT,
       last_run_at TEXT,
       next_wake_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS runner_bundle_slots (
-      slot TEXT PRIMARY KEY,
-      bundle_ref_json TEXT,
-      bundle_version INTEGER NOT NULL DEFAULT 0
     );
   `);
 }
