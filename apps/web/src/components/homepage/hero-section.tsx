@@ -1,10 +1,6 @@
 import { LandingAuthActions } from "@/app/auth-controls";
 
-export function HeroSection({
-  authenticated,
-}: {
-  authenticated: boolean;
-}) {
+export function HeroSection({ authenticated }: { authenticated: boolean }) {
   return (
     <section className="relative min-h-[85svh] overflow-hidden bg-[#3a3028] sm:min-h-svh">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -27,8 +23,8 @@ export function HeroSection({
           </h1>
 
           <p className="mt-6 max-w-[420px] text-base leading-[1.75] text-pretty text-white/75">
-            Your wearable collects the data. Murph tells you what to try,
-            measures what changed, and gives you a clear answer.
+            Murph is your personal health assistant. Connect your data. Pick a
+            protocol. See what actually makes you healthier.
           </p>
 
           <div className="mt-8">
@@ -42,8 +38,6 @@ export function HeroSection({
 
           <div className="mt-8 flex items-center gap-2 text-[0.8125rem] text-white/60">
             <span>Early access &middot; $5/mo</span>
-            <span className="text-white/25">&middot;</span>
-            <span>Connect your Oura or Whoop in 30 seconds</span>
           </div>
         </div>
       </div>
