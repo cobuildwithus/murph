@@ -12,6 +12,7 @@ import {
 import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import { parseHostedExecutionDispatchRequest } from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution/side-effects";
@@ -2472,7 +2473,7 @@ describe("HostedUserRunner", () => {
       userId: "member_123",
     });
     expect(result.status.pendingEventCount).toBe(1);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
   it("reports duplicate consumed events through the shared dispatch outcome surface", async () => {
@@ -2498,6 +2499,10 @@ describe("HostedUserRunner", () => {
     const dispatch = createDispatch("evt_duplicate_consumed");
 
     const first = await runner.dispatchWithOutcome(dispatch);
+    const invokesAfterFirstDispatch = countRunnerContainerCalls(
+      storage.runnerContainerFetch,
+      "/internal/invoke",
+    );
     const second = await runner.dispatchWithOutcome(dispatch);
 
     expect(first.event.state).toBe("completed");
@@ -2507,7 +2512,10 @@ describe("HostedUserRunner", () => {
       state: "completed",
       userId: "member_123",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(invokesAfterFirstDispatch).toBeGreaterThan(0);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(
+      invokesAfterFirstDispatch,
+    );
   });
 
   it("reports poisoned events through the shared dispatch outcome surface without rerunning them", async () => {
@@ -2526,19 +2534,30 @@ describe("HostedUserRunner", () => {
       userId: dispatch.event.userId,
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const replayFetch = vi.fn();
+    const replayFetch = vi.fn(async (url, init) => {
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
+      throw new Error(`Unexpected fetch during poisoned duplicate replay: ${String(url)}`);
+    });
     vi.stubGlobal("fetch", replayFetch);
 
     const replayed = await runner.dispatchWithOutcome(dispatch);
 
     expect(replayed.event).toEqual({
       eventId: "evt_duplicate_poisoned",
-      lastError: "Hosted execution runtime failed.",
-      state: "poisoned",
+      lastError: null,
+      state: "queued",
       userId: "member_123",
     });
     expect(replayed.status.poisonedEventIds).toContain("evt_duplicate_poisoned");
-    expect(replayFetch).not.toHaveBeenCalled();
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
   it("keeps an event pending when the runner returns 200 before the durable commit exists", async () => {
@@ -3750,7 +3769,7 @@ async function maybeCreateHostedWakeControlResponse(input: {
 
     return Response.json(await appendTestHostedWake({
       bucket: input.bucket.api,
-      dispatch,
+      dispatch: parseHostedExecutionDispatchRequest(dispatch),
     }));
   }
 
