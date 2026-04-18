@@ -27,7 +27,6 @@ describe("resolveRunnerNextWakeAt", () => {
       vi.setSystemTime(new Date("2026-04-10T00:00:05.000Z"));
 
       expect(resolveRunnerNextWakeAt({
-        nextPendingAvailableAt: null,
         preferredWakeAt: "2026-04-10T00:00:01.000Z",
       })).toBe("2026-04-10T00:00:05.000Z");
     } finally {

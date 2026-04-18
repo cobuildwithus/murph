@@ -1,6 +1,5 @@
 import type {
   HostedExecutionBundleRef,
-  HostedExecutionDispatchRequest,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionUserStatus,
@@ -40,18 +39,6 @@ export interface DurableObjectStateLike {
   storage: DurableObjectStorageLike;
 }
 
-export interface PendingDispatchMetaRecord {
-  attempts: number;
-  availableAt: string;
-  enqueuedAt: string;
-  eventId: string;
-  lastError: string | null;
-}
-
-export interface PendingDispatchRecord extends PendingDispatchMetaRecord {
-  dispatch: HostedExecutionDispatchRequest;
-}
-
 export type RunnerBundleVersion = number;
 
 export interface RunnerStateRecord {
@@ -65,7 +52,6 @@ export interface RunnerStateRecord {
   lastErrorCode: string | null;
   lastEventId: string | null;
   lastRunAt: string | null;
-  nextPendingAvailableAt: string | null;
   nextWakeAt: string | null;
   pendingEventCount: number;
   poisonedEventIds: string[];
@@ -77,22 +63,11 @@ export interface RunnerStateRecord {
 
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;
 export const CONSUMED_EVENT_EXACT_TTL_MS = 24 * 60 * 60_000;
-export const MAX_BACKPRESSURED_EVENT_IDS = 16;
-export const MAX_PENDING_EVENTS = 64;
-export const MAX_POISONED_EVENT_IDS = 16;
 export const MAX_RUN_TIMELINE_ENTRIES = 24;
 export const RETRY_MAX_DELAY_MS = 5 * 60_000;
 
 export function computeRetryDelayMs(baseDelayMs: number, attempts: number): number {
   return Math.min(RETRY_MAX_DELAY_MS, baseDelayMs * (2 ** Math.max(0, attempts - 1)));
-}
-
-export function earliestIsoTimestamp(
-  ...values: Array<string | null | undefined>
-): string | null {
-  return values
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
 }
 
 export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStatus {

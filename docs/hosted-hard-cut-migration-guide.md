@@ -18,7 +18,10 @@ What remains is narrower and deletion-oriented:
 - some onboarding receipt state still exists for invite/quota/local side-effect
   flows
 - a small set of test-only dispatch helpers still exists outside the production
-  path
+  path, but those dispatch-payload surfaces are no longer part of the
+  production hard-cut architecture
+- the checked-in R2 lifecycle config still expires `transient/dispatch-payloads/`
+  as a legacy cleanup backstop until deployed buckets are known empty
 
 ## What is already landed and should not be reopened
 
@@ -196,6 +199,8 @@ Current state:
   `dispatchWithOutcome` RPCs.
 - Local completed-status reuse and the dispatch-payload-store plumbing are gone
   from the production runner path.
+- The remaining dispatch-payload store and storage-path coverage is test-only
+  compatibility residue, not a production deploy or runtime ownership seam.
 - `dispatchWithOutcome` degrades conservatively to `queued` when canonical wake
   status is unavailable instead of reconstructing local lifecycle truth.
 

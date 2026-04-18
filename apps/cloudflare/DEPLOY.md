@@ -29,14 +29,14 @@ Before the first deploy:
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file only backstops execution-transient blobs:
+The checked-in lifecycle file backstops the production execution-transient blobs that still exist on the live runner path and keeps one legacy cleanup rule in place so older dispatch-payload blobs still age out:
 
 - `transient/execution-journal/` expires after 6 hours
-- `transient/dispatch-payloads/` expires after 6 hours
 - `transient/side-effects/` expires after 6 hours
+- `transient/dispatch-payloads/` expires after 6 hours while legacy blobs still exist
 - `transient/hosted-email/messages/` expires after 1 hour
 
-Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-secret blobs, and queue-local execution sidecars.
+Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-secret blobs, and queue-local execution sidecars. The `transient/dispatch-payloads/` rule is a cleanup-only backstop for pre-cutover residue, not part of the live production deploy contract.
 
 ## Required GitHub Environment Vars
 

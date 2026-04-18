@@ -130,9 +130,8 @@ repo/
   control-plane state, pending usage, or gateway product truth.
 - The broad Cloudflare control seam is intentionally gone. There is no generic
   worker user-env CRUD route surface, no staged dispatch payload control plane
-  or CRUD seam, and only transient queue-local encrypted dispatch envelopes
-  under `transient/dispatch-payloads/` as an internal execution detail,
-  and no Cloudflare-owned share-pack or pending-usage durable seam.
+  or CRUD seam, and no Cloudflare-owned share-pack or pending-usage durable
+  seam.
 - Narrow Cloudflare-to-web signed callbacks remain only where the execution
   runtime still needs them, such as execution-time device connect-link starts,
   canonical hosted share payload reads, and direct hosted usage recording.

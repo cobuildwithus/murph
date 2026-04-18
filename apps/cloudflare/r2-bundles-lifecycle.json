@@ -27,7 +27,7 @@
       }
     },
     {
-      "id": "delete-transient-dispatch-payloads-after-6h",
+      "id": "delete-legacy-transient-dispatch-payloads-after-6h",
       "enabled": true,
       "conditions": {
         "prefix": "transient/dispatch-payloads/"
