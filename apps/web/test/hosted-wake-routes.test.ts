@@ -9,8 +9,8 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   listHostedWakeRepairCandidates: vi.fn(),
   listHostedWakesAfterSeq: vi.fn(),
+  readHostedWakeLifecycleState: vi.fn(),
   readHostedExecutionCursor: vi.fn(),
-  readHostedExecutionWakeLifecycleState: vi.fn(),
   readOptionalJsonObject: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -42,9 +42,9 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
   requireVercelCronRequest: mocks.requireVercelCronRequest,
 }));
 
-vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
-  readHostedExecutionWakeLifecycleState:
-    mocks.readHostedExecutionWakeLifecycleState,
+vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+  readHostedWakeLifecycleState:
+    mocks.readHostedWakeLifecycleState,
 }));
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
@@ -120,7 +120,7 @@ describe("hosted wake internal routes", () => {
       userId: "member_123",
       version: "3",
     });
-    mocks.readHostedExecutionWakeLifecycleState.mockResolvedValue("queued");
+    mocks.readHostedWakeLifecycleState.mockResolvedValue("queued");
     mocks.commitHostedExecutionCursorTx.mockResolvedValue({
       committed: true,
       cursor: {
@@ -296,7 +296,7 @@ describe("hosted wake internal routes", () => {
     });
   });
 
-  it("reads hosted wake status from the canonical cursor and optional dispatch lifecycle", async () => {
+  it("reads hosted wake status from the canonical cursor and optional wake lifecycle", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       eventId: "evt_tick",
     });
@@ -317,12 +317,13 @@ describe("hosted wake internal routes", () => {
       },
       dispatchState: "queued",
       pendingWakeCount: 1,
+      wakeState: "queued",
     });
     expect(mocks.readHostedExecutionCursor).toHaveBeenCalledWith({
       prisma: expect.anything(),
       userId: "member_123",
     });
-    expect(mocks.readHostedExecutionWakeLifecycleState).toHaveBeenCalledWith({
+    expect(mocks.readHostedWakeLifecycleState).toHaveBeenCalledWith({
       eventId: "evt_tick",
       prisma: expect.anything(),
     });

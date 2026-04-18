@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 
@@ -20,6 +21,10 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
 }));
 
 import { appendHostedExecutionWakeTx } from "@/src/lib/hosted-execution/dispatch-lifecycle";
+import {
+  buildHostedAssistantCronWakeEventId,
+  materializeHostedAssistantCronWakeTx,
+} from "@/src/lib/hosted-wake/dispatch";
 
 describe("appendHostedExecutionWakeTx", () => {
   beforeEach(() => {
@@ -36,6 +41,22 @@ describe("appendHostedExecutionWakeTx", () => {
         occurredAt: "2026-04-18T00:00:00.000Z",
         payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
         seq: "1",
+        updatedAt: "2026-04-18T00:00:00.000Z",
+        userId: "member_123",
+      },
+    });
+    mocks.appendHostedCoalescingWakeTx.mockResolvedValue({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: {
+        behavior: "coalescing",
+        createdAt: "2026-04-18T00:00:00.000Z",
+        id: "wake_2",
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        payloadSchema: "murph.hosted-wake-system.v1",
+        seq: "2",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
       },
@@ -75,6 +96,57 @@ describe("appendHostedExecutionWakeTx", () => {
       payload: expect.objectContaining({
         event: expect.anything(),
       }),
+    }));
+  });
+
+  it("coalesces assistant cron wakes by user instead of defaulting to ordered appends", async () => {
+    const wake = buildHostedExecutionAssistantCronTickWake({
+      eventId: "evt_tick",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      reason: "alarm",
+      userId: "member_123",
+    });
+
+    await appendHostedExecutionWakeTx({
+      wake,
+      sourceType: "hosted_vercel_cron",
+      tx: {} as never,
+    });
+
+    expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
+      coalescingKey: "assistant.cron.tick:member_123",
+      dedupeKey: "dispatch:assistant.cron.tick:evt_tick",
+      kind: "assistant.cron.tick",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      userId: "member_123",
+    }));
+    expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
+      kind: "assistant.cron.tick",
+    }));
+  });
+
+  it("derives stable per-minute assistant cron wake ids when web materializes cron wakes", async () => {
+    const occurredAt = "2026-04-18T00:00:59.500Z";
+
+    expect(buildHostedAssistantCronWakeEventId({
+      occurredAt,
+      reason: "alarm",
+      userId: "member_123",
+    })).toBe("assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z");
+
+    await materializeHostedAssistantCronWakeTx({
+      occurredAt,
+      reason: "alarm",
+      tx: {} as never,
+      userId: "member_123",
+    });
+
+    expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
+      coalescingKey: "assistant.cron.tick:member_123",
+      dedupeKey: "dispatch:assistant.cron.tick:assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z",
+      kind: "assistant.cron.tick",
+      occurredAt,
+      userId: "member_123",
     }));
   });
 });
