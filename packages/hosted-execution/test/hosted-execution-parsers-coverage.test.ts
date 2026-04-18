@@ -275,7 +275,7 @@ describe("hosted execution parsers coverage", () => {
   });
 
   describe("event variants", () => {
-    it("parses member activation, linq, cron, and device-sync event payloads", () => {
+    it("parses member activation, cron, and device-sync event payloads", () => {
       const memberEvent = parseHostedExecutionEvent({
         firstContact: {
           channel: "telegram",
@@ -285,15 +285,6 @@ describe("hosted execution parsers coverage", () => {
         },
         kind: "member.activated",
         memberChannels: DEFAULT_MEMBER_CHANNELS,
-        userId: "user_123",
-      });
-      const linqEvent = parseHostedExecutionEvent({
-        kind: "linq.message.received",
-        linqEvent: {
-          eventId: "linq_evt_123",
-        },
-        linqMessageId: null,
-        phoneLookupKey: "phone_lookup_123",
         userId: "user_123",
       });
       const cronEvent = parseHostedExecutionEvent({
@@ -333,7 +324,6 @@ describe("hosted execution parsers coverage", () => {
       });
 
       expect(memberEvent.kind).toBe("member.activated");
-      expect(linqEvent.kind).toBe("linq.message.received");
       expect(cronEvent).toEqual({
         kind: "assistant.cron.tick",
         reason: "device-sync",
@@ -342,20 +332,24 @@ describe("hosted execution parsers coverage", () => {
       expect(deviceSyncEvent.kind).toBe("device-sync.wake");
     });
 
-    it("parses email events with a nullable identity id", () => {
-      expect(parseHostedExecutionEvent({
+    it("rejects removed provider message event payloads", () => {
+      expect(() => parseHostedExecutionEvent({
+        kind: "linq.message.received",
+        linqEvent: {
+          eventId: "linq_evt_123",
+        },
+        linqMessageId: null,
+        phoneLookupKey: "phone_lookup_123",
+        userId: "user_123",
+      })).toThrow(/Unsupported hosted execution event kind/i);
+
+      expect(() => parseHostedExecutionEvent({
         identityId: null,
         kind: "email.message.received",
         rawMessageKey: "raw_123",
         selfAddress: null,
         userId: "user_123",
-      })).toEqual({
-        identityId: null,
-        kind: "email.message.received",
-        rawMessageKey: "raw_123",
-        selfAddress: null,
-        userId: "user_123",
-      });
+      })).toThrow(/Unsupported hosted execution event kind/i);
     });
 
     it("rejects invalid event-level values", () => {

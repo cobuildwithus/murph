@@ -11,14 +11,10 @@ import type {
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
-  HostedExecutionTelegramConversationMessagePayload,
   HostedExecutionTelegramMessage,
-  HostedExecutionTelegramMessageReceivedEvent,
+  HostedExecutionTelegramConversationMessagePayload,
   HostedExecutionVaultShareAcceptedEvent,
   HostedExecutionVaultShareAcceptedWake,
-  HostedWakeEmailMessageReceivedPayload,
-  HostedWakeLinqMessageReceivedPayload,
-  HostedWakeTelegramMessageReceivedPayload,
 } from "./contracts.ts";
 
 function cloneLinqEvent(value: Record<string, unknown>): Record<string, unknown> {
@@ -96,25 +92,10 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
   };
 }
 
-export function buildHostedWakeLinqMessageReceivedPayload(input: {
-  eventId: string;
-  linqEvent: Record<string, unknown>;
-  linqMessageId?: string | null;
-  phoneLookupKey: string;
-}): HostedWakeLinqMessageReceivedPayload {
-  return {
-    channel: "linq",
-    eventId: input.eventId,
-    linqEvent: cloneLinqEvent(input.linqEvent),
-    ...(input.linqMessageId === undefined ? {} : { linqMessageId: input.linqMessageId }),
-    phoneLookupKey: input.phoneLookupKey,
-  };
-}
-
 export function buildHostedExecutionTelegramConversationMessageWake(input: {
   eventId: string;
   occurredAt: string;
-  telegramMessage: HostedExecutionTelegramMessageReceivedEvent["telegramMessage"];
+  telegramMessage: HostedExecutionTelegramMessage;
   userId: string;
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionTelegramConversationMessagePayload;
@@ -128,17 +109,6 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
     },
     occurredAt: input.occurredAt,
     userId: input.userId,
-  };
-}
-
-export function buildHostedWakeTelegramMessageReceivedPayload(input: {
-  eventId: string;
-  telegramMessage: HostedExecutionTelegramMessageReceivedEvent["telegramMessage"];
-}): HostedWakeTelegramMessageReceivedPayload {
-  return {
-    channel: "telegram",
-    eventId: input.eventId,
-    telegramMessage: cloneTelegramMessage(input.telegramMessage),
   };
 }
 
@@ -163,21 +133,6 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
     },
     occurredAt: input.occurredAt,
     userId: input.userId,
-  };
-}
-
-export function buildHostedWakeEmailMessageReceivedPayload(input: {
-  eventId: string;
-  identityId: string | null;
-  rawMessageKey: string;
-  selfAddress?: string | null;
-}): HostedWakeEmailMessageReceivedPayload {
-  return {
-    channel: "email",
-    eventId: input.eventId,
-    identityId: input.identityId,
-    rawMessageKey: input.rawMessageKey,
-    ...(input.selfAddress === undefined ? {} : { selfAddress: input.selfAddress }),
   };
 }
 

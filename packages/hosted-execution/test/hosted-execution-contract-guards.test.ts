@@ -9,19 +9,19 @@ import {
 import {
   isHostedConversationMessageWake,
   isHostedEmailConversationMessageWake,
+  isHostedExecutionWakeKind,
   isHostedLinqConversationMessageWake,
-  isHostedMessageWakeEventKind,
   isHostedSystemWake,
   isHostedTelegramConversationMessageWake,
 } from "../src/contracts.ts";
 
 describe("hosted execution wake guards", () => {
-  it("distinguishes message and system event kinds", () => {
-    expect(isHostedMessageWakeEventKind("linq.message.received")).toBe(true);
-    expect(isHostedMessageWakeEventKind("telegram.message.received")).toBe(true);
-    expect(isHostedMessageWakeEventKind("email.message.received")).toBe(true);
-    expect(isHostedMessageWakeEventKind("assistant.cron.tick")).toBe(false);
-    expect(isHostedMessageWakeEventKind("device-sync.wake")).toBe(false);
+  it("accepts canonical wake kinds only", () => {
+    expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
+    expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
+    expect(isHostedExecutionWakeKind("assistant.cron.tick")).toBe(true);
+    expect(isHostedExecutionWakeKind("linq.message.received")).toBe(false);
+    expect(isHostedExecutionWakeKind("email.message.received")).toBe(false);
   });
 
   it("narrows hosted wakes by conversation channel versus system wake", () => {

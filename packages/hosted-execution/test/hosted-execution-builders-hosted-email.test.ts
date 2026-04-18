@@ -12,9 +12,6 @@ import {
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionVaultShareAcceptedWake,
-  buildHostedWakeEmailMessageReceivedPayload,
-  buildHostedWakeLinqMessageReceivedPayload,
-  buildHostedWakeTelegramMessageReceivedPayload,
 } from "../src/builders.ts";
 import {
   readHostedEmailCapabilities,
@@ -274,78 +271,6 @@ describe("hosted execution wake builders", () => {
     });
   });
 
-  it("builds hosted wake payload helpers without mutating caller-owned message data", () => {
-    const linqEvent = {
-      delivery: "incoming",
-    };
-    const linqPayload = buildHostedWakeLinqMessageReceivedPayload({
-      eventId: "linq-payload-1",
-      linqEvent,
-      phoneLookupKey: "phone_lookup_789",
-    });
-
-    linqEvent.delivery = "mutated";
-
-    expect(linqPayload).toEqual({
-      channel: "linq",
-      eventId: "linq-payload-1",
-      linqEvent: {
-        delivery: "incoming",
-      },
-      phoneLookupKey: "phone_lookup_789",
-    });
-
-    const attachments: HostedExecutionTelegramAttachment[] = [
-      {
-        fileId: "file_payload_1",
-        fileName: "receipt.jpg",
-        kind: "photo",
-      },
-    ];
-    const telegramPayload = buildHostedWakeTelegramMessageReceivedPayload({
-      eventId: "telegram-payload-1",
-      telegramMessage: {
-        attachments,
-        messageId: "message_payload_1",
-        schema: "murph.hosted-telegram-message.v1",
-        text: "hello payload",
-        threadId: "thread_payload_1",
-      },
-    });
-
-    attachments[0]!.fileName = "mutated.jpg";
-
-    expect(telegramPayload).toEqual({
-      channel: "telegram",
-      eventId: "telegram-payload-1",
-      telegramMessage: {
-        attachments: [
-          {
-            fileId: "file_payload_1",
-            fileName: "receipt.jpg",
-            kind: "photo",
-          },
-        ],
-        messageId: "message_payload_1",
-        schema: "murph.hosted-telegram-message.v1",
-        text: "hello payload",
-        threadId: "thread_payload_1",
-      },
-    });
-
-    expect(buildHostedWakeEmailMessageReceivedPayload({
-      eventId: "email-payload-2",
-      identityId: null,
-      rawMessageKey: "raw_payload_2",
-      selfAddress: null,
-    })).toEqual({
-      channel: "email",
-      eventId: "email-payload-2",
-      identityId: null,
-      rawMessageKey: "raw_payload_2",
-      selfAddress: null,
-    });
-  });
 });
 
 describe("hosted email helpers", () => {
