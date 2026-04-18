@@ -1,13 +1,11 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { appendHostedExecutionWakeTx } from "../hosted-execution/dispatch-lifecycle";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedWebhookReceiptState,
   serializeHostedWebhookReceiptErrorState,
   serializeHostedWebhookReceiptSideEffect,
 } from "./webhook-receipt-codec";
-import { buildHostedWebhookDispatchFromPayload } from "./webhook-receipt-dispatch";
 import {
   claimHostedWebhookReceipt,
   completeHostedWebhookReceipt,
@@ -15,7 +13,6 @@ import {
   queueHostedWebhookReceiptSideEffects as queueHostedWebhookReceiptStateSideEffects,
 } from "./webhook-receipt-transitions";
 import type {
-  HostedWebhookDispatchSideEffect,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptLocalSideEffect,
   HostedWebhookReceiptPersistenceClient,
@@ -253,33 +250,6 @@ export async function updateHostedWebhookReceiptClaim(input: {
         prisma: input.prisma,
       }),
   });
-}
-
-export async function enqueueHostedWebhookDispatchSideEffects(input: {
-  dispatchSideEffects: readonly HostedWebhookDispatchSideEffect[];
-  eventId: string;
-  prisma: Prisma.TransactionClient;
-  source: string;
-}): Promise<void> {
-  for (const sideEffect of input.dispatchSideEffects) {
-    const dispatch = buildHostedWebhookDispatchFromPayload(sideEffect.payload);
-
-    if (!dispatch) {
-      throw hostedOnboardingError({
-        code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_INVALID",
-        message: `Hosted webhook dispatch side effect ${sideEffect.effectId} could not be rebuilt as an inline hosted wake dispatch.`,
-        httpStatus: 500,
-        retryable: false,
-      });
-    }
-
-    await appendHostedExecutionWakeTx({
-      dispatch,
-      sourceId: `${input.source}:${input.eventId}`,
-      sourceType: "hosted_webhook_receipt",
-      tx: input.prisma,
-    });
-  }
 }
 
 async function claimExistingHostedWebhookReceipt(

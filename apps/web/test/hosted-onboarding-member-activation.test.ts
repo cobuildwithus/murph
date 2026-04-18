@@ -106,22 +106,20 @@ describe("hosted onboarding member activation", () => {
       prisma: expect.anything(),
     });
     expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
-      dispatch: expect.objectContaining({
+      wake: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        event: expect.objectContaining({
-          firstContact: {
-            channel: "linq",
-            identityId: "hbidx:phone:v1:lookup",
-            threadId: "chat_home_123",
-            threadIsDirect: true,
-          },
-          kind: "member.activated",
-          memberChannels: {
-            email: true,
-            linq: true,
-            telegram: false,
-          },
-        }),
+        firstContact: {
+          channel: "linq",
+          identityId: "hbidx:phone:v1:lookup",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
+        },
+        kind: "member.activated",
+        memberChannels: {
+          email: true,
+          linq: true,
+          telegram: false,
+        },
       }),
       sourceId: "stripe:evt_123",
       sourceType: "hosted_stripe_event",
@@ -188,16 +186,14 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
-      dispatch: expect.objectContaining({
-        event: expect.objectContaining({
-          firstContact: {
-            channel: "linq",
-            fromPhoneNumber: "+15550100099",
-            identityId: "hbidx:phone:v1:lookup",
-            kind: "linq-materialize-home-thread",
-            toPhoneNumber: "+15550100001",
-          },
-        }),
+      wake: expect.objectContaining({
+        firstContact: {
+          channel: "linq",
+          fromPhoneNumber: "+15550100099",
+          identityId: "hbidx:phone:v1:lookup",
+          kind: "linq-materialize-home-thread",
+          toPhoneNumber: "+15550100001",
+        },
       }),
       sourceId: "stripe:evt_materialize",
       sourceType: "hosted_stripe_event",
@@ -242,20 +238,18 @@ describe("hosted onboarding member activation", () => {
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
     expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
-      dispatch: expect.objectContaining({
-        event: expect.objectContaining({
-          firstContact: {
-            channel: "telegram",
-            identityId: null,
-            threadId: "telegram_user_123",
-            threadIsDirect: true,
-          },
-          memberChannels: {
-            email: false,
-            linq: false,
-            telegram: true,
-          },
-        }),
+      wake: expect.objectContaining({
+        firstContact: {
+          channel: "telegram",
+          identityId: null,
+          threadId: "telegram_user_123",
+          threadIsDirect: true,
+        },
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: true,
+        },
       }),
       sourceId: "stripe:evt_telegram",
       sourceType: "hosted_stripe_event",
@@ -324,15 +318,13 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
-      dispatch: expect.objectContaining({
-        event: expect.objectContaining({
-          kind: "member.activated",
-          memberChannels: {
-            email: false,
-            linq: false,
-            telegram: true,
-          },
-        }),
+      wake: expect.objectContaining({
+        kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: true,
+        },
       }),
       sourceId: "stripe:evt_member_channels",
       sourceType: "hosted_stripe_event",
@@ -377,16 +369,14 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
-      dispatch: expect.objectContaining({
+      wake: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
-        event: expect.objectContaining({
-          kind: "member.activated",
-          memberChannels: {
-            email: false,
-            linq: false,
-            telegram: true,
-          },
-        }),
+        kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: true,
+        },
       }),
       sourceId: "stripe:evt_member_channels",
       sourceType: "hosted_stripe_event",

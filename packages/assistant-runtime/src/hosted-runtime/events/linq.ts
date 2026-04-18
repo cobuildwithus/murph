@@ -3,29 +3,29 @@ import {
   type LinqAttachmentDownloadDriver,
 } from "@murphai/inboxd/connectors/linq/normalize";
 import { parseLinqWebhookEvent } from "@murphai/messaging-ingress/linq-webhook";
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution";
 
 const HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 5_000;
 const HOSTED_LINQ_ATTACHMENT_CDN_HOST = "cdn.linqapp.com";
 
 export async function buildHostedLinqCapture(
-  dispatch: HostedExecutionDispatchRequest & {
-    event: Extract<HostedExecutionDispatchRequest["event"], { kind: "linq.message.received" }>;
+  wake: HostedExecutionConversationMessageWake & {
+    message: Extract<HostedExecutionConversationMessageWake["message"], { channel: "linq" }>;
   },
 ) {
-  const event = parseLinqWebhookEvent(JSON.stringify(dispatch.event.linqEvent));
+  const event = parseLinqWebhookEvent(JSON.stringify(wake.message.linqEvent));
   const capture = await normalizeLinqWebhookEvent({
     attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
-    defaultAccountId: dispatch.event.phoneLookupKey,
+    defaultAccountId: wake.message.phoneLookupKey,
     downloadDriver: createHostedLinqAttachmentDownloadDriver(),
     event,
   });
   const hostedCapture = {
     ...capture,
-    accountId: dispatch.event.phoneLookupKey,
+    accountId: wake.message.phoneLookupKey,
     externalId: resolveHostedLinqCaptureExternalId({
       fallbackExternalId: capture.externalId,
-      linqMessageId: dispatch.event.linqMessageId ?? null,
+      linqMessageId: wake.message.linqMessageId ?? null,
     }),
   };
 

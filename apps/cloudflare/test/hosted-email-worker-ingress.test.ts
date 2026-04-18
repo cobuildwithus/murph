@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedWakeDispatchInWeb: vi.fn(),
+  appendHostedWakeInWeb: vi.fn(),
   dispatch: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
   readHostedExecutionEnvironment: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("../src/web-control-plane.ts", async () => {
 
   return {
     ...actual,
-    appendHostedWakeDispatchInWeb: mocks.appendHostedWakeDispatchInWeb,
+    appendHostedWakeInWeb: mocks.appendHostedWakeInWeb,
     fetchHostedExecutionWebControlPlaneResponse: mocks.fetchHostedExecutionWebControlPlaneResponse,
   };
 });
@@ -72,18 +72,18 @@ describe("hosted email worker ingress", () => {
       rootKey: TEST_KEY,
       rootKeyId: "v1",
     });
-    mocks.appendHostedWakeDispatchInWeb.mockResolvedValue({
+    mocks.appendHostedWakeInWeb.mockResolvedValue({
       duplicate: false,
       inserted: true,
       updatedExisting: false,
       wake: {
         behavior: "ordered",
         createdAt: "2026-04-17T00:00:00.000Z",
-        dedupeKey: "dispatch:email.message.received:email:raw_123",
+        dedupeKey: "dispatch:conversation.message:email:raw_123",
         id: "wake_123",
-        kind: "email.message.received",
+        kind: "conversation.message",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        payloadSchema: "murph.hosted-wake-conversation-message.v1",
         quarantineCode: null,
         quarantinedAt: null,
         seq: "24",
@@ -168,21 +168,22 @@ describe("hosted email worker ingress", () => {
       to: replyAliasAddress,
     }, createWorkerEnv(bucket));
 
-    expect(mocks.appendHostedWakeDispatchInWeb).toHaveBeenCalledTimes(1);
-    const [appendInput] = mocks.appendHostedWakeDispatchInWeb.mock.calls[0] ?? [];
-    expect(appendInput.dispatch).toMatchObject({
-      event: {
+    expect(mocks.appendHostedWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput.wake).toMatchObject({
+      kind: "conversation.message",
+      userId: "user_123",
+      message: {
+        channel: "email",
         identityId: "assistant@mail.example.test",
-        kind: "email.message.received",
         selfAddress: replyAliasAddress,
-        userId: "user_123",
       },
     });
     expect(mocks.wakeHostedWakes).toHaveBeenCalledWith({
       targetSeqHint: "24",
     });
 
-    const rawMessageKey = appendInput?.dispatch?.event?.rawMessageKey;
+    const rawMessageKey = appendInput?.wake?.message?.rawMessageKey;
     expect(typeof rawMessageKey).toBe("string");
     await expect(readHostedEmailRawMessage({
       bucket,
@@ -220,13 +221,15 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket));
 
-    expect(mocks.appendHostedWakeDispatchInWeb).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedWakeDispatchInWeb).toHaveBeenCalledWith(expect.objectContaining({
-      dispatch: expect.objectContaining({
-        event: expect.objectContaining({
+    expect(mocks.appendHostedWakeInWeb).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      wake: expect.objectContaining({
+        kind: "conversation.message",
+        userId: "user_456",
+        message: expect.objectContaining({
+          channel: "email",
           identityId: "assistant@mail.example.test",
           selfAddress: "assistant@mail.example.test",
-          userId: "user_456",
         }),
       }),
     }));

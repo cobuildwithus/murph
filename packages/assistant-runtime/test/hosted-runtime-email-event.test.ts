@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionEmailMessageReceivedDispatch,
-  type HostedExecutionDispatchRequest,
+  buildHostedExecutionWakeFromDispatch,
+  isHostedEmailConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
@@ -33,10 +34,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import { buildHostedEmailCapture } from "../src/hosted-runtime/events/email.ts";
 
-type HostedEmailDispatch = HostedExecutionDispatchRequest & {
-  event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
-}
-
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -49,14 +46,15 @@ describe("buildHostedEmailCapture", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
       rawMessageKey: "raw_123",
       userId: "member_123",
-    }) as HostedEmailDispatch;
-    if (dispatch.event.kind !== "email.message.received") {
-      throw new Error("Expected email message dispatch.");
+    });
+    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
+    if (!isHostedEmailConversationMessageWake(wake)) {
+      throw new Error("Expected email conversation wake.");
     }
 
     await expect(
       buildHostedEmailCapture(
-        { ...dispatch, event: dispatch.event },
+        wake,
         {
           async deletePreparedAssistantDelivery() {},
           async readRawEmailMessage() {
@@ -85,9 +83,10 @@ describe("buildHostedEmailCapture", () => {
       rawMessageKey: "raw_123",
       selfAddress: "user@example.com",
       userId: "member_123",
-    }) as HostedEmailDispatch;
-    if (dispatch.event.kind !== "email.message.received") {
-      throw new Error("Expected email message dispatch.");
+    });
+    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
+    if (!isHostedEmailConversationMessageWake(wake)) {
+      throw new Error("Expected email conversation wake.");
     }
     const rawMessage = Uint8Array.from([1, 2, 3, 4]);
     const parsedMessage = {
@@ -104,7 +103,7 @@ describe("buildHostedEmailCapture", () => {
     mocks.normalizeParsedEmailMessage.mockResolvedValue(capture);
 
     await expect(buildHostedEmailCapture(
-      { ...dispatch, event: dispatch.event },
+      wake,
       {
         async deletePreparedAssistantDelivery() {},
         async readRawEmailMessage() {

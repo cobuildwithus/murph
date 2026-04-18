@@ -514,7 +514,7 @@ describe("executeHostedDispatchForCommit", () => {
     );
   });
 
-  it("skips the generic maintenance loop for ordinary hosted message wakes", async () => {
+  it("skips the generic maintenance loop when dispatch handlers do not require it", async () => {
     mocks.executeHostedDispatchEvent.mockResolvedValue({
       bootstrapResult: null,
       maintenanceRequired: false,
@@ -589,7 +589,7 @@ describe("executeHostedDispatchForCommit", () => {
     );
   });
 
-  it("preserves a pending assistant wake when message wakes skip generic maintenance", async () => {
+  it("preserves a pending assistant wake when dispatch handlers skip generic maintenance", async () => {
     vi.useFakeTimers();
 
     try {

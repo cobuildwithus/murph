@@ -1,6 +1,6 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionDispatchRequest,
+  type HostedExecutionWake,
   type HostedWakeAppendRequest,
   type HostedWakeAppendResponse,
   type HostedWakeCommitRequest,
@@ -101,16 +101,16 @@ const HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH = "/api/internal/hosted-wake/quaran
 const HOSTED_WEB_HOSTED_WAKE_STATUS_PATH = "/api/internal/hosted-wake/status";
 const HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH = "/api/internal/hosted-wake/unseen";
 
-export async function appendHostedWakeDispatchInWeb(input: {
+export async function appendHostedWakeInWeb(input: {
   baseUrl: string;
   boundUserId: string;
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
-  dispatch: HostedExecutionDispatchRequest;
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
+  wake: HostedExecutionWake;
 }): Promise<HostedWakeAppendResponse> {
   const body = JSON.stringify({
-    dispatch: input.dispatch,
+    wake: input.wake,
   } satisfies HostedWakeAppendRequest);
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: input.baseUrl,

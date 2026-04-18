@@ -6,7 +6,7 @@ import {
 } from "@murphai/inboxd/connectors/email/parsed";
 import {
   resolveHostedEmailSelfAddresses,
-  type HostedExecutionDispatchRequest,
+  type HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 import type {
@@ -14,28 +14,28 @@ import type {
 } from "../platform.ts";
 
 export async function buildHostedEmailCapture(
-  dispatch: HostedExecutionDispatchRequest & {
-    event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
+  wake: HostedExecutionConversationMessageWake & {
+    message: Extract<HostedExecutionConversationMessageWake["message"], { channel: "email" }>;
   },
   effectsPort: HostedRuntimeEffectsPort,
 ): Promise<Awaited<ReturnType<typeof normalizeParsedEmailMessage>>> {
-  const bytes = await effectsPort.readRawEmailMessage(dispatch.event.rawMessageKey);
+  const bytes = await effectsPort.readRawEmailMessage(wake.message.rawMessageKey);
 
   if (!bytes) {
     throw new Error(
-      `Hosted email message fetch failed for ${dispatch.event.userId}/${dispatch.event.rawMessageKey}.`,
+      `Hosted email message fetch failed for ${wake.userId}/${wake.message.rawMessageKey}.`,
     );
   }
 
   const parsedMessage = parseRawEmailMessage(bytes);
 
   return normalizeParsedEmailMessage({
-    accountAddress: dispatch.event.identityId,
-    accountId: dispatch.event.identityId,
+    accountAddress: wake.message.identityId,
+    accountId: wake.message.identityId,
     message: parsedMessage,
     selfAddresses: resolveHostedEmailSelfAddresses({
-      extra: [dispatch.event.selfAddress],
-      senderIdentity: dispatch.event.identityId,
+      extra: [wake.message.selfAddress],
+      senderIdentity: wake.message.identityId,
     }),
     source: "email",
     threadTarget: null,

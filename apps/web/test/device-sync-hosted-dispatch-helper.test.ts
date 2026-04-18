@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHostedDeviceSyncWakeDispatchFromSignal } from "@/src/lib/device-sync/hosted-dispatch";
+import { buildHostedDeviceSyncWakeFromSignal } from "@/src/lib/device-sync/hosted-dispatch";
 
-describe("buildHostedDeviceSyncWakeDispatchFromSignal", () => {
+describe("buildHostedDeviceSyncWakeFromSignal", () => {
   it("parses a nested wake hint through the device-sync owner parser", () => {
-    const dispatch = buildHostedDeviceSyncWakeDispatchFromSignal({
+    const wake = buildHostedDeviceSyncWakeFromSignal({
       connectionId: "conn_123",
       eventId: "evt_123",
       occurredAt: "2026-04-09T00:00:31Z",
@@ -38,47 +38,45 @@ describe("buildHostedDeviceSyncWakeDispatchFromSignal", () => {
       userId: "user_123",
     });
 
-    expect(dispatch).toMatchObject({
-      event: {
-        connectionId: "conn_123",
-        hint: {
-          eventType: "webhook",
-          jobs: [
-            {
-              availableAt: "2026-04-09T00:00:00Z",
-              dedupeKey: null,
-              kind: "resource",
-              maxAttempts: 5,
-              payload: {
-                resourceId: "sleep_123",
-              },
-              priority: 4,
+    expect(wake).toMatchObject({
+      connectionId: "conn_123",
+      hint: {
+        eventType: "webhook",
+        jobs: [
+          {
+            availableAt: "2026-04-09T00:00:00Z",
+            dedupeKey: null,
+            kind: "resource",
+            maxAttempts: 5,
+            payload: {
+              resourceId: "sleep_123",
             },
-          ],
-          nextReconcileAt: "2026-04-09T01:00:00Z",
-          occurredAt: "2026-04-09T00:00:30Z",
-          reason: "webhook_hint",
-          resourceCategory: "sleep",
-          revokeWarning: {
-            code: "TOKEN_REVOKED",
-            message: "Token was revoked.",
+            priority: 4,
           },
-          scopes: ["sleep"],
-          traceId: "trace_123",
-        },
-        kind: "device-sync.wake",
-        provider: "oura",
+        ],
+        nextReconcileAt: "2026-04-09T01:00:00Z",
+        occurredAt: "2026-04-09T00:00:30Z",
         reason: "webhook_hint",
-        userId: "user_123",
+        resourceCategory: "sleep",
+        revokeWarning: {
+          code: "TOKEN_REVOKED",
+          message: "Token was revoked.",
+        },
+        scopes: ["sleep"],
+        traceId: "trace_123",
       },
       eventId: "evt_123",
+      kind: "device-sync.wake",
       occurredAt: "2026-04-09T00:00:31Z",
+      provider: "oura",
+      reason: "webhook_hint",
+      userId: "user_123",
     });
   });
 
   it("fails closed when the nested wake hint payload is invalid", () => {
     expect(() =>
-      buildHostedDeviceSyncWakeDispatchFromSignal({
+      buildHostedDeviceSyncWakeFromSignal({
         connectionId: "conn_123",
         eventId: "evt_123",
         occurredAt: "2026-04-09T00:00:31Z",

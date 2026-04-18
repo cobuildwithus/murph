@@ -1,11 +1,18 @@
 /**
- * Owns hosted runner Durable Object schema setup so the queue store can stay
- * focused on queue transitions rather than Durable Object DDL details.
+ * Owns hosted runner Durable Object schema setup so the runner state store can
+ * stay focused on thin lease/runtime transitions rather than Durable Object
+ * DDL details.
  */
 
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
 export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void {
+  // Hard cut: web owns wake lifecycle truth, so the runner drops the old local
+  // queue lifecycle tables instead of migrating them forward.
+  sql.exec("DROP TABLE IF EXISTS pending_events");
+  sql.exec("DROP TABLE IF EXISTS consumed_events");
+  sql.exec("DROP TABLE IF EXISTS backpressured_events");
+  sql.exec("DROP TABLE IF EXISTS poisoned_events");
   sql.exec(`
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -30,43 +37,6 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       bundle_ref_json TEXT,
       bundle_version INTEGER NOT NULL DEFAULT 0
     )
-  `);
-  ensurePendingEventsTable(sql);
-  sql.exec(`
-    CREATE INDEX IF NOT EXISTS pending_events_available_at_idx
-    ON pending_events (available_at, enqueued_at, event_id)
-  `);
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS consumed_events (
-      event_id TEXT PRIMARY KEY,
-      recorded_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL
-    )
-  `);
-  sql.exec(`
-    CREATE INDEX IF NOT EXISTS consumed_events_expires_at_idx
-    ON consumed_events (expires_at)
-  `);
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS backpressured_events (
-      event_id TEXT PRIMARY KEY,
-      rejected_at TEXT NOT NULL
-    )
-  `);
-  sql.exec(`
-    CREATE INDEX IF NOT EXISTS backpressured_events_rejected_at_idx
-    ON backpressured_events (rejected_at, event_id)
-  `);
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS poisoned_events (
-      event_id TEXT PRIMARY KEY,
-      poisoned_at TEXT NOT NULL,
-      last_error_code TEXT NOT NULL
-    )
-  `);
-  sql.exec(`
-    CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
-    ON poisoned_events (poisoned_at, event_id)
   `);
   ensureRunnerMetaColumns(sql);
   assertRunnerQueueTableColumns(sql, "runner_meta", {
@@ -95,40 +65,6 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       "slot",
       "bundle_ref_json",
       "bundle_version",
-    ],
-  });
-  assertRunnerQueueTableColumns(sql, "pending_events", {
-    forbiddenColumns: [
-      "dispatch_json",
-      "last_error",
-    ],
-    requiredColumns: [
-      "event_id",
-      "payload_key",
-      "attempts",
-      "available_at",
-      "enqueued_at",
-      "last_error_code",
-    ],
-  });
-  assertRunnerQueueTableColumns(sql, "consumed_events", {
-    requiredColumns: [
-      "event_id",
-      "recorded_at",
-      "expires_at",
-    ],
-  });
-  assertRunnerQueueTableColumns(sql, "backpressured_events", {
-    requiredColumns: [
-      "event_id",
-      "rejected_at",
-    ],
-  });
-  assertRunnerQueueTableColumns(sql, "poisoned_events", {
-    requiredColumns: [
-      "event_id",
-      "poisoned_at",
-      "last_error_code",
     ],
   });
 }
@@ -169,23 +105,6 @@ function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
 
     sql.exec(addition.ddl);
   }
-}
-
-function ensurePendingEventsTable(sql: DurableObjectSqlStorageLike): void {
-  if (readRunnerQueueTableColumns(sql, "pending_events").length > 0) {
-    return;
-  }
-
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS pending_events (
-      event_id TEXT PRIMARY KEY,
-      payload_key TEXT NOT NULL,
-      attempts INTEGER NOT NULL,
-      available_at TEXT NOT NULL,
-      enqueued_at TEXT NOT NULL,
-      last_error_code TEXT
-    )
-  `);
 }
 
 function readRunnerQueueTableColumns(

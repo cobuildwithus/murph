@@ -1,5 +1,5 @@
 import {
-  parseHostedExecutionDispatchRequest,
+  parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 
 import {
@@ -15,15 +15,19 @@ import {
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const body = await readOptionalJsonObject(request);
-  const dispatch = parseHostedExecutionDispatchRequest(body.dispatch);
+  const wake = body.wake !== undefined
+    ? parseHostedExecutionWake(body.wake)
+    : (() => {
+        throw new TypeError("Hosted wake append request must include wake.");
+      })();
 
-  if (dispatch.event.userId !== userId) {
-    throw new TypeError("Hosted wake append dispatch userId must match the bound callback user.");
+  if (wake.userId !== userId) {
+    throw new TypeError("Hosted wake append wake userId must match the bound callback user.");
   }
 
   const response = await getPrisma().$transaction((tx) => {
     return appendHostedExecutionWakePayloadTx({
-      dispatch,
+      wake,
       tx,
     });
   });

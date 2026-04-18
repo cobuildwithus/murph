@@ -1,11 +1,6 @@
 export { readHostedWebhookReceiptState } from "./hosted-onboarding/webhook-receipt-codec";
 export {
-  buildHostedWebhookDispatchFromPayload,
-  readHostedWebhookReceiptDispatchByEventId,
-} from "./hosted-onboarding/webhook-receipt-dispatch";
-export {
   buildHostedWebhookReceiptLeaseWriteData,
-  enqueueHostedWebhookDispatchSideEffects,
   markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,
@@ -13,7 +8,6 @@ export {
   updateHostedWebhookReceiptClaim,
 } from "./hosted-onboarding/webhook-receipt-store";
 export type {
-  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookPlan,
@@ -26,9 +20,7 @@ export type {
   HostedWebhookSideEffectResult,
 } from "./hosted-onboarding/webhook-receipt-types";
 export {
-  createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   createHostedWebhookRevnetIssuanceSideEffect,
   HostedWebhookReceiptSideEffectDrainError,
 } from "./hosted-onboarding/webhook-receipt-types";
-export { runHostedWebhookWithReceipt } from "./hosted-onboarding/webhook-receipts";

@@ -7,6 +7,7 @@ import {
   readFood,
 } from "@murphai/core";
 import type { SharePack } from "@murphai/contracts";
+import { buildHostedExecutionVaultShareAcceptedWake } from "@murphai/hosted-execution";
 
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 import { handleHostedShareAcceptedDispatch } from "../src/hosted-runtime/events/share.ts";
@@ -44,16 +45,15 @@ describe("handleHostedShareAcceptedDispatch", () => {
 
       const pack = buildSharePack();
       const result = await handleHostedShareAcceptedDispatch({
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              ownerUserId: "member_sender",
-              shareId: "hshare_123",
-            },
-            userId: "member_123",
+        dispatch: buildHostedExecutionVaultShareAcceptedWake({
+          eventId: "evt_share_accepted",
+          memberId: "member_123",
+          occurredAt: "2026-04-06T00:00:00.000Z",
+          share: {
+            ownerUserId: "member_sender",
+            shareId: "hshare_123",
           },
-        },
+        }),
         sharePack: {
           ownerUserId: "member_sender",
           pack,
@@ -91,16 +91,15 @@ describe("handleHostedShareAcceptedDispatch", () => {
 
     await assert.rejects(
       handleHostedShareAcceptedDispatch({
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              ownerUserId: "member_sender",
-              shareId: "hshare_123",
-            },
-            userId: "member_123",
+        dispatch: buildHostedExecutionVaultShareAcceptedWake({
+          eventId: "evt_share_owner_mismatch",
+          memberId: "member_123",
+          occurredAt: "2026-04-06T00:00:00.000Z",
+          share: {
+            ownerUserId: "member_sender",
+            shareId: "hshare_123",
           },
-        },
+        }),
         sharePack: {
           ownerUserId: "member_other",
           pack,
@@ -117,16 +116,15 @@ describe("handleHostedShareAcceptedDispatch", () => {
 
     await assert.rejects(
       handleHostedShareAcceptedDispatch({
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              ownerUserId: "member_sender",
-              shareId: "hshare_123",
-            },
-            userId: "member_123",
+        dispatch: buildHostedExecutionVaultShareAcceptedWake({
+          eventId: "evt_share_id_mismatch",
+          memberId: "member_123",
+          occurredAt: "2026-04-06T00:00:00.000Z",
+          share: {
+            ownerUserId: "member_sender",
+            shareId: "hshare_123",
           },
-        },
+        }),
         sharePack: {
           ownerUserId: "member_sender",
           pack,

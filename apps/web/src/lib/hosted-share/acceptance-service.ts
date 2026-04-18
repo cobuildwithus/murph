@@ -14,8 +14,8 @@ import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import {
-  buildHostedShareAcceptanceDispatch,
   buildHostedShareAcceptanceEventId,
+  buildHostedShareAcceptanceWake,
   hashHostedShareCode,
   normalizeOptionalString,
   reconcileHostedShareAcceptanceLifecycle,
@@ -142,7 +142,7 @@ export async function acceptHostedShareLink(input: {
         });
 
     await appendHostedExecutionWakeTx({
-      dispatch: buildHostedShareAcceptanceDispatch({
+      wake: buildHostedShareAcceptanceWake({
         acceptedAt: acceptedAt.toISOString(),
         eventId,
         memberId,

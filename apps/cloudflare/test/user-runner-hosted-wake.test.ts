@@ -2,6 +2,7 @@ import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 import {
   HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  buildHostedExecutionWakeFromDispatch,
   buildHostedWakeLinqMessageReceivedPayload,
 } from "@murphai/hosted-execution";
 
@@ -358,11 +359,13 @@ describe("HostedUserRunner hosted wake drain", () => {
       dispatches: [
         {
           dispatch: createDispatch("evt_batch_first"),
+          wake: buildHostedExecutionWakeFromDispatch(createDispatch("evt_batch_first")),
           seq: 1n,
           state: "completed",
         },
         {
           dispatch: createDispatch("evt_batch_second"),
+          wake: buildHostedExecutionWakeFromDispatch(createDispatch("evt_batch_second")),
           seq: 2n,
           state: "completed",
         },
@@ -567,16 +570,31 @@ function readDispatchEventIdsFromSpy(
     if (
       !input
       || typeof input !== "object"
-      || !("dispatch" in input)
-      || !input.dispatch
-      || typeof input.dispatch !== "object"
-      || !("eventId" in input.dispatch)
-      || typeof input.dispatch.eventId !== "string"
     ) {
-      throw new TypeError("Expected a dispatch payload with an eventId.");
+      throw new TypeError("Expected a wake or dispatch payload with an eventId.");
     }
 
-    return input.dispatch.eventId;
+    if (
+      "wake" in input
+      && input.wake
+      && typeof input.wake === "object"
+      && "eventId" in input.wake
+      && typeof input.wake.eventId === "string"
+    ) {
+      return input.wake.eventId;
+    }
+
+    if (
+      "dispatch" in input
+      && input.dispatch
+      && typeof input.dispatch === "object"
+      && "eventId" in input.dispatch
+      && typeof input.dispatch.eventId === "string"
+    ) {
+      return input.dispatch.eventId;
+    }
+
+    throw new TypeError("Expected a wake or dispatch payload with an eventId.");
   });
 }
 

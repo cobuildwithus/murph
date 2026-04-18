@@ -6,12 +6,7 @@ import {
   sanitizeHostedOnboardingPersistedErrorMessage,
   sanitizeHostedOnboardingPersistedErrorName,
 } from "./http";
-import {
-  readHostedWebhookStoredDispatchSideEffectPayload,
-  requireHostedWebhookStoredDispatchSideEffectPayload,
-} from "./webhook-dispatch-payload";
 import type {
-  HostedWebhookDispatchSideEffect,
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookReceiptErrorState,
   HostedWebhookReceiptState,
@@ -149,25 +144,6 @@ function readHostedWebhookReceiptSideEffect(
   const status = readHostedWebhookSideEffectStatus(record.status);
 
   switch (record.kind) {
-    case "hosted_execution_dispatch": {
-      const payload = readHostedWebhookStoredDispatchSideEffectPayload(record.payloadJson);
-
-      if (!payload) {
-        throw buildHostedWebhookSideEffectPayloadError(record.effectId);
-      }
-
-      return {
-        attemptCount,
-        effectId: record.effectId,
-        kind: "hosted_execution_dispatch",
-        lastAttemptAt,
-        lastError,
-        payload,
-        result: readHostedWebhookDispatchSideEffectResult(record.resultJson, sentAt),
-        sentAt,
-        status,
-      } satisfies HostedWebhookDispatchSideEffect;
-    }
     case "linq_message_send": {
       const payload = readHostedWebhookLinqMessagePayload(record.payloadJson);
 
@@ -215,11 +191,6 @@ function serializeHostedWebhookSideEffectPayload(
   effect: HostedWebhookSideEffect,
 ): Prisma.InputJsonValue {
   switch (effect.kind) {
-    case "hosted_execution_dispatch":
-      return requireHostedWebhookStoredDispatchSideEffectPayload(
-        effect.payload,
-        effect.effectId,
-      ) as unknown as Prisma.InputJsonValue;
     case "linq_message_send":
       return serializeHostedWebhookLinqMessagePayload(effect.payload);
     case "revnet_invoice_issue":
@@ -264,19 +235,6 @@ function serializeHostedWebhookSideEffectResult(
   return effect.result
     ? effect.result as unknown as Prisma.InputJsonValue
     : Prisma.DbNull;
-}
-
-function readHostedWebhookDispatchSideEffectResult(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null,
-  sentAt: string | null,
-): HostedWebhookDispatchSideEffect["result"] {
-  const record = readHostedWebhookJsonObject(value);
-
-  if (record?.dispatched === true || sentAt) {
-    return { dispatched: true };
-  }
-
-  return null;
 }
 
 function readHostedWebhookLinqMessagePayload(

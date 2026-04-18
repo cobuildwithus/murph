@@ -24,9 +24,9 @@ import {
   type WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
-import { buildHostedExecutionEmailMessageReceivedDispatch } from "@murphai/hosted-execution";
+import { buildHostedExecutionEmailConversationMessageWake } from "@murphai/hosted-execution";
 import {
-  appendHostedWakeDispatchInWeb,
+  appendHostedWakeInWeb,
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
@@ -124,7 +124,7 @@ export async function handleHostedEmailIngress(
     userId: route.userId,
   });
   const eventId = `email:${rawMessageKey}`;
-  const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+  const wake = buildHostedExecutionEmailConversationMessageWake({
     eventId,
     identityId: route.identityId,
     occurredAt: new Date().toISOString(),
@@ -133,11 +133,11 @@ export async function handleHostedEmailIngress(
     userId: route.userId,
   });
 
-  const append = await appendHostedWakeDispatchInWeb({
+  const append = await appendHostedWakeInWeb({
     baseUrl: environment.hostedWebBaseUrl,
     boundUserId: route.userId,
     callbackSigning: environment.webCallbackSigning,
-    dispatch,
+    wake,
     fetchImpl: fetch,
     timeoutMs: environment.runnerTimeoutMs,
   });
