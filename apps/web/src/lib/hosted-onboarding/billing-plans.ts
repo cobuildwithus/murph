@@ -29,13 +29,13 @@ export interface HostedBillingPlanPresentation {
 
 const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_annual: {
-    badge: "Save $31",
+    badge: "Save $30",
     code: "launch_annual",
-    description: "$12.42/month billed yearly. Save $31 each year.",
+    description: "$12.50/month billed yearly. Save $30 each year.",
     displayName: "Annual",
     interval: "year",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
-    recurringAmountUsdCents: 14_900,
+    recurringAmountUsdCents: 15_000,
   },
   launch_monthly: {
     badge: null,
