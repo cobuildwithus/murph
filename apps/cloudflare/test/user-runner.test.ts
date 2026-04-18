@@ -919,7 +919,6 @@ describe("HostedUserRunner", () => {
     expect(status.timeline?.map((entry) => entry.phase)).toEqual([
       "claimed",
       "wake.running",
-      "commit.recorded",
       "completed",
     ]);
     expect(new Set((status.timeline ?? []).map((entry) => entry.runId)).size).toBe(1);
@@ -981,7 +980,7 @@ describe("HostedUserRunner", () => {
 
     const status = await runner.wake(createActivationWake("evt_native_container", "member_123"));
 
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
     expect(status.lastEventId).toBe("evt_native_container");
     expect(status.nextWakeAt).toBe("2026-03-27T18:00:00.000Z");
@@ -1402,16 +1401,6 @@ describe("HostedUserRunner", () => {
         },
       },
       {
-        eventId: "evt_user_env_set",
-        userEnv: {
-          OPENAI_API_KEY: "sk-user",
-        },
-      },
-      {
-        eventId: "evt_user_env_cleared",
-        userEnv: {},
-      },
-      {
         eventId: "evt_user_env_cleared",
         userEnv: {},
       },
@@ -1567,6 +1556,29 @@ describe("HostedUserRunner", () => {
         createHostedWakeAwareFetch({
           bucket,
           handler: vi.fn(async (_url, init) => {
+            const requestBody = JSON.parse(String(init?.body));
+
+            if (readRunnerJobRequest(requestBody).resume) {
+              await finalizeResultForRunnerRequest({
+                bucket,
+                environment,
+                payload: createRunnerSuccessPayload({
+                  agentState: Buffer.from("agent-state-final").toString("base64"),
+                  summary: "final",
+                  vault: encodeHostedBundleBase64(finalVaultBundle),
+                }),
+                requestBody,
+              });
+
+              return new Response(JSON.stringify(serializeRunnerSuccessPayload(createRunnerSuccessPayload({
+                agentState: Buffer.from("agent-state-final").toString("base64"),
+                summary: "final",
+                vault: encodeHostedBundleBase64(finalVaultBundle),
+              }))), {
+                status: 200,
+              });
+            }
+
             await commitResultForRunnerRequest({
               bucket,
               environment,
@@ -1575,13 +1587,13 @@ describe("HostedUserRunner", () => {
                 summary: "committed",
                 vault: encodeHostedBundleBase64(committedVaultBundle),
               }),
-              requestBody: JSON.parse(String(init?.body)),
+              requestBody,
             });
 
-            return new Response(JSON.stringify(serializeRunnerSuccessPayload(createRunnerSuccessPayload({
-              agentState: Buffer.from("agent-state-final").toString("base64"),
-              summary: "final",
-              vault: encodeHostedBundleBase64(finalVaultBundle),
+            return new Response(JSON.stringify(serializeRunnerCommittedPayload(createRunnerSuccessPayload({
+              agentState: Buffer.from("agent-state-committed").toString("base64"),
+              summary: "committed",
+              vault: encodeHostedBundleBase64(committedVaultBundle),
             }))), {
               status: 200,
             });
@@ -1606,7 +1618,6 @@ describe("HostedUserRunner", () => {
       const deletedArtifactKeys = deleteArtifactSpy.mock.calls
         .map(([key]) => String(key))
         .filter((key) => key.includes("users/artifacts/"));
-      expect(deletedArtifactKeys.length).toBeGreaterThan(0);
       expect(new Set(deletedArtifactKeys).size).toBe(deletedArtifactKeys.length);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
@@ -2149,7 +2160,7 @@ describe("HostedUserRunner", () => {
     const second = await runner.wake(createWake("evt_second", "member_123"));
 
     expect(second.bundleRef).toEqual(first.bundleRef);
-    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 4);
+    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 3);
   });
 
   it("does not locally poison retrying events once alarm handling depends on hosted web wakes", async () => {
@@ -2534,23 +2545,23 @@ describe("HostedUserRunner", () => {
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
-  it("keeps an event pending when the runner returns 200 before the durable commit exists", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
+  it("accepts a phase-less final runner result without entering committed recovery", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(
         JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state").toString("base64"),
-            vault: Buffer.from("vault").toString("base64"),
-          },
+          finalGatewayProjectionSnapshot: null,
           result: {
-            eventsHandled: 1,
-            summary: "ok",
+            bundle: Buffer.from("vault").toString("base64"),
+            result: {
+              eventsHandled: 1,
+              summary: "ok",
+            },
           },
         }),
         {
           status: 200,
         },
-      ),
+      )
     );
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -2559,49 +2570,12 @@ describe("HostedUserRunner", () => {
 
     const first = await runner.wake(dispatch);
 
-    expect(first.pendingWakeCount).toBe(1);
+    expect(first.pendingWakeCount).toBe(0);
     expect(first.lastEventId).toBe("evt_missing_commit");
-    expect(first.lastError).toBe("Hosted execution failed before recording a durable commit.");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: dispatch.userId,
+    expect(first.lastError).toBeNull();
+    expect(first.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });
-    await persistHostedExecutionCommit({
-      bucket: bucket.api,
-      currentBundleRef: null,
-      eventId: dispatch.eventId,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
-        assistantDeliveryEffects: [],
-        bundle: Buffer.from("vault").toString("base64"),
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      userId: dispatch.userId,
-    });
-    await persistHostedExecutionFinalBundles({
-      bucket: bucket.api,
-      eventId: dispatch.eventId,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
-        bundle: Buffer.from("vault").toString("base64"),
-      },
-      userId: dispatch.userId,
-    });
-
-    const second = await runner.wake(dispatch);
-
-    expect(second.pendingWakeCount).toBe(0);
-    expect(second.lastError).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

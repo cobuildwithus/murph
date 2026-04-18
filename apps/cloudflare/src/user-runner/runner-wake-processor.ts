@@ -65,6 +65,11 @@ export interface RunnerUserStores {
   userId: string;
 }
 
+export interface RunnerWakeExecutionResult {
+  postCursorAction: "cleanup-only" | "finalize-committed";
+  state: HostedWakeLifecycleState;
+}
+
 interface RunnerWakeTransitionInput<T> {
   eventId: string;
   gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
@@ -95,7 +100,7 @@ export class RunnerWakeProcessor {
     options: {
       holdLeaseUntilCleanup?: boolean;
     } = {},
-  ): Promise<HostedWakeLifecycleState> {
+  ): Promise<RunnerWakeExecutionResult> {
     const userId = wake.userId;
     const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
     const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
@@ -118,7 +123,10 @@ export class RunnerWakeProcessor {
         run: null,
         userId,
       });
-      return "completed";
+      return {
+        postCursorAction: "cleanup-only",
+        state: "completed",
+      };
     }
 
     const activeLease = await this.readRecentActiveRunLease();
@@ -136,7 +144,10 @@ export class RunnerWakeProcessor {
         run: null,
         userId,
       });
-      return "backpressured";
+      return {
+        postCursorAction: "cleanup-only",
+        state: "backpressured",
+      };
     }
 
     const run = this.resolveRunContext(
@@ -189,44 +200,73 @@ export class RunnerWakeProcessor {
           }
           : null,
       );
-      const durableCommit = runnerResult.phase === "committed"
-        ? await this.persistReturnedRunnerCommit({
+
+      if (runnerResult.phase === "committed") {
+        const durableCommit = await this.persistReturnedRunnerCommit({
           assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
           currentBundleRef: (await this.dependencies.stateStore.readBundleMetaState()).bundleRef,
           wake,
           gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
           result: runnerResult.result,
           run,
-        })
-        : await commitRecovery.readCommittedWakeResult(userId, wake.eventId);
+        });
 
-      if (!durableCommit) {
-        throw new Error("Hosted wake execution returned before recording a durable commit.");
+        await this.advanceRunPhase({
+          clearError: true,
+          wake,
+          message: "Hosted wake execution recorded a durable commit.",
+          phase: "commit.recorded",
+          run,
+        });
+        await commitRecovery.syncCommittedWakeBundlesWithoutConsuming(userId, durableCommit, { run });
+        if (!holdLeaseUntilCleanup) {
+          await this.dependencies.stateStore.completeWakeRun({
+            eventId: wake.eventId,
+            finishedAt: durableCommit.committedAt,
+            leaseOwner,
+          });
+        }
+        await this.advanceRunPhase({
+          clearError: true,
+          wake,
+          message: "Hosted wake execution recorded a durable commit and is awaiting cursor commit.",
+          phase: "completed",
+          run,
+        });
+        return {
+          postCursorAction: "finalize-committed",
+          state: "completed",
+        };
       }
 
-      await this.advanceRunPhase({
-        clearError: true,
-        wake,
-        message: "Hosted wake execution recorded a durable commit.",
-        phase: "commit.recorded",
+      await this.persistCompletedRunnerResult({
+        eventId: wake.eventId,
+        finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
+        result: runnerResult.result,
         run,
       });
-      await commitRecovery.syncCommittedWakeBundlesWithoutConsuming(userId, durableCommit, { run });
-      if (!holdLeaseUntilCleanup) {
-        await this.dependencies.stateStore.completeWakeRun({
-          eventId: wake.eventId,
-          finishedAt: durableCommit.committedAt,
-          leaseOwner,
-        });
-      }
+      await this.persistBrowserVaultSnapshotBestEffort(
+        userId,
+        runnerResult.browserVaultSnapshot ?? null,
+      );
       await this.advanceRunPhase({
         clearError: true,
         wake,
-        message: "Hosted wake execution recorded a durable commit and is awaiting cursor commit.",
+        message: "Hosted wake execution produced a final runtime result and is awaiting cursor commit cleanup.",
         phase: "completed",
         run,
       });
-      return "completed";
+      if (!holdLeaseUntilCleanup) {
+        await this.dependencies.stateStore.completeWakeRun({
+          eventId: wake.eventId,
+          finishedAt: new Date().toISOString(),
+          leaseOwner,
+        });
+      }
+      return {
+        postCursorAction: "cleanup-only",
+        state: "completed",
+      };
     } catch (error) {
       if (error instanceof HostedExecutionObsoleteRunResultError) {
         emitHostedExecutionStructuredLog({
@@ -248,7 +288,10 @@ export class RunnerWakeProcessor {
           eventId: wake.eventId,
           leaseOwner,
         });
-        return "backpressured";
+        return {
+          postCursorAction: "cleanup-only",
+          state: "backpressured",
+        };
       }
 
       const recoveredCommitted = await commitRecovery.readCommittedWakeResult(userId, wake.eventId);
@@ -271,7 +314,10 @@ export class RunnerWakeProcessor {
           phase: "completed",
           run,
         });
-        return "completed";
+        return {
+          postCursorAction: "cleanup-only",
+          state: "completed",
+        };
       }
 
       await this.dependencies.stateStore.failWakeRun({
@@ -292,7 +338,10 @@ export class RunnerWakeProcessor {
         phase: "retry.scheduled",
         run,
       });
-      return "backpressured";
+      return {
+        postCursorAction: "cleanup-only",
+        state: "backpressured",
+      };
     }
   }
 
@@ -326,7 +375,7 @@ export class RunnerWakeProcessor {
         },
       );
 
-      if (finalRunnerResult.phase !== "completed") {
+      if (!isCompletedRunnerResult(finalRunnerResult)) {
         throw new Error("Hosted wake execution returned a duplicate committed result during finalize.");
       }
 
@@ -611,6 +660,31 @@ export class RunnerWakeProcessor {
     });
   }
 
+  private async persistCompletedRunnerResult(input: {
+    eventId: string;
+    finalGatewayProjectionSnapshot: HostedExecutionFinalizePayload["gatewayProjectionSnapshot"];
+    result: HostedAssistantRuntimeJobResult["result"];
+    run: HostedExecutionRunContext;
+  }): Promise<void> {
+    await this.dependencies.applyHostedTransition({
+      eventId: input.eventId,
+      gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
+      leaseOwner: {
+        eventId: input.eventId,
+        run: input.run,
+      },
+      run: async (userId, stores) => {
+        const bundleState = await this.dependencies.stateStore.readBundleMetaState();
+        await stores.bundleSync.applyRunnerResultBundles(
+          userId,
+          bundleState.bundleVersion,
+          input.result.bundle,
+        );
+        await this.dependencies.wakeScheduler.syncNextWake(input.result.result.nextWakeAt ?? null);
+      },
+    });
+  }
+
   private async persistBrowserVaultSnapshotBestEffort(
     userId: string,
     browserVaultSnapshot: unknown | null,
@@ -795,6 +869,12 @@ export class HostedExecutionObsoleteRunResultError extends Error {
     );
     this.name = "HostedExecutionObsoleteRunResultError";
   }
+}
+
+function isCompletedRunnerResult(
+  result: HostedAssistantRuntimeJobResult,
+): result is Exclude<HostedAssistantRuntimeJobResult, { phase: "committed" }> {
+  return result.phase === undefined || result.phase === "completed";
 }
 
 export function summarizeHostedAssistantDeliveryOutcomes(
