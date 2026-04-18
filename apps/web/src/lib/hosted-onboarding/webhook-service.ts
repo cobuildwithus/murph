@@ -6,6 +6,7 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { claimHostedLinqQuotaReplyNotice } from "./linq-daily-state";
 import {
   requireHostedLinqMessageReceivedEvent,
   verifyAndParseHostedLinqWebhookRequest,
@@ -33,6 +34,7 @@ import {
   HostedWebhookReceiptSideEffectDrainError,
   type HostedWebhookReceiptClaim,
   type HostedWebhookPlan,
+  type HostedWebhookSideEffect,
 } from "./webhook-receipts";
 import {
   markHostedWebhookReceiptFailed,
@@ -41,7 +43,8 @@ import {
 } from "./webhook-receipt-store";
 import {
   planHostedOnboardingLinqWebhook,
-  tryHandleHostedOnboardingLinqDirectWakeFastPath,
+  planHostedOnboardingLinqActiveMemberDirect,
+  type HostedOnboardingLinqActiveMemberDirectPlan,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -106,36 +109,50 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
     const prisma = input.prisma ?? getPrisma();
+    const handlers = createHostedWebhookReceiptHandlers();
     if (event.event_type === "message.received") {
       requireHostedLinqMessageReceivedEvent(event);
 
-      const directWakeResponse = await runHostedOnboardingWebhookTransaction(
+      const directPlan = await runHostedOnboardingWebhookTransaction(
         prisma,
         (transaction) =>
-          tryHandleHostedOnboardingLinqDirectWakeFastPath({
+          planHostedOnboardingLinqActiveMemberDirect({
             event,
             prisma: transaction,
           }),
       );
 
-      if (directWakeResponse) {
-        responseReason = directWakeResponse.reason ?? null;
+      if (directPlan) {
+        if (directPlan.desiredSideEffects.length > 0) {
+          await drainHostedWebhookSideEffectsDirect({
+            handlers,
+            prisma,
+            sideEffects: directPlan.desiredSideEffects,
+            signal: input.signal,
+          });
+          await finalizeHostedOnboardingLinqActiveMemberDirectPlan({
+            plan: directPlan,
+            prisma,
+          });
+        }
+
+        responseReason = directPlan.response.reason ?? null;
         await maybeHandoffHostedExecutionWebhookWake({
           defer: input.defer,
           eventId: event.event_id,
           maxInlineDrainMs: input.maxInlineDrainMs,
           prisma,
-          response: directWakeResponse,
+          response: directPlan.response,
           source: "linq",
         });
         finishHostedOnboardingTiming(timing, "completed", {
-          duplicate: Boolean(directWakeResponse.duplicate),
+          duplicate: Boolean(directPlan.response.duplicate),
           eventId,
           eventType,
           responseReason,
           signalAbortedBeforeReturn: input.signal?.aborted ?? false,
         });
-        return directWakeResponse;
+        return directPlan.response;
       }
     }
     const receiptTiming = startHostedOnboardingTiming(
@@ -152,7 +169,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         duplicate: true,
       },
       eventId: event.event_id,
-      handlers: createHostedWebhookReceiptHandlers(),
+      handlers,
       plan: (transaction) =>
         planHostedOnboardingLinqWebhook({
           event,
@@ -595,6 +612,46 @@ async function waitForHostedExecutionWebhookWake(input: {
     timeoutMs,
     userId: input.userId,
   });
+}
+
+async function drainHostedWebhookSideEffectsDirect(input: {
+  handlers: ReturnType<typeof createHostedWebhookReceiptHandlers>;
+  prisma: PrismaClient;
+  sideEffects: readonly HostedWebhookSideEffect[];
+  signal?: AbortSignal;
+}): Promise<void> {
+  for (const effect of input.sideEffects) {
+    await input.handlers.performSideEffect(effect, {
+      prisma: input.prisma,
+      signal: input.signal,
+    });
+
+    if (input.handlers.afterSideEffectSent) {
+      await input.handlers.afterSideEffectSent({
+        effect,
+        prisma: input.prisma,
+      });
+    }
+  }
+}
+
+async function finalizeHostedOnboardingLinqActiveMemberDirectPlan(input: {
+  plan: HostedOnboardingLinqActiveMemberDirectPlan;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.plan.finalization) {
+    return;
+  }
+
+  switch (input.plan.finalization.kind) {
+    case "mark_daily_quota_reply_sent":
+      await claimHostedLinqQuotaReplyNotice({
+        memberId: input.plan.finalization.memberId,
+        occurredAt: input.plan.finalization.occurredAt,
+        prisma: input.prisma,
+      });
+      return;
+  }
 }
 
 async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookServiceResponse>(input: {

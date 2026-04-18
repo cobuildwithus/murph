@@ -1114,22 +1114,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         replyToMessageId: "msg_123",
       }),
     );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(
       (prisma as unknown as {
-        hostedWebhookReceiptSideEffect: {
-          upsert: ReturnType<typeof vi.fn>;
+        hostedWebhookReceipt: {
+          create: ReturnType<typeof vi.fn>;
+          updateMany: ReturnType<typeof vi.fn>;
         };
-      }).hostedWebhookReceiptSideEffect.upsert,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        payloadJson: expect.objectContaining({
-          chatId: "chat_other",
-          homeRecipientPhone: "+15550100001",
-          memberId: "member_123",
-          template: "conversation_home_redirect",
-        }),
-      }),
-    }));
+      }).hostedWebhookReceipt.create,
+    ).not.toHaveBeenCalled();
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceipt: {
+          create: ReturnType<typeof vi.fn>;
+          updateMany: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceipt.updateMany,
+    ).not.toHaveBeenCalled();
     expect(
       (prisma as unknown as {
         hostedMemberRouting: {
@@ -1265,12 +1266,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       inboundCount: 101,
     }));
     const prisma = asPrismaTransactionClient({
-      hostedLinqDailyState: {
-        findUnique: vi.fn().mockResolvedValue({
-          inboundCount: 100,
-          quotaReplySentAt: null,
-        }),
-      },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -1319,6 +1314,79 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         replyToMessageId: "msg_123",
       }),
     );
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceipt: {
+          create: ReturnType<typeof vi.fn>;
+          updateMany: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceipt.create,
+    ).not.toHaveBeenCalled();
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceipt: {
+          create: ReturnType<typeof vi.fn>;
+          updateMany: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceipt.updateMany,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("leaves the daily quota marker unset when the inline active-member quota reply fails", async () => {
+    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+      inboundCount: 101,
+    }));
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_over_limit_send_failure",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("linq send failed");
+
+    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceipt: {
+          create: ReturnType<typeof vi.fn>;
+          updateMany: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceipt.create,
+    ).not.toHaveBeenCalled();
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceipt: {
+          create: ReturnType<typeof vi.fn>;
+          updateMany: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceipt.updateMany,
+    ).not.toHaveBeenCalled();
   });
 
   it("tracks echoed outbound Linq messages without dispatching hosted execution", async () => {
@@ -1425,6 +1493,7 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
     };
     hostedLinqDailyState?: {
       findUnique?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      updateMany?: ((input: { data: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
     };
     hostedMemberRouting?: {
       findFirst?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -1565,8 +1634,11 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
       configurable: true,
       value: {
         findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
+  } else if (!hostedLinqDailyState.updateMany) {
+    hostedLinqDailyState.updateMany = vi.fn().mockResolvedValue({ count: 1 });
   }
 
   return prismaWithHostedMember as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
