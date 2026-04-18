@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
@@ -21,19 +21,43 @@ export function useHostedInviteStatusRefresh(input: {
   shouldPoll: boolean;
   disabled?: boolean;
 }) {
+  const inFlightRefreshRef = useRef<{
+    inviteCode: string;
+    promise: Promise<void>;
+  } | null>(null);
+
   const refreshStatusEffect = useEffectEvent(() => {
-    void fetchHostedInviteStatus(input.inviteCode)
+    const currentInviteCode = input.inviteCode;
+    const currentRefresh = inFlightRefreshRef.current;
+
+    if (currentRefresh?.inviteCode === currentInviteCode) {
+      return currentRefresh.promise;
+    }
+
+    const promise = fetchHostedInviteStatus(currentInviteCode)
       .then(input.onStatus)
       .catch((error: unknown) => {
         input.onError?.(error);
+      })
+      .finally(() => {
+        if (inFlightRefreshRef.current?.promise === promise) {
+          inFlightRefreshRef.current = null;
+        }
       });
+
+    inFlightRefreshRef.current = {
+      inviteCode: currentInviteCode,
+      promise,
+    };
+
+    return promise;
   });
 
   useEffect(() => {
     if (input.disabled) {
       return;
     }
-    refreshStatusEffect();
+    void refreshStatusEffect();
   }, [input.inviteCode, input.disabled]);
 
   useEffect(() => {
@@ -41,12 +65,37 @@ export function useHostedInviteStatusRefresh(input: {
       return;
     }
 
-    const timer = window.setInterval(() => {
-      refreshStatusEffect();
-    }, HOSTED_INVITE_STATUS_POLL_INTERVAL_MS);
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const scheduleNextPoll = () => {
+      if (cancelled) {
+        return;
+      }
+
+      timer = window.setTimeout(() => {
+        timer = null;
+        void runRefreshCycle();
+      }, HOSTED_INVITE_STATUS_POLL_INTERVAL_MS);
+    };
+
+    const runRefreshCycle = async () => {
+      await refreshStatusEffect();
+
+      if (cancelled) {
+        return;
+      }
+
+      scheduleNextPoll();
+    };
+
+    scheduleNextPoll();
 
     return () => {
-      window.clearInterval(timer);
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
     };
   }, [input.inviteCode, input.shouldPoll, input.disabled]);
 }
