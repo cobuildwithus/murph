@@ -350,7 +350,7 @@ function shouldEmitHostedExecutionStructuredLogToStdIo(
     return false;
   }
 
-  return env.VITEST !== "true";
+  return true;
 }
 
 export function emitHostedExecutionStructuredLog(
