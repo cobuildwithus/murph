@@ -4,10 +4,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useState } from "react";
 import Link from "next/link";
 
-import {
-  CheckCircleIcon,
-  LoaderCircleIcon,
-} from "lucide-react";
+import { CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -46,9 +43,12 @@ export function JoinInviteSignedInMismatchAlert({
 }) {
   return (
     <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-      <AlertTitle>This browser is signed in with a different Murph account.</AlertTitle>
+      <AlertTitle>
+        This browser is signed in with a different Murph account.
+      </AlertTitle>
       <AlertDescription>
-        This browser is already signed in with a different Murph account. Sign out first to continue with this invite.
+        This browser is already signed in with a different Murph account. Sign
+        out first to continue with this invite.
       </AlertDescription>
       <div className="mt-3">
         <HostedInviteSignOutButton onSignOut={onSignOut} />
@@ -57,7 +57,11 @@ export function JoinInviteSignedInMismatchAlert({
   );
 }
 
-function HostedInviteSignOutButton({ onSignOut }: { onSignOut: () => Promise<void> }) {
+function HostedInviteSignOutButton({
+  onSignOut,
+}: {
+  onSignOut: () => Promise<void>;
+}) {
   const { logout } = usePrivy();
   const [signOutPending, setSignOutPending] = useState(false);
 
@@ -73,7 +77,13 @@ function HostedInviteSignOutButton({ onSignOut }: { onSignOut: () => Promise<voi
   }
 
   return (
-    <Button type="button" onClick={handleSignOut} disabled={signOutPending} variant="outline" size="lg">
+    <Button
+      type="button"
+      onClick={handleSignOut}
+      disabled={signOutPending}
+      variant="outline"
+      size="lg"
+    >
       {signOutPending ? "Signing out..." : "Use this invite instead"}
     </Button>
   );
@@ -94,7 +104,8 @@ export function JoinInviteVerificationPanel({
         <Alert variant="destructive">
           <AlertTitle>Unable to refresh your signup state</AlertTitle>
           <AlertDescription>
-            We couldn&apos;t pick up your verified session yet. Check again to continue.
+            We couldn&apos;t pick up your verified session yet. Check again to
+            continue.
           </AlertDescription>
           <div className="mt-3">
             <Button
@@ -115,7 +126,9 @@ export function JoinInviteVerificationPanel({
       <Alert className="border-[#c4a882]/20 bg-[#f5f0e8]/40">
         <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
-        <AlertDescription>One moment while we pick up your session.</AlertDescription>
+        <AlertDescription>
+          One moment while we pick up your session.
+        </AlertDescription>
       </Alert>
     );
   }
@@ -182,14 +195,16 @@ export function JoinInviteCheckoutPanel({
   onCheckout: () => Promise<void>;
   onSelectBillingPlan: (billingPlanCode: HostedBillingPlanCode) => void;
 }) {
-  const selectedBillingPlan = billingPlans.find((plan) => plan.code === billingPlanCode) ?? null;
+  const selectedBillingPlan =
+    billingPlans.find((plan) => plan.code === billingPlanCode) ?? null;
 
   return (
     <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
       <div className="space-y-2">
         <p className="text-sm font-semibold text-[#2d3436]">Choose your plan</p>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Murph includes the full library, before and after analysis, and the same assistant on every launch plan.
+          Murph includes a private health vault, before and after analysis, and
+          iMessage, email, and Telgram support out of the box.
         </p>
       </div>
 
@@ -212,7 +227,9 @@ export function JoinInviteCheckoutPanel({
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-[#2d3436]">{plan.displayName}</p>
+                  <p className="text-sm font-semibold text-[#2d3436]">
+                    {plan.displayName}
+                  </p>
                   <p className="mt-1 font-serif text-2xl font-semibold tracking-tight text-[#2d3436]">
                     {plan.recurringSummary}
                   </p>
@@ -223,7 +240,9 @@ export function JoinInviteCheckoutPanel({
                   </span>
                 ) : null}
               </div>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{plan.description}</p>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                {plan.description}
+              </p>
             </button>
           );
         })}
@@ -245,8 +264,8 @@ export function JoinInviteCheckoutPanel({
           {checkoutPending
             ? "Opening checkout…"
             : billingReady
-              ? "Continue to checkout"
-              : "Billing is not configured yet"}
+            ? "Continue to checkout"
+            : "Billing is not configured yet"}
         </Button>
       </div>
     </div>
@@ -274,10 +293,16 @@ export function JoinInviteActivePanel({
         <div className="flex items-start gap-3 text-sm text-olive">
           <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
           <div className="space-y-1">
-            <p className="font-semibold">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}</p>
-            <p className="leading-relaxed text-olive/85">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}</p>
+            <p className="font-semibold">
+              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}
+            </p>
+            <p className="leading-relaxed text-olive/85">
+              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
+            </p>
             {sharePreview ? (
-              <p className="leading-relaxed text-olive/85">{JOIN_INVITE_ACTIVATION_PENDING_COPY.shareImportDescription}</p>
+              <p className="leading-relaxed text-olive/85">
+                {JOIN_INVITE_ACTIVATION_PENDING_COPY.shareImportDescription}
+              </p>
             ) : null}
           </div>
         </div>
@@ -295,14 +320,27 @@ export function JoinInviteActivePanel({
       {sharePreview ? (
         <div>
           {shareImportState === "completed" ? (
-            <p className="text-sm text-olive">{describeHostedSharePreview(sharePreview)} has been added to your account.</p>
+            <p className="text-sm text-olive">
+              {describeHostedSharePreview(sharePreview)} has been added to your
+              account.
+            </p>
           ) : shareImportState === "processing" ? (
-            <p className="text-sm text-muted-foreground">{describeHostedSharePreview(sharePreview)} is being added to your account.</p>
+            <p className="text-sm text-muted-foreground">
+              {describeHostedSharePreview(sharePreview)} is being added to your
+              account.
+            </p>
           ) : (
-            <Button type="button" onClick={onAcceptShare} disabled={pendingAction !== null} size="lg">
+            <Button
+              type="button"
+              onClick={onAcceptShare}
+              disabled={pendingAction !== null}
+              size="lg"
+            >
               {pendingAction === "share"
                 ? "Adding shared bundle..."
-                : `Add ${describeHostedSharePreview(sharePreview).toLowerCase()}`}
+                : `Add ${describeHostedSharePreview(
+                    sharePreview
+                  ).toLowerCase()}`}
             </Button>
           )}
         </div>
@@ -317,8 +355,12 @@ export function JoinInviteActivePanel({
             <div key={item.title} className="flex gap-3">
               <item.icon className="mt-0.5 size-4 shrink-0 text-olive-light" />
               <div>
-                <p className="text-sm font-semibold text-[#2d3436]">{item.title}</p>
-                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{item.body}</p>
+                <p className="text-sm font-semibold text-[#2d3436]">
+                  {item.title}
+                </p>
+                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
+                  {item.body}
+                </p>
               </div>
             </div>
           ))}
@@ -349,11 +391,20 @@ function JoinInviteMurphContactActions({
 
   return (
     <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
-      <Button render={<a href={buildMurphSmsHref(murphPhoneNumber)} />} nativeButton={false} size="lg">
+      <Button
+        render={<a href={buildMurphSmsHref(murphPhoneNumber)} />}
+        nativeButton={false}
+        size="lg"
+      >
         Text Murph
       </Button>
       <Button
-        render={<a download={MURPH_CONTACT_DOWNLOAD_FILENAME} href={buildMurphVcardHref(murphPhoneNumber)} />}
+        render={
+          <a
+            download={MURPH_CONTACT_DOWNLOAD_FILENAME}
+            href={buildMurphVcardHref(murphPhoneNumber)}
+          />
+        }
         nativeButton={false}
         variant="outline"
         size="lg"
@@ -369,7 +420,9 @@ function buildMurphSmsHref(phoneNumber: string): string {
 }
 
 function buildMurphVcardHref(phoneNumber: string): string {
-  return `data:text/vcard;charset=utf-8,${encodeURIComponent(buildMurphVcard(phoneNumber))}`;
+  return `data:text/vcard;charset=utf-8,${encodeURIComponent(
+    buildMurphVcard(phoneNumber)
+  )}`;
 }
 
 function buildMurphVcard(phoneNumber: string): string {
