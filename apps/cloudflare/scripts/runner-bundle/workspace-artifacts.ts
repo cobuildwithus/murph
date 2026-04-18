@@ -121,7 +121,7 @@ async function packWorkspacePackage(
   const before = new Set(await readdir(tarballsDir));
   const packageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
 
-  await runNpmCommand(["pack", "--pack-destination", tarballsDir], {
+  await runNpmCommand(["pack", "--ignore-scripts", "--pack-destination", tarballsDir], {
     cwd: packageDir,
   });
 

@@ -75,9 +75,18 @@ test("hosted web dev lock paths stay isolated between interactive and smoke arti
   const smokePaths = resolveHostedWebDevRuntimePaths("/repo/apps/web", createEnv({
     NEXT_DIST_DIR_MODE: "smoke",
   }));
+  const isolatedSmokePaths = resolveHostedWebDevRuntimePaths("/repo/apps/web", createEnv({
+    NEXT_DIST_DIR_MODE: "smoke",
+    NEXT_DIST_DIR_SUFFIX: "e2e-run",
+  }));
 
   assert.equal(interactivePaths.distDir, "/repo/apps/web/.next-dev");
   assert.equal(interactivePaths.lockPath, "/repo/apps/web/.next-dev/.dev-server.lock");
   assert.equal(smokePaths.distDir, "/repo/apps/web/.next-smoke");
   assert.equal(smokePaths.lockPath, "/repo/apps/web/.next-smoke/.dev-server.lock");
+  assert.equal(isolatedSmokePaths.distDir, "/repo/apps/web/.next-smoke-e2e-run");
+  assert.equal(
+    isolatedSmokePaths.lockPath,
+    "/repo/apps/web/.next-smoke-e2e-run/.dev-server.lock",
+  );
 });

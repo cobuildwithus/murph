@@ -1,5 +1,4 @@
 import type {
-  HostedExecutionDispatchRequest,
   HostedExecutionConversationMessageWake,
   HostedExecutionFirstContactTarget,
   HostedExecutionRunnerSharePack,
@@ -15,28 +14,27 @@ import {
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
-  prepareHostedDispatchContext,
+  prepareHostedWakeContext,
 } from "./context.ts";
 import { buildHostedEmailCapture } from "./events/email.ts";
 import { buildHostedLinqCapture } from "./events/linq.ts";
-import { handleHostedShareAcceptedDispatch } from "./events/share.ts";
+import { handleHostedShareAcceptedWake } from "./events/share.ts";
 import { buildHostedTelegramCapture } from "./events/telegram.ts";
 import { withHostedInboxPipeline } from "./events/inbox-pipeline.ts";
 import type {
-  HostedDispatchEffect,
-  HostedDispatchExecutionMetrics,
+  HostedWakeEffect,
+  HostedWakeExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
-import { assertNever, resolveHostedWake } from "./utils.ts";
+import { assertNever } from "./utils.ts";
 
-type HostedDispatchOutcome = HostedDispatchEffect & {
+type HostedWakeOutcome = HostedWakeEffect & {
   maintenanceRequired: boolean;
 };
 
-export async function executeHostedDispatchEvent(input: {
-  dispatch: HostedExecutionDispatchRequest;
-  wake?: HostedExecutionWake;
+export async function executeHostedWakeEvent(input: {
+  wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -45,19 +43,18 @@ export async function executeHostedDispatchEvent(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedDispatchExecutionMetrics> {
-  const wake = resolveHostedWake(input);
-  const bootstrapResult = await prepareHostedDispatchContext(
+}): Promise<HostedWakeExecutionMetrics> {
+  const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,
-    input.dispatch,
+    input.wake,
     input.runtimeEnv,
     input.runtime.resolvedConfig,
   );
   const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
     input.executionContext,
   );
-  const dispatchEffect = await handleHostedDispatchEvent({
-    wake,
+  const wakeEffect = await handleHostedWakeEvent({
+    wake: input.wake,
     executionContext: bootstrappedExecutionContext,
     runtime: input.runtime,
     sharePack: input.sharePack ?? null,
@@ -66,13 +63,13 @@ export async function executeHostedDispatchEvent(input: {
 
   return {
     bootstrapResult,
-    maintenanceRequired: dispatchEffect.maintenanceRequired,
-    shareImportResult: dispatchEffect.shareImportResult,
-    shareImportTitle: dispatchEffect.shareImportTitle,
+    maintenanceRequired: wakeEffect.maintenanceRequired,
+    shareImportResult: wakeEffect.shareImportResult,
+    shareImportTitle: wakeEffect.shareImportTitle,
   };
 }
 
-async function handleHostedDispatchEvent(input: {
+async function handleHostedWakeEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
@@ -81,7 +78,7 @@ async function handleHostedDispatchEvent(input: {
   >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedDispatchOutcome> {
+}): Promise<HostedWakeOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
     return executeHostedConversationWake({
       wake: input.wake,
@@ -109,14 +106,14 @@ async function executeHostedConversationWake(input: {
     "platform"
   >;
   vaultRoot: string;
-}): Promise<HostedDispatchOutcome> {
+}): Promise<HostedWakeOutcome> {
   const capture = await resolveHostedConversationCapture(input);
 
   await withHostedInboxPipeline(input.vaultRoot, async (pipeline) => {
     await pipeline.processCapture(capture);
   });
 
-  return createNoopDispatchEffect({
+  return createNoopWakeEffect({
     maintenanceRequired: false,
   });
 }
@@ -151,7 +148,7 @@ async function executeHostedSystemWake(input: {
   executionContext: AssistantExecutionContext;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedDispatchOutcome> {
+}): Promise<HostedWakeOutcome> {
   switch (input.wake.kind) {
     case "member.activated":
       if (input.wake.firstContact) {
@@ -163,25 +160,25 @@ async function executeHostedSystemWake(input: {
           ),
         );
       }
-      return createNoopDispatchEffect({
+      return createNoopWakeEffect({
         maintenanceRequired: true,
       });
     case "member.channels.updated":
-      return createNoopDispatchEffect({
+      return createNoopWakeEffect({
         maintenanceRequired: true,
       });
     case "assistant.cron.tick":
     case "device-sync.wake":
-      return createNoopDispatchEffect({
+      return createNoopWakeEffect({
         maintenanceRequired: true,
       });
     case "vault.share.accepted":
       if (!input.sharePack) {
-        throw new TypeError("Hosted share accepted dispatch requires a hydrated runner sharePack.");
+        throw new TypeError("Hosted share accepted wake requires a hydrated runner sharePack.");
       }
       return {
-        ...(await handleHostedShareAcceptedDispatch({
-          dispatch: input.wake,
+        ...(await handleHostedShareAcceptedWake({
+          wake: input.wake,
           sharePack: input.sharePack,
           vaultRoot: input.vaultRoot,
         })),
@@ -192,9 +189,9 @@ async function executeHostedSystemWake(input: {
   return assertNever(input.wake);
 }
 
-function createNoopDispatchEffect(input: {
+function createNoopWakeEffect(input: {
   maintenanceRequired: boolean;
-}): HostedDispatchOutcome {
+}): HostedWakeOutcome {
   return {
     maintenanceRequired: input.maintenanceRequired,
     shareImportResult: null,

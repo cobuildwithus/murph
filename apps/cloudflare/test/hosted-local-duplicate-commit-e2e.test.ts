@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -14,7 +15,7 @@ const userId = "member_duplicate_commit_local_e2e";
 const stabilityUserId = "member_duplicate_commit_local_smoke_stability";
 const overlapUserId = "member_overlap_claim_local_e2e";
 const overlapEventId = "evt_serialized_run_loop_claim_local_e2e";
-const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
+const activationWake = buildHostedExecutionMemberActivatedWake({
   eventId: `member.activated:stripe.invoice.paid:${userId}:evt_duplicate_local_e2e`,
   firstContact: {
     channel: "linq",
@@ -30,7 +31,7 @@ const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
   },
   occurredAt: new Date().toISOString(),
 });
-const stabilityActivationDispatch = buildHostedExecutionMemberActivatedDispatch({
+const stabilityActivationWake = buildHostedExecutionMemberActivatedWake({
   eventId: `member.activated:stripe.invoice.paid:${stabilityUserId}:evt_duplicate_local_smoke_stability`,
   firstContact: {
     channel: "linq",
@@ -68,24 +69,24 @@ describe("hosted local duplicate commit e2e", () => {
     }
 
     await worker.client.postJson("/__test/runner/pause", {
-      eventId: activationDispatch.eventId,
+      eventId: activationWake.eventId,
     });
 
-    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", activationDispatch);
+    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", activationWake);
 
-    await worker.waitForRunnerPauseEntry(activationDispatch.eventId);
+    await worker.waitForRunnerPauseEntry(activationWake.eventId);
     await worker.client.postJson("/__test/seed-duplicate-commit", {
-      eventId: activationDispatch.eventId,
+      eventId: activationWake.eventId,
       userId,
     });
     await worker.client.postJson("/__test/runner/release", {
-      eventId: activationDispatch.eventId,
+      eventId: activationWake.eventId,
     });
 
     const dispatchResult = await dispatchPromise;
     expect(dispatchResult).toMatchObject({
       event: {
-        eventId: activationDispatch.eventId,
+        eventId: activationWake.eventId,
         state: "completed",
       },
       status: {
@@ -112,7 +113,7 @@ describe("hosted local duplicate commit e2e", () => {
     });
 
     await worker.client.postJson("/__test/runner/clear", {
-      eventId: activationDispatch.eventId,
+      eventId: activationWake.eventId,
     });
   });
 
@@ -123,24 +124,24 @@ describe("hosted local duplicate commit e2e", () => {
     }
 
     await worker.client.postJson("/__test/runner/pause", {
-      eventId: stabilityActivationDispatch.eventId,
+      eventId: stabilityActivationWake.eventId,
     });
 
-    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", stabilityActivationDispatch);
+    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", stabilityActivationWake);
 
-    await worker.waitForRunnerPauseEntry(stabilityActivationDispatch.eventId);
+    await worker.waitForRunnerPauseEntry(stabilityActivationWake.eventId);
     await worker.client.postJson("/__test/seed-duplicate-commit", {
-      eventId: stabilityActivationDispatch.eventId,
+      eventId: stabilityActivationWake.eventId,
       userId: stabilityUserId,
     });
     await worker.client.postJson("/__test/runner/release", {
-      eventId: stabilityActivationDispatch.eventId,
+      eventId: stabilityActivationWake.eventId,
     });
 
     const dispatchResult = await dispatchPromise;
     expect(dispatchResult).toMatchObject({
       event: {
-        eventId: stabilityActivationDispatch.eventId,
+        eventId: stabilityActivationWake.eventId,
         state: "completed",
       },
       status: {
@@ -183,7 +184,7 @@ describe("hosted local duplicate commit e2e", () => {
     expect(stableStatus.bundleRef).toEqual(recoveredStatus.bundleRef);
 
     await worker.client.postJson("/__test/runner/clear", {
-      eventId: stabilityActivationDispatch.eventId,
+      eventId: stabilityActivationWake.eventId,
     });
   });
 
@@ -193,15 +194,12 @@ describe("hosted local duplicate commit e2e", () => {
       throw new Error("Expected the hosted local test worker fixture to be initialized.");
     }
 
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: overlapUserId,
-      },
+    const wake = buildHostedExecutionAssistantCronTickWake({
       eventId: overlapEventId,
       occurredAt: "2026-04-17T03:30:00.000Z",
-    };
+      reason: "manual",
+      userId: overlapUserId,
+    });
 
     await worker.client.postJson("/__test/bootstrap-user", {
       userId: overlapUserId,
@@ -213,7 +211,7 @@ describe("hosted local duplicate commit e2e", () => {
       eventId: overlapEventId,
     });
 
-    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", dispatch);
+    const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", wake);
     await worker.waitForRunnerPauseEntry(overlapEventId);
 
     const alarmResult = await worker.client.postJson("/__test/alarm", {

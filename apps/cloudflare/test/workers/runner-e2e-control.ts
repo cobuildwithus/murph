@@ -258,20 +258,21 @@ export async function pauseRunnerCommitIfArmed(input: {
     return;
   }
 
-  const state = await readPauseState(input.bucket, input.request.dispatch.eventId);
+  const eventId = input.request.wake.eventId;
+  const state = await readPauseState(input.bucket, eventId);
 
   if (!state) {
     return;
   }
 
-  await writePauseState(input.bucket, input.request.dispatch.eventId, {
+  await writePauseState(input.bucket, eventId, {
     ...state,
     entered: true,
     request: structuredClone(input.request),
   });
 
   while (true) {
-    const nextState = await readPauseState(input.bucket, input.request.dispatch.eventId);
+    const nextState = await readPauseState(input.bucket, eventId);
 
     if (!nextState || nextState.released) {
       return;
@@ -316,11 +317,11 @@ export function buildSyntheticCommittedRunnerResult(
     },
     phase: "committed",
     result: {
-      bundle: request.bundle ?? btoa(`vault:${request.dispatch.eventId}`),
+      bundle: request.bundle ?? btoa(`vault:${request.wake.eventId}`),
       result: {
         eventsHandled: 1,
         ...(nextWakeAt === null ? {} : { nextWakeAt }),
-        summary: `runtime:${request.dispatch.eventId}`,
+        summary: `runtime:${request.wake.eventId}`,
       },
     },
   };
@@ -341,11 +342,11 @@ export function buildSyntheticCompletedRunnerResult(
       schema: "murph.gateway-projection-snapshot.v1",
     },
     result: {
-      bundle: request.bundle ?? btoa(`vault:${request.dispatch.eventId}`),
+      bundle: request.bundle ?? btoa(`vault:${request.wake.eventId}`),
       result: {
         eventsHandled: 1,
         ...(nextWakeAt === null ? {} : { nextWakeAt }),
-        summary: `runtime:${request.dispatch.eventId}`,
+        summary: `runtime:${request.wake.eventId}`,
       },
     },
     phase: "completed",
@@ -359,8 +360,8 @@ function buildSyntheticAssistantDeliveryEffects(
   },
 ) {
   if (
-    request.dispatch.event.kind !== "member.activated"
-    || request.dispatch.event.firstContact == null
+    request.wake.kind !== "member.activated"
+    || request.wake.firstContact == null
   ) {
     return [];
   }
@@ -370,7 +371,7 @@ function buildSyntheticAssistantDeliveryEffects(
   return [
     {
       effectId,
-      fingerprint: `first-contact:${request.dispatch.eventId}`,
+      fingerprint: `first-contact:${request.wake.eventId}`,
       kind: "assistant.delivery" as const,
       payload: {
         actorId: "actor_123",
@@ -383,11 +384,11 @@ function buildSyntheticAssistantDeliveryEffects(
         message: "hello from runner e2e",
         subject: null,
         replyToMessageId: null,
-        sessionId: `session_${request.dispatch.eventId}`,
+        sessionId: `session_${request.wake.eventId}`,
         threadId: "thread_123",
         threadIsDirect: true,
         transportIdempotent: false,
-        turnId: `turn_${request.dispatch.eventId}`,
+        turnId: `turn_${request.wake.eventId}`,
       },
     },
   ];
@@ -452,15 +453,15 @@ function runnerInvocationStateObjectKey(userId: string): string {
 }
 
 function resolveSyntheticGeneratedAt(request: HostedAssistantRuntimeJobRequest): string {
-  return request.dispatch.occurredAt;
+  return request.wake.occurredAt;
 }
 
 function resolveSyntheticNextWakeAt(request: HostedAssistantRuntimeJobRequest): string | null {
-  if (request.dispatch.event.kind !== "member.activated") {
+  if (request.wake.kind !== "member.activated") {
     return null;
   }
 
-  const occurredAtMs = Date.parse(request.dispatch.occurredAt);
+  const occurredAtMs = Date.parse(request.wake.occurredAt);
   if (Number.isNaN(occurredAtMs)) {
     return "1970-01-01T00:01:00.000Z";
   }

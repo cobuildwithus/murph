@@ -6,21 +6,27 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import {
-  buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import {
-  parseHostedExecutionDispatchResult,
-} from "@murphai/hosted-execution/parsers";
 import {
   startHostedLocalDevHarness,
   type HostedLocalDevHarness,
 } from "./helpers/hosted-local-dev-harness.js";
 import {
+  appendHostedWakeAndWakeWorker,
+  wakeHostedWorkerForLatestPendingWake,
+} from "./helpers/hosted-local-dispatch.js";
+import {
   startHostedLocalOidcFixture,
   type HostedLocalOidcFixture,
 } from "./helpers/hosted-local-oidc-support.js";
+import {
+  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+  TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
+} from "./hosted-execution-fixtures.js";
 import {
   DEFAULT_DATABASE_URL,
   repoRoot,
@@ -31,6 +37,7 @@ import {
   readRequestBody,
   reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv,
+  resolveHostedLocalSmokeWebEnv,
   shouldUseAssistantProviderStub,
   startAssistantProviderStubServer,
   stopHttpStubServer,
@@ -106,6 +113,7 @@ describe("hosted local Linq webhook e2e", () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...hostedAssistantDevEnv,
+      ...resolveHostedLocalSmokeWebEnv(process.env),
       DATABASE_URL: localDatabaseUrl,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRunnerEnvProfiles(
         process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
@@ -115,8 +123,10 @@ describe("hosted local Linq webhook e2e", () => {
       LINQ_API_BASE_URL: linqServerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
-      MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
+      MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
       MURPH_DEV_WEB_PORT: String(webPort),
       MURPH_DEV_WORKER_PORT: String(workerPort),
       NEXT_DIST_DIR_MODE: "smoke",
@@ -147,13 +157,7 @@ describe("hosted local Linq webhook e2e", () => {
   it("routes a signed Linq webhook through apps/web and delivers the follow-up reply", async () => {
     await seedActiveHostedLinqMember(webhookUserId);
 
-    const activationResult = await dispatchHostedEvent(buildActivationDispatch(webhookUserId), webhookUserId);
-    expect(activationResult.event).toMatchObject({
-      eventId: `member.activated:local:${webhookUserId}:evt_linq_first_contact`,
-      lastError: null,
-      state: "completed",
-      userId: webhookUserId,
-    });
+    await dispatchHostedEvent(buildActivationDispatch(webhookUserId), webhookUserId);
 
     await requireHarness().waitForHostedCompletion(webhookUserId);
     await waitForLinqSend({
@@ -178,6 +182,10 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "dispatched-active-member",
     });
 
+    await wakeHostedWorkerForLatestPendingWake({
+      harness: requireHarness(),
+      userId: webhookUserId,
+    });
     await requireHarness().waitForHostedCompletion(webhookUserId);
 
     const replySend = await waitForAdditionalLinqSend({
@@ -195,16 +203,7 @@ describe("hosted local Linq webhook e2e", () => {
     const fastWebhookUserId = `${webhookUserId}_rapid`;
     await seedActiveHostedLinqMember(fastWebhookUserId);
 
-    const activationResult = await dispatchHostedEvent(
-      buildActivationDispatch(fastWebhookUserId),
-      fastWebhookUserId,
-    );
-    expect(activationResult.event).toMatchObject({
-      eventId: `member.activated:local:${fastWebhookUserId}:evt_linq_first_contact`,
-      lastError: null,
-      state: "completed",
-      userId: fastWebhookUserId,
-    });
+    await dispatchHostedEvent(buildActivationDispatch(fastWebhookUserId), fastWebhookUserId);
 
     await requireHarness().waitForHostedCompletion(fastWebhookUserId);
     await waitForLinqSend({
@@ -242,6 +241,10 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "dispatched-active-member",
     });
 
+    await wakeHostedWorkerForLatestPendingWake({
+      harness: requireHarness(),
+      userId: fastWebhookUserId,
+    });
     await requireHarness().waitForHostedCompletion(fastWebhookUserId);
 
     const replySends = await waitForMatchingLinqSendCount({
@@ -324,7 +327,7 @@ async function seedActiveHostedLinqMember(nextUserId: string): Promise<void> {
 }
 
 function buildActivationDispatch(nextUserId: string) {
-  return buildHostedExecutionMemberActivatedDispatch({
+  return buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:local:${nextUserId}:evt_linq_first_contact`,
     firstContact: {
       channel: "linq",
@@ -415,17 +418,12 @@ function requireLinqPhoneLookupKey(nextUserId: string): string {
   return lookupKey;
 }
 
-async function dispatchHostedEvent(dispatch: object, nextUserId: string) {
-  const response = await requireHarness().requestJson("/internal/dispatch", {
-    body: JSON.stringify(dispatch),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      [HOSTED_EXECUTION_USER_ID_HEADER]: nextUserId,
-    },
-    method: "POST",
+async function dispatchHostedEvent(wake: HostedExecutionWake, nextUserId: string) {
+  await appendHostedWakeAndWakeWorker({
+    wake,
+    harness: requireHarness(),
+    userId: nextUserId,
   });
-
-  return parseHostedExecutionDispatchResult(response);
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {

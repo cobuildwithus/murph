@@ -91,7 +91,7 @@ export function createHostedExecutionJobRunner(
     const runtime = buildRuntime(input.runtime ?? {});
     const environment = readEnvironment();
     const runtimePlatform = buildRuntimePlatform({
-      boundUserId: input.request.dispatch.event.userId,
+      boundUserId: input.request.wake.userId,
       commitTimeoutMs: runtime.commitTimeoutMs,
       internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
       localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,

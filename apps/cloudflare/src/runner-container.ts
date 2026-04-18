@@ -149,7 +149,7 @@ export class RunnerContainer extends Container {
   private async invokeHostedExecution(
     input: HostedExecutionContainerInvokeInput,
   ): Promise<HostedAssistantRuntimeJobResult> {
-    const dispatch = input.job.request.dispatch;
+    const dispatch = input.job.request.wake;
     const run = input.job.request.run ?? null;
     const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
       this.environment,
@@ -250,7 +250,7 @@ export class RunnerContainer extends Container {
     input: HostedExecutionContainerInvokeInput,
   ): Promise<string> {
     const readinessStartedAt = Date.now();
-    const dispatch = input.job.request.dispatch;
+    const dispatch = input.job.request.wake;
     const run = input.job.request.run ?? null;
     const status = readContainerStatus(await this.getState());
 
@@ -345,7 +345,7 @@ export class RunnerContainer extends Container {
     userId: string,
     internalWorkerProxyToken: string,
     input: {
-      dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+      dispatch: HostedAssistantRuntimeJobInput["request"]["wake"];
       run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
     },
   ): Promise<void> {
@@ -417,7 +417,7 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   } = {}): Promise<void> {
     try {
-      if (isRunnerContainerStopped(readContainerStatus(await this.getState()))) {
+      if (isRunnerContainerStopped(await readRunnerContainerStatus(this))) {
         return;
       }
 
@@ -425,10 +425,20 @@ export class RunnerContainer extends Container {
       try {
         await this.destroy();
       } catch (error) {
+        if (isMissingRunnerContainerError(error)) {
+          return;
+        }
         destroyError = error;
       }
 
-      await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
+      try {
+        await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
+      } catch (error) {
+        if (!isMissingRunnerContainerError(error)) {
+          throw error;
+        }
+        return;
+      }
 
       if (destroyError) {
         return;
@@ -697,13 +707,26 @@ async function waitForRunnerContainerStop(
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() <= deadline) {
-    if (isRunnerContainerStopped(readContainerStatus(await container.getState()))) {
+    if (isRunnerContainerStopped(await readRunnerContainerStatus(container))) {
       return;
     }
     await sleep(RUNNER_WAIT_INTERVAL_MS);
   }
 
   throw new Error("Hosted runner container destroy did not stop the shell.");
+}
+
+async function readRunnerContainerStatus(
+  container: RunnerContainer,
+): Promise<string | null> {
+  try {
+    return readContainerStatus(await container.getState());
+  } catch (error) {
+    if (isMissingRunnerContainerError(error)) {
+      return "stopped";
+    }
+    throw error;
+  }
 }
 
 function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
@@ -756,6 +779,14 @@ function isTransientOutboundHandlerInstallError(error: unknown): boolean {
     "Connecting to container port through proxy-everything failed",
     "Monitoring container failed with: 404",
   ].some((needle) => error.message.includes(needle));
+}
+
+function isMissingRunnerContainerError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.includes("No such container");
 }
 
 function readRunnerContainerSupervisorEnvVars(

@@ -46,8 +46,7 @@ export function parseHostedAssistantRuntimeJobRequest(
 
   return {
     bundle: request.bundle,
-    dispatch: request.dispatch,
-    ...(record.wake === undefined ? {} : { wake: request.wake }),
+    wake: request.wake,
     ...(request.run === undefined ? {} : { run: request.run }),
     ...(request.sharePack === undefined ? {} : { sharePack: request.sharePack }),
     ...(record.currentBundleRef === undefined

@@ -1,5 +1,5 @@
 import { DurableObject, env } from "cloudflare:workers";
-import { buildHostedExecutionWakeFromDispatch } from "@murphai/hosted-execution";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import worker from "../../src/index.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";
@@ -27,7 +27,7 @@ import {
 } from "./runner-e2e-control.ts";
 
 import type {
-  HostedExecutionDispatchRequest,
+  HostedExecutionWake,
   HostedExecutionDispatchResult,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -54,12 +54,12 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return this.runner.bootstrapUser(userId);
   }
 
-  async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
-    return this.runner.enqueueHostedWake(buildHostedExecutionWakeFromDispatch(input));
+  async wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
+    return this.runner.enqueueHostedWake(input);
   }
 
-  async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
-    return this.runner.enqueueHostedWakeWithOutcome(buildHostedExecutionWakeFromDispatch(input));
+  async wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult> {
+    return this.runner.enqueueHostedWakeWithOutcome(input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -93,10 +93,10 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
 
   if (url.pathname === "/__test/dispatch-with-outcome" && request.method === "POST") {
-    const dispatch = readTestDispatchRequest(await request.json() as unknown);
-    const runner = getUserRunnerStub(dispatch.event.userId);
-    await runner.bootstrapUser(dispatch.event.userId);
-    return Response.json(await runner.dispatchWithOutcome(dispatch));
+    const wake = readTestWake(await request.json() as unknown);
+    const runner = getUserRunnerStub(wake.userId);
+    await runner.bootstrapUser(wake.userId);
+    return Response.json(await runner.wakeWithOutcome(wake));
   }
 
   if (url.pathname === "/__test/status" && request.method === "GET") {
@@ -239,22 +239,22 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
   }
 
   if (url.pathname === "/__test/runner/payload-read-pause" && request.method === "POST") {
-    const body = await request.json() as { dispatch?: unknown };
+    const body = await request.json() as { wake?: unknown };
 
-    if (!body.dispatch) {
-      return Response.json({ error: "dispatch is required." }, { status: 400 });
+    if (!body.wake) {
+      return Response.json({ error: "wake is required." }, { status: 400 });
     }
 
-    const dispatch = readTestDispatchRequest(body.dispatch);
-    const expectedKey = await resolveDispatchPayloadObjectKey(dispatch);
+    const wake = readTestWake(body.wake);
+    const expectedKey = await resolveWakePayloadObjectKey(wake);
 
     await armDispatchPayloadReadPause({
       bucket: (env as { BUNDLES: R2BucketLike }).BUNDLES,
-      eventId: dispatch.eventId,
+      eventId: wake.eventId,
       expectedKey,
     });
     return Response.json({
-      eventId: dispatch.eventId,
+      eventId: wake.eventId,
       expectedKey,
       ok: true,
     });
@@ -340,7 +340,7 @@ function getUserRunnerStub(userId: string) {
       USER_RUNNER: {
         getByName(name: string): {
           bootstrapUser(userId: string): Promise<{ userId: string }>;
-          dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+          wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult>;
           runAlarmForTest(): Promise<void>;
           status(): Promise<HostedExecutionUserStatus>;
         };
@@ -372,53 +372,29 @@ async function resolveHostedUserCryptoContext(userId: string) {
   return store.requireUserCryptoContext(userId);
 }
 
-async function resolveDispatchPayloadObjectKey(
-  dispatch: HostedExecutionDispatchRequest,
+async function resolveWakePayloadObjectKey(
+  wake: HostedExecutionWake,
 ): Promise<string> {
-  const crypto = await resolveHostedUserCryptoContext(dispatch.event.userId);
+  const crypto = await resolveHostedUserCryptoContext(wake.userId);
 
   return await hostedDispatchPayloadObjectKeyForSignature(
     crypto.rootKey,
-    dispatch.event.userId,
-    dispatch.eventId,
-    await createDispatchPayloadSignature(dispatch),
+    wake.userId,
+    wake.eventId,
+    await createWakePayloadSignature(wake),
   );
 }
 
-async function createDispatchPayloadSignature(
-  dispatch: HostedExecutionDispatchRequest,
+async function createWakePayloadSignature(
+  wake: HostedExecutionWake,
 ): Promise<string> {
-  const canonicalJson = stringifyStructuredJson(dispatch);
+  const canonicalJson = stringifyStructuredJson(wake);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function readTestDispatchRequest(value: unknown): HostedExecutionDispatchRequest {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted test dispatch request must be an object.");
-  }
-
-  const record = value as {
-    event?: {
-      kind?: unknown;
-      userId?: unknown;
-    };
-    eventId?: unknown;
-    occurredAt?: unknown;
-  };
-
-  if (
-    typeof record.eventId !== "string"
-    || typeof record.occurredAt !== "string"
-    || !record.event
-    || typeof record.event !== "object"
-    || typeof record.event.kind !== "string"
-    || typeof record.event.userId !== "string"
-  ) {
-    throw new TypeError("Hosted test dispatch request is invalid.");
-  }
-
-  return value as HostedExecutionDispatchRequest;
+function readTestWake(value: unknown): HostedExecutionWake {
+  return parseHostedExecutionWake(value);
 }
 
 function createTestControlledBucket(bucket: R2BucketLike): R2BucketLike {

@@ -6,8 +6,11 @@ export const HOSTED_WEB_SMOKE_DIST_DIR = ".next-smoke";
 
 const hostedWebDevFileSystemCacheEnvVarName = "MURPH_NEXT_DEV_FILESYSTEM_CACHE";
 const hostedWebDistModeEnvVarName = "NEXT_DIST_DIR_MODE";
+const hostedWebDistSuffixEnvVarName = "NEXT_DIST_DIR_SUFFIX";
 const hostedWebSmokeDistMode = "smoke";
 const hostedWebSmokeDefaultDatabaseUrl = "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync";
+const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedWebSmokeDefaultPrivyAppId = "cm_app_smoke";
 
 export function createHostedWebSmokeEnvironment(
@@ -16,6 +19,18 @@ export function createHostedWebSmokeEnvironment(
   return {
     ...environment,
     DATABASE_URL: environment.DATABASE_URL ?? hostedWebSmokeDefaultDatabaseUrl,
+    HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION:
+      environment.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION
+      ?? hostedWebSmokeDefaultEncryptionKeyVersion,
+    HOSTED_CONTACT_PRIVACY_KEYS:
+      environment.HOSTED_CONTACT_PRIVACY_KEYS
+      ?? `v1:${hostedWebSmokeDefaultEncryptionKey}`,
+    HOSTED_WEB_ENCRYPTION_KEY:
+      environment.HOSTED_WEB_ENCRYPTION_KEY
+      ?? hostedWebSmokeDefaultEncryptionKey,
+    HOSTED_WEB_ENCRYPTION_KEY_VERSION:
+      environment.HOSTED_WEB_ENCRYPTION_KEY_VERSION
+      ?? hostedWebSmokeDefaultEncryptionKeyVersion,
     NEXT_PUBLIC_PRIVY_APP_ID: environment.NEXT_PUBLIC_PRIVY_APP_ID ?? hostedWebSmokeDefaultPrivyAppId,
     [hostedWebDistModeEnvVarName]: hostedWebSmokeDistMode,
   };
@@ -36,7 +51,29 @@ export function resolveHostedWebDistDir(
     return HOSTED_WEB_BUILD_DIST_DIR;
   }
 
-  return environment[hostedWebDistModeEnvVarName] === hostedWebSmokeDistMode
+  const baseDistDir = environment[hostedWebDistModeEnvVarName] === hostedWebSmokeDistMode
     ? HOSTED_WEB_SMOKE_DIST_DIR
     : HOSTED_WEB_DEV_DIST_DIR;
+
+  return applyHostedWebDistSuffix(baseDistDir, environment);
+}
+
+function applyHostedWebDistSuffix(
+  baseDistDir: string,
+  environment: NodeJS.ProcessEnv,
+): string {
+  const configuredSuffix = environment[hostedWebDistSuffixEnvVarName]?.trim();
+
+  if (!configuredSuffix) {
+    return baseDistDir;
+  }
+
+  const normalizedSuffix = configuredSuffix.toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalizedSuffix)) {
+    throw new Error(
+      `${hostedWebDistSuffixEnvVarName} must use lowercase letters, digits, and hyphens only.`,
+    );
+  }
+
+  return `${baseDistDir}-${normalizedSuffix}`;
 }

@@ -1,8 +1,8 @@
 import type {
-  HostedExecutionDispatchRequest,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import {
-  parseHostedExecutionDispatchRequest,
+  parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 
 import type { R2BucketLike } from "./bundle-store.js";
@@ -24,9 +24,9 @@ export interface HostedDispatchPayloadStore {
   deleteDispatchPayload(ref: HostedExecutionDispatchPayloadRef): Promise<void>;
   readDispatchPayload(
     ref: HostedExecutionDispatchPayloadRef,
-  ): Promise<HostedExecutionDispatchRequest | null>;
+  ): Promise<HostedExecutionWake | null>;
   writeDispatchPayload(
-    dispatch: HostedExecutionDispatchRequest,
+    wake: HostedExecutionWake,
   ): Promise<HostedExecutionDispatchPayloadRef>;
 }
 
@@ -56,19 +56,19 @@ export function createHostedDispatchPayloadStore(input: {
         expectedKeyId: input.keyId,
         key: ref.stagedPayloadId,
         parse(value) {
-          return parseHostedExecutionDispatchRequest(value);
+          return parseHostedExecutionWake(value);
         },
         scope: "dispatch-payload",
       });
     },
 
-    async writeDispatchPayload(dispatch) {
-      const normalizedDispatch = parseHostedExecutionDispatchRequest(dispatch);
+    async writeDispatchPayload(wake) {
+      const normalizedWake = parseHostedExecutionWake(wake);
       const stagedPayloadId = await hostedDispatchPayloadObjectKeyForSignature(
         input.key,
-        normalizedDispatch.event.userId,
-        normalizedDispatch.eventId,
-        await createHostedDispatchPayloadSignature(normalizedDispatch),
+        normalizedWake.userId,
+        normalizedWake.eventId,
+        await createHostedDispatchPayloadSignature(normalizedWake),
       );
       await writeEncryptedR2Json({
         aad: buildDispatchPayloadAad(stagedPayloadId),
@@ -77,7 +77,7 @@ export function createHostedDispatchPayloadStore(input: {
         key: stagedPayloadId,
         keyId: input.keyId,
         scope: "dispatch-payload",
-        value: normalizedDispatch,
+        value: normalizedWake,
       });
 
       return { stagedPayloadId };
@@ -86,9 +86,9 @@ export function createHostedDispatchPayloadStore(input: {
 }
 
 async function createHostedDispatchPayloadSignature(
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
 ): Promise<string> {
-  const canonicalJson = stringifyStructuredJson(parseHostedExecutionDispatchRequest(dispatch));
+  const canonicalJson = stringifyStructuredJson(parseHostedExecutionWake(wake));
   const digest = await crypto.subtle.digest("SHA-256", textEncoder.encode(canonicalJson));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
