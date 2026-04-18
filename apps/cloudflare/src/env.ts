@@ -19,6 +19,10 @@ import {
   readHostedWebCallbackSigningEnvironment,
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
+import {
+  readHostedWebEncryptionEnvironment,
+  type HostedWebEncryptionEnvironment,
+} from "./hosted-web-encryption.ts";
 import type { StringEnvSource } from "./string-env.ts";
 
 export type HostedExecutionEnvironment = Omit<
@@ -26,6 +30,9 @@ export type HostedExecutionEnvironment = Omit<
   | "automationRecipientPrivateJwkJson"
   | "automationRecipientPrivateKeyringJson"
   | "automationRecipientPublicJwkJson"
+  | "hostedWebEncryptionKey"
+  | "hostedWebEncryptionKeyVersion"
+  | "hostedWebEncryptionKeyringJson"
   | "recoveryRecipientPublicJwkJson"
   | "teeAutomationRecipientPublicJwkJson"
   | "platformEnvelopeKeyBase64"
@@ -34,6 +41,7 @@ export type HostedExecutionEnvironment = Omit<
   automationRecipientPrivateKey: HostedUserRecipientPrivateKeyJwk;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
   hostedWebBaseUrl: string;
+  hostedWebEncryption: HostedWebEncryptionEnvironment;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   platformEnvelopeKey: Uint8Array;
   platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
@@ -50,6 +58,9 @@ export function readHostedExecutionEnvironment(
     automationRecipientPrivateJwkJson,
     automationRecipientPrivateKeyringJson,
     automationRecipientPublicJwkJson,
+    hostedWebEncryptionKey,
+    hostedWebEncryptionKeyVersion,
+    hostedWebEncryptionKeyringJson,
     recoveryRecipientPublicJwkJson,
     teeAutomationRecipientPublicJwkJson,
     platformEnvelopeKeyBase64,
@@ -86,6 +97,11 @@ export function readHostedExecutionEnvironment(
       keyringJson: automationRecipientPrivateKeyringJson,
     }),
     automationRecipientPublicKey,
+    hostedWebEncryption: readHostedWebEncryptionEnvironment({
+      HOSTED_WEB_ENCRYPTION_KEY: hostedWebEncryptionKey,
+      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: hostedWebEncryptionKeyringJson ?? undefined,
+      HOSTED_WEB_ENCRYPTION_KEY_VERSION: hostedWebEncryptionKeyVersion,
+    }),
     platformEnvelopeKey,
     platformEnvelopeKeysById: decodeHostedExecutionPlatformEnvelopeKeyring({
       platformEnvelopeKey,

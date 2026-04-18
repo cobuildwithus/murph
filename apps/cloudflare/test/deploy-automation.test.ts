@@ -277,6 +277,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_WEB_ENCRYPTION_KEY: "hosted-web-encryption-key",
+      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-web-key\"}",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
@@ -291,6 +293,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{\"v0\":\"old-key\"}",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_WEB_ENCRYPTION_KEY: "hosted-web-encryption-key",
+      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-web-key\"}",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
@@ -308,6 +312,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_WEB_ENCRYPTION_KEY: "hosted-web-encryption-key",
       OPENAI_API_KEY: "sk-user",
     })).toMatchObject({
       OPENAI_API_KEY: "sk-user",
@@ -322,6 +327,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_WEB_ENCRYPTION_KEY: "hosted-web-encryption-key",
       OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
     }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
 

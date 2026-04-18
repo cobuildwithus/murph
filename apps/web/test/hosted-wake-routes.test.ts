@@ -84,13 +84,8 @@ describe("hosted wake internal routes", () => {
         id: "wake_24",
         kind: "assistant.cron.tick",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadJson: {
-          eventId: "evt_tick",
-          kind: "assistant.cron.tick",
-          occurredAt: "2026-04-17T00:00:00.000Z",
-          reason: "manual",
-          userId: "member_123",
-        },
+        payloadBytes: 128,
+        payloadCiphertext: "ciphertext_inline_123",
         payloadSchema: "murph.hosted-wake-system.v1",
         quarantineCode: null,
         quarantinedAt: null,
@@ -109,7 +104,24 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "3",
       },
-      wakes: [],
+      wakes: [
+        {
+          behavior: "ordered",
+          createdAt: "2026-04-17T00:00:00.000Z",
+          dedupeKey: "evt_tick",
+          id: "wake_24",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payloadBytes: 128,
+          payloadCiphertext: "ciphertext_inline_123",
+          payloadSchema: "murph.hosted-wake-system.v1",
+          quarantineCode: null,
+          quarantinedAt: null,
+          seq: "24",
+          updatedAt: "2026-04-17T00:00:00.000Z",
+          userId: "member_123",
+        },
+      ],
     });
     mocks.readHostedExecutionCursor.mockResolvedValue({
       committedSeq: "24",
@@ -220,7 +232,24 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "3",
       },
-      wakes: [],
+      wakes: [
+        {
+          behavior: "ordered",
+          createdAt: "2026-04-17T00:00:00.000Z",
+          dedupeKey: "evt_tick",
+          id: "wake_24",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payloadBytes: 128,
+          payloadCiphertext: "ciphertext_inline_123",
+          payloadSchema: "murph.hosted-wake-system.v1",
+          quarantineCode: null,
+          quarantinedAt: null,
+          seq: "24",
+          updatedAt: "2026-04-17T00:00:00.000Z",
+          userId: "member_123",
+        },
+      ],
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
     expect(mocks.listHostedWakesAfterSeq).toHaveBeenCalledWith({

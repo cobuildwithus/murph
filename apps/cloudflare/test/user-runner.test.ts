@@ -63,6 +63,8 @@ import {
   TEST_RECOVERY_RECIPIENT_KEY_ID,
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK as TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+  TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES,
+  TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
   TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
 } from "./hosted-execution-fixtures.js";
@@ -98,6 +100,13 @@ describe("HostedUserRunner", () => {
       [TEST_AUTOMATION_RECIPIENT_KEY_ID]: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
     },
     automationRecipientPublicKey: TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+    hostedWebEncryption: {
+      key: Uint8Array.from(TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES),
+      keyVersion: TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
+      keysByVersion: {
+        [TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION]: Uint8Array.from(TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES),
+      },
+    },
     platformEnvelopeKey: Uint8Array.from({ length: 32 }, () => 7),
     platformEnvelopeKeyId: "v1",
     platformEnvelopeKeysById: {

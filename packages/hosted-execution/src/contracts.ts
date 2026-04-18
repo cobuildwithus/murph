@@ -334,7 +334,8 @@ interface HostedWakeRecordBase {
   dedupeKey?: string | null;
   id: string;
   occurredAt: string;
-  payloadJson?: unknown;
+  payloadBytes?: number | null;
+  payloadCiphertext?: string | null;
   quarantineCode?: string | null;
   quarantinedAt?: string | null;
   seq: string;

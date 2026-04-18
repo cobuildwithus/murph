@@ -17,10 +17,13 @@ import {
   TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+  TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES,
+  TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
   TEST_RECOVERY_RECIPIENT_KEY_ID,
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK as TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
   TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+  encryptTestHostedWakePayload,
 } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
@@ -36,6 +39,13 @@ const environment: HostedExecutionEnvironment = {
   },
   automationRecipientPublicKey: TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
   maxEventAttempts: 3,
+  hostedWebEncryption: {
+    key: Uint8Array.from(TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES),
+    keyVersion: TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
+    keysByVersion: {
+      [TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION]: Uint8Array.from(TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES),
+    },
+  },
   platformEnvelopeKey: Uint8Array.from({ length: 32 }, () => 7),
   platformEnvelopeKeyId: "v1",
   platformEnvelopeKeysById: {
@@ -83,13 +93,13 @@ describe("HostedUserRunner hosted wake drain", () => {
         }),
         wakes: [
           createHostedWakeRecord({
-            payloadJson: {
+            payload: {
               invalid: true,
             },
             seq: "1",
           }),
           createHostedWakeRecord({
-            payloadJson: createWake("evt_after_poison"),
+            payload: createWake("evt_after_poison"),
             seq: "2",
           }),
         ],
@@ -168,7 +178,7 @@ describe("HostedUserRunner hosted wake drain", () => {
             seq: "1",
           }),
           createHostedWakeRecord({
-            payloadJson: createWake("evt_after_quarantine"),
+            payload: createWake("evt_after_quarantine"),
             seq: "2",
           }),
         ],
@@ -236,7 +246,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         }),
         wakes: [
           createHostedWakeRecord({
-            payloadJson: createWake("evt_stale_commit"),
+            payload: createWake("evt_stale_commit"),
             seq: "1",
           }),
         ],
@@ -397,7 +407,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         wakes: [
           createHostedWakeRecord({
             kind: "conversation.message",
-            payloadJson: {
+            payload: {
               eventId: "evt_linq_message",
               ...buildHostedExecutionLinqConversationMessageWake({
                 eventId: "evt_linq_message",
@@ -465,6 +475,72 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_linq_message"]);
   });
+
+  it("reconstructs inline system wake payloads into hosted runner dispatches", async () => {
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "0",
+          nextSeq: "2",
+          version: "cursor_v1",
+        }),
+        wakes: [
+          createHostedWakeRecord({
+            payload: createWake("evt_inline_system"),
+            payloadField: "hosted-wake-inline-payload",
+            seq: "1",
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "1",
+          nextSeq: "2",
+          updatedAt: "2026-03-26T12:00:02.000Z",
+          version: "cursor_v2",
+        }),
+        wakes: [],
+      });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+    });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockResolvedValue({
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+      pendingWakeCount: 0,
+    });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    await runner.wakeHostedWakes();
+
+    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_inline_system"]);
+  });
 });
 
 function createWake(eventId: string) {
@@ -496,18 +572,30 @@ function createCursorState(overrides: Partial<{
 function createHostedWakeRecord(input: {
   kind?: HostedWakeRecord["kind"];
   occurredAt?: string;
-  payloadJson?: unknown;
+  payloadField?: "hosted-wake-inline-payload" | "hosted-wake-ref-payload";
+  payload?: unknown;
   payloadSchema?: HostedWakeRecord["payloadSchema"];
   quarantineCode?: string | null;
   quarantinedAt?: string | null;
   seq: string;
 }): HostedWakeRecord {
+  const payloadTransport = input.payload === undefined
+    ? {}
+    : encryptTestHostedWakePayload({
+      field: input.payloadField ?? (
+        input.kind === "conversation.message"
+          ? "hosted-wake-inline-payload"
+          : "hosted-wake-ref-payload"
+      ),
+      userId: "member_123",
+      value: input.payload,
+    });
   const base = {
     behavior: "ordered" as const,
     createdAt: "2026-03-26T12:00:00.000Z",
     id: `wake_${input.seq}`,
     occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
-    ...(input.payloadJson === undefined ? {} : { payloadJson: input.payloadJson }),
+    ...payloadTransport,
     ...(input.quarantineCode === undefined ? {} : { quarantineCode: input.quarantineCode }),
     ...(input.quarantinedAt === undefined ? {} : { quarantinedAt: input.quarantinedAt }),
     seq: input.seq,

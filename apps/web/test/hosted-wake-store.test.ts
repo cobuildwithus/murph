@@ -260,9 +260,8 @@ describe("hosted wake store", () => {
     expect(result.updatedExisting).toBe(true);
     expect(result.wake.seq).toBe("1");
     expect(result.wake.dedupeKey).toBe("second");
-    expect(result.wake.payloadJson).toEqual({
-      revision: 2,
-    });
+    expect(result.wake.payloadCiphertext).toEqual(expect.any(String));
+    expect(result.wake).not.toHaveProperty("payloadJson");
 
     const listed = await listHostedWakesAfterSeq({
       prisma: tx,
@@ -271,6 +270,8 @@ describe("hosted wake store", () => {
 
     expect(listed.wakes).toHaveLength(1);
     expect(listed.wakes[0]?.seq).toBe("1");
+    expect(listed.wakes[0]?.payloadCiphertext).toEqual(expect.any(String));
+    expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
   });
 
   it("suppresses duplicate unresolved edge-triggered wakes", async () => {
@@ -399,6 +400,49 @@ describe("hosted wake store", () => {
 
     expect(listed.wakes).toHaveLength(1);
     expect(listed.wakes[0]?.seq).toBe("4");
+    expect(listed.wakes[0]?.payloadCiphertext).toEqual(expect.any(String));
+    expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
+  });
+
+  it("returns the spilled wake payload ciphertext without exposing storage internals", async () => {
+    const payload = {
+      blob: "x".repeat(20_000),
+    };
+    const encoded = encodeWakePayloadForHarness("member_123", payload);
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 2n,
+        userId: "member_123",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "evt_spilled",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload,
+          seq: 1n,
+          userId: "member_123",
+        },
+      ],
+    });
+
+    const listed = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+
+    expect(encoded.storage).toBe("ref");
+    expect(listed.wakes).toHaveLength(1);
+    expect(listed.wakes[0]).toEqual(expect.objectContaining({
+      payloadBytes: encoded.payloadBytes,
+      payloadCiphertext: expect.any(String),
+      seq: "1",
+    }));
+    expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
+    expect(listed.wakes[0]).not.toHaveProperty("payloadRef");
   });
 
   it("keeps quarantined wakes visible for cursor advancement without hydrating payloads", async () => {
@@ -449,14 +493,13 @@ describe("hosted wake store", () => {
         seq: "1",
       }),
       expect.objectContaining({
-        payloadJson: {
-          revision: 2,
-        },
+        payloadCiphertext: expect.any(String),
         quarantinedAt: null,
         seq: "2",
       }),
     ]);
     expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
+    expect(listed.wakes[1]).not.toHaveProperty("payloadJson");
   });
 
   it("resolves wake schedule and lifecycle lookups by the original dispatch event id", async () => {
