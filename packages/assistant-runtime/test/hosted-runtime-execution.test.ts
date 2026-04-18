@@ -1140,6 +1140,7 @@ describe("completeHostedExecutionAfterCommit", () => {
           hostedDeliveryEffect,
         ],
       },
+      includeCommittedCompatibility: true,
       wake: buildHostedExecutionAssistantCronTickWake({
         eventId: "evt_123",
         occurredAt: "2026-04-08T00:00:00.000Z",
@@ -1249,6 +1250,16 @@ describe("completeHostedExecutionAfterCommit", () => {
         },
       ],
       browserVaultSnapshot: undefined,
+      committedAssistantDeliveryEffects: [
+        hostedDeliveryEffect,
+      ],
+      committedGatewayProjectionSnapshot: {
+        schema: "murph.gateway-projection-snapshot.v1",
+        generatedAt: "2026-04-08T00:00:00.000Z",
+        conversations: [],
+        messages: [],
+        permissions: [],
+      },
       finalGatewayProjectionSnapshot: {
         schema: "murph.gateway-projection-snapshot.v1",
         generatedAt: "2026-04-08T00:10:00.000Z",

@@ -538,6 +538,7 @@ function normalizeHostedWakeAt(
 }
 
 export async function completeHostedExecutionAfterCommit(input: {
+  includeCommittedCompatibility?: boolean;
   materializedArtifactPaths?: ReadonlySet<string>;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
@@ -632,6 +633,14 @@ export async function completeHostedExecutionAfterCommit(input: {
   return {
     assistantDeliveryOutcomes,
     browserVaultSnapshot,
+    ...(input.includeCommittedCompatibility
+      ? {
+          committedAssistantDeliveryEffects:
+            input.committedExecution.committedAssistantDeliveryEffects,
+          committedGatewayProjectionSnapshot:
+            input.committedExecution.committedGatewayProjectionSnapshot,
+        }
+      : {}),
     finalGatewayProjectionSnapshot,
     phase: "completed",
     result: finalResult,
