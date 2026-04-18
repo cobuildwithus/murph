@@ -82,7 +82,7 @@ export interface NormalizedHostedAssistantRuntimeConfig {
 }
 
 export interface HostedCommittedExecutionState {
-  committedGatewayProjectionSnapshot: GatewayProjectionSnapshot;
+  committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   committedResult: HostedExecutionRunnerResult;
 }

@@ -168,7 +168,22 @@ export async function executeHostedWakeForCommit(input: {
     {
       sourceReader: assistantGatewayLocalProjectionSourceReader,
     },
-  );
+  ).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake,
+      error,
+      level: "warn",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+      },
+      message:
+        "Hosted runtime could not export the committed gateway projection snapshot; continuing without it.",
+      phase: "commit.recorded",
+      run: input.request.run ?? null,
+    });
+    return null;
+  });
 
   return {
     committedGatewayProjectionSnapshot,
@@ -572,8 +587,36 @@ export async function completeHostedExecutionAfterCommit(input: {
   await exportHostedPendingAssistantUsage({
     usageExportPort: input.runtime.platform.usageExportPort,
     vaultRoot: input.restored.vaultRoot,
+  }).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: input.wake,
+      error,
+      level: "warn",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      },
+      message:
+        "Hosted runtime could not export pending assistant usage after draining side effects; leaving the pending usage records in the final bundle.",
+      phase: "side-effects.draining",
+      run: input.run ?? null,
+    });
   });
-  await refreshAssistantStatusSnapshot(input.restored.vaultRoot);
+  await refreshAssistantStatusSnapshot(input.restored.vaultRoot).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: input.wake,
+      error,
+      level: "warn",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      },
+      message:
+        "Hosted runtime could not refresh the assistant status snapshot after draining side effects; continuing with the final bundle snapshot.",
+      phase: "side-effects.draining",
+      run: input.run ?? null,
+    });
+  });
   emitHostedExecutionStructuredLog({
     component: "runtime",
     wake: input.wake,
@@ -620,7 +663,22 @@ export async function completeHostedExecutionAfterCommit(input: {
     {
       sourceReader: assistantGatewayLocalProjectionSourceReader,
     },
-  );
+  ).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: input.wake,
+      error,
+      level: "warn",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      },
+      message:
+        "Hosted runtime could not export the final gateway projection snapshot; returning the final bundle without it.",
+      phase: "completed",
+      run: input.run ?? null,
+    });
+    return null;
+  });
   const finalResult: HostedExecutionRunnerResult = {
     bundle: encodeHostedBundleBase64(finalSnapshot.bundle),
     result: input.committedExecution.committedResult.result,
@@ -628,6 +686,21 @@ export async function completeHostedExecutionAfterCommit(input: {
   const browserVaultSnapshot = await exportHostedBrowserVaultSnapshot({
     sourceVersion: sha256HostedBundleHex(finalSnapshot.bundle),
     vaultRoot: input.restored.vaultRoot,
+  }).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: input.wake,
+      error,
+      level: "warn",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      },
+      message:
+        "Hosted runtime could not export the browser vault snapshot; returning the final bundle without it.",
+      phase: "completed",
+      run: input.run ?? null,
+    });
+    return null;
   });
 
   return {
