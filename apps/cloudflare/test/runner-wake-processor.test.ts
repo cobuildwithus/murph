@@ -14,6 +14,8 @@ describe("runner wake processor delivery summaries", () => {
         deliveryStatus: "failed",
         effectFingerprint: "dedupe-1",
         effectId: "outbox-1",
+        journalMethod: null,
+        journalStatus: null,
         providerMessageId: null,
         providerThreadId: null,
         retryable: false,
