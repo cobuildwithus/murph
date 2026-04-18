@@ -1,5 +1,5 @@
 /**
- * Pure thin-runner projection helpers extracted from RunnerQueueStore. The
+ * Pure thin-runner projection helpers extracted from RunnerStateStore. The
  * store still owns SQL-backed lease/runtime transitions; this module owns
  * normalization, bundle-ref versioning, and wake scheduling.
  */

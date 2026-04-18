@@ -7,7 +7,7 @@ import {
 } from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
-import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import type {
   DurableObjectSqlCursorLike,
   DurableObjectSqlValue,
@@ -90,9 +90,9 @@ class SqliteDurableObjectSqlStorage {
   }
 }
 
-function createRunnerQueueStoreHarness(setup?: (db: DatabaseSync) => void): {
+function createRunnerStateStoreHarness(setup?: (db: DatabaseSync) => void): {
   db: DatabaseSync;
-  store: RunnerQueueStore;
+  store: RunnerStateStore;
 } {
   const db = new DatabaseSync(":memory:");
   setup?.(db);
@@ -110,7 +110,7 @@ function createRunnerQueueStoreHarness(setup?: (db: DatabaseSync) => void): {
 
   return {
     db,
-    store: new RunnerQueueStore(state),
+    store: new RunnerStateStore(state),
   };
 }
 
@@ -139,9 +139,9 @@ function readBundleSlotRows(db: DatabaseSync): Array<{
   }>;
 }
 
-describe("RunnerQueueStore bundle slot storage", () => {
+describe("RunnerStateStore bundle slot storage", () => {
   it("stores the canonical vault bundle slot outside runner_meta for fresh state", async () => {
-    const { db, store } = createRunnerQueueStoreHarness();
+    const { db, store } = createRunnerStateStoreHarness();
     await store.bootstrapUser("user-fresh");
 
     const runnerMetaColumns = db.prepare("PRAGMA table_info(runner_meta)").all() as Array<{
@@ -162,7 +162,7 @@ describe("RunnerQueueStore bundle slot storage", () => {
   it("keeps compare-and-swap bundle versions in the canonical vault slot row", async () => {
     const currentVaultRef = makeBundleRef("vault/current");
     const nextVaultRef = makeBundleRef("vault/next");
-    const { db, store } = createRunnerQueueStoreHarness();
+    const { db, store } = createRunnerStateStoreHarness();
     await store.bootstrapUser("user-cas");
 
     const initial = await store.compareAndSwapBundleRefs({
@@ -198,7 +198,7 @@ describe("RunnerQueueStore bundle slot storage", () => {
 
   it("repairs malformed bundle refs without dropping their version", async () => {
     const vaultRef = makeBundleRef("vault/current");
-    const { db, store } = createRunnerQueueStoreHarness();
+    const { db, store } = createRunnerStateStoreHarness();
     await store.bootstrapUser("user-malformed");
 
     db.prepare(`

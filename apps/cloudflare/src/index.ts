@@ -146,7 +146,7 @@ export default {
       if (localLoopbackProxyResponse) {
         return localLoopbackProxyResponse;
       }
-      const publicResponse = await dispatchDeclarativeRoute(workerPublicRoutes, { request, url });
+      const publicResponse = await handleDeclarativeRoute(workerPublicRoutes, { request, url });
       if (publicResponse) {
         return publicResponse;
       }
@@ -154,7 +154,7 @@ export default {
       const stringEnv = asWorkerStringEnvironment(env);
       const environment = readHostedExecutionEnvironment(stringEnv);
       return (
-        await dispatchDeclarativeRoute(workerInternalRoutes, {
+        await handleDeclarativeRoute(workerInternalRoutes, {
           env,
           environment,
           request,
@@ -207,7 +207,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 }
 
-async function dispatchDeclarativeRoute<Context>(
+async function handleDeclarativeRoute<Context>(
   routes: readonly DeclarativeRoute<Context>[],
   context: Context & { request: Request; url: URL },
 ): Promise<Response | null> {

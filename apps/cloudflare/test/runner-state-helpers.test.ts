@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   resolveRunnerNextWakeAt,
-} from "../src/user-runner/runner-queue-state.js";
+} from "../src/user-runner/runner-state-helpers.js";
 
 describe("resolveRunnerNextWakeAt", () => {
   it("clamps overdue preferred wakes to an immediate hosted follow-up", () => {

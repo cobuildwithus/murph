@@ -1540,11 +1540,11 @@ describe("HostedUserRunner", () => {
         expectedKind: "vault",
       });
       const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
-      const queueStore = new (await import("../src/user-runner/runner-queue-store.js")).RunnerQueueStore(
+      const stateStore = new (await import("../src/user-runner/runner-state-store.js")).RunnerStateStore(
         storage.state,
       );
-      await queueStore.bootstrapUser("member_cleanup_failure");
-      await queueStore.compareAndSwapBundleRefs({
+      await stateStore.bootstrapUser("member_cleanup_failure");
+      await stateStore.compareAndSwapBundleRefs({
         expectedVersion: 0,
         nextBundleRef: previousVaultRef,
       });
@@ -1881,7 +1881,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const firstDispatch = runner.wake(dispatch);
+    const firstWake = runner.wake(dispatch);
     await firstCommitRecorded.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
@@ -1889,7 +1889,7 @@ describe("HostedUserRunner", () => {
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
 
     releaseFirstRunner.resolve();
-    await firstDispatch;
+    await firstWake;
     expect((await runner.status()).pendingEventCount).toBe(0);
   });
 
@@ -1943,7 +1943,7 @@ describe("HostedUserRunner", () => {
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(firstRunner, "member_123");
 
-    const firstDispatch = firstRunner.wake(dispatch);
+    const firstWake = firstRunner.wake(dispatch);
     await firstCommitRecorded.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
@@ -1953,7 +1953,7 @@ describe("HostedUserRunner", () => {
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
 
     releaseFirstRunner.resolve();
-    const finalStatus = await firstDispatch;
+    const finalStatus = await firstWake;
     expect(finalStatus.lastError).toBeNull();
     expect(finalStatus.pendingEventCount).toBe(0);
     expect((await restartedRunner.status()).pendingEventCount).toBe(0);
@@ -2009,21 +2009,21 @@ describe("HostedUserRunner", () => {
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(firstRunner, "member_123");
 
-    const firstDispatch = firstRunner.wake(dispatch);
+    const firstWake = firstRunner.wake(dispatch);
     await firstCommitRecorded.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const duplicateStatus = await restartedRunner.wake(dispatch);
+    const duplicateWakeStatus = await restartedRunner.wake(dispatch);
 
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
-    expect(duplicateStatus).toMatchObject({
+    expect(duplicateWakeStatus).toMatchObject({
       inFlight: true,
       lastEventId: dispatch.eventId,
     });
 
     releaseFirstRunner.resolve();
-    const finalStatus = await firstDispatch;
+    const finalStatus = await firstWake;
     expect(finalStatus.lastError).toBeNull();
     expect(finalStatus.pendingEventCount).toBe(0);
   });
@@ -2080,7 +2080,7 @@ describe("HostedUserRunner", () => {
     await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = createWake("evt_long_finalize_lease");
 
-    const firstDispatch = runner.wake(dispatch);
+    const firstWake = runner.wake(dispatch);
     await commitInvokeStarted.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
@@ -2094,7 +2094,7 @@ describe("HostedUserRunner", () => {
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
 
     releaseFinalizePhase.resolve();
-    const [finalStatus] = await Promise.all([firstDispatch, alarmPromise]);
+    const [finalStatus] = await Promise.all([firstWake, alarmPromise]);
 
     expect(finalStatus.lastError).toBeNull();
     expect(finalStatus.pendingEventCount).toBe(0);

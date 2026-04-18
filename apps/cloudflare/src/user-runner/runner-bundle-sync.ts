@@ -15,7 +15,7 @@ import {
   type R2BucketLike,
 } from "../bundle-store.js";
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
-import { RunnerQueueStore } from "./runner-queue-store.js";
+import { RunnerStateStore } from "./runner-state-store.js";
 import {
   type RunnerBundleVersion,
   type RunnerStateRecord,
@@ -31,7 +31,7 @@ export class RunnerBundleSync {
     private readonly platformEnvelopeKey: Uint8Array,
     private readonly platformEnvelopeKeyId: string,
     private readonly platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>,
-    private readonly queueStore: RunnerQueueStore,
+    private readonly stateStore: RunnerStateStore,
   ) {
     this.garbageCollector = new HostedBundleGarbageCollector(
       bucket,
@@ -43,7 +43,7 @@ export class RunnerBundleSync {
 
   async readBundlesForRunner(): Promise<HostedExecutionRunnerResult["bundle"]> {
     const store = this.createBundleStore();
-    const bundleState = await this.queueStore.readBundleMetaState();
+    const bundleState = await this.stateStore.readBundleMetaState();
     return encodeHostedBundleBase64(await readRequiredBundleForRunner({
       bundleStore: store,
       ref: bundleState.bundleRef,
@@ -60,7 +60,7 @@ export class RunnerBundleSync {
     const nextBundleBytes = decodeHostedBundleBase64(bundle);
 
     for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
-      const bundleState = await this.queueStore.readBundleMetaState();
+      const bundleState = await this.stateStore.readBundleMetaState();
       const nextBundleRef = bundle === null
         ? null
         : await writeHostedBundleBytesIfChanged({
@@ -70,7 +70,7 @@ export class RunnerBundleSync {
             plaintext: nextBundleBytes ?? new Uint8Array(),
           });
 
-      const swapped = await this.queueStore.compareAndSwapBundleRefs({
+      const swapped = await this.stateStore.compareAndSwapBundleRefs({
         expectedVersion: nextExpectedVersion,
         nextBundleRef,
       });

@@ -47,11 +47,11 @@ import {
   RunnerWakeProcessor,
   HostedExecutionObsoleteRunResultError,
   type RunnerUserStores,
-} from "./user-runner/runner-dispatch-processor.js";
-import type { RunnerLeaseOwnerInput } from "./user-runner/runner-queue-store.js";
+} from "./user-runner/runner-wake-processor.js";
+import type { RunnerLeaseOwnerInput } from "./user-runner/runner-state-store.js";
 import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
-import { RunnerQueueStore } from "./user-runner/runner-queue-store.js";
-import { RunnerScheduler } from "./user-runner/runner-scheduler.js";
+import { RunnerStateStore } from "./user-runner/runner-state-store.js";
+import { RunnerWakeScheduler } from "./user-runner/runner-wake-scheduler.js";
 import {
   shouldAdvanceHostedWakeCursor,
   type HostedWakeDrainState,
@@ -89,9 +89,9 @@ function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
 export class HostedUserRunner {
   private readonly wakeProcessor: RunnerWakeProcessor;
   private readonly eventTransitionLocks = new Map<string, Promise<void>>();
-  private readonly queueStore: RunnerQueueStore;
+  private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
-  private readonly scheduler: RunnerScheduler;
+  private readonly wakeScheduler: RunnerWakeScheduler;
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStore>;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
@@ -125,8 +125,8 @@ export class HostedUserRunner {
       teeAutomationRecipientPublicKey: env.teeAutomationRecipientPublicKey,
     });
     this.userKeyStore = userKeyStore;
-    this.queueStore = new RunnerQueueStore(state);
-    this.scheduler = new RunnerScheduler(this.queueStore, state);
+    this.stateStore = new RunnerStateStore(state);
+    this.wakeScheduler = new RunnerWakeScheduler(this.stateStore, state);
     this.wakeProcessor = new RunnerWakeProcessor({
       applyHostedTransition: <T>(input: {
         eventId: string;
@@ -138,11 +138,11 @@ export class HostedUserRunner {
       ensureRunnerStores: (userId?: string) => this.ensureRunnerStores(userId),
       env: this.env,
       hostedWebBaseUrl: this.env.hostedWebBaseUrl,
-      queueStore: this.queueStore,
+      stateStore: this.stateStore,
       readRunnerRuntimeConfigSource: () => this.readRunnerRuntimeConfigSource(),
       runnerContainerNamespace: this.runnerContainerNamespace,
       runnerRuntimeEnvSource: this.runnerRuntimeEnvSource,
-      scheduler: this.scheduler,
+      wakeScheduler: this.wakeScheduler,
     });
   }
 
@@ -181,15 +181,15 @@ export class HostedUserRunner {
         crypto.rootKey,
         crypto.rootKeyId,
         crypto.keysById,
-        this.queueStore,
+        this.stateStore,
       ),
       commitRecovery: createRunnerCommitRecovery({
         bucket: this.bucket,
         platformEnvelopeKey: crypto.rootKey,
         platformEnvelopeKeyId: crypto.rootKeyId,
         platformEnvelopeKeysById: crypto.keysById,
-        queueStore: this.queueStore,
-        scheduler: this.scheduler,
+        stateStore: this.stateStore,
+        wakeScheduler: this.wakeScheduler,
       }),
       crypto,
       gatewayStore: new HostedGatewayProjectionStore(this.state, {
@@ -206,7 +206,7 @@ export class HostedUserRunner {
   }
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
-    await this.queueStore.bootstrapUser(userId);
+    await this.stateStore.bootstrapUser(userId);
     return { userId };
   }
 
@@ -223,12 +223,12 @@ export class HostedUserRunner {
   async alarm(): Promise<void> {
     let record: RunnerStateRecord;
     try {
-      record = await this.queueStore.readState();
+      record = await this.stateStore.readState();
     } catch {
       return;
     }
 
-    record = await this.queueStore.clearNextWakeIfDue(Date.now());
+    record = await this.stateStore.clearNextWakeIfDue(Date.now());
     if (!record.runtimeBootstrapped) {
       return;
     }
@@ -241,7 +241,7 @@ export class HostedUserRunner {
         phase: "dispatch.running",
         userId: record.userId ?? null,
       });
-      await this.scheduler.syncNextWake(
+      await this.wakeScheduler.syncNextWake(
         new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
       );
       return;
@@ -258,21 +258,21 @@ export class HostedUserRunner {
         phase: "dispatch.running",
         userId: record.userId,
       });
-      await this.scheduler.syncNextWake(
+      await this.wakeScheduler.syncNextWake(
         new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
       );
     }
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
-    return this.composeUserStatus(await this.queueStore.readState());
+    return this.composeUserStatus(await this.stateStore.readState());
   }
 
   async enqueueHostedWake(
     wake: HostedExecutionWake,
   ): Promise<HostedExecutionUserStatus> {
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(wake);
-    await this.queueStore.bootstrapUser(wake.userId);
+    await this.stateStore.bootstrapUser(wake.userId);
     const append = await appendHostedWakeInWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: wake.userId,
@@ -313,7 +313,7 @@ export class HostedUserRunner {
     targetSeqHint?: string | null;
   }): Promise<HostedExecutionUserStatus> {
     const userId = await this.requireBoundUserId();
-    await this.queueStore.bootstrapUser(userId);
+    await this.stateStore.bootstrapUser(userId);
     const targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
     let afterSeq: string | null = null;
     let expectedVersion: string | null = null;
@@ -351,7 +351,7 @@ export class HostedUserRunner {
       let stoppingState: HostedWakeDrainState | null = null;
 
       for (const wake of batch.wakes) {
-        const outcome = await this.dispatchHostedWakeRecord(wake);
+        const outcome = await this.executeHostedWakeRecord(wake);
 
         if (shouldAdvanceHostedWakeCursor(outcome.state)) {
           highestCommittedWakeSeq = wake.seq;
@@ -369,7 +369,7 @@ export class HostedUserRunner {
         break;
       }
 
-      const bundleState = await this.queueStore.readBundleMetaState();
+      const bundleState = await this.stateStore.readBundleMetaState();
       const commit = await commitHostedWakeCursorToWeb({
         baseUrl: this.env.hostedWebBaseUrl,
         body: {
@@ -418,10 +418,10 @@ export class HostedUserRunner {
       }
     }
 
-    return this.composeUserStatus(await this.queueStore.readState());
+    return this.composeUserStatus(await this.stateStore.readState());
   }
 
-  private async dispatchHostedWakeRecord(wake: HostedWakeRecord): Promise<HostedWakeDrainOutcome> {
+  private async executeHostedWakeRecord(wake: HostedWakeRecord): Promise<HostedWakeDrainOutcome> {
     const userId = await this.requireBoundUserId();
     const seq = BigInt(wake.seq);
 
@@ -488,7 +488,7 @@ export class HostedUserRunner {
     }
 
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
-    const state = await this.wakeProcessor.executeNativeWakeDispatch(hostedWake, {
+    const state = await this.wakeProcessor.executeWake(hostedWake, {
       holdLeaseUntilCleanup: true,
     });
 
@@ -543,12 +543,12 @@ export class HostedUserRunner {
 
     const finalOutcome = committedOutcomes[committedOutcomes.length - 1]!;
     let finalCommittedResult: Awaited<
-      ReturnType<typeof this.wakeProcessor.finalizeNativeWakeDispatchAfterCursorCommit>
+      ReturnType<typeof this.wakeProcessor.finalizeWakeAfterCursorCommit>
     > = null;
 
     for (const outcome of committedOutcomes) {
       try {
-        const finalizedCommit = await this.wakeProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
+        const finalizedCommit = await this.wakeProcessor.finalizeWakeAfterCursorCommit({
           wake: outcome.wake!,
         });
 
@@ -557,14 +557,14 @@ export class HostedUserRunner {
           continue;
         }
 
-        await this.wakeProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+        await this.wakeProcessor.cleanupWakeAfterCursorCommit({
           wake: outcome.wake!,
         });
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "hosted.user-runner",
-          dispatch: outcome.wake!,
           error,
+          eventId: outcome.wake!.eventId,
           level: "warn",
           message: "Hosted wake finalization failed after the cursor had already advanced.",
           phase: "completed",
@@ -575,7 +575,7 @@ export class HostedUserRunner {
 
     try {
       if (!finalCommittedResult) {
-        await this.wakeProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+        await this.wakeProcessor.cleanupWakeAfterCursorCommit({
           wake: finalOutcome.wake!,
         });
         return;
@@ -615,14 +615,14 @@ export class HostedUserRunner {
         }
       }
 
-      await this.wakeProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+      await this.wakeProcessor.cleanupWakeAfterCursorCommit({
         wake: finalOutcome.wake!,
       });
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
-        dispatch: finalOutcome.wake!,
         error,
+        eventId: finalOutcome.wake!.eventId,
         level: "warn",
         message: "Hosted wake finalization failed after the cursor had already advanced.",
         phase: "completed",
@@ -638,7 +638,7 @@ export class HostedUserRunner {
       snapshotRef === undefined ? null : snapshotRef,
       "Hosted wake cursor snapshotRef",
     );
-    await this.queueStore.syncBundleRefCache(nextBundleRef);
+    await this.stateStore.syncBundleRefCache(nextBundleRef);
   }
 
   private async composeUserStatus(record: RunnerStateRecord): Promise<HostedExecutionUserStatus> {
@@ -704,8 +704,8 @@ export class HostedUserRunner {
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
-        dispatch: wake,
         error,
+        eventId: wake.eventId,
         level: "warn",
         message: "Hosted wake status read failed; returning a conservative queued result.",
         phase: "dispatch.running",
@@ -722,7 +722,7 @@ export class HostedUserRunner {
     run: (userId: string, stores: RunnerUserStores) => Promise<T>;
   }): Promise<T> {
     return this.withEventTransitionLock(input.eventId, async () => {
-      if (input.leaseOwner && !(await this.queueStore.hasActiveRunLease(input.leaseOwner))) {
+      if (input.leaseOwner && !(await this.stateStore.hasActiveRunLease(input.leaseOwner))) {
         throw new HostedExecutionObsoleteRunResultError(
           input.eventId,
           input.leaseOwner.run?.runId ?? null,
@@ -806,7 +806,7 @@ export class HostedUserRunner {
   }
 
   private async requireBoundUserId(): Promise<string> {
-    return (await this.queueStore.readState()).userId;
+    return (await this.stateStore.readState()).userId;
   }
 
   private async tryReadBoundUserId(): Promise<string | null> {
@@ -815,7 +815,7 @@ export class HostedUserRunner {
     }
 
     try {
-      return (await this.queueStore.readState()).userId;
+      return (await this.stateStore.readState()).userId;
     } catch {
       return null;
     }
