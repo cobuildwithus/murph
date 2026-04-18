@@ -9,9 +9,9 @@
 
 **Product category:** Health experimentation / personal health assistant
 
-**Product type:** SaaS ($15/mo or $144/yr managed launch pricing) — works through existing messaging apps, no separate app to install
+**Product type:** SaaS ($15/mo or $149/yr managed launch pricing) — works through existing messaging apps, no separate app to install
 
-**Business model:** $15/mo or $144/yr for the launch tier.
+**Business model:** $15/mo or $149/yr for the launch tier.
 
 ## Product Philosophy
 
@@ -197,7 +197,7 @@ What we refuse to become:
 ## Goals
 **Business goal:** Validate the experiment loop with early-access users, then open access.
 **Conversion action:** Connect wearable → start first experiment.
-**Current metrics:** Pre-launch. Launch pricing is $15/mo or $144/yr.
+**Current metrics:** Pre-launch. Launch pricing is $15/mo or $149/yr.
 
 ## Experiment Data Model
 
