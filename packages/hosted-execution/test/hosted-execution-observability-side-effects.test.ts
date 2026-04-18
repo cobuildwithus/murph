@@ -278,7 +278,7 @@ describe("hosted execution observability", () => {
     });
   });
 
-  it("emits structured logs only when stdio logging is enabled", () => {
+  it("emits structured logs by default and only suppresses them via explicit env override", () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -287,10 +287,15 @@ describe("hosted execution observability", () => {
     emitHostedExecutionStructuredLog({
       component: "runner",
       level: "info",
-      message: "quiet",
+      message: "default info",
       phase: "claimed",
     });
-    expect(infoSpy).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(infoSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      level: "info",
+      message: "default info",
+      phase: "claimed",
+    });
 
     process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "on";
     emitHostedExecutionStructuredLog({
@@ -321,7 +326,7 @@ describe("hosted execution observability", () => {
       message: "quiet again",
       phase: "completed",
     });
-    expect(infoSpy).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledTimes(1);
   });
 
   it("sanitizes nested structured log details and safe error metadata", () => {
