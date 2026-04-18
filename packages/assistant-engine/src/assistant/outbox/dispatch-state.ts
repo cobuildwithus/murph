@@ -28,6 +28,40 @@ export function buildAssistantDeliveryIdempotencyKey(
   return `assistant-outbox:${intent.intentId}`
 }
 
+export interface AssistantOutboxIntentMirrorState {
+  intent: AssistantOutboxIntent | null
+  sendingPastGraceWindow: boolean
+  sendingStartedAt: string | null
+}
+
+export function buildAssistantOutboxIntentMirrorState(input: {
+  intent: AssistantOutboxIntent | null
+  now?: Date
+  sendingGraceMs?: number
+}): AssistantOutboxIntentMirrorState {
+  const intent = input.intent
+  if (!intent || intent.status !== 'sending') {
+    return {
+      intent,
+      sendingPastGraceWindow: false,
+      sendingStartedAt: null,
+    }
+  }
+
+  const sendingStartedAt = intent.lastAttemptAt ?? intent.updatedAt ?? null
+  const sendingGraceMs = input.sendingGraceMs
+  const nowMs = (input.now ?? new Date()).getTime()
+  const sendingStartedAtMs = sendingStartedAt ? Date.parse(sendingStartedAt) : Number.NaN
+
+  return {
+    intent,
+    sendingPastGraceWindow:
+      typeof sendingGraceMs === 'number' &&
+      (!Number.isFinite(sendingStartedAtMs) || nowMs - sendingStartedAtMs >= sendingGraceMs),
+    sendingStartedAt,
+  }
+}
+
 export function errorImpliesAssistantDeliveryMayHaveSucceeded(error: unknown): boolean {
   if (
     typeof error === 'object' &&

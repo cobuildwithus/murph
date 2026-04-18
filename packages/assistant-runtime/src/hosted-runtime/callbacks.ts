@@ -26,6 +26,7 @@ import {
   markAssistantOutboxIntentMirrorTerminalById,
   markAssistantOutboxIntentSentById,
   normalizeAssistantDeliveryError,
+  readAssistantOutboxIntentMirrorState,
   saveAssistantSession,
   sendAssistantOutboxPayload,
   shouldDispatchAssistantOutboxIntent,
@@ -145,9 +146,26 @@ async function deliverHostedCommittedAssistantDelivery(input: {
     lastMethod: null,
     lastStatus: null,
   };
+  const mirrorState = await readAssistantOutboxIntentMirrorState({
+    intentId: input.assistantDeliveryEffect.effectId,
+    now: new Date(),
+    sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
+    vault: input.vaultRoot,
+  });
   let attempt: HostedAssistantDeliveryAttempt | null = null;
   let deliveryMayHaveSucceeded = false;
   try {
+    const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
+      assistantDeliveryEffect: input.assistantDeliveryEffect,
+      journalTrace,
+      mirrorState,
+      userId: input.userId,
+      wake: input.wake,
+    });
+    if (mirrorOutcome) {
+      return mirrorOutcome;
+    }
+
     const existingRecord = await callHostedAssistantDeliveryJournal({
       effectsPort: input.effectsPort,
       journalTrace,
@@ -518,6 +536,88 @@ async function deliverHostedCommittedAssistantDelivery(input: {
       userId: input.userId,
     });
     throw enrichedError;
+  }
+}
+
+async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  journalTrace: HostedAssistantDeliveryJournalTrace;
+  mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
+  userId: string;
+  wake: HostedExecutionWake;
+}): Promise<HostedAssistantDeliveryOutcome | null> {
+  const intent = input.mirrorState.intent;
+  if (!intent) {
+    return null;
+  }
+
+  switch (intent.status) {
+    case "sent": {
+      if (!intent.delivery) {
+        return null;
+      }
+      emitHostedAssistantDeliveryDispatchSuccess({
+        delivery: intent.delivery,
+        wake: input.wake,
+        effect: input.assistantDeliveryEffect,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        delivery: intent.delivery,
+        deliveryStatus: "sent",
+        effect: input.assistantDeliveryEffect,
+        journalTrace: input.journalTrace,
+        retryable: false,
+      });
+    }
+    case "failed": {
+      const failure = normalizeHostedAssistantDeliveryMirrorFailure({
+        fallbackMessage: "The assistant outbox mirror recorded a terminal delivery failure.",
+        lastError: intent.lastError,
+      });
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError: failure,
+        deliveryStatus: "failed",
+        wake: input.wake,
+        effect: input.assistantDeliveryEffect,
+        retryable: false,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: failure.code,
+        deliveryErrorMessage: failure.message,
+        deliveryStatus: "failed",
+        effect: input.assistantDeliveryEffect,
+        journalTrace: input.journalTrace,
+        retryable: false,
+      });
+    }
+    case "abandoned": {
+      const ambiguousError = createAssistantDeliveryAmbiguousError(
+        intent.lastError ?? {
+          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+          message: "The assistant outbox mirror recorded an abandoned delivery attempt.",
+        },
+      );
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError: ambiguousError,
+        deliveryStatus: "failed_ambiguous",
+        wake: input.wake,
+        effect: input.assistantDeliveryEffect,
+        retryable: false,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: ambiguousError.code,
+        deliveryErrorMessage: ambiguousError.message,
+        deliveryStatus: "failed_ambiguous",
+        effect: input.assistantDeliveryEffect,
+        journalTrace: input.journalTrace,
+        retryable: false,
+      });
+    }
+    default:
+      return null;
   }
 }
 
@@ -1117,6 +1217,19 @@ function buildHostedAssistantDeliveryOutcome(input: {
     retryable: input.retryable,
     target: input.delivery?.target ?? null,
     targetKind: input.delivery?.targetKind ?? null,
+  };
+}
+
+function normalizeHostedAssistantDeliveryMirrorFailure(input: {
+  fallbackMessage: string;
+  lastError: { code: string | null; message: string } | null;
+}): {
+  code: string | null;
+  message: string;
+} {
+  return {
+    code: input.lastError?.code ?? null,
+    message: input.lastError?.message ?? input.fallbackMessage,
   };
 }
 

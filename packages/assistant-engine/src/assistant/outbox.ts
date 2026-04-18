@@ -52,6 +52,7 @@ import {
   saveAssistantOutboxIntent as saveAssistantOutboxIntentLocal,
 } from './outbox/store.js'
 import {
+  buildAssistantOutboxIntentMirrorState,
   buildAssistantDeliveryIdempotencyKey,
   errorImpliesAssistantDeliveryMayHaveSucceeded,
   markAssistantOutboxIntentMirrorRetryable,
@@ -101,6 +102,10 @@ export interface AssistantOutboxDispatchPayload {
 }
 
 export type AssistantOutboxDispatchMode = 'immediate' | 'queue-only'
+
+export type {
+  AssistantOutboxIntentMirrorState,
+} from './outbox/dispatch-state.js'
 
 export interface AssistantOutboxDispatchHooks {
   clearPreparedIntent?: (input: {
@@ -262,6 +267,23 @@ export async function readAssistantOutboxIntent(
   intentId: string,
 ): Promise<AssistantOutboxIntent | null> {
   return readAssistantOutboxIntentLocal(vault, intentId)
+}
+
+export async function readAssistantOutboxIntentMirrorState(input: {
+  intentId: string
+  now?: Date
+  sendingGraceMs?: number
+  vault: string
+}) {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantState(paths)
+  const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath)
+  return buildAssistantOutboxIntentMirrorState({
+    intent,
+    now: input.now,
+    sendingGraceMs: input.sendingGraceMs,
+  })
 }
 
 export async function saveAssistantOutboxIntent(

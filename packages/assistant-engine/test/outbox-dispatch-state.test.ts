@@ -10,6 +10,7 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import {
+  buildAssistantOutboxIntentMirrorState,
   rescheduleAssistantOutboxConfirmationRetry,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorTerminal,
@@ -258,6 +259,60 @@ describe('assistant outbox dispatch-state', () => {
       expect(diagnostics.counters.deliveriesFailed).toBe(1)
       expect(diagnostics.counters.deliveriesRetryable).toBe(0)
       expect(diagnostics.counters.outboxRetries).toBe(0)
+    })
+  })
+
+  it('marks sending mirror state stale once the grace window elapses', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 2,
+        vault,
+      })
+
+      const mirrorState = buildAssistantOutboxIntentMirrorState({
+        intent: sending,
+        now: new Date('2026-04-13T00:03:00.000Z'),
+        sendingGraceMs: 2 * 60 * 1000,
+      })
+
+      expect(mirrorState.intent?.intentId).toBe(sending.intentId)
+      expect(mirrorState.sendingStartedAt).toBe('2026-04-13T00:00:00.000Z')
+      expect(mirrorState.sendingPastGraceWindow).toBe(true)
+    })
+  })
+
+  it('keeps sent mirror state non-stale and does not invent a sending timestamp', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const sent = await saveAssistantOutboxIntent(vault, {
+        ...sending,
+        delivery: {
+          channel: 'telegram',
+          idempotencyKey: 'assistant-outbox:sent',
+          messageLength: 24,
+          providerMessageId: 'provider_sent',
+          providerThreadId: 'thread_sent',
+          sentAt: '2026-04-13T00:01:00.000Z',
+          target: 'chat_sent',
+          targetKind: 'participant',
+        },
+        sentAt: '2026-04-13T00:01:00.000Z',
+        status: 'sent',
+        updatedAt: '2026-04-13T00:01:00.000Z',
+      })
+
+      const mirrorState = buildAssistantOutboxIntentMirrorState({
+        intent: sent,
+        now: new Date('2026-04-13T00:03:00.000Z'),
+        sendingGraceMs: 2 * 60 * 1000,
+      })
+
+      expect(mirrorState.intent?.status).toBe('sent')
+      expect(mirrorState.sendingStartedAt).toBeNull()
+      expect(mirrorState.sendingPastGraceWindow).toBe(false)
     })
   })
 
