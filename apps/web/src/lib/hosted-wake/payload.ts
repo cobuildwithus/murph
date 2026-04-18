@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import {
-  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution";
 
@@ -100,6 +100,6 @@ export function decodeHostedWakeStoredPayload(input: {
 }
 
 export {
-  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 };
