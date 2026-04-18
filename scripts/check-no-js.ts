@@ -17,7 +17,6 @@ const skippedSourceArtifactDirectoryNames = new Set([
   "coverage",
   ".next",
   ".next-dev",
-  ".next-smoke",
   ".deploy",
   ".wrangler",
 ]);
@@ -25,7 +24,6 @@ const blockedTrackedArtifactDirectoryNames = new Set([
   "dist",
   ".next",
   ".next-dev",
-  ".next-smoke",
   ".test-dist",
 ]);
 const execFileAsync = promisify(execFile);
@@ -120,7 +118,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs and the fixed {postcss,eslint}.config.mjs framework config paths, and no tracked .env/.env.* private files or dist/.next/.next-dev/.next-smoke/.test-dist/*.tsbuildinfo artifacts, were found.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs and the fixed {postcss,eslint}.config.mjs framework config paths, and no tracked .env/.env.* private files or dist/, .next/, .next-dev/, .next-smoke*/, .test-dist/, or *.tsbuildinfo artifacts, were found.",
   );
 }
 
@@ -180,7 +178,15 @@ export function isAllowedDeclarationArtifactContents(
 }
 
 export function shouldSkipSourceArtifactDirectory(name: string): boolean {
-  return skippedSourceArtifactDirectoryNames.has(name);
+  return skippedSourceArtifactDirectoryNames.has(name) || isNextSmokeArtifactDirectoryName(name);
+}
+
+export function isNextSmokeArtifactDirectoryName(name: string): boolean {
+  return /^\.next-smoke(?:-|$)/u.test(name);
+}
+
+export function isBlockedTrackedArtifactDirectoryName(name: string): boolean {
+  return blockedTrackedArtifactDirectoryNames.has(name) || isNextSmokeArtifactDirectoryName(name);
 }
 
 export function isBlockedTrackedEnvArtifactPath(filePath: string): boolean {
@@ -206,7 +212,7 @@ export function isBlockedTrackedArtifactPath(filePath: string): boolean {
   }
 
   const pathSegments = normalizedPath.split("/");
-  return pathSegments.some((segment) => blockedTrackedArtifactDirectoryNames.has(segment));
+  return pathSegments.some((segment) => isBlockedTrackedArtifactDirectoryName(segment));
 }
 
 export function getBlockedWorkingTreeArtifactPath(

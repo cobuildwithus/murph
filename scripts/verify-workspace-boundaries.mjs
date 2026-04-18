@@ -1207,7 +1207,16 @@ function findWorkspaceMember(filePath) {
 }
 
 export function isWorkspaceBuildArtifactPath(filePath) {
-  return /[\\/](dist|\.test-dist|\.next|\.next-dev|\.next-smoke)[\\/]/u.test(filePath);
+  return String(filePath)
+    .replace(/\\/g, "/")
+    .split("/")
+    .some((segment) =>
+      segment === "dist" ||
+      segment === ".test-dist" ||
+      segment === ".next" ||
+      segment === ".next-dev" ||
+      isNextSmokeArtifactDirectoryName(segment),
+    );
 }
 
 export function isSiblingBuildArtifactPath(configMember, targetMember, resolvedTarget) {
@@ -1446,11 +1455,15 @@ export function shouldSkipDirectory(name) {
     name === ".deploy" ||
     name === ".next" ||
     name === ".next-dev" ||
-    name === ".next-smoke" ||
+    isNextSmokeArtifactDirectoryName(name) ||
     name === ".test-dist" ||
     name === ".git" ||
     name === "coverage"
   );
+}
+
+function isNextSmokeArtifactDirectoryName(name) {
+  return /^\.next-smoke(?:-|$)/u.test(name);
 }
 
 async function pathExists(targetPath) {
