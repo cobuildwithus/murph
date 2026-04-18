@@ -10,9 +10,9 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  appendHostedExecutionWakeTx,
-  findHostedExecutionWakeByEventIdTx,
-} from "../hosted-execution/dispatch-lifecycle";
+  findHostedWakeByEventIdTx,
+  materializeHostedExecutionWakeTx,
+} from "../hosted-execution/wake-lifecycle";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
@@ -91,7 +91,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       sourceEventId: input.sourceEventId,
       sourceType: input.sourceType,
     });
-    const appendedWake = await appendHostedExecutionWakeTx({
+    const appendedWake = await materializeHostedExecutionWakeTx({
       wake,
       sourceId: input.sourceEventId,
       sourceType: "hosted_revnet_issuance",
@@ -170,7 +170,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const existingDispatchEventId = await findHostedExecutionWakeByEventIdTx({
+  const existingWakeEventId = await findHostedWakeByEventIdTx({
     eventId: activationEventId,
     tx: input.prisma,
   });
@@ -179,10 +179,10 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     input.skipIfBillingAlreadyActive &&
     currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
-    if (existingDispatchEventId) {
+    if (existingWakeEventId) {
       return {
         activated: false,
-        hostedExecutionEventId: existingDispatchEventId,
+        hostedExecutionEventId: existingWakeEventId,
         memberId: currentMember.core.id,
       };
     }
@@ -217,7 +217,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const appendedWake = await appendHostedExecutionWakeTx({
+  const appendedWake = await materializeHostedExecutionWakeTx({
     wake,
     sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
     sourceType: "hosted_stripe_event",

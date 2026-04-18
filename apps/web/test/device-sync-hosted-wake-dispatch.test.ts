@@ -38,7 +38,7 @@ const mocks = vi.hoisted(() => {
       });
       return "outbox";
     }),
-    appendHostedExecutionWakeTx: vi.fn(async (input: {
+    materializeHostedExecutionWakeTx: vi.fn(async (input: {
       wake: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
@@ -65,8 +65,8 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
 }));
 
-vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
-  appendHostedExecutionWakeTx: mocks.appendHostedExecutionWakeTx,
+vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+  materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
 }));
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({

@@ -14,8 +14,8 @@ import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
 import {
-  readHostedExecutionWakeTarget,
-} from "../hosted-execution/dispatch-lifecycle";
+  readHostedWakeTarget,
+} from "../hosted-execution/wake-lifecycle";
 import {
   handoffHostedExecutionWakeBestEffort,
   triggerHostedWakeUserBestEffort,
@@ -462,7 +462,7 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
     return;
   }
 
-  const wakeTarget = await readHostedExecutionWakeTarget({
+  const wakeTarget = await readHostedWakeTarget({
     eventId: input.eventId,
     prisma: input.prisma,
   });
@@ -677,7 +677,7 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
         return plannedResult;
       }
     } else if (activeClaim.state.sideEffects.length === 0) {
-      const wakeTarget = await readHostedExecutionWakeTarget({
+      const wakeTarget = await readHostedWakeTarget({
         eventId: input.eventId,
         prisma: input.prisma,
       });

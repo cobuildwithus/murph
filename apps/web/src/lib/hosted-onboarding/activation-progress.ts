@@ -5,8 +5,8 @@ import {
 } from "@prisma/client";
 
 import {
-  isExecutionLifecycleTerminal,
-} from "../hosted-execution/dispatch-lifecycle";
+  isHostedWakeLifecycleTerminal,
+} from "../hosted-execution/wake-lifecycle";
 import {
   readLatestHostedWakeLifecycleByKind,
 } from "../hosted-wake/store";
@@ -33,5 +33,5 @@ export async function isHostedMemberActivationPending(input: {
     return false;
   }
 
-  return !isExecutionLifecycleTerminal(activationLifecycle.state);
+  return !isHostedWakeLifecycleTerminal(activationLifecycle.state);
 }

@@ -20,13 +20,13 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
   readHostedWakeScheduleByEventIdTx: vi.fn(),
 }));
 
-import { appendHostedExecutionWakeTx } from "@/src/lib/hosted-execution/dispatch-lifecycle";
+import { materializeHostedExecutionWakeTx } from "@/src/lib/hosted-execution/wake-lifecycle";
 import {
   buildHostedAssistantCronWakeEventId,
   materializeHostedAssistantCronWakeTx,
 } from "@/src/lib/hosted-wake/dispatch";
 
-describe("appendHostedExecutionWakeTx", () => {
+describe("materializeHostedExecutionWakeTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.appendHostedOrderedWakeTx.mockResolvedValue({
@@ -75,7 +75,7 @@ describe("appendHostedExecutionWakeTx", () => {
       userId: "member_123",
     });
 
-    await appendHostedExecutionWakeTx({
+    await materializeHostedExecutionWakeTx({
       wake,
       sourceType: "hosted_webhook_receipt",
       tx: {} as never,
@@ -107,7 +107,7 @@ describe("appendHostedExecutionWakeTx", () => {
       userId: "member_123",
     });
 
-    await appendHostedExecutionWakeTx({
+    await materializeHostedExecutionWakeTx({
       wake,
       sourceType: "hosted_vercel_cron",
       tx: {} as never,

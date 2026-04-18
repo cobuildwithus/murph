@@ -34,7 +34,7 @@ import {
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "./linq-routing-policy";
 import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
-import { appendHostedExecutionWakeTx } from "../hosted-execution/dispatch-lifecycle";
+import { materializeHostedExecutionWakeTx } from "../hosted-execution/wake-lifecycle";
 import {
   createHostedPhoneLookupKey,
   sanitizeHostedLinqEventForStorage,
@@ -162,7 +162,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await appendHostedExecutionWakeTx({
+    await materializeHostedExecutionWakeTx({
       wake: buildHostedExecutionLinqConversationMessageWake({
         eventId: input.event.event_id,
         linqEvent: sanitizeHostedLinqEventForStorage(

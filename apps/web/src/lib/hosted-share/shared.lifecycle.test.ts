@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readHostedExecutionWakeLifecycleState: vi.fn(),
+  readHostedWakeLifecycleState: vi.fn(),
 }));
 
-vi.mock("../hosted-execution/dispatch-lifecycle", () => ({
-  readHostedExecutionWakeLifecycleState: mocks.readHostedExecutionWakeLifecycleState,
+vi.mock("../hosted-execution/wake-lifecycle", () => ({
+  readHostedWakeLifecycleState: mocks.readHostedWakeLifecycleState,
 }));
 
 import { reconcileHostedShareAcceptanceLifecycle } from "./shared";
@@ -22,7 +22,7 @@ describe("hosted share lifecycle reconciliation", () => {
         lastEventId: "evt_share",
       },
     });
-    mocks.readHostedExecutionWakeLifecycleState.mockResolvedValue("completed");
+    mocks.readHostedWakeLifecycleState.mockResolvedValue("completed");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -41,7 +41,7 @@ describe("hosted share lifecycle reconciliation", () => {
         lastEventId: "evt_share",
       },
     });
-    mocks.readHostedExecutionWakeLifecycleState.mockResolvedValue("poisoned");
+    mocks.readHostedWakeLifecycleState.mockResolvedValue("poisoned");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",

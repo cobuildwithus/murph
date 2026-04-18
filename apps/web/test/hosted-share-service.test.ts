@@ -3,7 +3,7 @@ import type { SharePack } from "@murphai/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type WakeDispatchRecord = {
-  dispatchState: "completed" | "poisoned" | "queued";
+  wakeState: "completed" | "poisoned" | "queued";
   eventId: string;
 };
 
@@ -11,19 +11,19 @@ const shareHarness = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     issueHostedInviteForPhone: vi.fn(),
-    readHostedExecutionWakeLifecycleState: vi.fn(async (input: {
+    readHostedWakeLifecycleState: vi.fn(async (input: {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
     }) =>
-      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.dispatchState ?? "queued"),
-    appendHostedExecutionWakeTx: vi.fn(async (input: {
+      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? "queued"),
+    materializeHostedExecutionWakeTx: vi.fn(async (input: {
       wake: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
       const outboxRows = input.tx?.outboxRows;
       if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.wake.eventId)) {
         outboxRows.push({
-          dispatchState: "queued",
+          wakeState: "queued",
           eventId: input.wake.eventId,
         });
       }
@@ -48,15 +48,15 @@ const shareHarness = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/dispatch-lifecycle")>(
-    "@/src/lib/hosted-execution/dispatch-lifecycle",
+vi.mock("@/src/lib/hosted-execution/wake-lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/wake-lifecycle")>(
+    "@/src/lib/hosted-execution/wake-lifecycle",
   );
 
   return {
     ...actual,
-    appendHostedExecutionWakeTx: shareHarness.appendHostedExecutionWakeTx,
-    readHostedExecutionWakeLifecycleState: shareHarness.readHostedExecutionWakeLifecycleState,
+    materializeHostedExecutionWakeTx: shareHarness.materializeHostedExecutionWakeTx,
+    readHostedWakeLifecycleState: shareHarness.readHostedWakeLifecycleState,
   };
 });
 vi.mock("@/src/lib/prisma", () => ({
@@ -138,21 +138,21 @@ describe("hosted share service", () => {
     shareHarness.issueHostedInviteForPhone.mockRejectedValue(
       new Error("Unexpected invite issuance in hosted share service test."),
     );
-    shareHarness.readHostedExecutionWakeLifecycleState.mockReset();
-    shareHarness.readHostedExecutionWakeLifecycleState.mockImplementation(async (input: {
+    shareHarness.readHostedWakeLifecycleState.mockReset();
+    shareHarness.readHostedWakeLifecycleState.mockImplementation(async (input: {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
     }) =>
-      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.dispatchState ?? "queued");
-    shareHarness.appendHostedExecutionWakeTx.mockReset();
-    shareHarness.appendHostedExecutionWakeTx.mockImplementation(async (input: {
+      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? "queued");
+    shareHarness.materializeHostedExecutionWakeTx.mockReset();
+    shareHarness.materializeHostedExecutionWakeTx.mockImplementation(async (input: {
       wake: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
       const outboxRows = input.tx?.outboxRows;
       if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.wake.eventId)) {
         outboxRows.push({
-          dispatchState: "queued",
+          wakeState: "queued",
           eventId: input.wake.eventId,
         });
       }
@@ -529,8 +529,8 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     });
 
-    prisma.outboxRows[0]!.dispatchState = "queued";
-    prisma.outboxRows[0]!.dispatchState = "completed";
+    prisma.outboxRows[0]!.wakeState = "queued";
+    prisma.outboxRows[0]!.wakeState = "completed";
 
     await expect(acceptHostedShareLink({
       member: {
@@ -578,8 +578,8 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     });
 
-    prisma.outboxRows[0]!.dispatchState = "queued";
-    prisma.outboxRows[0]!.dispatchState = "poisoned";
+    prisma.outboxRows[0]!.wakeState = "queued";
+    prisma.outboxRows[0]!.wakeState = "poisoned";
 
     await expect(buildHostedSharePageData({
       authenticatedMember: {
