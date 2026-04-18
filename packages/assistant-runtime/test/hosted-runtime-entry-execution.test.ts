@@ -133,6 +133,7 @@ beforeEach(() => {
   mocks.createHostedArtifactUploadSink.mockReturnValue(Symbol("artifact-sink"));
   mocks.executeHostedWakeEvent.mockResolvedValue({
     bootstrapResult: null,
+    conversationMetrics: null,
     followupExecution: "system-maintenance",
     shareImportResult: null,
     shareImportTitle: null,

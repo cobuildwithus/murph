@@ -22,6 +22,7 @@ export async function handleHostedShareAcceptedWake(input: {
   const pack = input.sharePack.pack;
 
   return {
+    conversationMetrics: null,
     shareImportResult: await importSharePackIntoVault({
       pack,
       vaultRoot: input.vaultRoot,

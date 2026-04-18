@@ -31,6 +31,7 @@ describe("summarizeWake", () => {
     assert.equal(
       summarizeWake(wake, {
         bootstrapResult: null,
+        conversationMetrics: null,
         deviceSyncProcessed: 1,
         deviceSyncSkipped: true,
         followupExecution: "system-maintenance",
@@ -67,6 +68,7 @@ describe("summarizeWake", () => {
           telegramAutoReplyEnabled: false,
           vaultCreated: true,
         },
+        conversationMetrics: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
         followupExecution: "system-maintenance",
@@ -103,6 +105,7 @@ describe("summarizeWake", () => {
           telegramAutoReplyEnabled: true,
           vaultCreated: false,
         },
+        conversationMetrics: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
         followupExecution: "system-maintenance",
@@ -155,6 +158,7 @@ describe("summarizeWake", () => {
             telegramAutoReplyEnabled: false,
             vaultCreated: true,
           },
+          conversationMetrics: null,
           deviceSyncProcessed: 0,
           deviceSyncSkipped: false,
           followupExecution: "system-maintenance",
@@ -183,6 +187,7 @@ describe("summarizeWake", () => {
     assert.equal(
       summarizeWake(wake, {
         bootstrapResult: null,
+        conversationMetrics: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
         followupExecution: "system-maintenance",
@@ -209,6 +214,7 @@ describe("summarizeWake", () => {
     assert.equal(
       summarizeWake(wake, {
         bootstrapResult: null,
+        conversationMetrics: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
         followupExecution: "system-maintenance",
@@ -295,6 +301,7 @@ describe("summarizeWake", () => {
       assert.equal(
         summarizeWake(entry.wake, {
           bootstrapResult: null,
+          conversationMetrics: null,
           deviceSyncProcessed: 2,
           deviceSyncSkipped: false,
           followupExecution: entry.wake.kind === "conversation.message"

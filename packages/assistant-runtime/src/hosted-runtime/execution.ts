@@ -36,8 +36,6 @@ import {
 } from "./context.ts";
 import { executeHostedWakeEvent } from "./events.ts";
 import {
-  drainHostedParserQueueUntilSettled,
-  runHostedConversationAssistantAutomation,
   runHostedMaintenanceLoop,
 } from "./maintenance.ts";
 import type {
@@ -87,7 +85,7 @@ export async function executeHostedWakeForCommit(input: {
       runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
     },
     message: "Hosted runtime executing wake handlers.",
-    phase: "dispatch.running",
+    phase: "wake.running",
     run: input.request.run ?? null,
   });
   const wakeHandlingStartedAtMs = Date.now();
@@ -110,12 +108,13 @@ export async function executeHostedWakeForCommit(input: {
       runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
     },
     message: "Hosted runtime finished wake handlers.",
-    phase: "dispatch.running",
+    phase: "wake.running",
     run: input.request.run ?? null,
   });
   const maintenanceMetrics = await runHostedWakeFollowupExecution({
     artifactMaterializer: input.artifactMaterializer ?? null,
     bootstrapResult: wakeMetrics.bootstrapResult,
+    conversationMetrics: wakeMetrics.conversationMetrics,
     executionContext: wakeExecutionContext,
     followupExecution: wakeMetrics.followupExecution,
     requestId: wake.eventId,
@@ -197,6 +196,7 @@ async function resolveHostedWakeExecutionContext(
 async function runHostedWakeFollowupExecution(input: {
   artifactMaterializer: HostedWorkspaceArtifactMaterializer | null;
   bootstrapResult: Awaited<ReturnType<typeof executeHostedWakeEvent>>["bootstrapResult"];
+  conversationMetrics: Awaited<ReturnType<typeof executeHostedWakeEvent>>["conversationMetrics"];
   executionContext: AssistantExecutionContext;
   followupExecution: HostedWakeFollowupExecution;
   requestId: string;
@@ -222,9 +222,7 @@ async function runHostedWakeFollowupExecution(input: {
       });
     case "conversation-message":
       return runHostedConversationWakeFollowupExecution({
-        artifactMaterializer: input.artifactMaterializer,
-        executionContext: input.executionContext,
-        requestId: input.requestId,
+        conversationMetrics: input.conversationMetrics,
         run: input.run ?? null,
         runtime: input.runtime,
         vaultRoot: input.vaultRoot,
@@ -270,7 +268,7 @@ async function runHostedSystemWakeFollowupExecution(input: {
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
     },
     message: "Hosted runtime finished system maintenance follow-up.",
-    phase: "dispatch.running",
+    phase: "wake.running",
     run: input.run ?? null,
   });
   return maintenanceMetrics;
@@ -308,8 +306,8 @@ async function resolveHostedConversationPreservedWakeMetrics(input: {
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
     },
     message:
-      "Hosted runtime resolved preserved assistant and device-sync wakes after conversation follow-up.",
-    phase: "dispatch.running",
+      "Hosted runtime resolved preserved assistant and device-sync wakes after conversation wake handling.",
+    phase: "wake.running",
     run: input.run ?? null,
   });
 
@@ -322,9 +320,7 @@ async function resolveHostedConversationPreservedWakeMetrics(input: {
 }
 
 async function runHostedConversationWakeFollowupExecution(input: {
-  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
-  executionContext: AssistantExecutionContext;
-  requestId: string;
+  conversationMetrics: Awaited<ReturnType<typeof executeHostedWakeEvent>>["conversationMetrics"];
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -333,16 +329,6 @@ async function runHostedConversationWakeFollowupExecution(input: {
   vaultRoot: string;
   wake: HostedExecutionWake;
 }): Promise<HostedMaintenanceMetrics> {
-  const parserResult = await drainHostedParserQueueUntilSettled({
-    artifactMaterializer: input.artifactMaterializer ?? null,
-    vaultRoot: input.vaultRoot,
-  });
-  const assistantAutomation = await runHostedConversationAssistantAutomation({
-    executionContext: input.executionContext,
-    requestId: input.requestId,
-    vaultRoot: input.vaultRoot,
-    wake: input.wake,
-  });
   const preservedMetrics = await resolveHostedConversationPreservedWakeMetrics({
     wake: input.wake,
     run: input.run ?? null,
@@ -353,11 +339,10 @@ async function runHostedConversationWakeFollowupExecution(input: {
   return {
     ...preservedMetrics,
     nextWakeAt: earliestHostedWakeAt(
-      parserResult.nextWakeAt,
-      assistantAutomation.nextWakeAt,
+      input.conversationMetrics?.nextWakeAt,
       preservedMetrics.nextWakeAt,
     ),
-    parserProcessed: parserResult.processedJobs,
+    parserProcessed: input.conversationMetrics?.parserProcessed ?? 0,
   };
 }
 
@@ -389,12 +374,12 @@ async function resolveHostedAssistantWakeAt(input: {
       component: "runtime",
       wake: input.wake,
       error,
-      level: "warn",
-      message:
-        "Hosted runtime could not resolve the preserved assistant wake after conversation follow-up; continuing without it.",
-      phase: "dispatch.running",
-      run: input.run ?? null,
-    });
+        level: "warn",
+        message:
+          "Hosted runtime could not resolve the preserved assistant wake after conversation wake handling; continuing without it.",
+        phase: "wake.running",
+        run: input.run ?? null,
+      });
     return null;
   }
 }
@@ -440,12 +425,12 @@ async function resolveHostedDeviceSyncWakeAt(input: {
       component: "runtime",
       wake: input.wake,
       error,
-      level: "warn",
-      message:
-        "Hosted runtime could not resolve the preserved device-sync wake after conversation follow-up; continuing without it.",
-      phase: "dispatch.running",
-      run: input.run ?? null,
-    });
+        level: "warn",
+        message:
+          "Hosted runtime could not resolve the preserved device-sync wake after conversation wake handling; continuing without it.",
+        phase: "wake.running",
+        run: input.run ?? null,
+      });
     return null;
   }
 }

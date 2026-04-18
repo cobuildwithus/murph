@@ -85,7 +85,10 @@ beforeEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
-  mocks.ingestHostedConversationMessageWake.mockResolvedValue(undefined);
+  mocks.ingestHostedConversationMessageWake.mockResolvedValue({
+    nextWakeAt: null,
+    parserProcessed: 0,
+  });
 });
 
 afterEach(() => {
@@ -116,6 +119,7 @@ describe("hosted runtime event coverage", () => {
     expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
+      conversationMetrics: null,
       followupExecution: "system-maintenance",
       shareImportResult: null,
       shareImportTitle: null,
@@ -147,6 +151,7 @@ describe("hosted runtime event coverage", () => {
       }),
     ).resolves.toEqual({
       bootstrapResult: null,
+      conversationMetrics: null,
       followupExecution: "system-maintenance",
       shareImportResult: null,
       shareImportTitle: null,
@@ -162,6 +167,7 @@ describe("hosted runtime event coverage", () => {
       }),
     ).resolves.toEqual({
       bootstrapResult: null,
+      conversationMetrics: null,
       followupExecution: "system-maintenance",
       shareImportResult: null,
       shareImportTitle: null,
@@ -209,6 +215,7 @@ describe("hosted runtime event coverage", () => {
     });
     assert.deepEqual(result, {
       bootstrapResult: null,
+      conversationMetrics: null,
       followupExecution: "system-maintenance",
       shareImportResult: "imported",
       shareImportTitle: "Shared export",

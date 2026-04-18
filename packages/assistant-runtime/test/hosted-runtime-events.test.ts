@@ -76,7 +76,10 @@ afterEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
-  mocks.ingestHostedConversationMessageWake.mockResolvedValue(undefined);
+  mocks.ingestHostedConversationMessageWake.mockResolvedValue({
+    nextWakeAt: null,
+    parserProcessed: 0,
+  });
 });
 
 describe("executeHostedWakeEvent", () => {
@@ -140,6 +143,7 @@ describe("executeHostedWakeEvent", () => {
     });
     assert.deepEqual(result, {
       bootstrapResult,
+      conversationMetrics: null,
       followupExecution: "system-maintenance",
       shareImportResult: null,
       shareImportTitle: null,
@@ -320,6 +324,10 @@ describe("executeHostedWakeEvent", () => {
     });
     assert.deepEqual(linqResult, {
       bootstrapResult: null,
+      conversationMetrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
       followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
@@ -349,6 +357,7 @@ describe("executeHostedWakeEvent", () => {
     expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
+      conversationMetrics: null,
       followupExecution: "system-maintenance",
       shareImportResult: null,
       shareImportTitle: null,

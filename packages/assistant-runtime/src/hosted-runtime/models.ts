@@ -135,8 +135,14 @@ export type HostedAssistantRuntimeJobResult =
 export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
 
 export interface HostedWakeEffect {
+  conversationMetrics: HostedConversationWakeMetrics | null;
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
+}
+
+export interface HostedConversationWakeMetrics {
+  nextWakeAt: string | null;
+  parserProcessed: number;
 }
 
 export type HostedWakeFollowupExecution =

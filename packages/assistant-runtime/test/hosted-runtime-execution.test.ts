@@ -202,6 +202,7 @@ beforeEach(() => {
       telegramAutoReplyEnabled: false,
       vaultCreated: true,
     },
+    conversationMetrics: null,
     followupExecution: "system-maintenance",
     shareImportResult: null,
     shareImportTitle: null,
@@ -528,6 +529,10 @@ describe("executeHostedWakeForCommit", () => {
   it("skips the generic maintenance loop when the conversation lane stays on wake follow-up", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
+      conversationMetrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
       followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
@@ -590,34 +595,8 @@ describe("executeHostedWakeForCommit", () => {
     });
 
     expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
-    expect(mocks.drainHostedParserQueueUntilSettled).toHaveBeenCalledWith({
-      artifactMaterializer: expect.any(Function),
-      vaultRoot: "/tmp/vault-root",
-    });
-    expect(mocks.runHostedConversationAssistantAutomation).toHaveBeenCalledWith({
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_message",
-        linqEvent: {
-          event_type: "message.received",
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-      executionContext: {
-        hosted: {
-          defaultTarget: expect.objectContaining({
-            adapter: "openai-compatible",
-            model: "gpt-4.1-mini",
-          }),
-          issueDeviceConnectLink: expect.any(Function),
-          memberId: "member_123",
-          userEnvKeys: [],
-        },
-      },
-      requestId: "evt_linq_message",
-      vaultRoot: "/tmp/vault-root",
-    });
+    expect(mocks.drainHostedParserQueueUntilSettled).not.toHaveBeenCalled();
+    expect(mocks.runHostedConversationAssistantAutomation).not.toHaveBeenCalled();
     assert.equal(result.committedResult.result.nextWakeAt, null);
     assert.equal(
       result.committedResult.result.summary,
@@ -625,20 +604,16 @@ describe("executeHostedWakeForCommit", () => {
     );
   });
 
-  it("schedules an immediate follow-up wake when conversation parser backlog does not settle in-turn", async () => {
+  it("propagates conversation-lane nextWakeAt returned by the wake handler", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
+      conversationMetrics: {
+        nextWakeAt: "2026-04-08T00:00:00.000Z",
+        parserProcessed: 2,
+      },
       followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
-    });
-    mocks.drainHostedParserQueueUntilSettled.mockResolvedValue({
-      nextWakeAt: "2026-04-08T00:00:00.000Z",
-      processedJobs: 2,
-    });
-    mocks.runHostedConversationAssistantAutomation.mockResolvedValue({
-      nextWakeAt: null,
-      progressed: false,
     });
 
     const result = await executeHostedWakeForCommit({
@@ -699,6 +674,8 @@ describe("executeHostedWakeForCommit", () => {
       runtimeEnv: {},
     });
 
+    expect(mocks.drainHostedParserQueueUntilSettled).not.toHaveBeenCalled();
+    expect(mocks.runHostedConversationAssistantAutomation).not.toHaveBeenCalled();
     expect(result.committedResult.result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
     expect(result.committedResult.result.summary).toBe(
       "Persisted Telegram capture on the hosted conversation lane.",
@@ -712,6 +689,10 @@ describe("executeHostedWakeForCommit", () => {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
       mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
+        conversationMetrics: {
+          nextWakeAt: null,
+          parserProcessed: 0,
+        },
         followupExecution: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
@@ -806,6 +787,10 @@ describe("executeHostedWakeForCommit", () => {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
       mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
+        conversationMetrics: {
+          nextWakeAt: null,
+          parserProcessed: 0,
+        },
         followupExecution: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
@@ -924,6 +909,10 @@ describe("executeHostedWakeForCommit", () => {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
       mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
+        conversationMetrics: {
+          nextWakeAt: null,
+          parserProcessed: 0,
+        },
         followupExecution: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
@@ -1020,6 +1009,10 @@ describe("executeHostedWakeForCommit", () => {
   it("falls back to a null preserved wake when assistant and device-sync wake lookups fail", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
+      conversationMetrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
       followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
@@ -1096,14 +1089,14 @@ describe("executeHostedWakeForCommit", () => {
       expect.objectContaining({
         level: "warn",
         message:
-          "Hosted runtime could not resolve the preserved assistant wake after conversation follow-up; continuing without it.",
+          "Hosted runtime could not resolve the preserved assistant wake after conversation wake handling; continuing without it.",
       }),
     );
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
         message:
-          "Hosted runtime could not resolve the preserved device-sync wake after conversation follow-up; continuing without it.",
+          "Hosted runtime could not resolve the preserved device-sync wake after conversation wake handling; continuing without it.",
       }),
     );
   });
