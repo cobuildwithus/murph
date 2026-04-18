@@ -585,7 +585,6 @@ export class RunnerWakeProcessor {
           payload: {
             assistantDeliveryEffects: input.assistantDeliveryEffects,
             bundle: input.result.bundle,
-            gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
             result: input.result.result,
           },
           userId,
@@ -652,7 +651,6 @@ export class RunnerWakeProcessor {
           keysById: stores.crypto.keysById,
           payload: {
             bundle: input.result.bundle,
-            gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
           },
           userId,
         });

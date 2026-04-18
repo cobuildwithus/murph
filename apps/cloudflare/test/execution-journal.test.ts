@@ -120,7 +120,7 @@ afterEach(() => {
 });
 
 describe("persistHostedExecutionCommit", () => {
-  it("accepts duplicate commits when structured payload keys are reordered", async () => {
+  it("accepts duplicate commits even when gateway snapshots differ because they are not journal state", async () => {
     const bucket = new InMemoryR2Bucket();
     const baseCommit = createBaseCommit(bucket);
 
@@ -151,10 +151,19 @@ describe("persistHostedExecutionCommit", () => {
           assistantDeliveryEffects: [],
           bundle: null,
           gatewayProjectionSnapshot: {
-            permissions: [],
-            messages: [],
             conversations: [],
             generatedAt: "2026-04-12T00:00:00.000Z",
+            messages: [{
+              actorDisplayName: null,
+              attachments: [],
+              createdAt: "2026-04-12T00:00:00.000Z",
+              direction: "outbound",
+              messageId: "msg_123",
+              schema: "murph.gateway-message.v1",
+              sessionKey: "conversation-1",
+              text: "changed snapshot",
+            }],
+            permissions: [],
             schema: "murph.gateway-projection-snapshot.v1",
           },
           result: {
@@ -166,6 +175,7 @@ describe("persistHostedExecutionCommit", () => {
       }),
     ).resolves.toEqual(first);
 
+    expect(first.gatewayProjectionSnapshot).toBeNull();
     expect(bucket.entries.size).toBe(1);
   });
 
@@ -502,7 +512,7 @@ describe("persistHostedExecutionCommit", () => {
 });
 
 describe("persistHostedExecutionFinalBundles", () => {
-  it("accepts equivalent duplicate finalizes without rewriting the durable result", async () => {
+  it("accepts duplicate finalizes without rewriting when only gateway snapshots differ", async () => {
     const bucket = new InMemoryR2Bucket();
     const baseCommit = createBaseCommit(bucket);
 
@@ -546,10 +556,30 @@ describe("persistHostedExecutionFinalBundles", () => {
         payload: {
           bundle: encodeBundle("bundle-a"),
           gatewayProjectionSnapshot: {
-            permissions: [],
-            messages: [],
-            conversations: [],
             generatedAt: "2026-04-12T00:00:00.000Z",
+            conversations: [{
+              schema: "murph.gateway-conversation.v1",
+              sessionKey: "conversation-2",
+              title: null,
+              titleSource: null,
+              lastMessagePreview: "changed snapshot",
+              lastActivityAt: "2026-04-12T00:00:00.000Z",
+              messageCount: 1,
+              canSend: false,
+              route: {
+                channel: null,
+                identityId: null,
+                participantId: null,
+                threadId: null,
+                directness: null,
+                reply: {
+                  kind: null,
+                  target: null,
+                },
+              },
+            }],
+            messages: [],
+            permissions: [],
             schema: "murph.gateway-projection-snapshot.v1",
           },
         },
@@ -557,10 +587,11 @@ describe("persistHostedExecutionFinalBundles", () => {
       }),
     ).resolves.toEqual(finalized);
 
+    expect(finalized.gatewayProjectionSnapshot).toBeNull();
     expect(bucket.entries.size).toBe(2);
   });
 
-  it("rejects post-finalize retries that try to replace the durable gateway snapshot", async () => {
+  it("accepts post-finalize retries that change only the gateway snapshot", async () => {
     const bucket = new InMemoryR2Bucket();
     const baseCommit = createBaseCommit(bucket);
 
@@ -635,7 +666,11 @@ describe("persistHostedExecutionFinalBundles", () => {
         },
         userId: baseCommit.userId,
       }),
-    ).rejects.toThrow(/gateway projection snapshot does not match the existing durable finalize/i);
+    ).resolves.toMatchObject({
+      eventId: baseCommit.eventId,
+      finalizedAt: expect.any(String),
+      userId: baseCommit.userId,
+    });
 
     expect(bucket.entries.size).toBe(2);
   });
