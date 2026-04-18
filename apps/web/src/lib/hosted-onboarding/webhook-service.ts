@@ -215,63 +215,33 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   assertHostedTelegramWebhookSecret(input.secretToken);
 
   const update = parseHostedTelegramWebhookUpdate(input.rawBody);
-  const result = await processHostedOnboardingWebhookPlan({
-    duplicateResponse: {
-      ok: true,
-      duplicate: true,
-    },
-    eventId: buildHostedTelegramWebhookEventId(update),
-    fastPathResponse: {
-      ok: true,
-      reason: "dispatched-active-member",
-    },
-    handlers: createHostedWebhookReceiptHandlers(),
-    plan: (transaction) =>
+  const eventId = buildHostedTelegramWebhookEventId(update);
+  const plan = await runHostedOnboardingWebhookTransaction(
+    prisma,
+    (transaction) =>
       planHostedOnboardingTelegramWebhook({
         prisma: transaction,
         update,
       }),
+  );
+
+  // Telegram ingress is wake-only or ignored. Hosted wake dedupe owns
+  // idempotency here, so receipt claim/state should not own this path.
+  if (plan.desiredSideEffects.length > 0) {
+    throw new Error(
+      "Hosted Telegram webhook planning unexpectedly queued receipt-local side effects.",
+    );
+  }
+
+  await maybeHandoffHostedExecutionWebhookWake({
+    defer: input.defer,
+    eventId,
+    maxInlineDrainMs: input.maxInlineDrainMs,
     prisma,
-    signal: input.signal,
+    response: plan.response,
     source: "telegram",
   });
-  if (result.fastPathReceiptClaim) {
-    try {
-      await maybeHandoffHostedExecutionWebhookWake({
-        defer: input.defer,
-        eventId: buildHostedTelegramWebhookEventId(update),
-        maxInlineDrainMs: input.maxInlineDrainMs,
-        prisma,
-        response: result.response,
-        source: "telegram",
-      });
-      await markHostedWebhookReceiptCompleted({
-        claimedReceipt: result.fastPathReceiptClaim,
-        eventId: buildHostedTelegramWebhookEventId(update),
-        prisma,
-        source: "telegram",
-      });
-    } catch (error) {
-      await markHostedWebhookReceiptFailed({
-        claimedReceipt: result.fastPathReceiptClaim,
-        error,
-        eventId: buildHostedTelegramWebhookEventId(update),
-        prisma,
-        source: "telegram",
-      });
-      throw error;
-    }
-  } else {
-    await maybeHandoffHostedExecutionWebhookWake({
-      defer: input.defer,
-      eventId: buildHostedTelegramWebhookEventId(update),
-      maxInlineDrainMs: input.maxInlineDrainMs,
-      prisma,
-      response: result.response,
-      source: "telegram",
-    });
-  }
-  return result.response;
+  return plan.response;
 }
 
 export async function handleHostedStripeWebhook(input: {
@@ -663,8 +633,10 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
 
   try {
     if (!activeClaim.state.plannedAt) {
-      const plannedResult = await runHostedWebhookReceiptTransaction(input.prisma, async (transaction) => {
-        const plan = await input.plan(transaction);
+      const plannedResult = await runHostedOnboardingWebhookTransaction(
+        input.prisma,
+        async (transaction) => {
+          const plan = await input.plan(transaction);
 
         if (shouldUseHostedWebhookDirectWakeFastPath(plan, activeClaim)) {
           const nextClaim = await queueHostedWebhookReceiptSideEffects({
@@ -690,12 +662,13 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
           source: input.source,
         });
 
-        return {
-          claimedReceipt: nextClaim,
-          fastPathReceiptClaim: null,
-          response: plan.response,
-        };
-      });
+          return {
+            claimedReceipt: nextClaim,
+            fastPathReceiptClaim: null,
+            response: plan.response,
+          };
+        },
+      );
 
       claimedReceipt = plannedResult.claimedReceipt;
       response = plannedResult.response;
@@ -778,7 +751,7 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
   }
 }
 
-async function runHostedWebhookReceiptTransaction<TResult>(
+async function runHostedOnboardingWebhookTransaction<TResult>(
   prisma: PrismaClient,
   callback: (transaction: Prisma.TransactionClient) => Promise<TResult>,
 ): Promise<TResult> {

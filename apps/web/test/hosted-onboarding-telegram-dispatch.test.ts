@@ -144,9 +144,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
+    const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
+        create: hostedWebhookReceiptCreate,
         findUnique: vi.fn().mockResolvedValue({
           payloadJson: {
             eventPayload: {
@@ -158,7 +160,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             },
           },
         }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        updateMany: hostedWebhookReceiptUpdateMany,
       },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
@@ -217,24 +219,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       limit: 1,
       prisma,
     });
-
-    const receiptWrites = (
-      prisma as unknown as {
-        hostedWebhookReceipt: {
-          updateMany: ReturnType<typeof vi.fn>;
-        };
-      }
-    ).hostedWebhookReceipt.updateMany.mock.calls.map((call) => call[0] as Record<string, unknown>);
-
-    expect(receiptWrites.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          completedAt: expect.any(Date),
-          plannedAt: expect.any(Date),
-          status: "completed",
-        }),
-      }),
-    );
+    expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
+    expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
   });
 
@@ -495,9 +481,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("ignores suspended members even when billing remains active", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
+    const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
+        create: hostedWebhookReceiptCreate,
         findUnique: vi.fn().mockResolvedValue({
           payloadJson: {
             eventPayload: {
@@ -509,7 +497,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             },
           },
         }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        updateMany: hostedWebhookReceiptUpdateMany,
       },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
@@ -550,6 +538,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
+    expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
   });
 
   it("ignores business-account self messages flagged through sender_business_bot", async () => {
