@@ -16,13 +16,14 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
+  buildHostedEmailCapture: vi.fn(),
+  buildHostedLinqCapture: vi.fn(),
+  buildHostedTelegramCapture: vi.fn(),
   handleHostedShareAcceptedDispatch: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
-  ingestHostedEmailMessage: vi.fn(),
-  ingestHostedLinqMessage: vi.fn(),
-  ingestHostedTelegramMessage: vi.fn(),
   prepareHostedDispatchContext: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
+  withHostedInboxPipeline: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -35,11 +36,11 @@ vi.mock("@murphai/assistant-engine", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/email.ts", () => ({
-  ingestHostedEmailMessage: mocks.ingestHostedEmailMessage,
+  buildHostedEmailCapture: mocks.buildHostedEmailCapture,
 }));
 
 vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
-  ingestHostedLinqMessage: mocks.ingestHostedLinqMessage,
+  buildHostedLinqCapture: mocks.buildHostedLinqCapture,
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
@@ -47,7 +48,11 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
-  ingestHostedTelegramMessage: mocks.ingestHostedTelegramMessage,
+  buildHostedTelegramCapture: mocks.buildHostedTelegramCapture,
+}));
+
+vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
+  withHostedInboxPipeline: mocks.withHostedInboxPipeline,
 }));
 
 import { executeHostedDispatchEvent } from "../src/hosted-runtime/events.ts";
@@ -86,6 +91,9 @@ afterEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
+  mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
+    processCapture: vi.fn(async () => {}),
+  }));
 });
 
 describe("executeHostedDispatchEvent", () => {
@@ -256,6 +264,10 @@ describe("executeHostedDispatchEvent", () => {
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
     });
     const vaultRoot = "/tmp/assistant-runtime-events";
+    const processCapture = vi.fn(async () => {});
+    mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
+      processCapture,
+    }));
 
     const linqDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
       eventId: "evt_linq",
@@ -311,14 +323,13 @@ describe("executeHostedDispatchEvent", () => {
       vaultRoot,
     });
 
-    expect(mocks.ingestHostedLinqMessage).toHaveBeenCalledWith(vaultRoot, linqDispatch);
-    expect(mocks.ingestHostedTelegramMessage).toHaveBeenCalledWith(vaultRoot, telegramDispatch);
-    expect(mocks.ingestHostedEmailMessage).toHaveBeenCalledWith(
-      vaultRoot,
+    expect(mocks.buildHostedLinqCapture).toHaveBeenCalledWith(linqDispatch);
+    expect(mocks.buildHostedTelegramCapture).toHaveBeenCalledWith(telegramDispatch);
+    expect(mocks.buildHostedEmailCapture).toHaveBeenCalledWith(
       emailDispatch,
       runtime.platform.effectsPort,
-      runtime.userEnv,
     );
+    expect(processCapture).toHaveBeenCalledTimes(3);
   });
 
   it("treats explicit member channel sync events as no-op dispatch handlers", async () => {

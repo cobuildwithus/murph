@@ -1,17 +1,27 @@
 import type {
   HostedExecutionFirstContactTarget,
   HostedExecutionDispatchRequest,
+  HostedMessageWakeDispatch,
   HostedExecutionRunnerSharePack,
+  HostedSystemWakeDispatch,
 } from "@murphai/hosted-execution";
 import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
+import {
+  isHostedEmailMessageWakeDispatch,
+  isHostedLinqMessageWakeDispatch,
+  isHostedMessageWakeDispatch,
+  isHostedSystemWakeDispatch,
+  isHostedTelegramMessageWakeDispatch,
+} from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedDispatchContext,
 } from "./context.ts";
-import { ingestHostedEmailMessage } from "./events/email.ts";
-import { ingestHostedLinqMessage } from "./events/linq.ts";
+import { buildHostedEmailCapture } from "./events/email.ts";
+import { buildHostedLinqCapture } from "./events/linq.ts";
 import { handleHostedShareAcceptedDispatch } from "./events/share.ts";
-import { ingestHostedTelegramMessage } from "./events/telegram.ts";
+import { buildHostedTelegramCapture } from "./events/telegram.ts";
+import { withHostedInboxPipeline } from "./events/inbox-pipeline.ts";
 import type {
   HostedDispatchEffect,
   HostedDispatchExecutionMetrics,
@@ -67,12 +77,80 @@ async function handleHostedDispatchEvent(input: {
 }): Promise<HostedDispatchEffect> {
   const dispatch = input.dispatch;
 
-  switch (dispatch.event.kind) {
+  if (isHostedMessageWakeDispatch(dispatch)) {
+    return executeHostedConversationWake({
+      dispatch,
+      runtime: input.runtime,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
+  if (isHostedSystemWakeDispatch(dispatch)) {
+    return executeHostedSystemWake({
+      dispatch,
+      executionContext: input.executionContext,
+      sharePack: input.sharePack ?? null,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
+  throw new TypeError("Unsupported hosted dispatch kind.");
+}
+
+async function executeHostedConversationWake(input: {
+  dispatch: HostedMessageWakeDispatch;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "platform"
+  >;
+  vaultRoot: string;
+}): Promise<HostedDispatchEffect> {
+  const capture = await resolveHostedConversationCapture(input);
+
+  await withHostedInboxPipeline(input.vaultRoot, async (pipeline) => {
+    await pipeline.processCapture(capture);
+  });
+
+  return createNoopDispatchEffect();
+}
+
+async function resolveHostedConversationCapture(input: {
+  dispatch: HostedMessageWakeDispatch;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "platform"
+  >;
+}) {
+  if (isHostedLinqMessageWakeDispatch(input.dispatch)) {
+    return buildHostedLinqCapture(input.dispatch);
+  }
+
+  if (isHostedTelegramMessageWakeDispatch(input.dispatch)) {
+    return buildHostedTelegramCapture(input.dispatch);
+  }
+
+  if (isHostedEmailMessageWakeDispatch(input.dispatch)) {
+    return buildHostedEmailCapture(
+      input.dispatch,
+      input.runtime.platform.effectsPort,
+    );
+  }
+
+  throw new TypeError("Unsupported hosted message wake kind.");
+}
+
+async function executeHostedSystemWake(input: {
+  dispatch: HostedSystemWakeDispatch;
+  executionContext: AssistantExecutionContext;
+  sharePack?: HostedExecutionRunnerSharePack | null;
+  vaultRoot: string;
+}): Promise<HostedDispatchEffect> {
+  switch (input.dispatch.event.kind) {
     case "member.activated":
-      if (dispatch.event.firstContact) {
+      if (input.dispatch.event.firstContact) {
         await queueAssistantFirstContactWelcome(
           buildAssistantFirstContactWelcomeInput(
-            dispatch.event.firstContact,
+            input.dispatch.event.firstContact,
             input.executionContext,
             input.vaultRoot,
           ),
@@ -80,29 +158,6 @@ async function handleHostedDispatchEvent(input: {
       }
       return createNoopDispatchEffect();
     case "member.channels.updated":
-      return createNoopDispatchEffect();
-    case "linq.message.received":
-      await ingestHostedLinqMessage(input.vaultRoot, {
-        ...dispatch,
-        event: dispatch.event,
-      });
-      return createNoopDispatchEffect();
-    case "telegram.message.received":
-      await ingestHostedTelegramMessage(input.vaultRoot, {
-        ...dispatch,
-        event: dispatch.event,
-      });
-      return createNoopDispatchEffect();
-    case "email.message.received":
-      await ingestHostedEmailMessage(
-        input.vaultRoot,
-        {
-          ...dispatch,
-          event: dispatch.event,
-        },
-        input.runtime.platform.effectsPort,
-        input.runtime.userEnv,
-      );
       return createNoopDispatchEffect();
     case "assistant.cron.tick":
     case "device-sync.wake":
@@ -113,15 +168,15 @@ async function handleHostedDispatchEvent(input: {
       }
       return await handleHostedShareAcceptedDispatch({
         dispatch: {
-          ...dispatch,
-          event: dispatch.event,
+          ...input.dispatch,
+          event: input.dispatch.event,
         },
         sharePack: input.sharePack,
         vaultRoot: input.vaultRoot,
       });
-    default:
-      return assertNever(dispatch.event);
   }
+
+  return assertNever(input.dispatch.event);
 }
 
 function createNoopDispatchEffect(): HostedDispatchEffect {

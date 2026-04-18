@@ -12,16 +12,13 @@ import {
 import type {
   HostedRuntimeEffectsPort,
 } from "../platform.ts";
-import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 
-export async function ingestHostedEmailMessage(
-  vaultRoot: string,
+export async function buildHostedEmailCapture(
   dispatch: HostedExecutionDispatchRequest & {
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
   },
   effectsPort: HostedRuntimeEffectsPort,
-  _runtimeEnv: Readonly<Record<string, string>>,
-): Promise<void> {
+): Promise<Awaited<ReturnType<typeof normalizeParsedEmailMessage>>> {
   const bytes = await effectsPort.readRawEmailMessage(dispatch.event.rawMessageKey);
 
   if (!bytes) {
@@ -32,7 +29,7 @@ export async function ingestHostedEmailMessage(
 
   const parsedMessage = parseRawEmailMessage(bytes);
 
-  const capture = await normalizeParsedEmailMessage({
+  return normalizeParsedEmailMessage({
     accountAddress: dispatch.event.identityId,
     accountId: dispatch.event.identityId,
     message: parsedMessage,
@@ -42,9 +39,5 @@ export async function ingestHostedEmailMessage(
     }),
     source: "email",
     threadTarget: null,
-  });
-
-  await withHostedInboxPipeline(vaultRoot, async (pipeline) => {
-    await pipeline.processCapture(capture);
   });
 }

@@ -5,17 +5,14 @@ import {
 import { parseLinqWebhookEvent } from "@murphai/messaging-ingress/linq-webhook";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
-import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
-
 const HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 5_000;
 const HOSTED_LINQ_ATTACHMENT_CDN_HOST = "cdn.linqapp.com";
 
-export async function ingestHostedLinqMessage(
-  vaultRoot: string,
+export async function buildHostedLinqCapture(
   dispatch: HostedExecutionDispatchRequest & {
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "linq.message.received" }>;
   },
-): Promise<void> {
+) {
   const event = parseLinqWebhookEvent(JSON.stringify(dispatch.event.linqEvent));
   const capture = await normalizeLinqWebhookEvent({
     attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
@@ -32,9 +29,7 @@ export async function ingestHostedLinqMessage(
     }),
   };
 
-  await withHostedInboxPipeline(vaultRoot, async (pipeline) => {
-    await pipeline.processCapture(hostedCapture);
-  });
+  return hostedCapture;
 }
 
 export function createHostedLinqAttachmentDownloadDriver(): LinqAttachmentDownloadDriver | null {
