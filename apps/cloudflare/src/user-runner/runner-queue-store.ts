@@ -56,11 +56,6 @@ interface PendingDispatchRowMeta extends PendingDispatchMetaRecord {
   payloadKey: string;
 }
 
-interface EventPresenceState {
-  consumed: boolean;
-  pending: boolean;
-}
-
 interface PoisonedEventRow {
   [key: string]: DurableObjectSqlValue;
   event_id: string;
@@ -132,16 +127,6 @@ export class RunnerQueueStore {
     return this.readStateSync();
   }
 
-  async readEventPresence(eventId: string): Promise<EventPresenceState> {
-    await this.ready;
-    this.pruneExpiredConsumedEventsSync();
-
-    return {
-      consumed: this.hasConsumedEventSync(eventId),
-      pending: this.hasPendingDispatchSync(eventId),
-    };
-  }
-
   async readEventState(eventId: string): Promise<{
     backpressured: boolean;
     consumed: boolean;
@@ -170,12 +155,6 @@ export class RunnerQueueStore {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
     return this.readEventDispatchStatusSync(eventId);
-  }
-
-  async listPendingDispatches(): Promise<PendingDispatchRecord[]> {
-    await this.ready;
-    this.pruneExpiredConsumedEventsSync();
-    return this.hydratePendingDispatchRows(this.readPendingDispatchRowsSync());
   }
 
   async hasDuePendingDispatch(nowMs: number): Promise<boolean> {
@@ -257,6 +236,8 @@ export class RunnerQueueStore {
       meta.runtime_bootstrapped === 1 || dispatch.event.kind === "member.activated" ? 1 : 0;
     this.deleteBackpressuredEventSync(dispatch.eventId);
     meta.user_id = dispatch.event.userId;
+    this.rememberLastEventMetaSync(meta, dispatch.eventId);
+    this.setRetryingEventMetaSync(meta, dispatch.eventId);
     this.writeMetaRowSync(meta);
 
     return {
@@ -300,6 +281,8 @@ export class RunnerQueueStore {
     } satisfies HostedExecutionRunContext;
     meta.in_flight = 1;
     this.assignActiveRunMetaSync(meta, nextPending.eventId, run);
+    this.rememberLastEventMetaSync(meta, nextPending.eventId);
+    this.setRetryingEventMetaSync(meta, nextPending.eventId);
     this.volatileRun = {
       attempt: run.attempt,
       eventId: nextPending.eventId,
@@ -317,41 +300,6 @@ export class RunnerQueueStore {
     };
   }
 
-  async applyCommittedDispatch(
-    committed: HostedExecutionCommittedResult,
-    leaseOwner: RunnerLeaseOwnerInput | null = null,
-  ): Promise<RunnerStateRecord> {
-    await this.ready;
-    await this.bootstrapUserFromCommittedResult(committed);
-    this.pruneExpiredConsumedEventsSync();
-
-    const meta = this.requireMetaRowSync();
-    const bundleState = this.selectBundleStateSync();
-    const pending = this.readPendingDispatchRowByEventIdSync(committed.eventId);
-    if (pending) {
-      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key, true);
-    }
-    this.removePendingDispatchSync(committed.eventId);
-    this.deletePoisonedEventSync(committed.eventId);
-    this.deleteBackpressuredEventSync(committed.eventId);
-    this.writeConsumedEventSync(
-      committed.eventId,
-      committed.committedAt,
-      nextConsumedEventExactExpiryIso(),
-    );
-    assignRunnerBundleRefs(bundleState, committed.bundleRef);
-    this.clearActiveRunLeaseSync(meta, leaseOwner ?? {
-      eventId: committed.eventId,
-      run: null,
-    });
-    this.clearLastErrorMetaSync(meta);
-    meta.last_run_at = committed.committedAt;
-    this.writeMetaRowSync(meta);
-    this.writeBundleStateSync(bundleState);
-
-    return this.readStateFromMetaSync(meta);
-  }
-
   async syncCommittedBundles(
     committed: HostedExecutionCommittedResult,
     leaseOwner: RunnerLeaseOwnerInput | null = null,
@@ -364,6 +312,8 @@ export class RunnerQueueStore {
     const bundleState = this.selectBundleStateSync();
     assignRunnerBundleRefs(bundleState, committed.bundleRef);
     this.deleteBackpressuredEventSync(committed.eventId);
+    this.rememberLastEventMetaSync(meta, committed.eventId);
+    this.clearRetryingEventMetaSync(meta);
     if (leaseOwner?.policy === "same-event") {
       this.clearActiveRunLeaseSync(meta, {
         eventId: committed.eventId,
@@ -391,6 +341,8 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     meta.in_flight = 1;
     this.assignActiveRunMetaSync(meta, input.eventId, input.run);
+    this.rememberLastEventMetaSync(meta, input.eventId);
+    this.setRetryingEventMetaSync(meta, input.eventId);
     this.volatileRun = {
       attempt: input.run.attempt,
       eventId: input.eventId,
@@ -415,6 +367,8 @@ export class RunnerQueueStore {
 
     const meta = this.requireMetaRowSync();
     this.clearActiveRunLeaseSync(meta, input.leaseOwner);
+    this.rememberLastEventMetaSync(meta, input.eventId);
+    this.clearRetryingEventMetaSync(meta);
     this.clearLastErrorMetaSync(meta);
     meta.last_run_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
@@ -433,6 +387,8 @@ export class RunnerQueueStore {
 
     const meta = this.requireMetaRowSync();
     this.clearActiveRunLeaseSync(meta, input.leaseOwner);
+    this.rememberLastEventMetaSync(meta, input.eventId);
+    this.setRetryingEventMetaSync(meta, input.eventId);
     meta.last_error_at = input.finishedAt ?? new Date().toISOString();
     meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
     this.writeMetaRowSync(meta);
@@ -485,6 +441,8 @@ export class RunnerQueueStore {
       this.clearActiveRunMetaSync(meta);
       meta.last_error_at = errorAt;
       meta.last_error_code = errorCode;
+      this.rememberLastEventMetaSync(meta, input.eventId);
+      this.clearRetryingEventMetaSync(meta);
       this.writeMetaRowSync(meta);
       return {
         poisoned: false,
@@ -497,12 +455,14 @@ export class RunnerQueueStore {
     this.clearActiveRunMetaSync(meta);
     meta.last_error_at = errorAt;
     meta.last_error_code = errorCode;
+    this.rememberLastEventMetaSync(meta, input.eventId);
 
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
       await this.deletePendingDispatchPayloadBestEffort(pending.payload_key, true);
       this.writeConsumedEventSync(input.eventId, errorAt, nextConsumedEventExactExpiryIso());
       this.writePoisonedEventSync(input.eventId, errorCode, errorAt);
+      this.clearRetryingEventMetaSync(meta);
       this.writeMetaRowSync(meta);
       return {
         poisoned: true,
@@ -520,6 +480,7 @@ export class RunnerQueueStore {
       errorCode,
       input.eventId,
     );
+    this.setRetryingEventMetaSync(meta, input.eventId);
     this.writeMetaRowSync(meta);
 
     return {
@@ -545,8 +506,10 @@ export class RunnerQueueStore {
     this.clearActiveRunMetaSync(meta);
     meta.last_error_at = errorAt;
     meta.last_error_code = errorCode;
+    this.rememberLastEventMetaSync(meta, input.eventId);
 
     if (!pending) {
+      this.clearRetryingEventMetaSync(meta);
       this.writeMetaRowSync(meta);
       return this.readStateFromMetaSync(meta);
     }
@@ -559,45 +522,8 @@ export class RunnerQueueStore {
       errorCode,
       input.eventId,
     );
+    this.setRetryingEventMetaSync(meta, input.eventId);
     this.writeMetaRowSync(meta);
-
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async rescheduleCommittedFinalizeRetry(input: {
-    attempts: number;
-    committed: HostedExecutionCommittedResult;
-    error: unknown;
-    leaseOwner?: RunnerLeaseOwnerInput | null;
-    retryDelayMs: number;
-  }): Promise<RunnerStateRecord> {
-    await this.ready;
-    await this.bootstrapUserFromCommittedResult(input.committed);
-    this.pruneExpiredConsumedEventsSync();
-
-    const meta = this.requireMetaRowSync();
-    const bundleState = this.selectBundleStateSync();
-    const errorCode = deriveHostedExecutionErrorCode(input.error);
-    assignRunnerBundleRefs(bundleState, input.committed.bundleRef);
-    this.clearActiveRunLeaseSync(meta, input.leaseOwner ?? {
-      eventId: input.committed.eventId,
-      run: null,
-    });
-    meta.last_error_at = new Date().toISOString();
-    meta.last_error_code = errorCode;
-    meta.last_run_at = input.committed.committedAt;
-    this.writeMetaRowSync(meta);
-    this.writeBundleStateSync(bundleState);
-
-    this.sql.exec(
-      `UPDATE pending_events
-        SET attempts = ?, available_at = ?, last_error_code = ?
-        WHERE event_id = ?`,
-      input.attempts,
-      new Date(Date.now() + input.retryDelayMs).toISOString(),
-      errorCode,
-      input.committed.eventId,
-    );
 
     return this.readStateFromMetaSync(meta);
   }
@@ -609,12 +535,20 @@ export class RunnerQueueStore {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
     const meta = this.requireMetaRowSync();
+    const pending = this.readPendingDispatchRowByEventIdSync(eventId);
+    if (pending) {
+      await this.deletePendingDispatchPayloadBestEffort(pending.payload_key, true);
+    }
+    this.removePendingDispatchSync(eventId);
     this.clearActiveRunLeaseSync(meta, leaseOwner ?? {
       eventId,
       run: null,
     });
+    this.rememberLastEventMetaSync(meta, eventId);
+    this.clearRetryingEventMetaSync(meta);
     this.writeMetaRowSync(meta);
     this.deleteBackpressuredEventSync(eventId);
+    this.deletePoisonedEventSync(eventId);
 
     if (!this.hasConsumedEventSync(eventId)) {
       this.writeConsumedEventSync(eventId, new Date().toISOString(), nextConsumedEventExactExpiryIso());
@@ -672,6 +606,13 @@ export class RunnerQueueStore {
     if (errorCode) {
       meta.last_error_at = nowIso;
       meta.last_error_code = errorCode;
+    }
+
+    this.rememberLastEventMetaSync(meta, input.eventId);
+    if (input.phase === "completed") {
+      this.clearRetryingEventMetaSync(meta);
+    } else {
+      this.setRetryingEventMetaSync(meta, input.eventId);
     }
 
     this.writeMetaRowSync(meta);
@@ -764,23 +705,7 @@ export class RunnerQueueStore {
   }
 
   private async bootstrapUserFromCommittedResult(committed: HostedExecutionCommittedResult): Promise<void> {
-    const existingUserId = this.tryResolveUserIdSync();
-    if (existingUserId) {
-      return;
-    }
-
-    if (committed.userId) {
-      await this.bootstrapUser(committed.userId);
-      return;
-    }
-
-    const pendingUserId = await this.readPendingDispatchUserIdByEventId(committed.eventId);
-    if (pendingUserId) {
-      await this.bootstrapUser(pendingUserId);
-      return;
-    }
-
-    throw new Error(`Hosted runner user is not initialized for committed event ${committed.eventId}.`);
+    await this.bootstrapUser(committed.userId);
   }
 
   private pruneExpiredConsumedEventsSync(): void {
@@ -862,8 +787,10 @@ export class RunnerQueueStore {
         in_flight,
         last_error_at,
         last_error_code,
+        last_event_id,
         last_run_at,
-        next_wake_at
+        next_wake_at,
+        retrying_event_id
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -888,9 +815,11 @@ export class RunnerQueueStore {
         in_flight,
         last_error_at,
         last_error_code,
+        last_event_id,
         last_run_at,
-        next_wake_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        next_wake_at,
+        retrying_event_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_run_event_id,
@@ -901,8 +830,10 @@ export class RunnerQueueStore {
       meta.in_flight,
       meta.last_error_at,
       meta.last_error_code,
+      meta.last_event_id,
       meta.last_run_at,
       meta.next_wake_at,
+      meta.retrying_event_id,
     );
   }
 
@@ -1378,6 +1309,18 @@ export class RunnerQueueStore {
   private clearLastErrorMetaSync(meta: RunnerMetaRow): void {
     meta.last_error_at = null;
     meta.last_error_code = null;
+  }
+
+  private rememberLastEventMetaSync(meta: RunnerMetaRow, eventId: string): void {
+    meta.last_event_id = eventId;
+  }
+
+  private setRetryingEventMetaSync(meta: RunnerMetaRow, eventId: string): void {
+    meta.retrying_event_id = eventId;
+  }
+
+  private clearRetryingEventMetaSync(meta: RunnerMetaRow): void {
+    meta.retrying_event_id = null;
   }
 
   private hasBackpressuredEventSync(eventId: string): boolean {
