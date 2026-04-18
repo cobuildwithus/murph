@@ -7,6 +7,7 @@ import { hostedOnboardingError } from "./errors";
 import {
   readHostedPrivyIdentityTokenFromCookieStore,
   readHostedPrivyIdentityTokenFromRequestCookies,
+  readHostedPrivyMemberIdFromVerifiedUser,
   resolveHostedPrivyIdentityFromVerifiedUser,
   type HostedPrivyIdentity,
   type HostedPrivyUser,
@@ -17,6 +18,7 @@ import { type PrivyLinkedAccountLike, resolveHostedPrivyLinkedAccounts } from ".
 export interface HostedPrivySession {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
+  memberId: string | null;
   verifiedPrivyUser: HostedPrivyUser;
 }
 
@@ -67,6 +69,7 @@ async function buildHostedPrivySession(identityToken: string): Promise<HostedPri
   return {
     identity: resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser),
     linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
+    memberId: readHostedPrivyMemberIdFromVerifiedUser(verifiedPrivyUser),
     verifiedPrivyUser,
   };
 }

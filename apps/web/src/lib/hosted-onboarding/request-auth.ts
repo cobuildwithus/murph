@@ -1,6 +1,7 @@
 import { type HostedMember, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { readHostedMemberCoreState } from "./hosted-member-store";
 import {
   assertHostedMemberActiveAccessAllowed,
 } from "./entitlement";
@@ -28,6 +29,7 @@ export interface PrivyMemberAuthContext {
 export interface PrivySessionContext {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
+  memberId: string | null;
   verifiedPrivyUser: HostedPrivyUser;
 }
 
@@ -47,7 +49,42 @@ export async function getPrivySession(
   return {
     identity: session.identity,
     linkedAccounts: session.linkedAccounts,
+    memberId: session.memberId,
     verifiedPrivyUser: session.verifiedPrivyUser,
+  };
+}
+
+export async function resolvePrivyMemberAuthFromSession(input: {
+  identity: HostedPrivyIdentity;
+  memberId: string | null;
+  prisma: PrismaClient;
+}): Promise<{
+  member: HostedMember | null;
+  memberLookup: HostedMemberPrivyIdentityLookup | null;
+}> {
+  if (input.memberId) {
+    const member = await readHostedMemberCoreState({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+
+    if (member) {
+      return {
+        member,
+        memberLookup: null,
+      };
+    }
+  }
+
+  const memberLookup = await lookupHostedMemberForPrivyIdentity({
+    identity: input.identity,
+    parallelizeReads: true,
+    prisma: input.prisma,
+  });
+
+  return {
+    member: memberLookup?.core ?? null,
+    memberLookup,
   };
 }
 
@@ -61,16 +98,16 @@ export async function getPrivyMemberAuth(
     return null;
   }
 
-  const memberLookup = await lookupHostedMemberForPrivyIdentity({
+  const { member, memberLookup } = await resolvePrivyMemberAuthFromSession({
     identity: session.identity,
-    parallelizeReads: true,
+    memberId: session.memberId,
     prisma,
   });
 
   return {
     identity: session.identity,
     linkedAccounts: session.linkedAccounts,
-    member: memberLookup?.core ?? null,
+    member,
     memberLookup,
     verifiedPrivyUser: session.verifiedPrivyUser,
   };

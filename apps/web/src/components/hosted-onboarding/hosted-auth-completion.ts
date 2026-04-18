@@ -50,6 +50,7 @@ export async function completeHostedPrivyAuth(
   }
 
   const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
+  await input.refreshUser?.().catch(() => null);
   const redirectUrl = await resolveHostedAuthRedirectUrl({
     intent: input.intent,
     payload,

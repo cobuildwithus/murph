@@ -3,11 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   lookupHostedMemberForPrivyIdentity: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
   resolveHostedPrivySessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   lookupHostedMemberForPrivyIdentity: mocks.lookupHostedMemberForPrivyIdentity,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
@@ -66,10 +71,12 @@ describe("hosted Privy request auth", () => {
           type: "email",
         },
       ],
+      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
     });
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
       createHostedMemberLookup(),
     );
@@ -108,6 +115,7 @@ describe("hosted Privy request auth", () => {
       identity: {
         userId: "did:privy:user_123",
       },
+      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -132,6 +140,73 @@ describe("hosted Privy request auth", () => {
     });
     expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      parallelizeReads: true,
+      prisma,
+    }));
+  });
+
+  it("uses the trusted Murph member id from the session before falling back to identity probes", async () => {
+    const member = createHostedMember();
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [],
+      memberId: member.id,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+    mocks.readHostedMemberCoreState.mockResolvedValue(member);
+
+    await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      member: {
+        id: member.id,
+      },
+      memberLookup: null,
+    });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: member.id,
+      prisma,
+    });
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the legacy identity lookup when the trusted member id is stale", async () => {
+    const memberLookup = createHostedMemberLookup();
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [],
+      memberId: "member_missing",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(memberLookup);
+
+    await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      member: {
+        id: memberLookup.core.id,
+      },
+      memberLookup,
+    });
+    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      identity: expect.objectContaining({
+        userId: "did:privy:user_123",
+      }),
       parallelizeReads: true,
       prisma,
     }));
@@ -185,6 +260,7 @@ describe("hosted Privy request auth", () => {
           type: "phone",
         },
       ],
+      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },

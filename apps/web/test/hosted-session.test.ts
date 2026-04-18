@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
   readHostedPrivyIdentityTokenFromCookieStore: vi.fn(),
   readHostedPrivyIdentityTokenFromRequestCookies: vi.fn(),
+  readHostedPrivyMemberIdFromVerifiedUser: vi.fn(),
   resolveHostedPrivyIdentityFromVerifiedUser: vi.fn(),
   resolveHostedPrivyLinkedAccounts: vi.fn(),
   verifyHostedPrivyIdentityToken: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("next/headers", () => ({
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   readHostedPrivyIdentityTokenFromCookieStore: mocks.readHostedPrivyIdentityTokenFromCookieStore,
   readHostedPrivyIdentityTokenFromRequestCookies: mocks.readHostedPrivyIdentityTokenFromRequestCookies,
+  readHostedPrivyMemberIdFromVerifiedUser: mocks.readHostedPrivyMemberIdFromVerifiedUser,
   resolveHostedPrivyIdentityFromVerifiedUser: mocks.resolveHostedPrivyIdentityFromVerifiedUser,
   verifyHostedPrivyIdentityToken: mocks.verifyHostedPrivyIdentityToken,
 }));
@@ -35,6 +37,7 @@ describe("hosted Privy session", () => {
     });
     mocks.readHostedPrivyIdentityTokenFromCookieStore.mockReturnValue(null);
     mocks.readHostedPrivyIdentityTokenFromRequestCookies.mockReturnValue(null);
+    mocks.readHostedPrivyMemberIdFromVerifiedUser.mockReturnValue(null);
     mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValue({
       phone: {
         number: "+14155552671",
@@ -88,6 +91,7 @@ describe("hosted Privy session", () => {
           type: "phone",
         },
       ],
+      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -109,6 +113,7 @@ describe("hosted Privy session", () => {
       identity: {
         userId: "did:privy:user_123",
       },
+      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -116,5 +121,16 @@ describe("hosted Privy session", () => {
 
     expect(mocks.readHostedPrivyIdentityTokenFromRequestCookies).toHaveBeenCalledWith(request);
     expect(mocks.verifyHostedPrivyIdentityToken).toHaveBeenCalledWith("identity-token");
+  });
+
+  it("reads the Murph member id from verified Privy custom metadata", async () => {
+    const { resolveHostedPrivySessionFromRequest } = await import("@/src/lib/hosted-onboarding/hosted-session");
+    mocks.readHostedPrivyIdentityTokenFromRequestCookies.mockReturnValue("identity-token");
+    mocks.readHostedPrivyMemberIdFromVerifiedUser.mockReturnValue("member_123");
+    const request = new Request("https://join.example.test/api/hosted-onboarding/privy/complete");
+
+    await expect(resolveHostedPrivySessionFromRequest(request)).resolves.toMatchObject({
+      memberId: "member_123",
+    });
   });
 });

@@ -158,6 +158,9 @@ describe("hosted onboarding routes", () => {
         inviteCode: "invite-code",
       },
       inviteCode: "invite-code",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
   });
 
@@ -197,9 +200,11 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
     await expect(response.json()).resolves.toEqual({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       ok: true,
@@ -236,6 +241,9 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: null,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
   });
 
@@ -271,6 +279,9 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
   });
 

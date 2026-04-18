@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
-  lookupHostedMemberForPrivyIdentity: vi.fn(),
   prisma: { __tag: "page-auth-prisma" },
+  resolvePrivyMemberAuthFromSession: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -18,8 +18,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  lookupHostedMemberForPrivyIdentity: mocks.lookupHostedMemberForPrivyIdentity,
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  resolvePrivyMemberAuthFromSession: mocks.resolvePrivyMemberAuthFromSession,
 }));
 
 describe("hosted page auth", () => {
@@ -28,7 +28,10 @@ describe("hosted page auth", () => {
     vi.clearAllMocks();
     mocks.getHostedPrivySession.mockResolvedValue(null);
     mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
+    mocks.resolvePrivyMemberAuthFromSession.mockResolvedValue({
+      member: null,
+      memberLookup: null,
+    });
   });
 
   it("returns an anonymous snapshot when no hosted Privy session exists", async () => {
@@ -42,7 +45,7 @@ describe("hosted page auth", () => {
       session: null,
     });
     expect(mocks.getPrisma).not.toHaveBeenCalled();
-    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+    expect(mocks.resolvePrivyMemberAuthFromSession).not.toHaveBeenCalled();
   });
 
   it("degrades invalid hosted Privy cookies to an anonymous snapshot", async () => {
@@ -64,7 +67,7 @@ describe("hosted page auth", () => {
       session: null,
     });
     expect(mocks.getPrisma).not.toHaveBeenCalled();
-    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+    expect(mocks.resolvePrivyMemberAuthFromSession).not.toHaveBeenCalled();
   });
 
   it("rethrows unexpected session failures", async () => {
@@ -74,7 +77,7 @@ describe("hosted page auth", () => {
 
     await expect(getHostedPageAuthSnapshot()).rejects.toBe(error);
     expect(mocks.getPrisma).not.toHaveBeenCalled();
-    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+    expect(mocks.resolvePrivyMemberAuthFromSession).not.toHaveBeenCalled();
   });
 
   it("returns the member-backed snapshot when the hosted Privy session verifies", async () => {
@@ -94,6 +97,7 @@ describe("hosted page auth", () => {
           type: "phone",
         },
       ],
+      memberId: "member_123",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -114,7 +118,10 @@ describe("hosted page auth", () => {
       matchedBy: ["privyUserId"],
     };
     mocks.getHostedPrivySession.mockResolvedValue(session);
-    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(memberLookup);
+    mocks.resolvePrivyMemberAuthFromSession.mockResolvedValue({
+      member,
+      memberLookup,
+    });
     const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
 
     await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
@@ -125,8 +132,9 @@ describe("hosted page auth", () => {
       session,
     });
     expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
-    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledWith({
+    expect(mocks.resolvePrivyMemberAuthFromSession).toHaveBeenCalledWith({
       identity: session.identity,
+      memberId: "member_123",
       prisma: mocks.prisma,
     });
   });
