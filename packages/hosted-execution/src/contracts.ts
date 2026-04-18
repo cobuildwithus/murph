@@ -277,27 +277,35 @@ export interface HostedExecutionUserStatus {
   userId: string;
 }
 
-export const HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES = [
+export const HOSTED_WAKE_LIFECYCLE_STATES = [
   "queued",
   "backpressured",
   "completed",
   "poisoned",
 ] as const;
 
-export type HostedExecutionDispatchLifecycleState =
-  (typeof HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES)[number];
+export type HostedWakeLifecycleState =
+  (typeof HOSTED_WAKE_LIFECYCLE_STATES)[number];
 
-export interface HostedExecutionDispatchStatus {
+export interface HostedWakeStatus {
   eventId: string;
   lastError: string | null;
-  state: HostedExecutionDispatchLifecycleState;
+  state: HostedWakeLifecycleState;
   userId: string;
 }
 
-export interface HostedExecutionDispatchResult {
-  event: HostedExecutionDispatchStatus;
+export interface HostedWakeExecutionResult {
+  event: HostedWakeStatus;
   status: HostedExecutionUserStatus;
 }
+
+export const HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES = HOSTED_WAKE_LIFECYCLE_STATES;
+
+export type HostedExecutionDispatchLifecycleState = HostedWakeLifecycleState;
+
+export type HostedExecutionDispatchStatus = HostedWakeStatus;
+
+export type HostedExecutionDispatchResult = HostedWakeExecutionResult;
 
 export const HOSTED_WAKE_BEHAVIORS = [
   "ordered",
@@ -408,7 +416,7 @@ export interface HostedWakeStatusRequest {
 
 export interface HostedWakeStatusResponse {
   cursor: HostedExecutionCursorState;
-  dispatchState?: HostedExecutionDispatchLifecycleState | null;
+  wakeState?: HostedWakeLifecycleState | null;
   pendingWakeCount: number;
 }
 

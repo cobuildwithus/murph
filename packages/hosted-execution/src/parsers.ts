@@ -20,7 +20,6 @@ import {
 
 import type {
   HostedExecutionAssistantCronTickEvent,
-  HostedExecutionDispatchLifecycleState,
   HostedExecutionDispatchStatus,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
@@ -45,6 +44,7 @@ import type {
   HostedWakeAppendResponse,
   HostedWakeCommitResponse,
   HostedWakeFetchResponse,
+  HostedWakeLifecycleState,
   HostedWakePayloadSchema,
   HostedWakeQuarantineResponse,
   HostedWakeRecord,
@@ -342,7 +342,10 @@ export function parseHostedExecutionDispatchStatus(
       event.lastError,
       "Hosted execution dispatch status lastError",
     ),
-    state: parseHostedExecutionDispatchLifecycleState(event.state),
+    state: parseHostedWakeLifecycleState(event.state, {
+      invalidStateMessage: "Unsupported hosted execution dispatch lifecycle state",
+      label: "Hosted execution dispatch status state",
+    }),
     userId: requireString(event.userId, "Hosted execution dispatch status userId"),
   };
 }
@@ -426,12 +429,22 @@ export function parseHostedExecutionRunStatus(value: unknown): HostedExecutionRu
 export function parseHostedWakeStatusResponse(value: unknown): HostedWakeStatusResponse {
   const record = requireObject(value, "Hosted wake status response");
 
+  if (record.dispatchState !== undefined) {
+    throw new TypeError(
+      "Hosted wake status response dispatchState is no longer supported; use wakeState.",
+    );
+  }
+
+  const parsedWakeState = record.wakeState === undefined
+    ? undefined
+    : record.wakeState === null
+      ? null
+      : parseHostedWakeLifecycleState(record.wakeState);
+
   return {
     cursor: parseHostedExecutionCursorState(record.cursor),
-    ...(record.dispatchState === undefined ? {} : {
-      dispatchState: record.dispatchState === null
-        ? null
-        : parseHostedExecutionDispatchLifecycleState(record.dispatchState),
+    ...(parsedWakeState === undefined ? {} : {
+      wakeState: parsedWakeState,
     }),
     pendingWakeCount: requireNumber(record.pendingWakeCount, "Hosted wake status response pendingWakeCount"),
   };
@@ -932,10 +945,17 @@ function requireBigIntString(value: unknown, label: string): string {
   return text;
 }
 
-function parseHostedExecutionDispatchLifecycleState(
+function parseHostedWakeLifecycleState(
   value: unknown,
-): HostedExecutionDispatchLifecycleState {
-  const state = requireString(value, "Hosted execution dispatch result event state");
+  options?: {
+    invalidStateMessage?: string;
+    label?: string;
+  },
+): HostedWakeLifecycleState {
+  const state = requireString(
+    value,
+    options?.label ?? "Hosted wake lifecycle state",
+  );
 
   if (
     state === "queued"
@@ -946,7 +966,9 @@ function parseHostedExecutionDispatchLifecycleState(
     return state;
   }
 
-  throw new TypeError(`Unsupported hosted execution dispatch lifecycle state: ${state}`);
+  throw new TypeError(
+    `${options?.invalidStateMessage ?? "Unsupported hosted wake lifecycle state"}: ${state}`,
+  );
 }
 
 function parseHostedConversationMessagePayloadEnvelope(input: {
