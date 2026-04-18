@@ -31,9 +31,17 @@ export interface HostedLocalChildProcess {
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): this;
   pid?: number;
+  signalCode?: NodeJS.Signals | null;
 }
 
 export interface NamedChildProcess {
   child: HostedLocalChildProcess;
   name: "cloudflare" | "web";
+}
+
+export interface BufferedNamedChildProcess extends NamedChildProcess {
+  stderrTail(maxChars?: number): string;
+  stderrText(): string;
+  stdoutTail(maxChars?: number): string;
+  stdoutText(): string;
 }
