@@ -37,7 +37,7 @@ describe("proxyLocalLoopbackRequest", () => {
       completedMessage: "completed",
       component: "worker",
       failedMessage: "failed",
-      phase: "dispatch.running",
+      phase: "wake.running",
       request: new Request("https://runner.example.test/proxy", {
         method: "GET",
       }),

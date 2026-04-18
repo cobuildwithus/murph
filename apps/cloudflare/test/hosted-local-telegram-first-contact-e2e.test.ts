@@ -69,7 +69,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
   it("sends Telegram typing and a reply after an inbound Telegram message", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
-    await requireScenario().dispatchWake(buildActivationWake(userId), userId);
+    await requireScenario().runWake(buildActivationWake(userId), userId);
 
     await requireScenario().waitForHostedCompletion(userId);
     await requireTelegramStub().waitForRequestsToSettle({
@@ -78,12 +78,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
 
     const requestCountBeforeInbound = requireTelegramStub().observedRequests.length;
-    await requireScenario().dispatchWake(buildInboundTelegramWake(userId), userId);
+    await requireScenario().runWake(buildInboundTelegramWake(userId), userId);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.bundleRef).not.toBeNull();
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingEventCount).toBe(0);
+    expect(finalStatus.pendingWakeCount).toBe(0);
 
     await requireTelegramStub().waitForRequest({
       expectedPath: `/bot${telegramBotToken}/sendChatAction`,
@@ -126,7 +126,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
   it("keeps Telegram context when two replies arrive before hosted completion catches up", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: fastReplyUserId });
-    await requireScenario().dispatchWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
+    await requireScenario().runWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
 
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
     await requireTelegramStub().waitForRequestsToSettle({

@@ -307,9 +307,7 @@ function createUserStatus(
     lastEventId: string | null;
     lastRunAt: string | null;
     nextWakeAt: string | null;
-    pendingEventCount: number;
-    poisonedEventIds: string[];
-    retryingEventId: string | null;
+    pendingWakeCount: number;
     userId: string;
   }> = {},
 ) {
@@ -320,9 +318,7 @@ function createUserStatus(
     lastEventId: input.lastEventId ?? null,
     lastRunAt: input.lastRunAt ?? null,
     nextWakeAt: input.nextWakeAt ?? null,
-    pendingEventCount: input.pendingEventCount ?? 0,
-    poisonedEventIds: input.poisonedEventIds ?? [],
-    retryingEventId: input.retryingEventId ?? null,
+    pendingWakeCount: input.pendingWakeCount ?? 0,
     userId: input.userId ?? "user_123",
   };
 }

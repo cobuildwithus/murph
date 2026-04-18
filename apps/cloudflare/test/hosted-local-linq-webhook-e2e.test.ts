@@ -88,7 +88,7 @@ describe("hosted local Linq webhook e2e", () => {
       memberPhone: buildLinqRecipientPhoneNumber(webhookUserId),
     });
 
-    await requireScenario().dispatchWake(buildActivationWake(webhookUserId), webhookUserId);
+    await requireScenario().runWake(buildActivationWake(webhookUserId), webhookUserId);
     await requireScenario().waitForHostedCompletion(webhookUserId);
     await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
@@ -136,7 +136,7 @@ describe("hosted local Linq webhook e2e", () => {
       memberPhone: buildLinqRecipientPhoneNumber(fastWebhookUserId),
     });
 
-    await requireScenario().dispatchWake(
+    await requireScenario().runWake(
       buildActivationWake(fastWebhookUserId),
       fastWebhookUserId,
     );

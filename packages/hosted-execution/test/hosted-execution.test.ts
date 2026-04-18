@@ -8,7 +8,6 @@ import {
   readHostedExecutionSignatureHeaders,
 } from "../src/auth.ts";
 import {
-  HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -16,6 +15,7 @@ import {
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_WAKE_LIFECYCLE_STATES,
+  HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "../src/contracts.ts";
 import {
@@ -148,8 +148,8 @@ describe("hosted execution coverage gaps", () => {
       "completed",
       "poisoned",
     ]);
-    expect(HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR).toBe(
-      "Hosted execution dispatch is not configured.",
+    expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
+      "Hosted execution wake handling is not configured.",
     );
     expect(HOSTED_EXECUTION_SIGNATURE_HEADER).toBe("x-hosted-execution-signature");
     expect(HOSTED_EXECUTION_TIMESTAMP_HEADER).toBe("x-hosted-execution-timestamp");

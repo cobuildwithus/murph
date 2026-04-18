@@ -195,7 +195,7 @@ export async function startHostedContainerEntrypoint(input: {
         },
         wake: job.request.wake,
         message: "Hosted container entrypoint accepted runner job.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         run: job.request.run ?? null,
       });
 
@@ -220,7 +220,7 @@ export async function startHostedContainerEntrypoint(input: {
         },
         wake: job.request.wake,
         message: "Hosted container entrypoint completed runner job.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         run: job.request.run ?? null,
       });
       response.statusCode = 200;

@@ -31,7 +31,6 @@ function createCommittedResult(): HostedExecutionCommittedResult {
 function createRunnerStateRecord(): RunnerStateRecord {
   return {
     runtimeBootstrapped: true,
-    backpressuredEventIds: [],
     bundleRef: null,
     bundleVersion: 1,
     inFlight: false,
@@ -41,9 +40,7 @@ function createRunnerStateRecord(): RunnerStateRecord {
     lastEventId: null,
     lastRunAt: null,
     nextWakeAt: null,
-    pendingEventCount: 0,
-    poisonedEventIds: [],
-    retryingEventId: null,
+    pendingWakeCount: 0,
     run: null,
     timeline: [],
     userId: "user_commit_recovery",

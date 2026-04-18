@@ -149,7 +149,7 @@ export class RunnerContainer extends Container {
   private async invokeHostedExecution(
     input: HostedExecutionContainerInvokeInput,
   ): Promise<HostedAssistantRuntimeJobResult> {
-    const dispatch = input.job.request.wake;
+    const wake = input.job.request.wake;
     const run = input.job.request.run ?? null;
     const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
       this.environment,
@@ -171,19 +171,19 @@ export class RunnerContainer extends Container {
       const runnerControlToken = await this.ensureContainerReady(input);
       this.runnerOutboundProxyToken = internalWorkerProxyToken;
       await this.installOutboundHandlers(input.userId, internalWorkerProxyToken, {
-        dispatch,
+        wake,
         run,
       });
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       emitHostedExecutionStructuredLog({
         component: "container",
-        wake: dispatch,
+        wake,
         details: {
           remainingTimeoutMs,
           runElapsedMs: computeHostedRunElapsedMs(run),
         },
-        message: "Hosted execution container dispatching runner request.",
+        message: "Hosted execution container sending runner request.",
         phase: "container.ready",
         run,
       });
@@ -210,7 +210,7 @@ export class RunnerContainer extends Container {
       );
       emitHostedExecutionStructuredLog({
         component: "container",
-        wake: dispatch,
+        wake,
         details: {
           responseStatus: response.status,
           runElapsedMs: computeHostedRunElapsedMs(run),
@@ -230,7 +230,7 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
-        wake: dispatch,
+        wake,
         error,
         message: "Hosted execution container failed.",
         phase: "failed",
@@ -250,7 +250,7 @@ export class RunnerContainer extends Container {
     input: HostedExecutionContainerInvokeInput,
   ): Promise<string> {
     const readinessStartedAt = Date.now();
-    const dispatch = input.job.request.wake;
+    const wake = input.job.request.wake;
     const run = input.job.request.run ?? null;
     const status = readContainerStatus(await this.getState());
 
@@ -259,7 +259,7 @@ export class RunnerContainer extends Container {
         await assertRunnerHealthy(this, Math.min(input.timeoutMs, readRunnerReadyTimeoutMs(this.environment)));
         emitHostedExecutionStructuredLog({
           component: "container",
-          wake: dispatch,
+          wake,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
             runElapsedMs: computeHostedRunElapsedMs(run),
@@ -273,7 +273,7 @@ export class RunnerContainer extends Container {
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
-          wake: dispatch,
+          wake,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
             runElapsedMs: computeHostedRunElapsedMs(run),
@@ -293,7 +293,7 @@ export class RunnerContainer extends Container {
 
     emitHostedExecutionStructuredLog({
       component: "container",
-      wake: dispatch,
+      wake,
       details: {
         runElapsedMs: computeHostedRunElapsedMs(run),
         startMode: "cold",
@@ -327,7 +327,7 @@ export class RunnerContainer extends Container {
 
     emitHostedExecutionStructuredLog({
       component: "container",
-      wake: dispatch,
+      wake,
       details: {
         readinessLatencyMs: Date.now() - readinessStartedAt,
         runElapsedMs: computeHostedRunElapsedMs(run),
@@ -345,7 +345,7 @@ export class RunnerContainer extends Container {
     userId: string,
     internalWorkerProxyToken: string,
     input: {
-      dispatch: HostedAssistantRuntimeJobInput["request"]["wake"];
+      wake: HostedAssistantRuntimeJobInput["request"]["wake"];
       run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
     },
   ): Promise<void> {
@@ -372,7 +372,7 @@ export class RunnerContainer extends Container {
         if (attempt > 1) {
           emitHostedExecutionStructuredLog({
             component: "container",
-            wake: input.dispatch,
+            wake: input.wake,
             details: {
               outboundHandlerInstallAttempt: attempt,
               outboundHandlerInstallRetryCount: attempt - 1,
@@ -395,7 +395,7 @@ export class RunnerContainer extends Container {
 
         emitHostedExecutionStructuredLog({
           component: "container",
-          wake: input.dispatch,
+          wake: input.wake,
           details: {
             outboundHandlerInstallAttempt: attempt,
             outboundHandlerInstallRetryDelayMs: OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS,

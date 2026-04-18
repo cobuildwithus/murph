@@ -352,12 +352,9 @@ export function parseHostedWakeStatus(
 
 export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionUserStatus {
   const record = requireObject(value, "Hosted execution user status");
+  assertNoLegacyHostedExecutionUserStatusFields(record);
 
   return {
-    backpressuredEventIds: readOptionalStringArray(
-      record.backpressuredEventIds,
-      "Hosted execution user status backpressuredEventIds",
-    ),
     bundleRef: parseHostedExecutionBundleRef(
       record.bundleRef,
       "Hosted execution user status bundleRef",
@@ -376,17 +373,9 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
     lastEventId: readNullableString(record.lastEventId, "Hosted execution user status lastEventId"),
     lastRunAt: readNullableString(record.lastRunAt, "Hosted execution user status lastRunAt"),
     nextWakeAt: readNullableString(record.nextWakeAt, "Hosted execution user status nextWakeAt"),
-    pendingEventCount: requireNumber(
-      record.pendingEventCount,
-      "Hosted execution user status pendingEventCount",
-    ),
-    poisonedEventIds: requireStringArray(
-      record.poisonedEventIds,
-      "Hosted execution user status poisonedEventIds",
-    ),
-    retryingEventId: readNullableString(
-      record.retryingEventId,
-      "Hosted execution user status retryingEventId",
+    pendingWakeCount: requireNumber(
+      record.pendingWakeCount,
+      "Hosted execution user status pendingWakeCount",
     ),
     ...(record.run === undefined ? {} : {
       run: record.run === null ? null : parseHostedExecutionRunStatus(record.run),
@@ -448,6 +437,25 @@ export function parseHostedWakeStatusResponse(value: unknown): HostedWakeStatusR
     }),
     pendingWakeCount: requireNumber(record.pendingWakeCount, "Hosted wake status response pendingWakeCount"),
   };
+}
+
+function assertNoLegacyHostedExecutionUserStatusFields(
+  record: Record<string, unknown>,
+): void {
+  const legacyField = [
+    "backpressuredEventIds",
+    "pendingEventCount",
+    "poisonedEventIds",
+    "retryingEventId",
+  ].find((key) => record[key] !== undefined);
+
+  if (!legacyField) {
+    return;
+  }
+
+  throw new TypeError(
+    `Hosted execution user status ${legacyField} is no longer supported; use wake-native status fields.`,
+  );
 }
 
 export function parseHostedExecutionTimelineEntries(value: unknown): HostedExecutionTimelineEntry[] {

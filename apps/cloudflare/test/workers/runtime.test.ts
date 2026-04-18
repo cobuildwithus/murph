@@ -100,7 +100,7 @@ describe("cloudflare worker runtime suite", () => {
     });
     await expect(stub.status()).resolves.toMatchObject({
       lastEventId: null,
-      pendingEventCount: 0,
+      pendingWakeCount: 0,
       userId: "member_invalid",
     });
   });
@@ -123,7 +123,6 @@ describe("cloudflare worker runtime suite", () => {
         }),
         lastEventId: "evt_signed_runtime",
         nextWakeAt: "2026-03-26T12:01:00.000Z",
-        retryingEventId: null,
         userId: wake.userId,
       },
     });
@@ -147,7 +146,7 @@ describe("cloudflare worker runtime suite", () => {
     });
     await expect(getUserRunnerStub(userId).status()).resolves.toMatchObject({
       lastEventId: null,
-      pendingEventCount: 0,
+      pendingWakeCount: 0,
       userId,
     });
   });
@@ -171,8 +170,7 @@ describe("cloudflare worker runtime suite", () => {
       expect(status).toEqual(expect.objectContaining({
         lastEventId: "evt_alarm_seed",
         nextWakeAt: null,
-        pendingEventCount: 0,
-        retryingEventId: null,
+        pendingWakeCount: 0,
         userId,
       }));
     });

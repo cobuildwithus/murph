@@ -172,7 +172,7 @@ export class HostedUserRunner {
 
   private async refreshRunnerStores(userId: string): Promise<RunnerUserStores> {
     const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
-      reason: "user-runner-store-refresh",
+      reason: "runner-store-refresh",
     });
 
     const stores: RunnerUserStores = {
@@ -235,10 +235,10 @@ export class HostedUserRunner {
 
     if (!record.userId) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         level: "warn",
-        message: "Hosted wake nudge skipped because the user runner is not bound yet.",
-        phase: "dispatch.running",
+        message: "Hosted wake nudge skipped because the runner is not bound yet.",
+        phase: "wake.running",
         userId: record.userId ?? null,
       });
       await this.wakeScheduler.syncNextWake(
@@ -251,11 +251,11 @@ export class HostedUserRunner {
       await this.wakeHostedWakes();
     } catch (error) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         error,
         level: "warn",
         message: "Hosted wake nudge failed; scheduling a retry.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId: record.userId,
       });
       await this.wakeScheduler.syncNextWake(
@@ -334,10 +334,10 @@ export class HostedUserRunner {
       if (batch.wakes.length === 0) {
         if (targetSeqHint && BigInt(batch.cursor.committedSeq) < targetSeqHint) {
           emitHostedExecutionStructuredLog({
-            component: "hosted.user-runner",
+            component: "hosted.runner",
             level: "info",
             message: "Hosted wake drain saw no unseen rows before the target sequence hint.",
-            phase: "dispatch.running",
+            phase: "wake.running",
             userId,
           });
         }
@@ -394,10 +394,10 @@ export class HostedUserRunner {
 
       if (!commit.committed) {
         emitHostedExecutionStructuredLog({
-          component: "hosted.user-runner",
+          component: "hosted.runner",
           level: "info",
           message: "Hosted wake cursor commit lost a compare-and-swap race; refetching cursor state.",
-          phase: "dispatch.running",
+          phase: "wake.running",
           userId,
         });
       }
@@ -427,13 +427,13 @@ export class HostedUserRunner {
 
     if (wake.quarantinedAt) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         details: {
           quarantineCode: wake.quarantineCode ?? null,
         },
         level: "info",
         message: `Hosted wake seq ${wake.seq} is already quarantined; advancing the cursor past the terminal row.`,
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId,
       });
       return {
@@ -455,10 +455,10 @@ export class HostedUserRunner {
       });
     } catch {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         level: "warn",
         message: `Hosted wake seq ${wake.seq} has an invalid wake payload and cannot be executed.`,
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId,
       });
       return await this.quarantineHostedWakeRecord(
@@ -472,10 +472,10 @@ export class HostedUserRunner {
 
     if (hostedWake.userId !== userId) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         level: "warn",
         message: `Hosted wake seq ${wake.seq} is bound to ${hostedWake.userId}, not ${userId}.`,
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId,
       });
       return await this.quarantineHostedWakeRecord(
@@ -517,11 +517,11 @@ export class HostedUserRunner {
       return response.quarantined;
     } catch (error) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         error,
         level: "warn",
         message: `Failed to quarantine hosted wake ${wakeId}.`,
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId,
       });
       return false;
@@ -562,7 +562,7 @@ export class HostedUserRunner {
         });
       } catch (error) {
         emitHostedExecutionStructuredLog({
-          component: "hosted.user-runner",
+          component: "hosted.runner",
           error,
           eventId: outcome.wake!.eventId,
           level: "warn",
@@ -620,7 +620,7 @@ export class HostedUserRunner {
       });
     } catch (error) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         error,
         eventId: finalOutcome.wake!.eventId,
         level: "warn",
@@ -654,22 +654,17 @@ export class HostedUserRunner {
 
       return {
         ...baseStatus,
-        backpressuredEventIds: [],
-        pendingEventCount: wakeStatus.pendingWakeCount > 0
+        pendingWakeCount: wakeStatus.pendingWakeCount > 0
           ? wakeStatus.pendingWakeCount
-          : baseStatus.pendingEventCount,
-        poisonedEventIds: [],
-        retryingEventId: wakeStatus.pendingWakeCount > 0 && baseStatus.inFlight
-          ? (baseStatus.run?.eventId ?? baseStatus.lastEventId)
-          : baseStatus.retryingEventId,
+          : baseStatus.pendingWakeCount,
       };
     } catch (error) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         error,
         level: "warn",
         message: "Hosted wake status read failed; returning local runner status only.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId: record.userId,
       });
       return baseStatus;
@@ -703,12 +698,12 @@ export class HostedUserRunner {
       };
     } catch (error) {
       emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
+        component: "hosted.runner",
         error,
         eventId: wake.eventId,
         level: "warn",
         message: "Hosted wake status read failed; returning a conservative queued result.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId: wake.userId,
       });
       return null;

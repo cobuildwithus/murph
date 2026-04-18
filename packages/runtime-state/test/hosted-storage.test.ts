@@ -143,7 +143,7 @@ test("hosted storage parsing and decryption fail closed on invalid envelopes", a
         iv: "def",
         keyId: "key-v1",
         schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
-        scope: "dispatch-payload",
+        scope: "legacy-payload",
       }),
     /Hosted cipher envelope\.scope must be a supported hosted storage scope\./u,
   );

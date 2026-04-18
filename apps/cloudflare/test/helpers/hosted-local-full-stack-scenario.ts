@@ -32,7 +32,7 @@ import {
   appendHostedWake,
   appendHostedWakeAndWakeWorker,
   wakeHostedWorkerForLatestPendingWake,
-} from "./hosted-local-dispatch.js";
+} from "./hosted-local-wake.js";
 import {
   startHostedLocalDevHarness,
   type HostedLocalDevHarness,
@@ -54,7 +54,7 @@ interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
 
 export interface HostedLocalFullStackScenario {
   assistantProviderBodies: string[];
-  dispatchWake(
+  runWake(
     wake: HostedExecutionWake,
     userId: string,
   ): Promise<{
@@ -165,7 +165,7 @@ export async function startHostedLocalFullStackScenario(input: {
           `stderr tail: ${scenarioHarness.stderrTail()}`,
         ].join("\n");
       },
-      dispatchWake: async (wake, userId) =>
+      runWake: async (wake, userId) =>
         await appendHostedWakeAndWakeWorker({
           harness: scenarioHarness,
           userId,

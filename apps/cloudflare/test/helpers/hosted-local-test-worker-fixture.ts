@@ -288,9 +288,8 @@ function isRunnerPauseState(value: unknown): value is {
 function isHostedExecutionUserStatus(value: unknown): value is HostedExecutionUserStatus {
   return typeof value === "object"
     && value !== null
-    && "pendingEventCount" in value
-    && typeof (value as { pendingEventCount?: unknown }).pendingEventCount === "number"
-    && "retryingEventId" in value;
+    && "pendingWakeCount" in value
+    && typeof (value as { pendingWakeCount?: unknown }).pendingWakeCount === "number";
 }
 
 function formatFailure(lines: string[], stdout: string, stderr: string): string {

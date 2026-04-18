@@ -61,7 +61,7 @@ export async function appendTestHostedWake(input: {
     ? {
       behavior: "ordered",
       createdAt: now,
-      dedupeKey: `dispatch:${wake.kind}:${wake.eventId}`,
+      dedupeKey: `${wake.eventId}`,
       wakeState: "queued",
       eventId: wake.eventId,
       id: `wake_${seq}`,
@@ -82,7 +82,7 @@ export async function appendTestHostedWake(input: {
     : {
       behavior: "ordered",
       createdAt: now,
-      dedupeKey: `dispatch:${wake.kind}:${wake.eventId}`,
+      dedupeKey: `${wake.eventId}`,
       wakeState: "queued",
       eventId: wake.eventId,
       id: `wake_${seq}`,

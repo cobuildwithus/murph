@@ -71,12 +71,12 @@ describe("hosted local Linq first-contact e2e", () => {
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
     });
-    await requireScenario().dispatchWake(buildActivationWake(userId), userId);
+    await requireScenario().runWake(buildActivationWake(userId), userId);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.bundleRef).not.toBeNull();
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingEventCount).toBe(0);
+    expect(finalStatus.pendingWakeCount).toBe(0);
 
     const sendRequest = await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
@@ -108,7 +108,7 @@ describe("hosted local Linq first-contact e2e", () => {
       memberId: directReplyUserId,
       memberPhone: buildLinqRecipientPhoneNumber(directReplyUserId),
     });
-    await requireScenario().dispatchWake(
+    await requireScenario().runWake(
       buildActivationWake(directReplyUserId),
       directReplyUserId,
     );
@@ -133,7 +133,7 @@ describe("hosted local Linq first-contact e2e", () => {
       phoneLookupKey: requireLinqPhoneLookupKey(directReplyUserId),
       userId: directReplyUserId,
     });
-    await requireScenario().dispatchWake(inboundWake, directReplyUserId);
+    await requireScenario().runWake(inboundWake, directReplyUserId);
 
     await requireScenario().waitForHostedCompletion(directReplyUserId);
     const replySend = await requireLinqStub().waitForAdditionalSend({
@@ -151,7 +151,7 @@ describe("hosted local Linq first-contact e2e", () => {
       memberId: fastReplyUserId,
       memberPhone: buildLinqRecipientPhoneNumber(fastReplyUserId),
     });
-    await requireScenario().dispatchWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
+    await requireScenario().runWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
 
     const createChatRequest = await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
@@ -177,7 +177,7 @@ describe("hosted local Linq first-contact e2e", () => {
       phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
     });
-    await requireScenario().dispatchWake(firstInboundWake, fastReplyUserId);
+    await requireScenario().runWake(firstInboundWake, fastReplyUserId);
 
     const secondInboundWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_goals`,
@@ -190,7 +190,7 @@ describe("hosted local Linq first-contact e2e", () => {
       phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
     });
-    await requireScenario().dispatchWake(secondInboundWake, fastReplyUserId);
+    await requireScenario().runWake(secondInboundWake, fastReplyUserId);
 
     const statusBeforeWait = await requireScenario().harness.readUserStatus(fastReplyUserId);
     await requireScenario().waitForHostedCompletion(fastReplyUserId);

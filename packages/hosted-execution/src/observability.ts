@@ -1,6 +1,6 @@
 export const HOSTED_EXECUTION_RUN_PHASES = [
   "claimed",
-  "dispatch.running",
+  "wake.running",
   "container.starting",
   "container.ready",
   "runtime.starting",

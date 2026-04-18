@@ -154,7 +154,7 @@ export async function startHostedLocalDevHarness(input: {
           });
 
           if (
-            status.pendingEventCount === 0
+            status.pendingWakeCount === 0
             && !status.inFlight
             && status.bundleRef !== null
             && status.lastError === null
