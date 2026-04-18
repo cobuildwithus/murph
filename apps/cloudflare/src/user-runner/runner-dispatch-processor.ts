@@ -6,7 +6,6 @@ import type {
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
   HostedExecutionRunnerSharePack,
-  HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import { parseHostedExecutionRunnerSharePack } from "@murphai/hosted-execution/parsers";
 import type {
@@ -45,15 +44,11 @@ import {
   buildHostedRunnerJobRuntimeConfig,
 } from "../runner-env.ts";
 import {
-  COMMITTED_RESULT_FRESH_WINDOW_MS,
-  computeRetryDelayMs,
-  toUserStatus,
   type RunnerStateRecord,
 } from "./types.js";
 import {
   RunnerCommitRecovery,
   isCommittedResultFinalized,
-  isCommittedResultFresh,
 } from "./runner-commit-recovery.js";
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
@@ -98,95 +93,18 @@ interface RunnerDispatchProcessorDependencies {
 }
 
 export class RunnerDispatchProcessor {
-  private runLoopPromise: Promise<HostedExecutionUserStatus> | null = null;
-
   constructor(
     private readonly dependencies: RunnerDispatchProcessorDependencies,
   ) {}
 
-  async dispatchBootstrapped(
-    input: HostedExecutionDispatchRequest,
-    stagedPayloadId: string | null = null,
-  ): Promise<HostedExecutionUserStatus> {
-    const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(
-      input.event.userId,
-    );
-    const committed = await commitRecovery.readCommittedDispatch(
-      input.event.userId,
-      input.eventId,
-    );
-    if (committed) {
-      const presence = await this.dependencies.queueStore.readEventPresence(input.eventId);
-      if (
-        presence.pending
-        || presence.consumed
-        || isCommittedResultFresh(committed, COMMITTED_RESULT_FRESH_WINDOW_MS)
-      ) {
-        if (!isCommittedResultFinalized(committed)) {
-          const liveLease = await this.readRecentActiveRunLease();
-          const recoveryRun = liveLease?.eventId === input.eventId
-            ? liveLease.run
-            : this.resolveRunContext(
-              await commitRecovery.syncCommittedBundlesWithoutConsuming(
-                input.event.userId,
-                committed,
-              ),
-              {
-                eventId: input.eventId,
-                startedAt: committed.committedAt,
-              },
-            );
-          await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
-
-          return toUserStatus(
-            await this.advanceRunPhase({
-              clearError: true,
-              dispatch: input,
-              message: "Recovered a durable commit awaiting finalize.",
-              phase: "commit.recorded",
-              run: recoveryRun,
-            }),
-          );
-        }
-
-        await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
-        return toUserStatus(
-          presence.pending
-            ? await this.applyCommittedDispatchAndCleanup(
-              input.event.userId,
-              committed,
-              input,
-              input,
-            )
-            : await this.rememberCommittedEventAndCleanup(
-              input.event.userId,
-              input.eventId,
-              input,
-            ),
-        );
-      }
-
-      await commitRecovery.deleteCommittedDispatch(input.event.userId, input.eventId);
-    }
-
-    const enqueueResult = await this.dependencies.queueStore.enqueueDispatch(input, stagedPayloadId);
-    let record = enqueueResult.record;
-
-    if (enqueueResult.accepted) {
-      record = await this.dependencies.scheduler.syncNextWake();
-    }
-
-    if (enqueueResult.alreadySeen || record.backpressuredEventIds.includes(input.eventId)) {
-      return toUserStatus(record);
-    }
-
-    return this.runQueuedEvents(record.userId);
-  }
-
   async executeNativeWakeDispatch(
     dispatch: HostedExecutionDispatchRequest,
+    options: {
+      holdLeaseUntilCleanup?: boolean;
+    } = {},
   ): Promise<HostedExecutionDispatchLifecycleState> {
     const userId = dispatch.event.userId;
+    const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
     const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
     const committed = await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
 
@@ -209,8 +127,26 @@ export class RunnerDispatchProcessor {
       return "completed";
     }
 
+    const existingStatus = await this.dependencies.queueStore.readEventDispatchStatus(dispatch.eventId);
+    if (existingStatus) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          existingState: existingStatus.state,
+        },
+        dispatch,
+        level: "info",
+        message: existingStatus.state === "completed"
+          ? "Hosted wake execution skipped because the event already completed."
+          : "Hosted wake execution deferred because the event already has local runner state.",
+        phase: existingStatus.state === "completed" ? "completed" : "dispatch.running",
+        run: null,
+      });
+      return existingStatus.state === "completed" ? "completed" : "backpressured";
+    }
+
     const activeLease = await this.readRecentActiveRunLease();
-    if (activeLease && activeLease.eventId !== dispatch.eventId) {
+    if (activeLease) {
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
@@ -299,51 +235,17 @@ export class RunnerDispatchProcessor {
         run,
       });
       await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, durableCommit, { run });
-
-      const finalRunnerResult = runnerResult.phase === "completed"
-        ? runnerResult
-        : await this.invokeRunner(
-          userId,
-          dispatch,
-          run,
-          {
-            committedResult: {
-              assistantDeliveryEffects: durableCommit.assistantDeliveryEffects,
-              result: durableCommit.result,
-            },
-          },
-        );
-
-      if (finalRunnerResult.phase !== "completed") {
-        throw new Error("Hosted wake execution returned a duplicate committed result during finalize.");
+      if (!holdLeaseUntilCleanup) {
+        await this.dependencies.queueStore.completeWakeRun({
+          eventId: dispatch.eventId,
+          finishedAt: durableCommit.committedAt,
+          leaseOwner,
+        });
       }
-
-      await this.finalizeReturnedRunnerResult({
-        eventId: dispatch.eventId,
-        finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
-        result: finalRunnerResult.result,
-        run,
-      });
-      await this.persistBrowserVaultSnapshotBestEffort(
-        userId,
-        finalRunnerResult.browserVaultSnapshot ?? null,
-      );
-
-      const finalizedCommit = await commitRecovery.readCommittedDispatch(userId, dispatch.eventId);
-      if (!finalizedCommit) {
-        throw new Error("Hosted wake execution lost its durable commit before direct completion.");
-      }
-
-      await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, finalizedCommit, { run });
-      await this.dependencies.queueStore.completeWakeRun({
-        eventId: dispatch.eventId,
-        finishedAt: finalizedCommit.finalizedAt ?? finalizedCommit.committedAt,
-        leaseOwner,
-      });
       await this.advanceRunPhase({
         clearError: true,
         dispatch,
-        message: "Hosted wake execution completed and is awaiting cursor commit.",
+        message: "Hosted wake execution recorded a durable commit and is awaiting cursor commit.",
         phase: "completed",
         run,
       });
@@ -377,11 +279,13 @@ export class RunnerDispatchProcessor {
           policy: "same-event",
           run: null,
         });
-        await this.dependencies.queueStore.completeWakeRun({
-          eventId: dispatch.eventId,
-          finishedAt: recoveredCommitted.finalizedAt ?? recoveredCommitted.committedAt,
-          leaseOwner,
-        });
+        if (!holdLeaseUntilCleanup) {
+          await this.dependencies.queueStore.completeWakeRun({
+            eventId: dispatch.eventId,
+            finishedAt: recoveredCommitted.finalizedAt ?? recoveredCommitted.committedAt,
+            leaseOwner,
+          });
+        }
         await this.advanceRunPhase({
           clearError: true,
           dispatch,
@@ -416,6 +320,63 @@ export class RunnerDispatchProcessor {
 
   async finalizeNativeWakeDispatchAfterCursorCommit(input: {
     dispatch: HostedExecutionDispatchRequest;
+  }): Promise<HostedExecutionCommittedResult | null> {
+    await this.dependencies.queueStore.markRuntimeBootstrapped();
+    const userId = input.dispatch.event.userId;
+    const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
+    let committed = await commitRecovery.readCommittedDispatch(userId, input.dispatch.eventId);
+
+    if (!committed) {
+      return null;
+    }
+
+    if (!isCommittedResultFinalized(committed)) {
+      const record = await this.dependencies.queueStore.readState();
+      const run = this.resolveRunContext(record, {
+        eventId: input.dispatch.eventId,
+        startedAt: committed.committedAt,
+      });
+      const finalRunnerResult = await this.invokeRunner(
+        userId,
+        input.dispatch,
+        run,
+        {
+          committedResult: {
+            assistantDeliveryEffects: committed.assistantDeliveryEffects,
+            result: committed.result,
+          },
+        },
+      );
+
+      if (finalRunnerResult.phase !== "completed") {
+        throw new Error("Hosted wake execution returned a duplicate committed result during finalize.");
+      }
+
+      await this.finalizeReturnedRunnerResult({
+        eventId: input.dispatch.eventId,
+        finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
+        result: finalRunnerResult.result,
+        run,
+      });
+      await this.persistBrowserVaultSnapshotBestEffort(
+        userId,
+        finalRunnerResult.browserVaultSnapshot ?? null,
+      );
+      committed = await commitRecovery.readCommittedDispatch(userId, input.dispatch.eventId);
+      if (!committed) {
+        throw new Error("Hosted wake execution lost its durable commit before finalize cleanup.");
+      }
+    }
+
+    await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, committed, {
+      policy: "same-event",
+      run: null,
+    });
+    return committed;
+  }
+
+  async cleanupNativeWakeDispatchAfterCursorCommit(input: {
+    dispatch: HostedExecutionDispatchRequest;
   }): Promise<void> {
     await this.dependencies.queueStore.markRuntimeBootstrapped();
     await this.rememberCommittedEventAndCleanup(
@@ -423,342 +384,6 @@ export class RunnerDispatchProcessor {
       input.dispatch.eventId,
       input.dispatch,
     );
-  }
-
-  async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
-    if (this.runLoopPromise) {
-      return toUserStatus(await this.dependencies.queueStore.readState());
-    }
-
-    const runLoop = this.runQueuedEventsInternal(userId);
-    const wrappedRunLoop = runLoop.finally(() => {
-      if (this.runLoopPromise === wrappedRunLoop) {
-        this.runLoopPromise = null;
-      }
-    });
-    this.runLoopPromise = wrappedRunLoop;
-    return await wrappedRunLoop;
-  }
-
-  private async runQueuedEventsInternal(userId: string): Promise<HostedExecutionUserStatus> {
-    await this.dependencies.ensureRunnerStores(userId);
-    let record = await this.dependencies.queueStore.readState();
-    if (record.inFlight && (record.run || await this.readRecentActiveRunLease())) {
-      return toUserStatus(record);
-    }
-
-    let processedDispatch = false;
-    const recovered = await this.recoverCommittedPendingDispatchAndCleanup(record);
-    if (recovered) {
-      record = recovered;
-      processedDispatch = true;
-    }
-
-    while (true) {
-      const recoveredPending = await this.recoverCommittedPendingDispatchAndCleanup(record);
-      if (recoveredPending) {
-        record = recoveredPending;
-        continue;
-      }
-
-      const claim = await this.dependencies.queueStore.claimNextDuePendingDispatch(Date.now());
-      const nextPending = claim.pendingDispatch;
-      const run = claim.run;
-      record = claim.record;
-
-      if (!nextPending || !run) {
-        return toUserStatus(
-          processedDispatch
-            ? record
-            : await this.dependencies.scheduler.syncNextWake(),
-        );
-      }
-
-      record = await this.advanceRunPhase({
-        clearError: true,
-        dispatch: nextPending.dispatch,
-        message: "Hosted dispatch claimed for execution.",
-        phase: "claimed",
-        run,
-      });
-
-      try {
-        const { commitRecovery } = await this.dependencies.ensureRunnerStores(record.userId);
-        const committed = await commitRecovery.readCommittedDispatch(
-          record.userId,
-          nextPending.dispatch.eventId,
-        );
-        if (committed && !isCommittedResultFinalized(committed)) {
-          record = await commitRecovery.syncCommittedBundlesWithoutConsuming(
-            record.userId,
-            committed,
-            { run },
-          );
-          await (await this.dependencies.ensureRunnerStores(record.userId)).gatewayStore.applySnapshot(
-            committed.gatewayProjectionSnapshot ?? null,
-          );
-        }
-        record = await this.advanceRunPhase({
-          clearError: true,
-          dispatch: nextPending.dispatch,
-          message: committed && !isCommittedResultFinalized(committed)
-            ? "Resuming hosted dispatch from a durable commit."
-            : "Invoking hosted dispatch runtime.",
-          phase: "dispatch.running",
-          run,
-        });
-        const runnerResult = await this.invokeRunner(
-          record.userId,
-          nextPending.dispatch,
-          run,
-          committed && !isCommittedResultFinalized(committed)
-            ? {
-              committedResult: {
-                assistantDeliveryEffects: committed.assistantDeliveryEffects,
-                result: committed.result,
-              },
-            }
-            : null,
-        );
-        const durableCommit = runnerResult.phase === "committed"
-          ? await this.persistReturnedRunnerCommit({
-            assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
-            currentBundleRef: (await this.dependencies.queueStore.readBundleMetaState()).bundleRef,
-            dispatch: nextPending.dispatch,
-            gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
-            result: runnerResult.result,
-            run,
-          })
-          : await (await this.dependencies.ensureRunnerStores(record.userId))
-            .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
-        emitHostedExecutionStructuredLog({
-          component: "runner",
-          details: {
-            assistantDeliveryEffectCount: runnerResult.phase === "committed"
-              ? runnerResult.committedAssistantDeliveryEffects.length
-              : durableCommit?.assistantDeliveryEffects.length ?? 0,
-            committedPhaseReturned: String(runnerResult.phase),
-            gatewayProjectionSnapshotPresent: runnerResult.phase === "committed"
-              ? String(runnerResult.committedGatewayProjectionSnapshot !== null)
-              : String(durableCommit?.gatewayProjectionSnapshot !== null),
-            runElapsedMs: computeHostedRunElapsedMs(run),
-          },
-          dispatch: nextPending.dispatch,
-          message: "Hosted runner returned a durable commit payload.",
-          phase: "commit.recorded",
-          run,
-        });
-        if (!durableCommit) {
-          throw new Error("Hosted runner returned before recording a durable commit.");
-        }
-        record = await this.advanceRunPhase({
-          clearError: true,
-          dispatch: nextPending.dispatch,
-          message: "Hosted dispatch recorded a durable commit.",
-          phase: "commit.recorded",
-          run,
-        });
-        record = await (await this.dependencies.ensureRunnerStores(record.userId))
-          .commitRecovery.syncCommittedBundlesWithoutConsuming(record.userId, durableCommit, { run });
-        const finalRunnerResult = runnerResult.phase === "completed"
-          ? runnerResult
-          : await this.invokeRunner(
-            record.userId,
-            nextPending.dispatch,
-            run,
-            {
-              committedResult: {
-                assistantDeliveryEffects: durableCommit.assistantDeliveryEffects,
-                result: durableCommit.result,
-              },
-            },
-          );
-        if (finalRunnerResult.phase !== "completed") {
-          throw new Error("Hosted runner returned a duplicate committed result during finalize.");
-        }
-        emitHostedExecutionStructuredLog({
-          component: "runner",
-          details: {
-            ...summarizeHostedAssistantDeliveryOutcomes(finalRunnerResult.assistantDeliveryOutcomes),
-            finalGatewayProjectionSnapshotPresent:
-              String(finalRunnerResult.finalGatewayProjectionSnapshot !== null),
-            runElapsedMs: computeHostedRunElapsedMs(run),
-          },
-          dispatch: nextPending.dispatch,
-          message: "Hosted runner returned a completed finalize payload.",
-          phase: "side-effects.draining",
-          run,
-        });
-        await this.finalizeReturnedRunnerResult({
-          eventId: nextPending.dispatch.eventId,
-          finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
-          result: finalRunnerResult.result,
-          run,
-        });
-        await this.persistBrowserVaultSnapshotBestEffort(
-          record.userId,
-          finalRunnerResult.browserVaultSnapshot ?? null,
-        );
-        const finalizedCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
-          .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
-        if (!finalizedCommit) {
-          throw new Error("Hosted runner returned before recording a durable commit.");
-        }
-        record = await this.applyCommittedDispatchAndCleanup(
-          record.userId,
-          finalizedCommit,
-          nextPending.dispatch,
-          nextPending.dispatch,
-          run,
-        );
-        processedDispatch = true;
-      } catch (error) {
-        if (error instanceof HostedExecutionObsoleteRunResultError) {
-          emitHostedExecutionStructuredLog({
-            component: "runner",
-            details: {
-              obsoleteRunId: error.runId,
-              runElapsedMs: computeHostedRunElapsedMs(run),
-            },
-            dispatch: nextPending.dispatch,
-            error,
-            level: "warn",
-            message: "Hosted runner returned a stale result for an obsolete run lease.",
-            phase: "dispatch.running",
-            run,
-          });
-          return toUserStatus(await this.dependencies.queueStore.readState());
-        }
-
-        const committed = await (await this.dependencies.ensureRunnerStores(record.userId))
-          .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
-
-        if (committed) {
-          if (isCommittedResultFinalized(committed)) {
-            try {
-              record = await this.applyCommittedDispatchAndCleanup(
-                record.userId,
-                committed,
-                nextPending.dispatch,
-                nextPending.dispatch,
-                run,
-              );
-            } catch (finalizeError) {
-              record = await (await this.dependencies.ensureRunnerStores(record.userId))
-                .commitRecovery.rescheduleCommittedFinalizeRetry({
-                  attempts: nextPending.attempts + 1,
-                  committed,
-                  error: finalizeError,
-                  leaseOwner: {
-                    run,
-                  },
-                  retryDelayMs: computeRetryDelayMs(
-                    this.dependencies.env.retryDelayMs,
-                    nextPending.attempts + 1,
-                  ),
-                });
-              record = await this.advanceRunPhase({
-                dispatch: nextPending.dispatch,
-                error: finalizeError,
-                level: "warn",
-                message: "Hosted dispatch scheduled a business outcome retry.",
-                phase: "retry.scheduled",
-                run,
-              });
-            }
-            continue;
-          }
-
-          record = await (await this.dependencies.ensureRunnerStores(record.userId))
-            .commitRecovery.rescheduleCommittedFinalizeRetry({
-              attempts: nextPending.attempts + 1,
-              committed,
-              error,
-              leaseOwner: {
-                run,
-              },
-              retryDelayMs: computeRetryDelayMs(
-                this.dependencies.env.retryDelayMs,
-                nextPending.attempts + 1,
-              ),
-            });
-          record = await this.advanceRunPhase({
-            dispatch: nextPending.dispatch,
-            error,
-            level: "warn",
-            message: "Hosted dispatch scheduled a finalize retry.",
-            phase: "retry.scheduled",
-            run,
-          });
-          continue;
-        }
-
-        if (error instanceof HostedExecutionConfigurationError) {
-          record = await this.dependencies.queueStore.deferPendingConfigurationFailure({
-            error,
-            eventId: nextPending.dispatch.eventId,
-            retryDelayMs: this.dependencies.env.retryDelayMs,
-          });
-          record = await this.dependencies.scheduler.syncNextWake();
-          record = await this.advanceRunPhase({
-            dispatch: nextPending.dispatch,
-            error,
-            level: "warn",
-            message: "Hosted dispatch delayed for configuration retry.",
-            phase: "retry.scheduled",
-            run,
-          });
-          continue;
-        }
-
-        if (isMissingHostedSharePackError(error) && nextPending.dispatch.event.kind === "vault.share.accepted") {
-          const failure = await this.dependencies.queueStore.reschedulePendingFailure({
-            error,
-            eventId: nextPending.dispatch.eventId,
-            maxEventAttempts: 1,
-            retryDelayMs: this.dependencies.env.retryDelayMs,
-          });
-          record = failure.record;
-          record = await this.dependencies.scheduler.syncNextWake();
-          record = await this.advanceRunPhase({
-            dispatch: nextPending.dispatch,
-            error,
-            level: "error",
-            message: "Hosted share import is awaiting web reconciliation after the Cloudflare pack was missing.",
-            phase: "poisoned",
-            run,
-          });
-          await this.deleteTransientDispatchDataBestEffort(nextPending.dispatch);
-          continue;
-        }
-
-        const failure = await this.dependencies.queueStore.reschedulePendingFailure({
-          error,
-          eventId: nextPending.dispatch.eventId,
-          maxEventAttempts: this.dependencies.env.maxEventAttempts,
-          retryDelayMs: computeRetryDelayMs(
-            this.dependencies.env.retryDelayMs,
-            nextPending.attempts + 1,
-          ),
-        });
-        record = failure.record;
-        record = await this.dependencies.scheduler.syncNextWake();
-        record = await this.advanceRunPhase({
-          dispatch: nextPending.dispatch,
-          error,
-          level: failure.poisoned ? "error" : "warn",
-          message: failure.poisoned
-            ? "Hosted dispatch was poisoned after exhausting retries."
-            : "Hosted dispatch scheduled a retry.",
-          phase: failure.poisoned ? "poisoned" : "retry.scheduled",
-          run,
-        });
-        if (failure.poisoned) {
-          await this.deleteTransientDispatchDataBestEffort(nextPending.dispatch);
-        }
-        continue;
-      }
-    }
   }
 
   private async invokeRunner(
@@ -1040,69 +665,6 @@ export class RunnerDispatchProcessor {
         userId,
       });
     }
-  }
-
-  private async recoverCommittedPendingDispatchAndCleanup(
-    record: RunnerStateRecord,
-  ): Promise<RunnerStateRecord | null> {
-    const { commitRecovery } = await this.dependencies.ensureRunnerStores(
-      record.userId,
-    );
-    const recovered = await commitRecovery.recoverCommittedPendingDispatch(record);
-    if (!recovered) {
-      return null;
-    }
-
-    return this.applyCommittedDispatchAndCleanup(
-      record.userId,
-      recovered.committed,
-      recovered.cleanupDispatch ?? {
-        event: {
-          userId: record.userId,
-        },
-        eventId: recovered.committedEventId,
-      },
-      recovered.cleanupDispatch,
-      this.resolveRunContext(recovered.record, {
-        eventId: recovered.committedEventId,
-        startedAt: recovered.record.lastRunAt ?? recovered.committed.committedAt,
-      }),
-      {
-        policy: "same-event",
-        run: null,
-      },
-    );
-  }
-
-  private async applyCommittedDispatchAndCleanup(
-    userId: string,
-    committed: HostedExecutionCommittedResult,
-    dispatch: HostedExecutionDispatchProgressRecord,
-    cleanupDispatch: HostedExecutionDispatchRequest | null = null,
-    run: HostedExecutionRunContext | null = null,
-    leaseOwner: {
-      policy?: "matching-run" | "same-event";
-      run: HostedExecutionRunContext | null;
-    } | null = run === null ? null : { run },
-  ): Promise<RunnerStateRecord> {
-    const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(userId);
-    await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
-    let record = await commitRecovery.applyCommittedDispatch(userId, committed, leaseOwner);
-    record = await this.advanceRunPhase({
-      clearError: true,
-      dispatch,
-      message: "Hosted dispatch completed from a committed result.",
-      phase: "completed",
-      run: run ?? this.resolveRunContext(record, {
-        eventId: committed.eventId,
-        startedAt: committed.committedAt,
-      }),
-    });
-    await this.deleteCommittedDispatchBestEffort(userId, committed.eventId);
-    if (cleanupDispatch) {
-      await this.deleteTransientDispatchDataBestEffort(cleanupDispatch);
-    }
-    return record;
   }
 
   private resolveRunContext(

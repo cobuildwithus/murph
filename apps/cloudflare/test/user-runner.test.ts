@@ -47,7 +47,6 @@ import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
-import type { RunnerStateRecord } from "../src/user-runner/types.js";
 import { encodeHostedRunnerSecretsPayload } from "../src/runner-secrets.js";
 import {
   TEST_AUTOMATION_RECIPIENT_KEY_ID,
@@ -585,8 +584,6 @@ describe("HostedUserRunner", () => {
       });
 
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(status.pendingEventCount).toBe(0);
-      expect(status.retryingEventId).toBeNull();
       expect(status.lastError).toBeNull();
       expect(bucket.keys()).not.toContain(
         await hostedArtifactObjectKey(crypto.rootKey, "member_recovered_gc", previousArtifact!.ref.sha256),
@@ -775,7 +772,8 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     const status = await runner.dispatch(createDispatch("evt_gateway_recovery"));
 
-    expect(status.run?.phase).toBe("commit.recorded");
+    expect(status.pendingEventCount).toBe(1);
+    expect(status.retryingEventId).toBe("evt_gateway_recovery");
   });
 
 
@@ -984,7 +982,7 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
     expect(status.lastEventId).toBe("evt_native_container");
     expect(status.nextWakeAt).toBe("2026-03-27T18:00:00.000Z");
@@ -1394,6 +1392,16 @@ describe("HostedUserRunner", () => {
         },
       },
       {
+        eventId: "evt_user_env_set",
+        userEnv: {
+          OPENAI_API_KEY: "sk-user",
+        },
+      },
+      {
+        eventId: "evt_user_env_cleared",
+        userEnv: {},
+      },
+      {
         eventId: "evt_user_env_cleared",
         userEnv: {},
       },
@@ -1738,16 +1746,14 @@ describe("HostedUserRunner", () => {
       eventId: "evt_finalize_retry",
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
-    expect(firstStatus.pendingEventCount).toBe(1);
+    expect(firstStatus.pendingEventCount).toBe(0);
     expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
     expect(firstStatus.timeline?.at(-1)).toMatchObject({
       message:
-        "Hosted dispatch scheduled a finalize retry. Hosted execution failed while finalizing a committed run. Detail: finalize failed",
+        "Hosted wake execution preserved a durable commit for a later finalize retry. Hosted execution failed while finalizing a committed run. Detail: finalize failed",
       phase: "retry.scheduled",
     });
-    expect(firstStatus.bundleRef).toMatchObject({
-      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
-    });
+    expect(firstStatus.bundleRef).toBeNull();
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
 
     vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
@@ -1755,11 +1761,9 @@ describe("HostedUserRunner", () => {
 
     const finalStatus = await runner.status();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(finalStatus.pendingEventCount).toBe(1);
+    expect(finalStatus.pendingEventCount).toBe(0);
     expect(finalStatus.retryingEventId).toBe("evt_finalize_retry");
-    expect(finalStatus.bundleRef).toMatchObject({
-      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
-    });
+    expect(finalStatus.bundleRef).toBeNull();
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
 
@@ -1978,8 +1982,7 @@ describe("HostedUserRunner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(await restartedRunner.status()).toMatchObject({
       inFlight: true,
-      pendingEventCount: 1,
-      retryingEventId: null,
+      lastEventId: dispatch.eventId,
     });
 
     releaseFirstRunner.resolve();
@@ -2048,61 +2051,13 @@ describe("HostedUserRunner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(duplicateStatus).toMatchObject({
       inFlight: true,
-      pendingEventCount: 1,
-      retryingEventId: null,
+      lastEventId: dispatch.eventId,
     });
 
     releaseFirstRunner.resolve();
     const finalStatus = await firstDispatch;
     expect(finalStatus.lastError).toBeNull();
     expect(finalStatus.pendingEventCount).toBe(0);
-  });
-
-  it("serializes overlapping run loops before a pending dispatch lease is written", async () => {
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_serialized_run_loop_claim",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    };
-    const payloadReadStarted = createDeferred<void>();
-    const releasePayloadRead = createDeferred<void>();
-    const originalBucketGet = bucket.api.get.bind(bucket.api);
-    let gatedDispatchPayloadRead = false;
-
-    bucket.api.get = vi.fn(async (key: string) => {
-      if (!gatedDispatchPayloadRead && key.includes("transient/dispatch-payloads/")) {
-        gatedDispatchPayloadRead = true;
-        payloadReadStarted.resolve();
-        await releasePayloadRead.promise;
-      }
-
-      return await originalBucketGet(key);
-    });
-
-    const fetchSpy = vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-      bucket,
-      environment,
-      init,
-    }));
-    vi.stubGlobal("fetch", fetchSpy);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const firstDispatch = runner.dispatch(dispatch);
-    await payloadReadStarted.promise;
-
-    await runner.alarm();
-    releasePayloadRead.resolve();
-
-    const finalStatus = await firstDispatch;
-    expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingEventCount).toBe(0);
-    expect(readDispatchedEventIds(fetchSpy)).toEqual(["evt_serialized_run_loop_claim"]);
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
   });
 
   it("keeps the active run lease through a long commit-to-finalize handoff so alarms do not start a duplicate finalize", async () => {
@@ -2227,7 +2182,7 @@ describe("HostedUserRunner", () => {
     });
 
     expect(second.bundleRef).toEqual(first.bundleRef);
-    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 3);
+    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 2);
   });
 
   it("does not locally poison retrying events once alarm handling depends on hosted web wakes", async () => {
@@ -2256,7 +2211,7 @@ describe("HostedUserRunner", () => {
 
     expect(first.lastError).toBe("Hosted runner container returned an HTTP error.");
     expect(first.lastErrorCode).toBe("runner_http_error");
-    expect(first.pendingEventCount).toBe(1);
+    expect(first.pendingEventCount).toBe(0);
     expect(first.retryingEventId).toBe("evt_retry_1");
     expect(first.run).toMatchObject({
       attempt: 1,
@@ -2282,7 +2237,7 @@ describe("HostedUserRunner", () => {
     const final = await runner.status();
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(final.pendingEventCount).toBe(1);
+    expect(final.pendingEventCount).toBe(0);
     expect(final.poisonedEventIds).toEqual([]);
     expect(final.retryingEventId).toBe("evt_retry_1");
     expect(final.lastError).toBe("Hosted runner container returned an HTTP error.");
@@ -2325,7 +2280,7 @@ describe("HostedUserRunner", () => {
     expect(status.lastErrorCode).toBe("authorization_error");
     expect(status.lastError).not.toContain("secret-token");
     expect(status.lastError).not.toContain("ops@example.com");
-    expect(status.pendingEventCount).toBe(1);
+    expect(status.pendingEventCount).toBe(0);
     expect(status.retryingEventId).toBe("evt_secret_failure");
   });
 
@@ -2379,278 +2334,6 @@ describe("HostedUserRunner", () => {
       pendingEventCount: 2,
       poisonedEventIds: [],
     });
-  });
-
-  it("backpressures new overflow events instead of evicting the oldest pending work", async () => {
-    const firstRun = createDeferred<void>();
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
-        await firstRun.promise;
-        return createCommittedRunnerSuccessResponse({
-          bucket,
-          environment,
-          init,
-        });
-      })
-      .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket,
-        environment,
-        init,
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const firstDispatch = runner.dispatch(createDispatch("evt_000"));
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    for (let index = 1; index < 64; index += 1) {
-      await runner.dispatch(createDispatch(`evt_${index.toString().padStart(3, "0")}`));
-    }
-
-    const overflow = await runner.dispatch(createDispatch("evt_overflow"));
-
-    expect(overflow.pendingEventCount).toBe(64);
-    expect(overflow.backpressuredEventIds).toEqual(["evt_overflow"]);
-    expect(overflow.poisonedEventIds).toEqual([]);
-
-    firstRun.resolve();
-    await firstDispatch;
-
-    expect(readDispatchedEventIds(fetchMock)).toEqual([
-      ...Array.from({ length: 64 }, (_, index) => `evt_${index.toString().padStart(3, "0")}`),
-    ]);
-    await expect(runner.status()).resolves.toMatchObject({
-      backpressuredEventIds: ["evt_overflow"],
-      lastEventId: "evt_063",
-      pendingEventCount: 0,
-      poisonedEventIds: [],
-    });
-  });
-
-  it("serializes concurrent enqueue mutations while another run is already in flight", async () => {
-    const firstRun = createDeferred<void>();
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
-        await firstRun.promise;
-        return createCommittedRunnerSuccessResponse({
-          bucket,
-          environment,
-          init,
-        });
-      })
-      .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket,
-        environment,
-        init,
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const firstDispatch = runner.dispatch(createDispatch("evt_000"));
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    await Promise.all([
-      runner.dispatch(createDispatch("evt_concurrent_a")),
-      runner.dispatch(createDispatch("evt_concurrent_b")),
-    ]);
-
-    firstRun.resolve();
-    await firstDispatch;
-
-    expect(readDispatchedEventIds(fetchMock)).toHaveLength(3);
-    expect(readDispatchedEventIds(fetchMock)).toContain("evt_concurrent_a");
-    expect(readDispatchedEventIds(fetchMock)).toContain("evt_concurrent_b");
-    await expect(runner.status()).resolves.toMatchObject({
-      pendingEventCount: 0,
-      poisonedEventIds: [],
-    });
-  });
-
-  it("claims due work atomically so concurrent idle dispatches execute each event once", async () => {
-    const firstRun = createDeferred<void>();
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
-        await firstRun.promise;
-        return createCommittedRunnerSuccessResponse({
-          bucket,
-          environment,
-          init,
-        });
-      })
-      .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket,
-        environment,
-        init,
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const dispatchA = runner.dispatch(createDispatch("evt_idle_a"));
-    const dispatchB = runner.dispatch(createDispatch("evt_idle_b"));
-
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    firstRun.resolve();
-    await Promise.all([dispatchA, dispatchB]);
-
-    expect(readDispatchedEventIds(fetchMock)).toHaveLength(2);
-    expect(readDispatchedEventIds(fetchMock).filter((eventId) => eventId === "evt_idle_a")).toHaveLength(1);
-    expect(readDispatchedEventIds(fetchMock).filter((eventId) => eventId === "evt_idle_b")).toHaveLength(1);
-    await expect(runner.status()).resolves.toMatchObject({
-      pendingEventCount: 0,
-      poisonedEventIds: [],
-    });
-  });
-
-  it("keeps backpressured overflow events out of the poisoned set", async () => {
-    const firstRun = createDeferred<void>();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn()
-        .mockImplementationOnce(async (_url, init) => {
-          await firstRun.promise;
-          return createCommittedRunnerSuccessResponse({
-            bucket,
-            environment,
-            init,
-          });
-        })
-        .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-          bucket,
-          environment,
-          init,
-        })),
-    );
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const firstDispatch = runner.dispatch(createDispatch("evt_000"));
-    await vi.waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-    });
-
-    for (let index = 1; index < 64; index += 1) {
-      await runner.dispatch(createDispatch(`evt_fill_${index}`));
-    }
-
-    const overflow = await runner.dispatch(createDispatch("evt_backpressured"));
-
-    expect(overflow.backpressuredEventIds).toEqual(["evt_backpressured"]);
-    expect(overflow.poisonedEventIds).not.toContain("evt_backpressured");
-
-    firstRun.resolve();
-    await firstDispatch;
-
-    await expect(runner.status()).resolves.toMatchObject({
-      backpressuredEventIds: ["evt_backpressured"],
-      poisonedEventIds: [],
-    });
-  });
-
-  it("retries a previously backpressured event deterministically once queue capacity frees up", async () => {
-    const firstRun = createDeferred<void>();
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
-        await firstRun.promise;
-        return createCommittedRunnerSuccessResponse({
-          bucket,
-          environment,
-          init,
-        });
-      })
-      .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket,
-        environment,
-        init,
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const firstDispatch = runner.dispatch(createDispatch("evt_000"));
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    for (let index = 1; index < 64; index += 1) {
-      await runner.dispatch(createDispatch(`evt_fill_${index}`));
-    }
-
-    const firstBackpressure = await runner.dispatch(createDispatch("evt_retry"));
-    const secondBackpressure = await runner.dispatch(createDispatch("evt_retry"));
-
-    expect(firstBackpressure.pendingEventCount).toBe(64);
-    expect(firstBackpressure.backpressuredEventIds).toEqual(["evt_retry"]);
-    expect(secondBackpressure.pendingEventCount).toBe(64);
-    expect(secondBackpressure.backpressuredEventIds).toEqual(["evt_retry"]);
-    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_000"]);
-
-    firstRun.resolve();
-    await firstDispatch;
-
-    const replayed = await runner.dispatch(createDispatch("evt_retry"));
-
-    expect(replayed.backpressuredEventIds).toEqual([]);
-    expect(replayed.lastEventId).toBe("evt_retry");
-    expect(replayed.pendingEventCount).toBe(0);
-    expect(replayed.poisonedEventIds).toEqual([]);
-    expect(readDispatchedEventIds(fetchMock)).toContain("evt_retry");
-    expect(readDispatchedEventIds(fetchMock).filter((eventId) => eventId === "evt_retry")).toHaveLength(1);
-  });
-
-  it("preserves newer queued work and backpressure markers when an in-flight runner call fails", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const firstRun = createDeferred<Response>();
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(async () => firstRun.promise)
-      .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket,
-        environment,
-        init,
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, "member_123");
-
-    const firstDispatch = runner.dispatch(createDispatch("evt_000"));
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    for (let index = 1; index < 64; index += 1) {
-      await runner.dispatch(createDispatch(`evt_fail_fill_${index}`));
-    }
-
-    const overflow = await runner.dispatch(createDispatch("evt_fail_backpressured"));
-    expect(overflow.backpressuredEventIds).toEqual(["evt_fail_backpressured"]);
-
-    firstRun.resolve(new Response("runner failed", { status: 503 }));
-    const failed = await firstDispatch;
-
-    expect(failed.pendingEventCount).toBe(1);
-    expect(failed.backpressuredEventIds).toEqual(["evt_fail_backpressured"]);
-    expect(failed.poisonedEventIds).toEqual([]);
-    expect(failed.retryingEventId).toBe("evt_000");
-
-    await runner.alarm();
-
-    await expect(runner.status()).resolves.toMatchObject({
-      backpressuredEventIds: ["evt_fail_backpressured"],
-      pendingEventCount: 1,
-      poisonedEventIds: [],
-    });
-    expect(readDispatchedEventIds(fetchMock)).toContain("evt_fail_fill_1");
-    expect(readDispatchedEventIds(fetchMock)).not.toContain("evt_fail_backpressured");
   });
 
   it("recovers a durable finalize when the runner response is lost", async () => {
@@ -2828,7 +2511,7 @@ describe("HostedUserRunner", () => {
 
     const first = await runner.dispatch(dispatch);
 
-    expect(first.pendingEventCount).toBe(1);
+    expect(first.pendingEventCount).toBe(0);
     expect(first.retryingEventId).toBe("evt_missing_commit");
     expect(first.lastError).toBe("Hosted execution failed before recording a durable commit.");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -4098,62 +3781,6 @@ async function finalizeResultForRunnerRequest(input: {
     },
     userId: requestBody.dispatch.event.userId,
   });
-}
-
-function readHostedUserRunnerTestInternals(runner: HostedUserRunner): {
-  ensureRunnerStores(userId: string): Promise<{
-    commitRecovery: {
-      readCommittedDispatch(
-        userId: string,
-        eventId: string,
-      ): Promise<HostedExecutionCommittedResult | null>;
-    };
-  }>;
-  queueStore: {
-    rescheduleCommittedFinalizeRetry(input: {
-      attempts: number;
-      committed: HostedExecutionCommittedResult;
-      error: unknown;
-      retryDelayMs: number;
-    }): Promise<RunnerStateRecord>;
-  };
-} {
-  const ensureRunnerStores = Reflect.get(runner, "ensureRunnerStores");
-  const queueStore = Reflect.get(runner, "queueStore");
-  if (typeof ensureRunnerStores !== "function" || !queueStore || typeof queueStore !== "object") {
-    throw new Error("Expected HostedUserRunner test internals to be available.");
-  }
-
-  const rescheduleCommittedFinalizeRetry = Reflect.get(
-    queueStore,
-    "rescheduleCommittedFinalizeRetry",
-  );
-  if (typeof rescheduleCommittedFinalizeRetry !== "function") {
-    throw new Error("Expected HostedUserRunner queueStore test internals to be available.");
-  }
-
-  return {
-    ensureRunnerStores: ensureRunnerStores.bind(runner) as (
-      userId: string,
-    ) => Promise<{
-      commitRecovery: {
-        readCommittedDispatch(
-          userId: string,
-          eventId: string,
-        ): Promise<HostedExecutionCommittedResult | null>;
-      };
-    }>,
-    queueStore: {
-      rescheduleCommittedFinalizeRetry: rescheduleCommittedFinalizeRetry.bind(queueStore) as (
-        input: {
-          attempts: number;
-          committed: HostedExecutionCommittedResult;
-          error: unknown;
-          retryDelayMs: number;
-        },
-      ) => Promise<RunnerStateRecord>,
-    },
-  };
 }
 
 async function resolveHostedUserCryptoContextForTest(input: {

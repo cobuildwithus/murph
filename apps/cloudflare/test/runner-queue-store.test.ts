@@ -181,7 +181,7 @@ describe("RunnerQueueStore", () => {
     }).toThrow(/runner_meta schema is unsupported; missing runtime_bootstrapped; forbidden activated/u);
   });
 
-  it("upgrades an existing runner_meta row by adding active-run lease columns in place", async () => {
+  it("upgrades an existing runner_meta row by adding active-run lease and operator summary columns in place", async () => {
     const state = createState();
     const sql = state.storage.sql!;
     sql.exec("DROP TABLE runner_meta");
@@ -227,6 +227,8 @@ describe("RunnerQueueStore", () => {
     expect(columns).toContain("active_run_id");
     expect(columns).toContain("active_run_attempt");
     expect(columns).toContain("active_run_started_at");
+    expect(columns).toContain("last_event_id");
+    expect(columns).toContain("retrying_event_id");
     expect(record.userId).toBe("member_123");
     expect(record.runtimeBootstrapped).toBe(true);
     expect(record.inFlight).toBe(true);
@@ -273,6 +275,50 @@ describe("RunnerQueueStore", () => {
       "super secret gateway message",
       "phone-secret",
     ]);
+  });
+
+  it("drops pending payload rows when a committed event is finalized", async () => {
+    const state = createState();
+    const { dispatchPayloadStore, store } = createQueueHarness(state);
+    const dispatch: HostedExecutionDispatchRequest = {
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_committed_cleanup",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    };
+    await store.bootstrapUser(dispatch.event.userId);
+    await store.enqueueDispatch(dispatch);
+
+    const pendingBefore = state.storage.sql!.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM pending_events WHERE event_id = ?",
+      dispatch.eventId,
+    ).one();
+    expect(pendingBefore?.count).toBe(1);
+
+    const payloadKey = state.storage.sql!.exec<{ payload_key: string }>(
+      "SELECT payload_key FROM pending_events WHERE event_id = ?",
+      dispatch.eventId,
+    ).one()?.payload_key;
+    expect(payloadKey).toEqual(expect.any(String));
+    await expect(
+      dispatchPayloadStore.readDispatchPayload({ stagedPayloadId: payloadKey ?? "" }),
+    ).resolves.toEqual(dispatch);
+
+    const record = await store.rememberCommittedEvent(dispatch.eventId);
+
+    expect(record.lastEventId).toBe(dispatch.eventId);
+    expect(record.pendingEventCount).toBe(0);
+    expect(record.retryingEventId).toBeNull();
+    expect(state.storage.sql!.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM pending_events WHERE event_id = ?",
+      dispatch.eventId,
+    ).one()?.count).toBe(0);
+    await expect(
+      dispatchPayloadStore.readDispatchPayload({ stagedPayloadId: payloadKey ?? "" }),
+    ).resolves.toBeNull();
   });
 
   it("deletes an encrypted payload blob when enqueue SQL fails after blob write", async () => {
@@ -512,57 +558,6 @@ describe("RunnerQueueStore", () => {
     );
   });
 
-  it("stores sanitized finalize-retry summaries for committed results", async () => {
-    const state = createState();
-    const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_secret_finalize",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-
-    const committed: HostedExecutionCommittedResult = {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-29T10:00:00.000Z",
-      eventId: "evt_secret_finalize",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "member_123",
-    };
-
-    const result = await store.rescheduleCommittedFinalizeRetry({
-      attempts: 2,
-      committed,
-      error: new Error("Authorization: Bearer secret-token for ops@example.com OPENAI_API_KEY=sk-live-secret"),
-      retryDelayMs: 30_000,
-    });
-
-    expect(result.lastError).toBe("Hosted execution authorization failed.");
-    expect(result.lastErrorCode).toBe("authorization_error");
-
-    const eventState = await store.readEventDispatchStatus("evt_secret_finalize");
-    expect(eventState).toMatchObject({
-      eventId: "evt_secret_finalize",
-      lastError: "Hosted execution authorization failed.",
-      state: "queued",
-      userId: "member_123",
-    });
-    expectOpaqueStrings(
-      eventState?.lastError ? [eventState.lastError] : [],
-      ["secret-token", "ops@example.com"],
-    );
-  });
-
   it("clears stale last-error text when committed bundles are synchronized after a finalize retry", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
@@ -689,85 +684,6 @@ describe("RunnerQueueStore", () => {
     })).resolves.toBe(true);
   });
 
-  it("does not clear a newer active lease when a stale finalize retry is rescheduled", async () => {
-    const state = createState();
-    const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_stale_finalize_lease",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-
-    const firstClaim = await store.claimNextDuePendingDispatch(Date.now());
-    if (!firstClaim.run) {
-      throw new Error("Expected the first claim to return an active run.");
-    }
-
-    const committed: HostedExecutionCommittedResult = {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-29T10:00:01.000Z",
-      eventId: "evt_stale_finalize_lease",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "member_123",
-    };
-
-    await store.rescheduleCommittedFinalizeRetry({
-      attempts: 1,
-      committed,
-      error: new Error("finalize failed"),
-      leaseOwner: {
-        eventId: committed.eventId,
-        run: firstClaim.run,
-      },
-      retryDelayMs: 0,
-    });
-
-    const secondClaim = await store.claimNextDuePendingDispatch(Date.now());
-    if (!secondClaim.run) {
-      throw new Error("Expected the second claim to return an active run.");
-    }
-
-    await store.rescheduleCommittedFinalizeRetry({
-      attempts: 2,
-      committed,
-      error: new Error("stale finalize result"),
-      leaseOwner: {
-        eventId: committed.eventId,
-        run: firstClaim.run,
-      },
-      retryDelayMs: 0,
-    });
-
-    await expect(store.hasActiveRunLease({
-      eventId: committed.eventId,
-      run: secondClaim.run,
-    })).resolves.toBe(true);
-    await expect(store.hasActiveRunLease({
-      eventId: committed.eventId,
-      run: firstClaim.run,
-    })).resolves.toBe(false);
-
-    const record = await store.readState();
-    expect(record.inFlight).toBe(true);
-    expect(record.retryingEventId).toBe(committed.eventId);
-    expect(record.run).toMatchObject({
-      attempt: secondClaim.run.attempt,
-      eventId: committed.eventId,
-      runId: secondClaim.run.runId,
-    });
-  });
-
   it("records a bounded run trace and derives stable error codes", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
@@ -812,103 +728,6 @@ describe("RunnerQueueStore", () => {
       message: "phase-25",
       phase: "retry.scheduled",
     });
-  });
-
-  it("clears a same-event active lease during committed recovery when the journal already owns the event", async () => {
-    const state = createState();
-    const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
-
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_recovered_commit",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-
-    const claim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
-    if (!claim.run) {
-      throw new Error("Expected a claimed run lease.");
-    }
-
-    await store.applyCommittedDispatch({
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-29T10:01:00.000Z",
-      eventId: "evt_recovered_commit",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "member_123",
-    }, {
-      eventId: "evt_recovered_commit",
-      policy: "same-event",
-      run: null,
-    });
-
-    const stateAfterRecovery = await store.readState();
-    expect(stateAfterRecovery.inFlight).toBe(false);
-    expect(stateAfterRecovery.pendingEventCount).toBe(0);
-
-    const nextClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
-    expect(nextClaim.pendingDispatch).toBeNull();
-    expect(nextClaim.run).toBeNull();
-  });
-
-  it("does not clear one event's live lease while cleaning up another committed event", async () => {
-    const state = createState();
-    const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
-
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_active",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-    const activeClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
-    if (!activeClaim.run) {
-      throw new Error("Expected the active event to claim a run lease.");
-    }
-
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_duplicate",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-
-    await store.applyCommittedDispatch({
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-29T10:01:00.000Z",
-      eventId: "evt_duplicate",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "member_123",
-    });
-    await store.rememberCommittedEvent("evt_other_duplicate");
-
-    const nextClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
-    expect(nextClaim.pendingDispatch).toBeNull();
-    expect(nextClaim.run).toBeNull();
-    expect((await store.readState()).inFlight).toBe(true);
   });
 
   it("clears the persisted last-error string when a later phase requests clearError", async () => {

@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionCursorState,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchStatus,
   HostedExecutionDispatchRequest,
@@ -8,10 +9,14 @@ import {
   buildHostedExecutionAssistantCronTickDispatch,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
+import { isHostedMessageWakeDispatch } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionBundleRef,
-  parseHostedExecutionDispatchRequest,
+  parseHostedWakeDispatchPayload,
 } from "@murphai/hosted-execution/parsers";
+import {
+  sameHostedBundlePayloadRef,
+} from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import {
@@ -40,6 +45,7 @@ import {
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
   quarantineHostedWakeInWeb,
+  readHostedWakeStatusFromWeb,
 } from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
@@ -323,21 +329,56 @@ export class HostedUserRunner {
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
-    return toUserStatus(await this.queueStore.readState());
+    return this.composeUserStatus(await this.queueStore.readState());
   }
 
   async dispatch(
     input: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionUserStatus> {
     await this.ensureManagedUserCryptoForActivationIfNeeded(input);
-    return this.dispatchProcessor.dispatchBootstrapped(input);
+    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
+
+    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
+      await this.queueStore.bootstrapUser(input.event.userId);
+      const state = await this.dispatchProcessor.executeNativeWakeDispatch(input, {
+        holdLeaseUntilCleanup: true,
+      });
+
+      if (state === "completed") {
+        const finalizedCommit = await this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
+          dispatch: input,
+        });
+
+        if (finalizedCommit) {
+          await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+            dispatch: input,
+          });
+        }
+      }
+
+      return this.status();
+    }
+
+    await this.queueStore.bootstrapUser(input.event.userId);
+    const append = await appendHostedWakeDispatchInWeb({
+      baseUrl: hostedWebBaseUrl,
+      boundUserId: input.event.userId,
+      callbackSigning: this.env.webCallbackSigning,
+      dispatch: input,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
+
+    return this.wakeHostedWakes({
+      targetSeqHint: append.wake.seq,
+    });
   }
 
   async dispatchWithOutcome(
     input: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionDispatchResult> {
     const status = await this.dispatch(input);
-    const event = await this.queueStore.readEventDispatchStatus(input.eventId)
+    const event = await this.readHostedDispatchStatus(input, status)
+      ?? await this.queueStore.readEventDispatchStatus(input.eventId)
       ?? buildLegacyDispatchStatus(input);
 
     return {
@@ -448,7 +489,7 @@ export class HostedUserRunner {
       await this.syncHostedWakeBundleCacheToCursor(commit.cursor.snapshotRef);
       if (commit.committed) {
         await this.finalizeCommittedHostedWakesLocally({
-          committedThroughSeq: BigInt(commit.cursor.committedSeq),
+          committedCursor: commit.cursor,
           dispatches: advancedWakes,
         });
       }
@@ -482,11 +523,14 @@ export class HostedUserRunner {
       }
     }
 
-    return this.status();
+    return this.composeUserStatus(await this.queueStore.readState());
   }
 
   private async dispatchHostedWakeRecord(wake: {
     id: string;
+    kind: string;
+    occurredAt: string;
+    payloadSchema: string;
     payloadJson?: unknown;
     seq: string;
   }): Promise<HostedWakeDrainOutcome> {
@@ -495,7 +539,13 @@ export class HostedUserRunner {
     let dispatch: HostedExecutionDispatchRequest;
 
     try {
-      dispatch = parseHostedExecutionDispatchRequest(wake.payloadJson);
+      dispatch = parseHostedWakeDispatchPayload({
+        kind: wake.kind,
+        occurredAt: wake.occurredAt,
+        payloadJson: wake.payloadJson,
+        payloadSchema: wake.payloadSchema,
+        userId,
+      });
     } catch {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
@@ -531,7 +581,9 @@ export class HostedUserRunner {
     }
 
     await this.ensureManagedUserCryptoForActivationIfNeeded(dispatch);
-    const state = await this.dispatchProcessor.executeNativeWakeDispatch(dispatch);
+    const state = isHostedMessageWakeDispatch(dispatch)
+      ? await this.dispatchHostedMessageWake(dispatch)
+      : await this.dispatchHostedSystemWake(dispatch);
 
     return {
       dispatch,
@@ -575,30 +627,124 @@ export class HostedUserRunner {
     }
   }
 
+  private async dispatchHostedMessageWake(
+    dispatch: HostedExecutionDispatchRequest,
+  ): Promise<HostedWakeDrainState> {
+    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch);
+  }
+
+  private async dispatchHostedSystemWake(
+    dispatch: HostedExecutionDispatchRequest,
+  ): Promise<HostedWakeDrainState> {
+    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch);
+  }
+
   private async finalizeCommittedHostedWakesLocally(input: {
-    committedThroughSeq: bigint;
+    committedCursor: HostedExecutionCursorState;
     dispatches: readonly HostedWakeDrainOutcome[];
   }): Promise<void> {
-    for (const outcome of input.dispatches) {
-      if (!outcome.dispatch || outcome.seq > input.committedThroughSeq) {
-        continue;
-      }
+    const committedThroughSeq = BigInt(input.committedCursor.committedSeq);
+    const committedOutcomes = input.dispatches.filter((outcome) =>
+      outcome.dispatch && outcome.seq <= committedThroughSeq
+    );
 
+    if (committedOutcomes.length === 0) {
+      return;
+    }
+
+    const finalOutcome = committedOutcomes[committedOutcomes.length - 1]!;
+    let finalCommittedResult: Awaited<
+      ReturnType<typeof this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit>
+    > = null;
+
+    for (const outcome of committedOutcomes) {
       try {
-        await this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
-          dispatch: outcome.dispatch,
+        const finalizedCommit = await this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
+          dispatch: outcome.dispatch!,
+        });
+
+        if (outcome === finalOutcome) {
+          finalCommittedResult = finalizedCommit;
+          continue;
+        }
+
+        await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+          dispatch: outcome.dispatch!,
         });
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "hosted.user-runner",
-          dispatch: outcome.dispatch,
+          dispatch: outcome.dispatch!,
           error,
           level: "warn",
-          message: "Hosted wake local cleanup failed after the cursor had already advanced.",
+          message: "Hosted wake finalization failed after the cursor had already advanced.",
           phase: "completed",
-          userId: outcome.dispatch.event.userId,
+          userId: outcome.dispatch!.event.userId,
         });
       }
+    }
+
+    try {
+      if (!finalCommittedResult) {
+        await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+          dispatch: finalOutcome.dispatch!,
+        });
+        return;
+      }
+
+      const cursorSnapshotRef = parseHostedExecutionBundleRef(
+        input.committedCursor.snapshotRef,
+        "Hosted wake committed cursor snapshotRef",
+      );
+
+      if (!sameHostedBundlePayloadRef(finalCommittedResult.bundleRef, cursorSnapshotRef)) {
+        const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
+
+        if (!hostedWebBaseUrl) {
+          throw new Error("HOSTED_WEB_BASE_URL must be configured for hosted wake snapshot finalize.");
+        }
+
+        const snapshotCommit = await commitHostedWakeCursorToWeb({
+          baseUrl: hostedWebBaseUrl,
+          body: {
+            committedSeq: input.committedCursor.committedSeq,
+            expectedVersion: input.committedCursor.version,
+            snapshotRef: finalCommittedResult.bundleRef ?? null,
+          },
+          boundUserId: finalOutcome.dispatch!.event.userId,
+          callbackSigning: this.env.webCallbackSigning,
+          timeoutMs: this.env.runnerTimeoutMs,
+        });
+
+        await this.syncHostedWakeBundleCacheToCursor(snapshotCommit.cursor.snapshotRef);
+
+        if (
+          !snapshotCommit.committed
+          && !sameHostedBundlePayloadRef(
+            finalCommittedResult.bundleRef,
+            parseHostedExecutionBundleRef(
+              snapshotCommit.cursor.snapshotRef,
+              "Hosted wake finalized cursor snapshotRef",
+            ),
+          )
+        ) {
+          throw new Error("Hosted wake finalized snapshot lost the cursor compare-and-swap race.");
+        }
+      }
+
+      await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+        dispatch: finalOutcome.dispatch!,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        dispatch: finalOutcome.dispatch!,
+        error,
+        level: "warn",
+        message: "Hosted wake finalization failed after the cursor had already advanced.",
+        phase: "completed",
+        userId: finalOutcome.dispatch!.event.userId,
+      });
     }
   }
 
@@ -610,6 +756,83 @@ export class HostedUserRunner {
       "Hosted wake cursor snapshotRef",
     );
     await this.queueStore.syncBundleRefCache(nextBundleRef);
+  }
+
+  private async composeUserStatus(record: RunnerStateRecord): Promise<HostedExecutionUserStatus> {
+    const baseStatus = toUserStatus(record);
+    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
+
+    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
+      return baseStatus;
+    }
+
+    try {
+      const wakeStatus = await readHostedWakeStatusFromWeb({
+        baseUrl: hostedWebBaseUrl,
+        boundUserId: record.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+
+      return {
+        ...baseStatus,
+        pendingEventCount: wakeStatus.pendingWakeCount,
+        retryingEventId: wakeStatus.pendingWakeCount > 0
+          ? (baseStatus.run?.eventId ?? baseStatus.retryingEventId ?? baseStatus.lastEventId)
+          : null,
+      };
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        error,
+        level: "warn",
+        message: "Hosted wake status read failed; returning local shim status only.",
+        phase: "dispatch.running",
+        userId: record.userId,
+      });
+      return baseStatus;
+    }
+  }
+
+  private async readHostedDispatchStatus(
+    dispatch: HostedExecutionDispatchRequest,
+    status: HostedExecutionUserStatus,
+  ): Promise<HostedExecutionDispatchStatus | null> {
+    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
+
+    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
+      return null;
+    }
+
+    try {
+      const wakeStatus = await readHostedWakeStatusFromWeb({
+        baseUrl: hostedWebBaseUrl,
+        body: {
+          eventId: dispatch.eventId,
+        },
+        boundUserId: dispatch.event.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+
+      return {
+        eventId: dispatch.eventId,
+        lastError: wakeStatus.dispatchState === "poisoned" ? status.lastError : null,
+        state: wakeStatus.dispatchState ?? "queued",
+        userId: dispatch.event.userId,
+      };
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        dispatch,
+        error,
+        level: "warn",
+        message: "Hosted wake dispatch status read failed; falling back to local shim status.",
+        phase: "dispatch.running",
+        userId: dispatch.event.userId,
+      });
+      return null;
+    }
   }
 
   private async applyHostedTransition<T>(input: {
