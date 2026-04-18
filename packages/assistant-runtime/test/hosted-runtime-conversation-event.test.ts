@@ -32,7 +32,7 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
   buildHostedTelegramCapture: mocks.buildHostedTelegramCapture,
 }));
 
-import { processHostedConversationMessageWake } from "../src/hosted-runtime/events/conversation.ts";
+import { ingestHostedConversationMessageWake } from "../src/hosted-runtime/events/conversation.ts";
 
 function createRuntime() {
   return {
@@ -57,7 +57,7 @@ afterEach(() => {
   }));
 });
 
-describe("processHostedConversationMessageWake", () => {
+describe("ingestHostedConversationMessageWake", () => {
   it("routes each conversation wake channel through the dedicated capture normalizer and inbox pipeline", async () => {
     const runtime = createRuntime();
     const vaultRoot = "/tmp/assistant-runtime-conversation";
@@ -77,7 +77,7 @@ describe("processHostedConversationMessageWake", () => {
     });
     const linqCapture = { source: "linq" };
     mocks.buildHostedLinqCapture.mockResolvedValueOnce(linqCapture);
-    await processHostedConversationMessageWake({
+    await ingestHostedConversationMessageWake({
       runtime,
       vaultRoot,
       wake: linqWake,
@@ -96,7 +96,7 @@ describe("processHostedConversationMessageWake", () => {
     });
     const telegramCapture = { source: "telegram" };
     mocks.buildHostedTelegramCapture.mockResolvedValueOnce(telegramCapture);
-    await processHostedConversationMessageWake({
+    await ingestHostedConversationMessageWake({
       runtime,
       vaultRoot,
       wake: telegramWake,
@@ -112,7 +112,7 @@ describe("processHostedConversationMessageWake", () => {
     });
     const emailCapture = { source: "email" };
     mocks.buildHostedEmailCapture.mockResolvedValueOnce(emailCapture);
-    await processHostedConversationMessageWake({
+    await ingestHostedConversationMessageWake({
       runtime,
       vaultRoot,
       wake: emailWake,
@@ -128,5 +128,26 @@ describe("processHostedConversationMessageWake", () => {
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
+  });
+
+  it("fails closed on unsupported conversation wake kinds before reaching the inbox pipeline", async () => {
+    const runtime = createRuntime();
+    const vaultRoot = "/tmp/assistant-runtime-conversation";
+
+    await expect(
+      ingestHostedConversationMessageWake({
+        runtime,
+        vaultRoot,
+        wake: {
+          eventId: "evt_unknown",
+          kind: "conversation.message",
+          message: {
+            channel: "unsupported",
+          },
+        } as never,
+      }),
+    ).rejects.toThrow(/Unsupported hosted conversation message wake kind/u);
+
+    expect(mocks.withHostedInboxPipeline).not.toHaveBeenCalled();
   });
 });

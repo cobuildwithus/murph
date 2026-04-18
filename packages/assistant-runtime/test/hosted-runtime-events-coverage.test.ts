@@ -12,8 +12,8 @@ import {
 const mocks = vi.hoisted(() => ({
   handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
+  ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
-  processHostedConversationMessageWake: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
 }));
 
@@ -38,7 +38,7 @@ vi.mock("@murphai/gateway-local", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
-  processHostedConversationMessageWake: mocks.processHostedConversationMessageWake,
+  ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
@@ -85,7 +85,7 @@ beforeEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
-  mocks.processHostedConversationMessageWake.mockResolvedValue(undefined);
+  mocks.ingestHostedConversationMessageWake.mockResolvedValue(undefined);
 });
 
 afterEach(() => {

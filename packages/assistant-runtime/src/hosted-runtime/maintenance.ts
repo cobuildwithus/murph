@@ -93,7 +93,7 @@ function reportHostedAssistantAutomationSkipped(
       configStatus: readiness.configStatus,
       provider: readiness.provider,
     },
-    dispatch: wake,
+    wake,
     level: "warn",
     message:
       readiness.configStatus === "invalid"
@@ -293,7 +293,7 @@ export async function runHostedAssistantAutomation(
       inboxScanCursor: beforeState.inboxScanCursor?.captureId ?? null,
       requestId,
     },
-    dispatch: wake,
+    wake,
     message: "Hosted assistant automation pass starting.",
     phase: "dispatch.running",
   });
@@ -313,7 +313,7 @@ export async function runHostedAssistantAutomation(
             requestId,
             type: event.type,
           },
-          dispatch: wake,
+          wake,
           message: `Hosted assistant automation event: ${event.type}.`,
           phase: "dispatch.running",
         });
@@ -335,7 +335,7 @@ export async function runHostedAssistantAutomation(
         progressed: result.progressed,
         requestId,
       },
-      dispatch: wake,
+      wake,
       message: "Hosted assistant automation pass finished.",
       phase: "dispatch.running",
     });
@@ -352,7 +352,7 @@ export async function runHostedAssistantAutomation(
         details: {
           requestId,
         },
-        dispatch: wake,
+        wake,
         message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
         phase: "dispatch.running",
       });
@@ -534,7 +534,7 @@ function reportHostedDeviceSyncControlPlaneFailure(
 ): void {
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch: wake,
+    wake,
     error,
     level: "warn",
     message: `Hosted device-sync control-plane ${phase} failed; continuing hosted job.`,

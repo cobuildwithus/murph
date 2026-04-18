@@ -37,8 +37,8 @@ import {
   executeHostedWakeForCommit,
 } from "./hosted-runtime/execution.ts";
 import {
-  startHostedDispatchTypingIndicator,
-  stopHostedDispatchTypingIndicator,
+  startHostedWakeTypingIndicator,
+  stopHostedWakeTypingIndicator,
 } from "./hosted-runtime/typing.ts";
 import type {
   HostedAssistantRuntimeJobResult,
@@ -115,7 +115,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: buildHostedRuntimeStartDetails(input, runtime),
-      dispatch: wake,
+      wake,
       message: "Hosted runtime starting.",
       phase: "runtime.starting",
       run: input.request.run ?? null,
@@ -150,7 +150,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     };
     emitHostedExecutionStructuredLog({
       component: "runtime",
-      dispatch: wake,
+      wake,
       details: {
         bundlePresent: incomingBundle !== null,
         restoreLatencyMs: Date.now() - restoreStartedAtMs,
@@ -168,7 +168,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         vaultRoot: restored.vaultRoot,
       },
       async () => {
-        const typingIndicator = startHostedDispatchTypingIndicator({
+        const typingIndicator = startHostedWakeTypingIndicator({
           wake,
           runtimeEnv,
           run: input.request.run ?? null,
@@ -195,7 +195,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
             emitHostedExecutionStructuredLog({
               component: "runtime",
-              dispatch: wake,
+              wake,
               details: {
                 assistantDeliveryEffectCount:
                   committedExecution.committedAssistantDeliveryEffects.length,
@@ -227,7 +227,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
           emitHostedExecutionStructuredLog({
             component: "runtime",
-            dispatch: wake,
+            wake,
             details: {
               runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
             },
@@ -238,7 +238,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
           return finalResult;
         } finally {
-          await stopHostedDispatchTypingIndicator({
+          await stopHostedWakeTypingIndicator({
             wake,
             typingIndicator,
             run: input.request.run ?? null,
@@ -250,7 +250,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     const wake = resolveHostedWake(input.request);
     emitHostedExecutionStructuredLog({
       component: "runtime",
-      dispatch: wake,
+      wake,
       error,
       message: "Hosted runtime failed.",
       phase: "failed",

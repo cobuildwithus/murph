@@ -232,7 +232,7 @@ describe("summarizeWake", () => {
     );
   });
 
-  it("summarizes hosted inbox and maintenance dispatch variants", () => {
+  it("summarizes hosted inbox and maintenance wake variants", () => {
     const wakes = [
       {
         wake: buildHostedExecutionLinqConversationMessageWake({

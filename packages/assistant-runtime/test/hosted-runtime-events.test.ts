@@ -18,8 +18,8 @@ import {
 const mocks = vi.hoisted(() => ({
   handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
+  ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
-  processHostedConversationMessageWake: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
 }));
 
@@ -33,7 +33,7 @@ vi.mock("@murphai/assistant-engine", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
-  processHostedConversationMessageWake: mocks.processHostedConversationMessageWake,
+  ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
@@ -76,11 +76,11 @@ afterEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
-  mocks.processHostedConversationMessageWake.mockResolvedValue(undefined);
+  mocks.ingestHostedConversationMessageWake.mockResolvedValue(undefined);
 });
 
 describe("executeHostedWakeEvent", () => {
-  it("queues the welcome message for activation first contact and returns noop dispatch metrics", async () => {
+  it("queues the welcome message for activation first contact and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
       assistantConfigured: true,
@@ -303,17 +303,17 @@ describe("executeHostedWakeEvent", () => {
       vaultRoot,
     });
 
-    expect(mocks.processHostedConversationMessageWake).toHaveBeenNthCalledWith(1, {
+    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(1, {
       runtime,
       vaultRoot,
       wake: linqWake,
     });
-    expect(mocks.processHostedConversationMessageWake).toHaveBeenNthCalledWith(2, {
+    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(2, {
       runtime,
       vaultRoot,
       wake: telegramWake,
     });
-    expect(mocks.processHostedConversationMessageWake).toHaveBeenNthCalledWith(3, {
+    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(3, {
       runtime,
       vaultRoot,
       wake: emailWake,
@@ -326,7 +326,7 @@ describe("executeHostedWakeEvent", () => {
     });
   });
 
-  it("treats explicit member channel sync events as no-op dispatch handlers", async () => {
+  it("treats explicit member channel sync events as no-op wake handlers", async () => {
     const wake = buildHostedExecutionMemberChannelsUpdatedWake({
       eventId: "evt_member_channels_updated",
       memberChannels: {
