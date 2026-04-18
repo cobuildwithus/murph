@@ -43,6 +43,10 @@ test("hosted web smoke accepts an explicit local-env override", () => {
 test("hosted web smoke falls back to the local database url when none is configured", () => {
   const environment = createEnv({});
   delete environment.DATABASE_URL;
+  delete environment.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+  delete environment.HOSTED_CONTACT_PRIVACY_KEYS;
+  delete environment.HOSTED_WEB_ENCRYPTION_KEY;
+  delete environment.HOSTED_WEB_ENCRYPTION_KEY_VERSION;
   delete environment.NEXT_PUBLIC_PRIVY_APP_ID;
   const smokeEnv = createHostedWebSmokeEnvironment(environment);
 
@@ -50,15 +54,27 @@ test("hosted web smoke falls back to the local database url when none is configu
     smokeEnv.DATABASE_URL,
     "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync",
   );
+  assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v1");
+  assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
+  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY, "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
+  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY_VERSION, "v1");
   assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_smoke");
 });
 
 test("hosted web smoke preserves an existing database url", () => {
   const smokeEnv = createHostedWebSmokeEnvironment(createEnv({
     DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:1/murph_test",
+    HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v9",
+    HOSTED_CONTACT_PRIVACY_KEYS: "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    HOSTED_WEB_ENCRYPTION_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    HOSTED_WEB_ENCRYPTION_KEY_VERSION: "v8",
     NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_real",
   }));
 
   assert.equal(smokeEnv.DATABASE_URL, "postgresql://postgres:postgres@127.0.0.1:1/murph_test");
+  assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v9");
+  assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+  assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY_VERSION, "v8");
   assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_real");
 });

@@ -714,7 +714,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       expect.objectContaining({
         level: "warn",
         message: "Hosted Linq typing indicator could not be started.",
-        phase: "dispatch.running",
+        phase: "wake.running",
       }),
     );
   });
@@ -864,7 +864,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       expect.objectContaining({
         level: "warn",
         message: "Hosted Telegram typing indicator could not be started.",
-        phase: "dispatch.running",
+        phase: "wake.running",
       }),
     );
   });

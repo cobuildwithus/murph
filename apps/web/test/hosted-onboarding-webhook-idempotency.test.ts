@@ -888,15 +888,13 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceId: "linq:evt_123",
-        sourceType: "hosted_webhook_receipt",
         wake: expect.objectContaining({
           eventId: "evt_123",
           kind: "conversation.message",
@@ -1226,15 +1224,13 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceId: "linq:evt_123",
-        sourceType: "hosted_webhook_receipt",
         wake: expect.objectContaining({
           eventId: "evt_123",
           kind: "conversation.message",
@@ -1296,7 +1292,7 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
@@ -1367,7 +1363,7 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
@@ -2151,7 +2147,7 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
@@ -2499,7 +2495,7 @@ function buildDispatchSideEffect(input: {
       }),
       storage: "inline",
     },
-    result: input.status === "sent" ? { dispatched: true } : null,
+    result: input.status === "sent" ? { wakeAppended: true } : null,
     sentAt:
       input.sentAt ??
       (input.status === "sent" ? "2026-03-26T12:00:01.000Z" : null),

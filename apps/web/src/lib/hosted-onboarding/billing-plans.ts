@@ -31,7 +31,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_annual: {
     badge: "Save $30",
     code: "launch_annual",
-    description: "$12.50/month billed yearly. Save $30 each year.",
+    description: "Save $30 each year.",
     displayName: "Annual",
     interval: "year",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
@@ -40,7 +40,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_monthly: {
     badge: null,
     code: "launch_monthly",
-    description: "Launch tier billed monthly. Cancel anytime.",
+    description: "Cancel anytime.",
     displayName: "Monthly",
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
@@ -114,7 +114,9 @@ export function formatHostedLandingPricingLongSummary(): string {
 export function formatHostedLandingAnnualEquivalentSummary(): string {
   const annualAmountUsdCents =
     getHostedBillingPlanDefinition("launch_annual").recurringAmountUsdCents;
-  return `${formatUsdMonthlyEquivalent(annualAmountUsdCents)}/month billed yearly`;
+  return `${formatUsdMonthlyEquivalent(
+    annualAmountUsdCents
+  )}/month billed yearly`;
 }
 
 function buildHostedBillingPlanPresentation(
@@ -153,7 +155,8 @@ function formatUsdLong(amountUsdCents: number): string {
 
 function formatUsdMonthlyEquivalent(amountUsdCents: number): string {
   const monthlyAmount = amountUsdCents / 1200;
-  const rounded =
-    Number.isInteger(monthlyAmount) ? monthlyAmount.toFixed(0) : monthlyAmount.toFixed(2);
+  const rounded = Number.isInteger(monthlyAmount)
+    ? monthlyAmount.toFixed(0)
+    : monthlyAmount.toFixed(2);
   return `$${rounded}`;
 }

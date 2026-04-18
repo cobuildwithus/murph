@@ -33,17 +33,20 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
-  HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
-    return createElement(
-      "div",
-      {
-        "data-phone-country-code": "GB",
-      },
-      input.children,
-    );
-  },
-}));
+vi.mock(
+  "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary",
+  () => ({
+    HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
+      return createElement(
+        "div",
+        {
+          "data-phone-country-code": "GB",
+        },
+        input.children
+      );
+    },
+  })
+);
 
 vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedInstallScriptUrl: () => "https://www.withmurph.ai/install.sh",
@@ -90,7 +93,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "footer",
       showSignIn: false,
-      signupLabel: "Create your account",
+      signupLabel: "Get started",
     },
     undefined
   );
@@ -114,10 +117,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     /data-root-landing-auth-actions-label="See what works for your body"/
   );
   assert.match(markup, /Discover what actually makes you healthier\./);
-  assert.match(
-    markup,
-    /data-root-landing-auth-actions-label="Create your account"/
-  );
+  assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
   assert.match(
     markup,
     /data-root-landing-auth-actions-label="Start your first experiment"/

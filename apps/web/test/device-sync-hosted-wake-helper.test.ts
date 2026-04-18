@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHostedDeviceSyncWakeFromSignal } from "@/src/lib/device-sync/hosted-dispatch";
+import { buildHostedDeviceSyncWakeFromSignal } from "@/src/lib/device-sync/wake";
 
 describe("buildHostedDeviceSyncWakeFromSignal", () => {
   it("parses a nested wake hint through the device-sync owner parser", () => {

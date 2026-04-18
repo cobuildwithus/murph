@@ -454,7 +454,7 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
     | HostedOnboardingTelegramWebhookResponse;
   source: "linq" | "telegram";
 }): Promise<void> {
-  if (input.response.reason !== "dispatched-active-member") {
+  if (input.response.reason !== "wake-appended-active-member") {
     return;
   }
 

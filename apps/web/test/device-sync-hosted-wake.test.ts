@@ -228,7 +228,7 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
 
 import {
   HostedDeviceSyncControlPlane,
-  dispatchHostedDeviceSyncWake,
+  appendHostedDeviceSyncWake,
 } from "@/src/lib/device-sync/control-plane";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
@@ -236,7 +236,7 @@ function buildPublicConnectionId(connectionId: string): string {
   return createHostedBrowserConnectionId("01234567890123456789012345678901", connectionId);
 }
 
-describe("dispatchHostedDeviceSyncWake", () => {
+describe("appendHostedDeviceSyncWake", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
@@ -384,7 +384,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
   });
 
   it("wakes hosted execution with a dedicated device-sync wake event for connection events", async () => {
-    await dispatchHostedDeviceSyncWake({
+    await appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       provider: "oura",
@@ -421,8 +421,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
           reason: "connected",
           userId: "user-123",
         }),
-        sourceId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-        sourceType: "device_sync_signal",
         tx: mocks.prismaTx,
       }),
     );
@@ -436,7 +434,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
   });
 
   it("uses the webhook trace id for a stable wake event id when one is available", async () => {
-    await dispatchHostedDeviceSyncWake({
+    await appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       provider: "oura",
@@ -475,8 +473,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
           reason: "webhook_hint",
           userId: "user-123",
         }),
-        sourceId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
-        sourceType: "device_sync_signal",
         tx: mocks.prismaTx,
       }),
     );
@@ -485,21 +481,21 @@ describe("dispatchHostedDeviceSyncWake", () => {
   it("does not wait for the best-effort outbox drain before returning a wake dispatch", async () => {
     mocks.drainHostedExecutionOutboxBestEffort.mockReturnValue(new Promise(() => {}));
 
-    await expect(dispatchHostedDeviceSyncWake({
+    await expect(appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       provider: "oura",
       source: "connection-established",
       userId: "user-123",
     })).resolves.toEqual({
-      dispatched: true,
+      wakeAppended: true,
     });
 
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("uses the dedicated device-sync wake path for disconnect events", async () => {
-    await dispatchHostedDeviceSyncWake({
+    await appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       provider: "oura",
@@ -536,8 +532,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
           reason: "disconnected",
           userId: "user-123",
         }),
-        sourceId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-        sourceType: "device_sync_signal",
         tx: mocks.prismaTx,
       }),
     );
@@ -592,8 +586,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
         wake: expect.objectContaining({
           eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         }),
-        sourceId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-        sourceType: "device_sync_signal",
         tx: mocks.prismaTx,
       }),
     );
@@ -783,8 +775,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
           reason: "connected",
           userId: "user-123",
         }),
-        sourceId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-        sourceType: "device_sync_signal",
         tx: mocks.prismaTx,
       }),
     );
@@ -902,8 +892,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
           reason: "webhook_hint",
           userId: "user-123",
         }),
-        sourceId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
-        sourceType: "device_sync_signal",
         tx: mocks.prismaTx,
       }),
     );

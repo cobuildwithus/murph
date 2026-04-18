@@ -14,7 +14,7 @@ import {
   findHostedExecutionWakeEventIdTx,
   readHostedExecutionWakeLifecycleStateTx,
   readHostedExecutionWakeTargetTx,
-} from "../hosted-wake/dispatch";
+} from "../hosted-wake/queue";
 
 const DEFAULT_HOSTED_WAKE_LIFECYCLE_STATE: HostedWakeLifecycleState = "queued";
 const HOSTED_WAKE_LIFECYCLE_STATE_SET = new Set<HostedWakeLifecycleState>(
@@ -53,9 +53,6 @@ export function isHostedWakeLifecycleTerminal(
 
 export async function materializeHostedExecutionWakeTx(input: {
   wake: HostedExecutionWake;
-  now?: string;
-  sourceId?: string | null;
-  sourceType: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedExecutionWakeMaterializationResult> {
   await appendHostedExecutionWakePayloadTx({

@@ -110,7 +110,7 @@ describe("hosted local Linq webhook e2e", () => {
     expect(webhookResponse.status).toBe(202);
     await expect(webhookResponse.json()).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     await requireScenario().waitForLatestPendingWake(webhookUserId);
@@ -169,12 +169,12 @@ describe("hosted local Linq webhook e2e", () => {
     expect(firstResponse.status).toBe(202);
     await expect(firstResponse.json()).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
     expect(secondResponse.status).toBe(202);
     await expect(secondResponse.json()).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     await requireScenario().waitForLatestPendingWake(fastWebhookUserId);

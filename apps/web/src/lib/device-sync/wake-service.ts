@@ -26,7 +26,7 @@ import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
-} from "./hosted-dispatch";
+} from "./wake";
 import {
   composeHostedRuntimeDeviceSyncAccount,
 } from "./internal-runtime";
@@ -287,7 +287,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   });
 }
 
-export async function dispatchHostedDeviceSyncWake(input: {
+export async function appendHostedDeviceSyncWake(input: {
   connectionId: string;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
@@ -295,7 +295,7 @@ export async function dispatchHostedDeviceSyncWake(input: {
   source: HostedDeviceSyncWakeSource;
   traceId?: string | null;
   userId: string;
-}): Promise<{ dispatched: boolean; reason?: string }> {
+}): Promise<{ wakeAppended: boolean; reason?: string }> {
   const prisma = getPrisma();
   const hint = buildHostedDeviceSyncSignalPayload(input);
   const store = new PrismaDeviceSyncControlPlaneStore({
@@ -329,7 +329,7 @@ export async function dispatchHostedDeviceSyncWake(input: {
   });
 
   return {
-    dispatched: true,
+    wakeAppended: true,
   };
 }
 
@@ -345,8 +345,6 @@ async function persistHostedDeviceSyncWake(input: {
     await input.persist(tx);
     await materializeHostedExecutionWakeTx({
       wake: input.wake,
-      sourceId: input.wake.eventId,
-      sourceType: "device_sync_signal",
       tx,
     });
     await input.complete?.(tx);

@@ -93,8 +93,6 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
     });
     const appendedWake = await materializeHostedExecutionWakeTx({
       wake,
-      sourceId: input.sourceEventId,
-      sourceType: "hosted_revnet_issuance",
       tx: input.prisma,
     });
 
@@ -219,8 +217,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   });
   const appendedWake = await materializeHostedExecutionWakeTx({
     wake,
-    sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
-    sourceType: "hosted_stripe_event",
     tx: input.prisma,
   });
 

@@ -256,12 +256,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceId: "linq:evt_123",
-        sourceType: "hosted_webhook_receipt",
         wake: expect.objectContaining({
           eventId: "evt_123",
           kind: "conversation.message",
@@ -314,7 +312,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         duplicate: false,
         eventId: "evt_123",
         eventType: "message.received",
-        responseReason: "dispatched-active-member",
+        responseReason: "wake-appended-active-member",
         signalAbortedBeforeReturn: false,
       }),
     );
@@ -373,7 +371,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timestamp: null,
     })).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     expect(deferred).toHaveLength(1);
@@ -457,14 +455,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceId: "linq:evt_123",
-        sourceType: "hosted_webhook_receipt",
         tx: transactionClient,
         wake: expect.objectContaining({
           eventId: "evt_123",

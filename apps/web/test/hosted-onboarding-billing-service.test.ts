@@ -92,9 +92,6 @@ describe("createHostedBillingCheckout", () => {
       priceId: "price_123",
       stripe: mocks.stripe,
     });
-    mocks.stripe.customers.create.mockResolvedValue({
-      id: "cus_123",
-    });
     mocks.stripe.checkout.sessions.create.mockResolvedValue({
       id: "cs_123",
       url: "https://billing.example.test/session_123",
@@ -160,7 +157,7 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
-  it("creates a fresh Stripe Checkout Session keyed only by member metadata", async () => {
+  it("creates a first-time Stripe Checkout Session without pre-creating a customer", async () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const prisma = makePrisma();
@@ -168,6 +165,13 @@ describe("createHostedBillingCheckout", () => {
     await expect(
       createHostedBillingCheckout({
         inviteCode: "invite-code",
+        linkedAccounts: [
+          {
+            address: "member@example.test",
+            type: "email",
+            verified_at: 1_710_000_000,
+          },
+        ],
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
         prisma: prisma as never,
@@ -178,22 +182,13 @@ describe("createHostedBillingCheckout", () => {
       url: "https://billing.example.test/session_123",
     });
 
-    expect(mocks.stripe.customers.create).toHaveBeenCalledWith(
-      {
-        metadata: {
-          memberId: "member_123",
-        },
-      },
-      {
-        idempotencyKey: "hosted-onboarding:stripe-customer:member_123",
-      },
-    );
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
         cancel_url: "https://join.example.test/join/invite-code/cancel?share=share_123",
         client_reference_id: "member_123",
-        customer: "cus_123",
+        customer_email: "member@example.test",
         metadata: {
           billingPlanCode: "launch_monthly",
           memberId: "member_123",
@@ -209,15 +204,16 @@ describe("createHostedBillingCheckout", () => {
       }),
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
+    expect(checkoutSessionRequest).not.toHaveProperty("customer");
     expect(checkoutSessionRequest).not.toHaveProperty("automatic_tax");
     expect(checkoutSessionRequest).not.toHaveProperty("customer_update");
     expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toBeUndefined();
     expect(consoleInfo).toHaveBeenCalledWith(
       "Hosted onboarding timing.",
       expect.objectContaining({
-        customerPath: "created",
+        customerPath: "checkout-create",
         outcome: "completed",
-        step: "hosted-onboarding.billing.ensure-stripe-customer",
+        step: "hosted-onboarding.billing.resolve-stripe-customer",
       }),
     );
     expect(consoleInfo).toHaveBeenCalledWith(
@@ -293,25 +289,14 @@ describe("createHostedBillingCheckout", () => {
         customer: "cus_existing",
       }),
     );
+    const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
+    expect(checkoutSessionRequest).not.toHaveProperty("customer_email");
   });
 
-  it("reuses the winning Stripe customer binding without a post-bind reread", async () => {
+  it("does not reread or synthesize a customer binding when none exists yet", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
-    const existingBinding = {
-      memberId: "member_123",
-      ...buildHostedMemberBillingPrivateColumns({
-        memberId: "member_123",
-        stripeCustomerId: "cus_raced",
-        stripeSubscriptionId: null,
-      }),
-      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:raced",
-      stripeSubscriptionLookupKey: null,
-    };
     const prisma = makePrisma({
-      findUniqueResults: [
-        null,
-        existingBinding,
-      ],
+      billingRef: null,
     });
 
     await createHostedBillingCheckout({
@@ -321,13 +306,16 @@ describe("createHostedBillingCheckout", () => {
       prisma: prisma as never,
     });
 
-    expect(prisma.hostedMemberBillingRef.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMemberBillingRef.findUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customer: "cus_raced",
+      expect.not.objectContaining({
+        customer: expect.anything(),
       }),
     );
+    const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
+    expect(checkoutSessionRequest).not.toHaveProperty("customer_email");
   });
 });
 

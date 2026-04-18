@@ -51,7 +51,7 @@ vi.mock("@/src/lib/hosted-wake/control", () => ({
   triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
 }));
 
-vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
+vi.mock("@/src/lib/hosted-wake/queue", () => ({
   appendHostedExecutionWakePayloadTx: mocks.appendHostedExecutionWakePayloadTx,
 }));
 

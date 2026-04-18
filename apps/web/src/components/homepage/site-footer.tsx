@@ -12,7 +12,8 @@ export function SiteFooter({ authenticated }: { authenticated: boolean }) {
             <span className="font-semibold text-[#f5f0e8]">
               {launchPricingSummary}.
             </span>{" "}
-            Private health vault, before and after analysis, cancel anytime.
+            Private health vault, full experiment library, before and after
+            analysis, cancel anytime.
           </p>
           <LandingAuthActions
             authenticated={authenticated}

@@ -191,10 +191,11 @@ export function HostedEmailAuthButton({
               secondaryAction={
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="lg"
                   disabled={disabled}
                   onClick={handleUseAnotherEmail}
+                  className="w-full text-muted-foreground hover:text-foreground"
                 >
                   Use another email
                 </Button>

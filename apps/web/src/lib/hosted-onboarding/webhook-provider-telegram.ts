@@ -77,8 +77,6 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       telegramMessage,
       userId: existingMember.id,
     }),
-    sourceId: `telegram:${buildHostedTelegramWebhookEventId(input.update)}`,
-    sourceType: "hosted_webhook_receipt",
     tx: input.prisma,
   });
 
@@ -86,7 +84,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     desiredSideEffects: [],
     response: {
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     },
   };
 }

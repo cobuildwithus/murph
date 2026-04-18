@@ -24,7 +24,7 @@ import { materializeHostedExecutionWakeTx } from "@/src/lib/hosted-execution/wak
 import {
   buildHostedAssistantCronWakeEventId,
   materializeHostedAssistantCronWakeTx,
-} from "@/src/lib/hosted-wake/dispatch";
+} from "@/src/lib/hosted-wake/queue";
 
 describe("materializeHostedExecutionWakeTx", () => {
   beforeEach(() => {
@@ -77,7 +77,6 @@ describe("materializeHostedExecutionWakeTx", () => {
 
     await materializeHostedExecutionWakeTx({
       wake,
-      sourceType: "hosted_webhook_receipt",
       tx: {} as never,
     });
 
@@ -109,7 +108,6 @@ describe("materializeHostedExecutionWakeTx", () => {
 
     await materializeHostedExecutionWakeTx({
       wake,
-      sourceType: "hosted_vercel_cron",
       tx: {} as never,
     });
 

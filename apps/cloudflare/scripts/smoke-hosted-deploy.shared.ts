@@ -33,12 +33,11 @@ export function resolveSmokeWorkerBaseUrl(source: EnvSource = process.env): stri
   const workerBaseUrl = readFirstConfiguredString(
     source.HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL,
     source.CF_PUBLIC_BASE_URL,
-    source.HOSTED_EXECUTION_CONTROL_URL,
   );
 
   if (!workerBaseUrl) {
     throw new Error(
-      "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL, CF_PUBLIC_BASE_URL, or HOSTED_EXECUTION_CONTROL_URL must be configured.",
+      "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL or CF_PUBLIC_BASE_URL must be configured.",
     );
   }
 

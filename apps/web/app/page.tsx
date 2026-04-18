@@ -59,7 +59,7 @@ export default async function HomePage() {
           "Oura, WHOOP, Strava, and Garmin",
         ],
         note: null,
-        signupLabel: "Create your account",
+        signupLabel: "Get started",
         title: "Discover what actually makes you healthier.",
       };
 

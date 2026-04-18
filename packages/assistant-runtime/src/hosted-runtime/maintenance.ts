@@ -103,7 +103,7 @@ function reportHostedAssistantAutomationSkipped(
           : readiness.provider
             ? `Hosted assistant automation skipped because the active hosted assistant profile (${readiness.provider}) is not ready.`
             : "Hosted assistant automation skipped because the hosted assistant config is not ready.",
-    phase: "dispatch.running",
+    phase: "wake.running",
   });
 }
 
@@ -295,7 +295,7 @@ export async function runHostedAssistantAutomation(
     },
     wake,
     message: "Hosted assistant automation pass starting.",
-    phase: "dispatch.running",
+    phase: "wake.running",
   });
 
   try {
@@ -315,7 +315,7 @@ export async function runHostedAssistantAutomation(
           },
           wake,
           message: `Hosted assistant automation event: ${event.type}.`,
-          phase: "dispatch.running",
+          phase: "wake.running",
         });
       },
       vaultServices,
@@ -337,7 +337,7 @@ export async function runHostedAssistantAutomation(
       },
       wake,
       message: "Hosted assistant automation pass finished.",
-      phase: "dispatch.running",
+      phase: "wake.running",
     });
     return result;
   } catch (error) {
@@ -354,7 +354,7 @@ export async function runHostedAssistantAutomation(
         },
         wake,
         message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
-        phase: "dispatch.running",
+        phase: "wake.running",
       });
       return {
         nextWakeAt: null,
@@ -538,7 +538,7 @@ function reportHostedDeviceSyncControlPlaneFailure(
     error,
     level: "warn",
     message: `Hosted device-sync control-plane ${phase} failed; continuing hosted job.`,
-    phase: "dispatch.running",
+    phase: "wake.running",
   });
 }
 

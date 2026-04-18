@@ -17,7 +17,7 @@ import {
 import {
   findHostedExecutionWakeEventIdTx,
   readHostedExecutionWakeTargetTx,
-} from "@/src/lib/hosted-wake/dispatch";
+} from "@/src/lib/hosted-wake/queue";
 
 interface TestCursorState {
   committedSeq: bigint;
@@ -69,9 +69,9 @@ describe("hosted wake store", () => {
     expect(() =>
       projectHostedWakeRecord(makeProjectedWakeRow({
         kind: "assistant.cron.tick",
-        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        payloadSchema: "murph.hosted-wake-conversation-message.v1",
       })),
-    ).toThrow(/Hosted wake payload schema is invalid/i);
+    ).toThrow(/Hosted system wake payload schema is invalid/i);
 
     expect(() =>
       projectHostedWakeRecord(makeProjectedWakeRow({

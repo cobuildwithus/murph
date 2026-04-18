@@ -166,7 +166,7 @@ async function bootstrapHostedAssistantRuntimeState(
     },
     wake,
     message: "Hosted assistant bootstrap evaluated.",
-    phase: "dispatch.running",
+    phase: "wake.running",
   });
 
   const reconciledChannelCapabilities = options.enableAssistantChannelReconciliation
@@ -224,7 +224,7 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
       },
       wake,
       message: "Hosted assistant auto-reply self-heal skipped.",
-      phase: "dispatch.running",
+      phase: "wake.running",
     });
     return EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE;
   }
@@ -259,7 +259,7 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
     },
     wake,
     message: "Hosted assistant auto-reply self-heal evaluated.",
-    phase: "dispatch.running",
+    phase: "wake.running",
   });
 
   return resolveHostedAssistantAutoReplyState(afterState.autoReply.map((entry) => entry.channel));
@@ -377,7 +377,7 @@ export async function reconcileHostedAssistantChannelState(
       },
       wake: options.wake,
       message: "Hosted assistant auto-reply channels reconciled.",
-      phase: "dispatch.running",
+      phase: "wake.running",
     });
   }
 
