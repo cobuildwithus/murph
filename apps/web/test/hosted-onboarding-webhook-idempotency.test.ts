@@ -370,7 +370,7 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     if (reason === "own-message") {
-      expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
       expect(mocks.incrementHostedLinqOutboundDailyState).not.toHaveBeenCalled();
     } else {
       expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();

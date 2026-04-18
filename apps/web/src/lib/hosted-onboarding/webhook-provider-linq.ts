@@ -20,7 +20,6 @@ import {
   claimHostedLinqQuotaReplyNotice,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
-  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   type HostedLinqWebhookEvent,
@@ -54,6 +53,18 @@ export type HostedOnboardingLinqWebhookResponse = {
   ok: true;
   reason?: string;
 };
+
+export type HostedOnboardingLinqActiveMemberDirectFinalization =
+  | {
+      kind: "mark_daily_quota_reply_sent";
+      memberId: string;
+      occurredAt: string;
+    };
+
+export type HostedOnboardingLinqActiveMemberDirectPlan =
+  HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> & {
+    finalization: HostedOnboardingLinqActiveMemberDirectFinalization | null;
+  };
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
@@ -233,10 +244,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 }
 
-export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
+export async function planHostedOnboardingLinqActiveMemberDirect(input: {
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedOnboardingLinqWebhookResponse | null> {
+}): Promise<HostedOnboardingLinqActiveMemberDirectPlan | null> {
   if (input.event.event_type !== "message.received") {
     return null;
   }
@@ -247,13 +258,7 @@ export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
   const participantPhoneNumber = resolveHostedLinqParticipantPhoneNumber(messageEvent);
   const recipientPhoneNumber = resolveHostedLinqRecipientPhoneNumber(messageEvent);
 
-  if (summary.isFromMe || !participantPhoneNumber) {
-    return null;
-  }
-
-  const phoneLookupKey = createHostedPhoneLookupKey(participantPhoneNumber);
-
-  if (!phoneLookupKey) {
+  if (!participantPhoneNumber) {
     return null;
   }
 
@@ -271,13 +276,23 @@ export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
     return null;
   }
 
+  if (summary.isFromMe) {
+    await incrementHostedLinqOutboundDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+
+    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("own-message"));
+  }
+
   const member = await readHostedMemberSnapshot({
     memberId: existingMember.id,
     prisma: input.prisma,
   });
 
   if (!member) {
-    return null;
+    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("missing-member"));
   }
 
   const routeDecision = resolveHostedLinqActiveRouteDecision({
@@ -288,45 +303,20 @@ export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
   });
 
   if (routeDecision.kind === "redirect_to_home") {
-    return null;
+    return buildActiveMemberDirectPlan(buildConversationHomeRedirectResponse({
+      chatId: summary.chatId,
+      homeRecipientPhone: routeDecision.homeRecipientPhone,
+      memberId: existingMember.id,
+      messageId: summary.messageId,
+      sourceEventId: input.event.event_id,
+    }));
   }
 
   if (routeDecision.kind === "ignore_unknown_home") {
-    return buildIgnoredLinqWebhookPlan("unknown-home-line").response;
+    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("unknown-home-line"));
   }
 
-  const dailyState = await input.prisma.hostedLinqDailyState.findUnique({
-    where: {
-      memberId_dayUtc: {
-        dayUtc: resolveHostedLinqDayUtc(occurredAt),
-        memberId: existingMember.id,
-      },
-    },
-  });
-  const nextInboundCount = (dailyState?.inboundCount ?? 0) + 1;
-
-  if (nextInboundCount > 100) {
-    if (!dailyState?.quotaReplySentAt) {
-      return null;
-    }
-
-    await bindHostedMemberHomeLinqChatAndTrackInbound({
-      chatId: summary.chatId,
-      memberId: existingMember.id,
-      occurredAt,
-      prisma: input.prisma,
-      recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
-        homeChatId: member.routing?.linqChatId ?? null,
-        homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
-        incomingChatId: summary.chatId,
-        incomingRecipientPhone: recipientPhoneNumber,
-      }),
-    });
-
-    return buildIgnoredLinqWebhookPlan("daily-quota-reached").response;
-  }
-
-  await bindHostedMemberHomeLinqChatAndTrackInbound({
+  const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
     chatId: summary.chatId,
     memberId: existingMember.id,
     occurredAt,
@@ -338,6 +328,26 @@ export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
       incomingRecipientPhone: recipientPhoneNumber,
     }),
   });
+
+  if (dailyState.inboundCount > 100) {
+    if (dailyState.quotaReplySentAt) {
+      return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("daily-quota-reached"));
+    }
+
+    return buildDirectQuotaReplyResponse({
+      chatId: summary.chatId,
+      memberId: existingMember.id,
+      messageId: summary.messageId,
+      occurredAt,
+      sourceEventId: input.event.event_id,
+    });
+  }
+
+  const phoneLookupKey = createHostedPhoneLookupKey(participantPhoneNumber);
+
+  if (!phoneLookupKey) {
+    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("invalid-phone"));
+  }
 
   await materializeHostedExecutionWakeTx({
     wake: buildHostedExecutionLinqConversationMessageWake({
@@ -357,11 +367,14 @@ export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
     tx: input.prisma,
   });
 
-  return {
-    ok: true,
-    ignored: false,
-    reason: "wake-appended-active-member",
-  };
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [],
+    response: {
+      ok: true,
+      ignored: false,
+      reason: "wake-appended-active-member",
+    },
+  });
 }
 
 function buildIgnoredLinqWebhookPlan(
@@ -403,6 +416,16 @@ function buildSignupLinkResponse(input: {
       joinUrl,
       reason: "sent-signup-link",
     },
+  };
+}
+
+function buildActiveMemberDirectPlan(
+  plan: HostedWebhookPlan<HostedOnboardingLinqWebhookResponse>,
+  finalization: HostedOnboardingLinqActiveMemberDirectFinalization | null = null,
+): HostedOnboardingLinqActiveMemberDirectPlan {
+  return {
+    ...plan,
+    finalization,
   };
 }
 
@@ -452,6 +475,27 @@ function buildQuotaReplyResponse(input: {
       reason: "sent-daily-quota-reply",
     },
   };
+}
+
+function buildDirectQuotaReplyResponse(input: {
+  chatId: string;
+  memberId: string;
+  messageId: string;
+  occurredAt: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqActiveMemberDirectPlan {
+  return buildActiveMemberDirectPlan(
+    buildQuotaReplyResponse({
+      chatId: input.chatId,
+      messageId: input.messageId,
+      sourceEventId: input.sourceEventId,
+    }),
+    {
+      kind: "mark_daily_quota_reply_sent",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    },
+  );
 }
 
 async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
