@@ -70,7 +70,6 @@ describe("R2 transient lifecycle rules", () => {
 
     expect(maxAgeByPrefix.get("transient/execution-journal/")).toBe(21600);
     expect(maxAgeByPrefix.get("transient/side-effects/")).toBe(21600);
-    expect(maxAgeByPrefix.get("transient/dispatch-payloads/")).toBe(21600);
     expect(maxAgeByPrefix.get("transient/hosted-email/messages/")).toBe(3600);
     expect(maxAgeByPrefix.has("transient/hosted-email/threads/")).toBe(false);
   });

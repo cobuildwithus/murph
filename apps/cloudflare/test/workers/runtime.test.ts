@@ -152,7 +152,7 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("supports direct Durable Object RPC and reschedules alarms through the hosted wake path", async () => {
+  it("supports direct Durable Object RPC and uses alarms only to nudge hosted wake refetch", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
 
@@ -169,7 +169,8 @@ describe("cloudflare worker runtime suite", () => {
     await vi.waitFor(async () => {
       const status = await stub.status();
       expect(status).toEqual(expect.objectContaining({
-        lastEventId: expect.stringMatching(/^alarm:/u),
+        lastEventId: "evt_alarm_seed",
+        nextWakeAt: null,
         pendingEventCount: 0,
         retryingEventId: null,
         userId,

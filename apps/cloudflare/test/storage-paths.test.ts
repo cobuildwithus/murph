@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   hostedArtifactObjectKey,
   hostedBundleObjectKey,
-  hostedDispatchPayloadObjectKey,
   hostedExecutionJournalObjectKey,
   hostedSideEffectRecordKey,
   hostedRunnerSecretsObjectKey,
@@ -25,25 +24,16 @@ describe("hosted storage paths", () => {
     const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, userId);
     const journalKey = await hostedExecutionJournalObjectKey(rootKey, userId, eventId);
     const sideEffectKey = await hostedSideEffectRecordKey(rootKey, userId, effectId);
-    const dispatchPayloadKey = await hostedDispatchPayloadObjectKey(rootKey, userId, eventId);
 
     expect(artifactKey).toMatch(/^users\/artifacts\/[0-9a-f]{24}\/[0-9a-f]{48}\.artifact\.bin$/);
     expect(bundleKey).toMatch(/^bundles\/vault\/[0-9a-f]{48}\.bundle\.json$/);
     expect(runnerSecretsKey).toMatch(/^users\/runner-secrets\/[0-9a-f]{24}\.json$/);
     expect(journalKey).toMatch(/^transient\/execution-journal\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
     expect(sideEffectKey).toMatch(/^transient\/side-effects\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
-    expect(dispatchPayloadKey).toMatch(/^transient\/dispatch-payloads\/[0-9a-f]{24}\/[0-9a-f]{40}\.json$/);
 
     expectOpaqueStrings(
-      [artifactKey, bundleKey, runnerSecretsKey, journalKey, sideEffectKey, dispatchPayloadKey],
+      [artifactKey, bundleKey, runnerSecretsKey, journalKey, sideEffectKey],
       [userId, eventId, effectId, sha256, hash],
     );
-  });
-
-  it("returns stable keys for the same inputs", async () => {
-    const first = await hostedDispatchPayloadObjectKey(rootKey, "user_123", "event_123");
-    const second = await hostedDispatchPayloadObjectKey(rootKey, "user_123", "event_123");
-
-    expect(first).toBe(second);
   });
 });

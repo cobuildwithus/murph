@@ -1,10 +1,11 @@
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 import {
-  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
   buildHostedExecutionAssistantCronTickWake,
-  buildHostedWakeLinqMessageReceivedPayload,
+  buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
+import type { HostedWakeRecord } from "@murphai/hosted-execution/contracts";
 
 import { createHostedExecutionVercelOidcValidationEnvironment } from "../src/auth-adapter.ts";
 import type { HostedExecutionEnvironment } from "../src/env.ts";
@@ -279,18 +280,18 @@ describe("HostedUserRunner hosted wake drain", () => {
       },
     );
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatchProcessor = Reflect.get(runner, "dispatchProcessor");
+    const wakeProcessor = Reflect.get(runner, "wakeProcessor");
 
     if (
-      !dispatchProcessor
-      || typeof dispatchProcessor !== "object"
-      || !("finalizeNativeWakeDispatchAfterCursorCommit" in dispatchProcessor)
+      !wakeProcessor
+      || typeof wakeProcessor !== "object"
+      || !("finalizeNativeWakeDispatchAfterCursorCommit" in wakeProcessor)
     ) {
-      throw new Error("Expected HostedUserRunner dispatch processor test internals to be available.");
+      throw new Error("Expected HostedUserRunner wake processor test internals to be available.");
     }
 
     const finalizeNativeWakeDispatchAfterCursorCommit = vi.spyOn(
-      dispatchProcessor,
+      wakeProcessor,
       "finalizeNativeWakeDispatchAfterCursorCommit",
     );
 
@@ -311,23 +312,23 @@ describe("HostedUserRunner hosted wake drain", () => {
       },
     );
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatchProcessor = Reflect.get(runner, "dispatchProcessor");
+    const wakeProcessor = Reflect.get(runner, "wakeProcessor");
 
     if (
-      !dispatchProcessor
-      || typeof dispatchProcessor !== "object"
-      || !("finalizeNativeWakeDispatchAfterCursorCommit" in dispatchProcessor)
-      || !("cleanupNativeWakeDispatchAfterCursorCommit" in dispatchProcessor)
+      !wakeProcessor
+      || typeof wakeProcessor !== "object"
+      || !("finalizeNativeWakeDispatchAfterCursorCommit" in wakeProcessor)
+      || !("cleanupNativeWakeDispatchAfterCursorCommit" in wakeProcessor)
     ) {
-      throw new Error("Expected HostedUserRunner dispatch processor test internals to be available.");
+      throw new Error("Expected HostedUserRunner wake processor test internals to be available.");
     }
 
     const finalizeNativeWakeDispatchAfterCursorCommit = vi.spyOn(
-      dispatchProcessor,
+      wakeProcessor,
       "finalizeNativeWakeDispatchAfterCursorCommit",
     );
     const cleanupNativeWakeDispatchAfterCursorCommit = vi.spyOn(
-      dispatchProcessor,
+      wakeProcessor,
       "cleanupNativeWakeDispatchAfterCursorCommit",
     );
     finalizeNativeWakeDispatchAfterCursorCommit.mockResolvedValue({
@@ -396,21 +397,26 @@ describe("HostedUserRunner hosted wake drain", () => {
         wakes: [
           createHostedWakeRecord({
             kind: "conversation.message",
-            payloadJson: buildHostedWakeLinqMessageReceivedPayload({
+            payloadJson: {
               eventId: "evt_linq_message",
-              linqEvent: {
-                id: "msg_123",
-                parts: [
-                  {
-                    type: "text",
-                    value: "hello",
-                  },
-                ],
-              },
-              linqMessageId: "msg_123",
-              phoneLookupKey: "lookup_123",
-            }),
-            payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+              ...buildHostedExecutionLinqConversationMessageWake({
+                eventId: "evt_linq_message",
+                linqEvent: {
+                  id: "msg_123",
+                  parts: [
+                    {
+                      type: "text",
+                      value: "hello",
+                    },
+                  ],
+                },
+                linqMessageId: "msg_123",
+                phoneLookupKey: "lookup_123",
+                occurredAt: "2026-03-26T12:00:00.000Z",
+                userId: "member_123",
+              }).message,
+            },
+            payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
             seq: "1",
           }),
         ],
@@ -488,27 +494,45 @@ function createCursorState(overrides: Partial<{
 }
 
 function createHostedWakeRecord(input: {
-  kind?: string;
+  kind?: HostedWakeRecord["kind"];
   occurredAt?: string;
   payloadJson?: unknown;
-  payloadSchema?: string;
+  payloadSchema?: HostedWakeRecord["payloadSchema"];
   quarantineCode?: string | null;
   quarantinedAt?: string | null;
   seq: string;
-}) {
-  return {
+}): HostedWakeRecord {
+  const base = {
     behavior: "ordered" as const,
     createdAt: "2026-03-26T12:00:00.000Z",
     id: `wake_${input.seq}`,
-    kind: input.kind ?? "assistant.cron.tick",
     occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
     ...(input.payloadJson === undefined ? {} : { payloadJson: input.payloadJson }),
-    payloadSchema: input.payloadSchema ?? HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
     ...(input.quarantineCode === undefined ? {} : { quarantineCode: input.quarantineCode }),
     ...(input.quarantinedAt === undefined ? {} : { quarantinedAt: input.quarantinedAt }),
     seq: input.seq,
     updatedAt: "2026-03-26T12:00:00.000Z",
     userId: "member_123",
+  };
+
+  if (input.kind === "conversation.message") {
+    const payloadSchema = input.payloadSchema === HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
+      ? input.payloadSchema
+      : HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA;
+    return {
+      ...base,
+      kind: input.kind,
+      payloadSchema,
+    };
+  }
+
+  const payloadSchema = input.payloadSchema === HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA
+    ? input.payloadSchema
+    : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA;
+  return {
+    ...base,
+    kind: input.kind ?? "assistant.cron.tick",
+    payloadSchema,
   };
 }
 

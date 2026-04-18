@@ -5,8 +5,8 @@ import type {
   HostedExecutionWake,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type { HostedWakeRecord } from "@murphai/hosted-execution/contracts";
 import {
-  buildHostedExecutionAssistantCronTickWake,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -44,7 +44,7 @@ import {
 } from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
-  RunnerDispatchProcessor,
+  RunnerWakeProcessor,
   HostedExecutionObsoleteRunResultError,
   type RunnerUserStores,
 } from "./user-runner/runner-dispatch-processor.js";
@@ -65,7 +65,7 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
-const HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS = 5_000;
+const HOSTED_WAKE_NUDGE_RETRY_DELAY_MS = 5_000;
 const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
 const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
@@ -87,7 +87,7 @@ function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
 }
 
 export class HostedUserRunner {
-  private readonly dispatchProcessor: RunnerDispatchProcessor;
+  private readonly wakeProcessor: RunnerWakeProcessor;
   private readonly eventTransitionLocks = new Map<string, Promise<void>>();
   private readonly queueStore: RunnerQueueStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
@@ -127,7 +127,7 @@ export class HostedUserRunner {
     this.userKeyStore = userKeyStore;
     this.queueStore = new RunnerQueueStore(state);
     this.scheduler = new RunnerScheduler(this.queueStore, state);
-    this.dispatchProcessor = new RunnerDispatchProcessor({
+    this.wakeProcessor = new RunnerWakeProcessor({
       applyHostedTransition: <T>(input: {
         eventId: string;
         gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
@@ -237,44 +237,29 @@ export class HostedUserRunner {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
         level: "warn",
-        message: "Hosted cron wake append skipped because the user runner is not bound yet.",
+        message: "Hosted wake nudge skipped because the user runner is not bound yet.",
         phase: "dispatch.running",
         userId: record.userId ?? null,
       });
       await this.scheduler.syncNextWake(
-        new Date(Date.now() + HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS).toISOString(),
+        new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
       );
       return;
     }
 
     try {
-      const wake = buildHostedExecutionAssistantCronTickWake({
-        eventId: `alarm:${Date.now()}`,
-        occurredAt: new Date().toISOString(),
-        reason: "alarm",
-        userId: record.userId,
-      });
-      const append = await appendHostedWakeInWeb({
-        baseUrl: this.readHostedWebControlBaseUrl(),
-        boundUserId: record.userId,
-        callbackSigning: this.env.webCallbackSigning,
-        wake,
-        timeoutMs: this.env.runnerTimeoutMs,
-      });
-      await this.wakeHostedWakes({
-        targetSeqHint: append.wake.seq,
-      });
+      await this.wakeHostedWakes();
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
         error,
         level: "warn",
-        message: "Hosted cron wake append failed; scheduling a retry.",
+        message: "Hosted wake nudge failed; scheduling a retry.",
         phase: "dispatch.running",
         userId: record.userId,
       });
       await this.scheduler.syncNextWake(
-        new Date(Date.now() + HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS).toISOString(),
+        new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
       );
     }
   }
@@ -436,16 +421,7 @@ export class HostedUserRunner {
     return this.composeUserStatus(await this.queueStore.readState());
   }
 
-  private async dispatchHostedWakeRecord(wake: {
-    id: string;
-    kind: string;
-    occurredAt: string;
-    quarantineCode?: string | null;
-    quarantinedAt?: string | null;
-    payloadSchema: string;
-    payloadJson?: unknown;
-    seq: string;
-  }): Promise<HostedWakeDrainOutcome> {
+  private async dispatchHostedWakeRecord(wake: HostedWakeRecord): Promise<HostedWakeDrainOutcome> {
     const userId = await this.requireBoundUserId();
     const seq = BigInt(wake.seq);
 
@@ -512,7 +488,7 @@ export class HostedUserRunner {
     }
 
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
-    const state = await this.dispatchProcessor.executeNativeWakeDispatch(hostedWake, {
+    const state = await this.wakeProcessor.executeNativeWakeDispatch(hostedWake, {
       holdLeaseUntilCleanup: true,
     });
 
@@ -567,12 +543,12 @@ export class HostedUserRunner {
 
     const finalOutcome = committedOutcomes[committedOutcomes.length - 1]!;
     let finalCommittedResult: Awaited<
-      ReturnType<typeof this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit>
+      ReturnType<typeof this.wakeProcessor.finalizeNativeWakeDispatchAfterCursorCommit>
     > = null;
 
     for (const outcome of committedOutcomes) {
       try {
-        const finalizedCommit = await this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
+        const finalizedCommit = await this.wakeProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
           wake: outcome.wake!,
         });
 
@@ -581,7 +557,7 @@ export class HostedUserRunner {
           continue;
         }
 
-        await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+        await this.wakeProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
           wake: outcome.wake!,
         });
       } catch (error) {
@@ -599,7 +575,7 @@ export class HostedUserRunner {
 
     try {
       if (!finalCommittedResult) {
-        await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+        await this.wakeProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
           wake: finalOutcome.wake!,
         });
         return;
@@ -639,7 +615,7 @@ export class HostedUserRunner {
         }
       }
 
-      await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
+      await this.wakeProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
         wake: finalOutcome.wake!,
       });
     } catch (error) {
@@ -713,16 +689,16 @@ export class HostedUserRunner {
         callbackSigning: this.env.webCallbackSigning,
         timeoutMs: this.env.runnerTimeoutMs,
       });
-      const dispatchState = wakeStatus.dispatchState;
+      const wakeState = wakeStatus.dispatchState;
 
-      if (!dispatchState) {
+      if (!wakeState) {
         return null;
       }
 
       return {
         eventId: wake.eventId,
         lastError: null,
-        state: dispatchState,
+        state: wakeState,
         userId: wake.userId,
       };
     } catch (error) {

@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
-
 import {
   createHostedArtifactStore,
   createHostedRunnerSecretsStore,
 } from "../src/bundle-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { writeEncryptedR2Json, writeEncryptedR2Payload } from "../src/crypto.js";
-import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { readHostedEmailRawMessage, writeHostedEmailRawMessage } from "../src/hosted-email.js";
 
@@ -276,42 +273,6 @@ describe("opaque storage path rotation", () => {
       },
       userId,
     });
-  });
-
-  it("keeps referenced dispatch payload blobs readable across platform-envelope-key rotation", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const oldKey = createTestRootKey(7);
-    const nextKey = createTestRootKey(8);
-    const dispatch = buildHostedExecutionDeviceSyncWake({
-      connectionId: "conn_rotated",
-      eventId: "evt_share_123",
-      hint: {
-        traceId: "trace_rotated",
-      },
-      occurredAt: "2026-04-04T00:00:00.000Z",
-      provider: "oura",
-      reason: "webhook_hint",
-      userId: "user_live_share",
-    });
-
-    const oldStore = createHostedDispatchPayloadStore({
-      bucket,
-      key: oldKey,
-      keyId: "old",
-      keysById: { old: oldKey },
-    });
-    const payloadRef = await oldStore.writeDispatchPayload(dispatch);
-
-    const rotatedStore = createHostedDispatchPayloadStore({
-      bucket,
-      key: nextKey,
-      keyId: "next",
-      keysById: { next: nextKey, old: oldKey },
-    });
-
-    expect(await rotatedStore.readDispatchPayload(payloadRef)).toEqual(dispatch);
-    await rotatedStore.deleteDispatchPayload(payloadRef);
-    expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 
   it("requires a rewrite before hosted raw email messages survive platform root-key rotation", async () => {

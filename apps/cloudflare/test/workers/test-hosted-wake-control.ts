@@ -2,6 +2,8 @@ import type {
   HostedExecutionCursorState,
   HostedExecutionWake,
   HostedExecutionDispatchLifecycleState,
+  HostedConversationMessageWakeRecord,
+  HostedSystemWakeRecord,
   HostedWakeAppendResponse,
   HostedWakeCommitRequest,
   HostedWakeCommitResponse,
@@ -55,28 +57,46 @@ export async function appendTestHostedWake(input: {
 
   const seq = String(state.nextSeq + 1);
   const now = new Date().toISOString();
-  const storedWake: StoredHostedWakeRecord = {
-    behavior: "ordered",
-    createdAt: now,
-    dedupeKey: `dispatch:${wake.kind}:${wake.eventId}`,
-    dispatchState: "queued",
-    eventId: wake.eventId,
-    id: `wake_${seq}`,
-    kind: wake.kind,
-    occurredAt: wake.occurredAt,
-    payloadJson: isHostedConversationMessageWake(wake)
-      ? {
-          eventId: wake.eventId,
-          ...wake.message,
-        }
-      : wake,
-    payloadSchema: isHostedConversationMessageWake(wake)
-      ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
-      : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-    seq,
-    updatedAt: now,
-    userId: wake.userId,
-  };
+  const storedWake: StoredHostedWakeRecord = isHostedConversationMessageWake(wake)
+    ? {
+      behavior: "ordered",
+      createdAt: now,
+      dedupeKey: `dispatch:${wake.kind}:${wake.eventId}`,
+      dispatchState: "queued",
+      eventId: wake.eventId,
+      id: `wake_${seq}`,
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
+      payloadJson: {
+        eventId: wake.eventId,
+        ...wake.message,
+      },
+      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      seq,
+      updatedAt: now,
+      userId: wake.userId,
+    } satisfies HostedConversationMessageWakeRecord & {
+      dispatchState: HostedExecutionDispatchLifecycleState;
+      eventId: string;
+    }
+    : {
+      behavior: "ordered",
+      createdAt: now,
+      dedupeKey: `dispatch:${wake.kind}:${wake.eventId}`,
+      dispatchState: "queued",
+      eventId: wake.eventId,
+      id: `wake_${seq}`,
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
+      payloadJson: wake,
+      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      seq,
+      updatedAt: now,
+      userId: wake.userId,
+    } satisfies HostedSystemWakeRecord & {
+      dispatchState: HostedExecutionDispatchLifecycleState;
+      eventId: string;
+    };
 
   state.nextSeq += 1;
   state.cursor = {
@@ -250,6 +270,24 @@ function hostedWakeControlObjectKey(userId: string): string {
 }
 
 function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {
+  if (wake.kind === "conversation.message") {
+    return {
+      behavior: wake.behavior,
+      createdAt: wake.createdAt,
+      ...(wake.dedupeKey === undefined ? {} : { dedupeKey: wake.dedupeKey }),
+      id: wake.id,
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
+      ...(wake.payloadJson === undefined ? {} : { payloadJson: wake.payloadJson }),
+      payloadSchema: wake.payloadSchema,
+      ...(wake.quarantineCode === undefined ? {} : { quarantineCode: wake.quarantineCode }),
+      ...(wake.quarantinedAt === undefined ? {} : { quarantinedAt: wake.quarantinedAt }),
+      seq: wake.seq,
+      updatedAt: wake.updatedAt,
+      userId: wake.userId,
+    };
+  }
+
   return {
     behavior: wake.behavior,
     createdAt: wake.createdAt,

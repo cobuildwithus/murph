@@ -106,7 +106,7 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
       (status) => status.pendingEventCount === 0 && status.retryingEventId === null,
     );
     expect(finalStatus).toMatchObject({
-      lastEventId: expect.stringMatching(/^alarm:/u),
+      lastEventId: activationWake.eventId,
       pendingEventCount: 0,
       retryingEventId: null,
       userId,
@@ -269,9 +269,6 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
       eventIds: [overlapEventId, overlapEventId],
     });
 
-    await worker.client.postJson("/__test/runner/payload-read-clear", {
-      eventId: overlapEventId,
-    });
     await worker.client.postJson("/__test/runner/invocations/clear", {
       userId: overlapUserId,
     });

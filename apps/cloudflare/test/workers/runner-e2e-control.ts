@@ -12,15 +12,6 @@ type StoredPauseState = {
   request: HostedAssistantRuntimeJobRequest | null;
 };
 
-type StoredDispatchPayloadReadPauseState = {
-  cleared?: boolean;
-  entered: boolean;
-  eventId: string;
-  expectedKey: string;
-  key: string | null;
-  released: boolean;
-};
-
 type StoredRunnerInvocationState = {
   count: number;
   eventIds: string[];
@@ -88,123 +79,6 @@ export async function clearRunnerCommitPause(
     released: false,
     request: null,
   } satisfies StoredPauseState));
-}
-
-export async function armDispatchPayloadReadPause(
-  input: {
-    bucket: R2BucketLike;
-    eventId: string;
-    expectedKey: string;
-  },
-): Promise<void> {
-  await writeDispatchPayloadReadPauseState(input.bucket, {
-    entered: false,
-    eventId: input.eventId,
-    expectedKey: input.expectedKey,
-    key: null,
-    released: false,
-  });
-}
-
-export async function readDispatchPayloadReadPauseState(
-  bucket: R2BucketLike,
-  eventId: string,
-): Promise<{
-  armed: boolean;
-  entered: boolean;
-  hasKey: boolean;
-  matchedExpectedKey: boolean;
-}> {
-  const state = await readDispatchPayloadReadPauseStateObject(bucket);
-
-  if (!state || state.eventId !== eventId) {
-    return {
-      armed: false,
-      entered: false,
-      hasKey: false,
-      matchedExpectedKey: false,
-    };
-  }
-
-  return {
-    armed: true,
-    entered: state.entered,
-    hasKey: state.key !== null,
-    matchedExpectedKey: state.key === state.expectedKey,
-  };
-}
-
-export async function releaseDispatchPayloadReadPause(
-  bucket: R2BucketLike,
-  eventId: string,
-): Promise<boolean> {
-  const state = await readDispatchPayloadReadPauseStateObject(bucket);
-
-  if (!state || state.eventId !== eventId) {
-    return false;
-  }
-
-  await writeDispatchPayloadReadPauseState(bucket, {
-    ...state,
-    released: true,
-  });
-  return true;
-}
-
-export async function clearDispatchPayloadReadPause(
-  bucket: R2BucketLike,
-  eventId: string,
-): Promise<void> {
-  const state = await readDispatchPayloadReadPauseStateObject(bucket);
-
-  if (!state || state.eventId !== eventId) {
-    return;
-  }
-
-  if (bucket.delete) {
-    await bucket.delete(dispatchPayloadReadPauseStateObjectKey());
-    return;
-  }
-
-  await bucket.put(dispatchPayloadReadPauseStateObjectKey(), JSON.stringify({
-    ...state,
-    cleared: true,
-    entered: false,
-    key: null,
-    released: false,
-  } satisfies StoredDispatchPayloadReadPauseState));
-}
-
-export async function pauseDispatchPayloadReadIfArmed(input: {
-  bucket: R2BucketLike;
-  key: string;
-}): Promise<void> {
-  const state = await readDispatchPayloadReadPauseStateObject(input.bucket);
-
-  if (
-    !state
-    || state.entered
-    || state.released
-    || input.key !== state.expectedKey
-  ) {
-    return;
-  }
-
-  await writeDispatchPayloadReadPauseState(input.bucket, {
-    ...state,
-    entered: true,
-    key: input.key,
-  });
-
-  while (true) {
-    const nextState = await readDispatchPayloadReadPauseStateObject(input.bucket);
-
-    if (!nextState || nextState.released) {
-      return;
-    }
-
-    await sleep(pollIntervalMs);
-  }
 }
 
 export async function readRunnerInvocationState(
@@ -419,33 +293,6 @@ async function writePauseState(
 
 function pauseStateObjectKey(eventId: string): string {
   return `test/runner-pauses/${encodeURIComponent(eventId)}.json`;
-}
-
-async function readDispatchPayloadReadPauseStateObject(
-  bucket: R2BucketLike,
-): Promise<StoredDispatchPayloadReadPauseState | null> {
-  const object = await bucket.get(dispatchPayloadReadPauseStateObjectKey());
-
-  if (!object) {
-    return null;
-  }
-
-  const parsed = JSON.parse(
-    new TextDecoder().decode(await object.arrayBuffer()),
-  ) as StoredDispatchPayloadReadPauseState;
-
-  return parsed.cleared ? null : parsed;
-}
-
-async function writeDispatchPayloadReadPauseState(
-  bucket: R2BucketLike,
-  state: StoredDispatchPayloadReadPauseState,
-): Promise<void> {
-  await bucket.put(dispatchPayloadReadPauseStateObjectKey(), JSON.stringify(state));
-}
-
-function dispatchPayloadReadPauseStateObjectKey(): string {
-  return "test/dispatch-payload-read-pause.json";
 }
 
 function runnerInvocationStateObjectKey(userId: string): string {
