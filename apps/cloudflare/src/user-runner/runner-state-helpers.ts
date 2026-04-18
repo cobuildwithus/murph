@@ -35,7 +35,6 @@ export interface RunnerMetaRow {
   last_event_id: string | null;
   last_run_at: string | null;
   next_wake_at: string | null;
-  retrying_event_id: string | null;
   user_id: string;
 }
 
@@ -91,7 +90,6 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     last_event_id: null,
     last_run_at: null,
     next_wake_at: null,
-    retrying_event_id: null,
     user_id: userId,
   };
 }
@@ -116,20 +114,14 @@ export function projectRunnerStateRecord(input: {
     && typeof input.meta.active_run_attempt === "number"
     && input.meta.active_run_started_at !== null;
   const lastEventId = input.meta.last_event_id
-    ?? input.meta.retrying_event_id
     ?? input.meta.active_run_event_id
     ?? input.run?.eventId
     ?? null;
-  const retryingEventId = input.meta.retrying_event_id
-    ?? (hasPersistedRunLease
-      ? (input.meta.active_run_event_id ?? input.run?.eventId ?? lastEventId)
-      : null);
 
   return {
     changed: bundleRefState.changed,
     record: {
       runtimeBootstrapped: input.meta.runtime_bootstrapped === 1,
-      backpressuredEventIds: [],
       bundleRef: bundleRefState.bundleRef,
       bundleVersion: bundleRefState.sanitizedBundleState.bundleVersion,
       inFlight: input.meta.in_flight === 1 || hasPersistedRunLease,
@@ -139,10 +131,8 @@ export function projectRunnerStateRecord(input: {
       lastEventId,
       lastRunAt: input.meta.last_run_at,
       nextWakeAt: input.meta.next_wake_at,
-      pendingEventCount: 0,
-      poisonedEventIds: [],
+      pendingWakeCount: 0,
       run: input.run,
-      retryingEventId,
       timeline: [...input.timeline],
       userId: input.meta.user_id,
     },

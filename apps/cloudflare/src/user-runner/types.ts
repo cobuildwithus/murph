@@ -43,7 +43,6 @@ export type RunnerBundleVersion = number;
 
 export interface RunnerStateRecord {
   runtimeBootstrapped: boolean;
-  backpressuredEventIds: string[];
   bundleRef: HostedExecutionBundleRef | null;
   bundleVersion: RunnerBundleVersion;
   inFlight: boolean;
@@ -53,10 +52,8 @@ export interface RunnerStateRecord {
   lastEventId: string | null;
   lastRunAt: string | null;
   nextWakeAt: string | null;
-  pendingEventCount: number;
-  poisonedEventIds: string[];
+  pendingWakeCount: number;
   run: HostedExecutionRunStatus | null;
-  retryingEventId: string | null;
   timeline: HostedExecutionTimelineEntry[];
   userId: string;
 }
@@ -71,7 +68,6 @@ export function computeRetryDelayMs(baseDelayMs: number, attempts: number): numb
 
 export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStatus {
   return {
-    backpressuredEventIds: record.backpressuredEventIds,
     bundleRef: record.bundleRef,
     inFlight: record.inFlight,
     lastError: record.lastError,
@@ -84,12 +80,10 @@ export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStat
     lastEventId: record.lastEventId,
     lastRunAt: record.lastRunAt,
     nextWakeAt: record.nextWakeAt,
-    pendingEventCount: record.pendingEventCount,
-    poisonedEventIds: record.poisonedEventIds,
+    pendingWakeCount: record.pendingWakeCount,
     ...(record.run ? {
       run: record.run,
     } : {}),
-    retryingEventId: record.retryingEventId,
     ...(record.timeline.length > 0 ? {
       timeline: record.timeline,
     } : {}),

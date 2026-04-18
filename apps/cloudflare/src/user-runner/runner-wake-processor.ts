@@ -132,7 +132,7 @@ export class RunnerWakeProcessor {
         eventId: wake.eventId,
         level: "info",
         message: "Hosted wake execution deferred because another active run still owns the user lease.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         run: null,
         userId,
       });
@@ -173,7 +173,7 @@ export class RunnerWakeProcessor {
         message: committed && !isCommittedResultFinalized(committed)
           ? "Resuming hosted wake finalize from a durable commit."
           : "Running hosted wake directly from the canonical wake queue.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         run,
       });
       const runnerResult = await this.invokeRunner(
@@ -239,7 +239,7 @@ export class RunnerWakeProcessor {
           eventId: wake.eventId,
           level: "warn",
           message: "Hosted wake execution returned a stale result for an obsolete run lease.",
-          phase: "dispatch.running",
+          phase: "wake.running",
           run,
           userId,
         });
@@ -497,7 +497,7 @@ export class RunnerWakeProcessor {
       },
       eventId: wake.eventId,
       message: "Hosted runner prepared container invocation.",
-      phase: "dispatch.running",
+      phase: "wake.running",
       run,
       userId,
     });

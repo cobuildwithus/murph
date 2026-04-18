@@ -80,8 +80,7 @@ function initializeSchema(database: DatabaseSync): void {
       last_error_code TEXT,
       last_event_id TEXT,
       last_run_at TEXT,
-      next_wake_at TEXT,
-      retrying_event_id TEXT
+      next_wake_at TEXT
     );
     CREATE TABLE IF NOT EXISTS runner_bundle_slots (
       slot TEXT PRIMARY KEY,

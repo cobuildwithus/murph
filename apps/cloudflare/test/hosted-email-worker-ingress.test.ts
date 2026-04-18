@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedWakeInWeb: vi.fn(),
-  dispatch: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
   readHostedExecutionEnvironment: vi.fn(),
   resolveHostedExecutionUserCryptoContext: vi.fn(),
@@ -79,7 +78,7 @@ describe("hosted email worker ingress", () => {
       wake: {
         behavior: "ordered",
         createdAt: "2026-04-17T00:00:00.000Z",
-        dedupeKey: "dispatch:conversation.message:email:raw_123",
+        dedupeKey: "email:raw_123",
         id: "wake_123",
         kind: "conversation.message",
         occurredAt: "2026-04-17T00:00:00.000Z",
@@ -92,7 +91,6 @@ describe("hosted email worker ingress", () => {
       },
     });
     mocks.resolveUserRunnerStub.mockResolvedValue({
-      dispatch: mocks.dispatch,
       wakeHostedWakes: mocks.wakeHostedWakes,
     });
   });
@@ -131,7 +129,7 @@ describe("hosted email worker ingress", () => {
     }, createWorkerEnv(bucket));
 
     expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
-    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);

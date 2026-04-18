@@ -146,7 +146,6 @@ describe("hosted execution parsers coverage", () => {
           userId: "user_123",
         },
         status: {
-          backpressuredEventIds: ["evt_123"],
           bundleRef: TEST_BUNDLE_REF,
           inFlight: true,
           lastError: "Waiting for runner slot.",
@@ -155,13 +154,11 @@ describe("hosted execution parsers coverage", () => {
           lastEventId: "evt_123",
           lastRunAt: "2026-04-08T00:01:00.000Z",
           nextWakeAt: "2026-04-08T00:05:00.000Z",
-          pendingEventCount: 2,
-          poisonedEventIds: ["evt_poisoned"],
-          retryingEventId: "evt_retry",
+          pendingWakeCount: 2,
           run: {
             attempt: 3,
             eventId: "evt_123",
-            phase: "dispatch.running",
+            phase: "wake.running",
             runId: "run_123",
             startedAt: "2026-04-08T00:00:00.000Z",
             updatedAt: "2026-04-08T00:02:00.000Z",
@@ -174,7 +171,7 @@ describe("hosted execution parsers coverage", () => {
             eventId: "evt_123",
             level: "info",
             message: "Runner resumed processing.",
-            phase: "dispatch.running",
+            phase: "wake.running",
             runId: "run_123",
           }],
           userId: "user_123",
@@ -182,7 +179,7 @@ describe("hosted execution parsers coverage", () => {
       });
 
       expect(parsed.event.state).toBe("backpressured");
-      expect(parsed.status.run?.phase).toBe("dispatch.running");
+      expect(parsed.status.run?.phase).toBe("wake.running");
       expect(parsed.status.timeline?.[0]?.message).toBe("Runner resumed processing.");
     });
 
@@ -194,9 +191,7 @@ describe("hosted execution parsers coverage", () => {
         lastEventId: null,
         lastRunAt: null,
         nextWakeAt: null,
-        pendingEventCount: 0,
-        poisonedEventIds: [],
-        retryingEventId: null,
+        pendingWakeCount: 0,
         userId: "user_123",
       })).toEqual({
         bundleRef: null,
@@ -205,11 +200,28 @@ describe("hosted execution parsers coverage", () => {
         lastEventId: null,
         lastRunAt: null,
         nextWakeAt: null,
-        pendingEventCount: 0,
-        poisonedEventIds: [],
-        retryingEventId: null,
+        pendingWakeCount: 0,
         userId: "user_123",
       });
+    });
+
+    it("rejects removed queue-era user status fields", () => {
+      expect(() =>
+        parseHostedExecutionUserStatus({
+          backpressuredEventIds: [],
+          bundleRef: null,
+          inFlight: false,
+          lastError: null,
+          lastEventId: null,
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingEventCount: 0,
+          pendingWakeCount: 0,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "user_123",
+        }),
+      ).toThrow(/pendingEventCount is no longer supported|backpressuredEventIds is no longer supported/i);
     });
 
     it("rejects invalid run phases, timeline levels, and wake lifecycle states", () => {
@@ -221,9 +233,7 @@ describe("hosted execution parsers coverage", () => {
           lastEventId: null,
           lastRunAt: null,
           nextWakeAt: null,
-          pendingEventCount: 1,
-          poisonedEventIds: [],
-          retryingEventId: null,
+          pendingWakeCount: 1,
           run: {
             attempt: 1,
             eventId: "evt_123",
@@ -244,7 +254,7 @@ describe("hosted execution parsers coverage", () => {
           eventId: "evt_123",
           level: "debug",
           message: "bad level",
-          phase: "dispatch.running",
+          phase: "wake.running",
           runId: "run_123",
         }]),
       ).toThrow(/timeline entries\[0\]\.level is invalid/i);
@@ -264,9 +274,7 @@ describe("hosted execution parsers coverage", () => {
             lastEventId: null,
             lastRunAt: null,
             nextWakeAt: null,
-            pendingEventCount: 0,
-            poisonedEventIds: [],
-            retryingEventId: null,
+            pendingWakeCount: 0,
             userId: "user_123",
           },
         }),

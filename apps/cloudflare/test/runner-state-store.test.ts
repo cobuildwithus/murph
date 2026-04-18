@@ -113,18 +113,15 @@ describe("RunnerStateStore", () => {
     expect(columns).toContain("active_run_attempt");
     expect(columns).toContain("active_run_started_at");
     expect(columns).toContain("last_event_id");
-    expect(columns).toContain("retrying_event_id");
     expect(record.userId).toBe("member_123");
     expect(record.runtimeBootstrapped).toBe(true);
     expect(record.inFlight).toBe(true);
     expect(record.lastErrorCode).toBe("runner_http_error");
     expect(record.lastRunAt).toBe("2026-03-29T10:05:00.000Z");
-    expect(record.pendingEventCount).toBe(0);
-    expect(record.poisonedEventIds).toEqual([]);
-    expect(record.backpressuredEventIds).toEqual([]);
+    expect(record.pendingWakeCount).toBe(0);
   });
 
-  it("tracks active-run lease, retry metadata, and next-wake scheduling without local queue rows", async () => {
+  it("tracks active-run lease and next-wake scheduling without local queue rows", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-18T10:00:00.000Z"));
     const state = createState();
@@ -148,7 +145,7 @@ describe("RunnerStateStore", () => {
         eventId: "evt_active",
         runId: "run_active",
       });
-      expect(claimed.retryingEventId).toBe("evt_active");
+      expect(claimed.lastEventId).toBe("evt_active");
       expect(await store.hasActiveRunLease({
         eventId: "evt_active",
         run: {
@@ -171,10 +168,9 @@ describe("RunnerStateStore", () => {
         },
       });
       expect(retried.inFlight).toBe(false);
-      expect(retried.retryingEventId).toBe("evt_active");
       expect(retried.lastEventId).toBe("evt_active");
       expect(retried.lastErrorCode).toBe("runtime_error");
-      expect(retried.pendingEventCount).toBe(0);
+      expect(retried.pendingWakeCount).toBe(0);
 
       const scheduled = await store.syncNextWake({
         preferredWakeAt: "2026-04-18T10:05:00.000Z",
@@ -208,7 +204,6 @@ describe("RunnerStateStore", () => {
       run: null,
     });
     expect(afterCommit.inFlight).toBe(false);
-    expect(afterCommit.retryingEventId).toBeNull();
     expect(afterCommit.lastRunAt).toBe("2026-04-18T12:00:00.000Z");
 
     const finalized = await store.completeWakeRun({
@@ -223,8 +218,7 @@ describe("RunnerStateStore", () => {
     expect(finalized.inFlight).toBe(false);
     expect(finalized.lastEventId).toBe("evt_committed");
     expect(finalized.lastRunAt).toBe("2026-04-18T12:00:01.000Z");
-    expect(finalized.pendingEventCount).toBe(0);
-    expect(finalized.poisonedEventIds).toEqual([]);
+    expect(finalized.pendingWakeCount).toBe(0);
   });
 });
 

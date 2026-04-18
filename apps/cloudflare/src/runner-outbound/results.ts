@@ -179,7 +179,7 @@ async function handleRunnerAssistantDeliveryRequest(input: {
       userId: input.userId,
     },
     message: "Hosted runner side-effect journal request received.",
-    phase: "dispatch.running",
+    phase: "wake.running",
     userId: input.userId,
   });
   const crypto = await resolveRunnerOutboundUserCryptoContext({
@@ -216,7 +216,7 @@ async function handleRunnerAssistantDeliveryRequest(input: {
             userId: input.userId,
           },
           message: "Hosted runner side-effect journal request succeeded.",
-          phase: "dispatch.running",
+          phase: "wake.running",
           userId: input.userId,
         });
 
@@ -243,7 +243,7 @@ async function handleRunnerAssistantDeliveryRequest(input: {
           userId: input.userId,
         },
         message: "Hosted runner side-effect journal request succeeded.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId: input.userId,
       });
 
@@ -276,7 +276,7 @@ async function handleRunnerAssistantDeliveryRequest(input: {
         userId: input.userId,
       },
       message: "Hosted runner side-effect journal request succeeded.",
-      phase: "dispatch.running",
+      phase: "wake.running",
       userId: input.userId,
     });
 
@@ -297,7 +297,7 @@ async function handleRunnerAssistantDeliveryRequest(input: {
         error,
         level: "warn",
         message: "Hosted runner side-effect journal request conflicted.",
-        phase: "dispatch.running",
+        phase: "wake.running",
         userId: input.userId,
       });
       return json({
@@ -316,7 +316,7 @@ async function handleRunnerAssistantDeliveryRequest(input: {
       error,
       level: "warn",
       message: "Hosted runner side-effect journal request failed.",
-      phase: "dispatch.running",
+      phase: "wake.running",
       userId: input.userId,
     });
     throw error;

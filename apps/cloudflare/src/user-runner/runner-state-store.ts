@@ -102,7 +102,6 @@ export class RunnerStateStore {
     const bundleState = this.selectBundleStateSync();
     assignRunnerBundleRefs(bundleState, committed.bundleRef);
     this.rememberLastEventMetaSync(meta, committed.eventId);
-    this.clearRetryingEventMetaSync(meta);
     if (leaseOwner?.policy === "same-event") {
       this.clearActiveRunLeaseSync(meta, {
         eventId: committed.eventId,
@@ -130,7 +129,6 @@ export class RunnerStateStore {
     meta.in_flight = 1;
     this.assignActiveRunMetaSync(meta, input.eventId, input.run);
     this.rememberLastEventMetaSync(meta, input.eventId);
-    this.setRetryingEventMetaSync(meta, input.eventId);
     this.volatileRun = {
       attempt: input.run.attempt,
       eventId: input.eventId,
@@ -155,7 +153,6 @@ export class RunnerStateStore {
     const meta = this.requireMetaRowSync();
     this.clearActiveRunLeaseSync(meta, input.leaseOwner);
     this.rememberLastEventMetaSync(meta, input.eventId);
-    this.clearRetryingEventMetaSync(meta);
     this.clearLastErrorMetaSync(meta);
     meta.last_run_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
@@ -174,7 +171,6 @@ export class RunnerStateStore {
     const meta = this.requireMetaRowSync();
     this.clearActiveRunLeaseSync(meta, input.leaseOwner);
     this.rememberLastEventMetaSync(meta, input.eventId);
-    this.setRetryingEventMetaSync(meta, input.eventId);
     meta.last_error_at = input.finishedAt ?? new Date().toISOString();
     meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
     this.writeMetaRowSync(meta);
@@ -258,12 +254,6 @@ export class RunnerStateStore {
     }
 
     this.rememberLastEventMetaSync(meta, input.eventId);
-    if (input.phase === "completed") {
-      this.clearRetryingEventMetaSync(meta);
-    } else {
-      this.setRetryingEventMetaSync(meta, input.eventId);
-    }
-
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
@@ -409,8 +399,7 @@ export class RunnerStateStore {
         last_error_code,
         last_event_id,
         last_run_at,
-        next_wake_at,
-        retrying_event_id
+        next_wake_at
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -437,9 +426,8 @@ export class RunnerStateStore {
         last_error_code,
         last_event_id,
         last_run_at,
-        next_wake_at,
-        retrying_event_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        next_wake_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_run_event_id,
@@ -453,7 +441,6 @@ export class RunnerStateStore {
       meta.last_event_id,
       meta.last_run_at,
       meta.next_wake_at,
-      meta.retrying_event_id,
     );
   }
 
@@ -586,14 +573,6 @@ export class RunnerStateStore {
     meta.last_event_id = eventId;
   }
 
-  private setRetryingEventMetaSync(meta: RunnerMetaRow, eventId: string): void {
-    meta.retrying_event_id = eventId;
-  }
-
-  private clearRetryingEventMetaSync(meta: RunnerMetaRow): void {
-    meta.retrying_event_id = null;
-  }
-
   private readPersistedRunStatusSync(meta: RunnerMetaRow): HostedExecutionRunStatus | null {
     const run = this.readActiveRunContextSync(meta);
     if (!run || !meta.active_run_event_id) {
@@ -603,7 +582,7 @@ export class RunnerStateStore {
     return {
       ...run,
       eventId: meta.active_run_event_id,
-      phase: "dispatch.running",
+      phase: "wake.running",
       updatedAt: meta.active_run_started_at ?? run.startedAt,
     };
   }

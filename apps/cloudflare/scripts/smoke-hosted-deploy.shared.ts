@@ -113,7 +113,7 @@ export async function runSmokeHostedDeploy(input: {
     versionOverrideHeaders,
   };
   const status = await readSmokeUserStatus(statusRequest);
-  log(`Authenticated hosted status check passed for ${smokeUserId}. pendingEventCount=${status.pendingEventCount}`);
+  log(`Authenticated hosted status check passed for ${smokeUserId}. pendingWakeCount=${status.pendingWakeCount}`);
   log("Cloudflare hosted execution smoke checks passed.");
 }
 

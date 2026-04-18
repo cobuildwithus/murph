@@ -260,7 +260,6 @@ export interface HostedExecutionRunnerResult {
 export type HostedExecutionBundleRef = RuntimeHostedExecutionBundleRef;
 
 export interface HostedExecutionUserStatus {
-  backpressuredEventIds?: string[];
   bundleRef: HostedExecutionBundleRefState;
   inFlight: boolean;
   lastError: string | null;
@@ -269,10 +268,8 @@ export interface HostedExecutionUserStatus {
   lastEventId: string | null;
   lastRunAt: string | null;
   nextWakeAt: string | null;
-  pendingEventCount: number;
-  poisonedEventIds: string[];
+  pendingWakeCount: number;
   run?: HostedExecutionRunStatus | null;
-  retryingEventId: string | null;
   timeline?: HostedExecutionTimelineEntry[];
   userId: string;
 }
@@ -437,8 +434,8 @@ export type HostedExecutionDeviceSyncRuntimeConnectionSnapshot =
 export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
   DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse;
 
-export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
-  "Hosted execution dispatch is not configured.";
+export const HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR =
+  "Hosted execution wake handling is not configured.";
 
 export function isHostedExecutionWakeKind(
   kind: string,

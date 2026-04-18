@@ -540,7 +540,7 @@ describe("HostedUserRunner", () => {
             lastError: "lost ack",
           },
         ],
-        retryingEventId: "evt_recovered_gc",
+        lastEventId: "evt_recovered_gc",
         storage,
         userId: "member_recovered_gc",
       });
@@ -747,7 +747,7 @@ describe("HostedUserRunner", () => {
         enqueuedAt: "2026-03-26T12:00:00.000Z",
         lastError: "lost ack",
       }],
-      retryingEventId: "evt_gateway_recovery",
+      lastEventId: "evt_gateway_recovery",
       storage,
       userId: "member_123",
     });
@@ -787,8 +787,8 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     const status = await runner.wake(createWake("evt_gateway_recovery"));
 
-    expect(status.pendingEventCount).toBe(1);
-    expect(status.retryingEventId).toBe("evt_gateway_recovery");
+    expect(status.pendingWakeCount).toBe(1);
+    expect(status.lastEventId).toBe("evt_gateway_recovery");
   });
 
 
@@ -823,7 +823,7 @@ describe("HostedUserRunner", () => {
           lastError: "lost ack",
         },
       ],
-      retryingEventId: dispatch.eventId,
+      lastEventId: dispatch.eventId,
       storage,
       userId: dispatch.userId,
     });
@@ -853,8 +853,7 @@ describe("HostedUserRunner", () => {
     const status = await runner.wake(dispatch);
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(status.pendingEventCount).toBe(0);
-    expect(status.retryingEventId).toBeNull();
+    expect(status.pendingWakeCount).toBe(0);
     expect(status.lastError).toBeNull();
     expect(status.lastEventId).toBe(dispatch.eventId);
     await expect(
@@ -906,13 +905,11 @@ describe("HostedUserRunner", () => {
     expect(status.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });
-    expect(status.pendingEventCount).toBe(0);
-    expect(status.poisonedEventIds).toEqual([]);
-    expect(status.retryingEventId).toBeNull();
+    expect(status.pendingWakeCount).toBe(0);
     expect(status.run).toBeUndefined();
     expect(status.timeline?.map((entry) => entry.phase)).toEqual([
       "claimed",
-      "dispatch.running",
+      "wake.running",
       "commit.recorded",
       "completed",
     ]);
@@ -1067,7 +1064,7 @@ describe("HostedUserRunner", () => {
           lastError: "lost ack",
         },
       ],
-      retryingEventId: dispatch.eventId,
+      lastEventId: dispatch.eventId,
       storage,
       userId,
     });
@@ -1106,7 +1103,7 @@ describe("HostedUserRunner", () => {
 
     const status = await runner.wake(dispatch);
 
-    expect(status.pendingEventCount).toBe(0);
+    expect(status.pendingWakeCount).toBe(0);
     expect(bucket.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
@@ -1587,7 +1584,7 @@ describe("HostedUserRunner", () => {
       const status = await runner.wake(createWake("evt_cleanup_failure", "member_cleanup_failure"));
 
       expect(status.lastError).toBeNull();
-      expect(status.pendingEventCount).toBe(0);
+      expect(status.pendingWakeCount).toBe(0);
       expect(status.bundleRef).toMatchObject({
         key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
       });
@@ -1645,7 +1642,7 @@ describe("HostedUserRunner", () => {
     const status = await runner.wake(createActivationWake("evt_finalized_recovery", "member_123"));
 
     expect(status.lastError).toBeNull();
-    expect(status.pendingEventCount).toBe(0);
+    expect(status.pendingWakeCount).toBe(0);
     expect(status.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });
@@ -1724,8 +1721,8 @@ describe("HostedUserRunner", () => {
     await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstStatus = await runner.wake(createActivationWake("evt_finalize_retry", "member_123"));
-    expect(firstStatus.pendingEventCount).toBe(1);
-    expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
+    expect(firstStatus.pendingWakeCount).toBe(1);
+    expect(firstStatus.lastEventId).toBe("evt_finalize_retry");
     expect(firstStatus.timeline?.at(-1)).toMatchObject({
       message:
         "Hosted wake execution deferred after a direct runner failure. Hosted execution runtime failed. Detail: expected undefined to deeply equal { committedResult: { …(2) } }",
@@ -1738,8 +1735,8 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     const finalStatus = await runner.status();
-    expect(finalStatus.pendingEventCount).toBe(1);
-    expect(finalStatus.retryingEventId).toBe("evt_finalize_retry");
+    expect(finalStatus.pendingWakeCount).toBe(1);
+    expect(finalStatus.lastEventId).toBe("evt_finalize_retry");
     expect(finalStatus.bundleRef).toBeNull();
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
@@ -1825,8 +1822,8 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     const status = await runner.status();
-    expect(status.pendingEventCount).toBe(0);
-    expect(status.retryingEventId).toBe(dispatch.eventId);
+    expect(status.pendingWakeCount).toBe(0);
+    expect(status.lastEventId).toBe(dispatch.eventId);
     expect(status.inFlight).toBe(true);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -1890,7 +1887,7 @@ describe("HostedUserRunner", () => {
 
     releaseFirstRunner.resolve();
     await firstWake;
-    expect((await runner.status()).pendingEventCount).toBe(0);
+    expect((await runner.status()).pendingWakeCount).toBe(0);
   });
 
   it("does not steal a live commit lease after a runner restart before finalize completes", async () => {
@@ -1955,8 +1952,8 @@ describe("HostedUserRunner", () => {
     releaseFirstRunner.resolve();
     const finalStatus = await firstWake;
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingEventCount).toBe(0);
-    expect((await restartedRunner.status()).pendingEventCount).toBe(0);
+    expect(finalStatus.pendingWakeCount).toBe(0);
+    expect((await restartedRunner.status()).pendingWakeCount).toBe(0);
   });
 
   it("does not clear a live commit lease when the same event is redispatched before finalize completes", async () => {
@@ -2025,7 +2022,7 @@ describe("HostedUserRunner", () => {
     releaseFirstRunner.resolve();
     const finalStatus = await firstWake;
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingEventCount).toBe(0);
+    expect(finalStatus.pendingWakeCount).toBe(0);
   });
 
   it("keeps the active run lease through a long commit-to-finalize handoff so alarms do not start a duplicate finalize", async () => {
@@ -2097,7 +2094,7 @@ describe("HostedUserRunner", () => {
     const [finalStatus] = await Promise.all([firstWake, alarmPromise]);
 
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingEventCount).toBe(0);
+    expect(finalStatus.pendingWakeCount).toBe(0);
     expect(finalStatus.lastEventId).toBe("evt_long_finalize_lease");
     expect(finalStatus.run).toBeUndefined();
   });
@@ -2173,8 +2170,8 @@ describe("HostedUserRunner", () => {
 
     expect(first.lastError).toBe("Hosted runner container returned an HTTP error.");
     expect(first.lastErrorCode).toBe("runner_http_error");
-    expect(first.pendingEventCount).toBe(1);
-    expect(first.retryingEventId).toBe("evt_retry_1");
+    expect(first.pendingWakeCount).toBe(1);
+    expect(first.lastEventId).toBe("evt_retry_1");
     expect(first.run).toMatchObject({
       attempt: 1,
       eventId: "evt_retry_1",
@@ -2182,7 +2179,7 @@ describe("HostedUserRunner", () => {
     });
     expect(first.timeline?.map((entry) => entry.phase)).toEqual([
       "claimed",
-      "dispatch.running",
+      "wake.running",
       "retry.scheduled",
     ]);
     expect(new Set((first.timeline ?? []).map((entry) => entry.runId)).size).toBe(1);
@@ -2199,9 +2196,8 @@ describe("HostedUserRunner", () => {
     const final = await runner.status();
 
     expect(global.fetch).toHaveBeenCalledTimes(5);
-    expect(final.pendingEventCount).toBe(1);
-    expect(final.poisonedEventIds).toEqual([]);
-    expect(final.retryingEventId).toBe("evt_retry_1");
+    expect(final.pendingWakeCount).toBe(1);
+    expect(final.lastEventId).toBe("evt_retry_1");
     expect(final.lastError).toBe("Hosted runner container returned an HTTP error.");
     expect(final.lastErrorCode).toBe("runner_http_error");
     expect(final.run).toMatchObject({
@@ -2211,7 +2207,7 @@ describe("HostedUserRunner", () => {
     });
     expect(final.timeline?.slice(-3).map((entry) => entry.phase)).toEqual([
       "claimed",
-      "dispatch.running",
+      "wake.running",
       "retry.scheduled",
     ]);
   });
@@ -2237,8 +2233,8 @@ describe("HostedUserRunner", () => {
     expect(status.lastErrorCode).toBe("authorization_error");
     expect(status.lastError).not.toContain("secret-token");
     expect(status.lastError).not.toContain("ops@example.com");
-    expect(status.pendingEventCount).toBe(1);
-    expect(status.retryingEventId).toBe("evt_secret_failure");
+    expect(status.pendingWakeCount).toBe(1);
+    expect(status.lastEventId).toBe("evt_secret_failure");
   });
 
   it("does not drain queued work locally from alarm without the hosted web callback path", async () => {
@@ -2297,8 +2293,7 @@ describe("HostedUserRunner", () => {
 
     expect(readDispatchedEventIds(fetchMock)).toEqual([]);
     await expect(runner.status()).resolves.toMatchObject({
-      pendingEventCount: 0,
-      poisonedEventIds: [],
+      pendingWakeCount: 0,
     });
   });
 
@@ -2344,10 +2339,10 @@ describe("HostedUserRunner", () => {
     const first = await runner.wake(dispatch);
     const second = await runner.wake(dispatch);
 
-    expect(first.pendingEventCount).toBe(0);
+    expect(first.pendingWakeCount).toBe(0);
     expect(first.lastError).toBeNull();
     expect(first.lastEventId).toBe("evt_lost_response");
-    expect(second.pendingEventCount).toBe(0);
+    expect(second.pendingWakeCount).toBe(0);
     expect(sideEffects).toBe(1);
   });
 
@@ -2385,7 +2380,7 @@ describe("HostedUserRunner", () => {
       state: "completed",
       userId: "member_123",
     });
-    expect(result.status.pendingEventCount).toBe(0);
+    expect(result.status.pendingWakeCount).toBe(0);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBeGreaterThan(0);
   });
 
@@ -2474,7 +2469,7 @@ describe("HostedUserRunner", () => {
       state: "queued",
       userId: "member_123",
     });
-    expect(second.status.pendingEventCount).toBe(0);
+    expect(second.status.pendingWakeCount).toBe(0);
     expect(second.status.lastEventId).toBe("evt_duplicate_consumed_status_fallback");
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(
       invokesAfterFirstDispatch,
@@ -2527,7 +2522,6 @@ describe("HostedUserRunner", () => {
       state: "poisoned",
       userId: "member_123",
     });
-    expect(replayed.status.poisonedEventIds).toEqual([]);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
@@ -2556,8 +2550,8 @@ describe("HostedUserRunner", () => {
 
     const first = await runner.wake(dispatch);
 
-    expect(first.pendingEventCount).toBe(1);
-    expect(first.retryingEventId).toBe("evt_missing_commit");
+    expect(first.pendingWakeCount).toBe(1);
+    expect(first.lastEventId).toBe("evt_missing_commit");
     expect(first.lastError).toBe("Hosted execution failed before recording a durable commit.");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -2597,8 +2591,7 @@ describe("HostedUserRunner", () => {
 
     const second = await runner.wake(dispatch);
 
-    expect(second.pendingEventCount).toBe(0);
-    expect(second.retryingEventId).toBeNull();
+    expect(second.pendingWakeCount).toBe(0);
     expect(second.lastError).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -2621,7 +2614,6 @@ describe("HostedUserRunner", () => {
           lastError: "timeout",
         },
       ],
-      retryingEventId: dispatch.eventId,
       storage,
       userId: dispatch.userId,
     });
@@ -2663,8 +2655,7 @@ describe("HostedUserRunner", () => {
 
     const status = await runner.wake(dispatch);
 
-    expect(status.pendingEventCount).toBe(0);
-    expect(status.retryingEventId).toBeNull();
+    expect(status.pendingWakeCount).toBe(0);
     expect(status.lastError).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(
@@ -2695,9 +2686,7 @@ describe("HostedUserRunner", () => {
 
     const status = await runner.wake(createWake("evt_per_run_runner_token", "member_123"));
 
-    expect(status.pendingEventCount).toBe(0);
-    expect(status.poisonedEventIds).toEqual([]);
-    expect(status.retryingEventId).toBeNull();
+    expect(status.pendingWakeCount).toBe(0);
     expect(status.lastError).toBeNull();
     expect(status.lastErrorCode).toBeUndefined();
     expect(status.run).toBeUndefined();
@@ -2774,8 +2763,6 @@ describe("HostedUserRunner", () => {
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    expect((await runner.status()).poisonedEventIds).toEqual([]);
-
     vi.stubGlobal(
       "fetch",
       createHostedWakeAwareFetch({
@@ -2796,7 +2783,6 @@ describe("HostedUserRunner", () => {
       state: "poisoned",
       userId: "member_123",
     });
-    expect(replayed.status.poisonedEventIds).toEqual([]);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
@@ -3189,7 +3175,6 @@ async function seedRunnerQueueState(
       startedAt: string;
     } | null;
     runtimeBootstrapped?: boolean;
-    backpressuredEventIds?: string[];
     bucket: ReturnType<typeof createBucket>;
     environment: HostedExecutionEnvironment;
     inFlight?: boolean;
@@ -3234,7 +3219,6 @@ async function seedRunnerQueueState(
       lastError: string;
       poisonedAt: string;
     }>;
-    retryingEventId?: string | null;
     storage: ReturnType<typeof createStorage>;
     userId: string;
   },
@@ -3265,9 +3249,8 @@ async function seedRunnerQueueState(
       last_error_code,
       last_event_id,
       last_run_at,
-      next_wake_at,
-      retrying_event_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      next_wake_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
     input.activeRunLease?.eventId ?? null,
@@ -3281,7 +3264,6 @@ async function seedRunnerQueueState(
       input.lastEventId ?? null,
       input.lastRunAt ?? null,
       input.nextWakeAt ?? null,
-      input.retryingEventId ?? null,
     );
 
   sql.exec(
@@ -3700,7 +3682,7 @@ async function createCommittedRunnerSuccessResponse(input: {
       wake: {
         behavior: "ordered",
         createdAt: wakeAppendRequest.occurredAt,
-        dedupeKey: `dispatch:${wakeAppendRequest.kind}:${wakeAppendRequest.eventId}`,
+        dedupeKey: `${wakeAppendRequest.eventId}`,
         id: `wake_${wakeAppendRequest.eventId}`,
         kind: wakeAppendRequest.kind,
         occurredAt: wakeAppendRequest.occurredAt,

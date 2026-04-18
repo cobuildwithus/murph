@@ -312,10 +312,10 @@ lifecycle plus local execution residue.
 live with the canonical wake/cursor owner instead of being split across a web
 outbox and a Cloudflare queue model.
 
-**Main refactor risk:** do not let compatibility status fields such as
-`pendingEventCount`, `poisonedEventIds`, or `backpressuredEventIds` become a
-second durable queue truth. They are compatibility/output fields only; the
-canonical owner remains the web-owned wake/cursor seam.
+**Main refactor risk:** do not let Cloudflare status output grow a second wake
+ownership seam. The only queue-depth field should stay wake-native
+(`pendingWakeCount`), and the canonical owner remains the web-owned
+`HostedWake` / `HostedExecutionCursor` seam.
 
 ### 18. Keep device-sync wake hint subshapes with the device-sync runtime owner
 

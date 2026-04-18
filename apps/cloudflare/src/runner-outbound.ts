@@ -80,7 +80,7 @@ export async function handleRunnerOutboundRequest(
       },
       error,
       message: "Hosted runner outbound request failed.",
-      phase: "dispatch.running",
+      phase: "wake.running",
     });
 
     const details = buildHostedExecutionSafeErrorDetails(error);

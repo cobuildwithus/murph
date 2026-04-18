@@ -540,7 +540,7 @@ async function maybeHandleLocalLoopbackProxyRoute(
     completedMessage: "Hosted worker local loopback proxy request completed.",
     component: "worker",
     failedMessage: "Hosted worker local loopback proxy request failed.",
-    phase: "dispatch.running",
+    phase: "wake.running",
     request,
     startMessage: "Hosted worker local loopback proxy request started.",
     upstreamUrl,
