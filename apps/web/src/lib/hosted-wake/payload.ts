@@ -1,11 +1,14 @@
 import { Buffer } from "node:buffer";
 
 import {
+  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution";
+
+import {
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
-
-export const HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA = "murph.hosted-wake-dispatch.v1";
 export const HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES = 16 * 1024;
 
 const HOSTED_WAKE_INLINE_PAYLOAD_FIELD = "hosted-wake-inline-payload";
@@ -95,3 +98,8 @@ export function decodeHostedWakeStoredPayload(input: {
 
   return JSON.parse(decrypted) as unknown;
 }
+
+export {
+  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+};

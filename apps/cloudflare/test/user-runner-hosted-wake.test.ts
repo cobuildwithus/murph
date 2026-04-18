@@ -1,4 +1,9 @@
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
+import {
+  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  buildHostedWakeLinqMessageReceivedPayload,
+} from "@murphai/hosted-execution";
 
 import { createHostedExecutionVercelOidcValidationEnvironment } from "../src/auth-adapter.ts";
 import type { HostedExecutionEnvironment } from "../src/env.ts";
@@ -109,6 +114,16 @@ describe("HostedUserRunner hosted wake drain", () => {
         version: "cursor_v3",
       }),
     });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockResolvedValue({
+      cursor: createCursorState({
+        committedSeq: "2",
+        nextSeq: "3",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v3",
+      }),
+      pendingWakeCount: 0,
+    });
 
     const runner = new HostedUserRunner(
       storage.state,
@@ -169,6 +184,16 @@ describe("HostedUserRunner hosted wake drain", () => {
         version: "cursor_v2",
       }),
     });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockResolvedValue({
+      cursor: createCursorState({
+        committedSeq: "0",
+        nextSeq: "2",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+      pendingWakeCount: 1,
+    });
 
     const runner = new HostedUserRunner(
       storage.state,
@@ -199,6 +224,165 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1"]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_stale_commit"]);
     expect(finalizeNativeWakeDispatchAfterCursorCommit).not.toHaveBeenCalled();
+  });
+
+  it("finalizes every committed wake before local cleanup after the cursor advances", async () => {
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const dispatchProcessor = Reflect.get(runner, "dispatchProcessor");
+
+    if (
+      !dispatchProcessor
+      || typeof dispatchProcessor !== "object"
+      || !("finalizeNativeWakeDispatchAfterCursorCommit" in dispatchProcessor)
+      || !("cleanupNativeWakeDispatchAfterCursorCommit" in dispatchProcessor)
+    ) {
+      throw new Error("Expected HostedUserRunner dispatch processor test internals to be available.");
+    }
+
+    const finalizeNativeWakeDispatchAfterCursorCommit = vi.spyOn(
+      dispatchProcessor,
+      "finalizeNativeWakeDispatchAfterCursorCommit",
+    );
+    const cleanupNativeWakeDispatchAfterCursorCommit = vi.spyOn(
+      dispatchProcessor,
+      "cleanupNativeWakeDispatchAfterCursorCommit",
+    );
+    finalizeNativeWakeDispatchAfterCursorCommit.mockResolvedValue({
+      assistantDeliveryEffects: [],
+      bundleRef: null,
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: "evt_batch_second",
+      finalizedAt: "2026-03-26T12:00:01.000Z",
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "handled",
+      },
+    });
+
+    const finalizeCommittedHostedWakesLocally = Reflect.get(runner, "finalizeCommittedHostedWakesLocally");
+
+    if (typeof finalizeCommittedHostedWakesLocally !== "function") {
+      throw new Error("Expected HostedUserRunner finalizeCommittedHostedWakesLocally test helper.");
+    }
+
+    await finalizeCommittedHostedWakesLocally.call(runner, {
+      committedCursor: createCursorState({
+        committedSeq: "2",
+        nextSeq: "3",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+      dispatches: [
+        {
+          dispatch: createDispatch("evt_batch_first"),
+          seq: 1n,
+          state: "completed",
+        },
+        {
+          dispatch: createDispatch("evt_batch_second"),
+          seq: 2n,
+          state: "completed",
+        },
+      ],
+    });
+
+    expect(readDispatchEventIdsFromSpy(finalizeNativeWakeDispatchAfterCursorCommit)).toEqual([
+      "evt_batch_first",
+      "evt_batch_second",
+    ]);
+    expect(readDispatchEventIdsFromSpy(cleanupNativeWakeDispatchAfterCursorCommit)).toEqual([
+      "evt_batch_first",
+      "evt_batch_second",
+    ]);
+  });
+
+  it("reconstructs direct message wake payloads into hosted runner dispatches", async () => {
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "0",
+          nextSeq: "2",
+          version: "cursor_v1",
+        }),
+        wakes: [
+          createHostedWakeRecord({
+            kind: "linq.message.received",
+            payloadJson: buildHostedWakeLinqMessageReceivedPayload({
+              eventId: "evt_linq_message",
+              linqEvent: {
+                id: "msg_123",
+                parts: [
+                  {
+                    type: "text",
+                    value: "hello",
+                  },
+                ],
+              },
+              linqMessageId: "msg_123",
+              phoneLookupKey: "lookup_123",
+            }),
+            payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+            seq: "1",
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "1",
+          nextSeq: "2",
+          updatedAt: "2026-03-26T12:00:02.000Z",
+          version: "cursor_v2",
+        }),
+        wakes: [],
+      });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+    });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockResolvedValue({
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+      pendingWakeCount: 0,
+    });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    await runner.wakeHostedWakes();
+
+    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_linq_message"]);
   });
 });
 
@@ -232,17 +416,20 @@ function createCursorState(overrides: Partial<{
 }
 
 function createHostedWakeRecord(input: {
+  kind?: string;
+  occurredAt?: string;
   payloadJson: unknown;
+  payloadSchema?: string;
   seq: string;
 }) {
   return {
     behavior: "ordered" as const,
     createdAt: "2026-03-26T12:00:00.000Z",
     id: `wake_${input.seq}`,
-    kind: "assistant.cron.tick",
-    occurredAt: "2026-03-26T12:00:00.000Z",
+    kind: input.kind ?? "assistant.cron.tick",
+    occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
     payloadJson: input.payloadJson,
-    payloadSchema: "murph.hosted-dispatch-payload.v1",
+    payloadSchema: input.payloadSchema ?? HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
     seq: input.seq,
     updatedAt: "2026-03-26T12:00:00.000Z",
     userId: "member_123",
@@ -290,6 +477,28 @@ function readDispatchedEventIds(fetchMock: ReturnType<typeof vi.fn>): string[] {
     const request = readRunnerJobRequest(JSON.parse(body));
 
     return request.resume ? [] : [request.dispatch.eventId];
+  });
+}
+
+function readDispatchEventIdsFromSpy(
+  spy: ReturnType<typeof vi.spyOn>,
+): string[] {
+  return spy.mock.calls.map((call: unknown[]) => {
+    const input = call[0];
+
+    if (
+      !input
+      || typeof input !== "object"
+      || !("dispatch" in input)
+      || !input.dispatch
+      || typeof input.dispatch !== "object"
+      || !("eventId" in input.dispatch)
+      || typeof input.dispatch.eventId !== "string"
+    ) {
+      throw new TypeError("Expected a dispatch payload with an eventId.");
+    }
+
+    return input.dispatch.eventId;
   });
 }
 
