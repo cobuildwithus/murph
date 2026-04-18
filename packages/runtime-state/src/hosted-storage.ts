@@ -13,12 +13,10 @@ export type HostedStorageScope =
   | "device-sync-runtime"
   | "email-raw"
   | "email-route"
-  | "execution-journal"
   | "gateway-store"
   | "root-key-envelope"
   | "root-key-recipient"
-  | "runner-secrets"
-  | "side-effect-journal";
+  | "runner-secrets";
 
 export interface HostedCipherEnvelope {
   algorithm: "AES-GCM";
@@ -280,10 +278,8 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "device-sync-runtime",
   "email-raw",
   "email-route",
-  "execution-journal",
   "gateway-store",
   "root-key-envelope",
   "root-key-recipient",
   "runner-secrets",
-  "side-effect-journal",
 ]);

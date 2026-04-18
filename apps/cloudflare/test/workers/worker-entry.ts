@@ -3,10 +3,12 @@ import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import worker from "../../src/index.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";
-import { persistHostedExecutionCommit } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
 import { createHostedUserKeyStore } from "../../src/user-key-store.js";
+import { RunnerBundleSync } from "../../src/user-runner/runner-bundle-sync.js";
+import { RunnerStateStore } from "../../src/user-runner/runner-state-store.js";
+import type { RunnerPendingCommitRecord } from "../../src/user-runner/types.js";
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import {
@@ -14,12 +16,14 @@ import {
   buildSeededDuplicateCommitPayload,
   clearRunnerInvocationState,
   clearRunnerCommitPause,
+  readRunnerCommitPauseRequest,
   readRunnerInvocationState,
   readRunnerCommitPauseState,
   releaseRunnerCommitPause,
 } from "./runner-e2e-control.ts";
 
 import type {
+  HostedAssistantRuntimeJobResult,
   HostedExecutionWake,
   HostedWakeExecutionResult,
   HostedExecutionUserStatus,
@@ -192,23 +196,6 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
         error: `No paused committed runner request is available for ${body.eventId}.`,
       }, { status: 409 });
     }
-
-    const crypto = await resolveHostedUserCryptoContext(body.userId);
-    await persistHostedExecutionCommit({
-      bucket: (env as { BUNDLES: R2BucketLike }).BUNDLES,
-      currentBundleRef: null,
-      eventId: body.eventId,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
-        assistantDeliveryEffects: seeded.committedAssistantDeliveryEffects,
-        bundle: seeded.result.bundle,
-        gatewayProjectionSnapshot: seeded.committedGatewayProjectionSnapshot,
-        result: seeded.result.result,
-      },
-      userId: body.userId,
-    });
 
     return Response.json({
       eventId: body.eventId,

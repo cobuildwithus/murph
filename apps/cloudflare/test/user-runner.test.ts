@@ -40,12 +40,6 @@ import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
 import {
-  createHostedExecutionJournalStore,
-  persistHostedExecutionCommit,
-  persistHostedExecutionFinalBundles,
-  type HostedExecutionCommittedResult,
-} from "../src/execution-journal.js";
-import {
   type HostedExecutionEnvironment,
 } from "../src/env.ts";
 import {
@@ -55,6 +49,8 @@ import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner as BaseHostedUserRunner } from "../src/user-runner.js";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
+import type { RunnerPendingCommitRecord } from "../src/user-runner/types.js";
 import { encodeHostedRunnerSecretsPayload } from "../src/runner-secrets.js";
 import {
   TEST_AUTOMATION_RECIPIENT_KEY_ID,
@@ -532,24 +528,20 @@ describe("HostedUserRunner", () => {
         runtimeBootstrapped: true,
         bucket,
         environment,
-        pendingEvents: [
-          {
-            attempts: 1,
-            availableAt: "2026-03-26T12:00:00.000Z",
-            dispatch: {
-              event: {
-                kind: "assistant.cron.tick",
-                reason: "manual",
-                userId: "member_recovered_gc",
-              },
-              eventId: "evt_recovered_gc",
-              occurredAt: "2026-03-26T12:00:00.000Z",
-            },
-            enqueuedAt: "2026-03-26T12:00:00.000Z",
-            lastError: "lost ack",
-          },
-        ],
         lastEventId: "evt_recovered_gc",
+        pendingCommit: {
+          assistantDeliveryEffects: [],
+          bundleRef: previousVaultRef,
+          committedAt: "2026-03-26T12:00:01.000Z",
+          eventId: "evt_recovered_gc",
+          finalizedAt: "2026-03-26T12:00:02.000Z",
+          result: {
+            eventsHandled: 1,
+            summary: "recovered",
+          },
+          schemaVersion: 1,
+          userId: "member_recovered_gc",
+        },
         storage,
         userId: "member_recovered_gc",
       });
@@ -566,35 +558,6 @@ describe("HostedUserRunner", () => {
         1,
       );
 
-      await persistHostedExecutionCommit({
-        bucket: bucket.api,
-        currentBundleRef: previousVaultRef,
-        eventId: "evt_recovered_gc",
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from(nextVaultBundle!).toString("base64"),
-          result: {
-            eventsHandled: 1,
-            summary: "recovered",
-          },
-        },
-        userId: "member_recovered_gc",
-      });
-      await persistHostedExecutionFinalBundles({
-        bucket: bucket.api,
-        eventId: "evt_recovered_gc",
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
-        payload: {
-          bundle: Buffer.from(nextVaultBundle!).toString("base64"),
-        },
-        userId: "member_recovered_gc",
-      });
-
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
       const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -603,194 +566,13 @@ describe("HostedUserRunner", () => {
 
       expect(fetchMock).not.toHaveBeenCalled();
       expect(status.lastError).toBeNull();
+      expect(status.pendingWakeCount).toBe(0);
       expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).toContain(previousAgentRef.key);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
-
-  it("roundtrips committed execution journal records through object storage", async () => {
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: environment.platformEnvelopeKey,
-      keyId: environment.platformEnvelopeKeyId,
-    });
-    const committedResult = {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-27T00:00:00.000Z",
-      eventId: "evt_roundtrip",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "member_123",
-    };
-
-    await journalStore.writeCommittedResult("member_123", "evt_roundtrip", committedResult);
-
-    await expect(journalStore.readCommittedResult("member_123", "evt_roundtrip")).resolves.toEqual(
-      committedResult,
-    );
-  });
-
-  it("rejects duplicate durable commits whose payload diverges from the first write", async () => {
-    await persistHostedExecutionCommit({
-      bucket: bucket.api,
-      currentBundleRef: null,
-      eventId: "evt_duplicate_commit",
-      key: environment.platformEnvelopeKey,
-      keyId: environment.platformEnvelopeKeyId,
-      payload: {
-        assistantDeliveryEffects: [],
-        bundle: Buffer.from("vault").toString("base64"),
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      userId: "member_123",
-    });
-
-    await expect(
-      persistHostedExecutionCommit({
-        bucket: bucket.api,
-        currentBundleRef: null,
-        eventId: "evt_duplicate_commit",
-        key: environment.platformEnvelopeKey,
-        keyId: environment.platformEnvelopeKeyId,
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          result: {
-            eventsHandled: 1,
-            summary: "changed",
-          },
-        },
-        userId: "member_123",
-      }),
-    ).rejects.toThrow(
-      "Hosted execution commit evt_duplicate_commit result does not match the existing durable commit.",
-    );
-  });
-
-  it("does not rewrite finalized journal records when bundle refs only differ by updatedAt", async () => {
-    await persistHostedExecutionCommit({
-      bucket: bucket.api,
-      currentBundleRef: null,
-      eventId: "evt_finalize_same_ref",
-      key: environment.platformEnvelopeKey,
-      keyId: environment.platformEnvelopeKeyId,
-      payload: {
-        assistantDeliveryEffects: [],
-        bundle: Buffer.from("vault").toString("base64"),
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      userId: "member_123",
-    });
-
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: environment.platformEnvelopeKey,
-      keyId: environment.platformEnvelopeKeyId,
-    });
-    const existing = await journalStore.readCommittedResult("member_123", "evt_finalize_same_ref");
-    if (!existing?.bundleRef) {
-      throw new Error("Expected committed bundle ref to exist.");
-    }
-
-    const finalizedRecord = {
-      ...existing,
-      bundleRef: {
-        ...existing.bundleRef,
-        updatedAt: "2026-03-27T00:00:01.000Z",
-      },
-      finalizedAt: "2026-03-27T00:00:02.000Z",
-    };
-    await journalStore.writeCommittedResult("member_123", "evt_finalize_same_ref", finalizedRecord);
-    const writesBeforeFinalize = bucket.putCount();
-
-    const finalized = await persistHostedExecutionFinalBundles({
-      bucket: bucket.api,
-      eventId: "evt_finalize_same_ref",
-      key: environment.platformEnvelopeKey,
-      keyId: environment.platformEnvelopeKeyId,
-      payload: {
-        bundle: Buffer.from("vault").toString("base64"),
-      },
-      userId: "member_123",
-    });
-
-    expect(finalized).toEqual(finalizedRecord);
-    expect(bucket.putCount()).toBe(writesBeforeFinalize);
-  });
-  it("reapplies committed gateway snapshots from the durable journal before finalize completes", async () => {
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: "member_123",
-    });
-    await seedRunnerQueueState({
-      runtimeBootstrapped: true,
-      bucket,
-      environment,
-      pendingEvents: [{
-        attempts: 1,
-        availableAt: "2026-03-26T12:00:00.000Z",
-        dispatch: createWake("evt_gateway_recovery"),
-        enqueuedAt: "2026-03-26T12:00:00.000Z",
-        lastError: "lost ack",
-      }],
-      lastEventId: "evt_gateway_recovery",
-      storage,
-      userId: "member_123",
-    });
-
-    await createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).writeCommittedResult("member_123", "evt_gateway_recovery", {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-26T12:00:01.000Z",
-      eventId: "evt_gateway_recovery",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
-        generatedAt: "2026-03-26T12:00:01.000Z",
-        lastActivityAt: "2026-03-26T12:00:01.000Z",
-        lastMessagePreview: "Committed before finalize.",
-        messages: [{
-          actorDisplayName: "Alex",
-          createdAt: "2026-03-26T12:00:01.000Z",
-          direction: "inbound",
-          messageId: "gwcm_projection_recovery",
-          text: "Committed before finalize.",
-        }],
-        messageCount: 1,
-        title: "Recovery thread",
-      }),
-      result: {
-        eventsHandled: 1,
-        summary: "commit recorded",
-      },
-      userId: "member_123",
-    });
-
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const status = await runner.wake(createWake("evt_gateway_recovery"));
-
-    expect(status.pendingWakeCount).toBe(1);
-    expect(status.lastEventId).toBe("evt_gateway_recovery");
-  });
-
 
   it("recovers finalized committed results after automation-key rotation via the user root key envelope", async () => {
     const rotatedEnvironment = {
@@ -814,41 +596,27 @@ describe("HostedUserRunner", () => {
       runtimeBootstrapped: true,
       bucket,
       environment: rotatedEnvironment,
-      pendingEvents: [
-        {
-          attempts: 1,
-          availableAt: "2026-03-26T12:00:00.000Z",
-          dispatch,
-          enqueuedAt: "2026-03-26T12:00:00.000Z",
-          lastError: "lost ack",
-        },
-      ],
       lastEventId: dispatch.eventId,
-      storage,
-      userId: dispatch.userId,
-    });
-
-    await createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).writeCommittedResult(dispatch.userId, dispatch.eventId, {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-26T12:00:01.000Z",
-      eventId: dispatch.eventId,
-      finalizedAt: "2026-03-26T12:00:02.000Z",
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "recovered",
+      pendingCommit: {
+        assistantDeliveryEffects: [],
+        bundleRef: null,
+        committedAt: "2026-03-26T12:00:01.000Z",
+        eventId: dispatch.eventId,
+        finalizedAt: "2026-03-26T12:00:02.000Z",
+        result: {
+          eventsHandled: 1,
+          summary: "recovered",
+        },
+        schemaVersion: 1,
+        userId: dispatch.userId,
       },
+      storage,
       userId: dispatch.userId,
     });
 
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
+    const stateStore = new RunnerStateStore(storage.state as never);
 
     const status = await runner.wake(dispatch);
 
@@ -856,14 +624,7 @@ describe("HostedUserRunner", () => {
     expect(status.pendingWakeCount).toBe(0);
     expect(status.lastError).toBeNull();
     expect(status.lastEventId).toBe(dispatch.eventId);
-    await expect(
-      createHostedExecutionJournalStore({
-        bucket: bucket.api,
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
-      }).readCommittedResult(dispatch.userId, dispatch.eventId),
-    ).resolves.toBeNull();
+    await expect(stateStore.readPendingCommit(dispatch.eventId)).resolves.toBeNull();
   });
 
   it("dispatches work through the runner endpoint and persists encrypted bundles", async () => {
@@ -881,18 +642,10 @@ describe("HostedUserRunner", () => {
       "fetch",
       createHostedWakeAwareFetch({
         bucket,
-        handler: vi.fn(async (_url, init) => {
-          await commitResultForRunnerRequest({
-            bucket,
-            environment,
-            payload: resultPayload,
-            requestBody: JSON.parse(String(init?.body)),
-          });
-
-          return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
+        handler: vi.fn(async () =>
+          new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
             status: 200,
-          });
-        }),
+          })),
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -915,24 +668,6 @@ describe("HostedUserRunner", () => {
     expect(new Set((status.timeline ?? []).map((entry) => entry.runId)).size).toBe(1);
     expect(storage.lastAlarm).toBeNull();
     expectHostedBundleKeys(bucket.keys(), ["vault"]);
-    await expect(createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: (await resolveHostedUserCryptoContextForTest({
-        bucket,
-        environment,
-        userId: "member_123",
-      })).rootKey,
-      keyId: (await resolveHostedUserCryptoContextForTest({
-        bucket,
-        environment,
-        userId: "member_123",
-      })).rootKeyId,
-      keysById: (await resolveHostedUserCryptoContextForTest({
-        bucket,
-        environment,
-        userId: "member_123",
-      })).keysById,
-    }).readCommittedResult("member_123", "evt_123")).resolves.toBeNull();
   });
 
   it("starts the native container runner and applies the next wake hint", async () => {
@@ -955,8 +690,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: resultPayload,
             requestBody: JSON.parse(String(init?.body)),
           });
@@ -985,8 +718,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: createRunnerSuccessPayload({
               summary: "processed email",
             }),
@@ -1054,36 +785,21 @@ describe("HostedUserRunner", () => {
       runtimeBootstrapped: true,
       bucket,
       environment,
-      pendingEvents: [
-        {
-          attempts: 1,
-          availableAt: "2026-03-26T12:00:00.000Z",
-          dispatch,
-          enqueuedAt: "2026-03-26T12:00:00.000Z",
-          lastError: "lost ack",
-        },
-      ],
       lastEventId: dispatch.eventId,
-      storage,
-      userId,
-    });
-
-    await createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    }).writeCommittedResult(userId, dispatch.eventId, {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-26T12:00:01.000Z",
-      eventId: dispatch.eventId,
-      finalizedAt: "2026-03-26T12:00:02.000Z",
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "recovered email",
+      pendingCommit: {
+        assistantDeliveryEffects: [],
+        bundleRef: null,
+        committedAt: "2026-03-26T12:00:01.000Z",
+        eventId: dispatch.eventId,
+        finalizedAt: "2026-03-26T12:00:02.000Z",
+        result: {
+          eventsHandled: 1,
+          summary: "recovered email",
+        },
+        schemaVersion: 1,
+        userId,
       },
+      storage,
       userId,
     });
 
@@ -1128,8 +844,6 @@ describe("HostedUserRunner", () => {
           },
         };
         await commitResultForRunnerRequest({
-          bucket,
-          environment,
           payload,
           requestBody: JSON.parse(String(init?.body)),
         });
@@ -1216,8 +930,6 @@ describe("HostedUserRunner", () => {
           },
         };
         await commitResultForRunnerRequest({
-          bucket,
-          environment,
           payload,
           requestBody: JSON.parse(String(init?.body)),
         });
@@ -1262,8 +974,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: resultPayload,
             requestBody: JSON.parse(String(init?.body)),
           });
@@ -1321,8 +1031,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: resultPayload,
             requestBody: JSON.parse(String(init?.body)),
           });
@@ -1415,8 +1123,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: committedPayload,
             requestBody: JSON.parse(String(init?.body)),
           });
@@ -1551,8 +1257,6 @@ describe("HostedUserRunner", () => {
 
             if (readRunnerJobRequest(requestBody).resume) {
               await finalizeResultForRunnerRequest({
-                bucket,
-                environment,
                 payload: createRunnerSuccessPayload({
                   agentState: Buffer.from("agent-state-final").toString("base64"),
                   summary: "final",
@@ -1571,8 +1275,6 @@ describe("HostedUserRunner", () => {
             }
 
             await commitResultForRunnerRequest({
-              bucket,
-              environment,
               payload: createRunnerSuccessPayload({
                 agentState: Buffer.from("agent-state-committed").toString("base64"),
                 summary: "committed",
@@ -1616,50 +1318,53 @@ describe("HostedUserRunner", () => {
   });
 
   it("recovers finalized bundle refs when the runner fails after durable finalize but before returning", async () => {
-    const committedPayload = createRunnerSuccessPayload({
-      agentState: Buffer.from("agent-state-committed").toString("base64"),
-      summary: "committed",
-      vault: Buffer.from("vault-committed").toString("base64"),
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: "member_123",
     });
-    const finalPayload = createRunnerSuccessPayload({
-      agentState: Buffer.from("agent-state-finalized").toString("base64"),
-      summary: "finalized",
-      vault: Buffer.from("vault-finalized").toString("base64"),
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
     });
-    vi.stubGlobal(
-      "fetch",
-      createHostedWakeAwareFetch({
-        bucket,
-        handler: vi.fn(async (_url, init) => {
-          const requestBody = JSON.parse(String(init?.body));
-          await commitResultForRunnerRequest({
-            bucket,
-            environment,
-            payload: committedPayload,
-            requestBody,
-          });
-          await finalizeResultForRunnerRequest({
-            bucket,
-            environment,
-            payload: finalPayload,
-            requestBody,
-          });
-          throw new Error("runner connection dropped after finalize");
-        }),
-      }),
+    const finalBundleRef = await bundleStore.writeBundle(
+      "vault",
+      new TextEncoder().encode("vault-finalized"),
     );
+    await seedRunnerQueueState({
+      runtimeBootstrapped: true,
+      bucket,
+      environment,
+      lastEventId: "evt_finalized_recovery",
+      pendingCommit: {
+        assistantDeliveryEffects: [],
+        bundleRef: finalBundleRef,
+        committedAt: "2026-03-26T12:00:01.000Z",
+        eventId: "evt_finalized_recovery",
+        finalizedAt: "2026-03-26T12:00:02.000Z",
+        result: {
+          eventsHandled: 1,
+          summary: "finalized",
+        },
+        schemaVersion: 1,
+        userId: "member_123",
+      },
+      storage,
+      userId: "member_123",
+    });
+    vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: vi.fn() }));
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
     const status = await runner.wake(createActivationWake("evt_finalized_recovery", "member_123"));
 
     expect(status.lastError).toBeNull();
     expect(status.pendingWakeCount).toBe(0);
-    expect(status.bundleRef).toMatchObject({
-      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
-    });
+    expect(status.bundleRef).toEqual(finalBundleRef);
   });
 
-  it("keeps committed events pending until the hosted web callback path can resume finalize retries", async () => {
+  it("retries a DO-local pending commit until finalize succeeds", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const sideEffects = [
@@ -1680,26 +1385,8 @@ describe("HostedUserRunner", () => {
       summary: "final",
       vault: Buffer.from("vault-final").toString("base64"),
     });
-    const fetchSpy = vi.fn()
-      .mockImplementation(async (url, init) => {
-        const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
-          bucket,
-          init,
-          url,
-        });
-        if (hostedWakeResponse) {
-          return hostedWakeResponse;
-        }
-
-        await commitResultForRunnerRequest({
-          bucket,
-          environment,
-          payload: committedPayload,
-          requestBody: JSON.parse(String(init?.body)),
-        });
-        throw new Error("finalize failed");
-      })
-      .mockImplementationOnce(async (url, init) => {
+    let runnerInvocationCount = 0;
+    const fetchSpy = vi.fn(async (url, init) => {
         const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
           bucket,
           init,
@@ -1710,18 +1397,26 @@ describe("HostedUserRunner", () => {
         }
 
         const requestBody = JSON.parse(String(init?.body));
-        expect(readRunnerJobRequest(requestBody).resume).toEqual({
+        const request = readRunnerJobRequest(requestBody);
+        runnerInvocationCount += 1;
+
+        if (runnerInvocationCount === 1) {
+          expect(request.resume).toBeUndefined();
+          return new Response(JSON.stringify(serializeRunnerCommittedPayload(committedPayload)), {
+            status: 200,
+          });
+        }
+
+        expect(request.resume).toEqual({
           committedResult: {
             assistantDeliveryEffects: expectedResumeSideEffects,
             result: committedPayload.result,
           },
         });
-        await finalizeResultForRunnerRequest({
-          bucket,
-          environment,
-          payload: finalPayload,
-          requestBody,
-        });
+
+        if (runnerInvocationCount === 2) {
+          throw new Error("finalize failed");
+        }
 
         return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
           status: 200,
@@ -1730,29 +1425,36 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchSpy }));
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
+    const stateStore = new RunnerStateStore(storage.state as never);
 
     const firstStatus = await runner.wake(createActivationWake("evt_finalize_retry", "member_123"));
     expect(firstStatus.pendingWakeCount).toBe(1);
     expect(firstStatus.lastEventId).toBe("evt_finalize_retry");
-    expect(firstStatus.timeline?.at(-1)).toMatchObject({
-      message:
-        "Hosted wake execution deferred after a direct runner failure. Hosted execution runtime failed. Detail: expected undefined to deeply equal { committedResult: { …(2) } }",
-      phase: "retry.scheduled",
+    expect(firstStatus.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });
-    expect(firstStatus.bundleRef).toBeNull();
+    await expect(stateStore.readPendingCommit("evt_finalize_retry")).resolves.toMatchObject({
+      assistantDeliveryEffects: expectedResumeSideEffects,
+      eventId: "evt_finalize_retry",
+      finalizedAt: null,
+    });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
 
     vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
-    await runner.alarm();
+    await runner.wakeHostedWakes();
 
     const finalStatus = await runner.status();
-    expect(finalStatus.pendingWakeCount).toBe(1);
+    expect(finalStatus.pendingWakeCount).toBe(0);
     expect(finalStatus.lastEventId).toBe("evt_finalize_retry");
-    expect(finalStatus.bundleRef).toBeNull();
+    expect(finalStatus.bundleRef).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+    });
+    await expect(stateStore.readPendingCommit("evt_finalize_retry")).resolves.toBeNull();
+    expect(runnerInvocationCount).toBe(3);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
 
-  it("leaves committed pending crash recovery to the hosted web callback path", async () => {
+  it("resumes a stale DO-local pending commit after a restart", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const dispatch = createWake("evt_resume_after_crash", "member_123", "2026-03-26T12:00:00.000Z");
@@ -1777,34 +1479,23 @@ describe("HostedUserRunner", () => {
       bucket,
       environment,
       inFlight: true,
-      pendingEvents: [{
-        attempts: 0,
-        availableAt: dispatch.occurredAt,
-        dispatch,
-        enqueuedAt: dispatch.occurredAt,
-        lastError: null,
-      }],
+      pendingCommit: {
+        assistantDeliveryEffects: [],
+        bundleRef: null,
+        committedAt: dispatch.occurredAt,
+        eventId: dispatch.eventId,
+        finalizedAt: null,
+        result: committedPayload.result,
+        schemaVersion: 1,
+        userId: dispatch.userId,
+      },
+      runtimeBootstrapped: true,
       storage,
       userId: dispatch.userId,
     });
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: dispatch.userId,
-    });
-    await persistHostedExecutionCommit({
+    await appendTestHostedWake({
       bucket: bucket.api,
-      currentBundleRef: null,
-      eventId: dispatch.eventId,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
-        assistantDeliveryEffects: [],
-        bundle: committedPayload.bundles.vault,
-        result: committedPayload.result,
-      },
-      userId: dispatch.userId,
+      wake: dispatch,
     });
 
     const fetchSpy = vi.fn(async (_url, init) => {
@@ -1815,19 +1506,14 @@ describe("HostedUserRunner", () => {
           result: committedPayload.result,
         },
       });
-      await finalizeResultForRunnerRequest({
-        bucket,
-        environment,
-        payload: finalPayload,
-        requestBody,
-      });
-
       return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
         status: 200,
       });
     });
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchSpy }));
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, dispatch.userId);
+    const stateStore = new RunnerStateStore(storage.state as never);
 
     vi.setSystemTime(new Date("2026-03-26T12:01:01.000Z"));
     await runner.alarm();
@@ -1835,8 +1521,9 @@ describe("HostedUserRunner", () => {
     const status = await runner.status();
     expect(status.pendingWakeCount).toBe(0);
     expect(status.lastEventId).toBe(dispatch.eventId);
-    expect(status.inFlight).toBe(true);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(status.inFlight).toBe(false);
+    await expect(stateStore.readPendingCommit(dispatch.eventId)).resolves.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("does not launch a second resumed run while the first runner is still alive after commit", async () => {
@@ -1867,16 +1554,12 @@ describe("HostedUserRunner", () => {
 
       const requestBody = JSON.parse(String(init?.body));
       await commitResultForRunnerRequest({
-        bucket,
-        environment,
         payload: committedPayload,
         requestBody,
       });
       firstCommitRecorded.resolve();
       await releaseFirstRunner.promise;
       await finalizeResultForRunnerRequest({
-        bucket,
-        environment,
         payload: finalPayload,
         requestBody,
       });
@@ -1929,16 +1612,12 @@ describe("HostedUserRunner", () => {
 
       const requestBody = JSON.parse(String(init?.body));
       await commitResultForRunnerRequest({
-        bucket,
-        environment,
         payload: committedPayload,
         requestBody,
       });
       firstCommitRecorded.resolve();
       await releaseFirstRunner.promise;
       await finalizeResultForRunnerRequest({
-        bucket,
-        environment,
         payload: finalPayload,
         requestBody,
       });
@@ -1995,16 +1674,12 @@ describe("HostedUserRunner", () => {
 
       const requestBody = JSON.parse(String(init?.body));
       await commitResultForRunnerRequest({
-        bucket,
-        environment,
         payload: committedPayload,
         requestBody,
       });
       firstCommitRecorded.resolve();
       await releaseFirstRunner.promise;
       await finalizeResultForRunnerRequest({
-        bucket,
-        environment,
         payload: finalPayload,
         requestBody,
       });
@@ -2130,8 +1805,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: resultPayload,
             requestBody: JSON.parse(String(init?.body)),
           });
@@ -2151,7 +1824,7 @@ describe("HostedUserRunner", () => {
     const second = await runner.wake(createWake("evt_second", "member_123"));
 
     expect(second.bundleRef).toEqual(first.bundleRef);
-    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 3);
+    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 2);
   });
 
   it("does not locally poison retrying events once alarm handling depends on hosted web wakes", async () => {
@@ -2325,21 +1998,23 @@ describe("HostedUserRunner", () => {
       createHostedWakeAwareFetch({
         bucket,
         handler: vi.fn(async (_url, init) => {
-          sideEffects += 1;
-          const requestBody = JSON.parse(String(init?.body));
-          await commitResultForRunnerRequest({
-            bucket,
-            environment,
-            payload: resultPayload,
-            requestBody,
+          const request = readRunnerJobRequest(JSON.parse(String(init?.body)));
+          sideEffects += request.resume ? 0 : 1;
+
+          if (!request.resume) {
+            return new Response(JSON.stringify(serializeRunnerCommittedPayload(resultPayload)), {
+              status: 200,
+            });
+          }
+
+          if (sideEffects === 1) {
+            sideEffects += 1;
+            throw new Error("network timeout");
+          }
+
+          return new Response(JSON.stringify(serializeRunnerSuccessPayload(resultPayload)), {
+            status: 200,
           });
-          await finalizeResultForRunnerRequest({
-            bucket,
-            environment,
-            payload: resultPayload,
-            requestBody,
-          });
-          throw new Error("network timeout");
         }),
       }),
     );
@@ -2348,13 +2023,12 @@ describe("HostedUserRunner", () => {
     const dispatch = createWake("evt_lost_response", "member_123", "2026-03-26T12:15:00.000Z");
 
     const first = await runner.wake(dispatch);
-    const second = await runner.wake(dispatch);
+    const second = await runner.wakeHostedWakes();
 
-    expect(first.pendingWakeCount).toBe(0);
-    expect(first.lastError).toBeNull();
+    expect(first.pendingWakeCount).toBe(1);
     expect(first.lastEventId).toBe("evt_lost_response");
     expect(second.pendingWakeCount).toBe(0);
-    expect(sideEffects).toBe(1);
+    expect(sideEffects).toBe(2);
   });
 
   it("resolves duplicate queued wakes through the canonical web wake queue", async () => {
@@ -2570,75 +2244,47 @@ describe("HostedUserRunner", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("applies a prefinalized event on retry without rerunning side effects", async () => {
+  it("applies a prefinalized DO-local pending commit without rerunning side effects", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     const dispatch = createWake("evt_ack_lost", "member_123", "2026-03-26T12:20:00.000Z");
     await seedRunnerQueueState({
-      runtimeBootstrapped: false,
+      runtimeBootstrapped: true,
       bucket,
       environment,
       lastError: "timeout",
       lastEventId: dispatch.eventId,
-      pendingEvents: [
-        {
-          attempts: 1,
-          availableAt: dispatch.occurredAt,
-          dispatch,
-          enqueuedAt: dispatch.occurredAt,
-          lastError: "timeout",
-        },
-      ],
-      storage,
-      userId: dispatch.userId,
-    });
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: dispatch.userId,
-    });
-    await persistHostedExecutionCommit({
-      bucket: bucket.api,
-      currentBundleRef: null,
-      eventId: dispatch.eventId,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
+      pendingCommit: {
         assistantDeliveryEffects: [],
-        bundle: Buffer.from("vault").toString("base64"),
+        bundleRef: null,
+        committedAt: dispatch.occurredAt,
+        eventId: dispatch.eventId,
+        finalizedAt: "2026-03-26T12:20:02.000Z",
         result: {
           eventsHandled: 1,
           summary: "ok",
         },
+        schemaVersion: 1,
+        userId: dispatch.userId,
       },
+      storage,
       userId: dispatch.userId,
     });
-    await persistHostedExecutionFinalBundles({
+    await appendTestHostedWake({
       bucket: bucket.api,
-      eventId: dispatch.eventId,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
-        bundle: Buffer.from("vault").toString("base64"),
-      },
-      userId: dispatch.userId,
+      wake: dispatch,
     });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
+    await seedManagedUserCryptoForTest(runner, dispatch.userId);
+    const stateStore = new RunnerStateStore(storage.state as never);
 
-    const status = await runner.wake(dispatch);
+    await runner.alarm();
+    const status = await runner.status();
 
     expect(status.pendingWakeCount).toBe(0);
     expect(status.lastError).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
-    await expect(
-      createHostedExecutionJournalStore({
-        bucket: bucket.api,
-        key: environment.platformEnvelopeKey,
-        keyId: environment.platformEnvelopeKeyId,
-      }).readCommittedResult(dispatch.userId, dispatch.eventId),
-    ).resolves.toBeNull();
+    await expect(stateStore.readPendingCommit(dispatch.eventId)).resolves.toBeNull();
   });
 
   it("does not require an ambient runner control token because the container shell manages its own supervisor token", async () => {
@@ -2902,8 +2548,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: resultPayload,
             requestBody: JSON.parse(String(init?.body)),
           });
@@ -2966,8 +2610,6 @@ describe("HostedUserRunner", () => {
         bucket,
         handler: vi.fn(async (_url, init) => {
           await commitResultForRunnerRequest({
-            bucket,
-            environment,
             payload: resultPayload,
             requestBody: JSON.parse(String(init?.body)),
           });
@@ -3193,11 +2835,13 @@ async function seedRunnerQueueState(
       lastError: string;
       poisonedAt: string;
     }>;
+    pendingCommit?: RunnerPendingCommitRecord | null;
     storage: ReturnType<typeof createStorage>;
     userId: string;
   },
 ): Promise<void> {
   const { storage } = input;
+  new RunnerStateStore(storage.state as never);
   const sql = storage.state.storage.sql;
   if (!sql) {
     throw new Error("Test storage.sql is required.");
@@ -3224,8 +2868,9 @@ async function seedRunnerQueueState(
       last_error_code,
       last_event_id,
       last_run_at,
-      next_wake_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      next_wake_at,
+      pending_commit_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
     null,
@@ -3241,6 +2886,7 @@ async function seedRunnerQueueState(
       input.lastEventId ?? null,
       input.lastRunAt ?? null,
       input.nextWakeAt ?? null,
+      input.pendingCommit ? JSON.stringify(input.pendingCommit) : null,
     );
 }
 
@@ -3769,60 +3415,19 @@ function maybeReadHostedWakeAppendRequest(value: unknown): {
 }
 
 async function commitResultForRunnerRequest(input: {
-  bucket: ReturnType<typeof createBucket>;
-  environment: HostedExecutionEnvironment;
   payload: RunnerSuccessPayloadLike;
   requestBody: unknown;
 }): Promise<void> {
-  const payload = normalizeRunnerSuccessPayload(input.payload);
-  const requestBody = readRunnerJobRequest(input.requestBody);
-  const crypto = await resolveHostedUserCryptoContextForTest({
-    bucket: input.bucket,
-    environment: input.environment,
-    userId: requestBody.wake.userId,
-  });
-  await persistHostedExecutionCommit({
-    bucket: input.bucket.api,
-    currentBundleRef: requestBody.currentBundleRef ?? null,
-    eventId: requestBody.wake.eventId,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-    payload: {
-      assistantDeliveryEffects: payload.assistantDeliveryEffects,
-      bundle: payload.bundles.vault ?? payload.bundles.agentState ?? null,
-      gatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
-      result: payload.result,
-    },
-    userId: requestBody.wake.userId,
-  });
+  normalizeRunnerSuccessPayload(input.payload);
+  readRunnerJobRequest(input.requestBody);
 }
 
 async function finalizeResultForRunnerRequest(input: {
-  bucket: ReturnType<typeof createBucket>;
-  environment: HostedExecutionEnvironment;
   payload: RunnerSuccessPayloadLike;
   requestBody: unknown;
 }): Promise<void> {
-  const payload = normalizeRunnerSuccessPayload(input.payload);
-  const requestBody = readRunnerJobRequest(input.requestBody);
-  const crypto = await resolveHostedUserCryptoContextForTest({
-    bucket: input.bucket,
-    environment: input.environment,
-    userId: requestBody.wake.userId,
-  });
-  await persistHostedExecutionFinalBundles({
-    bucket: input.bucket.api,
-    eventId: requestBody.wake.eventId,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-    payload: {
-      bundle: payload.bundles.vault ?? payload.bundles.agentState ?? null,
-      gatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
-    },
-    userId: requestBody.wake.userId,
-  });
+  normalizeRunnerSuccessPayload(input.payload);
+  readRunnerJobRequest(input.requestBody);
 }
 
 async function resolveHostedUserCryptoContextForTest(input: {
