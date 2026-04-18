@@ -48,7 +48,7 @@ const stabilityActivationWake = buildHostedExecutionMemberActivatedWake({
   occurredAt: new Date().toISOString(),
 });
 
-describe("hosted local duplicate commit e2e", () => {
+describe("hosted local duplicate-commit worker-only e2e", () => {
   let workerFixture: HostedLocalTestWorkerFixture | null = null;
 
   beforeAll(async () => {
