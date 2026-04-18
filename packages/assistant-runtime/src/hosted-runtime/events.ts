@@ -19,6 +19,7 @@ import type {
   HostedWakeEffect,
   HostedWakeFollowupExecution,
   HostedWakeExecutionMetrics,
+  HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
@@ -58,6 +59,7 @@ export async function executeHostedWakeEvent(input: {
 
   return {
     bootstrapResult,
+    conversationMetrics: wakeEffect.conversationMetrics,
     followupExecution: wakeEffect.followupExecution,
     shareImportResult: wakeEffect.shareImportResult,
     shareImportTitle: wakeEffect.shareImportTitle,
@@ -98,9 +100,10 @@ async function executeHostedConversationWake(input: {
   >;
   vaultRoot: string;
 }): Promise<HostedWakeOutcome> {
-  await ingestHostedConversationMessageWake(input);
+  const conversationMetrics = await ingestHostedConversationMessageWake(input);
 
   return createNoopWakeEffect({
+    conversationMetrics,
     followupExecution: "conversation-message",
   });
 }
@@ -123,15 +126,18 @@ async function executeHostedSystemWake(input: {
         );
       }
       return createNoopWakeEffect({
+        conversationMetrics: null,
         followupExecution: "system-maintenance",
       });
     case "member.channels.updated":
       return createNoopWakeEffect({
+        conversationMetrics: null,
         followupExecution: "system-maintenance",
       });
     case "assistant.cron.tick":
     case "device-sync.wake":
       return createNoopWakeEffect({
+        conversationMetrics: null,
         followupExecution: "system-maintenance",
       });
     case "vault.share.accepted":
@@ -144,6 +150,7 @@ async function executeHostedSystemWake(input: {
           sharePack: input.sharePack,
           vaultRoot: input.vaultRoot,
         })),
+        conversationMetrics: null,
         followupExecution: "system-maintenance",
       };
   }
@@ -152,9 +159,11 @@ async function executeHostedSystemWake(input: {
 }
 
 function createNoopWakeEffect(input: {
+  conversationMetrics: HostedConversationWakeMetrics | null;
   followupExecution: HostedWakeFollowupExecution;
 }): HostedWakeOutcome {
   return {
+    conversationMetrics: input.conversationMetrics,
     followupExecution: input.followupExecution,
     shareImportResult: null,
     shareImportTitle: null,

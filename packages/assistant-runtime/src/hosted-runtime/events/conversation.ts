@@ -4,12 +4,17 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  createParsedInboxPipeline,
+  openInboxRuntime,
+} from "@murphai/inboxd";
+import { createConfiguredParserRegistry } from "@murphai/parsers";
 
 import { buildHostedEmailCapture } from "./email.ts";
-import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 import { buildHostedLinqCapture } from "./linq.ts";
 import { buildHostedTelegramCapture } from "./telegram.ts";
 import type {
+  HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
@@ -17,12 +22,40 @@ export async function ingestHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<HostedConversationWakeMetrics> {
   const capture = await buildHostedInboxCaptureForConversationWake(input);
-
-  await withHostedInboxPipeline(input.vaultRoot, async (pipeline) => {
-    await pipeline.processCapture(capture);
+  const runtime = await openInboxRuntime({
+    vaultRoot: input.vaultRoot,
   });
+  let parserProcessed = 0;
+  let pipeline: Awaited<ReturnType<typeof createParsedInboxPipeline>> | null = null;
+
+  try {
+    const configured = await createConfiguredParserRegistry({
+      vaultRoot: input.vaultRoot,
+    });
+    pipeline = await createParsedInboxPipeline({
+      ffmpeg: configured.ffmpeg,
+      onParserDrain(results) {
+        parserProcessed += results.length;
+      },
+      registry: configured.registry,
+      runtime,
+      vaultRoot: input.vaultRoot,
+    });
+    await pipeline.processCapture(capture);
+
+    return {
+      nextWakeAt: null,
+      parserProcessed,
+    };
+  } finally {
+    if (pipeline) {
+      pipeline.close();
+    } else {
+      runtime.close();
+    }
+  }
 }
 
 async function buildHostedInboxCaptureForConversationWake(input: {
