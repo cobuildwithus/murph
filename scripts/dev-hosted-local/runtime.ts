@@ -16,6 +16,7 @@ import {
   webDir,
 } from "./constants.ts";
 import type {
+  BufferedNamedChildProcess,
   HostedLocalChildProcess,
   HostedWebDevServerLockMetadata,
   NamedChildProcess,
@@ -115,7 +116,12 @@ export function spawnChildProcess(
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv,
-): NamedChildProcess {
+  input: {
+    pipeOutput?: boolean;
+    stderrTarget?: NodeJS.WriteStream;
+    stdoutTarget?: NodeJS.WriteStream;
+  } = {},
+): BufferedNamedChildProcess {
   const child = spawn(command, args, {
     cwd: repoRoot,
     detached: process.platform !== "win32",
@@ -123,12 +129,30 @@ export function spawnChildProcess(
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  const stdout = createOutputBuffer();
+  const stderr = createOutputBuffer();
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
-  pipeWithPrefix(name, child.stdout, process.stdout);
-  pipeWithPrefix(name, child.stderr, process.stderr);
+  child.stdout?.on("data", (chunk: string | Buffer) => {
+    stdout.append(chunk);
+  });
+  child.stderr?.on("data", (chunk: string | Buffer) => {
+    stderr.append(chunk);
+  });
 
-  return { child, name };
+  if (input.pipeOutput !== false) {
+    pipeWithPrefix(name, child.stdout, input.stdoutTarget ?? process.stdout);
+    pipeWithPrefix(name, child.stderr, input.stderrTarget ?? process.stderr);
+  }
+
+  return {
+    child,
+    name,
+    stderrTail: (maxChars?: number): string => tail(stderr.read(), maxChars),
+    stderrText: (): string => stderr.read(),
+    stdoutTail: (maxChars?: number): string => tail(stdout.read(), maxChars),
+    stdoutText: (): string => stdout.read(),
+  };
 }
 
 export async function waitForFirstChildExit(
@@ -389,7 +413,7 @@ export async function terminateChildProcessAndWait(
 ): Promise<void> {
   const signal = input.signal ?? "SIGTERM";
   const graceMs = input.graceMs ?? 15_000;
-  const processGroupId = process.platform === "win32" ? null : child.pid;
+  const processGroupId = process.platform === "win32" ? null : (child.pid ?? null);
 
   if (child.exitCode !== null || child.pid === undefined) {
     return;
@@ -465,6 +489,14 @@ export function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
+}
+
+function tail(value: string, maxChars: number = 2_000): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  return value.slice(value.length - maxChars);
 }
 
 async function runBoundedCommand(input: BoundedCommandInput): Promise<BoundedCommandResult> {
@@ -766,4 +798,20 @@ function pipeWithPrefix(
       buffer = "";
     }
   });
+}
+
+function createOutputBuffer(): {
+  append(chunk: string | Buffer): void;
+  read(): string;
+} {
+  let value = "";
+
+  return {
+    append(chunk: string | Buffer): void {
+      value += chunk.toString();
+    },
+    read(): string {
+      return value;
+    },
+  };
 }

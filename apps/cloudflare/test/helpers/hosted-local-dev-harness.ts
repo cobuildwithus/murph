@@ -1,4 +1,3 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -11,9 +10,9 @@ import type { HostedExecutionUserStatus } from "@murphai/hosted-execution";
 import { repoRoot } from "../../vitest.shared.js";
 import { resolveHostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/config.ts";
 import {
-  terminateChildProcessAndWait,
-} from "../../../../scripts/dev-hosted-local/runtime.ts";
-import { resolveVercelOidcToken } from "../../../../scripts/dev-hosted-local/vercel.ts";
+  startHostedLocalDevStack,
+  type HostedLocalDevStack,
+} from "../../../../scripts/dev-hosted-local/stack.ts";
 
 export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
@@ -57,22 +56,18 @@ export async function startHostedLocalDevHarness(input: {
     : null;
   const persistDir = createdTempPersistDir
     ?? path.resolve(repoRoot, persistDirOverride ?? "");
-  const readyToken = randomUUID();
-  const nextDistDirSuffix = `e2e-${readyToken}`.toLowerCase();
+  const nextDistDirSuffix = `e2e-${randomUUID()}`.toLowerCase();
   const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
   const originalNextEnvContents = await readFile(nextEnvPath, "utf8");
   let nextDistDir: string | null = null;
-  let child: ChildProcess | null = null;
-  let oidcToken = "";
-  let stdout = "";
-  let stderr = "";
+  let stack: HostedLocalDevStack | null = null;
 
   const stop = async (): Promise<void> => {
-    if (child?.pid) {
-      await terminateChildProcessAndWait(child, { signal: "SIGTERM" });
+    if (stack) {
+      await stack.stop("SIGTERM");
     }
 
-    child = null;
+    stack = null;
 
     await restoreNextArtifacts().catch(() => {});
 
@@ -92,7 +87,6 @@ export async function startHostedLocalDevHarness(input: {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...input.env,
       MURPH_DEV_CF_PERSIST_DIR: persistDir,
-      MURPH_DEV_READY_TOKEN: readyToken,
       NEXT_DIST_DIR_SUFFIX: resolvedNextDistDirSuffix,
     };
     nextDistDir = resolveHostedLocalHarnessDistDir(
@@ -100,43 +94,24 @@ export async function startHostedLocalDevHarness(input: {
       resolvedNextDistDirSuffix,
     );
 
-    child = spawn("pnpm", ["dev"], {
-      cwd: repoRoot,
-      detached: process.platform !== "win32",
+    stack = await startHostedLocalDevStack({
       env: runtimeEnv,
-      stdio: ["ignore", "pipe", "pipe"],
+      pipeOutput: streamLogs,
     });
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
-      if (streamLogs) {
-        process.stdout.write(chunk);
-      }
-    });
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-      if (streamLogs) {
-        process.stderr.write(chunk);
-      }
-    });
-
-    oidcToken = await resolveVercelOidcToken(runtimeEnv);
 
     try {
-      await waitForReadyToken({
-        child,
-        readyToken,
-        stderr: () => stderr,
-        stdout: () => stdout,
-      });
-      ensurePreparedRunnerContainerImageAlias(`${stdout}\n${stderr}`);
+      await stack.ready;
     } catch (error) {
+      const stdout = stack.stdoutTail();
+      const stderr = stack.stderrTail();
       await stop().catch(() => {});
       throw error instanceof Error
         ? error
-        : new Error(formatFailure([String(error)], stdout, stderr));
+        : new Error(formatFailure(
+          [String(error)],
+          stdout,
+          stderr,
+        ));
     }
 
     return {
@@ -144,7 +119,7 @@ export async function startHostedLocalDevHarness(input: {
         ...config,
         workerPersistDir: persistDir,
       },
-      oidcToken,
+      oidcToken: stack.oidcToken,
       persistDir,
       readUserStatus: async (userId: string): Promise<HostedExecutionUserStatus> => {
         return await readHostedUserStatus({
@@ -157,8 +132,8 @@ export async function startHostedLocalDevHarness(input: {
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
       stop,
-      stdoutTail: (maxChars?: number): string => tail(stdout, maxChars),
-      stderrTail: (maxChars?: number): string => tail(stderr, maxChars),
+      stdoutTail: (maxChars?: number): string => stack?.stdoutTail(maxChars) ?? "",
+      stderrTail: (maxChars?: number): string => stack?.stderrTail(maxChars) ?? "",
       waitForHostedCompletion: async (
         userId: string,
         pollInput: {
@@ -192,7 +167,7 @@ export async function startHostedLocalDevHarness(input: {
 
         throw new Error(formatFailure([
           `Timed out waiting for hosted completion for ${userId}.`,
-        ], stdout, stderr));
+        ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
       webBaseUrl,
       workerBaseUrl,
@@ -208,20 +183,20 @@ export async function startHostedLocalDevHarness(input: {
     try {
       response = await fetch(new URL(pathname, `${workerBaseUrl}/`), {
         ...init,
-        headers: buildAuthenticatedHeaders(oidcToken, init?.headers),
+        headers: buildAuthenticatedHeaders(stack?.oidcToken ?? "", init?.headers),
       });
     } catch (error) {
       throw new Error(formatFailure([
         `${init?.method ?? "GET"} ${pathname} failed before an HTTP response was received.`,
         error instanceof Error ? error.message : String(error),
-      ], stdout, stderr));
+      ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
     }
 
     if (!response.ok) {
       throw new Error(formatFailure([
         `${init?.method ?? "GET"} ${pathname} failed with HTTP ${response.status}.`,
         `body: ${await response.text()}`,
-      ], stdout, stderr));
+      ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
     }
 
     return response;
@@ -233,13 +208,13 @@ export async function startHostedLocalDevHarness(input: {
     try {
       response = await fetch(new URL(pathname, `${workerBaseUrl}/`), {
         ...init,
-        headers: buildAuthenticatedHeaders(oidcToken, init?.headers),
+        headers: buildAuthenticatedHeaders(stack?.oidcToken ?? "", init?.headers),
       });
     } catch (error) {
       throw new Error(formatFailure([
         `${init?.method ?? "GET"} ${pathname} failed before an HTTP response was received.`,
         error instanceof Error ? error.message : String(error),
-      ], stdout, stderr));
+      ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
     }
     const rawBody = await response.text();
 
@@ -247,7 +222,7 @@ export async function startHostedLocalDevHarness(input: {
       throw new Error(formatFailure([
         `${init?.method ?? "GET"} ${pathname} failed with HTTP ${response.status}.`,
         `body: ${rawBody}`,
-      ], stdout, stderr));
+      ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
     }
 
     if (rawBody.length === 0) {
@@ -261,7 +236,7 @@ export async function startHostedLocalDevHarness(input: {
         `Failed to parse JSON from ${init?.method ?? "GET"} ${pathname}.`,
         error instanceof Error ? error.message : String(error),
         `body: ${rawBody}`,
-      ], stdout, stderr));
+      ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
     }
   }
 
@@ -315,35 +290,6 @@ function buildAuthenticatedHeaders(
   return normalized;
 }
 
-async function waitForReadyToken(input: {
-  child: ChildProcess;
-  readyToken: string;
-  stderr: () => string;
-  stdout: () => string;
-}): Promise<void> {
-  const expectedLine = `__MURPH_HOSTED_LOCAL_READY__ ${input.readyToken}`;
-  const startedAt = Date.now();
-  const timeoutMs = 300_000;
-
-  while ((Date.now() - startedAt) < timeoutMs) {
-    if (input.stdout().includes(expectedLine)) {
-      return;
-    }
-
-    if (input.child.exitCode !== null || input.child.signalCode !== null) {
-      throw new Error(formatFailure([
-        "Local hosted dev exited before reaching its ready checkpoint.",
-      ], input.stdout(), input.stderr()));
-    }
-
-    await sleep(250);
-  }
-
-  throw new Error(formatFailure([
-    "Timed out waiting for the local hosted dev ready checkpoint.",
-  ], input.stdout(), input.stderr()));
-}
-
 function formatFailure(lines: string[], stdout: string, stderr: string): string {
   return [
     ...lines,
@@ -364,85 +310,4 @@ function tail(value: string, maxChars: number = 2_000): string {
   }
 
   return value.slice(value.length - maxChars);
-}
-
-function ensurePreparedRunnerContainerImageAlias(stdout: string): void {
-  const expectedRef = readLatestPreparedRunnerContainerImageRef(stdout);
-  if (!expectedRef) {
-    return;
-  }
-
-  if (hasDockerImageRef(expectedRef)) {
-    return;
-  }
-
-  const expectedIdPrefix = readLatestPreparedRunnerContainerImageIdPrefix(stdout);
-  if (!expectedIdPrefix) {
-    throw new Error(
-      `Prepared runner container image ${expectedRef} is missing and no local image id was found in dev output.`,
-    );
-  }
-
-  const existingRef = findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix);
-  if (!existingRef) {
-    throw new Error(
-      `Prepared runner container image ${expectedRef} is missing and no local image matches id prefix ${expectedIdPrefix}.`,
-    );
-  }
-
-  execFileSync("docker", ["tag", existingRef, expectedRef], {
-    stdio: "pipe",
-  });
-}
-
-function readLatestPreparedRunnerContainerImageRef(stdout: string): string | null {
-  const matches = Array.from(
-    stdout.matchAll(/naming to docker\.io\/(cloudflare-dev\/runnercontainer:[a-f0-9]+)\s+done/g),
-  );
-  return matches.at(-1)?.[1] ?? null;
-}
-
-function readLatestPreparedRunnerContainerImageIdPrefix(stdout: string): string | null {
-  const matches = Array.from(stdout.matchAll(/exporting manifest sha256:([a-f0-9]{12,64})/g));
-  const manifestHash = matches.at(-1)?.[1] ?? null;
-  return manifestHash ? manifestHash.slice(0, 12) : null;
-}
-
-function hasDockerImageRef(imageRef: string): boolean {
-  try {
-    execFileSync("docker", ["image", "inspect", imageRef], {
-      stdio: "pipe",
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix: string): string | null {
-  const rawOutput = execFileSync(
-    "docker",
-    ["images", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}"],
-    {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  const lines = rawOutput
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const [imageRef, imageId] = line.split(/\s+/, 2);
-    if (!imageRef?.startsWith("cloudflare-dev/runnercontainer:")) {
-      continue;
-    }
-
-    if (imageId?.startsWith(expectedIdPrefix)) {
-      return imageRef;
-    }
-  }
-
-  return null;
 }

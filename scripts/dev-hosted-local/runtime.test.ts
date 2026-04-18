@@ -63,6 +63,7 @@ describe("waitForHealthyHttpEndpoint", () => {
 
 describe("terminateChildProcessAndWait", () => {
   it("escalates to SIGKILL when the child ignores the initial graceful signal", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     const child = new EventEmitter() as EventEmitter & {
       exitCode: number | null;
       kill: (signal?: NodeJS.Signals | number) => boolean;
@@ -89,5 +90,6 @@ describe("terminateChildProcessAndWait", () => {
     });
 
     expect(killCalls).toEqual(["SIGTERM", "SIGKILL"]);
+    platformSpy.mockRestore();
   });
 });
