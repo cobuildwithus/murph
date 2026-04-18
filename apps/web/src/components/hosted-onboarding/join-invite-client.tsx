@@ -3,14 +3,28 @@
 import { useEffect, useEffectEvent, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
+
+import { JoinInviteEyebrow, type JoinInviteEyebrowTone } from "./join-invite-eyebrow";
+
+function resolveJoinInviteEyebrow(
+  stage: HostedInviteStatusPayload["stage"],
+): { label: string; tone: JoinInviteEyebrowTone } {
+  switch (stage) {
+    case "invalid":
+    case "expired":
+      return { label: "Link no longer works", tone: "danger" };
+    case "blocked":
+      return { label: "Needs support", tone: "danger" };
+    default:
+      return { label: "Murph signup", tone: "default" };
+  }
+}
 
 import { requestHostedBillingCheckout } from "./client-api";
 import {
@@ -37,6 +51,7 @@ interface JoinInviteClientProps {
   inviteCode: string;
   shareCode: string | null;
   sharePreview: HostedSharePreview | null;
+  preview?: boolean;
 }
 
 export function JoinInviteClient({
@@ -46,6 +61,7 @@ export function JoinInviteClient({
   inviteCode,
   shareCode,
   sharePreview,
+  preview = false,
 }: JoinInviteClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [hasCompletedInitialRefresh, setHasCompletedInitialRefresh] = useState(
@@ -92,6 +108,7 @@ export function JoinInviteClient({
       }
     },
     shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.activationPending,
+    disabled: preview,
   });
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
@@ -174,58 +191,54 @@ export function JoinInviteClient({
     );
   }
 
+  const eyebrow = resolveJoinInviteEyebrow(status.stage);
+
   return (
-    <div className="space-y-5">
-      <Card className="shadow-sm">
-        <CardHeader className="gap-3">
-          <Badge variant="secondary" className="w-fit">
-            Murph signup
-          </Badge>
-          <div className="space-y-3">
-            <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
-              {resolveJoinInviteTitle(status)}
-            </CardTitle>
-            <CardDescription className="max-w-lg text-lg leading-relaxed text-stone-500">
-              {resolveJoinInviteSubtitle(status)}
-            </CardDescription>
-          </div>
-        </CardHeader>
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-3">
+        <JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
+          {resolveJoinInviteTitle(status)}
+        </h1>
+        <p className="text-base leading-relaxed text-muted-foreground">
+          {resolveJoinInviteSubtitle(status)}
+        </p>
+      </div>
 
-        <CardContent className="flex flex-col gap-4">
-          {errorMessage ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to continue</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          ) : null}
+      <div className="flex flex-col gap-4">
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>Unable to continue</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
 
-          {sharePreview ? (
-            <JoinInviteSharePreviewAlert sharePreview={sharePreview} />
-          ) : null}
+        {sharePreview ? (
+          <JoinInviteSharePreviewAlert sharePreview={sharePreview} />
+        ) : null}
 
-          <JoinInviteStageContent
-            authenticated={status.session.authenticated}
-            awaitingInviteSessionResolution={awaitingInviteSessionResolution}
-            checkoutPending={checkoutPending}
-            initialLinkedAccounts={initialLinkedAccounts}
-            inviteCode={inviteCode}
-            pendingAction={pendingAction}
-            shareImportState={shareImportState}
-            sharePreview={sharePreview}
-            status={status}
-            statusRefreshErrorMessage={statusRefreshErrorMessage}
-            statusRefreshRetryPending={statusRefreshRetryPending}
-            onAcceptShare={handleAcceptShare}
-            onCheckout={startCheckout}
-            onPhoneVerified={handlePhoneVerified}
-            onRefreshStatus={refreshStatus}
-            onRetryStatusRefresh={handleRetryStatusRefresh}
-            onSignOut={async () => {
-              await refreshStatus();
-            }}
-          />
-        </CardContent>
-      </Card>
+        <JoinInviteStageContent
+          authenticated={status.session.authenticated}
+          awaitingInviteSessionResolution={awaitingInviteSessionResolution}
+          checkoutPending={checkoutPending}
+          initialLinkedAccounts={initialLinkedAccounts}
+          inviteCode={inviteCode}
+          pendingAction={pendingAction}
+          shareImportState={shareImportState}
+          sharePreview={sharePreview}
+          status={status}
+          statusRefreshErrorMessage={statusRefreshErrorMessage}
+          statusRefreshRetryPending={statusRefreshRetryPending}
+          onAcceptShare={handleAcceptShare}
+          onCheckout={startCheckout}
+          onPhoneVerified={handlePhoneVerified}
+          onRefreshStatus={refreshStatus}
+          onRetryStatusRefresh={handleRetryStatusRefresh}
+          onSignOut={async () => {
+            await refreshStatus();
+          }}
+        />
+      </div>
     </div>
   );
 }

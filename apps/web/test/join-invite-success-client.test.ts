@@ -24,7 +24,7 @@ vi.mock("next/link", () => ({
   },
 }));
 
-import { JoinInviteSuccessShell } from "@/src/components/hosted-onboarding/join-invite-success-shell";
+import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 const activeJoinInviteSuccessClientCleanups = new Set<() => Promise<void> | void>();
@@ -46,7 +46,7 @@ afterEach(async () => {
 
 test("verify-stage success page keeps the copy neutral while sign-in settles", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessShell, {
+    createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("verify"),
       inviteCode: "invite-code",
       sessionId: null,
@@ -55,14 +55,14 @@ test("verify-stage success page keeps the copy neutral while sign-in settles", (
   );
 
   assert.match(markup, /Finishing sign-in/);
-  assert.match(markup, /We’re finishing sign-in and checking your setup status now\./);
+  assert.match(markup, /Checking your signup status\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.match(markup, /Back to invite/);
 });
 
 test("blocked success page does not pretend setup is still running", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessShell, {
+    createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("blocked"),
       inviteCode: "invite-code",
       sessionId: null,
@@ -70,15 +70,15 @@ test("blocked success page does not pretend setup is still running", () => {
     }),
   );
 
-  assert.match(markup, /Unable to continue/);
-  assert.match(markup, /We couldn’t finish setup automatically\./);
+  assert.match(markup, /Account blocked/);
+  assert.match(markup, /Head back to your invite for next steps\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
 
 test("active success page explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessShell, {
+    createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("active", true),
       inviteCode: "invite-code",
       sessionId: null,
@@ -86,9 +86,9 @@ test("active success page explains when vault and assistant setup is still runni
     }),
   );
 
-  assert.match(markup, /Your account is ready/);
-  assert.match(markup, /Payment is confirmed\./);
-  assert.match(markup, /setting up your private, encrypted vault/);
+  assert.match(markup, /You’re all set/);
+  assert.match(markup, /Payment confirmed\./);
+  assert.match(markup, /Setup finishes in about a minute/);
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
 
@@ -154,7 +154,7 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
 
   await act(async () => {
     root?.render(
-      createElement(JoinInviteSuccessShell, {
+      createElement(JoinInviteSuccessClient, {
         initialStatus: input?.initialStatus ?? createStatus("checkout"),
         inviteCode: "invite-code",
         sessionId: input?.sessionId ?? "cs_123",

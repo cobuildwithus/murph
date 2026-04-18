@@ -9,7 +9,6 @@ import {
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import {
   JoinInviteActivePanel,
-  JoinInviteBlockedAlert,
   JoinInviteCheckoutButton,
   JoinInviteMessagingSetupPanel,
   JoinInviteSignedInMismatchAlert,
@@ -98,7 +97,15 @@ export function JoinInviteStageContent({
         />
       ) : null}
 
-      {status.stage === "blocked" ? <JoinInviteBlockedAlert /> : null}
+      {status.stage === "blocked" ? (
+        <div className="text-sm leading-relaxed text-muted-foreground">
+          Email{" "}
+          <a href="mailto:support@withmurph.ai" className="font-semibold text-olive underline-offset-4 hover:underline">
+            support@withmurph.ai
+          </a>{" "}
+          to restore access.
+        </div>
+      ) : null}
 
       {status.stage === "checkout" && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
