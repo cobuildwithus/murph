@@ -355,7 +355,7 @@ export class HostedUserRunner {
     const status = await this.dispatch(input);
     const event = await this.readHostedDispatchStatus(input, status)
       ?? await this.queueStore.readEventDispatchStatus(input.eventId)
-      ?? buildLegacyDispatchStatus(input);
+      ?? buildShimDispatchStatusFallback(input, status);
 
     return {
       event,
@@ -975,9 +975,33 @@ function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | 
   }
 }
 
-function buildLegacyDispatchStatus(
+function buildShimDispatchStatusFallback(
   input: HostedExecutionDispatchRequest,
+  status: HostedExecutionUserStatus,
 ): HostedExecutionDispatchStatus {
+  if (status.retryingEventId === input.eventId) {
+    return {
+      eventId: input.eventId,
+      lastError: status.lastError,
+      state: "backpressured",
+      userId: input.event.userId,
+    };
+  }
+
+  if (
+    status.lastEventId === input.eventId
+    && status.pendingEventCount === 0
+    && status.inFlight === false
+    && status.lastError === null
+  ) {
+    return {
+      eventId: input.eventId,
+      lastError: null,
+      state: "completed",
+      userId: input.event.userId,
+    };
+  }
+
   return {
     eventId: input.eventId,
     lastError: null,
