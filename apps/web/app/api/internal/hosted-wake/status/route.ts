@@ -1,6 +1,6 @@
 import {
-  readHostedExecutionWakeLifecycleState,
-} from "@/src/lib/hosted-execution/dispatch-lifecycle";
+  readHostedWakeLifecycleState,
+} from "@/src/lib/hosted-execution/wake-lifecycle";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -22,8 +22,8 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const pendingWakeCount = countPendingWakes(cursor);
-  const dispatchState = eventId
-    ? await readHostedExecutionWakeLifecycleState({
+  const wakeState = eventId
+    ? await readHostedWakeLifecycleState({
       eventId,
       prisma,
     })
@@ -31,7 +31,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     cursor,
-    ...(dispatchState === undefined ? {} : { dispatchState }),
+    ...(wakeState === undefined ? {} : { dispatchState: wakeState, wakeState }),
     pendingWakeCount,
   });
 });

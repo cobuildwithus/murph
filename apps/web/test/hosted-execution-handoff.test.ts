@@ -11,8 +11,8 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
-  readHostedExecutionWakeTarget: vi.fn(),
+vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+  readHostedWakeTarget: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/logging", () => ({
@@ -22,13 +22,13 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { readHostedExecutionWakeTarget } from "@/src/lib/hosted-execution/dispatch-lifecycle";
+import { readHostedWakeTarget } from "@/src/lib/hosted-execution/wake-lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "@/src/lib/hosted-wake/control";
 
 describe("handoffHostedExecutionWakeBestEffort", () => {
   beforeEach(() => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
-    vi.mocked(readHostedExecutionWakeTarget).mockReset();
+    vi.mocked(readHostedWakeTarget).mockReset();
   });
 
   afterEach(() => {
@@ -36,7 +36,7 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
   });
 
   it("swallows lookup failures because the handoff is best-effort", async () => {
-    vi.mocked(readHostedExecutionWakeTarget).mockRejectedValue(new Error("lookup failed"));
+    vi.mocked(readHostedWakeTarget).mockRejectedValue(new Error("lookup failed"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
@@ -58,7 +58,7 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
       getStatus: vi.fn(),
       wakeUser,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    vi.mocked(readHostedExecutionWakeTarget).mockResolvedValue({
+    vi.mocked(readHostedWakeTarget).mockResolvedValue({
       eventId: "member.activated:test-event",
       seq: "42",
       userId: "user-123",
