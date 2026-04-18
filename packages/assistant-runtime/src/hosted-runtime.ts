@@ -47,6 +47,10 @@ import type {
 import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
+import {
+  resolveHostedDispatch,
+  resolveHostedWake,
+} from "./hosted-runtime/utils.ts";
 export {
   formatHostedRuntimeChildResult,
   parseHostedRuntimeChildResult,
@@ -107,11 +111,13 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
   let workspaceRoot: string | null = null;
 
   try {
+    const dispatch = resolveHostedDispatch(input.request);
+    const wake = resolveHostedWake(input.request);
     const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: buildHostedRuntimeStartDetails(input, runtime),
-      dispatch: input.request.dispatch,
+      dispatch,
       message: "Hosted runtime starting.",
       phase: "runtime.starting",
       run: input.request.run ?? null,
@@ -137,10 +143,10 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     const executionContext: AssistantExecutionContext = {
       hosted: {
         issueDeviceConnectLink: createHostedDeviceConnectLinkIssuer({
-          boundUserId: input.request.dispatch.event.userId,
+          boundUserId: wake.userId,
           platform: runtime.platform,
         }),
-        memberId: input.request.dispatch.event.userId,
+        memberId: wake.userId,
         userEnvKeys: Object.keys(runtime.userEnv),
       },
     };
@@ -151,7 +157,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         restoreLatencyMs: Date.now() - restoreStartedAtMs,
         runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
       },
-      dispatch: input.request.dispatch,
+      dispatch,
       message: "Hosted runtime restored execution context.",
       phase: "runtime.starting",
       run: input.request.run ?? null,
@@ -165,7 +171,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       },
       async () => {
         const typingIndicator = startHostedDispatchTypingIndicator({
-          dispatch: input.request.dispatch,
+          dispatch,
           runtimeEnv,
           run: input.request.run ?? null,
         });
@@ -191,7 +197,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
             emitHostedExecutionStructuredLog({
               component: "runtime",
-              dispatch: input.request.dispatch,
+              dispatch,
               details: {
                 assistantDeliveryEffectCount:
                   committedExecution.committedAssistantDeliveryEffects.length,
@@ -213,7 +219,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
           }
 
           const finalResult = await completeHostedExecutionAfterCommit({
-            dispatch: input.request.dispatch,
+            dispatch,
             materializedArtifactPaths,
             run: input.request.run ?? null,
             runtime,
@@ -223,7 +229,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
           emitHostedExecutionStructuredLog({
             component: "runtime",
-            dispatch: input.request.dispatch,
+            dispatch,
             details: {
               runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
             },
@@ -235,7 +241,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
           return finalResult;
         } finally {
           await stopHostedDispatchTypingIndicator({
-            dispatch: input.request.dispatch,
+            dispatch,
             typingIndicator,
             run: input.request.run ?? null,
           });
@@ -243,9 +249,10 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       },
     );
   } catch (error) {
+    const dispatch = resolveHostedDispatch(input.request);
     emitHostedExecutionStructuredLog({
       component: "runtime",
-      dispatch: input.request.dispatch,
+      dispatch,
       error,
       message: "Hosted runtime failed.",
       phase: "failed",
@@ -410,4 +417,3 @@ function hasAnyHostedRuntimeConfigKey(
 ): boolean {
   return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }
-

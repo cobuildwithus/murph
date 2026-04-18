@@ -7,7 +7,8 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution/contracts";
+  HostedExecutionWake,
+} from "@murphai/hosted-execution";
 import type { HostedExecutionBundleRefState } from "@murphai/hosted-execution/bundles";
 import type {
   HostedAssistantDeliveryEffect,
@@ -37,8 +38,10 @@ export interface HostedAssistantRuntimeConfig {
   userEnv?: Readonly<Record<string, string>>;
 }
 
-export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerRequest {
+export interface HostedAssistantRuntimeJobRequest
+  extends Omit<HostedExecutionRunnerRequest, "wake"> {
   currentBundleRef?: HostedExecutionBundleRefState;
+  wake?: HostedExecutionWake;
   resume?: {
     committedResult: {
       assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
@@ -155,6 +158,7 @@ export type HostedWorkspaceArtifactMaterializer = (
 ) => Promise<void>;
 
 export type HostedDispatchEvent = HostedExecutionDispatchRequest["event"];
+export type HostedWakeEvent = HostedExecutionWake;
 export interface HostedRestoredExecutionContext {
   assistantStateRoot: string;
   operatorHomeRoot: string;

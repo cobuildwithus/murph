@@ -20,10 +20,12 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDispatchRequest,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
+import { resolveHostedWake } from "./hosted-runtime/utils.ts";
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -37,13 +39,15 @@ type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
+  wake?: HostedExecutionWake;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
+  const wake = resolveHostedWake(input);
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
   if (!client) {
-    if (input.dispatch.event.kind === "device-sync.wake") {
+    if (wake.kind === "device-sync.wake") {
       throw new Error(
         "Hosted device-sync wake dispatch requires a configured hosted device-sync control-plane port.",
       );
@@ -59,7 +63,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   const codec = createSecretCodec(input.secret);
-  const now = input.dispatch.occurredAt;
+  const now = wake.occurredAt;
 
   for (const entry of snapshot.connections) {
     state.observedTokenVersions.set(entry.connection.id, entry.tokenBundle?.tokenVersion ?? null);
@@ -92,9 +96,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     state.localToHostedAccountIds.set(stored.id, entry.connection.id);
   }
 
-  if (input.dispatch.event.kind === "device-sync.wake") {
+  if (wake.kind === "device-sync.wake") {
     applyHostedDeviceSyncWakeHint({
-      dispatch: input.dispatch,
+      wake,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
     });
@@ -105,11 +109,13 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
+  wake?: HostedExecutionWake;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
 }): Promise<void> {
+  const wake = resolveHostedWake(input);
   if (!input.state.snapshot) {
     return;
   }
@@ -146,7 +152,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   }
 
   await client.applyUpdates({
-    occurredAt: input.dispatch.occurredAt,
+    occurredAt: wake.occurredAt,
     updates,
   });
 }
@@ -169,15 +175,15 @@ function resolveHostedDeviceSyncRuntimeClientForUser(
 }
 
 function applyHostedDeviceSyncWakeHint(input: {
-  dispatch: HostedExecutionDispatchRequest;
+  wake: HostedExecutionWake;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
 }): void {
-  if (input.dispatch.event.kind !== "device-sync.wake") {
+  if (input.wake.kind !== "device-sync.wake") {
     return;
   }
 
-  const wake = resolveHostedDeviceSyncWakeContext(input.dispatch.event);
+  const wake = resolveHostedDeviceSyncWakeContext(input.wake);
   const localAccountId = wake.connectionId ? input.hostedToLocalAccountIds.get(wake.connectionId) ?? null : null;
 
   if (!localAccountId) {
@@ -190,18 +196,18 @@ function applyHostedDeviceSyncWakeHint(input: {
     return;
   }
 
-  if (input.dispatch.event.reason === "disconnected") {
-    input.service.store.disconnectAccount(localAccountId, input.dispatch.occurredAt);
+  if (input.wake.reason === "disconnected") {
+    input.service.store.disconnectAccount(localAccountId, input.wake.occurredAt);
     input.service.store.markPendingJobsDeadForAccount(
       localAccountId,
-      input.dispatch.occurredAt,
+      input.wake.occurredAt,
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
       "Hosted device-sync wake marked the connection as disconnected.",
     );
     return;
   }
 
-  if (input.dispatch.event.reason === "reauthorization_required") {
+  if (input.wake.reason === "reauthorization_required") {
     input.service.store.patchAccount(localAccountId, {
       status: "reauthorization_required",
     });
@@ -211,7 +217,7 @@ function applyHostedDeviceSyncWakeHint(input: {
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
 
   for (const hint of jobHints) {
-    const job = hostedJobHintToDeviceSyncJobInput(hint, input.dispatch.occurredAt);
+    const job = hostedJobHintToDeviceSyncJobInput(hint, input.wake.occurredAt);
     input.service.store.enqueueJob({
       accountId: localAccountId,
       availableAt: job.availableAt,

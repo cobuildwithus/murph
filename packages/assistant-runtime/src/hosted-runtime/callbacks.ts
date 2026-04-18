@@ -1,6 +1,7 @@
 import type {
   HostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution/contracts";
+  HostedExecutionWake,
+} from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -48,6 +49,7 @@ import type {
 import type {
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
+import { resolveHostedDispatch, resolveHostedWake } from "./utils.ts";
 
 const HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS = 20;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_finalize";
@@ -104,10 +106,13 @@ export async function collectHostedAssistantDeliverySideEffects(
 
 export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: {
   dispatch: HostedExecutionDispatchRequest;
+  wake?: HostedExecutionWake;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryOutcome[]> {
+  const dispatch = resolveHostedDispatch(input);
+  const wake = resolveHostedWake(input);
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
     emitHostedExecutionStructuredLog({
@@ -115,18 +120,18 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
       details: buildHostedAssistantDeliveryDetails({
         effectFingerprint: assistantDeliveryEffect.fingerprint,
         effectId: assistantDeliveryEffect.effectId,
-        userId: input.dispatch.event.userId,
+        userId: wake.userId,
       }),
-      dispatch: input.dispatch,
+      dispatch,
       message: "Hosted assistant delivery dispatch starting.",
       phase: "side-effects.draining",
-      userId: input.dispatch.event.userId,
+      userId: wake.userId,
     });
     outcomes.push(await dispatchHostedCommittedAssistantDelivery({
-      dispatch: input.dispatch,
+      wake,
       effectsPort: input.effectsPort,
       assistantDeliveryEffect,
-      userId: input.dispatch.event.userId,
+      userId: wake.userId,
       vaultRoot: input.vaultRoot,
     }));
   }
@@ -135,7 +140,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }
 
 async function dispatchHostedCommittedAssistantDelivery(input: {
-  dispatch: HostedExecutionDispatchRequest;
+  wake: HostedExecutionWake;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   userId: string;
@@ -165,7 +170,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       });
       emitHostedAssistantDeliveryDispatchSuccess({
         delivery: buildAssistantChannelDeliveryFromHostedReceipt(existingRecord.delivery),
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         effect: input.assistantDeliveryEffect,
         userId: input.userId,
       });
@@ -190,7 +195,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: ambiguousError,
         deliveryStatus: "failed_ambiguous",
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         effect: input.assistantDeliveryEffect,
         retryable: false,
         userId: input.userId,
@@ -225,7 +230,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
           message: existingRecord.failure.message,
         },
         deliveryStatus: "failed",
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         effect: input.assistantDeliveryEffect,
         retryable: false,
         userId: input.userId,
@@ -253,7 +258,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: null,
         deliveryStatus: "sending",
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         effect: input.assistantDeliveryEffect,
         retryable: true,
         userId: input.userId,
@@ -294,7 +299,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: ambiguousError,
         deliveryStatus: "failed_ambiguous",
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         effect: input.assistantDeliveryEffect,
         retryable: false,
         userId: input.userId,
@@ -386,7 +391,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
     });
     if (delivered.session) {
       await bestEffortSaveHostedAssistantDeliverySession({
-        dispatch: input.dispatch,
+        wake: input.wake,
         effect: input.assistantDeliveryEffect,
         session: delivered.session,
         userId: input.userId,
@@ -396,7 +401,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
 
     emitHostedAssistantDeliveryDispatchSuccess({
       delivery,
-      dispatch: input.dispatch,
+      dispatch: input.wake,
       effect: input.assistantDeliveryEffect,
       userId: input.userId,
     });
@@ -437,7 +442,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: ambiguousError,
         deliveryStatus: "failed_ambiguous",
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         effect: input.assistantDeliveryEffect,
         retryable: false,
         userId: input.userId,
@@ -481,7 +486,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError,
         deliveryStatus,
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         effect: input.assistantDeliveryEffect,
         retryable,
         userId: input.userId,
@@ -511,7 +516,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
         },
         userId: input.userId,
       }),
-      dispatch: input.dispatch,
+      dispatch: input.wake,
       error: enrichedError,
       message: "Hosted assistant delivery threw during post-commit dispatch.",
       phase: "side-effects.draining",
@@ -523,7 +528,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
 
 function emitHostedAssistantDeliveryDispatchSuccess(input: {
   delivery: AssistantChannelDelivery;
-  dispatch: HostedExecutionDispatchRequest;
+  dispatch: HostedExecutionWake;
   effect: HostedAssistantDeliveryEffect;
   userId: string;
 }): void {
@@ -551,7 +556,7 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
 function emitHostedAssistantDeliveryDispatchOutcome(input: {
   deliveryError: { code: string | null; message: string } | null;
   deliveryStatus: "failed" | "failed_ambiguous" | "retryable" | "sending";
-  dispatch: HostedExecutionDispatchRequest;
+  dispatch: HostedExecutionWake;
   effect: HostedAssistantDeliveryEffect;
   retryable: boolean;
   userId: string;
@@ -863,7 +868,7 @@ async function bestEffortHostedAssistantDeliveryMirror(input: {
 }
 
 async function bestEffortSaveHostedAssistantDeliverySession(input: {
-  dispatch: HostedExecutionDispatchRequest;
+  wake: HostedExecutionWake;
   effect: HostedAssistantDeliveryEffect;
   session: AssistantSession;
   userId: string;
@@ -883,7 +888,7 @@ async function bestEffortSaveHostedAssistantDeliverySession(input: {
         },
         userId: input.userId,
       }),
-      dispatch: input.dispatch,
+      dispatch: input.wake,
       error,
       level: "warn",
       message: "Hosted assistant delivery session persistence failed after send.",

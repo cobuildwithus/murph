@@ -1,5 +1,9 @@
 import {
   emitHostedExecutionStructuredLog,
+  isHostedLinqConversationMessageWake,
+  isHostedTelegramConversationMessageWake,
+  type HostedExecutionConversationMessageWake,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
   parseCanonicalLinqMessageReceivedEvent,
@@ -19,6 +23,7 @@ import {
 import type {
   HostedAssistantRuntimeJobInput,
 } from "./models.ts";
+import { resolveHostedDispatch, resolveHostedWake } from "./utils.ts";
 
 type HostedTypingHandle = {
   stop(): Promise<void>;
@@ -34,21 +39,24 @@ type HostedDispatchTypingIndicator = {
 };
 
 export function startHostedDispatchTypingIndicator(input: {
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
+  wake?: HostedAssistantRuntimeJobInput["request"]["wake"];
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): HostedDispatchTypingIndicator | null {
-  if (isHostedLinqMessageReceivedDispatch(input.dispatch)) {
+  const wake = resolveHostedWake(input);
+
+  if (isHostedLinqConversationMessageWake(wake)) {
     return startHostedLinqDispatchTypingIndicator({
       ...input,
-      dispatch: input.dispatch,
+      wake,
     });
   }
 
-  if (isHostedTelegramMessageReceivedDispatch(input.dispatch)) {
+  if (isHostedTelegramConversationMessageWake(wake)) {
     return startHostedTelegramDispatchTypingIndicator({
       ...input,
-      dispatch: input.dispatch,
+      wake,
     });
   }
 
@@ -56,7 +64,8 @@ export function startHostedDispatchTypingIndicator(input: {
 }
 
 export async function stopHostedDispatchTypingIndicator(input: {
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
+  wake?: HostedAssistantRuntimeJobInput["request"]["wake"];
   typingIndicator: HostedDispatchTypingIndicator | null;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): Promise<void> {
@@ -64,13 +73,15 @@ export async function stopHostedDispatchTypingIndicator(input: {
     return;
   }
 
+  const dispatch = resolveHostedDispatch(input);
+
   try {
     await input.typingIndicator.stop();
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: input.typingIndicator.stopLogDetails,
-      dispatch: input.dispatch,
+      dispatch,
       error,
       level: "warn",
       message: `Hosted ${input.typingIndicator.channelLabel} typing indicator could not be stopped.`,
@@ -81,28 +92,26 @@ export async function stopHostedDispatchTypingIndicator(input: {
 }
 
 function startHostedLinqDispatchTypingIndicator(input: {
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"] & {
-    event: Extract<
-      HostedAssistantRuntimeJobInput["request"]["dispatch"]["event"],
-      { kind: "linq.message.received" }
-    >;
-  };
+  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  wake: HostedExecutionConversationMessageWake & {
+    message: { channel: "linq"; linqEvent: Record<string, unknown> };
+  };
 }): HostedDispatchTypingIndicator | null {
   const env = input.runtimeEnv as NodeJS.ProcessEnv;
 
   let chatId: string;
   try {
     const event = parseCanonicalLinqMessageReceivedEvent(
-      parseLinqWebhookEvent(JSON.stringify(input.dispatch.event.linqEvent)),
+      parseLinqWebhookEvent(JSON.stringify(input.wake.message.linqEvent)),
     );
     chatId = event.data.chat_id;
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: buildHostedLinqTypingLogDetails("typing_start", false),
-      dispatch: input.dispatch,
+      dispatch: input.wake,
       error,
       level: "warn",
       message: "Hosted Linq typing indicator could not be started.",
@@ -114,7 +123,7 @@ function startHostedLinqDispatchTypingIndicator(input: {
 
   return createAsyncHostedTypingIndicator({
     channelLabel: "Linq",
-    dispatch: input.dispatch,
+    wake: input.wake,
     run: input.run,
     startLogDetails: buildHostedLinqTypingLogDetails("typing_start", true),
     stopLogDetails: buildHostedLinqTypingLogDetails("typing_stop", true),
@@ -145,21 +154,19 @@ function startHostedLinqDispatchTypingIndicator(input: {
 }
 
 function startHostedTelegramDispatchTypingIndicator(input: {
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"] & {
-    event: Extract<
-      HostedAssistantRuntimeJobInput["request"]["dispatch"]["event"],
-      { kind: "telegram.message.received" }
-    >;
-  };
+  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  wake: HostedExecutionConversationMessageWake & {
+    message: { channel: "telegram"; telegramMessage: { threadId: string } };
+  };
 }): HostedDispatchTypingIndicator | null {
-  const target = input.dispatch.event.telegramMessage.threadId;
+  const target = input.wake.message.telegramMessage.threadId;
   const startLogDetails = buildHostedTelegramTypingLogDetails(target);
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: startLogDetails,
-    dispatch: input.dispatch,
+    dispatch: input.wake,
     message: "Hosted Telegram typing indicator requested.",
     phase: "dispatch.running",
     run: input.run,
@@ -167,7 +174,7 @@ function startHostedTelegramDispatchTypingIndicator(input: {
 
   return createAsyncHostedTypingIndicator({
     channelLabel: "Telegram",
-    dispatch: input.dispatch,
+    wake: input.wake,
     run: input.run,
     startLogDetails,
     start: () => startTelegramTypingSession(
@@ -179,17 +186,6 @@ function startHostedTelegramDispatchTypingIndicator(input: {
       },
     ),
   });
-}
-
-function isHostedLinqMessageReceivedDispatch(
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"],
-): dispatch is HostedAssistantRuntimeJobInput["request"]["dispatch"] & {
-  event: Extract<
-    HostedAssistantRuntimeJobInput["request"]["dispatch"]["event"],
-    { kind: "linq.message.received" }
-  >;
-} {
-  return dispatch.event.kind === "linq.message.received";
 }
 
 function buildHostedLinqTypingLogDetails(
@@ -205,7 +201,7 @@ function buildHostedLinqTypingLogDetails(
 
 function createAsyncHostedTypingIndicator(input: {
   channelLabel: HostedDispatchTypingIndicator["channelLabel"];
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+  wake: HostedExecutionWake;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   startLogDetails?: Record<string, boolean | string>;
   stopLogDetails?: Record<string, boolean | string>;
@@ -222,7 +218,7 @@ function createAsyncHostedTypingIndicator(input: {
         emitHostedExecutionStructuredLog({
           component: "runtime",
           details: input.stopLogDetails,
-          dispatch: input.dispatch,
+          dispatch: input.wake,
           error,
           level: "warn",
           message: `Hosted ${input.channelLabel} typing indicator could not be stopped.`,
@@ -245,7 +241,7 @@ function createAsyncHostedTypingIndicator(input: {
           runElapsedMs: computeHostedRunElapsedMs(input.run),
           startLatencyMs: Date.now() - typingStartRequestedAtMs,
         },
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         message: `Hosted ${input.channelLabel} typing indicator started.`,
         phase: "dispatch.running",
         run: input.run,
@@ -258,7 +254,7 @@ function createAsyncHostedTypingIndicator(input: {
       emitHostedExecutionStructuredLog({
         component: "runtime",
         details: input.startLogDetails,
-        dispatch: input.dispatch,
+        dispatch: input.wake,
         error,
         level: "warn",
         message: `Hosted ${input.channelLabel} typing indicator could not be started.`,
@@ -308,17 +304,6 @@ function computeHostedRunElapsedMs(
   }
 
   return Math.max(0, Date.now() - startedAtMs);
-}
-
-function isHostedTelegramMessageReceivedDispatch(
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"],
-): dispatch is HostedAssistantRuntimeJobInput["request"]["dispatch"] & {
-  event: Extract<
-    HostedAssistantRuntimeJobInput["request"]["dispatch"]["event"],
-    { kind: "telegram.message.received" }
-  >;
-} {
-  return dispatch.event.kind === "telegram.message.received";
 }
 
 function buildHostedTelegramTypingLogDetails(target: string): Record<string, boolean | string> {

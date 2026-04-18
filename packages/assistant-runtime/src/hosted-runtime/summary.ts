@@ -1,44 +1,52 @@
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import {
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionWake,
+} from "@murphai/hosted-execution";
 
 import type {
   HostedBootstrapResult,
   HostedDispatchExecutionMetrics,
   HostedMaintenanceMetrics,
 } from "./models.ts";
-import { assertNever } from "./utils.ts";
+import { assertNever, resolveHostedWake } from "./utils.ts";
 
 export function summarizeDispatch(
-  dispatch: HostedExecutionDispatchRequest,
+  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
   metrics: HostedDispatchExecutionMetrics & HostedMaintenanceMetrics,
 ): string {
+  const wake = resolveHostedWake(dispatch);
   const suffix = ` Parser jobs: ${metrics.parserProcessed}. Device sync jobs: ${metrics.deviceSyncProcessed}${metrics.deviceSyncSkipped ? " (skipped: providers not configured)." : "."}`;
 
-  switch (dispatch.event.kind) {
+  switch (wake.kind) {
     case "member.activated":
       return `Processed member activation (${formatHostedBootstrapResult(metrics.bootstrapResult)}) and ran the hosted maintenance loop.${suffix}`;
     case "member.channels.updated":
       return `Processed member channel sync and ran the hosted maintenance loop.${suffix}`;
-    case "linq.message.received":
-      return "Persisted Linq capture on the hosted conversation lane.";
-    case "telegram.message.received":
-      return "Persisted Telegram capture on the hosted conversation lane.";
-    case "email.message.received":
-      return "Persisted hosted email capture on the hosted conversation lane.";
+    case "conversation.message":
+      switch (wake.message.channel) {
+        case "linq":
+          return "Persisted Linq capture on the hosted conversation lane.";
+        case "telegram":
+          return "Persisted Telegram capture on the hosted conversation lane.";
+        case "email":
+          return "Persisted hosted email capture on the hosted conversation lane.";
+      }
+      return assertNever(wake.message);
     case "assistant.cron.tick":
-      return `Processed assistant cron tick (${dispatch.event.reason}) and ran the hosted maintenance loop.${suffix}`;
+      return `Processed assistant cron tick (${wake.reason}) and ran the hosted maintenance loop.${suffix}`;
     case "device-sync.wake":
-      return `Processed device-sync wake (${dispatch.event.reason}) and ran the hosted maintenance loop.${suffix}`;
+      return `Processed device-sync wake (${wake.reason}) and ran the hosted maintenance loop.${suffix}`;
     case "vault.share.accepted": {
       const importedFoods = metrics.shareImportResult?.foods.length ?? 0;
       const importedProtocols = metrics.shareImportResult?.protocols.length ?? 0;
       const importedRecipes = metrics.shareImportResult?.recipes.length ?? 0;
       const loggedMeal = metrics.shareImportResult?.meal ? " Logged one meal entry from the shared food." : "";
-      const title = metrics.shareImportTitle ?? dispatch.event.share.shareId;
+      const title = metrics.shareImportTitle ?? wake.share.shareId;
       return `Imported share pack "${title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
     }
-    default:
-      return assertNever(dispatch.event);
   }
+
+  return assertNever(wake);
 }
 
 function formatHostedBootstrapResult(result: HostedBootstrapResult | null): string {

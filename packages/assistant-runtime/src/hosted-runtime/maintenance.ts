@@ -31,6 +31,7 @@ import {
 import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
   HostedExecutionDispatchRequest,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -38,6 +39,7 @@ import {
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
+import { resolveHostedDispatch, resolveHostedWake } from "./utils.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_MAINTENANCE_PASSES = 10;
@@ -78,7 +80,7 @@ async function resolveHostedAssistantAutomationReadiness(input: {
 }
 
 function reportHostedAssistantAutomationSkipped(
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   readiness: HostedAssistantAutomationReadiness,
 ): void {
   emitHostedExecutionStructuredLog({
@@ -93,7 +95,7 @@ function reportHostedAssistantAutomationSkipped(
       configStatus: readiness.configStatus,
       provider: readiness.provider,
     },
-    dispatch,
+    dispatch: wake,
     level: "warn",
     message:
       readiness.configStatus === "invalid"
@@ -111,6 +113,7 @@ export async function runHostedMaintenanceLoop(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   dispatch: HostedExecutionDispatchRequest;
+  wake?: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   requestId: string;
   resolvedConfig: {
@@ -120,12 +123,13 @@ export async function runHostedMaintenanceLoop(input: {
   timeoutMs: number | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
+  const wake = resolveHostedWake(input);
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
     skipAssistantAutomation: input.skipAssistantAutomation ?? false,
   });
 
   if (!assistantAutomation.configured) {
-    reportHostedAssistantAutomationSkipped(input.dispatch, assistantAutomation);
+    reportHostedAssistantAutomationSkipped(wake, assistantAutomation);
   }
 
   let deviceSyncProcessed = 0;
@@ -138,7 +142,7 @@ export async function runHostedMaintenanceLoop(input: {
       artifactMaterializer: input.artifactMaterializer ?? null,
       assistantAutomation,
       deviceSyncPort: input.deviceSyncPort,
-      dispatch: input.dispatch,
+      wake,
       executionContext: input.executionContext,
       requestId: input.requestId,
       resolvedConfig: input.resolvedConfig,
@@ -242,8 +246,9 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
   executionContext: AssistantExecutionContext,
-  dispatch: HostedExecutionDispatchRequest,
+  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
 ): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
+  const wake = resolveHostedWake(dispatch);
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
@@ -259,7 +264,7 @@ export async function runHostedAssistantAutomation(
       inboxScanCursor: beforeState.inboxScanCursor?.captureId ?? null,
       requestId,
     },
-    dispatch,
+    dispatch: wake,
     message: "Hosted assistant automation pass starting.",
     phase: "dispatch.running",
   });
@@ -279,7 +284,7 @@ export async function runHostedAssistantAutomation(
             requestId,
             type: event.type,
           },
-          dispatch,
+          dispatch: wake,
           message: `Hosted assistant automation event: ${event.type}.`,
           phase: "dispatch.running",
         });
@@ -301,7 +306,7 @@ export async function runHostedAssistantAutomation(
         progressed: result.progressed,
         requestId,
       },
-      dispatch,
+      dispatch: wake,
       message: "Hosted assistant automation pass finished.",
       phase: "dispatch.running",
     });
@@ -318,7 +323,7 @@ export async function runHostedAssistantAutomation(
         details: {
           requestId,
         },
-        dispatch,
+        dispatch: wake,
         message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
         phase: "dispatch.running",
       });
@@ -333,12 +338,14 @@ export async function runHostedAssistantAutomation(
 }
 
 export async function runHostedDeviceSyncPass(
-  dispatch: HostedExecutionDispatchRequest,
+  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
   vaultRoot: string,
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null,
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
+  const resolvedDispatch = resolveHostedDispatch(dispatch);
+  const wake = resolveHostedWake(dispatch);
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
     vaultRoot,
@@ -360,14 +367,15 @@ export async function runHostedDeviceSyncPass(
     snapshot: null,
   };
   let controlPlaneSynced = false;
-  const failHardOnControlPlaneError = dispatch.event.kind === "device-sync.wake";
+  const failHardOnControlPlaneError = wake.kind === "device-sync.wake";
 
   try {
     if (secret) {
       try {
         syncState = await syncHostedDeviceSyncControlPlaneState({
+          dispatch: resolvedDispatch,
           deviceSyncPort,
-          dispatch,
+          wake,
           secret,
           service,
         });
@@ -377,7 +385,7 @@ export async function runHostedDeviceSyncPass(
           throw error;
         }
 
-        reportHostedDeviceSyncControlPlaneFailure("sync", dispatch, error);
+        reportHostedDeviceSyncControlPlaneFailure("sync", wake, error);
       }
     }
 
@@ -387,8 +395,9 @@ export async function runHostedDeviceSyncPass(
     if (secret && controlPlaneSynced) {
       try {
         await reconcileHostedDeviceSyncControlPlaneState({
+          dispatch: resolvedDispatch,
           deviceSyncPort,
-          dispatch,
+          wake,
           secret,
           service,
           state: syncState,
@@ -398,7 +407,7 @@ export async function runHostedDeviceSyncPass(
           throw error;
         }
 
-        reportHostedDeviceSyncControlPlaneFailure("reconcile", dispatch, error);
+        reportHostedDeviceSyncControlPlaneFailure("reconcile", wake, error);
       }
     }
 
@@ -416,7 +425,7 @@ async function runHostedMaintenancePass(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   assistantAutomation: HostedAssistantAutomationReadiness;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
-  dispatch: HostedExecutionDispatchRequest;
+  wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   requestId: string;
   resolvedConfig: {
@@ -434,14 +443,14 @@ async function runHostedMaintenancePass(input: {
         input.vaultRoot,
         input.requestId,
         input.executionContext,
-        input.dispatch,
+        input.wake,
       )
     : {
         nextWakeAt: null,
         progressed: false,
       };
   const deviceSyncResult = await runHostedDeviceSyncPass(
-    input.dispatch,
+    input.wake,
     input.vaultRoot,
     input.resolvedConfig.deviceSync,
     input.deviceSyncPort,
@@ -469,12 +478,12 @@ async function runHostedMaintenancePass(input: {
 
 function reportHostedDeviceSyncControlPlaneFailure(
   phase: "reconcile" | "sync",
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   error: unknown,
 ): void {
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch,
+    dispatch: wake,
     error,
     level: "warn",
     message: `Hosted device-sync control-plane ${phase} failed; continuing hosted job.`,

@@ -1,17 +1,17 @@
 import type {
-  HostedExecutionFirstContactTarget,
   HostedExecutionDispatchRequest,
-  HostedMessageWakeDispatch,
+  HostedExecutionConversationMessageWake,
+  HostedExecutionFirstContactTarget,
   HostedExecutionRunnerSharePack,
-  HostedSystemWakeDispatch,
+  HostedExecutionSystemWake,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
 import {
-  isHostedEmailMessageWakeDispatch,
-  isHostedLinqMessageWakeDispatch,
-  isHostedMessageWakeDispatch,
-  isHostedSystemWakeDispatch,
-  isHostedTelegramMessageWakeDispatch,
+  isHostedConversationMessageWake,
+  isHostedEmailConversationMessageWake,
+  isHostedLinqConversationMessageWake,
+  isHostedTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
@@ -28,7 +28,7 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
-import { assertNever } from "./utils.ts";
+import { assertNever, resolveHostedWake } from "./utils.ts";
 
 type HostedDispatchOutcome = HostedDispatchEffect & {
   maintenanceRequired: boolean;
@@ -36,6 +36,7 @@ type HostedDispatchOutcome = HostedDispatchEffect & {
 
 export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
+  wake?: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -45,6 +46,7 @@ export async function executeHostedDispatchEvent(input: {
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
 }): Promise<HostedDispatchExecutionMetrics> {
+  const wake = resolveHostedWake(input);
   const bootstrapResult = await prepareHostedDispatchContext(
     input.vaultRoot,
     input.dispatch,
@@ -55,7 +57,7 @@ export async function executeHostedDispatchEvent(input: {
     input.executionContext,
   );
   const dispatchEffect = await handleHostedDispatchEvent({
-    dispatch: input.dispatch,
+    wake,
     executionContext: bootstrappedExecutionContext,
     runtime: input.runtime,
     sharePack: input.sharePack ?? null,
@@ -71,7 +73,7 @@ export async function executeHostedDispatchEvent(input: {
 }
 
 async function handleHostedDispatchEvent(input: {
-  dispatch: HostedExecutionDispatchRequest;
+  wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -80,30 +82,28 @@ async function handleHostedDispatchEvent(input: {
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
 }): Promise<HostedDispatchOutcome> {
-  const dispatch = input.dispatch;
-
-  if (isHostedMessageWakeDispatch(dispatch)) {
+  if (isHostedConversationMessageWake(input.wake)) {
     return executeHostedConversationWake({
-      dispatch,
+      wake: input.wake,
       runtime: input.runtime,
       vaultRoot: input.vaultRoot,
     });
   }
 
-  if (isHostedSystemWakeDispatch(dispatch)) {
+  if (!isHostedConversationMessageWake(input.wake)) {
     return executeHostedSystemWake({
-      dispatch,
+      wake: input.wake,
       executionContext: input.executionContext,
       sharePack: input.sharePack ?? null,
       vaultRoot: input.vaultRoot,
     });
   }
 
-  throw new TypeError("Unsupported hosted dispatch kind.");
+  throw new TypeError("Unsupported hosted wake kind.");
 }
 
 async function executeHostedConversationWake(input: {
-  dispatch: HostedMessageWakeDispatch;
+  wake: HostedExecutionConversationMessageWake;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "platform"
@@ -122,23 +122,23 @@ async function executeHostedConversationWake(input: {
 }
 
 async function resolveHostedConversationCapture(input: {
-  dispatch: HostedMessageWakeDispatch;
+  wake: HostedExecutionConversationMessageWake;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "platform"
   >;
 }) {
-  if (isHostedLinqMessageWakeDispatch(input.dispatch)) {
-    return buildHostedLinqCapture(input.dispatch);
+  if (isHostedLinqConversationMessageWake(input.wake)) {
+    return buildHostedLinqCapture(input.wake);
   }
 
-  if (isHostedTelegramMessageWakeDispatch(input.dispatch)) {
-    return buildHostedTelegramCapture(input.dispatch);
+  if (isHostedTelegramConversationMessageWake(input.wake)) {
+    return buildHostedTelegramCapture(input.wake);
   }
 
-  if (isHostedEmailMessageWakeDispatch(input.dispatch)) {
+  if (isHostedEmailConversationMessageWake(input.wake)) {
     return buildHostedEmailCapture(
-      input.dispatch,
+      input.wake,
       input.runtime.platform.effectsPort,
     );
   }
@@ -147,17 +147,17 @@ async function resolveHostedConversationCapture(input: {
 }
 
 async function executeHostedSystemWake(input: {
-  dispatch: HostedSystemWakeDispatch;
+  wake: HostedExecutionSystemWake;
   executionContext: AssistantExecutionContext;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
 }): Promise<HostedDispatchOutcome> {
-  switch (input.dispatch.event.kind) {
+  switch (input.wake.kind) {
     case "member.activated":
-      if (input.dispatch.event.firstContact) {
+      if (input.wake.firstContact) {
         await queueAssistantFirstContactWelcome(
           buildAssistantFirstContactWelcomeInput(
-            input.dispatch.event.firstContact,
+            input.wake.firstContact,
             input.executionContext,
             input.vaultRoot,
           ),
@@ -181,10 +181,7 @@ async function executeHostedSystemWake(input: {
       }
       return {
         ...(await handleHostedShareAcceptedDispatch({
-          dispatch: {
-            ...input.dispatch,
-            event: input.dispatch.event,
-          },
+          dispatch: input.wake,
           sharePack: input.sharePack,
           vaultRoot: input.vaultRoot,
         })),
@@ -192,7 +189,7 @@ async function executeHostedSystemWake(input: {
       };
   }
 
-  return assertNever(input.dispatch.event);
+  return assertNever(input.wake);
 }
 
 function createNoopDispatchEffect(input: {
