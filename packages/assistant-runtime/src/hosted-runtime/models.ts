@@ -37,15 +37,19 @@ export interface HostedAssistantRuntimeConfig {
   userEnv?: Readonly<Record<string, string>>;
 }
 
+export interface HostedAssistantRuntimeResumeCommittedResult {
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  result: HostedExecutionRunnerResult["result"];
+}
+
+export interface HostedAssistantRuntimeResumeState {
+  committedResult: HostedAssistantRuntimeResumeCommittedResult;
+}
+
 export interface HostedAssistantRuntimeJobRequest
   extends HostedExecutionRunnerRequest {
   currentBundleRef?: HostedExecutionBundleRefState;
-  resume?: {
-    committedResult: {
-      assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-      result: HostedExecutionRunnerResult["result"];
-    };
-  } | null;
+  resume?: HostedAssistantRuntimeResumeState | null;
 }
 
 export interface HostedAssistantRuntimeJobInput {
