@@ -30,6 +30,10 @@ import type {
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 import { assertNever } from "./utils.ts";
 
+type HostedDispatchOutcome = HostedDispatchEffect & {
+  maintenanceRequired: boolean;
+};
+
 export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   executionContext: AssistantExecutionContext;
@@ -60,6 +64,7 @@ export async function executeHostedDispatchEvent(input: {
 
   return {
     bootstrapResult,
+    maintenanceRequired: dispatchEffect.maintenanceRequired,
     shareImportResult: dispatchEffect.shareImportResult,
     shareImportTitle: dispatchEffect.shareImportTitle,
   };
@@ -74,7 +79,7 @@ async function handleHostedDispatchEvent(input: {
   >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedDispatchEffect> {
+}): Promise<HostedDispatchOutcome> {
   const dispatch = input.dispatch;
 
   if (isHostedMessageWakeDispatch(dispatch)) {
@@ -104,14 +109,16 @@ async function executeHostedConversationWake(input: {
     "platform"
   >;
   vaultRoot: string;
-}): Promise<HostedDispatchEffect> {
+}): Promise<HostedDispatchOutcome> {
   const capture = await resolveHostedConversationCapture(input);
 
   await withHostedInboxPipeline(input.vaultRoot, async (pipeline) => {
     await pipeline.processCapture(capture);
   });
 
-  return createNoopDispatchEffect();
+  return createNoopDispatchEffect({
+    maintenanceRequired: false,
+  });
 }
 
 async function resolveHostedConversationCapture(input: {
@@ -144,7 +151,7 @@ async function executeHostedSystemWake(input: {
   executionContext: AssistantExecutionContext;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedDispatchEffect> {
+}): Promise<HostedDispatchOutcome> {
   switch (input.dispatch.event.kind) {
     case "member.activated":
       if (input.dispatch.event.firstContact) {
@@ -156,31 +163,43 @@ async function executeHostedSystemWake(input: {
           ),
         );
       }
-      return createNoopDispatchEffect();
+      return createNoopDispatchEffect({
+        maintenanceRequired: true,
+      });
     case "member.channels.updated":
-      return createNoopDispatchEffect();
+      return createNoopDispatchEffect({
+        maintenanceRequired: true,
+      });
     case "assistant.cron.tick":
     case "device-sync.wake":
-      return createNoopDispatchEffect();
+      return createNoopDispatchEffect({
+        maintenanceRequired: true,
+      });
     case "vault.share.accepted":
       if (!input.sharePack) {
         throw new TypeError("Hosted share accepted dispatch requires a hydrated runner sharePack.");
       }
-      return await handleHostedShareAcceptedDispatch({
-        dispatch: {
-          ...input.dispatch,
-          event: input.dispatch.event,
-        },
-        sharePack: input.sharePack,
-        vaultRoot: input.vaultRoot,
-      });
+      return {
+        ...(await handleHostedShareAcceptedDispatch({
+          dispatch: {
+            ...input.dispatch,
+            event: input.dispatch.event,
+          },
+          sharePack: input.sharePack,
+          vaultRoot: input.vaultRoot,
+        })),
+        maintenanceRequired: true,
+      };
   }
 
   return assertNever(input.dispatch.event);
 }
 
-function createNoopDispatchEffect(): HostedDispatchEffect {
+function createNoopDispatchEffect(input: {
+  maintenanceRequired: boolean;
+}): HostedDispatchOutcome {
   return {
+    maintenanceRequired: input.maintenanceRequired,
     shareImportResult: null,
     shareImportTitle: null,
   };

@@ -353,8 +353,7 @@ export class HostedUserRunner {
     input: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionDispatchResult> {
     const status = await this.dispatch(input);
-    const event = await this.readHostedDispatchStatus(input, status)
-      ?? await this.queueStore.readEventDispatchStatus(input.eventId)
+    const event = await this.readHostedDispatchStatus(input)
       ?? buildShimDispatchStatusFallback(input, status);
 
     return {
@@ -608,13 +607,17 @@ export class HostedUserRunner {
   private async dispatchHostedMessageWake(
     dispatch: HostedExecutionDispatchRequest,
   ): Promise<HostedWakeDrainState> {
-    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch);
+    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch, {
+      holdLeaseUntilCleanup: true,
+    });
   }
 
   private async dispatchHostedSystemWake(
     dispatch: HostedExecutionDispatchRequest,
   ): Promise<HostedWakeDrainState> {
-    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch);
+    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch, {
+      holdLeaseUntilCleanup: true,
+    });
   }
 
   private async finalizeCommittedHostedWakesLocally(input: {
@@ -743,10 +746,12 @@ export class HostedUserRunner {
 
       return {
         ...baseStatus,
+        backpressuredEventIds: [],
         pendingEventCount: wakeStatus.pendingWakeCount,
-        retryingEventId: wakeStatus.pendingWakeCount > 0
-          ? (baseStatus.run?.eventId ?? baseStatus.retryingEventId ?? baseStatus.lastEventId)
-          : null,
+        poisonedEventIds: [],
+        retryingEventId: wakeStatus.pendingWakeCount > 0 && baseStatus.inFlight
+          ? (baseStatus.run?.eventId ?? baseStatus.lastEventId)
+          : baseStatus.retryingEventId,
       };
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -763,7 +768,6 @@ export class HostedUserRunner {
 
   private async readHostedDispatchStatus(
     dispatch: HostedExecutionDispatchRequest,
-    status: HostedExecutionUserStatus,
   ): Promise<HostedExecutionDispatchStatus | null> {
     try {
       const wakeStatus = await readHostedWakeStatusFromWeb({
@@ -778,7 +782,7 @@ export class HostedUserRunner {
 
       return {
         eventId: dispatch.eventId,
-        lastError: wakeStatus.dispatchState === "poisoned" ? status.lastError : null,
+        lastError: null,
         state: wakeStatus.dispatchState ?? "queued",
         userId: dispatch.event.userId,
       };
@@ -979,25 +983,13 @@ function buildShimDispatchStatusFallback(
   input: HostedExecutionDispatchRequest,
   status: HostedExecutionUserStatus,
 ): HostedExecutionDispatchStatus {
-  if (status.retryingEventId === input.eventId) {
+  const activeEventId = status.run?.eventId ?? status.lastEventId;
+
+  if (status.inFlight && activeEventId === input.eventId) {
     return {
       eventId: input.eventId,
       lastError: status.lastError,
       state: "backpressured",
-      userId: input.event.userId,
-    };
-  }
-
-  if (
-    status.lastEventId === input.eventId
-    && status.pendingEventCount === 0
-    && status.inFlight === false
-    && status.lastError === null
-  ) {
-    return {
-      eventId: input.eventId,
-      lastError: null,
-      state: "completed",
       userId: input.event.userId,
     };
   }

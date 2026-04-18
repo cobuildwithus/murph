@@ -157,6 +157,7 @@ describe("executeHostedDispatchEvent", () => {
     });
     assert.deepEqual(result, {
       bootstrapResult,
+      maintenanceRequired: true,
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -278,7 +279,7 @@ describe("executeHostedDispatchEvent", () => {
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    await executeHostedDispatchEvent({
+    const linqResult = await executeHostedDispatchEvent({
       dispatch: linqDispatch,
       executionContext,
       runtime,
@@ -330,6 +331,12 @@ describe("executeHostedDispatchEvent", () => {
       runtime.platform.effectsPort,
     );
     expect(processCapture).toHaveBeenCalledTimes(3);
+    assert.deepEqual(linqResult, {
+      bootstrapResult: null,
+      maintenanceRequired: false,
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
   });
 
   it("treats explicit member channel sync events as no-op dispatch handlers", async () => {
@@ -355,6 +362,7 @@ describe("executeHostedDispatchEvent", () => {
     expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
+      maintenanceRequired: true,
       shareImportResult: null,
       shareImportTitle: null,
     });

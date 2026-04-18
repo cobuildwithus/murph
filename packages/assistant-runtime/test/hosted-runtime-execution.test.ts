@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   ),
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   createHostedArtifactUploadSink: vi.fn(),
+  createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
+  createDeviceSyncRegistry: vi.fn(),
+  createDeviceSyncService: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -16,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   executeHostedDispatchEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
+  getAssistantCronStatus: vi.fn(),
+  getAssistantStatus: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
   readHostedAssistantExecutionDefaultTarget: vi.fn(),
@@ -48,7 +53,22 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 vi.mock("@murphai/assistant-engine", () => ({
+  getAssistantCronStatus: mocks.getAssistantCronStatus,
+  getAssistantStatus: mocks.getAssistantStatus,
   refreshAssistantStatusSnapshot: mocks.refreshAssistantStatusSnapshot,
+}));
+
+vi.mock("@murphai/device-syncd/config", () => ({
+  createConfiguredDeviceSyncProvidersFromConfigs:
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs,
+}));
+
+vi.mock("@murphai/device-syncd/registry", () => ({
+  createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
+}));
+
+vi.mock("@murphai/device-syncd/service", () => ({
+  createDeviceSyncService: mocks.createDeviceSyncService,
 }));
 
 vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
@@ -136,6 +156,16 @@ beforeEach(() => {
     Buffer.from(bytes).toString("base64"),
   );
   mocks.createHostedArtifactUploadSink.mockReturnValue(Symbol("artifact-sink"));
+  mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue([]);
+  mocks.createDeviceSyncRegistry.mockReturnValue({
+    list() {
+      return [];
+    },
+  });
+  mocks.createDeviceSyncService.mockReturnValue({
+    close: vi.fn(),
+    getNextWakeAt: vi.fn(() => null),
+  });
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
   });
@@ -160,6 +190,7 @@ beforeEach(() => {
       telegramAutoReplyEnabled: false,
       vaultCreated: true,
     },
+    maintenanceRequired: true,
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -220,6 +251,15 @@ beforeEach(() => {
     webSearch: null,
   });
   mocks.refreshAssistantStatusSnapshot.mockResolvedValue(undefined);
+  mocks.getAssistantCronStatus.mockResolvedValue({
+    nextRunAt: null,
+  });
+  mocks.getAssistantStatus.mockResolvedValue({
+    outbox: {
+      nextAttemptAt: null,
+    },
+    recentTurns: [],
+  });
 });
 
 describe("executeHostedDispatchForCommit", () => {
@@ -470,6 +510,496 @@ describe("executeHostedDispatchForCommit", () => {
             defaultTarget: existingDefaultTarget,
           }),
         },
+      }),
+    );
+  });
+
+  it("skips the generic maintenance loop for ordinary hosted message wakes", async () => {
+    mocks.executeHostedDispatchEvent.mockResolvedValue({
+      bootstrapResult: null,
+      maintenanceRequired: false,
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+
+    const result = await executeHostedDispatchForCommit({
+      artifactMaterializer: vi.fn(),
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        dispatch: {
+          event: {
+            kind: "linq.message.received",
+            linqEvent: {
+              event_type: "message.received",
+            },
+            phoneLookupKey: "15551234567",
+            userId: "member_123",
+          },
+          eventId: "evt_linq_message",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
+    assert.equal(result.committedResult.result.nextWakeAt, null);
+    assert.equal(
+      result.committedResult.result.summary,
+      "Persisted Linq capture on the hosted conversation lane.",
+    );
+  });
+
+  it("preserves a pending assistant wake when message wakes skip generic maintenance", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
+      mocks.executeHostedDispatchEvent.mockResolvedValue({
+        bootstrapResult: null,
+        maintenanceRequired: false,
+        shareImportResult: null,
+        shareImportTitle: null,
+      });
+      mocks.getAssistantStatus.mockResolvedValue({
+        outbox: {
+          nextAttemptAt: "2026-04-08T00:20:00.000Z",
+        },
+        recentTurns: [],
+      });
+      mocks.getAssistantCronStatus.mockResolvedValue({
+        nextRunAt: "2026-04-08T00:30:00.000Z",
+      });
+
+      const result = await executeHostedDispatchForCommit({
+        artifactMaterializer: vi.fn(),
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: {
+            event: {
+              kind: "telegram.message.received",
+              telegramMessage: {
+                messageId: "telegram_message_123",
+                schema: "murph.hosted-telegram-message.v1",
+                text: "hello",
+                threadId: "telegram_thread_123",
+              },
+              userId: "member_123",
+            },
+            eventId: "evt_telegram_message",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+        restored: {
+          assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+          operatorHomeRoot: "/tmp/operator-home",
+          vaultRoot: "/tmp/vault-root",
+        },
+        runtime: {
+          commitTimeoutMs: 45_000,
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            effectsPort: {
+              async deletePreparedAssistantDelivery() {},
+              async readRawEmailMessage() {
+                return null;
+              },
+              async readAssistantDeliveryRecord() {
+                return null;
+              },
+              async sendEmail() {},
+              async writeAssistantDeliveryRecord(record) {
+                return record;
+              },
+            },
+            usageExportPort: null,
+          },
+          resolvedConfig: createHostedRuntimeResolvedConfig(),
+          userEnv: {},
+        },
+        runtimeEnv: {},
+      });
+
+      expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
+      expect(mocks.getAssistantStatus).toHaveBeenCalledWith({
+        limit: 200,
+        vault: "/tmp/vault-root",
+      });
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:20:00.000Z");
+      assert.equal(
+        result.committedResult.result.summary,
+        "Persisted Telegram capture on the hosted conversation lane.",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("promotes due assistant recovery work to an immediate preserved wake when maintenance is skipped", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
+      mocks.executeHostedDispatchEvent.mockResolvedValue({
+        bootstrapResult: null,
+        maintenanceRequired: false,
+        shareImportResult: null,
+        shareImportTitle: null,
+      });
+      mocks.getAssistantStatus.mockResolvedValue({
+        outbox: {
+          nextAttemptAt: null,
+        },
+        recentTurns: [
+          {
+            deliveryDisposition: "failed",
+            deliveryIntentId: null,
+            deliveryRequested: true,
+            completedAt: null,
+            lastError: null,
+            promptPreview: null,
+            provider: "openai-compatible",
+            providerModel: "gpt-4.1-mini",
+            responsePreview: null,
+            schema: "murph.assistant-turn-receipt.v1",
+            sessionId: "session_123",
+            startedAt: "2026-04-08T00:00:00.000Z",
+            status: "failed",
+            timeline: [
+              {
+                at: "2026-04-08T00:00:00.000Z",
+                detail: null,
+                kind: "turn.started",
+                metadata: {
+                  autoReplyCaptureId: "capture_123",
+                },
+              },
+              {
+                at: "2026-04-08T00:05:00.000Z",
+                detail: null,
+                kind: "turn.deferred",
+                metadata: {
+                  autoReplyRetryAt: "2026-04-08T00:09:00.000Z",
+                },
+              },
+            ],
+            turnId: "turn_123",
+            updatedAt: "2026-04-08T00:05:00.000Z",
+          },
+        ],
+      });
+
+      const result = await executeHostedDispatchForCommit({
+        artifactMaterializer: vi.fn(),
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: {
+            event: {
+              kind: "email.message.received",
+              identityId: null,
+              rawMessageKey: "raw/message.eml",
+              userId: "member_123",
+            },
+            eventId: "evt_email_message",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+        restored: {
+          assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+          operatorHomeRoot: "/tmp/operator-home",
+          vaultRoot: "/tmp/vault-root",
+        },
+        runtime: {
+          commitTimeoutMs: 45_000,
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            effectsPort: {
+              async deletePreparedAssistantDelivery() {},
+              async readRawEmailMessage() {
+                return null;
+              },
+              async readAssistantDeliveryRecord() {
+                return null;
+              },
+              async sendEmail() {},
+              async writeAssistantDeliveryRecord(record) {
+                return record;
+              },
+            },
+            usageExportPort: null,
+          },
+          resolvedConfig: createHostedRuntimeResolvedConfig(),
+          userEnv: {},
+        },
+        runtimeEnv: {},
+      });
+
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
+      assert.equal(
+        result.committedResult.result.summary,
+        "Persisted hosted email capture on the hosted conversation lane.",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves a device-sync wake without running the generic maintenance loop", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
+      mocks.executeHostedDispatchEvent.mockResolvedValue({
+        bootstrapResult: null,
+        maintenanceRequired: false,
+        shareImportResult: null,
+        shareImportTitle: null,
+      });
+      const close = vi.fn();
+      mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue([
+        {
+          provider: "oura",
+        },
+      ]);
+      mocks.createDeviceSyncRegistry.mockReturnValue({
+        list() {
+          return [{ provider: "oura" }];
+        },
+      });
+      mocks.createDeviceSyncService.mockReturnValue({
+        close,
+        getNextWakeAt() {
+          return "2026-04-08T00:25:00.000Z";
+        },
+      });
+
+      const result = await executeHostedDispatchForCommit({
+        artifactMaterializer: vi.fn(),
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: {
+            event: {
+              kind: "linq.message.received",
+              linqEvent: {
+                event_type: "message.received",
+              },
+              phoneLookupKey: "15551234567",
+              userId: "member_123",
+            },
+            eventId: "evt_linq_message_device_sync",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+        restored: {
+          assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+          operatorHomeRoot: "/tmp/operator-home",
+          vaultRoot: "/tmp/vault-root",
+        },
+        runtime: {
+          commitTimeoutMs: 45_000,
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            effectsPort: {
+              async deletePreparedAssistantDelivery() {},
+              async readRawEmailMessage() {
+                return null;
+              },
+              async readAssistantDeliveryRecord() {
+                return null;
+              },
+              async sendEmail() {},
+              async writeAssistantDeliveryRecord(record) {
+                return record;
+              },
+            },
+            usageExportPort: null,
+          },
+          resolvedConfig: createHostedRuntimeResolvedConfig({
+            deviceSync: {
+              providerConfigs: {},
+              publicBaseUrl: "https://device-sync.example.test",
+              secret: "device-sync-secret",
+            },
+          }),
+          userEnv: {},
+        },
+        runtimeEnv: {},
+      });
+
+      expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
+      expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
+      expect(close).toHaveBeenCalledTimes(1);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:25:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to a null preserved wake when assistant and device-sync wake lookups fail", async () => {
+    mocks.executeHostedDispatchEvent.mockResolvedValue({
+      bootstrapResult: null,
+      maintenanceRequired: false,
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+    mocks.getAssistantStatus.mockRejectedValue(new Error("status read failed"));
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockImplementation(() => {
+      throw new Error("device sync init failed");
+    });
+
+    const result = await executeHostedDispatchForCommit({
+      artifactMaterializer: vi.fn(),
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        dispatch: {
+          event: {
+            kind: "linq.message.received",
+            linqEvent: {
+              event_type: "message.received",
+            },
+            phoneLookupKey: "15551234567",
+            userId: "member_123",
+          },
+          eventId: "evt_linq_message_error",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig({
+          deviceSync: {
+            providerConfigs: {},
+            publicBaseUrl: "https://device-sync.example.test",
+            secret: "device-sync-secret",
+          },
+        }),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    assert.equal(result.committedResult.result.nextWakeAt, null);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted runtime could not resolve the preserved assistant wake while skipping maintenance; continuing without it.",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted runtime could not resolve the preserved device-sync wake while skipping maintenance; continuing without it.",
       }),
     );
   });

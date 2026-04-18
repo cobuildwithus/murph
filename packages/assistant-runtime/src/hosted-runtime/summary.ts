@@ -19,11 +19,11 @@ export function summarizeDispatch(
     case "member.channels.updated":
       return `Processed member channel sync and ran the hosted maintenance loop.${suffix}`;
     case "linq.message.received":
-      return `Persisted Linq capture and ran the hosted maintenance loop.${suffix}`;
+      return "Persisted Linq capture on the hosted conversation lane.";
     case "telegram.message.received":
-      return `Persisted Telegram capture and ran the hosted maintenance loop.${suffix}`;
+      return "Persisted Telegram capture on the hosted conversation lane.";
     case "email.message.received":
-      return `Persisted hosted email capture and ran the hosted maintenance loop.${suffix}`;
+      return "Persisted hosted email capture on the hosted conversation lane.";
     case "assistant.cron.tick":
       return `Processed assistant cron tick (${dispatch.event.reason}) and ran the hosted maintenance loop.${suffix}`;
     case "device-sync.wake":

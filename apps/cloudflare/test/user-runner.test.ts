@@ -1926,7 +1926,16 @@ describe("HostedUserRunner", () => {
     });
     const firstCommitRecorded = createDeferred<void>();
     const releaseFirstRunner = createDeferred<void>();
-    const fetchSpy = vi.fn(async (_url, init) => {
+    const fetchSpy = vi.fn(async (url, init) => {
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
       const requestBody = JSON.parse(String(init?.body));
       await commitResultForRunnerRequest({
         bucket,
@@ -1987,7 +1996,16 @@ describe("HostedUserRunner", () => {
     });
     const firstCommitRecorded = createDeferred<void>();
     const releaseFirstRunner = createDeferred<void>();
-    const fetchSpy = vi.fn(async (_url, init) => {
+    const fetchSpy = vi.fn(async (url, init) => {
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
       const requestBody = JSON.parse(String(init?.body));
       await commitResultForRunnerRequest({
         bucket,
@@ -2019,11 +2037,7 @@ describe("HostedUserRunner", () => {
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await restartedRunner.alarm();
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(await restartedRunner.status()).toMatchObject({
-      inFlight: true,
-      lastEventId: dispatch.eventId,
-    });
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
 
     releaseFirstRunner.resolve();
     const finalStatus = await firstDispatch;
@@ -2439,29 +2453,30 @@ describe("HostedUserRunner", () => {
     expect(sideEffects).toBe(1);
   });
 
-  it("reports duplicate pending events through the shared dispatch outcome surface", async () => {
+  it("resolves duplicate queued wakes through the canonical web wake queue", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = createDispatch("evt_duplicate_pending");
-    await seedRunnerQueueState({
-      bucket,
-      environment,
-      lastError: null,
-      pendingEvents: [{
-        attempts: 0,
-        availableAt: dispatch.occurredAt,
-        dispatch,
-        enqueuedAt: dispatch.occurredAt,
-        lastError: null,
-      }],
-      storage,
-      userId: "member_123",
+    await appendTestHostedWake({
+      bucket: bucket.api,
+      dispatch,
     });
-    const fetchMock = vi.fn(async (url, init) => await maybeCreateHostedWakeControlResponse({
-      bucket,
-      init,
-      url,
-    }));
+    const fetchMock = vi.fn(async (url, init) => {
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
+      return createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await runner.dispatchWithOutcome(dispatch);
@@ -2469,11 +2484,11 @@ describe("HostedUserRunner", () => {
     expect(result.event).toEqual({
       eventId: "evt_duplicate_pending",
       lastError: null,
-      state: "queued",
+      state: "completed",
       userId: "member_123",
     });
-    expect(result.status.pendingEventCount).toBe(1);
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
+    expect(result.status.pendingEventCount).toBe(0);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBeGreaterThan(0);
   });
 
   it("reports duplicate consumed events through the shared dispatch outcome surface", async () => {
@@ -2518,19 +2533,68 @@ describe("HostedUserRunner", () => {
     );
   });
 
+  it("degrades duplicate consumed outcomes to queued when hosted wake status lookup fails", async () => {
+    let failHostedWakeStatusReads = false;
+    const fetchMock = vi.fn(async (url, init) => {
+      if (failHostedWakeStatusReads && String(url).endsWith("/api/internal/hosted-wake/status")) {
+        throw new Error("hosted wake status unavailable");
+      }
+
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
+      return createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const dispatch = createDispatch("evt_duplicate_consumed_status_fallback");
+
+    const first = await runner.dispatchWithOutcome(dispatch);
+    failHostedWakeStatusReads = true;
+    const second = await runner.dispatchWithOutcome(dispatch);
+
+    expect(first.event.state).toBe("completed");
+    expect(second.event).toEqual({
+      eventId: "evt_duplicate_consumed_status_fallback",
+      lastError: null,
+      state: "queued",
+      userId: "member_123",
+    });
+    expect(second.status.pendingEventCount).toBe(0);
+    expect(second.status.lastEventId).toBe("evt_duplicate_consumed_status_fallback");
+  });
+
   it("reports poisoned events through the shared dispatch outcome surface without rerunning them", async () => {
     const dispatch = createDispatch("evt_duplicate_poisoned");
+    const appended = await appendTestHostedWake({
+      bucket: bucket.api,
+      dispatch,
+    });
     await seedRunnerQueueState({
       bucket,
       environment,
       lastError: "Hosted runner container returned an HTTP error.",
       lastErrorAt: "2026-03-26T12:00:30.000Z",
-      poisonedEvents: [{
-        eventId: dispatch.eventId,
-        lastError: "Hosted runner container returned an HTTP error.",
-        poisonedAt: "2026-03-26T12:00:30.000Z",
-      }],
       storage,
+      userId: dispatch.event.userId,
+    });
+    await quarantineTestHostedWake({
+      body: {
+        quarantineCode: "duplicate-poisoned-test",
+        wakeId: appended.wake.id,
+      },
+      bucket: bucket.api,
       userId: dispatch.event.userId,
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -2553,10 +2617,10 @@ describe("HostedUserRunner", () => {
     expect(replayed.event).toEqual({
       eventId: "evt_duplicate_poisoned",
       lastError: null,
-      state: "queued",
+      state: "poisoned",
       userId: "member_123",
     });
-    expect(replayed.status.poisonedEventIds).toContain("evt_duplicate_poisoned");
+    expect(replayed.status.poisonedEventIds).toEqual([]);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
@@ -2831,43 +2895,61 @@ describe("HostedUserRunner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
-  it("keeps poisoned event ids blocked even after the old replay TTL window passes", async () => {
+  it("keeps poisoned wakes blocked even after the old replay TTL window passes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const dispatch = createDispatch("evt_poison_expiry");
+    const appended = await appendTestHostedWake({
+      bucket: bucket.api,
+      dispatch,
+    });
     await seedRunnerQueueState({
       bucket,
       environment,
       lastError: "Hosted runner container returned an HTTP error.",
       lastErrorAt: "2026-03-26T12:00:30.000Z",
-      poisonedEvents: [{
-        eventId: "evt_poison_expiry",
-        lastError: "Hosted runner container returned an HTTP error.",
-        poisonedAt: "2026-03-26T12:00:30.000Z",
-      }],
       storage,
+      userId: "member_123",
+    });
+    await quarantineTestHostedWake({
+      body: {
+        quarantineCode: "poison-expiry-test",
+        wakeId: appended.wake.id,
+      },
+      bucket: bucket.api,
       userId: "member_123",
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    expect((await runner.status()).poisonedEventIds).toContain("evt_poison_expiry");
+    expect((await runner.status()).poisonedEventIds).toEqual([]);
 
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-      bucket,
-      environment,
-      init,
-    })));
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
+      return createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+      });
+    }));
     vi.setSystemTime(new Date("2026-04-02T12:00:31.000Z"));
-    const replayed = await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_poison_expiry",
-      occurredAt: "2026-04-02T12:00:31.000Z",
-    });
+    const replayed = await runner.dispatchWithOutcome(dispatch);
 
-    expect(replayed.poisonedEventIds).toContain("evt_poison_expiry");
+    expect(replayed.event).toEqual({
+      eventId: "evt_poison_expiry",
+      lastError: null,
+      state: "poisoned",
+      userId: "member_123",
+    });
+    expect(replayed.status.poisonedEventIds).toEqual([]);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
   it("stores encrypted runner-secret config in a dedicated hosted object", async () => {

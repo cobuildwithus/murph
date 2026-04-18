@@ -140,6 +140,7 @@ export interface HostedDispatchEffect {
 
 export interface HostedDispatchExecutionMetrics extends HostedDispatchEffect {
   bootstrapResult: HostedBootstrapResult | null;
+  maintenanceRequired: boolean;
 }
 
 export interface HostedMaintenanceMetrics {
