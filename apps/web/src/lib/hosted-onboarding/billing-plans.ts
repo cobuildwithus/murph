@@ -29,9 +29,9 @@ export interface HostedBillingPlanPresentation {
 
 const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_annual: {
-    badge: "Save $24",
+    badge: "Save $36",
     code: "launch_annual",
-    description: "$12/month billed yearly. Save $24 each year.",
+    description: "$12/month billed yearly. Save $36 each year.",
     displayName: "Annual",
     interval: "year",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
@@ -44,12 +44,12 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     displayName: "Monthly",
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-    recurringAmountUsdCents: 1_400,
+    recurringAmountUsdCents: 1_500,
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
 export function getHostedBillingPlanDefinition(
-  code: HostedBillingPlanCode,
+  code: HostedBillingPlanCode
 ): HostedBillingPlanDefinition {
   return HOSTED_BILLING_PLAN_DEFINITIONS[code];
 }
@@ -59,7 +59,7 @@ export function getHostedDefaultBillingPlanCode(): HostedBillingPlanCode {
 }
 
 export function parseHostedBillingPlanCode(
-  value: unknown,
+  value: unknown
 ): HostedBillingPlanCode | null {
   return typeof value === "string" && hasHostedBillingPlanCode(value)
     ? value
@@ -69,11 +69,13 @@ export function parseHostedBillingPlanCode(
 export function listHostedBillingPlanPresentations(input?: {
   configuredPlanCodes?: readonly HostedBillingPlanCode[] | null;
 }): readonly HostedBillingPlanPresentation[] {
-  const configuredPlanCodes = new Set(input?.configuredPlanCodes ?? HOSTED_BILLING_PLAN_CODES);
+  const configuredPlanCodes = new Set(
+    input?.configuredPlanCodes ?? HOSTED_BILLING_PLAN_CODES
+  );
 
-  return HOSTED_BILLING_PLAN_CODES
-    .filter((code) => configuredPlanCodes.has(code))
-    .map((code) => buildHostedBillingPlanPresentation(code));
+  return HOSTED_BILLING_PLAN_CODES.filter((code) =>
+    configuredPlanCodes.has(code)
+  ).map((code) => buildHostedBillingPlanPresentation(code));
 }
 
 export function resolveHostedBillingReady(input: {
@@ -84,30 +86,41 @@ export function resolveHostedBillingReady(input: {
     return false;
   }
 
-  return HOSTED_BILLING_PLAN_CODES.some((code) => Boolean(input.stripePriceIdsByPlan[code]));
+  return HOSTED_BILLING_PLAN_CODES.some((code) =>
+    Boolean(input.stripePriceIdsByPlan[code])
+  );
 }
 
 export function resolveConfiguredHostedBillingPlanCodes(input: {
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
 }): HostedBillingPlanCode[] {
-  return HOSTED_BILLING_PLAN_CODES.filter((code) => Boolean(input.stripePriceIdsByPlan[code]));
+  return HOSTED_BILLING_PLAN_CODES.filter((code) =>
+    Boolean(input.stripePriceIdsByPlan[code])
+  );
 }
 
 export function formatHostedLandingPricingShortSummary(): string {
-  return `${formatUsdCompact(getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents)}/mo or ${formatUsdCompact(getHostedBillingPlanDefinition("launch_annual").recurringAmountUsdCents)}/yr`;
+  return `${formatUsdCompact(
+    getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents
+  )}/mo`;
 }
 
 export function formatHostedLandingPricingLongSummary(): string {
-  return `${formatUsdLong(getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents)}/month or ${formatUsdLong(getHostedBillingPlanDefinition("launch_annual").recurringAmountUsdCents)}/year`;
+  return `${formatUsdLong(
+    getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents
+  )}/month`;
 }
 
 export function formatHostedLandingAnnualEquivalentSummary(): string {
-  const annualAmountUsdCents = getHostedBillingPlanDefinition("launch_annual").recurringAmountUsdCents;
-  return `${formatUsdLong(Math.round(annualAmountUsdCents / 12))}/month billed yearly`;
+  const annualAmountUsdCents =
+    getHostedBillingPlanDefinition("launch_annual").recurringAmountUsdCents;
+  return `${formatUsdLong(
+    Math.round(annualAmountUsdCents / 12)
+  )}/month billed yearly`;
 }
 
 function buildHostedBillingPlanPresentation(
-  code: HostedBillingPlanCode,
+  code: HostedBillingPlanCode
 ): HostedBillingPlanPresentation {
   const definition = getHostedBillingPlanDefinition(code);
 
@@ -126,7 +139,9 @@ function buildHostedBillingPlanPresentation(
   };
 }
 
-function hasHostedBillingPlanCode(value: string): value is HostedBillingPlanCode {
+function hasHostedBillingPlanCode(
+  value: string
+): value is HostedBillingPlanCode {
   return HOSTED_BILLING_PLAN_CODES.includes(value as HostedBillingPlanCode);
 }
 
