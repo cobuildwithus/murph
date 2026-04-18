@@ -20,6 +20,7 @@ That rendered surface is then used by:
 - `pnpm --dir apps/cloudflare deploy:smoke`
 
 The rendered deploy helper path is the canonical rollout contract. The lower-level version helper still exists for recovery work, and the checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
+Hosted assistant post-commit delivery recovery now relies on the shared outbox mirror inside the encrypted vault plus pending-commit Durable Object coordination; the old `/results.worker/effects/:id` journal seam is no longer part of the deploy surface.
 
 ## One-Time Cloudflare Setup
 
@@ -32,7 +33,6 @@ Before the first deploy:
 The checked-in lifecycle file backstops the production execution-transient blobs that still exist on the live runner path:
 
 - `transient/execution-journal/` expires after 6 hours
-- `transient/side-effects/` expires after 6 hours
 - `transient/hosted-email/messages/` expires after 1 hour
 
 Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-secret blobs, and queue-local execution sidecars.

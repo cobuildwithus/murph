@@ -216,6 +216,42 @@ async function readFetchRequestBody(request: Request): Promise<unknown> {
   return body.length > 0 ? JSON.parse(body) : null
 }
 
+function installSentAssistantOutboxDispatchMock(input: {
+  delivery: Record<string, unknown>;
+  intentId: string;
+  sentAt: string;
+}): void {
+  hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ intentId, vault }) => {
+    if (intentId !== input.intentId) {
+      throw new Error(`Unexpected assistant outbox intent id: ${intentId}`);
+    }
+
+    const intentPath = path.join(resolveAssistantStatePaths(vault).outboxDirectory, `${intentId}.json`);
+    const currentIntent = assistantOutboxIntentSchema.parse(
+      JSON.parse(await readFile(intentPath, "utf8")),
+    );
+    const sentIntent = assistantOutboxIntentSchema.parse({
+      ...currentIntent,
+      attemptCount: currentIntent.attemptCount + 1,
+      delivery: input.delivery,
+      deliveryConfirmationPending: false,
+      lastAttemptAt: input.sentAt,
+      lastError: null,
+      nextAttemptAt: null,
+      sentAt: input.sentAt,
+      status: "sent",
+      updatedAt: input.sentAt,
+    });
+    await writeFile(intentPath, `${JSON.stringify(sentIntent)}\n`);
+
+    return {
+      deliveryError: null,
+      intent: sentIntent,
+      session: null,
+    };
+  });
+}
+
 async function restoreHostedExecutionContext(input: {
   agentStateBundle?: ArrayBuffer | Uint8Array | null;
   artifactResolver?: Parameters<typeof restoreHostedExecutionContextActual>[0]["artifactResolver"];
@@ -1926,7 +1962,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("reconciles journaled hosted assistant deliveries only after the Durable Object resumes the committed result", async () => {
+  it("reconciles mirror-backed hosted assistant deliveries only after the Durable Object resumes the committed result", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
@@ -1938,6 +1974,17 @@ describe("runHostedExecutionJob", () => {
     await mkdir(statePaths.outboxDirectory, { recursive: true });
     const intentId = "outbox_hosted_reconcile";
     const createdAt = "2026-03-26T12:00:00.000Z";
+    const sentAt = "2026-03-26T12:00:05.000Z";
+    const delivery = {
+      channel: "linq",
+      idempotencyKey: `assistant-outbox:${intentId}`,
+      messageLength: "Queued the Linq reply.".length,
+      providerMessageId: null,
+      providerThreadId: null,
+      sentAt,
+      target: "chat_123",
+      targetKind: "thread",
+    };
     await writeFile(
       path.join(statePaths.outboxDirectory, `${intentId}.json`),
       `${JSON.stringify(assistantOutboxIntentSchema.parse({
@@ -1973,42 +2020,17 @@ describe("runHostedExecutionJob", () => {
       operatorHomeRoot,
       vaultRoot,
     });
+    installSentAssistantOutboxDispatchMock({
+      delivery,
+      intentId,
+      sentAt,
+    });
 
-    const fetchCalls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input, init) => {
-        const request = normalizeFetchRequest(input, init);
-        fetchCalls.push(`${request.method} ${request.url}`);
-
-        if (
-          request.url.startsWith(
-            "http://results.worker/effects/",
-          )
-        ) {
-          return new Response(JSON.stringify({
-            effectId: intentId,
-            record: {
-              delivery: {
-                channel: "linq",
-                idempotencyKey: `assistant-outbox:${intentId}`,
-                sentAt: "2026-03-26T12:00:05.000Z",
-                target: "chat_123",
-                targetKind: "thread",
-                messageLength: "Queued the Linq reply.".length,
-              },
-              effectId: intentId,
-              fingerprint: "dedupe_hosted",
-              kind: "assistant.delivery",
-              recordedAt: "2026-03-26T12:00:05.000Z",
-              state: "sent",
-            },
-          }), { status: 200 });
-        }
-
-        throw new Error(`Unexpected fetch URL: ${request.url}`);
-      }),
-    );
+    const fetchMock = vi.fn(async (input, init) => {
+      const request = normalizeFetchRequest(input, init);
+      throw new Error(`Unexpected fetch URL: ${request.url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
 
     const result = await runHostedExecutionJob({
       bundles: {
@@ -2024,9 +2046,12 @@ describe("runHostedExecutionJob", () => {
       wake: createActivationWake({ eventId: "evt_outbox", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
     });
 
-    expect(fetchCalls).toEqual([
-      "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted",
-    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      hostedCliMocks.dispatchAssistantOutboxIntent.mock.calls.some(
+        ([input]) => input.intentId === intentId,
+      ),
+    ).toBe(true);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
     cleanupPaths.push(workspaceRoot);
@@ -2045,7 +2070,7 @@ describe("runHostedExecutionJob", () => {
     expect(savedIntent.delivery?.target).toBe("chat_123");
   });
 
-  it("keeps newly queued hosted assistant deliveries pending when the durable commit records no committed side effects", async () => {
+  it("keeps newly queued hosted assistant deliveries on the pending-commit path when the durable commit records no committed delivery effects", async () => {
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
@@ -2091,37 +2116,11 @@ describe("runHostedExecutionJob", () => {
       await writePendingIntent(vault);
     });
     hostedCliMocks.dispatchAssistantOutboxIntent.mockClear();
-    const fetchCalls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url, init) => {
-        fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
-
-        if (
-          String(url)
-          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send"
-          && (init?.method ?? "GET") === "GET"
-        ) {
-          return new Response(JSON.stringify({
-            effectId: intentId,
-            record: null,
-          }), { status: 200 });
-        }
-
-        if (
-          String(url)
-          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send"
-          && init?.method === "PUT"
-        ) {
-          return new Response(JSON.stringify({
-            effectId: intentId,
-            record: JSON.parse(String(init?.body)),
-          }), { status: 200 });
-        }
-
-        throw new Error(`Unexpected fetch URL: ${String(url)}`);
-      }),
-    );
+    const fetchMock = vi.fn(async (input, init) => {
+      const request = normalizeFetchRequest(input, init);
+      throw new Error(`Unexpected fetch URL: ${request.url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
 
     try {
       const result = await runHostedExecutionJob({
@@ -2138,7 +2137,7 @@ describe("runHostedExecutionJob", () => {
         wake: createActivationWake({ eventId: "evt_outbox_send", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
       });
 
-      expect(fetchCalls).toEqual([]);
+      expect(fetchMock).not.toHaveBeenCalled();
       expect(hostedCliMocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
@@ -2161,7 +2160,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("replays committed side effects on resume without rerunning compute or recommitting", async () => {
+  it("replays committed assistant deliveries from the outbox mirror on resume without rerunning compute or recommitting", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
@@ -2224,34 +2223,16 @@ describe("runHostedExecutionJob", () => {
       throw new Error("resume path should not rerun hosted automation");
     });
     hostedCliMocks.runAssistantAutomation.mockClear();
-    const fetchCalls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input, init) => {
-        const request = normalizeFetchRequest(input, init);
-        fetchCalls.push(`${request.method} ${request.url}`);
-
-        if (
-          request.url
-          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume"
-          && request.method === "GET"
-        ) {
-          return new Response(JSON.stringify({
-            effectId: intentId,
-            record: {
-              delivery,
-              effectId: intentId,
-              fingerprint: "dedupe_hosted_resume",
-              kind: "assistant.delivery",
-              recordedAt: sentAt,
-              state: "sent",
-            },
-          }), { status: 200 });
-        }
-
-        throw new Error(`Unexpected fetch URL: ${request.url}`);
-      }),
-    );
+    installSentAssistantOutboxDispatchMock({
+      delivery,
+      intentId,
+      sentAt,
+    });
+    const fetchMock = vi.fn(async (input, init) => {
+      const request = normalizeFetchRequest(input, init);
+      throw new Error(`Unexpected fetch URL: ${request.url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
 
     const result = await runHostedExecutionJob({
       bundles: {
@@ -2300,9 +2281,12 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
-    expect(fetchCalls).toEqual([
-      "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
-    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      hostedCliMocks.dispatchAssistantOutboxIntent.mock.calls.some(
+        ([input]) => input.intentId === intentId,
+      ),
+    ).toBe(true);
     expect(result.result).toEqual({
       eventsHandled: 1,
       summary: "committed",
@@ -2327,7 +2311,7 @@ describe("runHostedExecutionJob", () => {
     expect(savedIntent.delivery).toEqual(delivery);
   });
 
-  it("replays non-idempotent committed side effects from the hosted journal without resending", async () => {
+  it("replays non-idempotent committed assistant deliveries from the outbox mirror without resending", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-non-idempotent-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
@@ -2390,34 +2374,16 @@ describe("runHostedExecutionJob", () => {
       throw new Error("resume path should not rerun hosted automation");
     });
     hostedCliMocks.runAssistantAutomation.mockClear();
-    const fetchCalls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input, init) => {
-        const request = normalizeFetchRequest(input, init);
-        fetchCalls.push(`${request.method} ${request.url}`);
-
-        if (
-          request.url
-          === "http://results.worker/effects/outbox_hosted_resume_non_idempotent?fingerprint=dedupe_hosted_resume_non_idempotent"
-          && request.method === "GET"
-        ) {
-          return new Response(JSON.stringify({
-            effectId: intentId,
-            record: {
-              delivery,
-              effectId: intentId,
-              fingerprint: "dedupe_hosted_resume_non_idempotent",
-              kind: "assistant.delivery",
-              recordedAt: sentAt,
-              state: "sent",
-            },
-          }), { status: 200 });
-        }
-
-        throw new Error(`Unexpected fetch URL: ${request.url}`);
-      }),
-    );
+    installSentAssistantOutboxDispatchMock({
+      delivery,
+      intentId,
+      sentAt,
+    });
+    const fetchMock = vi.fn(async (input, init) => {
+      const request = normalizeFetchRequest(input, init);
+      throw new Error(`Unexpected fetch URL: ${request.url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
 
     const result = await runHostedExecutionJob({
       bundles: {
@@ -2466,9 +2432,12 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
-    expect(fetchCalls).toEqual([
-      "GET http://results.worker/effects/outbox_hosted_resume_non_idempotent?fingerprint=dedupe_hosted_resume_non_idempotent",
-    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      hostedCliMocks.dispatchAssistantOutboxIntent.mock.calls.some(
+        ([input]) => input.intentId === intentId,
+      ),
+    ).toBe(true);
     expect(result.result).toEqual({
       eventsHandled: 1,
       summary: "committed",
