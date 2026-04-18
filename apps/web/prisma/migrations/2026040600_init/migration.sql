@@ -336,28 +336,6 @@ CREATE TABLE "hosted_webhook_receipt_side_effect" (
 );
 
 -- CreateTable
-CREATE TABLE "execution_outbox" (
-    "id" TEXT NOT NULL,
-    "user_id" TEXT NOT NULL,
-    "source_type" TEXT NOT NULL,
-    "source_id" TEXT,
-    "event_id" TEXT NOT NULL,
-    "event_kind" TEXT NOT NULL,
-    "payload_json" JSONB NOT NULL,
-    "dispatch_state" TEXT NOT NULL DEFAULT 'queued',
-    "attempt_count" INTEGER NOT NULL DEFAULT 0,
-    "last_attempt_at" TIMESTAMP(3),
-    "next_attempt_at" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP,
-    "claim_token" TEXT,
-    "claim_expires_at" TIMESTAMP(3),
-    "last_error" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "execution_outbox_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "hosted_ai_usage" (
     "id" TEXT NOT NULL,
     "member_id" TEXT NOT NULL,
@@ -603,15 +581,6 @@ CREATE INDEX "hosted_webhook_receipt_status_claim_expires_at_first_receiv_idx" O
 
 -- CreateIndex
 CREATE INDEX "hosted_webhook_receipt_side_effect_source_event_id_status_idx" ON "hosted_webhook_receipt_side_effect"("source", "event_id", "status");
-
--- CreateIndex
-CREATE UNIQUE INDEX "execution_outbox_event_id_key" ON "execution_outbox"("event_id");
-
--- CreateIndex
-CREATE INDEX "execution_outbox_next_attempt_at_created_at_idx" ON "execution_outbox"("next_attempt_at", "created_at");
-
--- CreateIndex
-CREATE INDEX "execution_outbox_user_id_created_at_idx" ON "execution_outbox"("user_id", "created_at");
 
 -- CreateIndex
 CREATE INDEX "hosted_ai_usage_member_id_occurred_at_idx" ON "hosted_ai_usage"("member_id", "occurred_at");

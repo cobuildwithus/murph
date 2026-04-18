@@ -126,7 +126,6 @@ describe("hosted Prisma baseline migration", () => {
       "202604161430_device_sync_web_owner_runtime_state",
       "202604171900_hosted_wake_substrate",
       "202604172330_hosted_wake_payload_spill",
-      "202604180100_drop_execution_outbox",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
@@ -165,10 +164,6 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
     expect(baselineMigrationSql).toContain('"result_json" JSONB');
-    expect(baselineMigrationSql).toContain('"dispatch_state" TEXT NOT NULL DEFAULT \'queued\'');
-    expect(baselineMigrationSql).toContain(
-      'CREATE INDEX "execution_outbox_next_attempt_at_created_at_idx" ON "execution_outbox"("next_attempt_at", "created_at")',
-    );
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
     expect(baselineMigrationSql).not.toContain('"phone_number" TEXT');
     expect(baselineMigrationSql).not.toContain('"normalized_phone_number" TEXT');
@@ -178,6 +173,11 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).not.toContain('"dispatch_payload_json" JSONB');
     expect(baselineMigrationSql).not.toContain('"linq_chat_id" TEXT');
     expect(baselineMigrationSql).not.toContain('"revnet_amount_paid" INTEGER');
+    expect(baselineMigrationSql).not.toContain('CREATE TABLE "execution_outbox"');
+    expect(baselineMigrationSql).not.toContain('"dispatch_state" TEXT NOT NULL DEFAULT \'queued\'');
+    expect(baselineMigrationSql).not.toContain(
+      'CREATE INDEX "execution_outbox_next_attempt_at_created_at_idx" ON "execution_outbox"("next_attempt_at", "created_at")',
+    );
     expect(baselineMigrationSql).not.toContain('CREATE TYPE "ExecutionOutboxStatus"');
     expect(baselineMigrationSql).not.toContain('"status" "ExecutionOutboxStatus"');
     expect(baselineMigrationSql).not.toContain('"execution_outbox_status_next_attempt_at_created_at_idx"');
