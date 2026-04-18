@@ -357,6 +357,30 @@ describe("hosted wake internal routes", () => {
     });
   });
 
+  it("omits wakeState when the canonical wake row is absent", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      eventId: "evt_missing",
+    });
+    mocks.readHostedWakeLifecycleState.mockResolvedValue(null);
+
+    const { POST } = await import("../app/api/internal/hosted-wake/status/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "3",
+      },
+      pendingWakeCount: 1,
+    });
+  });
+
   it("repairs stale wake cursors through the hosted wake control client", async () => {
     const { GET } = await import("../app/api/internal/hosted-wake/repair/route");
     const response = await GET(new Request("https://example.test", { method: "GET" }));
