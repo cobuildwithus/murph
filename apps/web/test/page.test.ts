@@ -109,7 +109,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /data-root-landing-auth-actions-label="Start your first experiment"/
   );
-  assert.match(markup, /Run Murph Locally/);
+  assert.match(markup, /You can also install it locally\./);
   assert.match(
     markup,
     /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/

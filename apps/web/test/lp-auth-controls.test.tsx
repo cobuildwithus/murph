@@ -135,6 +135,6 @@ test("LandingAuthActions shows only an Open settings link for authenticated user
   const links = Array.from(container.querySelectorAll("a"));
   expect(links).toHaveLength(1);
   expect(links[0]?.getAttribute("href")).toBe("/settings");
-  expect(links[0]?.textContent).toContain("Open settings");
+  expect(links[0]?.textContent).toContain("Your account");
   expect(container.textContent).not.toContain("Sign in");
 });

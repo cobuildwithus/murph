@@ -38,6 +38,7 @@ import { HostedEmailAuthButton } from "@/src/components/hosted-onboarding/hosted
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.clearAllMocks();
   mocks.usePrivy.mockReturnValue({
     ready: true,
@@ -60,6 +61,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  await vi.runOnlyPendingTimersAsync();
+  vi.useRealTimers();
   if (cleanupRender) {
     await cleanupRender();
     cleanupRender = null;
@@ -113,7 +116,7 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
   expect(container.textContent).toContain("Verify email");
 
   const codeInput = container.querySelector(
-    'input[placeholder="123456"]',
+    "input[data-input-otp]",
   ) as HTMLInputElement | null;
   const verifyButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent?.includes("Verify email"),
@@ -193,7 +196,7 @@ test("HomepageEmailAuthButton surfaces email verification failures and clears th
   });
 
   const codeInput = container.querySelector(
-    'input[placeholder="123456"]',
+    "input[data-input-otp]",
   ) as HTMLInputElement | null;
   const verifyButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent?.includes("Verify email"),

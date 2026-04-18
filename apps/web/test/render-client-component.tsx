@@ -79,6 +79,12 @@ function installGlobals(
   window: Window & typeof globalThis,
   document: Document,
 ) {
+  class ResizeObserverMock {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
   vi.stubGlobal("window", window);
   vi.stubGlobal("document", document);
   vi.stubGlobal("navigator", window.navigator);
@@ -87,6 +93,7 @@ function installGlobals(
   vi.stubGlobal("Event", window.Event);
   vi.stubGlobal("MouseEvent", window.MouseEvent);
   vi.stubGlobal("MutationObserver", window.MutationObserver);
+  vi.stubGlobal("ResizeObserver", ResizeObserverMock);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     callback(0);
     return 0;

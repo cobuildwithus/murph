@@ -152,8 +152,8 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /Send me a code/);
-    assert.match(markup, /We&#x27;ll text a verification code to your phone\./);
+    assert.match(markup, /Send code/);
+    assert.match(markup, /text a 6-digit code to your phone\./);
     assert.match(markup, /Use a different number/);
     assert.match(markup, /data-privy-captcha="mounted"/);
     assert.doesNotMatch(markup, /Phone number/);
@@ -193,7 +193,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /autofocus=""/);
-    assert.match(markup, /class="[^"]*h-14[^"]*text-lg[^"]*"/);
+    assert.match(markup, /class="[^"]*h-12[^"]*text-lg[^"]*"/);
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
@@ -209,13 +209,14 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /Send me a code/);
+    assert.match(markup, /Send code/);
     assert.match(markup, /Use a different number/);
     assert.match(markup, /By signing up, you agree to our/);
     assert.match(markup, /\/legal\/terms\.pdf/);
     assert.match(markup, /\/legal\/privacy\.pdf/);
     assert.match(markup, /underline-offset-4/);
-    assert.equal(markup.match(/w-full/g)?.length ?? 0, 2);
+    assert.match(markup, /class="[^"]*w-fit[^"]*"/);
+    assert.equal(markup.match(/w-full/g)?.length ?? 0, 0);
   });
 
   it("disables invite manual-entry send-code submit until the phone number is valid", async () => {
@@ -300,7 +301,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
-    assert.ok((markup.match(/h-14/g)?.length ?? 0) >= 2);
+    assert.match(markup, /class="[^"]*h-14[^"]*w-full[^"]*"/);
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
@@ -374,7 +375,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Verify phone/);
     assert.match(markup, /Use a different number/);
-    assert.ok((markup.match(/h-14/g)?.length ?? 0) >= 3);
+    assert.ok((markup.match(/h-12/g)?.length ?? 0) >= 3);
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
