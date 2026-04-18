@@ -1,9 +1,11 @@
 import type {
   HostedExecutionRunnerResult,
+  HostedExecutionWakeKind,
   HostedExecutionBundleRef,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionUserStatus,
+  HostedWakePayloadSchema,
 } from "@murphai/hosted-execution";
 import type { HostedAssistantDeliveryEffect } from "@murphai/hosted-execution/side-effects";
 
@@ -69,6 +71,15 @@ export interface RunnerPendingCommitRecord {
   result: HostedExecutionRunnerResult["result"];
   schemaVersion: 1;
   userId: string;
+  wake: {
+    eventId: string;
+    kind: HostedExecutionWakeKind;
+    occurredAt: string;
+    payloadCiphertext: string;
+    payloadSchema: HostedWakePayloadSchema;
+    seq: string;
+    userId: string;
+  };
 }
 
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;

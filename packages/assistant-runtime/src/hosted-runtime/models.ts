@@ -105,6 +105,8 @@ export interface HostedAssistantDeliveryOutcome {
   deliveryStatus: HostedAssistantDeliveryOutcomeStatus;
   effectFingerprint: string;
   effectId: string;
+  journalMethod: "DELETE" | "GET" | "PUT" | null;
+  journalStatus: string | null;
   providerMessageId: string | null;
   providerThreadId: string | null;
   retryable: boolean;
@@ -149,7 +151,11 @@ export interface HostedConversationWakeMetrics {
 
 export type HostedWakeFollowupExecution =
   | "conversation-message"
-  | "system-maintenance";
+  | "assistant-cron"
+  | "device-sync"
+  | "member-activated"
+  | "member-channels-updated"
+  | "vault-share-accepted";
 
 export interface HostedWakeExecutionMetrics extends HostedWakeEffect {
   bootstrapResult: HostedBootstrapResult | null;

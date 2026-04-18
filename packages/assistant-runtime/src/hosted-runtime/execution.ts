@@ -224,20 +224,24 @@ async function runHostedWakeFollowupExecution(input: {
   wake: HostedExecutionWake;
 }): Promise<HostedMaintenanceMetrics> {
   switch (input.followupExecution) {
-    case "system-maintenance":
-      return runHostedSystemWakeFollowupExecution({
-        artifactMaterializer: input.artifactMaterializer,
-        bootstrapResult: input.bootstrapResult,
-        executionContext: input.executionContext,
-        requestId: input.requestId,
+    case "conversation-message":
+      return runHostedConversationWakeFollowupExecution({
+        conversationMetrics: input.conversationMetrics,
         run: input.run ?? null,
         runtime: input.runtime,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
-    case "conversation-message":
-      return runHostedConversationWakeFollowupExecution({
-        conversationMetrics: input.conversationMetrics,
+    case "assistant-cron":
+    case "device-sync":
+    case "member-activated":
+    case "member-channels-updated":
+    case "vault-share-accepted":
+      return runHostedSystemWakeFollowupExecution({
+        artifactMaterializer: input.artifactMaterializer,
+        bootstrapResult: input.bootstrapResult,
+        executionContext: input.executionContext,
+        requestId: input.requestId,
         run: input.run ?? null,
         runtime: input.runtime,
         vaultRoot: input.vaultRoot,
@@ -289,35 +293,62 @@ async function runHostedSystemWakeFollowupExecution(input: {
   return maintenanceMetrics;
 }
 
+async function resolveHostedPreservedWakeMetrics(input: {
+  deviceSyncConfig: NormalizedHostedAssistantRuntimeConfig["resolvedConfig"]["deviceSync"];
+  includeAssistant?: boolean;
+  includeDeviceSync?: boolean;
+  referenceMs?: number;
+  run?: HostedExecutionRunContext | null;
+  vaultRoot: string;
+  wake: HostedExecutionWake;
+}): Promise<HostedMaintenanceMetrics> {
+  const referenceMs = input.referenceMs ?? Date.now();
+  const [assistantWakeAt, deviceSyncWakeAt] = await Promise.all([
+    input.includeAssistant === false
+      ? Promise.resolve<string | null>(null)
+      : resolveHostedAssistantWakeAt({
+          wake: input.wake,
+          referenceMs,
+          run: input.run ?? null,
+          vaultRoot: input.vaultRoot,
+        }),
+    input.includeDeviceSync === false
+      ? Promise.resolve<string | null>(null)
+      : resolveHostedDeviceSyncWakeAt({
+          deviceSyncConfig: input.deviceSyncConfig,
+          wake: input.wake,
+          referenceMs,
+          run: input.run ?? null,
+          vaultRoot: input.vaultRoot,
+        }),
+  ]);
+
+  return {
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: input.includeDeviceSync === false,
+    nextWakeAt: earliestHostedWakeAt(assistantWakeAt, deviceSyncWakeAt),
+    parserProcessed: 0,
+  };
+}
+
 async function resolveHostedConversationPreservedWakeMetrics(input: {
   wake: HostedExecutionWake;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
-  const referenceMs = Date.now();
-  const [assistantWakeAt, deviceSyncWakeAt] = await Promise.all([
-    resolveHostedAssistantWakeAt({
-      wake: input.wake,
-      referenceMs,
-      run: input.run ?? null,
-      vaultRoot: input.vaultRoot,
-    }),
-    resolveHostedDeviceSyncWakeAt({
-      deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
-      wake: input.wake,
-      referenceMs,
-      run: input.run ?? null,
-      vaultRoot: input.vaultRoot,
-    }),
-  ]);
-  const nextWakeAt = earliestHostedWakeAt(assistantWakeAt, deviceSyncWakeAt);
+  const preservedMetrics = await resolveHostedPreservedWakeMetrics({
+    deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
+    run: input.run ?? null,
+    vaultRoot: input.vaultRoot,
+    wake: input.wake,
+  });
 
   emitHostedExecutionStructuredLog({
     component: "runtime",
     wake: input.wake,
     details: {
-      nextWakeAt,
+      nextWakeAt: preservedMetrics.nextWakeAt,
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
     },
     message:
@@ -326,12 +357,7 @@ async function resolveHostedConversationPreservedWakeMetrics(input: {
     run: input.run ?? null,
   });
 
-  return {
-    deviceSyncProcessed: 0,
-    deviceSyncSkipped: false,
-    nextWakeAt,
-    parserProcessed: 0,
-  };
+  return preservedMetrics;
 }
 
 async function runHostedConversationWakeFollowupExecution(input: {

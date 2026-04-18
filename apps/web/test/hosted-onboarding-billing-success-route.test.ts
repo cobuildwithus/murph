@@ -55,7 +55,7 @@ describe("hosted onboarding billing success route", () => {
         expiresAt: null,
         matchesInvite: true,
       },
-      stage: "active",
+      stage: "activating",
     });
   });
 
@@ -94,7 +94,7 @@ describe("hosted onboarding billing success route", () => {
         expiresAt: null,
         matchesInvite: true,
       },
-      stage: "active",
+      stage: "activating",
     });
     expect(mocks.reconcileHostedBillingCheckoutSuccess).toHaveBeenCalledWith({
       inviteCode: "invite-code",

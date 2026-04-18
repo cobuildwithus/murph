@@ -1,4 +1,6 @@
 import {
+  HOSTED_WAKE_PAYLOAD_SCHEMAS,
+  isHostedExecutionWakeKind,
   parseHostedExecutionBundleRef,
   type HostedExecutionRunContext,
   type HostedExecutionRunnerResult,
@@ -668,13 +670,15 @@ function parsePendingCommitRecord(
       result?: unknown;
       schemaVersion?: unknown;
       userId?: unknown;
+      wake?: unknown;
     };
     if (value.schemaVersion !== 1 || value.userId !== userId || typeof value.eventId !== "string") {
       return null;
     }
 
     const result = parsePendingCommitResult(value.result);
-    if (!result || typeof value.committedAt !== "string") {
+    const wake = parsePendingCommitWake(value.wake, userId);
+    if (!result || !wake || typeof value.committedAt !== "string") {
       return null;
     }
 
@@ -694,10 +698,47 @@ function parsePendingCommitRecord(
       result,
       schemaVersion: 1,
       userId,
+      wake,
     };
   } catch {
     return null;
   }
+}
+
+function parsePendingCommitWake(
+  value: unknown,
+  userId: string,
+): RunnerPendingCommitRecord["wake"] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    record.userId !== userId
+    || typeof record.eventId !== "string"
+    || typeof record.kind !== "string"
+    || !isHostedExecutionWakeKind(record.kind)
+    || typeof record.occurredAt !== "string"
+    || typeof record.payloadCiphertext !== "string"
+    || typeof record.payloadSchema !== "string"
+    || !HOSTED_WAKE_PAYLOAD_SCHEMAS.includes(
+      record.payloadSchema as RunnerPendingCommitRecord["wake"]["payloadSchema"],
+    )
+    || typeof record.seq !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    eventId: record.eventId,
+    kind: record.kind,
+    occurredAt: record.occurredAt,
+    payloadCiphertext: record.payloadCiphertext,
+    payloadSchema: record.payloadSchema as RunnerPendingCommitRecord["wake"]["payloadSchema"],
+    seq: record.seq,
+    userId,
+  };
 }
 
 function parsePendingCommitResult(

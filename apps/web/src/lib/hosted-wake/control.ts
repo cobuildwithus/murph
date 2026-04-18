@@ -48,7 +48,6 @@ export async function handoffHostedExecutionWakeBestEffort(input: {
   context?: string;
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
-  outboxLimit?: number;
   prisma?: PrismaClient;
   timeoutMs?: number;
 }): Promise<void> {

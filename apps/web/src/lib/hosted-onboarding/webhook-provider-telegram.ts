@@ -15,7 +15,7 @@ import {
 import { lookupHostedMemberRoutingByTelegramUserId } from "./hosted-member-routing-store";
 import {
   type HostedWebhookPlan,
-} from "./webhook-receipts";
+} from "./webhook-service-types";
 
 export type HostedOnboardingTelegramWebhookResponse = {
   duplicate?: boolean;

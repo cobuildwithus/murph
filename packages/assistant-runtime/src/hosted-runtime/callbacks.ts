@@ -747,6 +747,8 @@ function buildHostedAssistantDeliveryOutcome(input: {
     deliveryStatus: input.deliveryStatus,
     effectFingerprint: input.effect.fingerprint,
     effectId: input.effect.effectId,
+    journalMethod: null,
+    journalStatus: null,
     providerMessageId: input.delivery?.providerMessageId ?? null,
     providerThreadId: input.delivery?.providerThreadId ?? null,
     retryable: input.retryable,

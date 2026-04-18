@@ -6,6 +6,7 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
@@ -36,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAssistantExecutionDefaultTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
   runHostedConversationAssistantAutomation: vi.fn(),
+  runHostedDeviceSyncPass: vi.fn(),
   runHostedMaintenanceLoop: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
 }));
@@ -110,6 +112,7 @@ vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   drainHostedParserQueueUntilSettled: mocks.drainHostedParserQueueUntilSettled,
   runHostedConversationAssistantAutomation:
     mocks.runHostedConversationAssistantAutomation,
+  runHostedDeviceSyncPass: mocks.runHostedDeviceSyncPass,
   runHostedMaintenanceLoop: mocks.runHostedMaintenanceLoop,
 }));
 
@@ -209,7 +212,7 @@ beforeEach(() => {
       vaultCreated: true,
     },
     conversationMetrics: null,
-    followupExecution: "system-maintenance",
+    followupExecution: "assistant-cron",
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -296,6 +299,22 @@ beforeEach(() => {
 
 describe("executeHostedWakeForCommit", () => {
   it("runs wake handling and system maintenance, snapshots the workspace, and summarizes the commit", async () => {
+    mocks.executeHostedWakeEvent.mockResolvedValueOnce({
+      bootstrapResult: {
+        assistantConfigStatus: "missing",
+        assistantConfigured: false,
+        assistantProvider: null,
+        assistantSeeded: false,
+        emailAutoReplyEnabled: false,
+        linqAutoReplyEnabled: false,
+        telegramAutoReplyEnabled: false,
+        vaultCreated: true,
+      },
+      conversationMetrics: null,
+      followupExecution: "member-activated",
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
     mocks.listHostedBundleArtifacts.mockReturnValue([
       {
         path: "vault/raw/already-materialized.bin",
@@ -603,6 +622,82 @@ describe("executeHostedWakeForCommit", () => {
         },
       }),
     );
+  });
+
+  it("runs the maintenance loop for member channel updates", async () => {
+    mocks.executeHostedWakeEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      followupExecution: "member-channels-updated",
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+
+    const result = await executeHostedWakeForCommit({
+      artifactMaterializer: vi.fn(),
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        wake: buildHostedExecutionMemberChannelsUpdatedWake({
+          eventId: "evt_member_channels_updated",
+          memberChannels: {
+            email: true,
+            linq: true,
+            telegram: false,
+          },
+          memberId: "member_123",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        }),
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipAssistantAutomation: false,
+        timeoutMs: 45_000,
+      }),
+    );
+    expect(result.committedResult.result.nextWakeAt).toBe("2026-04-08T00:30:00.000Z");
+    expect(result.committedResult.result.summary).toMatch(/channel sync/u);
   });
 
   it("skips the generic maintenance loop when the conversation lane stays on wake follow-up", async () => {
