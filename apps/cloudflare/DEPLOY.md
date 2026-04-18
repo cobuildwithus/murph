@@ -46,6 +46,7 @@ Set these in the selected GitHub environment as vars:
 - `CF_BUNDLES_BUCKET`
 - `CF_BUNDLES_PREVIEW_BUCKET`
 - `CF_PUBLIC_BASE_URL`
+- `HOSTED_WEB_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 
@@ -63,7 +64,7 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
-The callback-signing key remains part of the required worker secret surface because the runtime still imports the signer for narrow web-bound execution proxying. It is no longer documented as a broad lifecycle or correctness callback seam.
+The callback-signing key remains part of the required worker secret surface because every canonical hosted wake append/fetch/commit call now goes through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
 
 ## Optional Vars
 
@@ -87,9 +88,8 @@ Observability:
 - `CF_LOG_HEAD_SAMPLING_RATE` defaults to `1`
 - `CF_TRACE_HEAD_SAMPLING_RATE` defaults to `1`
 
-Narrow signed web proxy:
+Signed hosted-web callback metadata:
 
-- `HOSTED_WEB_BASE_URL`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 
 Hosted assistant config:
@@ -159,6 +159,7 @@ export CF_WORKER_NAME=hosted-runner-staging
 export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_PUBLIC_BASE_URL=https://hosted-runner-staging.example.workers.dev
+export HOSTED_WEB_BASE_URL=https://web.example.test
 export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=your-team
 export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=your-project
 export HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=...
