@@ -97,26 +97,20 @@ export function HostedPhoneSettings(props: {
             </dl>
           ) : null}
 
-          <div className="flex flex-wrap gap-3">
-            <Button type="button" variant={showLinkForm ? "outline" : "default"} onClick={() => setExpanded((value) => !value)}>
-              {showLinkForm
-                ? currentPhoneNumber
-                  ? "Hide phone form"
-                  : "Hide phone setup"
-                : currentPhoneNumber
-                  ? "Change phone"
-                  : "Add phone"}
-            </Button>
-          </div>
+          {currentPhoneNumber ? (
+            <div className="flex flex-wrap gap-3">
+              <Button type="button" variant={showLinkForm ? "outline" : "default"} onClick={() => setExpanded((value) => !value)}>
+                {showLinkForm ? "Hide phone form" : "Change phone"}
+              </Button>
+            </div>
+          ) : null}
 
           {showLinkForm ? (
-            <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
-              <HostedPhoneAuth
-                intent="link"
-                onLinked={handleLinked}
-                showPassiveConsentNotice={false}
-              />
-            </div>
+            <HostedPhoneAuth
+              intent="link"
+              onLinked={handleLinked}
+              showPassiveConsentNotice={false}
+            />
           ) : null}
         </div>
       )}

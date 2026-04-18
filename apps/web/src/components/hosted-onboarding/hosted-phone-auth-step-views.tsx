@@ -34,28 +34,31 @@ export function HostedInviteShortcutStep({
   onUseDifferentNumber: () => void;
 }) {
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-stone-600">
-        We&apos;ll text a verification code to your phone.
-      </p>
-      <div className="flex flex-wrap gap-3">
-        <Button
-          type="button"
-          onClick={onSendCode}
-          disabled={disabled}
-          size="lg"
-          className="w-full"
-        >
-          {pendingAction === "send-code" ? "Sending code..." : "Send me a code"}
-        </Button>
-        <HostedUseDifferentNumberButton
-          disabled={disabled}
-          pendingAction={pendingAction}
-          size="sm"
-          onClick={onUseDifferentNumber}
-        />
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          Step 1 of 2
+        </p>
+        <p className="text-sm leading-relaxed text-foreground">
+          We’ll text a 6-digit code to your phone.
+        </p>
       </div>
-      <HostedAuthLegalNotice />
+      <Button
+        type="button"
+        onClick={onSendCode}
+        disabled={disabled}
+        size="lg"
+        className="w-fit"
+      >
+        {pendingAction === "send-code" ? "Sending…" : "Send code"}
+      </Button>
+      <HostedUseDifferentNumberButton
+        disabled={disabled}
+        pendingAction={pendingAction}
+        size="sm"
+        onClick={onUseDifferentNumber}
+      />
+      <HostedAuthLegalNotice className="border-t border-[#c4a882]/20 pt-3" />
     </div>
   );
 }

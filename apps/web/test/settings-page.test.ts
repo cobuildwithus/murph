@@ -29,6 +29,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 
+const redirectMock = vi.hoisted(() => vi.fn((path: string) => {
+  throw new Error(`NEXT_REDIRECT:${path}`);
+}));
+
+vi.mock("next/navigation", () => ({
+  redirect: redirectMock,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
@@ -68,7 +76,7 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
     session: null,
   });
 
-  const { default: SettingsPage } = await import("../app/settings/page");
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
   const markup = renderToStaticMarkup(await SettingsPage());
 

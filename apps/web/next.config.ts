@@ -134,7 +134,7 @@ export function buildHostedWebContentSecurityPolicy(
     ...PRIVY_REQUIRED_SCRIPT_SOURCES,
     ...TELEGRAM_REQUIRED_SCRIPT_SOURCES,
     ...TURNSTILE_SOURCES,
-    ...(isDevelopment ? ["'unsafe-eval'"] : []),
+    ...(isDevelopment ? ["'unsafe-eval'", "https://ui.sh"] : []),
   ]);
 
   return [

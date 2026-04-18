@@ -56,7 +56,7 @@ const badgeVariants = cva("rounded-full px-2 py-0.5 text-xs font-medium", {
 - **shadcn/ui** with **base UI, not Radix** — `apps/web/components.json`. We use `@base-ui/react` primitives. Do not install or import from `@radix-ui/*`.
 - **Components**: `apps/web/src/components/ui/` (shadcn), `apps/web/src/components/` (custom)
 - **Imports**: `@/*` → `apps/web/*`, e.g. `@/src/components/ui/button`, `@/src/lib/utils`
-- **Icons**: Lucide Animated — `pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`
+- **Icons**: `lucide-react` is the default import (matches existing usage). Reserve Lucide Animated (`pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`) for icons that specifically need motion — loaders, hover affordances, etc.
 - **Transitions**: View Transitions API (`<ViewTransition>` from `next/navigation`), not Framer Motion
 - **shadcn MCP**: `.mcp.json` (registry access for agents)
 - **shadcn skill**: `.agents/skills/shadcn/`

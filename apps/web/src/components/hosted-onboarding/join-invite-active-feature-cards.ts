@@ -1,29 +1,29 @@
 import {
   ActivityIcon,
+  FlaskConicalIcon,
   MessageCircleIcon,
-  MoonIcon,
-  UtensilsIcon,
+  TrendingUpIcon,
 } from "lucide-react";
 
 export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
   {
-    body: "Text what you ate and Murph tracks it automatically.",
-    icon: UtensilsIcon,
-    title: "Log meals & nutrition",
+    body: "Pick a protocol from the library — sauna, zone 2, creatine — and run it for a set period.",
+    icon: FlaskConicalIcon,
+    title: "Run an experiment",
   },
   {
-    body: "Syncs with Oura, WHOOP, and Garmin for sleep and recovery, plus Strava for activity.",
-    icon: MoonIcon,
-    title: "Track sleep & recovery",
+    body: "Baseline vs. post-experiment metrics, with a clear verdict at the end.",
+    icon: TrendingUpIcon,
+    title: "See what worked",
   },
   {
-    body: "Plain-English answers grounded in your own data.",
+    body: "Text Murph via iMessage, Telegram, or email. It remembers your data.",
     icon: MessageCircleIcon,
-    title: "Ask health questions",
+    title: "Chat wherever you live",
   },
   {
-    body: "Connects how you eat, sleep, and move to show what works.",
+    body: "Oura, WHOOP, Garmin, and Strava sync into every experiment automatically.",
     icon: ActivityIcon,
-    title: "Spot patterns",
+    title: "Wearables connected",
   },
 ] as const;

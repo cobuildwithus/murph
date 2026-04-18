@@ -232,6 +232,13 @@ The hosted schema now includes the canonical member slices, hosted email
 authorization, hosted share payload ownership, device-sync web ownership
 models, plus the canonical `HostedWake` / `HostedExecutionCursor` fence.
 
+## Local dev aids
+
+Dev-only helpers for iterating on UI. All guarded by `process.env.NODE_ENV !== "production"` and removed from the production bundle.
+
+- `/join/<inviteCode>?preview=<stage>` and `/join/<inviteCode>/success?preview=<stage>` render any signup-flow stage without a real invite. Stages: `invalid`, `expired`, `verify`, `checkout`, `messaging-setup`, `blocked`, `active`, `active-pending`. Disables the status-refresh poll so the mocked status is not overwritten.
+- CSP allows `https://ui.sh` only in development so the `ui-picker` toolbar can load during design iteration. Production CSP is unchanged.
+
 ## Local verification
 
 - `pnpm --dir apps/web lint`
