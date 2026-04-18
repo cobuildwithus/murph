@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   encodeHostedBundleBase64: vi.fn(),
   executeHostedWakeEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
+  exportHostedBrowserVaultSnapshot: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
   getAssistantCronStatus: vi.fn(),
   getAssistantStatus: vi.fn(),
@@ -120,6 +121,10 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 
 vi.mock("../src/hosted-runtime/usage.ts", () => ({
   exportHostedPendingAssistantUsage: mocks.exportHostedPendingAssistantUsage,
+}));
+
+vi.mock("../src/hosted-runtime/browser-vault.ts", () => ({
+  exportHostedBrowserVaultSnapshot: mocks.exportHostedBrowserVaultSnapshot,
 }));
 
 import {
@@ -241,6 +246,13 @@ beforeEach(() => {
     exported: 1,
     failed: 0,
     pending: 0,
+  });
+  mocks.exportHostedBrowserVaultSnapshot.mockResolvedValue({
+    entities: [],
+    generatedAt: "2026-04-08T00:10:00.000Z",
+    metadata: null,
+    schema: "murph.browser-vault-snapshot.v1",
+    sourceVersion: "a".repeat(64),
   });
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (executionContext) => {
     if (executionContext.hosted?.defaultTarget) {
@@ -441,6 +453,74 @@ describe("executeHostedWakeForCommit", () => {
           committedAssistantDeliveryEffectCount: "1",
         }),
         message: "Hosted runtime collected committed assistant delivery effects.",
+        phase: "commit.recorded",
+      }),
+    );
+  });
+
+  it("continues when the committed gateway projection export fails", async () => {
+    mocks.exportGatewayProjectionSnapshotLocal.mockRejectedValueOnce(
+      new Error("gateway export unavailable"),
+    );
+
+    const result = await executeHostedWakeForCommit({
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        wake: buildHostedExecutionAssistantCronTickWake({
+          eventId: "evt_committed_gateway_fallback",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "manual",
+          userId: "member_123",
+        }),
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    assert.equal(result.committedGatewayProjectionSnapshot, null);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted runtime could not export the committed gateway projection snapshot; continuing without it.",
         phase: "commit.recorded",
       }),
     );
@@ -1296,6 +1376,119 @@ describe("completeHostedExecutionAfterCommit", () => {
         }),
         message: "Hosted runtime drained committed side effects.",
         phase: "side-effects.draining",
+      }),
+    );
+  });
+
+  it("returns a final result when non-critical post-commit exports fail", async () => {
+    mocks.exportHostedPendingAssistantUsage.mockRejectedValueOnce(
+      new Error("usage export unavailable"),
+    );
+    mocks.refreshAssistantStatusSnapshot.mockRejectedValueOnce(
+      new Error("status refresh unavailable"),
+    );
+    mocks.exportGatewayProjectionSnapshotLocal.mockRejectedValueOnce(
+      new Error("gateway export unavailable"),
+    );
+    mocks.exportHostedBrowserVaultSnapshot.mockRejectedValueOnce(
+      new Error("browser vault export unavailable"),
+    );
+
+    const result = await completeHostedExecutionAfterCommit({
+      committedExecution: {
+        committedGatewayProjectionSnapshot: null,
+        committedResult: {
+          bundle: "committed-bundle",
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "completed summary",
+          },
+        },
+        committedAssistantDeliveryEffects: [],
+      },
+      wake: buildHostedExecutionAssistantCronTickWake({
+        eventId: "evt_best_effort_exports",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "manual",
+        userId: "member_123",
+      }),
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      run: {
+        attempt: 1,
+        runId: "run_best_effort_exports",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record) {
+              return record;
+            },
+          },
+          usageExportPort: {
+            async recordUsage() {
+              return { recorded: 1, usageIds: ["usage_123"] };
+            },
+          },
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+    });
+
+    assert.equal(result.phase, "completed");
+    assert.equal(result.finalGatewayProjectionSnapshot, null);
+    assert.equal(result.browserVaultSnapshot, null);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted runtime could not export pending assistant usage after draining side effects; leaving the pending usage records in the final bundle.",
+        phase: "side-effects.draining",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted runtime could not refresh the assistant status snapshot after draining side effects; continuing with the final bundle snapshot.",
+        phase: "side-effects.draining",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted runtime could not export the final gateway projection snapshot; returning the final bundle without it.",
+        phase: "completed",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          "Hosted runtime could not export the browser vault snapshot; returning the final bundle without it.",
+        phase: "completed",
       }),
     );
   });
