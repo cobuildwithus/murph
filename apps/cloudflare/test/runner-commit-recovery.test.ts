@@ -40,7 +40,6 @@ function createRunnerStateRecord(): RunnerStateRecord {
     lastErrorCode: null,
     lastEventId: null,
     lastRunAt: null,
-    nextPendingAvailableAt: null,
     nextWakeAt: null,
     pendingEventCount: 0,
     poisonedEventIds: [],

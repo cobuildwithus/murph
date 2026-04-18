@@ -21,7 +21,6 @@ import {
   type DurableObjectSqlValue,
   type RunnerBundleVersion,
   type RunnerStateRecord,
-  earliestIsoTimestamp,
 } from "./types.js";
 
 export interface RunnerMetaRow {
@@ -144,7 +143,6 @@ export function projectRunnerStateRecord(input: {
       lastErrorCode: input.meta.last_error_code,
       lastEventId,
       lastRunAt: input.meta.last_run_at,
-      nextPendingAvailableAt: null,
       nextWakeAt: input.meta.next_wake_at,
       pendingEventCount: 0,
       poisonedEventIds: [],
@@ -158,13 +156,9 @@ export function projectRunnerStateRecord(input: {
 }
 
 export function resolveRunnerNextWakeAt(input: {
-  nextPendingAvailableAt?: string | null;
   preferredWakeAt?: string | null;
 }): string | null {
-  return earliestIsoTimestamp(
-    input.nextPendingAvailableAt ?? null,
-    normalizePreferredWakeAt(input.preferredWakeAt ?? null),
-  );
+  return normalizePreferredWakeAt(input.preferredWakeAt ?? null);
 }
 
 function normalizePreferredWakeAt(value: string | null): string | null {
