@@ -1,17 +1,12 @@
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import {
-  buildCloudflareHostedControlUserWakePath,
-} from "@murphai/cloudflare-hosted-control/routes";
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedWakeAppendRequest,
   type HostedExecutionWake,
   type HostedExecutionUserStatus,
-  type HostedWakeAppendRequest,
   type HostedWakeAppendResponse,
   type HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
-import {
-  parseHostedWakeAppendResponse,
-} from "@murphai/hosted-execution/parsers";
+import { parseHostedWakeAppendResponse } from "@murphai/hosted-execution/parsers";
 
 import {
   fetchHostedExecutionWebControlPlaneResponse,
@@ -53,12 +48,12 @@ export async function appendHostedWake(input: {
   timeoutMs?: number;
   userId: string;
 }): Promise<HostedWakeAppendResponse> {
-  const appendBody = JSON.stringify({
+  const body = JSON.stringify({
     wake: input.wake,
   } satisfies HostedWakeAppendRequest);
-  const appendResponse = await fetchHostedExecutionWebControlPlaneResponse({
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: input.harness.webBaseUrl,
-    body: appendBody,
+    body,
     boundUserId: input.userId,
     callbackSigning: {
       keyId: DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID,
@@ -68,17 +63,40 @@ export async function appendHostedWake(input: {
     path: "/api/internal/hosted-wake/append",
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
-  const rawAppendBody = await appendResponse.text();
+  const rawBody = await response.text();
 
-  if (!appendResponse.ok) {
-    throw new Error(
-      `Hosted wake append failed with HTTP ${appendResponse.status}. body: ${rawAppendBody}`,
-    );
+  if (!response.ok) {
+    throw new Error(`Hosted wake append failed with HTTP ${response.status}. body: ${rawBody}`);
   }
 
-  return parseHostedWakeAppendResponse(
-    rawAppendBody.length > 0 ? JSON.parse(rawAppendBody) : null,
-  );
+  return parseHostedWakeAppendResponse(rawBody.length > 0 ? JSON.parse(rawBody) : null);
+}
+
+function createHostedLocalCloudflareControlClient(
+  harness: HostedLocalDevHarness,
+) {
+  return createCloudflareHostedControlClient({
+    allowHttpLocalhost: true,
+    baseUrl: harness.workerBaseUrl,
+    fetchImpl: async (input, init) => {
+      const response = await fetch(input, init);
+
+      if (response.ok) {
+        return response;
+      }
+
+      const body = await response.text();
+      throw new Error(formatHostedLocalWorkerControlFailure({
+        body,
+        harness,
+        method: init?.method ?? "GET",
+        status: response.status,
+        url: String(input),
+      }));
+    },
+    getBearerToken: async () => harness.oidcToken,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+  });
 }
 
 export async function wakeHostedWorker(input: {
@@ -86,23 +104,11 @@ export async function wakeHostedWorker(input: {
   targetSeqHint?: string | null;
   userId: string;
 }): Promise<HostedExecutionUserStatus> {
-  return await input.harness.requestJson<HostedExecutionUserStatus>(
-    buildCloudflareHostedControlUserWakePath(input.userId),
-    {
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-      },
-      method: "POST",
-      ...(input.targetSeqHint === undefined ? {} : {
-        body: JSON.stringify({
-          targetSeqHint: input.targetSeqHint,
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-        },
-      }),
-    },
+  return await createHostedLocalCloudflareControlClient(input.harness).wakeUser(
+    input.userId,
+    input.targetSeqHint === undefined
+      ? undefined
+      : { targetSeqHint: input.targetSeqHint },
   );
 }
 
@@ -164,6 +170,31 @@ async function readHostedWakeStatus(input: {
 function deriveLatestPendingWakeSeq(status: HostedWakeStatusResponse): string {
   const latestPendingSeq = BigInt(status.cursor.nextSeq) - 1n;
   return latestPendingSeq.toString();
+}
+
+function formatHostedLocalWorkerControlFailure(input: {
+  body: string;
+  harness: HostedLocalDevHarness;
+  method: string;
+  status: number;
+  url: string;
+}): string {
+  const details = [
+    `${input.method} ${input.url} failed with HTTP ${input.status}.`,
+    `body: ${input.body}`,
+  ];
+  const stdout = input.harness.stdoutTail();
+  const stderr = input.harness.stderrTail();
+
+  if (stdout) {
+    details.push(`stdout:\n${stdout}`);
+  }
+
+  if (stderr) {
+    details.push(`stderr:\n${stderr}`);
+  }
+
+  return details.join("\n\n");
 }
 
 async function sleep(ms: number): Promise<void> {

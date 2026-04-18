@@ -1,190 +1,107 @@
-import { execFileSync } from "node:child_process";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { appendFile } from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionWake,
-} from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
-import {
-  startHostedLocalDevHarness,
-  type HostedLocalDevHarness,
-} from "./helpers/hosted-local-dev-harness.js";
-import {
-  appendHostedWake,
-  appendHostedWakeAndWakeWorker,
-  wakeHostedWorkerForLatestPendingWake,
-} from "./helpers/hosted-local-dispatch.js";
-import {
-  startHostedLocalOidcFixture,
-  type HostedLocalOidcFixture,
-} from "./helpers/hosted-local-oidc-support.js";
-import {
-  buildHostLoopbackStubBaseUrl,
-  readRequestBody,
-  reserveLocalTcpPort,
-  resolveHostedAssistantLocalDevEnv,
-  resolveHostedLocalSmokeWebEnv,
-  shouldUseAssistantProviderStub,
-  startAssistantProviderStubServer,
-  stopHttpStubServer,
-  writeJsonResponse,
-} from "./helpers/hosted-local-e2e-support.js";
-import {
-  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-  TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
-} from "./hosted-execution-fixtures.js";
+
 import {
   DEFAULT_DATABASE_URL,
 } from "../../../scripts/dev-hosted-local/constants.ts";
-
-interface ObservedTelegramRequest {
-  body: string;
-  method: string;
-  url: string;
-}
-
-type ObservedTelegramRequestMatcher = (request: ObservedTelegramRequest) => boolean;
+import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
+import {
+  startHostedLocalFullStackScenario,
+  type HostedLocalFullStackScenario,
+} from "./helpers/hosted-local-full-stack-scenario.js";
+import {
+  buildTelegramMessageId,
+  buildTelegramThreadId,
+  resolveHostedTelegramAssistantReplyText,
+  startHostedLocalTelegramStub,
+  type HostedLocalTelegramStub,
+} from "./helpers/hosted-local-telegram-support.js";
 
 const userId = `member_local_telegram_reply_${Date.now()}`;
 const fastReplyUserId = `member_local_telegram_fast_reply_${Date.now()}`;
 const telegramBotToken = "telegram-local-test-token";
-const observedTelegramRequests: ObservedTelegramRequest[] = [];
-const observedAssistantProviderBodies: string[] = [];
+
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
-const debugE2E = process.env.MURPH_E2E_DEBUG_PROGRESS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
-const useAssistantProviderStub = shouldUseAssistantProviderStub(process.env);
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
 
-let telegramServer: ReturnType<typeof createServer> | null = null;
-let telegramApiBaseUrl = "";
-let assistantProviderServer: ReturnType<typeof createServer> | null = null;
-let assistantProviderBaseUrl = "";
-let localHarness: HostedLocalDevHarness | null = null;
-let oidcFixture: HostedLocalOidcFixture | null = null;
+let scenario: HostedLocalFullStackScenario | null = null;
+let telegramStub: HostedLocalTelegramStub | null = null;
 
 it("derives stable numeric suffixes from the full Telegram user id", () => {
-  expect(buildStableTelegramNumericSuffix("member_local_telegram_reply_20260408", 7)).not.toBe(
-    buildStableTelegramNumericSuffix("member_local_telegram_fast_reply_20260408", 7),
+  expect(buildStableNumericSuffix("member_local_telegram_reply_20260408", 7)).not.toBe(
+    buildStableNumericSuffix("member_local_telegram_fast_reply_20260408", 7),
   );
 });
 
 describe("hosted local Telegram auto-reply e2e", () => {
   beforeAll(async () => {
-    logDebug("starting hosted local Telegram e2e setup");
-    observedTelegramRequests.length = 0;
-    observedAssistantProviderBodies.length = 0;
-    telegramServer = await startTelegramStubServer();
-    telegramApiBaseUrl = buildHostLoopbackStubBaseUrl(telegramServer, "Telegram stub");
-    logDebug("started Telegram stub server", { telegramApiBaseUrl });
-
-    if (useAssistantProviderStub) {
-      assistantProviderServer = await startAssistantProviderStubServer({
-        onRequestBody: (body) => {
-          observedAssistantProviderBodies.push(body);
-        },
-        resolveMessageText: resolveHostedTelegramAssistantReplyText,
-      });
-      assistantProviderBaseUrl =
-        `${buildHostLoopbackStubBaseUrl(assistantProviderServer, "assistant provider stub")}/v1`;
-      logDebug("started assistant provider stub server", {
-        assistantProviderBaseUrl,
-      });
-    }
-    oidcFixture = await startHostedLocalOidcFixture();
-
-    const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
-      process.env,
-      useAssistantProviderStub ? assistantProviderBaseUrl : null,
-      "Local hosted Telegram e2e",
-    );
-    const webPort = await reserveLocalTcpPort();
-    const workerPort = await reserveLocalTcpPort();
-    const runtimeEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...hostedAssistantDevEnv,
-      ...resolveHostedLocalSmokeWebEnv(process.env),
-      DATABASE_URL: localDatabaseUrl,
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRunnerEnvProfiles(
-        process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
-        "telegram",
-      ),
-      HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: requireOidcFixture().jwksUrl,
-      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-      HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
-      MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
-      MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
-      MURPH_DEV_WEB_PORT: String(webPort),
-      MURPH_DEV_WORKER_PORT: String(workerPort),
-      NEXT_DIST_DIR_MODE: "smoke",
-      TELEGRAM_API_BASE_URL: telegramApiBaseUrl,
-      TELEGRAM_BOT_TOKEN: telegramBotToken,
-      VERCEL_OIDC_TOKEN: requireOidcFixture().token,
-    };
-
-    localHarness = await startHostedLocalDevHarness({
-      env: runtimeEnv,
+    telegramStub = await startHostedLocalTelegramStub({
+      botToken: telegramBotToken,
+      debugLogFile: telegramDebugLogFile,
+    });
+    scenario = await startHostedLocalFullStackScenario({
+      additionalEnv: {
+        TELEGRAM_API_BASE_URL: requireTelegramStub().baseUrl,
+        TELEGRAM_BOT_TOKEN: telegramBotToken,
+      },
+      localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-telegram-first-contact-",
-      statusHeaders: (nextUserId: string) => ({
-        [HOSTED_EXECUTION_USER_ID_HEADER]: nextUserId,
-      }),
-      statusPath: (nextUserId: string) => `/internal/users/${encodeURIComponent(nextUserId)}/status`,
+      requiredRunnerEnvProfile: "telegram",
+      resolveAssistantReplyText: resolveHostedTelegramAssistantReplyText,
+      scenarioLabel: "Local hosted Telegram e2e",
       streamLogs: streamDevLogs,
     });
   }, 300_000);
 
   afterAll(async () => {
-    logDebug("tearing down hosted local Telegram e2e");
-    await localHarness?.stop();
-    localHarness = null;
-    await oidcFixture?.stop();
-    oidcFixture = null;
-    await stopHttpStubServer(telegramServer);
-    await stopHttpStubServer(assistantProviderServer);
+    await scenario?.stop();
+    scenario = null;
+    await telegramStub?.stop();
+    telegramStub = null;
   });
 
   it("sends Telegram typing and a reply after an inbound Telegram message", async () => {
-    await seedActiveHostedMember(userId);
-    await dispatchHostedEvent(buildActivationDispatch(userId), userId);
+    await requireScenario().seedActiveHostedMember({ memberId: userId });
+    await requireScenario().dispatchWake(buildActivationWake(userId), userId);
 
-    await requireHarness().waitForHostedCompletion(userId);
-    await waitForTelegramRequestsToSettle({ userId });
-    logDebug("activation completed", { userId });
+    await requireScenario().waitForHostedCompletion(userId);
+    await requireTelegramStub().waitForRequestsToSettle({
+      scenario: requireScenario(),
+      userId,
+    });
 
-    const requestCountBeforeInbound = observedTelegramRequests.length;
-    await dispatchHostedEvent(buildInboundTelegramDispatch(userId), userId);
+    const requestCountBeforeInbound = requireTelegramStub().observedRequests.length;
+    await requireScenario().dispatchWake(buildInboundTelegramWake(userId), userId);
 
-    const finalStatus = await requireHarness().waitForHostedCompletion(userId);
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.bundleRef).not.toBeNull();
     expect(finalStatus.lastError).toBeNull();
     expect(finalStatus.pendingEventCount).toBe(0);
 
-    await waitForTelegramRequest({
+    await requireTelegramStub().waitForRequest({
       expectedPath: `/bot${telegramBotToken}/sendChatAction`,
-      matchRequest: createTelegramTypingRequestMatcher(userId),
+      matchRequest: requireTelegramStub().createTypingMatcher(userId),
+      scenario: requireScenario(),
       userId,
     });
-    const sendRequest = await waitForTelegramRequest({
+    const sendRequest = await requireTelegramStub().waitForRequest({
       expectedPath: `/bot${telegramBotToken}/sendMessage`,
-      matchRequest: createTelegramSendMessageMatcher(userId),
+      matchRequest: requireTelegramStub().createSendMessageMatcher(userId),
+      scenario: requireScenario(),
       userId,
     });
 
-    const requestsAfterInbound = observedTelegramRequests.slice(requestCountBeforeInbound);
+    const requestsAfterInbound = requireTelegramStub().observedRequests.slice(requestCountBeforeInbound);
     const typingRequestsAfterInbound = requestsAfterInbound.filter((request) =>
-      isMatchingObservedTelegramRequest(
-        request,
-        `/bot${telegramBotToken}/sendChatAction`,
-        createTelegramTypingRequestMatcher(userId),
-      )
+      request.url === `/bot${telegramBotToken}/sendChatAction`
+      && requireTelegramStub().createTypingMatcher(userId)(request)
     );
 
     expect(sendRequest.method).toBe("POST");
@@ -200,7 +117,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(typingIndices[1]).toBeGreaterThan(typingIndices[0]);
     expect(sendIndex).toBeGreaterThan(typingIndices[1]);
 
-    expect(parseObservedTelegramJson(sendRequest.body)).toMatchObject({
+    expect(requireTelegramStub().parseObservedJson(sendRequest.body)).toMatchObject({
       chat_id: buildTelegramThreadId(userId),
       reply_to_message_id: Number.parseInt(buildTelegramMessageId(userId), 10),
       text: expect.stringContaining("Telegram"),
@@ -208,20 +125,23 @@ describe("hosted local Telegram auto-reply e2e", () => {
   }, 300_000);
 
   it("keeps Telegram context when two replies arrive before hosted completion catches up", async () => {
-    await seedActiveHostedMember(fastReplyUserId);
-    await dispatchHostedEvent(buildActivationDispatch(fastReplyUserId), fastReplyUserId);
+    await requireScenario().seedActiveHostedMember({ memberId: fastReplyUserId });
+    await requireScenario().dispatchWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
 
-    await requireHarness().waitForHostedCompletion(fastReplyUserId);
-    await waitForTelegramRequestsToSettle({ userId: fastReplyUserId });
+    await requireScenario().waitForHostedCompletion(fastReplyUserId);
+    await requireTelegramStub().waitForRequestsToSettle({
+      scenario: requireScenario(),
+      userId: fastReplyUserId,
+    });
 
     const expectedSendPath = `/bot${telegramBotToken}/sendMessage`;
-    const baselineSendCount = countObservedTelegramRequests(
+    const baselineSendCount = requireTelegramStub().countObservedRequests(
       expectedSendPath,
-      createTelegramSendMessageMatcher(fastReplyUserId),
+      requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
     );
 
-    await enqueueHostedEvent(
-      buildInboundTelegramDispatch(fastReplyUserId, {
+    await requireScenario().enqueueWake(
+      buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_name`,
         messageId: `${buildTelegramMessageId(fastReplyUserId)}1`,
         text: "U can call me Rocket Man",
@@ -229,8 +149,8 @@ describe("hosted local Telegram auto-reply e2e", () => {
       fastReplyUserId,
     );
 
-    await enqueueHostedEvent(
-      buildInboundTelegramDispatch(fastReplyUserId, {
+    await requireScenario().enqueueWake(
+      buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_goals`,
         messageId: `${buildTelegramMessageId(fastReplyUserId)}2`,
         text: "I want to build more strength, improve endurance, and get fitter overall.",
@@ -238,125 +158,34 @@ describe("hosted local Telegram auto-reply e2e", () => {
       fastReplyUserId,
     );
 
-    await wakeHostedWorkerForLatestPendingWake({
-      harness: requireHarness(),
-      userId: fastReplyUserId,
-    });
-    await requireHarness().waitForHostedCompletion(fastReplyUserId);
+    await requireScenario().waitForLatestPendingWake(fastReplyUserId);
+    await requireScenario().waitForHostedCompletion(fastReplyUserId);
 
-    const replyRequests = await waitForMatchingTelegramRequestCount({
+    const replyRequests = await requireTelegramStub().waitForRequestCount({
       expectedCount: baselineSendCount + 2,
       expectedPath: expectedSendPath,
-      matchRequest: createTelegramSendMessageMatcher(fastReplyUserId),
+      matchRequest: requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
+      scenario: requireScenario(),
       userId: fastReplyUserId,
     });
     const replyTexts = replyRequests
       .slice(-2)
-      .map((request) => parseObservedTelegramJson(request.body)?.text);
+      .map((request) => requireTelegramStub().parseObservedJson(request.body)?.text);
 
     expect(replyTexts).toEqual([
       "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?",
       "Got you — stronger, fitter, faster, and more endurance.",
     ]);
-    expect(observedAssistantProviderBodies.at(-1)).toContain("Rocket Man");
-    expect(observedAssistantProviderBodies.at(-1)).toContain("build more strength");
-    expect(observedAssistantProviderBodies.at(-1)).toContain("I’ll call you Rocket Man");
+    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("Rocket Man");
+    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("build more strength");
+    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("I’ll call you Rocket Man");
   }, 300_000);
-
-  async function dispatchHostedEvent(wake: HostedExecutionWake, nextUserId: string) {
-    logDebug("append hosted wake and wake worker", {
-      eventId:
-        typeof wake === "object" && wake !== null && "eventId" in wake
-          ? (wake as { eventId?: unknown }).eventId
-          : null,
-      userId: nextUserId,
-    });
-    const { append, wakeStatus } = await appendHostedWakeAndWakeWorker({
-      wake,
-      harness: requireHarness(),
-      userId: nextUserId,
-    });
-    logDebug("hosted wake enqueued", {
-      duplicate: append.duplicate,
-      pendingEventCount: wakeStatus.pendingEventCount,
-      userId: nextUserId,
-    });
-  }
-
-  async function enqueueHostedEvent(wake: HostedExecutionWake, nextUserId: string) {
-    logDebug("append hosted wake", {
-      eventId:
-        typeof wake === "object" && wake !== null && "eventId" in wake
-          ? (wake as { eventId?: unknown }).eventId
-          : null,
-      userId: nextUserId,
-    });
-    const append = await appendHostedWake({
-      wake,
-      harness: requireHarness(),
-      userId: nextUserId,
-    });
-    logDebug("hosted wake enqueued without immediate wake", {
-      duplicate: append.duplicate,
-      seq: append.wake.seq,
-      userId: nextUserId,
-    });
-  }
 });
 
-function requireHarness(): HostedLocalDevHarness {
-  if (!localHarness) {
-    throw new Error("Hosted local harness was not initialized.");
-  }
-
-  return localHarness;
-}
-
-function requireOidcFixture(): HostedLocalOidcFixture {
-  if (!oidcFixture) {
-    throw new Error("Hosted local OIDC fixture was not initialized.");
-  }
-
-  return oidcFixture;
-}
-
-function logDebug(message: string, details?: Record<string, unknown>): void {
-  if (!debugE2E) {
-    return;
-  }
-
-  const payload = details ? ` ${JSON.stringify(details)}` : "";
-  console.error(`[hosted-local-telegram-e2e] ${message}${payload}`);
-}
-
-async function seedActiveHostedMember(nextUserId: string): Promise<void> {
-  execFileSync(
-    "pnpm",
-    [
-      "exec",
-      "tsx",
-      "--tsconfig",
-      "tsconfig.base.json",
-      "apps/web/scripts/seed-hosted-active-member.ts",
-    ],
-    {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        DATABASE_URL: localDatabaseUrl,
-        MURPH_E2E_MEMBER_ID: nextUserId,
-        NODE_ENV: "test",
-        VITEST: "1",
-      },
-      stdio: "pipe",
-    },
-  );
-}
-
-function buildActivationDispatch(nextUserId: string) {
+function buildActivationWake(userId: string) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${nextUserId}:evt_telegram_activation`,
-    memberId: nextUserId,
+    eventId: `member.activated:local:${userId}:evt_telegram_activation`,
+    memberId: userId,
     memberChannels: {
       email: false,
       linq: false,
@@ -366,8 +195,8 @@ function buildActivationDispatch(nextUserId: string) {
   });
 }
 
-function buildInboundTelegramDispatch(
-  nextUserId: string,
+function buildInboundTelegramWake(
+  userId: string,
   overrides: {
     eventId?: string;
     messageId?: string;
@@ -377,327 +206,30 @@ function buildInboundTelegramDispatch(
   return buildHostedExecutionTelegramConversationMessageWake({
     eventId:
       overrides.eventId
-      ?? `telegram.message.received:local:${nextUserId}:evt_telegram_reply`,
+      ?? `telegram.message.received:local:${userId}:evt_telegram_reply`,
     occurredAt: new Date().toISOString(),
     telegramMessage: {
-      messageId: overrides.messageId ?? buildTelegramMessageId(nextUserId),
+      messageId: overrides.messageId ?? buildTelegramMessageId(userId),
       schema: "murph.hosted-telegram-message.v1",
       text: overrides.text ?? "yo",
-      threadId: buildTelegramThreadId(nextUserId),
+      threadId: buildTelegramThreadId(userId),
     },
-    userId: nextUserId,
+    userId,
   });
 }
 
-function createTelegramTypingRequestMatcher(nextUserId: string): ObservedTelegramRequestMatcher {
-  return (request) => {
-    const parsed = parseObservedTelegramJson(request.body);
-    return Boolean(
-      parsed
-      && parsed.action === "typing"
-      && parsed.chat_id === buildTelegramThreadId(nextUserId),
-    );
-  };
-}
-
-function createTelegramSendMessageMatcher(nextUserId: string): ObservedTelegramRequestMatcher {
-  const expectedMessageIdPrefix = buildTelegramMessageId(nextUserId);
-
-  return (request) => {
-    const parsed = parseObservedTelegramJson(request.body);
-    const replyToMessageId =
-      parsed && "reply_to_message_id" in parsed
-        ? parsed.reply_to_message_id
-        : null;
-
-    return Boolean(
-      parsed
-      && parsed.chat_id === buildTelegramThreadId(nextUserId)
-      && (
-        typeof replyToMessageId === "number"
-          ? String(replyToMessageId).startsWith(expectedMessageIdPrefix)
-          : false
-      )
-      && typeof parsed.text === "string"
-      && parsed.text.length > 0,
-    );
-  };
-}
-
-async function waitForTelegramRequest(input: {
-  expectedPath: string;
-  matchRequest?: ObservedTelegramRequestMatcher;
-  userId: string;
-}): Promise<ObservedTelegramRequest> {
-  const startedAt = Date.now();
-  let nextProgressLogAt = startedAt;
-
-  while ((Date.now() - startedAt) < 60_000) {
-    const matchingRequest = observedTelegramRequests.find((request) =>
-      isMatchingObservedTelegramRequest(request, input.expectedPath, input.matchRequest)
-    );
-    if (matchingRequest) {
-      logDebug("observed Telegram request", {
-        elapsedMs: Date.now() - startedAt,
-        expectedPath: input.expectedPath,
-        userId: input.userId,
-      });
-      return matchingRequest;
-    }
-
-    if (Date.now() >= nextProgressLogAt) {
-      logDebug("waiting for Telegram request", {
-        elapsedMs: Date.now() - startedAt,
-        expectedPath: input.expectedPath,
-        observedRequests: observedTelegramRequests.map((request) => ({
-          method: request.method,
-          url: request.url,
-        })),
-        observedRequestCount: observedTelegramRequests.length,
-        userId: input.userId,
-      });
-      nextProgressLogAt = Date.now() + 5_000;
-    }
-
-    await sleep(250);
+function requireScenario(): HostedLocalFullStackScenario {
+  if (!scenario) {
+    throw new Error("Hosted local full-stack scenario was not initialized.");
   }
 
-  const status = await requireHarness().readUserStatus(input.userId);
-  throw new Error([
-    `Timed out waiting for Telegram request ${input.expectedPath} for ${input.userId}.`,
-    `observed requests: ${JSON.stringify(summarizeObservedTelegramRequests())}`,
-    `hosted status: ${JSON.stringify(status)}`,
-    `stdout tail: ${requireHarness().stdoutTail()}`,
-    `stderr tail: ${requireHarness().stderrTail()}`,
-  ].join("\n"));
+  return scenario;
 }
 
-async function waitForMatchingTelegramRequestCount(input: {
-  expectedCount: number;
-  expectedPath: string;
-  matchRequest?: ObservedTelegramRequestMatcher;
-  userId: string;
-}): Promise<ObservedTelegramRequest[]> {
-  const startedAt = Date.now();
-
-  while ((Date.now() - startedAt) < 60_000) {
-    const matching = observedTelegramRequests.filter((request) =>
-      isMatchingObservedTelegramRequest(request, input.expectedPath, input.matchRequest)
-    );
-    if (matching.length >= input.expectedCount) {
-      return matching;
-    }
-
-    await sleep(250);
+function requireTelegramStub(): HostedLocalTelegramStub {
+  if (!telegramStub) {
+    throw new Error("Hosted local Telegram stub was not initialized.");
   }
 
-  const status = await requireHarness().readUserStatus(input.userId);
-  throw new Error([
-    `Timed out waiting for ${input.expectedCount} Telegram requests ${input.expectedPath} for ${input.userId}.`,
-    `observed requests: ${JSON.stringify(summarizeObservedTelegramRequests())}`,
-    `hosted status: ${JSON.stringify(status)}`,
-    `stdout tail: ${requireHarness().stdoutTail()}`,
-    `stderr tail: ${requireHarness().stderrTail()}`,
-  ].join("\n"));
-}
-
-function isMatchingObservedTelegramRequest(
-  request: ObservedTelegramRequest,
-  expectedPath: string,
-  matchRequest?: ObservedTelegramRequestMatcher,
-): boolean {
-  return (
-    request.method === "POST"
-    && request.url === expectedPath
-    && (matchRequest ? matchRequest(request) : true)
-  );
-}
-
-function parseObservedTelegramJson(body: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(body) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function summarizeObservedTelegramRequests(): Array<{
-  body: Record<string, unknown> | null;
-  method: string;
-  url: string;
-}> {
-  return observedTelegramRequests.map((request) => ({
-    body: parseObservedTelegramJson(request.body),
-    method: request.method,
-    url: request.url,
-  }));
-}
-
-function countObservedTelegramRequests(
-  expectedPath: string,
-  matchRequest?: ObservedTelegramRequestMatcher,
-): number {
-  return observedTelegramRequests.filter((request) =>
-    isMatchingObservedTelegramRequest(request, expectedPath, matchRequest)
-  ).length;
-}
-
-function countObservedTelegramRequestsForUser(nextUserId: string): number {
-  const expectedThreadId = buildTelegramThreadId(nextUserId);
-  return observedTelegramRequests.filter((request) => {
-    const parsed = parseObservedTelegramJson(request.body);
-    return parsed?.chat_id === expectedThreadId;
-  }).length;
-}
-
-async function waitForTelegramRequestsToSettle(input: {
-  quietMs?: number;
-  timeoutMs?: number;
-  userId: string;
-}): Promise<void> {
-  const timeoutMs = input.timeoutMs ?? 10_000;
-  const quietMs = input.quietMs ?? 750;
-  const startedAt = Date.now();
-  let lastCount = countObservedTelegramRequestsForUser(input.userId);
-  let stableSince = Date.now();
-
-  while ((Date.now() - startedAt) < timeoutMs) {
-    const nextCount = countObservedTelegramRequestsForUser(input.userId);
-
-    if (nextCount !== lastCount) {
-      lastCount = nextCount;
-      stableSince = Date.now();
-    }
-
-    if ((Date.now() - stableSince) >= quietMs) {
-      return;
-    }
-
-    await sleep(100);
-  }
-
-  const status = await requireHarness().readUserStatus(input.userId);
-  throw new Error([
-    `Timed out waiting for Telegram requests to settle for ${input.userId}.`,
-    `observed requests: ${JSON.stringify(summarizeObservedTelegramRequests())}`,
-    `hosted status: ${JSON.stringify(status)}`,
-    `stdout tail: ${requireHarness().stdoutTail()}`,
-    `stderr tail: ${requireHarness().stderrTail()}`,
-  ].join("\n"));
-}
-
-async function startTelegramStubServer(): Promise<ReturnType<typeof createServer>> {
-  const server = createServer(async (request, response) => {
-    const body = await readRequestBody(request);
-    const observedRequest = {
-      body,
-      method: request.method ?? "GET",
-      url: request.url ?? "/",
-    };
-    observedTelegramRequests.push(observedRequest);
-    await writeTelegramDebugLog({
-      body: parseObservedTelegramJson(body),
-      method: observedRequest.method,
-      url: observedRequest.url,
-    });
-
-    if (request.method === "POST" && request.url === `/bot${telegramBotToken}/sendChatAction`) {
-      writeJsonResponse(response, 200, {
-        ok: true,
-        result: true,
-      });
-      return;
-    }
-
-    if (request.method === "POST" && request.url === `/bot${telegramBotToken}/sendMessage`) {
-      writeJsonResponse(response, 200, {
-        ok: true,
-        result: {
-          message_id: 9001,
-        },
-      });
-      return;
-    }
-
-    writeJsonResponse(response, 404, {
-      error: `Unhandled Telegram stub route: ${request.method ?? "GET"} ${request.url ?? "/"}`,
-    });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "0.0.0.0", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-
-  return server;
-}
-
-function sleep(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
-}
-
-async function writeTelegramDebugLog(entry: Record<string, unknown>): Promise<void> {
-  if (!telegramDebugLogFile) {
-    return;
-  }
-
-  await appendFile(telegramDebugLogFile, `${JSON.stringify(entry)}\n`, "utf8");
-}
-
-function buildTelegramThreadId(nextUserId: string): string {
-  return buildStableTelegramNumericId(nextUserId, "600");
-}
-
-function buildTelegramMessageId(nextUserId: string): string {
-  return buildStableTelegramNumericId(nextUserId, "700");
-}
-
-function buildStableTelegramNumericId(nextUserId: string, prefix: string): string {
-  const suffix = buildStableTelegramNumericSuffix(nextUserId, 7);
-  return `${prefix}${suffix}`;
-}
-
-function buildStableTelegramNumericSuffix(value: string, length: number): string {
-  let hash = 0;
-
-  for (const character of value) {
-    hash = (hash * 31 + character.charCodeAt(0)) % 10_000_000;
-  }
-
-  return String(hash).padStart(length, "0").slice(-length);
-}
-
-function mergeRunnerEnvProfiles(
-  existingProfiles: string | undefined,
-  requiredProfile: string,
-): string {
-  const profiles = new Set(
-    String(existingProfiles ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-  );
-  profiles.add(requiredProfile);
-  return Array.from(profiles).join(",");
-}
-
-function resolveHostedTelegramAssistantReplyText(body: string): string {
-  if (body.includes("Rocket Man") && body.includes("build more strength")) {
-    if (body.includes("I’ll call you Rocket Man") || body.includes("I'll call you Rocket Man")) {
-      return "Got you — stronger, fitter, faster, and more endurance.";
-    }
-
-    return "What should I call you? And out of those, which ones matter most to you right now?";
-  }
-
-  if (body.includes("Rocket Man")) {
-    return "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
-  }
-
-  return "I saw your Telegram message and I'm here.";
+  return telegramStub;
 }

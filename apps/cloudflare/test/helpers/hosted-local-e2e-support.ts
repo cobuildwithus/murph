@@ -173,6 +173,30 @@ export function shouldUseAssistantProviderStub(source: NodeJS.ProcessEnv): boole
   );
 }
 
+export function buildStableNumericSuffix(value: string, length: number): string {
+  let hash = 0;
+
+  for (const character of value) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 10_000_000;
+  }
+
+  return String(hash).padStart(length, "0").slice(-length);
+}
+
+export function mergeRequiredEnvProfile(
+  existingProfiles: string | undefined,
+  requiredProfile: string,
+): string {
+  const profiles = new Set(
+    String(existingProfiles ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+  profiles.add(requiredProfile);
+  return Array.from(profiles).join(",");
+}
+
 export function requireBoundTcpPort(
   server: ReturnType<typeof createServer>,
   label: string,
