@@ -8,19 +8,13 @@ import type {
 import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
 import {
   isHostedConversationMessageWake,
-  isHostedEmailConversationMessageWake,
-  isHostedLinqConversationMessageWake,
-  isHostedTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedWakeContext,
 } from "./context.ts";
-import { buildHostedEmailCapture } from "./events/email.ts";
-import { buildHostedLinqCapture } from "./events/linq.ts";
+import { processHostedConversationMessageWake } from "./events/conversation.ts";
 import { handleHostedShareAcceptedWake } from "./events/share.ts";
-import { buildHostedTelegramCapture } from "./events/telegram.ts";
-import { withHostedInboxPipeline } from "./events/inbox-pipeline.ts";
 import type {
   HostedWakeEffect,
   HostedWakeFollowupExecution,
@@ -104,40 +98,11 @@ async function executeHostedConversationWake(input: {
   >;
   vaultRoot: string;
 }): Promise<HostedWakeOutcome> {
-  const capture = await resolveHostedConversationCapture(input);
-
-  await withHostedInboxPipeline(input.vaultRoot, async (pipeline) => {
-    await pipeline.processCapture(capture);
-  });
+  await processHostedConversationMessageWake(input);
 
   return createNoopWakeEffect({
     followupExecution: "conversation-message",
   });
-}
-
-async function resolveHostedConversationCapture(input: {
-  wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "platform"
-  >;
-}) {
-  if (isHostedLinqConversationMessageWake(input.wake)) {
-    return buildHostedLinqCapture(input.wake);
-  }
-
-  if (isHostedTelegramConversationMessageWake(input.wake)) {
-    return buildHostedTelegramCapture(input.wake);
-  }
-
-  if (isHostedEmailConversationMessageWake(input.wake)) {
-    return buildHostedEmailCapture(
-      input.wake,
-      input.runtime.platform.effectsPort,
-    );
-  }
-
-  throw new TypeError("Unsupported hosted message wake kind.");
 }
 
 async function executeHostedSystemWake(input: {
