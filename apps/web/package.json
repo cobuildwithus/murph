@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
+  "exports": {
+    "./testing": "./src/testing.ts"
+  },
   "engines": {
     "node": ">=24.14.1"
   },

@@ -37,6 +37,9 @@
       "@murphai/cloudflare-hosted-control/*": [
         "packages/cloudflare-hosted-control/src/*"
       ],
+      "@murphai/hosted-web/testing": [
+        "apps/web/src/testing.ts"
+      ],
       "@murphai/messaging-ingress": [
         "packages/messaging-ingress/src/index.ts"
       ],

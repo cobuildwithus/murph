@@ -37,6 +37,10 @@ import {
   startHostedLocalDevHarness,
   type HostedLocalDevHarness,
 } from "./hosted-local-dev-harness.js";
+import {
+  seedHostedActiveLinqMember,
+  seedHostedActiveMember,
+} from "@murphai/hosted-web/testing";
 
 interface HostedActiveMemberSeedArgs {
   environment?: NodeJS.ProcessEnv;
@@ -175,9 +179,6 @@ export async function startHostedLocalFullStackScenario(input: {
         }),
       harness: scenarioHarness,
       seedActiveHostedLinqMember: async (seedInput) => {
-        const { seedHostedActiveLinqMember } = await import(
-          "../../../web/src/lib/hosted-onboarding/hosted-member-test-seed.ts"
-        );
         await seedHostedActiveLinqMember({
           environment: {
             ...seedEnvironment,
@@ -192,9 +193,6 @@ export async function startHostedLocalFullStackScenario(input: {
         });
       },
       seedActiveHostedMember: async (seedInput) => {
-        const { seedHostedActiveMember } = await import(
-          "../../../web/src/lib/hosted-onboarding/hosted-member-test-seed.ts"
-        );
         await seedHostedActiveMember({
           environment: {
             ...seedEnvironment,

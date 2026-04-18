@@ -19,6 +19,8 @@ import type { HostedLocalDevHarness } from "./hosted-local-dev-harness.js";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const HOSTED_LOCAL_WORKER_RESTART_BODY = "Your worker restarted mid-request.";
+const HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES = 4;
 
 export async function appendHostedWakeAndWakeWorker(input: {
   wake: HostedExecutionWake;
@@ -79,18 +81,39 @@ function createHostedLocalCloudflareControlClient(
     allowHttpLocalhost: true,
     baseUrl: harness.workerBaseUrl,
     fetchImpl: async (input, init) => {
-      const response = await fetch(input, init);
+      for (let attempt = 0; attempt <= HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES; attempt += 1) {
+        const response = await fetch(input, init);
 
-      if (response.ok) {
-        return response;
+        if (response.ok) {
+          return response;
+        }
+
+        const body = await response.text();
+        if (
+          shouldRetryHostedLocalWorkerRestart({
+            attempt,
+            body,
+            status: response.status,
+          })
+        ) {
+          await sleep(250 * (attempt + 1));
+          continue;
+        }
+
+        throw new Error(formatHostedLocalWorkerControlFailure({
+          body,
+          harness,
+          method: init?.method ?? "GET",
+          status: response.status,
+          url: String(input),
+        }));
       }
 
-      const body = await response.text();
       throw new Error(formatHostedLocalWorkerControlFailure({
-        body,
+        body: "Exceeded local worker restart retries.",
         harness,
         method: init?.method ?? "GET",
-        status: response.status,
+        status: 503,
         url: String(input),
       }));
     },
@@ -195,6 +218,16 @@ function formatHostedLocalWorkerControlFailure(input: {
   }
 
   return details.join("\n\n");
+}
+
+function shouldRetryHostedLocalWorkerRestart(input: {
+  attempt: number;
+  body: string;
+  status: number;
+}): boolean {
+  return input.status === 503
+    && input.body.includes(HOSTED_LOCAL_WORKER_RESTART_BODY)
+    && input.attempt < HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES;
 }
 
 async function sleep(ms: number): Promise<void> {
