@@ -291,12 +291,10 @@ export const HOSTED_WAKE_BEHAVIORS = [
 export type HostedWakeBehavior =
   (typeof HOSTED_WAKE_BEHAVIORS)[number];
 
-export const HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA = "murph.hosted-wake-dispatch.v1";
 export const HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA = "murph.hosted-wake-message.v1";
 export const HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA = "murph.hosted-wake-system.v1";
 
 export const HOSTED_WAKE_PAYLOAD_SCHEMAS = [
-  HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
   HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 ] as const;

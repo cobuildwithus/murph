@@ -9,11 +9,9 @@ import {
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import {
-  HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
   HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
   HOSTED_WAKE_BEHAVIORS,
-  isHostedMessageWakeDispatch,
   isHostedMessageWakeEventKind,
   isHostedSystemWakeDispatch,
 } from "./contracts.ts";
@@ -742,8 +740,7 @@ export function parseHostedWakeDispatchPayload(input: {
       throw new TypeError(
         `Unsupported hosted wake message payload kind: ${input.kind}`,
       );
-    case HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA:
-    case HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA: {
+    case HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA: {
       const dispatch = parseHostedExecutionDispatchRequest(input.payloadJson);
 
       if (dispatch.event.userId !== input.userId) {
@@ -756,13 +753,6 @@ export function parseHostedWakeDispatchPayload(input: {
 
       if (dispatch.occurredAt !== input.occurredAt) {
         throw new TypeError("Hosted wake dispatch payload occurredAt must match the wake record.");
-      }
-
-      if (input.payloadSchema === HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA) {
-        if (isHostedMessageWakeDispatch(dispatch) || isHostedSystemWakeDispatch(dispatch)) {
-          return dispatch;
-        }
-        throw new TypeError("Hosted wake dispatch payload must carry a supported hosted wake event kind.");
       }
 
       if (!isHostedSystemWakeDispatch(dispatch)) {
