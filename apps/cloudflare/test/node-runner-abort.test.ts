@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  runHostedExecutionJob,
-  setHostedExecutionIsolatedRunnerForTests,
-  setHostedExecutionRunModeForTests,
+  createHostedExecutionJobRunner,
 } from "../src/node-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 describe("runHostedExecutionJob abort forwarding", () => {
   const runHostedAssistantRuntimeJobIsolated = vi.fn();
+  let runHostedExecutionJob = createHostedExecutionJobRunner();
 
   beforeEach(() => {
-    setHostedExecutionRunModeForTests(null);
-    setHostedExecutionIsolatedRunnerForTests(runHostedAssistantRuntimeJobIsolated);
     runHostedAssistantRuntimeJobIsolated.mockReset();
+    runHostedExecutionJob = createHostedExecutionJobRunner({
+      runIsolated: runHostedAssistantRuntimeJobIsolated,
+    });
     for (const [key, value] of Object.entries(createHostedExecutionTestEnv())) {
       if (typeof value === "string") {
         vi.stubEnv(key, value);
@@ -33,8 +33,6 @@ describe("runHostedExecutionJob abort forwarding", () => {
   });
 
   afterEach(() => {
-    setHostedExecutionIsolatedRunnerForTests(null);
-    setHostedExecutionRunModeForTests(null);
     vi.unstubAllEnvs();
   });
 
