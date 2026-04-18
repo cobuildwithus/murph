@@ -120,7 +120,7 @@ export interface HostedExecutionStructuredLogRecord {
   userId: string | null;
 }
 
-interface HostedExecutionDispatchLike {
+interface HostedExecutionWakeLike {
   eventId?: string | null;
 }
 
@@ -141,7 +141,6 @@ export type HostedExecutionStructuredLogDetails = {
 export interface HostedExecutionStructuredLogInput {
   component: string;
   details?: HostedExecutionStructuredLogDetails | null;
-  dispatch?: HostedExecutionDispatchLike | null;
   error?: unknown;
   eventId?: string | null;
   level?: HostedExecutionRunLevel;
@@ -150,6 +149,7 @@ export interface HostedExecutionStructuredLogInput {
   run?: HostedExecutionRunContext | null;
   time?: string;
   userId?: string | null;
+  wake?: HostedExecutionWakeLike | null;
 }
 
 export function isHostedExecutionRunPhase(value: unknown): value is HostedExecutionRunPhase {
@@ -326,7 +326,7 @@ export function buildHostedExecutionStructuredLogRecord(
       errorMessage: summarizeHostedExecutionError(error),
       ...(errorName ? { errorName } : {}),
     }),
-    eventId: input.dispatch?.eventId ?? input.eventId ?? null,
+    eventId: input.wake?.eventId ?? input.eventId ?? null,
     level: input.level ?? (error === undefined ? "info" : "error"),
     message: formatHostedExecutionLogMessage(input.message, error),
     phase: input.phase,

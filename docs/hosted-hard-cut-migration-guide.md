@@ -14,8 +14,9 @@ web-owned wake seam instead of the Durable Object alarm path.
 
 What remains is narrower and deletion-oriented:
 
-- internal compatibility helpers still materialize `HostedExecutionDispatchRequest`
-  from wakes inside shared packages
+- shared hosted-execution helpers still expose a small amount of
+  dispatch-named observability/status compatibility surface, especially
+  `dispatch.running`
 - some onboarding receipt state still exists for invite/quota/local side-effect
   flows
 - a small set of compatibility aliases still exists outside the production
@@ -84,7 +85,7 @@ Why this matters:
 
 ## Deduplicated remaining gaps
 
-### 1. Shared hosted contracts are wake-first externally, with internal dispatch compatibility still present
+### 1. Shared hosted contracts are wake-first externally, with a small amount of dispatch-named compatibility still present
 
 Status: partial, but no longer a production-boundary blocker
 
@@ -101,17 +102,18 @@ Current state:
 - The append route and Cloudflare control-plane client are wake-first now.
 - assistant-runtime now derives wakes locally when wake-native logic needs them,
   instead of depending on a populated `request.wake` field.
-- Internal shared runtime contracts still carry `HostedExecutionDispatchRequest`
-  as a compatibility surface behind that append boundary.
-- New message wakes land as `conversation.message`, but dispatch-era provider
-  event kinds still exist inside builders/parsers and runtime-facing helper
-  types.
-- Some system wakes still store full dispatch envelopes under
+- `packages/hosted-execution` no longer exposes a live
+  `HostedExecutionDispatchRequest` append path, but it still carries a few
+  dispatch-named observability/status compatibility seams.
+- New message wakes land as `conversation.message`, and the shared wake
+  builders/parsers are already wake-first.
+- Some system wakes still store system payloads under
   `HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA`.
 
 What to fix:
 
-- Treat the remaining dispatch-shaped builders/parsers as compatibility-only.
+- Treat the remaining dispatch-named observability/status helpers as
+  compatibility-only.
 - Delete them once test harnesses and the last internal callers stop needing
   them.
 
@@ -249,7 +251,7 @@ drive implementation:
 - “System producers are only partially cut over” is no longer the main gap.
   Activation, channel sync, device-sync, share acceptance, and hosted email all
   already land in `HostedWake`; the real remaining issue is the leftover
-  dispatch-era contract surface inside shared runtime code.
+  dispatch-named observability/status surface inside shared runtime code.
 - “Cloudflare still owns a second queue architecture” is no longer true for the
   production path. The remaining direct-dispatch seams are test-only.
 - “Runtime message turns still go through generic dispatch/event layering”
@@ -271,13 +273,15 @@ Primary files:
 Tasks:
 
 - Preserve the wake-first append/control-plane boundary.
-- Keep new work off `HostedExecutionDispatchRequest`.
-- Delete compatibility-only builders/parsers when tests and internal callers no
-  longer need them.
+- Keep new work off dispatch-named compatibility aliases when a wake-native
+  field or helper already exists.
+- Delete compatibility-only helpers when tests and internal callers no longer
+  need them.
 
 Acceptance:
 
-- No new producer needs `HostedExecutionDispatchRequest` just to append a wake.
+- No new producer or shared helper needs dispatch-named compatibility inputs
+  just to append or describe a wake.
 - New message wakes no longer use top-level provider-specific kinds.
 
 ### Phase 2. Tighten the active-member webhook fast path
@@ -383,8 +387,8 @@ Acceptance:
 These are the pieces still worth cleaning up if we want to remove every last
 dispatch-era compatibility seam:
 
-1. Delete shared hosted-execution compatibility builders/parsers once the last
-   internal callers and tests stop needing them.
+1. Delete shared hosted-execution compatibility helpers once the last internal
+   callers and tests stop needing them.
 
 2. Delete Cloudflare test-only direct-dispatch helpers once the harnesses move
    fully onto wake-based helpers.
@@ -396,8 +400,7 @@ dispatch-era compatibility seam:
 
 - Web/Postgres is the only owner of hosted wake ordering, lifecycle, cursor
   state, and snapshot pointer truth.
-- All producers append canonical wake contracts directly, not
-  `HostedExecutionDispatchRequest`.
+- All producers append canonical wake contracts directly.
 - Active-member message ingress does not depend on the webhook receipt engine.
 - Message wakes do not trigger the generic maintenance loop.
 - Cloudflare Durable Objects no longer persist their own queue truth.

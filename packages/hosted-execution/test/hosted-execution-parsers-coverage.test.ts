@@ -137,7 +137,7 @@ describe("hosted execution parsers coverage", () => {
   });
 
   describe("status and timeline parsing", () => {
-    it("parses dispatch results with run status and timeline", () => {
+    it("parses wake execution results with run status and timeline", () => {
       const parsed = parseHostedWakeExecutionResult({
         event: {
           eventId: "evt_123",
@@ -212,7 +212,7 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
-    it("rejects invalid run phases, timeline levels, and dispatch lifecycle states", () => {
+    it("rejects invalid run phases, timeline levels, and wake lifecycle states", () => {
       expect(() =>
         parseHostedExecutionUserStatus({
           bundleRef: null,

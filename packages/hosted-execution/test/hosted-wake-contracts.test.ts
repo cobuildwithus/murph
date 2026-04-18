@@ -33,7 +33,7 @@ describe("hosted wake contract parsers", () => {
       wake: {
         behavior: "ordered",
         createdAt: "2026-04-17T00:00:00.000Z",
-        dedupeKey: "dispatch:conversation.message:email:test-message",
+        dedupeKey: "wake:conversation.message:email:test-message",
         id: "wake-123",
         kind: wake.kind,
         occurredAt: wake.occurredAt,

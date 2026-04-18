@@ -53,7 +53,7 @@ describe("hosted execution coverage gaps", () => {
         encodeHostedExecutionSignedRequestPayload({
           method: " patch ",
           nonce: "  nonce_abc  ",
-          path: "internal/dispatch",
+          path: "internal/hosted-wake",
           payload: "{\"ok\":true}",
           search: "limit=10&sort=desc",
           timestamp: "2026-04-07T00:00:00.000Z",
@@ -63,7 +63,7 @@ describe("hosted execution coverage gaps", () => {
     ).toBe(JSON.stringify([
       "2026-04-07T00:00:00.000Z",
       "PATCH",
-      "/internal/dispatch",
+      "/internal/hosted-wake",
       "?limit=10&sort=desc",
       "user_123",
       "nonce_abc",

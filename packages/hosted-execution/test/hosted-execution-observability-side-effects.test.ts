@@ -158,10 +158,10 @@ describe("hosted execution observability", () => {
     ).toBe("Hosted runner container returned HTTP 401.");
   });
 
-  it("builds structured logs with normalized messages, safe errors, and dispatch precedence", () => {
+  it("builds structured logs with normalized messages, safe errors, and wake precedence", () => {
     const record = buildHostedExecutionStructuredLogRecord({
       component: "runner",
-      dispatch: { eventId: "evt_dispatch" },
+      wake: { eventId: "evt_wake" },
       error: Object.assign(new TypeError("wrong type"), { name: "TypeError" }),
       eventId: "evt_fallback",
       message: "  Bearer top-secret user@example.com  ",
@@ -184,7 +184,7 @@ describe("hosted execution observability", () => {
       errorCode: "type_error",
       errorMessage: "Hosted execution runtime failed.",
       errorName: "TypeError",
-      eventId: "evt_dispatch",
+      eventId: "evt_wake",
       level: "error",
       message:
         "Bearer [redacted] [redacted-email] Hosted execution runtime failed. Detail: wrong type",
