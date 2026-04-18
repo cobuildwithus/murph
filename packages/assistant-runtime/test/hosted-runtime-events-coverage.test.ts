@@ -37,11 +37,11 @@ vi.mock("@murphai/gateway-local", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/email.ts", () => ({
-  ingestHostedEmailMessage: vi.fn(),
+  buildHostedEmailCapture: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
-  ingestHostedLinqMessage: vi.fn(),
+  buildHostedLinqCapture: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
@@ -49,7 +49,11 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
-  ingestHostedTelegramMessage: vi.fn(),
+  buildHostedTelegramCapture: vi.fn(),
+}));
+
+vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
+  withHostedInboxPipeline: vi.fn(),
 }));
 
 import { executeHostedDispatchEvent } from "../src/hosted-runtime/events.ts";

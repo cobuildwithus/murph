@@ -10,7 +10,6 @@ import {
 const mocks = vi.hoisted(() => ({
   normalizeLinqWebhookEvent: vi.fn(),
   parseLinqWebhookEvent: vi.fn(),
-  withHostedInboxPipeline: vi.fn(),
 }));
 
 vi.mock("@murphai/inboxd/connectors/linq/normalize", () => ({
@@ -21,13 +20,9 @@ vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
   parseLinqWebhookEvent: mocks.parseLinqWebhookEvent,
 }));
 
-vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
-  withHostedInboxPipeline: mocks.withHostedInboxPipeline,
-}));
-
 import {
+  buildHostedLinqCapture,
   createHostedLinqAttachmentDownloadDriver,
-  ingestHostedLinqMessage,
   normalizeHostedLinqAttachmentUrl,
 } from "../src/hosted-runtime/events/linq.ts";
 
@@ -58,8 +53,8 @@ afterEach(() => {
   restoreFetch();
 });
 
-describe("ingestHostedLinqMessage", () => {
-  it("normalizes the webhook event and persists the capture through the inbox pipeline", async () => {
+describe("buildHostedLinqCapture", () => {
+  it("normalizes the webhook event into a hosted capture", async () => {
     const dispatch = buildHostedExecutionLinqMessageReceivedDispatch({
       eventId: "evt_linq",
       linqEvent: {
@@ -92,17 +87,15 @@ describe("ingestHostedLinqMessage", () => {
       },
       attachments: [],
     };
-    const processCapture = vi.fn(async () => {});
-
     mocks.parseLinqWebhookEvent.mockReturnValue(parsedEvent);
     mocks.normalizeLinqWebhookEvent.mockResolvedValue(capture);
-    mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
-      processCapture,
-    }));
 
-    await ingestHostedLinqMessage("/tmp/assistant-runtime-linq", {
+    await expect(buildHostedLinqCapture({
       ...dispatch,
       event: dispatch.event,
+    })).resolves.toEqual({
+      ...capture,
+      accountId: "15551234567",
     });
 
     expect(mocks.parseLinqWebhookEvent).toHaveBeenCalledWith(JSON.stringify(dispatch.event.linqEvent));
@@ -113,10 +106,6 @@ describe("ingestHostedLinqMessage", () => {
         downloadUrl: expect.any(Function),
       }),
       event: parsedEvent,
-    });
-    expect(processCapture).toHaveBeenCalledWith({
-      ...capture,
-      accountId: "15551234567",
     });
   });
 
@@ -154,20 +143,13 @@ describe("ingestHostedLinqMessage", () => {
       },
       attachments: [],
     };
-    const processCapture = vi.fn(async () => {});
-
     mocks.parseLinqWebhookEvent.mockReturnValue({ parsed: true });
     mocks.normalizeLinqWebhookEvent.mockResolvedValue(capture);
-    mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
-      processCapture,
-    }));
 
-    await ingestHostedLinqMessage("/tmp/assistant-runtime-linq", {
+    await expect(buildHostedLinqCapture({
       ...dispatch,
       event: dispatch.event,
-    });
-
-    expect(processCapture).toHaveBeenCalledWith({
+    })).resolves.toEqual({
       ...capture,
       accountId: "15551234567",
       externalId: "linq:msg_real_123",

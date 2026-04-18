@@ -5,25 +5,18 @@ import {
 import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
-import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
-
-export async function ingestHostedTelegramMessage(
-  vaultRoot: string,
+export async function buildHostedTelegramCapture(
   dispatch: HostedExecutionDispatchRequest & {
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "telegram.message.received" }>;
   },
-): Promise<void> {
-  const capture = await normalizeHostedTelegramMessage({
+) {
+  return normalizeHostedTelegramMessage({
     accountId: "bot",
     downloadDriver: createHostedTelegramAttachmentDownloadDriver(),
     externalId: dispatch.eventId,
     message: dispatch.event.telegramMessage,
     occurredAt: dispatch.occurredAt,
     receivedAt: dispatch.occurredAt,
-  });
-
-  await withHostedInboxPipeline(vaultRoot, async (pipeline) => {
-    await pipeline.processCapture(capture);
   });
 }
 

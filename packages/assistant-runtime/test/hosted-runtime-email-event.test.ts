@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   normalizeParsedEmailMessage: vi.fn(),
   parseRawEmailMessage: vi.fn(),
   resolveHostedEmailSelfAddresses: vi.fn(),
-  withHostedInboxPipeline: vi.fn(),
 }));
 
 vi.mock("@murphai/inboxd/connectors/email/normalize-parsed", () => ({
@@ -32,11 +31,7 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
-  withHostedInboxPipeline: mocks.withHostedInboxPipeline,
-}));
-
-import { ingestHostedEmailMessage } from "../src/hosted-runtime/events/email.ts";
+import { buildHostedEmailCapture } from "../src/hosted-runtime/events/email.ts";
 
 type HostedEmailDispatch = HostedExecutionDispatchRequest & {
   event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
@@ -46,7 +41,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("ingestHostedEmailMessage", () => {
+describe("buildHostedEmailCapture", () => {
   it("fails closed when the raw email payload is unavailable", async () => {
     const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
       eventId: "evt_email",
@@ -60,8 +55,7 @@ describe("ingestHostedEmailMessage", () => {
     }
 
     await expect(
-      ingestHostedEmailMessage(
-        "/tmp/assistant-runtime-email",
+      buildHostedEmailCapture(
         { ...dispatch, event: dispatch.event },
         {
           async deletePreparedAssistantDelivery() {},
@@ -76,16 +70,14 @@ describe("ingestHostedEmailMessage", () => {
             return record;
           },
         },
-        {},
       ),
     ).rejects.toThrow(
       "Hosted email message fetch failed for member_123/raw_123.",
     );
     expect(mocks.parseRawEmailMessage).not.toHaveBeenCalled();
-    expect(mocks.withHostedInboxPipeline).not.toHaveBeenCalled();
   });
 
-  it("normalizes the parsed email and hands the capture to the inbox pipeline", async () => {
+  it("normalizes the parsed email into a capture", async () => {
     const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
       eventId: "evt_email",
       identityId: "assistant@mail.example.test",
@@ -104,20 +96,14 @@ describe("ingestHostedEmailMessage", () => {
     const capture = {
       source: "email",
     };
-    const processCapture = vi.fn(async () => {});
-
     mocks.parseRawEmailMessage.mockReturnValue(parsedMessage);
     mocks.resolveHostedEmailSelfAddresses.mockReturnValue([
       "assistant@mail.example.test",
       "user@example.com",
     ]);
     mocks.normalizeParsedEmailMessage.mockResolvedValue(capture);
-    mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
-      processCapture,
-    }));
 
-    await ingestHostedEmailMessage(
-      "/tmp/assistant-runtime-email",
+    await expect(buildHostedEmailCapture(
       { ...dispatch, event: dispatch.event },
       {
         async deletePreparedAssistantDelivery() {},
@@ -132,8 +118,7 @@ describe("ingestHostedEmailMessage", () => {
           return record;
         },
       },
-      {},
-    );
+    )).resolves.toEqual(capture);
 
     expect(mocks.parseRawEmailMessage).toHaveBeenCalledWith(rawMessage);
     expect(mocks.resolveHostedEmailSelfAddresses).toHaveBeenCalledWith({
@@ -151,10 +136,5 @@ describe("ingestHostedEmailMessage", () => {
       source: "email",
       threadTarget: null,
     });
-    expect(mocks.withHostedInboxPipeline).toHaveBeenCalledWith(
-      "/tmp/assistant-runtime-email",
-      expect.any(Function),
-    );
-    expect(processCapture).toHaveBeenCalledWith(capture);
   });
 });

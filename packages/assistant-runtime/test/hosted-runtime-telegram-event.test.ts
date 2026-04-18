@@ -9,20 +9,15 @@ import {
 
 const mocks = vi.hoisted(() => ({
   normalizeHostedTelegramMessage: vi.fn(),
-  withHostedInboxPipeline: vi.fn(),
 }));
 
 vi.mock("@murphai/inboxd/connectors/telegram/normalize", () => ({
   normalizeHostedTelegramMessage: mocks.normalizeHostedTelegramMessage,
 }));
 
-vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
-  withHostedInboxPipeline: mocks.withHostedInboxPipeline,
-}));
-
 import {
+  buildHostedTelegramCapture,
   createHostedTelegramAttachmentDownloadDriver,
-  ingestHostedTelegramMessage,
 } from "../src/hosted-runtime/events/telegram.ts";
 
 type HostedTelegramDispatch = HostedExecutionDispatchRequest & {
@@ -76,8 +71,8 @@ afterEach(() => {
   restoreTelegramEnv();
 });
 
-describe("ingestHostedTelegramMessage", () => {
-  it("normalizes the hosted message payload and persists it through the inbox pipeline", async () => {
+describe("buildHostedTelegramCapture", () => {
+  it("normalizes the hosted message payload into a capture", async () => {
     const dispatch = buildHostedExecutionTelegramMessageReceivedDispatch({
       eventId: "evt_telegram",
       occurredAt: "2026-04-08T00:00:00.000Z",
@@ -101,17 +96,12 @@ describe("ingestHostedTelegramMessage", () => {
     const capture = {
       source: "telegram",
     };
-    const processCapture = vi.fn(async () => {});
-
     mocks.normalizeHostedTelegramMessage.mockResolvedValue(capture);
-    mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
-      processCapture,
-    }));
 
-    await ingestHostedTelegramMessage("/tmp/assistant-runtime-telegram", {
+    await expect(buildHostedTelegramCapture({
       ...dispatch,
       event: dispatch.event,
-    });
+    })).resolves.toEqual(capture);
 
     expect(mocks.normalizeHostedTelegramMessage).toHaveBeenCalledWith({
       accountId: "bot",
@@ -121,7 +111,6 @@ describe("ingestHostedTelegramMessage", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
       receivedAt: "2026-04-08T00:00:00.000Z",
     });
-    expect(processCapture).toHaveBeenCalledWith(capture);
   });
 });
 
