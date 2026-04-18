@@ -10,6 +10,7 @@ import {
   appendHostedOrderedWakeTx,
   commitHostedExecutionCursorTx,
   listHostedWakesAfterSeq,
+  projectHostedWakeRecord,
   readLatestHostedWakeLifecycleByKind,
   readHostedExecutionCursor,
 } from "@/src/lib/hosted-wake/store";
@@ -58,6 +59,28 @@ interface TestWakePayloadState {
 }
 
 describe("hosted wake store", () => {
+  it("fails closed when projecting a corrupted wake record kind or schema", () => {
+    expect(() =>
+      projectHostedWakeRecord(makeProjectedWakeRow({
+        kind: "legacy.dispatch",
+      })),
+    ).toThrow(/Hosted wake kind is invalid/i);
+
+    expect(() =>
+      projectHostedWakeRecord(makeProjectedWakeRow({
+        kind: "assistant.cron.tick",
+        payloadSchema: "murph.hosted-wake-dispatch.v1",
+      })),
+    ).toThrow(/Hosted wake payload schema is invalid/i);
+
+    expect(() =>
+      projectHostedWakeRecord(makeProjectedWakeRow({
+        kind: "conversation.message",
+        payloadSchema: "murph.hosted-wake-system.v1",
+      })),
+    ).toThrow(/Hosted conversation wake payload schema is invalid/i);
+  });
+
   it("rejects cursor commits that advance past the allocated wake head", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
@@ -228,7 +251,7 @@ describe("hosted wake store", () => {
       payload: {
         revision: 2,
       },
-      payloadSchema: "murph.hosted-wake-dispatch.v1",
+      payloadSchema: "murph.hosted-wake-system.v1",
       tx,
       userId: "member_123",
     });
@@ -281,7 +304,7 @@ describe("hosted wake store", () => {
       payload: {
         revision: 2,
       },
-      payloadSchema: "murph.hosted-wake-dispatch.v1",
+      payloadSchema: "murph.hosted-wake-system.v1",
       tx,
       userId: "member_123",
     });
@@ -329,7 +352,7 @@ describe("hosted wake store", () => {
       payload: {
         revision: 2,
       },
-      payloadSchema: "murph.hosted-wake-dispatch.v1",
+      payloadSchema: "murph.hosted-wake-system.v1",
       tx,
       userId: "member_123",
     });
@@ -447,11 +470,17 @@ describe("hosted wake store", () => {
         {
           behavior: "ordered",
           coalescingKey: null,
-          dedupeKey: "dispatch:telegram.message.received:telegram:update:321",
-          kind: "telegram.message.received",
+          dedupeKey: "dispatch:conversation.message:telegram:update:321",
+          kind: "conversation.message",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
-            text: "hello",
+            channel: "telegram",
+            telegramMessage: {
+              messageId: "message_321",
+              schema: "murph.hosted-telegram-message.v1",
+              text: "hello",
+              threadId: "thread_321",
+            },
           },
           seq: 1n,
           userId: "member_123",
@@ -474,7 +503,7 @@ describe("hosted wake store", () => {
     });
 
     await expect(readLatestHostedWakeLifecycleByKind({
-      kind: "telegram.message.received",
+      kind: "conversation.message",
       prisma: tx,
       userId: "member_123",
     })).resolves.toEqual({
@@ -524,7 +553,9 @@ function createHostedWakeStoreHarness(input?: {
           createdAt,
           payloadBytes: encoded.payloadBytes,
           payloadCiphertext: encoded.payloadRefCiphertext,
-          payloadSchema: "murph.hosted-wake-dispatch.v1",
+          payloadSchema: wake.kind === "conversation.message"
+            ? "murph.hosted-wake-conversation-message.v1"
+            : "murph.hosted-wake-system.v1",
           updatedAt: createdAt,
           userId: wake.userId,
           wakeId: id,
@@ -542,7 +573,9 @@ function createHostedWakeStoreHarness(input?: {
         payloadBytes: encoded.payloadBytes,
         payloadInlineCiphertext: encoded.payloadInlineCiphertext,
         payloadRef: encoded.storage === "ref" ? id : null,
-        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        payloadSchema: wake.kind === "conversation.message"
+          ? "murph.hosted-wake-conversation-message.v1"
+          : "murph.hosted-wake-system.v1",
         quarantineCode: wake.quarantinedAt ? "invalid-dispatch-payload" : null,
         quarantinedAt: wake.quarantinedAt ? new Date(wake.quarantinedAt) : null,
         seq: wake.seq,
@@ -800,6 +833,30 @@ function createHostedWakeStoreHarness(input?: {
   };
 
   return tx as unknown as Prisma.TransactionClient;
+}
+
+function makeProjectedWakeRow(
+  overrides: Partial<Parameters<typeof projectHostedWakeRecord>[0]> = {},
+): Parameters<typeof projectHostedWakeRecord>[0] {
+  return {
+    behavior: "ordered",
+    coalescingKey: null,
+    createdAt: new Date("2026-04-17T00:00:00.000Z"),
+    dedupeKey: null,
+    id: "wake_123",
+    kind: "assistant.cron.tick",
+    occurredAt: new Date("2026-04-17T00:00:00.000Z"),
+    payloadBytes: 1,
+    payloadInlineCiphertext: null,
+    payloadRef: null,
+    payloadSchema: "murph.hosted-wake-system.v1",
+    quarantineCode: null,
+    quarantinedAt: null,
+    seq: 1n,
+    updatedAt: new Date("2026-04-17T00:00:00.000Z"),
+    userId: "member_123",
+    ...overrides,
+  };
 }
 
 function encodeWakePayloadForHarness(userId: string, payload: unknown) {

@@ -78,7 +78,7 @@ async function sendHostedContainerJsonRequest(input: {
 }
 
 function buildJobBody(input: {
-  dispatch: {
+  wake: {
     event: Record<string, unknown>;
     eventId: string;
     occurredAt: string;
@@ -97,7 +97,11 @@ function buildJobBody(input: {
         commit: {
           bundleRef: null,
         },
-        dispatch: input.dispatch,
+        wake: {
+          ...input.wake.event,
+          eventId: input.wake.eventId,
+          occurredAt: input.wake.occurredAt,
+        },
         ...(input.run ? { run: input.run } : {}),
       },
     },
@@ -140,7 +144,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
       body: JSON.stringify(buildJobBody({
-        dispatch: {
+        wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
           eventId: "evt_missing_token",
           occurredAt: "2026-03-26T12:00:00.000Z",
@@ -239,7 +243,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
         body: JSON.stringify(buildJobBody({
-          dispatch: {
+          wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_direct_proxy_token_only",
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -311,7 +315,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
         body: JSON.stringify(buildJobBody({
-          dispatch: {
+          wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_runtime_type_error",
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -359,7 +363,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
         body: JSON.stringify(buildJobBody({
-          dispatch: {
+          wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_runtime_secret_error",
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -410,7 +414,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
         body: JSON.stringify(buildJobBody({
-          dispatch: {
+          wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_runtime_config_error",
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -466,7 +470,7 @@ describe("startHostedContainerEntrypoint", () => {
       };
       const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
         body: JSON.stringify(buildJobBody({
-          dispatch: {
+          wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_with_run",
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -484,7 +488,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
           request: expect.objectContaining({
-            dispatch: expect.objectContaining({
+            wake: expect.objectContaining({
               eventId: "evt_with_run",
             }),
             run,
@@ -556,7 +560,7 @@ describe("startHostedContainerEntrypoint", () => {
     const secondResponse = await sendHostedContainerJsonRequest({
       authorization: headers.authorization,
       body: JSON.stringify(buildJobBody({
-        dispatch: {
+        wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
           eventId: "evt_busy",
           occurredAt: "2026-03-26T12:00:00.000Z",
@@ -625,7 +629,7 @@ describe("startHostedContainerEntrypoint", () => {
       });
       request.on("error", () => {});
       request.write(JSON.stringify(buildJobBody({
-        dispatch: {
+        wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
           eventId: "evt_disconnect",
           occurredAt: "2026-03-26T12:00:00.000Z",
@@ -694,7 +698,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
       body: JSON.stringify(buildJobBody({
-        dispatch: {
+        wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
           eventId: "evt_sibling_cleanup",
           occurredAt: "2026-03-26T12:00:00.000Z",
@@ -759,7 +763,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
       body: JSON.stringify(buildJobBody({
-        dispatch: {
+        wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
           eventId: "evt_descendant_cleanup",
           occurredAt: "2026-03-26T12:00:00.000Z",

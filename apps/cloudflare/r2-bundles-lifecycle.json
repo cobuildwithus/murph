@@ -27,19 +27,6 @@
       }
     },
     {
-      "id": "delete-legacy-transient-dispatch-payloads-after-6h",
-      "enabled": true,
-      "conditions": {
-        "prefix": "transient/dispatch-payloads/"
-      },
-      "deleteObjectsTransition": {
-        "condition": {
-          "type": "Age",
-          "maxAge": 21600
-        }
-      }
-    },
-    {
       "id": "delete-transient-hosted-email-raw-messages-after-1h",
       "enabled": true,
       "conditions": {

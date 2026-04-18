@@ -9,13 +9,13 @@ import {
 } from "../src/auth.ts";
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
-  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  HOSTED_WAKE_LIFECYCLE_STATES,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "../src/contracts.ts";
 import {
@@ -142,7 +142,7 @@ describe("hosted execution coverage gaps", () => {
       "device-sync.wake",
       "vault.share.accepted",
     ]);
-    expect(HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES).toEqual([
+    expect(HOSTED_WAKE_LIFECYCLE_STATES).toEqual([
       "queued",
       "backpressured",
       "completed",

@@ -20,12 +20,10 @@ import {
 
 import type {
   HostedExecutionAssistantCronTickEvent,
-  HostedExecutionDispatchStatus,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
-  HostedExecutionDispatchResult,
   HostedExecutionWake,
   HostedExecutionWakeAppendRequest,
   HostedWakeAppendRequest,
@@ -43,11 +41,13 @@ import type {
   HostedWakeBehavior,
   HostedWakeAppendResponse,
   HostedWakeCommitResponse,
+  HostedWakeExecutionResult,
   HostedWakeFetchResponse,
   HostedWakeLifecycleState,
   HostedWakePayloadSchema,
   HostedWakeQuarantineResponse,
   HostedWakeRecord,
+  HostedWakeStatus,
   HostedWakeStatusResponse,
 } from "./contracts.ts";
 import {
@@ -322,31 +322,31 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
   };
 }
 
-export function parseHostedExecutionDispatchResult(value: unknown): HostedExecutionDispatchResult {
-  const record = requireObject(value, "Hosted execution dispatch result");
+export function parseHostedWakeExecutionResult(value: unknown): HostedWakeExecutionResult {
+  const record = requireObject(value, "Hosted wake execution result");
 
   return {
-    event: parseHostedExecutionDispatchStatus(record.event),
+    event: parseHostedWakeStatus(record.event),
     status: parseHostedExecutionUserStatus(record.status),
   };
 }
 
-export function parseHostedExecutionDispatchStatus(
+export function parseHostedWakeStatus(
   value: unknown,
-): HostedExecutionDispatchStatus {
-  const event = requireObject(value, "Hosted execution dispatch status");
+): HostedWakeStatus {
+  const event = requireObject(value, "Hosted wake status");
 
   return {
-    eventId: requireString(event.eventId, "Hosted execution dispatch status eventId"),
+    eventId: requireString(event.eventId, "Hosted wake status eventId"),
     lastError: readNullableString(
       event.lastError,
-      "Hosted execution dispatch status lastError",
+      "Hosted wake status lastError",
     ),
     state: parseHostedWakeLifecycleState(event.state, {
-      invalidStateMessage: "Unsupported hosted execution dispatch lifecycle state",
-      label: "Hosted execution dispatch status state",
+      invalidStateMessage: "Unsupported hosted wake lifecycle state",
+      label: "Hosted wake status state",
     }),
-    userId: requireString(event.userId, "Hosted execution dispatch status userId"),
+    userId: requireString(event.userId, "Hosted wake status userId"),
   };
 }
 

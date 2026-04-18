@@ -37,7 +37,7 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 
 import type {
   HostedExecutionBundleRef,
-  HostedExecutionDispatchResult,
+  HostedWakeExecutionResult,
   HostedExecutionWake,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -66,7 +66,7 @@ import {
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
   wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus>;
-  wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult>;
+  wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult>;
   status(): Promise<HostedExecutionUserStatus>;
 }
 

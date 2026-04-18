@@ -1,8 +1,9 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionAssistantCronTickEvent,
-  HostedExecutionDispatchLifecycleState,
   HostedExecutionWake,
+  HostedWakePayloadSchema,
+  HostedWakeLifecycleState,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
@@ -103,7 +104,7 @@ export async function readHostedExecutionWakeTargetTx(input: {
 export async function readHostedExecutionWakeLifecycleStateTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
-}): Promise<HostedExecutionDispatchLifecycleState | null> {
+}): Promise<HostedWakeLifecycleState | null> {
   const lifecycle = await readHostedWakeLifecycleByDedupeKeyTx({
     dedupeKey: buildHostedWakeDedupeKeyFromEventId(input.eventId),
     tx: input.tx,
@@ -175,7 +176,7 @@ function buildHostedWakeDedupeKeyFromEventId(
   return `dispatch:${eventKind}:${eventId}`;
 }
 
-function resolveHostedWakePayloadSchema(wake: HostedExecutionWake): string {
+function resolveHostedWakePayloadSchema(wake: HostedExecutionWake): HostedWakePayloadSchema {
   return isHostedConversationMessageWake(wake)
     ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
     : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA;

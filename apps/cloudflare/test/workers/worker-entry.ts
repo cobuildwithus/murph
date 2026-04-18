@@ -21,7 +21,7 @@ import {
 
 import type {
   HostedExecutionWake,
-  HostedExecutionDispatchResult,
+  HostedWakeExecutionResult,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 
@@ -51,7 +51,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return this.runner.enqueueHostedWake(input);
   }
 
-  async wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult> {
+  async wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult> {
     return this.runner.enqueueHostedWakeWithOutcome(input);
   }
 
@@ -267,7 +267,7 @@ function getUserRunnerStub(userId: string) {
       USER_RUNNER: {
         getByName(name: string): {
           bootstrapUser(userId: string): Promise<{ userId: string }>;
-          wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult>;
+          wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
           status(): Promise<HostedExecutionUserStatus>;
         };

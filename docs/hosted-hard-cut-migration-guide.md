@@ -6,10 +6,11 @@ Status snapshot: 2026-04-18
 
 The web-owned hosted-wake substrate is in place and should stay. Most hosted
 producers append canonical wake rows, including email and the active-member
-webhook hot path. The production hard cut is now effectively landed: Cloudflare
-is on the wake/status/browser-vault control surface, direct dispatch RPCs are
-gone from the production Durable Object boundary, and ordinary message wakes no
-longer force the generic maintenance loop.
+webhook hot path. The production hard cut is now landed: Cloudflare is on the
+wake/status/browser-vault control surface, direct dispatch RPCs are gone from
+the production Durable Object boundary, ordinary message wakes no longer force
+the generic maintenance loop, and cron wake materialization belongs on the
+web-owned wake seam instead of the Durable Object alarm path.
 
 What remains is narrower and deletion-oriented:
 
@@ -17,11 +18,9 @@ What remains is narrower and deletion-oriented:
   from wakes inside shared packages
 - some onboarding receipt state still exists for invite/quota/local side-effect
   flows
-- a small set of test-only dispatch helpers still exists outside the production
-  path, but those dispatch-payload surfaces are no longer part of the
-  production hard-cut architecture
-- the checked-in R2 lifecycle config still expires `transient/dispatch-payloads/`
-  as a legacy cleanup backstop until deployed buckets are known empty
+- a small set of compatibility aliases still exists outside the production
+  path, mostly around dispatch-named lifecycle/status helpers, but those names
+  no longer define ownership boundaries in the live architecture
 
 ## What is already landed and should not be reopened
 
@@ -197,10 +196,8 @@ Current state:
   `backpressured_events`, and `poisoned_events`.
 - Production `UserRunnerDurableObject` no longer exposes `dispatch` or
   `dispatchWithOutcome` RPCs.
-- Local completed-status reuse and the dispatch-payload-store plumbing are gone
+- Local completed-status reuse and staged dispatch-payload plumbing are gone
   from the production runner path.
-- The remaining dispatch-payload store and storage-path coverage is test-only
-  compatibility residue, not a production deploy or runtime ownership seam.
 - `dispatchWithOutcome` degrades conservatively to `queued` when canonical wake
   status is unavailable instead of reconstructing local lifecycle truth.
 
@@ -211,8 +208,8 @@ What to fix:
   - in-flight run status
   - next wake time
   - latest cached bundle ref for warm reuse
-- Delete the remaining test-only direct-dispatch helpers once the harnesses stop
-  using them.
+- Continue deleting compatibility aliases and harness-only direct-dispatch names
+  as the remaining tests move fully onto wake-first naming.
 
 Web must remain the only owner of:
 
@@ -389,9 +386,8 @@ dispatch-era compatibility seam:
 1. Delete shared hosted-execution compatibility builders/parsers once the last
    internal callers and tests stop needing them.
 
-2. Delete Cloudflare test-only direct-dispatch helpers and the remaining
-   dispatch-payload-store coverage once the harnesses move fully onto wake-based
-   helpers.
+2. Delete Cloudflare test-only direct-dispatch helpers once the harnesses move
+   fully onto wake-based helpers.
 
 3. Keep shrinking webhook receipt ownership until only explicitly justified
    onboarding/quota/local-side-effect flows remain.

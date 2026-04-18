@@ -1,13 +1,13 @@
 # Cloudflare Hosted Execution Idempotency Follow-Up
 
-This repo now has durable owner-specific idempotency lanes for every currently implemented hosted outward effect. The Cloudflare hosted runner has durable bundle commits plus a generic committed side-effect journal for hosted one-shot runs, while `apps/web` uses canonical `HostedWake` / `HostedExecutionCursor` rows, receipt-local hosted webhook side-effect state for Linq/Telegram, queued hosted Stripe event facts, and invoice-owned RevNet issuance state for the other hosted outward edges.
+This repo now has durable owner-specific idempotency lanes for every currently implemented hosted outward effect. The Cloudflare hosted runner keeps durable bundle commits plus a generic committed side-effect journal for hosted one-shot runs, while `apps/web` owns canonical `HostedWake` / `HostedExecutionCursor` rows, receipt-local hosted webhook side-effect state for Linq/Telegram, queued hosted Stripe event facts, and invoice-owned RevNet issuance state for the other hosted outward edges.
 
 ## What Is Protected Today
 
 - encrypted `vault` and `agent-state` bundle refs are only advanced through the durable commit path
 - repeated worker and runner retries can recover from a lost runner response by replaying the durable commit journal
-- Cloudflare now commits hosted runner results inside the Durable Object that owns the pending event, so stale runner retries no longer race through a separate `/commit` callback path to challenge or recreate committed state
-- already-committed events are treated as consumed and will not re-run the same bundle commit indefinitely
+- Cloudflare now commits hosted runner results inside the Durable Object that owns the active run lease and journal state, so stale runner retries no longer race through a separate `/commit` callback path to challenge or recreate committed state
+- web-owned wake rows plus cursor compare-and-swap remain the only committed high-water and pending-work truth; Cloudflare replays against that wake/cursor seam instead of maintaining a second pending/consumed queue owner
 - hosted one-shot runs now collect due outbound side effects before the durable commit and persist those side effects alongside the committed hosted result
 - committed hosted assistant-delivery effects now carry the outbound payload and transport metadata needed to redrive from the hosted journal alone, so hosted replay no longer depends on reconstructing a local outbox dispatch request
 - hosted assistant replies still create durable assistant outbox intents during the one-shot run, but post-commit delivery now resumes from the committed side-effect journal instead of treating assistant sends as a separate special-case path
@@ -15,7 +15,7 @@ This repo now has durable owner-specific idempotency lanes for every currently i
 - hosted non-idempotent assistant delivery now treats the hosted delivery journal as the authoritative recovery surface, keeps `pending` as an implicit no-record state, persists `sending`, `sent`, `failed`, and `failed_ambiguous` journal states, disables hosted fallback to persisted outbox delivery snapshots, promotes stale non-idempotent `sending` records to terminal `failed_ambiguous` instead of retrying confirmation forever, and treats an already-recorded durable `failed` as terminal instead of re-sending
 - Cloudflare-bound hosted execution dispatches from onboarding, hosted share acceptance, hosted email ingress, and hosted device-sync wakes now append canonical `HostedWake` rows directly instead of detouring through a second dispatch queue
 - hosted onboarding webhook receipts now persist the planned response plus receipt-local side-effect state for Linq or Telegram replies before send, append canonical hosted wakes in the same transaction as the owning hosted state mutation, and reclaim expired processing leases so abandoned attempts can resume instead of burning the event
-- third-party webhook request paths now acknowledge after the durable receipt and canonical hosted-wake append complete; any immediate hosted-execution drain is only a non-blocking best-effort nudge, with cron recovery still owning retries
+- third-party webhook request paths now acknowledge after the durable receipt and canonical hosted-wake append complete; any immediate hosted-execution drain is only a non-blocking best-effort nudge, with web-owned wake materialization and cursor recovery owning retries
 - Stripe webhook ingress now dedupes at durable fact insertion time and retries through the hosted Stripe event queue plus reconciler instead of trying to resume receipt-local inline work
 - hosted RevNet issuance now fails closed once a tx hash exists, so a broadcast followed by a write-back failure is held for operator repair instead of being misclassified as a clean retry
 - committed hosted retries now resume post-commit side effects from the committed journal without rerunning the original one-shot compute stage first

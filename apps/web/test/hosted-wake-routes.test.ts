@@ -315,9 +315,8 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "3",
       },
-      dispatchState: "queued",
-      pendingWakeCount: 1,
       wakeState: "queued",
+      pendingWakeCount: 1,
     });
     expect(mocks.readHostedExecutionCursor).toHaveBeenCalledWith({
       prisma: expect.anything(),

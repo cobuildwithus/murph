@@ -31,7 +31,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     cursor,
-    ...(wakeState === undefined ? {} : { dispatchState: wakeState, wakeState }),
+    ...(wakeState === undefined ? {} : { wakeState }),
     pendingWakeCount,
   });
 });

@@ -17,7 +17,7 @@ import {
   parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution";
 import type {
-  HostedExecutionDispatchResult,
+  HostedWakeExecutionResult,
   HostedExecutionWake,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
@@ -82,7 +82,7 @@ class HostedUserRunner extends BaseHostedUserRunner {
     return this.enqueueHostedWake(input);
   }
 
-  wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult> {
+  wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult> {
     return this.enqueueHostedWakeWithOutcome(input);
   }
 }
