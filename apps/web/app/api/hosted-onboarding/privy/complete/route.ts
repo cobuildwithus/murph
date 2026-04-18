@@ -26,7 +26,6 @@ export const POST = withJsonError(async (request: Request) => {
     });
 
     return jsonOk({
-      activationPending: result.activationPending,
       inviteCode: result.inviteCode,
       joinUrl: result.joinUrl,
       messagingSetupRequired: result.messagingSetupRequired,

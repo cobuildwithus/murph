@@ -9,7 +9,6 @@ export type HostedBillingPlanInterval = "month" | "year";
 export interface HostedBillingPlanDefinition {
   readonly badge: string | null;
   readonly code: HostedBillingPlanCode;
-  readonly description: string;
   readonly displayName: string;
   readonly interval: HostedBillingPlanInterval;
   readonly priceIdEnvKey: string;
@@ -19,7 +18,6 @@ export interface HostedBillingPlanDefinition {
 export interface HostedBillingPlanPresentation {
   readonly badge: string | null;
   readonly code: HostedBillingPlanCode;
-  readonly description: string;
   readonly displayName: string;
   readonly interval: HostedBillingPlanInterval;
   readonly recurringAmountUsdCents: number;
@@ -31,7 +29,6 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_annual: {
     badge: "Save $30",
     code: "launch_annual",
-    description: "Save $30 each year.",
     displayName: "Annual",
     interval: "year",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
@@ -40,7 +37,6 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_monthly: {
     badge: null,
     code: "launch_monthly",
-    description: "Cancel anytime.",
     displayName: "Monthly",
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
@@ -127,7 +123,6 @@ function buildHostedBillingPlanPresentation(
   return {
     badge: definition.badge,
     code: definition.code,
-    description: definition.description,
     displayName: definition.displayName,
     interval: definition.interval,
     recurringAmountUsdCents: definition.recurringAmountUsdCents,

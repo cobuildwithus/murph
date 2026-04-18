@@ -12,7 +12,7 @@ export type JoinInvitePreviewStage =
   | "messaging-setup"
   | "blocked"
   | "active"
-  | "active-pending";
+  | "activating";
 
 const PREVIEW_STAGES: readonly JoinInvitePreviewStage[] = [
   "invalid",
@@ -22,7 +22,7 @@ const PREVIEW_STAGES: readonly JoinInvitePreviewStage[] = [
   "messaging-setup",
   "blocked",
   "active",
-  "active-pending",
+  "activating",
 ];
 
 export function parseJoinInvitePreviewStage(
@@ -43,7 +43,6 @@ export function buildJoinInvitePreviewStatus(
   const futureIso = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString();
   const pastIso = new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString();
   const base: HostedInviteStatusPayload = {
-    activationPending: false,
     billing: {
       defaultPlanCode: getHostedDefaultBillingPlanCode(),
       plans: listHostedBillingPlanPresentations(),
@@ -87,7 +86,7 @@ export function buildJoinInvitePreviewStatus(
       return { ...base, stage: "blocked" };
     case "active":
       return { ...base, stage: "active" };
-    case "active-pending":
-      return { ...base, activationPending: true, stage: "active" };
+    case "activating":
+      return { ...base, stage: "activating" };
   }
 }

@@ -4,6 +4,7 @@ import {
   maskPhoneNumber,
   normalizePhoneNumberForCountry,
 } from "@/src/lib/hosted-onboarding/phone";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import {
@@ -153,7 +154,7 @@ export function resolveHostedPrivyCompletionRedirectUrl(input: {
   intent: HostedPhoneAuthIntent;
   payload: HostedPrivyCompletionPayload;
 }): string {
-  if (input.intent === "signin" && input.payload.stage === "active") {
+  if (input.intent === "signin" && isHostedOnboardingAccessibleStage(input.payload.stage)) {
     return "/settings";
   }
 

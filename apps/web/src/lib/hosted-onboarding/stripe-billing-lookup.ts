@@ -1,4 +1,10 @@
-import { coerceStripeObjectId } from "./billing";
+import type Stripe from "stripe";
+
+import {
+  coerceStripeInvoiceSubscriptionId,
+  coerceStripeObjectId,
+  coerceStripeSubscriptionId,
+} from "./billing";
 import {
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
@@ -7,9 +13,13 @@ import {
   composeHostedMemberBillingSnapshot,
   type HostedMemberBillingSnapshot,
   readHostedMemberBillingSnapshot,
+  readHostedMemberCoreState,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
-import { type HostedOnboardingReadClient } from "./shared";
+import {
+  normalizeNullableString,
+  type HostedOnboardingReadClient,
+} from "./shared";
 
 /**
  * Owns Stripe-object-to-member lookup and customer-context reads so billing
@@ -24,24 +34,24 @@ export async function findMemberForStripeObject(input: {
   subscriptionId: string | null;
 }): Promise<HostedMemberBillingSnapshot | null> {
   if (input.memberId) {
-    const member = await readHostedMemberBillingSnapshot({
+    const directMember = await readHostedMemberBillingSnapshotWithoutRef({
       memberId: input.memberId,
       prisma: input.prisma,
     });
 
-    if (member) {
-      return member;
+    if (directMember) {
+      return directMember;
     }
   }
 
   if (input.clientReferenceId) {
-    const member = await readHostedMemberBillingSnapshot({
+    const directMember = await readHostedMemberBillingSnapshotWithoutRef({
       memberId: input.clientReferenceId,
       prisma: input.prisma,
     });
 
-    if (member) {
-      return member;
+    if (directMember) {
+      return directMember;
     }
   }
 
@@ -74,6 +84,72 @@ export async function findMemberForStripeObject(input: {
   }
 
   return null;
+}
+
+export function listHostedStripeDirectMemberIds(input: {
+  clientReferenceId: string | null;
+  memberId: string | null;
+}): string[] {
+  return listHostedStripeUniqueMemberIds([
+    input.memberId,
+    input.clientReferenceId,
+  ]);
+}
+
+export async function listHostedStripeCheckoutSessionMemberIds(input: {
+  prisma: HostedOnboardingReadClient;
+  session: Stripe.Checkout.Session;
+}): Promise<string[]> {
+  const directMemberIds = listHostedStripeDirectMemberIds({
+    clientReferenceId: normalizeNullableString(input.session.client_reference_id),
+    memberId: normalizeNullableString(input.session.metadata?.memberId),
+  });
+
+  if (directMemberIds.length > 0) {
+    return directMemberIds;
+  }
+
+  const matchedMember = await findMemberForStripeCheckoutSession(input);
+  return matchedMember ? [matchedMember.core.id] : [];
+}
+
+export async function findMemberForStripeCheckoutSession(input: {
+  prisma: HostedOnboardingReadClient;
+  session: Stripe.Checkout.Session;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  return findMemberForStripeObject({
+    clientReferenceId: normalizeNullableString(input.session.client_reference_id),
+    customerId: coerceStripeObjectId(input.session.customer),
+    memberId: normalizeNullableString(input.session.metadata?.memberId),
+    prisma: input.prisma,
+    subscriptionId: coerceStripeSubscriptionId(input.session.subscription),
+  });
+}
+
+export async function findMemberForStripeSubscription(input: {
+  prisma: HostedOnboardingReadClient;
+  subscription: Stripe.Subscription;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  return findMemberForStripeObject({
+    clientReferenceId: null,
+    customerId: coerceStripeObjectId(input.subscription.customer),
+    memberId: normalizeNullableString(input.subscription.metadata?.memberId),
+    prisma: input.prisma,
+    subscriptionId: input.subscription.id,
+  });
+}
+
+export async function findMemberForStripeInvoice(input: {
+  invoice: Stripe.Invoice;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  return findMemberForStripeObject({
+    clientReferenceId: null,
+    customerId: coerceStripeObjectId(input.invoice.customer),
+    memberId: null,
+    prisma: input.prisma,
+    subscriptionId: coerceStripeInvoiceSubscriptionId(input.invoice),
+  });
 }
 
 export async function findMemberForStripeReversal(input: {
@@ -157,4 +233,18 @@ export async function resolveStripeCustomerContext(input: {
   return {
     customerId: null,
   };
+}
+
+async function readHostedMemberBillingSnapshotWithoutRef(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  const memberCore = await readHostedMemberCoreState(input);
+  return memberCore ? composeHostedMemberBillingSnapshot(memberCore, null) : null;
+}
+
+function listHostedStripeUniqueMemberIds(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(
+    values.filter((value): value is string => typeof value === "string" && value.length > 0),
+  )];
 }

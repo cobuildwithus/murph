@@ -15,9 +15,11 @@ import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
 import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
-import { normalizeNullableString } from "./shared";
 import {
+  findMemberForStripeCheckoutSession,
+  findMemberForStripeInvoice,
   findMemberForStripeObject,
+  findMemberForStripeSubscription,
   findMemberForStripeReversal,
 } from "./stripe-billing-lookup";
 import {
@@ -39,12 +41,9 @@ export async function applyStripeCheckoutCompleted(
   _dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<HostedStripeActivationOutcome> {
-  const member = await findMemberForStripeObject({
-    clientReferenceId: normalizeNullableString(session.client_reference_id),
-    customerId: coerceStripeObjectId(session.customer),
-    memberId: normalizeNullableString(session.metadata?.memberId),
+  const member = await findMemberForStripeCheckoutSession({
     prisma,
-    subscriptionId: coerceStripeSubscriptionId(session.subscription),
+    session,
   });
 
   if (!member) {
@@ -81,12 +80,9 @@ export async function applyStripeSubscriptionUpdated(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<void> {
-  const member = await findMemberForStripeObject({
-    clientReferenceId: null,
-    customerId: coerceStripeObjectId(subscription.customer),
-    memberId: normalizeNullableString(subscription.metadata?.memberId),
+  const member = await findMemberForStripeSubscription({
     prisma,
-    subscriptionId: subscription.id,
+    subscription,
   });
 
   if (!member) {
@@ -117,12 +113,9 @@ export async function applyStripeInvoicePaid(
   prisma: Prisma.TransactionClient,
 ): Promise<HostedStripeActivationOutcome & { createdOrUpdatedRevnetIssuance: boolean }> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
-  const member = await findMemberForStripeObject({
-    clientReferenceId: null,
-    customerId: coerceStripeObjectId(invoice.customer),
-    memberId: null,
+  const member = await findMemberForStripeInvoice({
+    invoice,
     prisma,
-    subscriptionId,
   });
 
   if (!member || !subscriptionId) {
@@ -190,12 +183,9 @@ export async function applyStripeInvoicePaymentFailed(
   prisma: Prisma.TransactionClient,
 ): Promise<void> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
-  const member = await findMemberForStripeObject({
-    clientReferenceId: null,
-    customerId: coerceStripeObjectId(invoice.customer),
-    memberId: null,
+  const member = await findMemberForStripeInvoice({
+    invoice,
     prisma,
-    subscriptionId,
   });
 
   if (!member) {

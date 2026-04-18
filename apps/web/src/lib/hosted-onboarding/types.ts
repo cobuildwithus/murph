@@ -1,11 +1,13 @@
-import type { HostedOnboardingStage } from "./lifecycle";
+import type {
+  HostedOnboardingStage,
+  HostedPostVerificationStage,
+} from "./stage";
 import type {
   HostedBillingPlanCode,
   HostedBillingPlanPresentation,
 } from "./billing-plans";
 
 export interface HostedInviteStatusPayload {
-  activationPending: boolean;
   billing: {
     defaultPlanCode: HostedBillingPlanCode | null;
     plans: readonly HostedBillingPlanPresentation[];
@@ -30,9 +32,8 @@ export interface HostedInviteStatusPayload {
 }
 
 export interface HostedPrivyCompletionPayload {
-  activationPending: boolean;
   inviteCode: string;
   joinUrl: string;
   messagingSetupRequired: boolean;
-  stage: "checkout" | "blocked" | "active";
+  stage: HostedPostVerificationStage;
 }

@@ -1,5 +1,6 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
@@ -132,13 +133,13 @@ export function JoinInviteStageContent({
         />
       ) : null}
 
-      {status.stage === "active" ? (
+      {isHostedOnboardingAccessibleStage(status.stage) ? (
         <JoinInviteActivePanel
-          activationPending={status.activationPending}
           murphPhoneNumber={status.murphPhoneNumber ?? null}
           pendingAction={pendingAction}
           shareImportState={shareImportState}
           sharePreview={sharePreview}
+          stage={status.stage}
           onAcceptShare={onAcceptShare}
         />
       ) : null}
