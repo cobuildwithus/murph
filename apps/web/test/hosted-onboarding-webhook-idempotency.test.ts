@@ -38,25 +38,25 @@ const mocks = vi.hoisted(() => {
     stripePaymentIntentsRetrieve,
     lastScheduledDispatchEventId: null as string | null,
     lastScheduledDispatchPrisma: null as unknown,
-    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
+    readHostedExecutionWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
       state.lastScheduledDispatchEventId = input.eventId;
       state.lastScheduledDispatchPrisma = input.prisma ?? null;
       return {
         eventId: input.eventId,
-        route: "outbox" as const,
+        route: "wake" as const,
+        seq: "31",
         userId: "member_123",
       };
     }),
-    scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
+    appendHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
       return {
         eventId: input.dispatch.eventId,
-        route: "outbox" as const,
       };
     }),
-    handoffHostedExecutionScheduledEventBestEffort: vi.fn(async (input: {
+    handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
       eventId: string;
       prisma?: unknown;
     }) => {
@@ -101,12 +101,12 @@ vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
 
   return {
     ...actual,
-    readHostedExecutionScheduledDispatchTarget: mocks.readHostedExecutionScheduledDispatchTarget,
-    scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
+    appendHostedExecutionWakeTx: mocks.appendHostedExecutionWakeTx,
+    readHostedExecutionWakeTarget: mocks.readHostedExecutionWakeTarget,
   };
 });
 vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
+  handoffHostedExecutionWakeBestEffort: mocks.handoffHostedExecutionWakeBestEffort,
   triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
 }));
 

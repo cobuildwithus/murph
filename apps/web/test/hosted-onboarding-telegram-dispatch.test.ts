@@ -8,12 +8,13 @@ const mocks = vi.hoisted(() => {
     enqueueHostedExecutionOutbox: vi.fn(),
     lastScheduledDispatchEventId: null as string | null,
     lastScheduledDispatchPrisma: null as unknown,
-    readHostedExecutionScheduledDispatchTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
+    readHostedExecutionWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
       state.lastScheduledDispatchEventId = input.eventId;
       state.lastScheduledDispatchPrisma = input.prisma ?? null;
       return {
         eventId: input.eventId,
-        route: "outbox" as const,
+        route: "wake" as const,
+        seq: "23",
         userId: "member_telegram_123",
       };
     }),
@@ -41,13 +42,12 @@ const mocks = vi.hoisted(() => {
       telegramBotUsername: "murph_bot",
       telegramWebhookSecret: null as string | null,
     },
-    scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
+    appendHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
       return {
         eventId: input.dispatch.eventId,
-        route: "outbox" as const,
       };
     }),
     triggerHostedWakeUserBestEffort: vi.fn(async (input?: { timeoutMs?: number }) => {
@@ -84,8 +84,8 @@ vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
 
   return {
     ...actual,
-    readHostedExecutionScheduledDispatchTarget: mocks.readHostedExecutionScheduledDispatchTarget,
-    scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
+    appendHostedExecutionWakeTx: mocks.appendHostedExecutionWakeTx,
+    readHostedExecutionWakeTarget: mocks.readHostedExecutionWakeTarget,
   };
 });
 
@@ -107,7 +107,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionScheduledEventBestEffort: vi.fn(async () => "outbox"),
+  handoffHostedExecutionWakeBestEffort: vi.fn(async () => "wake"),
   triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
 }));
 

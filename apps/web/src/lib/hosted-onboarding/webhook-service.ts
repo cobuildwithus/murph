@@ -11,10 +11,10 @@ import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
 import {
-  readHostedExecutionScheduledDispatchTarget,
+  readHostedExecutionWakeTarget,
 } from "../hosted-execution/dispatch-lifecycle";
 import {
-  handoffHostedExecutionScheduledEventBestEffort,
+  handoffHostedExecutionWakeBestEffort,
   triggerHostedWakeUserBestEffort,
 } from "../hosted-wake/control";
 import {
@@ -249,14 +249,14 @@ export async function handleHostedStripeWebhook(input: {
     if (hostedExecutionEventId) {
       if (input.defer) {
         await input.defer(async () => {
-          await handoffHostedExecutionScheduledEventBestEffort({
+          await handoffHostedExecutionWakeBestEffort({
             context: "stripe.webhook",
             eventId: hostedExecutionEventId,
             prisma,
           });
         });
       } else {
-        await handoffHostedExecutionScheduledEventBestEffort({
+        await handoffHostedExecutionWakeBestEffort({
           context: "stripe.webhook",
           eventId: hostedExecutionEventId,
           prisma,
@@ -448,12 +448,12 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
     return;
   }
 
-  const scheduledTarget = await readHostedExecutionScheduledDispatchTarget({
+  const wakeTarget = await readHostedExecutionWakeTarget({
     eventId: input.eventId,
     prisma: input.prisma,
   });
 
-  if (!scheduledTarget) {
+  if (!wakeTarget) {
     return;
   }
 
@@ -463,7 +463,6 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
       deferred: Boolean(input.defer),
       eventId: input.eventId,
       inlineTimeoutMs: input.maxInlineDrainMs ?? null,
-      route: scheduledTarget.route,
       responseReason: input.response.reason,
     },
   );
@@ -473,9 +472,9 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
       eventId: input.eventId,
       responseReason: input.response.reason,
       source: input.source,
-      targetSeqHint: scheduledTarget.seq ?? null,
+      targetSeqHint: wakeTarget.seq ?? null,
       timeoutMs: input.maxInlineDrainMs,
-      userId: scheduledTarget.userId,
+      userId: wakeTarget.userId,
     });
 
     if (completedInline) {
@@ -492,8 +491,8 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
           eventId: input.eventId,
           responseReason: input.response.reason,
           source: input.source,
-          targetSeqHint: scheduledTarget.seq ?? null,
-          userId: scheduledTarget.userId,
+          targetSeqHint: wakeTarget.seq ?? null,
+          userId: wakeTarget.userId,
         }),
       );
       finishHostedOnboardingTiming(handoffTiming, "scheduled", {
@@ -517,8 +516,8 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
         eventId: input.eventId,
         responseReason: input.response.reason,
         source: input.source,
-        targetSeqHint: scheduledTarget.seq ?? null,
-        userId: scheduledTarget.userId,
+        targetSeqHint: wakeTarget.seq ?? null,
+        userId: wakeTarget.userId,
       }),
     );
     finishHostedOnboardingTiming(handoffTiming, "scheduled", {
@@ -532,8 +531,8 @@ async function maybeHandoffHostedExecutionWebhookWake(input: {
     eventId: input.eventId,
     responseReason: input.response.reason,
     source: input.source,
-    targetSeqHint: scheduledTarget.seq ?? null,
-    userId: scheduledTarget.userId,
+    targetSeqHint: wakeTarget.seq ?? null,
+    userId: wakeTarget.userId,
   });
   finishHostedOnboardingTiming(handoffTiming, "completed", {
     deferred: false,
