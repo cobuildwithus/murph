@@ -170,7 +170,7 @@ export class HostedUserRunner {
       bucket: this.bucket,
       ensureRunnerStores: (userId?: string) => this.ensureRunnerStores(userId),
       env: this.env,
-      hostedWebBaseUrl: toStringEnvSource(this.runnerRuntimeEnvSource).HOSTED_WEB_BASE_URL ?? null,
+      hostedWebBaseUrl: this.env.hostedWebBaseUrl,
       queueStore: this.queueStore,
       readRunnerRuntimeConfigSource: () => this.readRunnerRuntimeConfigSource(),
       runnerContainerNamespace: this.runnerContainerNamespace,
@@ -281,12 +281,11 @@ export class HostedUserRunner {
       return;
     }
 
-    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-    if (!record.userId || !hostedWebBaseUrl || !this.env.webCallbackSigning) {
+    if (!record.userId) {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
         level: "warn",
-        message: "Hosted cron wake append skipped because the canonical hosted-web callback path is not configured.",
+        message: "Hosted cron wake append skipped because the user runner is not bound yet.",
         phase: "dispatch.running",
         userId: record.userId ?? null,
       });
@@ -304,7 +303,7 @@ export class HostedUserRunner {
         userId: record.userId,
       });
       const append = await appendHostedWakeDispatchInWeb({
-        baseUrl: hostedWebBaseUrl,
+        baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: record.userId,
         callbackSigning: this.env.webCallbackSigning,
         dispatch,
@@ -336,32 +335,9 @@ export class HostedUserRunner {
     input: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionUserStatus> {
     await this.ensureManagedUserCryptoForActivationIfNeeded(input);
-    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-
-    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
-      await this.queueStore.bootstrapUser(input.event.userId);
-      const state = await this.dispatchProcessor.executeNativeWakeDispatch(input, {
-        holdLeaseUntilCleanup: true,
-      });
-
-      if (state === "completed") {
-        const finalizedCommit = await this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
-          dispatch: input,
-        });
-
-        if (finalizedCommit) {
-          await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
-            dispatch: input,
-          });
-        }
-      }
-
-      return this.status();
-    }
-
     await this.queueStore.bootstrapUser(input.event.userId);
     const append = await appendHostedWakeDispatchInWeb({
-      baseUrl: hostedWebBaseUrl,
+      baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: input.event.userId,
       callbackSigning: this.env.webCallbackSigning,
       dispatch: input,
@@ -397,19 +373,6 @@ export class HostedUserRunner {
     targetSeqHint?: string | null;
   }): Promise<HostedExecutionUserStatus> {
     const userId = await this.requireBoundUserId();
-    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-
-    if (!hostedWebBaseUrl) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.user-runner",
-        level: "warn",
-        message: "Hosted wake drain skipped because HOSTED_WEB_BASE_URL is not configured.",
-        phase: "dispatch.running",
-        userId,
-      });
-      return this.status();
-    }
-
     await this.queueStore.bootstrapUser(userId);
     const targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
     let afterSeq: string | null = null;
@@ -418,7 +381,7 @@ export class HostedUserRunner {
     for (let round = 0; round < MAX_HOSTED_WAKE_DRAIN_ROUNDS; round += 1) {
       const batch = await fetchHostedWakeBatchFromWeb({
         afterSeq,
-        baseUrl: hostedWebBaseUrl,
+        baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: userId,
         callbackSigning: this.env.webCallbackSigning,
         limit: DEFAULT_HOSTED_WAKE_BATCH_LIMIT,
@@ -473,7 +436,7 @@ export class HostedUserRunner {
 
       const bundleState = await this.queueStore.readBundleMetaState();
       const commit = await commitHostedWakeCursorToWeb({
-        baseUrl: hostedWebBaseUrl,
+        baseUrl: this.env.hostedWebBaseUrl,
         body: {
           committedSeq: highestCommittedWakeSeq,
           expectedVersion,
@@ -530,12 +493,33 @@ export class HostedUserRunner {
     id: string;
     kind: string;
     occurredAt: string;
+    quarantineCode?: string | null;
+    quarantinedAt?: string | null;
     payloadSchema: string;
     payloadJson?: unknown;
     seq: string;
   }): Promise<HostedWakeDrainOutcome> {
     const userId = await this.requireBoundUserId();
     const seq = BigInt(wake.seq);
+
+    if (wake.quarantinedAt) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.user-runner",
+        details: {
+          quarantineCode: wake.quarantineCode ?? null,
+        },
+        level: "info",
+        message: `Hosted wake seq ${wake.seq} is already quarantined; advancing the cursor past the terminal row.`,
+        phase: "dispatch.running",
+        userId,
+      });
+      return {
+        dispatch: null,
+        seq,
+        state: "quarantined",
+      };
+    }
+
     let dispatch: HostedExecutionDispatchRequest;
 
     try {
@@ -597,15 +581,9 @@ export class HostedUserRunner {
     wakeId: string,
     quarantineCode: string,
   ): Promise<boolean> {
-    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-
-    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
-      return false;
-    }
-
     try {
       const response = await quarantineHostedWakeInWeb({
-        baseUrl: hostedWebBaseUrl,
+        baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: userId,
         callbackSigning: this.env.webCallbackSigning,
         quarantineCode,
@@ -698,14 +676,8 @@ export class HostedUserRunner {
       );
 
       if (!sameHostedBundlePayloadRef(finalCommittedResult.bundleRef, cursorSnapshotRef)) {
-        const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-
-        if (!hostedWebBaseUrl) {
-          throw new Error("HOSTED_WEB_BASE_URL must be configured for hosted wake snapshot finalize.");
-        }
-
         const snapshotCommit = await commitHostedWakeCursorToWeb({
-          baseUrl: hostedWebBaseUrl,
+          baseUrl: this.readHostedWebControlBaseUrl(),
           body: {
             committedSeq: input.committedCursor.committedSeq,
             expectedVersion: input.committedCursor.version,
@@ -760,15 +732,10 @@ export class HostedUserRunner {
 
   private async composeUserStatus(record: RunnerStateRecord): Promise<HostedExecutionUserStatus> {
     const baseStatus = toUserStatus(record);
-    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-
-    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
-      return baseStatus;
-    }
 
     try {
       const wakeStatus = await readHostedWakeStatusFromWeb({
-        baseUrl: hostedWebBaseUrl,
+        baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: record.userId,
         callbackSigning: this.env.webCallbackSigning,
         timeoutMs: this.env.runnerTimeoutMs,
@@ -798,15 +765,9 @@ export class HostedUserRunner {
     dispatch: HostedExecutionDispatchRequest,
     status: HostedExecutionUserStatus,
   ): Promise<HostedExecutionDispatchStatus | null> {
-    const hostedWebBaseUrl = this.readHostedWebControlBaseUrl();
-
-    if (!hostedWebBaseUrl || !this.env.webCallbackSigning) {
-      return null;
-    }
-
     try {
       const wakeStatus = await readHostedWakeStatusFromWeb({
-        baseUrl: hostedWebBaseUrl,
+        baseUrl: this.readHostedWebControlBaseUrl(),
         body: {
           eventId: dispatch.eventId,
         },
@@ -886,8 +847,8 @@ export class HostedUserRunner {
     return toStringEnvSource(this.runnerRuntimeEnvSource);
   }
 
-  private readHostedWebControlBaseUrl(): string | null {
-    return this.readWorkerStringEnvSource().HOSTED_WEB_BASE_URL ?? null;
+  private readHostedWebControlBaseUrl(): string {
+    return this.env.hostedWebBaseUrl;
   }
 
   private async resolveRunnerSecretsServiceWhileHoldingKeyLock(

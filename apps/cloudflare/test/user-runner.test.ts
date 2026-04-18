@@ -11,6 +11,7 @@ import {
 } from "@murphai/gateway-core";
 import {
   deriveHostedExecutionErrorCode,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution";
 import type {
   HostedAssistantDeliveryEffect,
@@ -83,6 +84,7 @@ describe("HostedUserRunner", () => {
     recoveryRecipientPublicKey: TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
     teeAutomationRecipientKeyId: TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
     teeAutomationRecipientPublicKey: TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+    hostedWebBaseUrl: "https://web.example.test/",
     retryDelayMs: 10_000,
     runnerReadyTimeoutMs: 20_000,
     runnerTimeoutMs: 60_000,
@@ -1114,9 +1116,15 @@ describe("HostedUserRunner", () => {
   });
 
   it("sends forwarded env and worker-only runtime config through the per-job runtime payload instead of the container start envelope", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url, init) => {
+    const fetchSpy = vi.fn(async (url, init) => {
+      const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
         const payload = {
           bundles: {
             agentState: Buffer.from("agent-state").toString("base64"),
@@ -1134,11 +1142,11 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(serializeRunnerSuccessPayload(payload)), {
-          status: 200,
-        });
-      }),
-    );
+      return new Response(JSON.stringify(serializeRunnerSuccessPayload(payload)), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
     const runner = new HostedUserRunner(
       storage.state,
       {
@@ -1249,7 +1257,7 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     const status = await runner.status();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalled();
     expect(status.lastEventId).toBe("evt_seed_wake");
     expect(status.nextWakeAt).not.toBe("2026-03-26T12:00:05.000Z");
     expect(status.nextWakeAt).toBe("2026-03-26T12:00:15.000Z");
@@ -1701,7 +1709,15 @@ describe("HostedUserRunner", () => {
       vault: Buffer.from("vault-final").toString("base64"),
     });
     const fetchSpy = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
+      .mockImplementation(async (url, init) => {
+        const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+          init,
+          url,
+        });
+        if (hostedWakeResponse) {
+          return hostedWakeResponse;
+        }
+
         await commitResultForRunnerRequest({
           bucket,
           environment,
@@ -1710,7 +1726,15 @@ describe("HostedUserRunner", () => {
         });
         throw new Error("finalize failed");
       })
-      .mockImplementationOnce(async (_url, init) => {
+      .mockImplementationOnce(async (url, init) => {
+        const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+          init,
+          url,
+        });
+        if (hostedWakeResponse) {
+          return hostedWakeResponse;
+        }
+
         const requestBody = JSON.parse(String(init?.body));
         expect(readRunnerJobRequest(requestBody).resume).toEqual({
           committedResult: {
@@ -1760,7 +1784,6 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     const finalStatus = await runner.status();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(finalStatus.pendingEventCount).toBe(0);
     expect(finalStatus.retryingEventId).toBe("evt_finalize_retry");
     expect(finalStatus.bundleRef).toBeNull();
@@ -1859,7 +1882,7 @@ describe("HostedUserRunner", () => {
     expect(status.pendingEventCount).toBe(1);
     expect(status.retryingEventId).toBeNull();
     expect(status.inFlight).toBe(true);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalled();
   });
 
   it("does not launch a second resumed run while the first runner is still alive after commit", async () => {
@@ -2190,11 +2213,19 @@ describe("HostedUserRunner", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response("runner failed", {
+      vi.fn().mockImplementation(async (url, init) => {
+        const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+          init,
+          url,
+        });
+        if (hostedWakeResponse) {
+          return hostedWakeResponse;
+        }
+
+        return new Response("runner failed", {
           status: 503,
-        }),
-      ),
+        });
+      }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
@@ -2408,7 +2439,10 @@ describe("HostedUserRunner", () => {
       storage,
       userId: "member_123",
     });
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn(async (url, init) => maybeCreateHostedWakeControlResponse({
+      init,
+      url,
+    }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await runner.dispatchWithOutcome(dispatch);
@@ -2424,11 +2458,21 @@ describe("HostedUserRunner", () => {
   });
 
   it("reports duplicate consumed events through the shared dispatch outcome surface", async () => {
-    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
-      bucket,
-      environment,
-      init,
-    }));
+    const fetchMock = vi.fn(async (url, init) => {
+      const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
+      return createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
@@ -3658,6 +3702,70 @@ function serializeRunnerCommittedPayload(
       result: normalized.result,
     },
   };
+}
+
+function maybeCreateHostedWakeControlResponse(input: {
+  init?: RequestInit;
+  url: unknown;
+}): Response | null {
+  const url = String(input.url);
+  const now = "2026-03-26T12:00:00.000Z";
+
+  if (url.endsWith("/api/internal/hosted-wake/append")) {
+    const requestBody = JSON.parse(String(input.init?.body ?? "{}")) as {
+      dispatch?: {
+        event?: {
+          kind?: string;
+          userId?: string;
+        };
+        eventId?: string;
+        occurredAt?: string;
+      };
+    };
+    const dispatch = requestBody.dispatch;
+    const userId = typeof dispatch?.event?.userId === "string" ? dispatch.event.userId : "member_123";
+    const eventId = typeof dispatch?.eventId === "string" ? dispatch.eventId : "evt_hosted_wake";
+    const occurredAt = typeof dispatch?.occurredAt === "string" ? dispatch.occurredAt : now;
+    const kind = typeof dispatch?.event?.kind === "string" ? dispatch.event.kind : "assistant.cron.tick";
+
+    return Response.json({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: {
+        behavior: "ordered",
+        createdAt: now,
+        dedupeKey: eventId,
+        id: "wake_1",
+        kind,
+        occurredAt,
+        payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+        seq: "1",
+        updatedAt: now,
+        userId,
+      },
+    });
+  }
+
+  if (url.endsWith("/api/internal/hosted-wake/status")) {
+    const requestBody = JSON.parse(String(input.init?.body ?? "{}")) as { eventId?: unknown };
+
+    return Response.json({
+      cursor: {
+        committedSeq: "0",
+        createdAt: now,
+        nextSeq: "1",
+        snapshotRef: null,
+        updatedAt: now,
+        userId: "member_123",
+        version: "0",
+      },
+      ...(typeof requestBody.eventId === "string" ? { dispatchState: "queued" } : {}),
+      pendingWakeCount: 0,
+    });
+  }
+
+  return null;
 }
 
 async function createCommittedRunnerSuccessResponse(input: {

@@ -54,7 +54,6 @@ function createRunnerStateRecord(): RunnerStateRecord {
 function createCommitRecoveryHarness() {
   const queueRecord = createRunnerStateRecord();
   const syncedRecord = createRunnerStateRecord();
-  const applyCommittedDispatch = vi.fn().mockResolvedValue(queueRecord);
   const readBundleMetaState = vi.fn().mockResolvedValue({
     bundleRef: null,
     bundleVersion: 1,
@@ -66,7 +65,6 @@ function createCommitRecoveryHarness() {
   const cleanupBundleTransition = vi.fn().mockResolvedValue(undefined);
 
   const queueStore: RunnerQueueStore = Object.create(RunnerQueueStore.prototype);
-  queueStore.applyCommittedDispatch = applyCommittedDispatch;
   queueStore.readBundleMetaState = readBundleMetaState;
   queueStore.syncCommittedBundles = syncCommittedBundles;
 
@@ -85,7 +83,6 @@ function createCommitRecoveryHarness() {
   garbageCollector.cleanupBundleTransition = cleanupBundleTransition;
 
   return {
-    applyCommittedDispatch,
     cleanupBundleTransition,
     journalStore,
     queueStore,
@@ -103,27 +100,6 @@ function createCommitRecoveryHarness() {
 }
 
 describe("RunnerCommitRecovery", () => {
-  it("defaults committed dispatch recovery to a same-event lease when no run is available", async () => {
-    const committed = createCommittedResult();
-    const harness = createCommitRecoveryHarness();
-
-    const result = await harness.recovery.applyCommittedDispatch(
-      committed.userId,
-      committed,
-    );
-
-    expect(harness.applyCommittedDispatch).toHaveBeenCalledTimes(1);
-    expect(harness.applyCommittedDispatch).toHaveBeenCalledWith(
-      committed,
-      {
-        eventId: committed.eventId,
-        policy: "same-event",
-        run: null,
-      },
-    );
-    expect(result).toBe(harness.syncedRecord);
-  });
-
   it("defaults committed bundle sync recovery to a same-event lease when no run is available", async () => {
     const committed = createCommittedResult();
     const harness = createCommitRecoveryHarness();
@@ -149,13 +125,13 @@ describe("RunnerCommitRecovery", () => {
     const committed = createCommittedResult();
     const harness = createCommitRecoveryHarness();
 
-    await harness.recovery.applyCommittedDispatch(
+    await harness.recovery.syncCommittedBundlesWithoutConsuming(
       committed.userId,
       committed,
       { run: null },
     );
 
-    expect(harness.applyCommittedDispatch).toHaveBeenCalledWith(
+    expect(harness.syncCommittedBundles).toHaveBeenCalledWith(
       committed,
       {
         eventId: committed.eventId,
@@ -174,13 +150,13 @@ describe("RunnerCommitRecovery", () => {
       startedAt: "2026-04-14T12:00:01.000Z",
     };
 
-    await harness.recovery.applyCommittedDispatch(
+    await harness.recovery.syncCommittedBundlesWithoutConsuming(
       committed.userId,
       committed,
       { run },
     );
 
-    expect(harness.applyCommittedDispatch).toHaveBeenCalledWith(
+    expect(harness.syncCommittedBundles).toHaveBeenCalledWith(
       committed,
       {
         eventId: committed.eventId,

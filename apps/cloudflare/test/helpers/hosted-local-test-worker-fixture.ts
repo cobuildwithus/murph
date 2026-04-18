@@ -1,16 +1,35 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 
-import type { HostedExecutionUserStatus } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionUserStatus,
+  HostedWakeAppendRequest,
+  HostedWakeCommitRequest,
+  HostedWakeFetchRequest,
+  HostedWakeQuarantineRequest,
+  HostedWakeStatusRequest,
+} from "@murphai/hosted-execution";
+import { parseHostedExecutionDispatchRequest } from "@murphai/hosted-execution/parsers";
 
 import { repoRoot } from "../../vitest.shared.js";
+import type { R2BucketLike } from "../../src/bundle-store.js";
+import {
+  appendTestHostedWake,
+  commitTestHostedWakeCursor,
+  fetchTestHostedWakeBatch,
+  quarantineTestHostedWake,
+  readTestHostedWakeStatus,
+} from "../workers/test-hosted-wake-control.js";
 import {
   sleep,
   terminateChildProcessAndWait,
   waitForHealthyHttpEndpoint,
 } from "../../../../scripts/dev-hosted-local/runtime.ts";
+
+const hostedWakeControlPort = 8913;
 
 export interface HostedLocalTestWorkerClient {
   getJson(pathname: string): Promise<unknown>;
@@ -35,6 +54,7 @@ export async function startHostedLocalTestWorkerFixture(input: {
   const persistDir = await mkdtemp(path.join(os.tmpdir(), input.persistDirPrefix ?? "murph-hosted-test-worker-"));
   const baseUrl = `http://127.0.0.1:${input.port}`;
   let child: ChildProcess | null = null;
+  let hostedWakeControlServer: Server | null = null;
   let stdout = "";
   let stderr = "";
 
@@ -51,6 +71,21 @@ export async function startHostedLocalTestWorkerFixture(input: {
 
     child = null;
 
+    if (hostedWakeControlServer) {
+      await new Promise<void>((resolve, reject) => {
+        hostedWakeControlServer?.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    }
+
+    hostedWakeControlServer = null;
+
     await rm(persistDir, {
       force: true,
       recursive: true,
@@ -58,6 +93,7 @@ export async function startHostedLocalTestWorkerFixture(input: {
   };
 
   try {
+    hostedWakeControlServer = await startHostedWakeControlServer(hostedWakeControlPort);
     child = spawn("pnpm", [
       "--dir",
       "apps/cloudflare",
@@ -308,4 +344,134 @@ function tail(value: string, maxChars: number = 2_000): string {
   }
 
   return value.slice(value.length - maxChars);
+}
+
+async function startHostedWakeControlServer(port: number): Promise<Server> {
+  const bucket = new InMemoryR2Bucket();
+  const server = createServer(async (request, response) => {
+    try {
+      await handleHostedWakeControlRequest(request, response, bucket);
+    } catch (error) {
+      response.statusCode = 500;
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  return server;
+}
+
+async function handleHostedWakeControlRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  bucket: R2BucketLike,
+): Promise<void> {
+  const method = request.method ?? "GET";
+  const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  const userId = request.headers["x-hosted-execution-user-id"];
+
+  if (typeof userId !== "string" || userId.length === 0) {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error: "x-hosted-execution-user-id is required." }));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/append") {
+    const body = await readJsonBody<HostedWakeAppendRequest>(request);
+    response.end(JSON.stringify(await appendTestHostedWake({
+      bucket,
+      dispatch: parseHostedExecutionDispatchRequest(body.dispatch),
+    })));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/unseen") {
+    const body = await readJsonBody<HostedWakeFetchRequest>(request);
+    response.end(JSON.stringify(await fetchTestHostedWakeBatch({
+      body,
+      bucket,
+      userId,
+    })));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/commit") {
+    const body = await readJsonBody<HostedWakeCommitRequest>(request);
+    response.end(JSON.stringify(await commitTestHostedWakeCursor({
+      body,
+      bucket,
+      userId,
+    })));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/quarantine") {
+    const body = await readJsonBody<HostedWakeQuarantineRequest>(request);
+    response.end(JSON.stringify(await quarantineTestHostedWake({
+      body,
+      bucket,
+      userId,
+    })));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/status") {
+    const body = await readJsonBody<HostedWakeStatusRequest>(request);
+    response.end(JSON.stringify(await readTestHostedWakeStatus({
+      body,
+      bucket,
+      userId,
+    })));
+    return;
+  }
+
+  response.statusCode = 404;
+  response.end(JSON.stringify({ error: "Not found." }));
+}
+
+async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  const raw = Buffer.concat(chunks).toString("utf8");
+  return JSON.parse(raw.length === 0 ? "{}" : raw) as T;
+}
+
+class InMemoryR2Bucket implements R2BucketLike {
+  private readonly entries = new Map<string, string>();
+
+  async get(key: string) {
+    const value = this.entries.get(key);
+
+    if (value === undefined) {
+      return null;
+    }
+
+    return {
+      async arrayBuffer() {
+        return new TextEncoder().encode(value).buffer.slice(0);
+      },
+    };
+  }
+
+  async put(key: string, value: string): Promise<void> {
+    this.entries.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.entries.delete(key);
+  }
 }

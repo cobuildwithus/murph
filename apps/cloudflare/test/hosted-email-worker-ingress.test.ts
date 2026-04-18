@@ -52,6 +52,7 @@ import {
 
 const TEST_KEY = createTestRootKey(21);
 const TEST_ENVIRONMENT = {
+  hostedWebBaseUrl: "https://web.example.test",
   platformEnvelopeKey: TEST_KEY,
   platformEnvelopeKeyId: "v1",
   platformEnvelopeKeysById: {
@@ -82,9 +83,6 @@ describe("hosted email worker ingress", () => {
         id: "wake_123",
         kind: "email.message.received",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadBytes: 1,
-        payloadInlineCiphertext: "ciphertext",
-        payloadRef: null,
         payloadSchema: "murph.hosted-wake-dispatch.v1",
         quarantineCode: null,
         quarantinedAt: null,

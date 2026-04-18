@@ -9,12 +9,15 @@ import {
   type HostedWakeFetchResponse,
   type HostedWakeQuarantineRequest,
   type HostedWakeQuarantineResponse,
+  type HostedWakeStatusRequest,
+  type HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedWakeAppendResponse,
   parseHostedWakeCommitResponse,
   parseHostedWakeFetchResponse,
   parseHostedWakeQuarantineResponse,
+  parseHostedWakeStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -87,7 +90,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     ...(input.body === undefined ? {} : { body: input.body }),
     headers,
     method: input.method,
-    redirect: "error",
+    redirect: "manual",
     signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
   });
 }
@@ -95,6 +98,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
 const HOSTED_WEB_HOSTED_WAKE_APPEND_PATH = "/api/internal/hosted-wake/append";
 const HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH = "/api/internal/hosted-wake/commit";
 const HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH = "/api/internal/hosted-wake/quarantine";
+const HOSTED_WEB_HOSTED_WAKE_STATUS_PATH = "/api/internal/hosted-wake/status";
 const HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH = "/api/internal/hosted-wake/unseen";
 
 export async function appendHostedWakeDispatchInWeb(input: {
@@ -212,6 +216,32 @@ export async function quarantineHostedWakeInWeb(input: {
   }
 
   return parseHostedWakeQuarantineResponse(await response.json());
+}
+
+export async function readHostedWakeStatusFromWeb(input: {
+  baseUrl: string;
+  body?: HostedWakeStatusRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedWakeStatusResponse> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body: JSON.stringify(input.body ?? {}),
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_HOSTED_WAKE_STATUS_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted wake status read failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedWakeStatusResponse(await response.json());
 }
 
 function requireHostedWebControlBaseUrl(value: string): string {

@@ -18,8 +18,10 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       in_flight INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,
+      last_event_id TEXT,
       last_run_at TEXT,
-      next_wake_at TEXT
+      next_wake_at TEXT,
+      retrying_event_id TEXT
     )
   `);
   sql.exec(`
@@ -82,8 +84,10 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       "in_flight",
       "last_error_at",
       "last_error_code",
+      "last_event_id",
       "last_run_at",
       "next_wake_at",
+      "retrying_event_id",
     ],
   });
   assertRunnerQueueTableColumns(sql, "runner_bundle_slots", {
@@ -147,6 +151,14 @@ function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
     {
       columnName: "active_run_started_at",
       ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_started_at TEXT",
+    },
+    {
+      columnName: "last_event_id",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN last_event_id TEXT",
+    },
+    {
+      columnName: "retrying_event_id",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN retrying_event_id TEXT",
     },
   ] as const;
 

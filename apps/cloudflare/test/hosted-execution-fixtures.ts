@@ -58,6 +58,7 @@ export function createHostedExecutionTestEnv(
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+    HOSTED_WEB_BASE_URL: "https://web.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
     ...overrides,
   };

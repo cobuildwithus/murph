@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseHostedExecutionCursorState,
+  parseHostedWakeAppendResponse,
   parseHostedWakeCommitResponse,
   parseHostedWakeDispatchPayload,
   parseHostedWakeFetchResponse,
@@ -43,9 +44,6 @@ describe("hosted wake parser contracts", () => {
           payloadJson: {
             eventId: "evt_123",
           },
-          payloadBytes: 88,
-          payloadInlineCiphertext: "ciphertext",
-          payloadRef: null,
           payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
           quarantineCode: null,
           quarantinedAt: null,
@@ -65,6 +63,76 @@ describe("hosted wake parser contracts", () => {
       },
       seq: "12",
     });
+  });
+
+  it("omits payload transport details from the public wake record contract", () => {
+    const parsedFetch = parseHostedWakeFetchResponse({
+      cursor: {
+        committedSeq: "12",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "13",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "4",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          createdAt: "2026-04-17T00:00:00.000Z",
+          dedupeKey: "member.channels.updated:test",
+          id: "wake-1",
+          kind: "member.channels.updated",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payloadBytes: 128,
+          payloadInlineCiphertext: "inline-ciphertext",
+          payloadJson: {
+            eventId: "evt_123",
+          },
+          payloadRef: "payload-ref-1",
+          payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+          quarantineCode: null,
+          quarantinedAt: null,
+          seq: "12",
+          updatedAt: "2026-04-17T00:00:00.000Z",
+          userId: "member-1",
+        },
+      ],
+    });
+
+    expect(parsedFetch.wakes[0]).not.toHaveProperty("payloadBytes");
+    expect(parsedFetch.wakes[0]).not.toHaveProperty("payloadInlineCiphertext");
+    expect(parsedFetch.wakes[0]).not.toHaveProperty("payloadRef");
+
+    const parsedAppend = parseHostedWakeAppendResponse({
+      duplicate: false,
+      inserted: true,
+      updatedExisting: false,
+      wake: {
+        behavior: "ordered",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        dedupeKey: "member.channels.updated:test",
+        id: "wake-1",
+        kind: "member.channels.updated",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+        payloadBytes: 128,
+        payloadInlineCiphertext: "inline-ciphertext",
+        payloadJson: {
+          eventId: "evt_123",
+        },
+        payloadRef: "payload-ref-1",
+        payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+        quarantineCode: null,
+        quarantinedAt: null,
+        seq: "12",
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member-1",
+      },
+    });
+
+    expect(parsedAppend.wake).not.toHaveProperty("payloadBytes");
+    expect(parsedAppend.wake).not.toHaveProperty("payloadInlineCiphertext");
+    expect(parsedAppend.wake).not.toHaveProperty("payloadRef");
   });
 
   it("rejects invalid bigint strings in hosted wake responses", () => {
