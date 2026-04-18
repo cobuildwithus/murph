@@ -157,7 +157,7 @@ describe("executeHostedWakeEvent", () => {
     });
     assert.deepEqual(result, {
       bootstrapResult,
-      maintenanceRequired: true,
+      followupExecution: "system-maintenance",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -337,7 +337,7 @@ describe("executeHostedWakeEvent", () => {
     expect(processCapture).toHaveBeenCalledTimes(3);
     assert.deepEqual(linqResult, {
       bootstrapResult: null,
-      maintenanceRequired: false,
+      followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -366,7 +366,7 @@ describe("executeHostedWakeEvent", () => {
     expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
-      maintenanceRequired: true,
+      followupExecution: "system-maintenance",
       shareImportResult: null,
       shareImportTitle: null,
     });

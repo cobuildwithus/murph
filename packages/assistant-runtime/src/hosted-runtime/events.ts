@@ -23,6 +23,7 @@ import { buildHostedTelegramCapture } from "./events/telegram.ts";
 import { withHostedInboxPipeline } from "./events/inbox-pipeline.ts";
 import type {
   HostedWakeEffect,
+  HostedWakeFollowupExecution,
   HostedWakeExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
@@ -30,7 +31,7 @@ import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 import { assertNever } from "./utils.ts";
 
 type HostedWakeOutcome = HostedWakeEffect & {
-  maintenanceRequired: boolean;
+  followupExecution: HostedWakeFollowupExecution;
 };
 
 export async function executeHostedWakeEvent(input: {
@@ -63,7 +64,7 @@ export async function executeHostedWakeEvent(input: {
 
   return {
     bootstrapResult,
-    maintenanceRequired: wakeEffect.maintenanceRequired,
+    followupExecution: wakeEffect.followupExecution,
     shareImportResult: wakeEffect.shareImportResult,
     shareImportTitle: wakeEffect.shareImportTitle,
   };
@@ -87,16 +88,12 @@ async function handleHostedWakeEvent(input: {
     });
   }
 
-  if (!isHostedConversationMessageWake(input.wake)) {
-    return executeHostedSystemWake({
-      wake: input.wake,
-      executionContext: input.executionContext,
-      sharePack: input.sharePack ?? null,
-      vaultRoot: input.vaultRoot,
-    });
-  }
-
-  throw new TypeError("Unsupported hosted wake kind.");
+  return executeHostedSystemWake({
+    wake: input.wake,
+    executionContext: input.executionContext,
+    sharePack: input.sharePack ?? null,
+    vaultRoot: input.vaultRoot,
+  });
 }
 
 async function executeHostedConversationWake(input: {
@@ -114,7 +111,7 @@ async function executeHostedConversationWake(input: {
   });
 
   return createNoopWakeEffect({
-    maintenanceRequired: false,
+    followupExecution: "conversation-message",
   });
 }
 
@@ -161,16 +158,16 @@ async function executeHostedSystemWake(input: {
         );
       }
       return createNoopWakeEffect({
-        maintenanceRequired: true,
+        followupExecution: "system-maintenance",
       });
     case "member.channels.updated":
       return createNoopWakeEffect({
-        maintenanceRequired: true,
+        followupExecution: "system-maintenance",
       });
     case "assistant.cron.tick":
     case "device-sync.wake":
       return createNoopWakeEffect({
-        maintenanceRequired: true,
+        followupExecution: "system-maintenance",
       });
     case "vault.share.accepted":
       if (!input.sharePack) {
@@ -182,7 +179,7 @@ async function executeHostedSystemWake(input: {
           sharePack: input.sharePack,
           vaultRoot: input.vaultRoot,
         })),
-        maintenanceRequired: true,
+        followupExecution: "system-maintenance",
       };
   }
 
@@ -190,10 +187,10 @@ async function executeHostedSystemWake(input: {
 }
 
 function createNoopWakeEffect(input: {
-  maintenanceRequired: boolean;
+  followupExecution: HostedWakeFollowupExecution;
 }): HostedWakeOutcome {
   return {
-    maintenanceRequired: input.maintenanceRequired,
+    followupExecution: input.followupExecution,
     shareImportResult: null,
     shareImportTitle: null,
   };
