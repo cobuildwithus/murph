@@ -10,7 +10,7 @@ and the canonical web-owned `HostedWake` / `HostedExecutionCursor` execution que
 
 Every hosted producer now appends canonical wakes in Postgres and hands execution
 off to Cloudflare with a narrow authenticated wake call. There is no parallel
-`execution_outbox` dispatch architecture.
+legacy dispatch architecture.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs one

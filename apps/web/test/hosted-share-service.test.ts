@@ -11,12 +11,12 @@ const shareHarness = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     issueHostedInviteForPhone: vi.fn(),
-    readHostedExecutionLifecycleStateFromWake: vi.fn(async (input: {
+    readHostedExecutionWakeLifecycleState: vi.fn(async (input: {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
     }) =>
       input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.dispatchState ?? "queued"),
-    scheduleHostedExecutionDispatchTx: vi.fn(async (input: {
+    appendHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
@@ -30,10 +30,9 @@ const shareHarness = vi.hoisted(() => {
 
       return {
         eventId: input.dispatch.eventId,
-        route: "wake" as const,
       };
     }),
-    handoffHostedExecutionScheduledEventBestEffort: vi.fn(async (input: {
+    handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
       eventId: string;
       prisma?: unknown;
     }) => {
@@ -56,8 +55,8 @@ vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
 
   return {
     ...actual,
-    readHostedExecutionLifecycleStateFromWake: shareHarness.readHostedExecutionLifecycleStateFromWake,
-    scheduleHostedExecutionDispatchTx: shareHarness.scheduleHostedExecutionDispatchTx,
+    appendHostedExecutionWakeTx: shareHarness.appendHostedExecutionWakeTx,
+    readHostedExecutionWakeLifecycleState: shareHarness.readHostedExecutionWakeLifecycleState,
   };
 });
 vi.mock("@/src/lib/prisma", () => ({
@@ -66,7 +65,7 @@ vi.mock("@/src/lib/prisma", () => ({
   }),
 }));
 vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionScheduledEventBestEffort: shareHarness.handoffHostedExecutionScheduledEventBestEffort,
+  handoffHostedExecutionWakeBestEffort: shareHarness.handoffHostedExecutionWakeBestEffort,
 }));
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(
@@ -139,14 +138,14 @@ describe("hosted share service", () => {
     shareHarness.issueHostedInviteForPhone.mockRejectedValue(
       new Error("Unexpected invite issuance in hosted share service test."),
     );
-    shareHarness.readHostedExecutionLifecycleStateFromWake.mockReset();
-    shareHarness.readHostedExecutionLifecycleStateFromWake.mockImplementation(async (input: {
+    shareHarness.readHostedExecutionWakeLifecycleState.mockReset();
+    shareHarness.readHostedExecutionWakeLifecycleState.mockImplementation(async (input: {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
     }) =>
       input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.dispatchState ?? "queued");
-    shareHarness.scheduleHostedExecutionDispatchTx.mockReset();
-    shareHarness.scheduleHostedExecutionDispatchTx.mockImplementation(async (input: {
+    shareHarness.appendHostedExecutionWakeTx.mockReset();
+    shareHarness.appendHostedExecutionWakeTx.mockImplementation(async (input: {
       dispatch: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
@@ -160,7 +159,6 @@ describe("hosted share service", () => {
 
       return {
         eventId: input.dispatch.eventId,
-        route: "wake" as const,
       };
     });
     originalHostedOnboardingPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;

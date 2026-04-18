@@ -3,8 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   parseHostedExecutionCursorState,
   parseHostedWakeCommitResponse,
+  parseHostedWakeDispatchPayload,
   parseHostedWakeFetchResponse,
 } from "../src/parsers.ts";
+import {
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  buildHostedWakeEmailMessageReceivedPayload,
+  buildHostedWakeLinqMessageReceivedPayload,
+} from "../src/builders.ts";
+import {
+  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+} from "../src/contracts.ts";
 
 describe("hosted wake parser contracts", () => {
   it("parses hosted wake batch responses with bigint-string cursor fields", () => {
@@ -36,7 +46,7 @@ describe("hosted wake parser contracts", () => {
           payloadBytes: 88,
           payloadInlineCiphertext: "ciphertext",
           payloadRef: null,
-          payloadSchema: "murph.hosted-wake-dispatch.v1",
+          payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
           quarantineCode: null,
           quarantinedAt: null,
           seq: "12",
@@ -94,6 +104,78 @@ describe("hosted wake parser contracts", () => {
         userId: "member-1",
         version: "8",
       },
+    });
+  });
+
+  it("rejects message payloads labeled as system wakes", () => {
+    expect(() => parseHostedWakeDispatchPayload({
+      kind: "email.message.received",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      payloadJson: {
+        event: {
+          kind: "email.message.received",
+          identityId: "assistant@example.com",
+          rawMessageKey: "raw_123",
+          userId: "member-1",
+        },
+        eventId: "evt_email",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+      },
+      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      userId: "member-1",
+    })).toThrow(/system payload schema/i);
+  });
+
+  it("parses direct message wake payloads into runtime dispatches", () => {
+    const expected = buildHostedExecutionLinqMessageReceivedDispatch({
+      eventId: "evt_linq",
+      linqEvent: {
+        id: "msg_123",
+      },
+      linqMessageId: "msg_123",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      phoneLookupKey: "lookup_123",
+      userId: "member-1",
+    });
+
+    expect(parseHostedWakeDispatchPayload({
+      kind: "linq.message.received",
+      occurredAt: expected.occurredAt,
+      payloadJson: buildHostedWakeLinqMessageReceivedPayload({
+        eventId: expected.eventId,
+        linqEvent: expected.event.linqEvent,
+        linqMessageId: expected.event.linqMessageId,
+        phoneLookupKey: expected.event.phoneLookupKey,
+      }),
+      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+      userId: expected.event.userId,
+    })).toEqual(expected);
+  });
+
+  it("parses email direct wake payloads into runtime dispatches", () => {
+    const occurredAt = "2026-04-17T00:00:00.000Z";
+
+    expect(parseHostedWakeDispatchPayload({
+      kind: "email.message.received",
+      occurredAt,
+      payloadJson: buildHostedWakeEmailMessageReceivedPayload({
+        eventId: "evt_email",
+        identityId: "assistant@example.com",
+        rawMessageKey: "raw_123",
+        selfAddress: "reply@example.com",
+      }),
+      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+      userId: "member-1",
+    })).toEqual({
+      event: {
+        identityId: "assistant@example.com",
+        kind: "email.message.received",
+        rawMessageKey: "raw_123",
+        selfAddress: "reply@example.com",
+        userId: "member-1",
+      },
+      eventId: "evt_email",
+      occurredAt,
     });
   });
 });

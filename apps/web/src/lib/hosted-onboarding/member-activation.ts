@@ -10,8 +10,8 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  findHostedExecutionScheduledEventIdTx,
-  scheduleHostedExecutionDispatchTx,
+  appendHostedExecutionWakeTx,
+  findHostedExecutionWakeByEventIdTx,
 } from "../hosted-execution/dispatch-lifecycle";
 import {
   deriveHostedEntitlement,
@@ -91,7 +91,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       sourceEventId: input.sourceEventId,
       sourceType: input.sourceType,
     });
-    const scheduledDispatch = await scheduleHostedExecutionDispatchTx({
+    const appendedWake = await appendHostedExecutionWakeTx({
       dispatch,
       sourceId: input.sourceEventId,
       sourceType: "hosted_revnet_issuance",
@@ -100,13 +100,12 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
 
     finishHostedOnboardingTiming(timing, "completed", {
       activated: true,
-      dispatchRoute: scheduledDispatch.route,
       dispatchScheduled: true,
     });
 
     return {
       activated: true,
-      hostedExecutionEventId: scheduledDispatch.eventId,
+      hostedExecutionEventId: appendedWake.eventId,
       memberId: input.member.core.id,
     };
   } catch (error) {
@@ -171,7 +170,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const existingDispatchEventId = await findHostedExecutionScheduledEventIdTx({
+  const existingDispatchEventId = await findHostedExecutionWakeByEventIdTx({
     eventId: activationEventId,
     tx: input.prisma,
   });
@@ -218,7 +217,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const scheduledDispatch = await scheduleHostedExecutionDispatchTx({
+  const appendedWake = await appendHostedExecutionWakeTx({
     dispatch,
     sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
     sourceType: "hosted_stripe_event",
@@ -227,7 +226,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
 
   return {
     activated: true,
-    hostedExecutionEventId: scheduledDispatch.eventId,
+    hostedExecutionEventId: appendedWake.eventId,
     memberId: currentMember.core.id,
   };
 }

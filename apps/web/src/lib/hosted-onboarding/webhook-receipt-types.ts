@@ -6,6 +6,8 @@ import { type Prisma } from "@prisma/client";
 
 import {
   createHostedWebhookDispatchSideEffectPayload,
+  createHostedWebhookLinqMessageWakeAppendPayload,
+  createHostedWebhookTelegramMessageWakeAppendPayload,
   type HostedWebhookDispatchSideEffectPayload as HostedWebhookDispatchPayload,
   type HostedWebhookStoredDispatchSideEffectPayload as HostedWebhookStoredDispatchPayload,
 } from "./webhook-dispatch-payload";
@@ -208,6 +210,46 @@ export function createHostedWebhookDispatchSideEffect(input: {
     lastAttemptAt: null,
     lastError: null,
     payload: createHostedWebhookDispatchSideEffectPayload(input.dispatch),
+    result: null,
+    sentAt: null,
+    status: "pending",
+  };
+}
+
+export function createHostedWebhookLinqMessageReceivedWakeSideEffect(input: {
+  eventId: string;
+  linqEvent: Record<string, unknown>;
+  linqMessageId?: string | null;
+  occurredAt: string;
+  phoneLookupKey: string;
+  userId: string;
+}): HostedWebhookDispatchSideEffect {
+  return {
+    attemptCount: 0,
+    effectId: `dispatch:${input.eventId}`,
+    kind: "hosted_execution_dispatch",
+    lastAttemptAt: null,
+    lastError: null,
+    payload: createHostedWebhookLinqMessageWakeAppendPayload(input),
+    result: null,
+    sentAt: null,
+    status: "pending",
+  };
+}
+
+export function createHostedWebhookTelegramMessageReceivedWakeSideEffect(input: {
+  eventId: string;
+  occurredAt: string;
+  telegramMessage: Parameters<typeof createHostedWebhookTelegramMessageWakeAppendPayload>[0]["telegramMessage"];
+  userId: string;
+}): HostedWebhookDispatchSideEffect {
+  return {
+    attemptCount: 0,
+    effectId: `dispatch:${input.eventId}`,
+    kind: "hosted_execution_dispatch",
+    lastAttemptAt: null,
+    lastError: null,
+    payload: createHostedWebhookTelegramMessageWakeAppendPayload(input),
     result: null,
     sentAt: null,
     status: "pending",

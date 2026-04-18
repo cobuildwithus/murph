@@ -6,11 +6,11 @@ const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-  scheduleHostedExecutionDispatchTx: vi.fn(),
+  appendHostedExecutionWakeTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
-  scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
+  appendHostedExecutionWakeTx: mocks.appendHostedExecutionWakeTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -47,9 +47,8 @@ describe("hosted onboarding member channel sync", () => {
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
-    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+    mocks.appendHostedExecutionWakeTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      route: "outbox",
     });
   });
 
@@ -135,7 +134,7 @@ describe("hosted onboarding member channel sync", () => {
       occurredAt: "2026-04-15T00:00:00.000Z",
     });
 
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
       dispatch: {
         event: {
           kind: "member.channels.updated",
@@ -156,13 +155,12 @@ describe("hosted onboarding member channel sync", () => {
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
   });
 
-  it("accepts a wake-routed schedule result without changing the returned dispatch", async () => {
+  it("accepts a canonical wake append result without changing the returned dispatch", async () => {
     const tx = {
       label: "test-prisma-tx",
     };
-    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+    mocks.appendHostedExecutionWakeTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      route: "wake",
     });
 
     await expect(
@@ -187,7 +185,7 @@ describe("hosted onboarding member channel sync", () => {
       occurredAt: "2026-04-15T00:00:00.000Z",
     });
 
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         event: expect.objectContaining({

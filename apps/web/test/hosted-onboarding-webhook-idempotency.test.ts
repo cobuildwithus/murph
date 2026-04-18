@@ -43,17 +43,21 @@ const mocks = vi.hoisted(() => {
       state.lastScheduledDispatchPrisma = input.prisma ?? null;
       return {
         eventId: input.eventId,
-        route: "wake" as const,
         seq: "31",
         userId: "member_123",
       };
     }),
     appendHostedExecutionWakeTx: vi.fn(async (input: {
-      dispatch: { eventId: string };
+      dispatch?: { eventId: string };
+      eventId?: string;
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
+      const eventId = typeof input.eventId === "string" ? input.eventId : input.dispatch?.eventId;
+      if (!eventId) {
+        throw new Error("Expected a hosted wake append eventId.");
+      }
       return {
-        eventId: input.dispatch.eventId,
+        eventId,
       };
     }),
     handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
@@ -880,15 +884,14 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            kind: "linq.message.received",
-            userId: "member_123",
-          }),
+        eventId: "evt_123",
+        kind: "linq.message.received",
+        payload: expect.objectContaining({
           eventId: "evt_123",
         }),
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
+        userId: "member_123",
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
@@ -1265,9 +1268,8 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          eventId: "evt_123",
-        }),
+        eventId: "evt_123",
+        kind: "linq.message.received",
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
       }),

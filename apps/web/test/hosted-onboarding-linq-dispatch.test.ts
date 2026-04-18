@@ -30,17 +30,21 @@ const mocks = vi.hoisted(() => {
       state.lastScheduledDispatchPrisma = input.prisma ?? null;
       return {
         eventId: input.eventId,
-        route: "wake" as const,
         seq: "17",
         userId: "member_123",
       };
     }),
     appendHostedExecutionWakeTx: vi.fn(async (input: {
-      dispatch: { eventId: string };
+      dispatch?: { eventId: string };
+      eventId?: string;
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
+      const eventId = typeof input.eventId === "string" ? input.eventId : input.dispatch?.eventId;
+      if (!eventId) {
+        throw new Error("Expected a hosted wake append eventId.");
+      }
       return {
-        eventId: input.dispatch.eventId,
+        eventId,
       };
     }),
     triggerHostedWakeUserBestEffort: vi.fn(async (input?: { timeoutMs?: number }) => {
@@ -216,16 +220,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            kind: "linq.message.received",
-            linqMessageId: "msg_123",
-            userId: "member_123",
-          }),
+        eventId: "evt_123",
+        kind: "linq.message.received",
+        payload: expect.objectContaining({
           eventId: "evt_123",
+          linqMessageId: "msg_123",
         }),
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
+        userId: "member_123",
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
@@ -432,18 +435,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            kind: "linq.message.received",
-            linqMessageId: "msg_123",
-            userId: "member_123",
-          }),
+        eventId: "evt_123",
+        kind: "linq.message.received",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        payload: expect.objectContaining({
           eventId: "evt_123",
-          occurredAt: "2026-03-26T12:00:00.000Z",
+          linqMessageId: "msg_123",
         }),
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
         tx: transactionClient,
+        userId: "member_123",
       }),
     );
     const receiptUpdateWrites = transactionReceiptUpdateMany.mock.calls.map(
@@ -593,10 +595,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          eventId: "evt_456",
-          occurredAt: "2026-03-26T12:00:05.000Z",
-        }),
+        eventId: "evt_456",
+        kind: "linq.message.received",
+        occurredAt: "2026-03-26T12:00:05.000Z",
       }),
     );
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);

@@ -2,11 +2,17 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionDispatchLifecycleState,
   HostedExecutionDispatchRequest,
+  HostedWakeMessagePayload,
 } from "@murphai/hosted-execution/contracts";
-
 import {
-  HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
-} from "./payload";
+  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  buildHostedWakeEmailMessageReceivedPayload,
+  buildHostedWakeLinqMessageReceivedPayload,
+  buildHostedWakeTelegramMessageReceivedPayload,
+  isHostedMessageWakeDispatch,
+} from "@murphai/hosted-execution";
+
 import {
   appendHostedCoalescingWakeTx,
   appendHostedEdgeTriggeredWakeTx,
@@ -17,7 +23,7 @@ import {
   type AppendHostedWakeResult,
 } from "./store";
 
-export async function appendHostedOrderedDispatchWakeTx(input: {
+export async function appendHostedOrderedWakePayloadTx(input: {
   dispatch: HostedExecutionDispatchRequest;
   tx: Prisma.TransactionClient;
 }): Promise<AppendHostedWakeResult> {
@@ -25,31 +31,50 @@ export async function appendHostedOrderedDispatchWakeTx(input: {
     dedupeKey: buildHostedWakeDispatchDedupeKey(input.dispatch),
     kind: input.dispatch.event.kind,
     occurredAt: input.dispatch.occurredAt,
-    payload: input.dispatch,
-    payloadSchema: HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
+    payload: buildHostedWakePayloadValue(input.dispatch),
+    payloadSchema: resolveHostedWakePayloadSchema(input.dispatch),
     tx: input.tx,
     userId: input.dispatch.event.userId,
   });
 }
 
-export async function appendHostedExecutionDispatchWakeTx(input: {
+export async function appendHostedExecutionWakePayloadTx(input: {
   dispatch: HostedExecutionDispatchRequest;
   tx: Prisma.TransactionClient;
+} | {
+  eventId: string;
+  kind: "linq.message.received" | "telegram.message.received";
+  occurredAt: string;
+  payload: HostedWakeMessagePayload;
+  tx: Prisma.TransactionClient;
+  userId: string;
 }): Promise<AppendHostedWakeResult> {
+  if (!("dispatch" in input)) {
+    return appendHostedOrderedWakeTx({
+      dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId, input.kind),
+      kind: input.kind,
+      occurredAt: input.occurredAt,
+      payload: input.payload,
+      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+      tx: input.tx,
+      userId: input.userId,
+    });
+  }
+
   switch (input.dispatch.event.kind) {
     case "device-sync.wake":
     case "member.channels.updated":
-      return appendHostedCoalescingDispatchWakeTx({
+      return appendHostedCoalescingWakePayloadTx({
         coalescingKey: buildHostedWakeDispatchCoalescingKey(input.dispatch),
         dispatch: input.dispatch,
         tx: input.tx,
       });
     default:
-      return appendHostedOrderedDispatchWakeTx(input);
+      return appendHostedOrderedWakePayloadTx(input);
   }
 }
 
-export async function appendHostedCoalescingDispatchWakeTx(input: {
+export async function appendHostedCoalescingWakePayloadTx(input: {
   coalescingKey: string;
   dispatch: HostedExecutionDispatchRequest;
   tx: Prisma.TransactionClient;
@@ -59,14 +84,14 @@ export async function appendHostedCoalescingDispatchWakeTx(input: {
     dedupeKey: buildHostedWakeDispatchDedupeKey(input.dispatch),
     kind: input.dispatch.event.kind,
     occurredAt: input.dispatch.occurredAt,
-    payload: input.dispatch,
-    payloadSchema: HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
+    payload: buildHostedWakePayloadValue(input.dispatch),
+    payloadSchema: resolveHostedWakePayloadSchema(input.dispatch),
     tx: input.tx,
     userId: input.dispatch.event.userId,
   });
 }
 
-export async function appendHostedEdgeTriggeredDispatchWakeTx(input: {
+export async function appendHostedEdgeTriggeredWakePayloadTx(input: {
   coalescingKey: string;
   dispatch: HostedExecutionDispatchRequest;
   tx: Prisma.TransactionClient;
@@ -76,8 +101,8 @@ export async function appendHostedEdgeTriggeredDispatchWakeTx(input: {
     dedupeKey: buildHostedWakeDispatchDedupeKey(input.dispatch),
     kind: input.dispatch.event.kind,
     occurredAt: input.dispatch.occurredAt,
-    payload: input.dispatch,
-    payloadSchema: HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
+    payload: buildHostedWakePayloadValue(input.dispatch),
+    payloadSchema: resolveHostedWakePayloadSchema(input.dispatch),
     tx: input.tx,
     userId: input.dispatch.event.userId,
   });
@@ -93,7 +118,7 @@ export async function findHostedExecutionWakeEventIdTx(input: {
   });
 }
 
-export async function readHostedExecutionWakeScheduleTx(input: {
+export async function readHostedExecutionWakeTargetTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
 }): Promise<{
@@ -140,4 +165,46 @@ function buildHostedWakeDispatchDedupeKeyFromEventId(
   eventKind = "unknown",
 ): string {
   return `dispatch:${eventKind}:${eventId}`;
+}
+
+function resolveHostedWakePayloadSchema(
+  dispatch: HostedExecutionDispatchRequest,
+): string {
+  return isHostedMessageWakeDispatch(dispatch)
+    ? HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA
+    : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA;
+}
+
+function buildHostedWakePayloadValue(
+  dispatch: HostedExecutionDispatchRequest,
+): unknown {
+  if (!isHostedMessageWakeDispatch(dispatch)) {
+    return dispatch;
+  }
+
+  switch (dispatch.event.kind) {
+    case "linq.message.received":
+      return buildHostedWakeLinqMessageReceivedPayload({
+        eventId: dispatch.eventId,
+        linqEvent: dispatch.event.linqEvent,
+        ...(dispatch.event.linqMessageId === undefined
+          ? {}
+          : { linqMessageId: dispatch.event.linqMessageId }),
+        phoneLookupKey: dispatch.event.phoneLookupKey,
+      });
+    case "telegram.message.received":
+      return buildHostedWakeTelegramMessageReceivedPayload({
+        eventId: dispatch.eventId,
+        telegramMessage: dispatch.event.telegramMessage,
+      });
+    case "email.message.received":
+      return buildHostedWakeEmailMessageReceivedPayload({
+        eventId: dispatch.eventId,
+        identityId: dispatch.event.identityId,
+        rawMessageKey: dispatch.event.rawMessageKey,
+        ...(dispatch.event.selfAddress === undefined
+          ? {}
+          : { selfAddress: dispatch.event.selfAddress }),
+      });
+  }
 }

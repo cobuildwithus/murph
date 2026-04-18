@@ -7,9 +7,9 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
-  scheduleHostedExecutionDispatchTx,
+  appendHostedExecutionWakeTx,
 } from "../hosted-execution/dispatch-lifecycle";
-import { handoffHostedExecutionScheduledEventBestEffort } from "../hosted-wake/control";
+import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
@@ -141,7 +141,7 @@ export async function acceptHostedShareLink(input: {
           },
         });
 
-    await scheduleHostedExecutionDispatchTx({
+    await appendHostedExecutionWakeTx({
       dispatch: buildHostedShareAcceptanceDispatch({
         acceptedAt: acceptedAt.toISOString(),
         eventId,
@@ -170,7 +170,7 @@ export async function acceptHostedShareLink(input: {
     };
   }
 
-  void handoffHostedExecutionScheduledEventBestEffort({
+  void handoffHostedExecutionWakeBestEffort({
     context: "hosted-share.acceptance",
     eventId: claim.eventId,
     prisma,

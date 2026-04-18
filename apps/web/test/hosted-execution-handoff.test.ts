@@ -12,7 +12,7 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
-  readHostedExecutionScheduledDispatchTarget: vi.fn(),
+  readHostedExecutionWakeTarget: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/logging", () => ({
@@ -22,13 +22,13 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { readHostedExecutionScheduledDispatchTarget } from "@/src/lib/hosted-execution/dispatch-lifecycle";
-import { handoffHostedExecutionScheduledEventBestEffort } from "@/src/lib/hosted-wake/control";
+import { readHostedExecutionWakeTarget } from "@/src/lib/hosted-execution/dispatch-lifecycle";
+import { handoffHostedExecutionWakeBestEffort } from "@/src/lib/hosted-wake/control";
 
-describe("handoffHostedExecutionScheduledEventBestEffort", () => {
+describe("handoffHostedExecutionWakeBestEffort", () => {
   beforeEach(() => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
-    vi.mocked(readHostedExecutionScheduledDispatchTarget).mockReset();
+    vi.mocked(readHostedExecutionWakeTarget).mockReset();
   });
 
   afterEach(() => {
@@ -36,11 +36,11 @@ describe("handoffHostedExecutionScheduledEventBestEffort", () => {
   });
 
   it("swallows lookup failures because the handoff is best-effort", async () => {
-    vi.mocked(readHostedExecutionScheduledDispatchTarget).mockRejectedValue(new Error("lookup failed"));
+    vi.mocked(readHostedExecutionWakeTarget).mockRejectedValue(new Error("lookup failed"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      handoffHostedExecutionScheduledEventBestEffort({
+      handoffHostedExecutionWakeBestEffort({
         eventId: "member.activated:test-event",
       }),
     ).resolves.toBeUndefined();
@@ -58,9 +58,8 @@ describe("handoffHostedExecutionScheduledEventBestEffort", () => {
       getStatus: vi.fn(),
       wakeUser,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    vi.mocked(readHostedExecutionScheduledDispatchTarget).mockResolvedValue({
+    vi.mocked(readHostedExecutionWakeTarget).mockResolvedValue({
       eventId: "member.activated:test-event",
-      route: "wake",
       seq: "42",
       userId: "user-123",
     });
@@ -69,7 +68,7 @@ describe("handoffHostedExecutionScheduledEventBestEffort", () => {
       await run();
     });
 
-    await handoffHostedExecutionScheduledEventBestEffort({
+    await handoffHostedExecutionWakeBestEffort({
       context: "member-activation",
       defer,
       eventId: "member.activated:test-event",

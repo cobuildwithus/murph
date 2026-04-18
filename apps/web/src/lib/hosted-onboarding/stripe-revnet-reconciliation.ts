@@ -6,7 +6,7 @@ import {
 import {
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
 } from "./member-activation";
-import { handoffHostedExecutionScheduledEventBestEffort } from "../hosted-wake/control";
+import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
@@ -104,7 +104,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
     if (activationEventId) {
-      await handoffHostedExecutionScheduledEventBestEffort({
+      await handoffHostedExecutionWakeBestEffort({
         context: "stripe-revnet-reconciliation",
         eventId: activationEventId,
         prisma: input.prisma,

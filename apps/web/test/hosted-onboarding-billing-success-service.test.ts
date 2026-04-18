@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
-    handoffHostedExecutionScheduledEventBestEffort: vi.fn(async (input: {
+    handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
       eventId: string;
       prisma?: unknown;
     }) => {
@@ -48,7 +48,7 @@ vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
 }));
 vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
+  handoffHostedExecutionWakeBestEffort: mocks.handoffHostedExecutionWakeBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({

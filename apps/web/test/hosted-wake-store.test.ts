@@ -16,7 +16,7 @@ import {
 } from "@/src/lib/hosted-wake/store";
 import {
   findHostedExecutionWakeEventIdTx,
-  readHostedExecutionWakeScheduleTx,
+  readHostedExecutionWakeTargetTx,
 } from "@/src/lib/hosted-wake/dispatch";
 
 interface TestCursorState {
@@ -124,7 +124,7 @@ describe("hosted wake store", () => {
     });
   });
 
-  it("treats already-committed cursor seqs as stale no-op commits", async () => {
+  it("allows snapshot-only CAS updates at the already-committed seq", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
         committedSeq: 2n,
@@ -141,7 +141,44 @@ describe("hosted wake store", () => {
       committedSeq: 2n,
       expectedVersion: 7n,
       snapshotRef: {
-        checkpoint: "wake_2_stale",
+        checkpoint: "wake_2_finalized",
+      },
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      committed: true,
+      cursor: expect.objectContaining({
+        committedSeq: "2",
+        nextSeq: "4",
+        snapshotRef: {
+          checkpoint: "wake_2_finalized",
+        },
+        userId: "member_123",
+        version: "8",
+      }),
+    });
+  });
+
+  it("treats already-committed cursor seqs as stale no-op commits when the snapshot is unchanged", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 2n,
+        nextSeq: 4n,
+        snapshotRef: {
+          checkpoint: "wake_2",
+        },
+        userId: "member_123",
+        version: 7n,
+      },
+    });
+
+    const result = await commitHostedExecutionCursorTx({
+      committedSeq: 2n,
+      expectedVersion: 7n,
+      snapshotRef: {
+        checkpoint: "wake_2",
       },
       tx,
       userId: "member_123",
@@ -375,7 +412,7 @@ describe("hosted wake store", () => {
       tx,
     })).resolves.toBe("telegram:update:321");
 
-    await expect(readHostedExecutionWakeScheduleTx({
+    await expect(readHostedExecutionWakeTargetTx({
       eventId: "telegram:update:321",
       tx,
     })).resolves.toEqual({
@@ -507,7 +544,7 @@ function createHostedWakeStoreHarness(input?: {
         };
         where: {
           committedSeq: bigint;
-          nextSeq: { gt: bigint };
+          nextSeq?: { gt: bigint };
           userId: string;
           version: bigint;
         };
@@ -515,7 +552,10 @@ function createHostedWakeStoreHarness(input?: {
         const matches = state.cursor.userId === args.where.userId
           && state.cursor.version === args.where.version
           && state.cursor.committedSeq === args.where.committedSeq
-          && state.cursor.nextSeq > args.where.nextSeq.gt;
+          && (
+            !args.where.nextSeq
+            || state.cursor.nextSeq > args.where.nextSeq.gt
+          );
 
         if (!matches) {
           return { count: 0 };
