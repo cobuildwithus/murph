@@ -6,11 +6,17 @@ import {
 } from "@prisma/client";
 import type {
   HostedExecutionCursorState,
-  HostedExecutionDispatchLifecycleState,
+  HostedExecutionWakeKind,
   HostedWakeBehavior,
   HostedWakeCommitResponse,
   HostedWakeFetchResponse,
+  HostedWakeLifecycleState,
+  HostedWakePayloadSchema,
   HostedWakeRecord,
+} from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_WAKE_PAYLOAD_SCHEMAS,
+  isHostedExecutionWakeKind,
 } from "@murphai/hosted-execution/contracts";
 
 import { getPrisma } from "../prisma";
@@ -92,7 +98,7 @@ export interface AppendHostedWakeResult {
 
 export interface HostedWakeLifecycleRecord {
   eventId: string;
-  state: HostedExecutionDispatchLifecycleState;
+  state: HostedWakeLifecycleState;
 }
 
 export interface HostedWakeRepairCandidate {
@@ -554,7 +560,7 @@ export async function ensureHostedExecutionCursorRowTx(input: {
 async function resolveHostedWakeLifecycleStateTx(input: {
   record: HostedWakeRow;
   tx: HostedWakeStoreClient;
-}): Promise<HostedExecutionDispatchLifecycleState> {
+}): Promise<HostedWakeLifecycleState> {
   if (input.record.quarantinedAt) {
     return "poisoned";
   }
@@ -585,21 +591,50 @@ export function projectHostedWakeRecord(
   record: HostedWakeRow,
   payloadJson: unknown | null = null,
 ): HostedWakeRecord {
-  return {
+  const base = {
     behavior: record.behavior,
     coalescingKey: record.coalescingKey,
     createdAt: record.createdAt.toISOString(),
     dedupeKey: record.dedupeKey,
     id: record.id,
-    kind: record.kind,
     occurredAt: record.occurredAt.toISOString(),
     ...(payloadJson === null ? {} : { payloadJson }),
-    payloadSchema: record.payloadSchema,
     quarantineCode: record.quarantineCode,
     quarantinedAt: record.quarantinedAt?.toISOString() ?? null,
     seq: record.seq.toString(),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
+  };
+
+  if (!isHostedExecutionWakeKind(record.kind)) {
+    throw new TypeError(`Hosted wake kind is invalid: ${record.kind}`);
+  }
+  if (!HOSTED_WAKE_PAYLOAD_SCHEMAS.includes(record.payloadSchema as HostedWakePayloadSchema)) {
+    throw new TypeError(`Hosted wake payload schema is invalid: ${record.payloadSchema}`);
+  }
+
+  if (record.kind === "conversation.message") {
+    if (record.payloadSchema !== "murph.hosted-wake-conversation-message.v1") {
+      throw new TypeError(
+        `Hosted conversation wake payload schema is invalid: ${record.payloadSchema}`,
+      );
+    }
+
+    return {
+      ...base,
+      kind: record.kind,
+      payloadSchema: record.payloadSchema,
+    };
+  }
+
+  if (record.payloadSchema !== "murph.hosted-wake-system.v1") {
+    throw new TypeError(`Hosted system wake payload schema is invalid: ${record.payloadSchema}`);
+  }
+
+  return {
+    ...base,
+    kind: record.kind as Exclude<HostedExecutionWakeKind, "conversation.message">,
+    payloadSchema: record.payloadSchema,
   };
 }
 

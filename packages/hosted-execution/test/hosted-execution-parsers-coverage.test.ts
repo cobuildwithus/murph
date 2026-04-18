@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 import {
-  parseHostedExecutionDispatchResult,
   parseHostedExecutionEvent,
+  parseHostedWakeExecutionResult,
   parseHostedExecutionRunnerRequest,
   parseHostedExecutionRunnerResult,
   parseHostedExecutionSharePack,
@@ -138,7 +138,7 @@ describe("hosted execution parsers coverage", () => {
 
   describe("status and timeline parsing", () => {
     it("parses dispatch results with run status and timeline", () => {
-      const parsed = parseHostedExecutionDispatchResult({
+      const parsed = parseHostedWakeExecutionResult({
         event: {
           eventId: "evt_123",
           lastError: null,
@@ -250,7 +250,7 @@ describe("hosted execution parsers coverage", () => {
       ).toThrow(/timeline entries\[0\]\.level is invalid/i);
 
       expect(() =>
-        parseHostedExecutionDispatchResult({
+        parseHostedWakeExecutionResult({
           event: {
             eventId: "evt_123",
             lastError: null,
@@ -270,7 +270,7 @@ describe("hosted execution parsers coverage", () => {
             userId: "user_123",
           },
         }),
-      ).toThrow(/Unsupported hosted execution dispatch lifecycle state/i);
+      ).toThrow(/Unsupported hosted wake lifecycle state/i);
     });
   });
 

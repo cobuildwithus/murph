@@ -1,6 +1,6 @@
-import type { HostedExecutionDispatchLifecycleState } from "@murphai/hosted-execution";
+import type { HostedWakeLifecycleState } from "@murphai/hosted-execution";
 
-export type HostedWakeDrainState = HostedExecutionDispatchLifecycleState | "quarantined";
+export type HostedWakeDrainState = HostedWakeLifecycleState | "quarantined";
 
 export function shouldAdvanceHostedWakeCursor(
   state: HostedWakeDrainState,

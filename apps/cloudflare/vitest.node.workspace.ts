@@ -77,7 +77,6 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
         "base64.test.ts",
         "container-entrypoint.test.ts",
         "crypto.test.ts",
-        "dispatch-payload-store.test.ts",
         "env.test.ts",
         "hosted-email*.test.ts",
         "index*.test.ts",

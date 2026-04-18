@@ -3,9 +3,9 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 import {
-  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
-  type HostedExecutionDispatchLifecycleState,
+  HOSTED_WAKE_LIFECYCLE_STATES,
   type HostedExecutionWake,
+  type HostedWakeLifecycleState,
 } from "@murphai/hosted-execution/contracts";
 
 import { getPrisma } from "../prisma";
@@ -16,14 +16,14 @@ import {
   readHostedExecutionWakeTargetTx,
 } from "../hosted-wake/dispatch";
 
-export type HostedWakeLifecycleState = HostedExecutionDispatchLifecycleState;
-
 const DEFAULT_HOSTED_WAKE_LIFECYCLE_STATE: HostedWakeLifecycleState = "queued";
 const HOSTED_WAKE_LIFECYCLE_STATE_SET = new Set<HostedWakeLifecycleState>(
-  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
+  HOSTED_WAKE_LIFECYCLE_STATES,
 );
 
 type HostedWakeClient = PrismaClient | Prisma.TransactionClient;
+
+export type { HostedWakeLifecycleState };
 
 export interface HostedExecutionWakeMaterializationResult {
   eventId: string;

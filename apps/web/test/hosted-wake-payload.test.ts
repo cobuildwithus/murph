@@ -34,7 +34,7 @@ describe("Hosted wake payload storage", () => {
 
   it("spills oversized payloads to ref ciphertext and round-trips them", () => {
     const value = {
-      kind: "telegram.message.received",
+      kind: "conversation.message",
       text: "x".repeat(HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES + 256),
     };
     const encoded = encodeHostedWakeStoredPayload({

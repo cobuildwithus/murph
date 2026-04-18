@@ -164,7 +164,7 @@ describe("cloudflare web control plane wake helpers", () => {
                 userId: "user_123",
                 version: "4",
               },
-              dispatchState: "queued",
+              wakeState: "queued",
               pendingWakeCount: 1,
             }),
             {
@@ -185,7 +185,7 @@ describe("cloudflare web control plane wake helpers", () => {
         userId: "user_123",
         version: "4",
       },
-      dispatchState: "queued",
+      wakeState: "queued",
       pendingWakeCount: 1,
     });
 

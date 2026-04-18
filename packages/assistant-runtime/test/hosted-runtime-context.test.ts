@@ -78,7 +78,7 @@ function buildLegacyWake(input: {
         memberId: input.event.userId ?? "member_123",
         occurredAt: input.occurredAt,
       });
-    case "linq.message.received":
+    case "conversation.message":
       return buildHostedExecutionLinqConversationMessageWake({
         eventId: input.eventId,
         linqEvent: input.event.linqEvent as Record<string, unknown>,
@@ -88,7 +88,7 @@ function buildLegacyWake(input: {
         userId: input.event.userId ?? "member_123",
       });
     default:
-      throw new Error(`Unsupported legacy wake kind: ${input.event.kind}`);
+      throw new Error(`Unsupported wake kind: ${input.event.kind}`);
   }
 }
 
@@ -560,7 +560,7 @@ test("hosted Linq inbound dispatch self-heals managed Linq auto-reply when the h
         vaultRoot,
         buildLegacyWake({
           event: {
-            kind: "linq.message.received",
+            kind: "conversation.message",
             linqEvent: {
               data: {
                 chat_id: "chat_123",
@@ -621,7 +621,7 @@ test("hosted Linq inbound dispatch self-heal preserves existing managed channels
         vaultRoot,
         buildLegacyWake({
           event: {
-            kind: "linq.message.received",
+            kind: "conversation.message",
             linqEvent: {
               data: {
                 chat_id: "chat_123",
@@ -685,7 +685,7 @@ test("hosted Linq inbound dispatch self-heal does not enable auto-reply when the
         vaultRoot,
         buildLegacyWake({
           event: {
-            kind: "linq.message.received",
+            kind: "conversation.message",
             linqEvent: {
               data: {
                 chat_id: "chat_123",

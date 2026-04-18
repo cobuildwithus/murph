@@ -299,14 +299,6 @@ export interface HostedWakeExecutionResult {
   status: HostedExecutionUserStatus;
 }
 
-export const HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES = HOSTED_WAKE_LIFECYCLE_STATES;
-
-export type HostedExecutionDispatchLifecycleState = HostedWakeLifecycleState;
-
-export type HostedExecutionDispatchStatus = HostedWakeStatus;
-
-export type HostedExecutionDispatchResult = HostedWakeExecutionResult;
-
 export const HOSTED_WAKE_BEHAVIORS = [
   "ordered",
   "coalescing",

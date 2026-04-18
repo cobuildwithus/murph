@@ -1,9 +1,9 @@
 import type {
   HostedExecutionCursorState,
-  HostedExecutionDispatchResult,
-  HostedExecutionDispatchStatus,
   HostedExecutionWake,
   HostedExecutionUserStatus,
+  HostedWakeExecutionResult,
+  HostedWakeStatus,
 } from "@murphai/hosted-execution";
 import type { HostedWakeRecord } from "@murphai/hosted-execution/contracts";
 import {
@@ -288,7 +288,7 @@ export class HostedUserRunner {
 
   async enqueueHostedWakeWithOutcome(
     wake: HostedExecutionWake,
-  ): Promise<HostedExecutionDispatchResult> {
+  ): Promise<HostedWakeExecutionResult> {
     const status = await this.enqueueHostedWake(wake);
     const event = await this.readHostedWakeStatus(wake) ?? {
       eventId: wake.eventId,
@@ -678,7 +678,7 @@ export class HostedUserRunner {
 
   private async readHostedWakeStatus(
     wake: Pick<HostedExecutionWake, "eventId" | "userId">,
-  ): Promise<HostedExecutionDispatchStatus | null> {
+  ): Promise<HostedWakeStatus | null> {
     try {
       const wakeStatus = await readHostedWakeStatusFromWeb({
         baseUrl: this.readHostedWebControlBaseUrl(),
@@ -689,7 +689,7 @@ export class HostedUserRunner {
         callbackSigning: this.env.webCallbackSigning,
         timeoutMs: this.env.runnerTimeoutMs,
       });
-      const wakeState = wakeStatus.dispatchState;
+      const wakeState = wakeStatus.wakeState;
 
       if (!wakeState) {
         return null;
