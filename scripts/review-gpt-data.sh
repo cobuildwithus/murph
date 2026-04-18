@@ -60,7 +60,7 @@ fi
 tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt-data.XXXXXX.log")"
 
 set +e
-pnpm exec cobuild-review-gpt --config scripts/review-gpt.data.config.sh "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
+bash scripts/review-gpt-cli.sh --config scripts/review-gpt.data.config.sh "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
 command_status="${PIPESTATUS[0]}"
 set -e
 
