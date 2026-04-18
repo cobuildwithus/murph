@@ -1,7 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import {
-  type DeviceSyncAccount,
   deviceSyncError,
   sanitizeStoredDeviceSyncMetadata,
   toRedactedPublicDeviceSyncAccount,
@@ -9,58 +7,37 @@ import {
   type UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
 
-import {
-  buildHostedConnectionTokenCipherOptions,
-  buildHostedProviderAccountBlindIndex,
-  type HostedSecretCodec,
-} from "../crypto";
-import {
-  buildHostedPublicDeviceSyncAccount,
-  type HostedStaticDeviceSyncConnectionRecord,
-} from "../internal-runtime";
+import { buildHostedProviderAccountBlindIndex, type HostedSecretCodec } from "../crypto";
+import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
   maybeDate,
-  maybeIsoTimestamp,
   normalizeNullableString,
   sanitizeHostedSqlErrorText,
   generateHostedRandomPrefixedId,
 } from "../shared";
 import type { HostedPrismaTransactionClient } from "./types";
+import {
+  hostedConnectionRecordArgs,
+  mapHostedConnectionRecord,
+  normalizeStoredScopes,
+  type HostedConnectionRecord,
+  type HostedStoredDeviceSyncAccount,
+} from "./connection-records";
+import {
+  encryptHostedConnectionSecret,
+  readHostedStoredExternalAccountId,
+  readHostedStoredTokenBundle,
+  requireHostedSecretCodec,
+} from "./connection-secrets";
 
-export const hostedConnectionRecordArgs = {
-  select: {
-    accessTokenEncrypted: true,
-    accessTokenExpiresAt: true,
-    connectedAt: true,
-    createdAt: true,
-    displayName: true,
-    externalAccountIdEncrypted: true,
-    id: true,
-    keyVersion: true,
-    lastErrorCode: true,
-    lastErrorMessage: true,
-    lastSyncCompletedAt: true,
-    lastSyncErrorAt: true,
-    lastSyncStartedAt: true,
-    lastWebhookAt: true,
-    metadataJson: true,
-    nextReconcileAt: true,
-    provider: true,
-    providerAccountBlindIndex: true,
-    refreshTokenEncrypted: true,
-    scopesJson: true,
-    status: true,
-    tokenVersion: true,
-    updatedAt: true,
-    userId: true,
-  },
-} satisfies Prisma.DeviceConnectionDefaultArgs;
-
-export type HostedConnectionRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionRecordArgs>;
-export type HostedStoredDeviceSyncAccount = DeviceSyncAccount & {
-  keyVersion: string;
-  tokenVersion: number;
-};
+export {
+  hostedConnectionRecordArgs,
+  mapHostedConnectionRecord,
+} from "./connection-records";
+export type {
+  HostedConnectionRecord,
+  HostedStoredDeviceSyncAccount,
+} from "./connection-records";
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -84,7 +61,7 @@ export class PrismaHostedConnectionStore {
     const scopes = normalizeStoredScopes(input.scopes);
     const connectedAt = new Date(input.connectedAt);
     const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
-    const codec = this.requireCodec();
+    const codec = requireHostedSecretCodec(this.codec);
 
     const record = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.deviceConnection.findUnique({
@@ -116,37 +93,34 @@ export class PrismaHostedConnectionStore {
             id: existing.id,
           },
           data: {
-            accessTokenEncrypted: codec.encrypt(
-              input.tokens.accessToken,
-              buildHostedConnectionTokenCipherOptions({
-                connectionId: existing.id,
-                provider: input.provider,
-                purpose: "device-sync-access-token",
-              }),
-            ),
+            accessTokenEncrypted: encryptHostedConnectionSecret({
+              codec,
+              connectionId: existing.id,
+              provider: input.provider,
+              purpose: "device-sync-access-token",
+              value: input.tokens.accessToken,
+            }),
             accessTokenExpiresAt: maybeDate(input.tokens.accessTokenExpiresAt),
             connectedAt,
             displayName,
-            externalAccountIdEncrypted: codec.encrypt(
-              input.externalAccountId,
-              buildHostedConnectionTokenCipherOptions({
-                connectionId: existing.id,
-                provider: input.provider,
-                purpose: "device-sync-external-account-id",
-              }),
-            ),
+            externalAccountIdEncrypted: encryptHostedConnectionSecret({
+              codec,
+              connectionId: existing.id,
+              provider: input.provider,
+              purpose: "device-sync-external-account-id",
+              value: input.externalAccountId,
+            }),
             keyVersion: codec.keyVersion,
             metadataJson: metadata,
             nextReconcileAt: maybeDate(input.nextReconcileAt),
             refreshTokenEncrypted: input.tokens.refreshToken
-              ? codec.encrypt(
-                input.tokens.refreshToken,
-                buildHostedConnectionTokenCipherOptions({
-                  connectionId: existing.id,
-                  provider: input.provider,
-                  purpose: "device-sync-refresh-token",
-                }),
-              )
+              ? encryptHostedConnectionSecret({
+                codec,
+                connectionId: existing.id,
+                provider: input.provider,
+                purpose: "device-sync-refresh-token",
+                value: input.tokens.refreshToken,
+              })
               : null,
             scopesJson: scopes,
             status: input.status ?? "active",
@@ -169,25 +143,23 @@ export class PrismaHostedConnectionStore {
 
       return tx.deviceConnection.create({
         data: {
-          accessTokenEncrypted: codec.encrypt(
-            input.tokens.accessToken,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId,
-              provider: input.provider,
-              purpose: "device-sync-access-token",
-            }),
-          ),
+          accessTokenEncrypted: encryptHostedConnectionSecret({
+            codec,
+            connectionId,
+            provider: input.provider,
+            purpose: "device-sync-access-token",
+            value: input.tokens.accessToken,
+          }),
           accessTokenExpiresAt: maybeDate(input.tokens.accessTokenExpiresAt),
           connectedAt,
           displayName,
-          externalAccountIdEncrypted: codec.encrypt(
-            input.externalAccountId,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId,
-              provider: input.provider,
-              purpose: "device-sync-external-account-id",
-            }),
-          ),
+          externalAccountIdEncrypted: encryptHostedConnectionSecret({
+            codec,
+            connectionId,
+            provider: input.provider,
+            purpose: "device-sync-external-account-id",
+            value: input.externalAccountId,
+          }),
           id: connectionId,
           keyVersion: codec.keyVersion,
           metadataJson: metadata,
@@ -195,14 +167,13 @@ export class PrismaHostedConnectionStore {
           provider: input.provider,
           providerAccountBlindIndex,
           refreshTokenEncrypted: input.tokens.refreshToken
-            ? codec.encrypt(
-              input.tokens.refreshToken,
-              buildHostedConnectionTokenCipherOptions({
-                connectionId,
-                provider: input.provider,
-                purpose: "device-sync-refresh-token",
-              }),
-            )
+            ? encryptHostedConnectionSecret({
+              codec,
+              connectionId,
+              provider: input.provider,
+              purpose: "device-sync-refresh-token",
+              value: input.tokens.refreshToken,
+            })
             : null,
           scopesJson: scopes,
           status: input.status ?? "active",
@@ -330,10 +301,10 @@ export class PrismaHostedConnectionStore {
       return;
     }
 
-    const codec = this.requireCodec();
+    const codec = requireHostedSecretCodec(this.codec);
     const externalAccountId =
       input.externalAccountId === undefined
-        ? this.readStoredExternalAccountId(record)
+        ? readHostedStoredExternalAccountId(record, this.codec)
         : normalizeNullableString(input.externalAccountId);
 
     await prisma.deviceConnection.update({
@@ -342,36 +313,33 @@ export class PrismaHostedConnectionStore {
       },
       data: {
         accessTokenEncrypted: input.tokenBundle
-          ? codec.encrypt(
-            input.tokenBundle.accessToken,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId: input.connectionId,
-              provider: input.provider,
-              purpose: "device-sync-access-token",
-            }),
-          )
+          ? encryptHostedConnectionSecret({
+            codec,
+            connectionId: input.connectionId,
+            provider: input.provider,
+            purpose: "device-sync-access-token",
+            value: input.tokenBundle.accessToken,
+          })
           : null,
         accessTokenExpiresAt: maybeDate(input.tokenBundle?.accessTokenExpiresAt ?? null),
         externalAccountIdEncrypted: externalAccountId
-          ? codec.encrypt(
-            externalAccountId,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId: input.connectionId,
-              provider: input.provider,
-              purpose: "device-sync-external-account-id",
-            }),
-          )
+          ? encryptHostedConnectionSecret({
+            codec,
+            connectionId: input.connectionId,
+            provider: input.provider,
+            purpose: "device-sync-external-account-id",
+            value: externalAccountId,
+          })
           : null,
         keyVersion: input.tokenBundle?.keyVersion ?? null,
         refreshTokenEncrypted: input.tokenBundle?.refreshToken
-          ? codec.encrypt(
-            input.tokenBundle.refreshToken,
-            buildHostedConnectionTokenCipherOptions({
-              connectionId: input.connectionId,
-              provider: input.provider,
-              purpose: "device-sync-refresh-token",
-            }),
-          )
+          ? encryptHostedConnectionSecret({
+            codec,
+            connectionId: input.connectionId,
+            provider: input.provider,
+            purpose: "device-sync-refresh-token",
+            value: input.tokenBundle.refreshToken,
+          })
           : null,
         tokenVersion: input.tokenBundle?.tokenVersion ?? null,
       },
@@ -439,7 +407,7 @@ export class PrismaHostedConnectionStore {
     } = {},
   ): PublicDeviceSyncAccount {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = this.readStoredExternalAccountId(record);
+    mappedRecord.externalAccountId = readHostedStoredExternalAccountId(record, this.codec);
 
     return toRedactedPublicDeviceSyncAccount(
       buildHostedPublicDeviceSyncAccount({
@@ -451,11 +419,11 @@ export class PrismaHostedConnectionStore {
 
   private buildStoredConnectionAccount(record: HostedConnectionRecord): HostedStoredDeviceSyncAccount | null {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = this.readStoredExternalAccountId(record);
+    mappedRecord.externalAccountId = readHostedStoredExternalAccountId(record, this.codec);
     const publicConnection = buildHostedPublicDeviceSyncAccount({
       record: mappedRecord,
     });
-    const tokenBundle = this.readStoredTokenBundle(record);
+    const tokenBundle = readHostedStoredTokenBundle(record, this.codec);
 
     if (!tokenBundle) {
       return null;
@@ -470,119 +438,4 @@ export class PrismaHostedConnectionStore {
       tokenVersion: tokenBundle.tokenVersion,
     } satisfies HostedStoredDeviceSyncAccount;
   }
-
-  private readStoredTokenBundle(record: HostedConnectionRecord): {
-    accessToken: string;
-    accessTokenExpiresAt: string | null;
-    keyVersion: string;
-    refreshToken: string | null;
-    tokenVersion: number;
-  } | null {
-    const codec = this.codec;
-    const accessTokenEncrypted = normalizeNullableString(record.accessTokenEncrypted);
-    const keyVersion = normalizeNullableString(record.keyVersion);
-    const tokenVersion = typeof record.tokenVersion === "number" ? record.tokenVersion : null;
-
-    if (!codec || !accessTokenEncrypted || !keyVersion || !tokenVersion) {
-      return null;
-    }
-
-    return {
-      accessToken: codec.decrypt(
-        accessTokenEncrypted,
-        buildHostedConnectionTokenCipherOptions({
-          connectionId: record.id,
-          provider: record.provider,
-          purpose: "device-sync-access-token",
-        }),
-      ),
-      accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
-      keyVersion,
-      refreshToken: normalizeNullableString(record.refreshTokenEncrypted)
-        ? codec.decrypt(
-          normalizeNullableString(record.refreshTokenEncrypted)!,
-          buildHostedConnectionTokenCipherOptions({
-            connectionId: record.id,
-            provider: record.provider,
-            purpose: "device-sync-refresh-token",
-          }),
-        )
-        : null,
-      tokenVersion,
-    };
-  }
-
-  private readStoredExternalAccountId(record: HostedConnectionRecord): string | null {
-    const codec = this.codec;
-    const payload = normalizeNullableString(record.externalAccountIdEncrypted);
-
-    if (!codec || !payload) {
-      return null;
-    }
-
-    return codec.decrypt(
-      payload,
-      buildHostedConnectionTokenCipherOptions({
-        connectionId: record.id,
-        provider: record.provider,
-        purpose: "device-sync-external-account-id",
-      }),
-    );
-  }
-
-  private requireCodec(): HostedSecretCodec {
-    if (!this.codec) {
-      throw new TypeError("Hosted device-sync secret codec is required.");
-    }
-
-    return this.codec;
-  }
-}
-
-export function mapHostedConnectionRecord(record: HostedConnectionRecord): HostedStaticDeviceSyncConnectionRecord {
-  return {
-    accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
-    connectedAt: record.connectedAt.toISOString(),
-    createdAt: record.createdAt.toISOString(),
-    displayName: normalizeNullableString(record.displayName),
-    externalAccountId: null,
-    id: record.id,
-    lastErrorCode: normalizeNullableString(record.lastErrorCode),
-    lastErrorMessage: sanitizeHostedSqlErrorText(record.lastErrorMessage),
-    lastSyncCompletedAt: maybeIsoTimestamp(record.lastSyncCompletedAt),
-    lastSyncErrorAt: maybeIsoTimestamp(record.lastSyncErrorAt),
-    lastSyncStartedAt: maybeIsoTimestamp(record.lastSyncStartedAt),
-    lastWebhookAt: maybeIsoTimestamp(record.lastWebhookAt),
-    metadata: readStoredMetadata(record.metadataJson),
-    nextReconcileAt: maybeIsoTimestamp(record.nextReconcileAt),
-    provider: record.provider,
-    scopes: readStoredScopes(record.scopesJson),
-    status: record.status as HostedStaticDeviceSyncConnectionRecord["status"],
-    updatedAt: record.updatedAt.toISOString(),
-    userId: record.userId,
-  } satisfies HostedStaticDeviceSyncConnectionRecord;
-}
-
-function normalizeStoredScopes(value: readonly string[] | null | undefined): string[] {
-  return (value ?? [])
-    .map((entry) => normalizeNullableString(entry))
-    .filter((entry): entry is string => Boolean(entry));
-}
-
-function readStoredScopes(value: Prisma.JsonValue | null): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry) => normalizeNullableString(typeof entry === "string" ? entry : null))
-    .filter((entry): entry is string => Boolean(entry));
-}
-
-function readStoredMetadata(value: Prisma.JsonValue | null): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  return sanitizeStoredDeviceSyncMetadata(value as Record<string, unknown>);
 }

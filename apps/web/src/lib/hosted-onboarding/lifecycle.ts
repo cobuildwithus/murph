@@ -1,14 +1,11 @@
 import { HostedBillingStatus } from "@prisma/client";
 
 import { hasHostedMemberActiveAccess, isHostedMemberSuspended } from "./entitlement";
-
-export type HostedOnboardingStage =
-  | "invalid"
-  | "expired"
-  | "verify"
-  | "checkout"
-  | "blocked"
-  | "active";
+import {
+  resolveHostedAccessibleOnboardingStage,
+  type HostedOnboardingStage,
+  type HostedPostVerificationStage,
+} from "./stage";
 
 export function requiresHostedBillingCheckout(
   billingStatus: HostedBillingStatus,
@@ -18,6 +15,7 @@ export function requiresHostedBillingCheckout(
 }
 
 export function deriveHostedOnboardingStage(input: {
+  activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   expiresAt: Date;
   now: Date;
@@ -37,7 +35,7 @@ export function deriveHostedOnboardingStage(input: {
   }
 
   if (hasHostedMemberActiveAccess(input)) {
-    return "active";
+    return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
   if (requiresHostedBillingCheckout(input.billingStatus)) {
@@ -48,15 +46,16 @@ export function deriveHostedOnboardingStage(input: {
 }
 
 export function deriveHostedPostVerificationStage(input: {
+  activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   suspendedAt?: Date | null;
-}): "active" | "checkout" | "blocked" {
+}): HostedPostVerificationStage {
   if (isHostedMemberSuspended(input.suspendedAt)) {
     return "blocked";
   }
 
   if (input.billingStatus === HostedBillingStatus.active) {
-    return "active";
+    return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
   return requiresHostedBillingCheckout(input.billingStatus) ? "checkout" : "blocked";

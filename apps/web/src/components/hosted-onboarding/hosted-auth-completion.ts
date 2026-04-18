@@ -2,6 +2,7 @@ import {
   ensureHostedPrivyPhoneReady,
   ensureHostedPrivyWalletReady,
 } from "@/src/lib/hosted-onboarding/privy-client";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedPrivyCompletionWithRetry } from "./hosted-privy-auth-support";
@@ -68,7 +69,7 @@ async function resolveHostedAuthRedirectUrl(input: {
     return input.payload.joinUrl;
   }
 
-  if (input.intent === "signin" || input.payload.stage === "active") {
+  if (input.intent === "signin" || isHostedOnboardingAccessibleStage(input.payload.stage)) {
     return "/settings";
   }
 

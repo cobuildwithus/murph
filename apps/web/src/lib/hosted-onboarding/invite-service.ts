@@ -16,7 +16,12 @@ import {
   resolveConfiguredHostedBillingPlanCodes,
   resolveHostedBillingReady,
 } from "./billing-plans";
-import { readHostedPhoneHint } from "./contact-privacy";
+import {
+  createHostedPrivyUserLookupKey,
+  createHostedWalletAddressLookupKey,
+  hostedPhoneLookupKeyMatchesValue,
+  readHostedPhoneHint,
+} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
@@ -26,7 +31,8 @@ import {
   writeHostedMemberSignupPhoneState,
 } from "./hosted-member-identity-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
-import { hasHostedPrivyPhoneAuthConfig } from "./privy";
+import { type HostedPrivyIdentity, hasHostedPrivyPhoneAuthConfig } from "./privy";
+import { normalizeHostedWalletAddress } from "./revnet";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
@@ -46,6 +52,7 @@ const HOSTED_INVITE_SEND_CODE_COOLDOWN_MS = 60_000;
 
 export async function getHostedInviteStatus(input: {
   authenticatedMember?: HostedMember | null;
+  authenticatedSessionIdentity?: HostedPrivyIdentity | null;
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
@@ -73,7 +80,6 @@ export async function getHostedInviteStatus(input: {
 
   if (!invite) {
     return {
-      activationPending: false,
       billing: {
         defaultPlanCode: defaultBillingPlanCode,
         plans: billingPlans,
@@ -85,7 +91,7 @@ export async function getHostedInviteStatus(input: {
       invite: null,
       messagingSetupRequired: false,
       session: {
-        authenticated: Boolean(input.authenticatedMember),
+        authenticated: Boolean(input.authenticatedSessionIdentity ?? input.authenticatedMember),
         expiresAt: null,
         matchesInvite: false,
       },
@@ -93,7 +99,12 @@ export async function getHostedInviteStatus(input: {
     };
   }
 
-  const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
+  const sessionMatchesInvite = input.authenticatedSessionIdentity
+    ? resolveHostedInviteSessionMatchesInvite(
+        input.authenticatedSessionIdentity,
+        invite.member.identity,
+      )
+    : input.authenticatedMember?.id === invite.memberId;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
   const activationPending = sessionMatchesInvite
     ? await isHostedMemberActivationPending({
@@ -106,6 +117,7 @@ export async function getHostedInviteStatus(input: {
     ? projectHostedMemberRoutingState(invite.member.routing)
     : null;
   const stage = deriveHostedOnboardingStage({
+    activationPending,
     billingStatus: invite.member.billingStatus,
     expiresAt: invite.expiresAt,
     now,
@@ -118,7 +130,6 @@ export async function getHostedInviteStatus(input: {
   });
 
   return {
-    activationPending,
     billing: {
       defaultPlanCode: defaultBillingPlanCode,
       plans: billingPlans,
@@ -139,7 +150,7 @@ export async function getHostedInviteStatus(input: {
       stage,
     }),
     session: {
-      authenticated: Boolean(input.authenticatedMember),
+      authenticated: Boolean(input.authenticatedSessionIdentity ?? input.authenticatedMember),
       expiresAt: null,
       matchesInvite: Boolean(sessionMatchesInvite),
     },
@@ -490,6 +501,56 @@ function resolveHostedInviteMurphPhoneNumber(input: {
   );
 }
 
+function resolveHostedInviteSessionMatchesInvite(
+  sessionIdentity: HostedPrivyIdentity,
+  inviteIdentity: {
+    phoneLookupKey?: string | null;
+    privyUserId?: string | null;
+    privyUserLookupKey?: string | null;
+    walletAddress?: string | null;
+    walletAddressLookupKey?: string | null;
+  } | null,
+): boolean {
+  if (!inviteIdentity) {
+    return false;
+  }
+
+  const invitePrivyUserLookupKey =
+    inviteIdentity.privyUserLookupKey
+    ?? createHostedPrivyUserLookupKey(inviteIdentity.privyUserId ?? null);
+  if (
+    invitePrivyUserLookupKey
+    && createHostedPrivyUserLookupKey(sessionIdentity.userId) === invitePrivyUserLookupKey
+  ) {
+    return true;
+  }
+
+  if (
+    hostedPhoneLookupKeyMatchesValue(
+      sessionIdentity.phone?.number ?? null,
+      inviteIdentity.phoneLookupKey ?? null,
+    )
+  ) {
+    return true;
+  }
+
+  const inviteWalletAddressLookupKey =
+    inviteIdentity.walletAddressLookupKey
+    ?? createHostedWalletAddressLookupKey(inviteIdentity.walletAddress ?? null);
+  const sessionWalletAddress = normalizeHostedWalletAddress(
+    sessionIdentity.wallet?.address ?? null,
+  );
+
+  if (
+    inviteWalletAddressLookupKey
+    && createHostedWalletAddressLookupKey(sessionWalletAddress) === inviteWalletAddressLookupKey
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 async function findHostedInviteByCode(
   inviteCode: string,
   prisma: HostedOnboardingReadClient,
@@ -537,5 +598,8 @@ function readPhoneCodeRetryAfterMs(input: {
     return 0;
   }
 
-  return Math.max(0, input.sentAt.getTime() + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime());
+  return Math.max(
+    0,
+    input.sentAt.getTime() + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime(),
+  );
 }

@@ -1,14 +1,7 @@
-import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
-import {
-  sanitizeHostedRuntimeErrorCode,
-  sanitizeHostedRuntimeErrorText,
-} from "@murphai/device-syncd/hosted-runtime";
+import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import type {
-  DeviceSyncAccount,
-  DeviceSyncProvider,
   DeviceSyncRegistry,
-  ProviderAuthTokens,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
 import {
@@ -24,13 +17,20 @@ import { requireHostedDeviceSyncProvider } from "./providers";
 import {
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
-  type HostedStoredDeviceSyncAccount,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
+import {
+  buildStoredTokenBundle,
+  buildTokenExport,
+  type HostedTokenExport,
+  shouldRefreshHostedToken,
+} from "./agent-session-token-bundle";
+import { refreshProviderTokensWithStatusHandling } from "./agent-session-token-refresh";
 import { parseInteger, toIsoTimestamp } from "./shared";
 
+export type { HostedTokenExport } from "./agent-session-token-bundle";
+
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
-const TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
 const HOSTED_DEVICE_SYNC_AGENT_AUTH_MESSAGES = {
   required:
     "Hosted device-sync agent routes require a bearer token created by /api/device-sync/agents/pair.",
@@ -38,19 +38,6 @@ const HOSTED_DEVICE_SYNC_AGENT_AUTH_MESSAGES = {
     "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
   invalid: "Hosted device-sync agent bearer token is invalid or revoked.",
 } as const;
-
-export interface HostedTokenExport {
-  accessToken: string;
-  refreshToken: string | null;
-  accessTokenExpiresAt: string | null;
-  tokenVersion: number;
-  keyVersion: string;
-  exportedAt: string;
-}
-
-type HostedProviderTokenRefreshResult =
-  | { status: "success"; tokens: ProviderAuthTokens }
-  | { status: "error"; error: unknown };
 
 type HostedTokenRefreshLockResult =
   | {
@@ -259,7 +246,8 @@ export class HostedDeviceSyncAgentSessionService {
       }
 
       const provider = requireHostedDeviceSyncProvider(this.registry, currentConnection.provider);
-      const refreshResult = await this.refreshProviderTokensWithStatusHandling({
+      const refreshResult = await refreshProviderTokensWithStatusHandling({
+        store: this.store,
         tx,
         account: currentAccount,
         currentTokenBundle,
@@ -436,122 +424,4 @@ export class HostedDeviceSyncAgentSessionService {
   private async rotateAgentSession(session: HostedAgentSessionRecord, now: string): Promise<HostedAgentSessionBearer> {
     return this.agentSessions.rotateAgentSession(session, now);
   }
-
-  private async refreshProviderTokensWithStatusHandling(input: {
-    tx: HostedPrismaTransactionClient;
-    account: HostedStoredDeviceSyncAccount;
-    currentTokenBundle: {
-      accessToken: string;
-      accessTokenExpiresAt: string | null;
-      keyVersion: string;
-      refreshToken: string | null;
-      tokenVersion: number;
-    };
-    provider: DeviceSyncProvider;
-    now: string;
-    userId: string;
-  }): Promise<HostedProviderTokenRefreshResult> {
-    try {
-      return {
-        status: "success",
-        tokens: await input.provider.refreshTokens(input.account),
-      };
-    } catch (error) {
-      if (isDeviceSyncError(error) && error.accountStatus) {
-        const sanitizedErrorCode = sanitizeHostedRuntimeErrorCode(error.code) ?? "TOKEN_REFRESH_FAILED";
-        const sanitizedErrorMessage =
-          sanitizeHostedRuntimeErrorText(error.message) ?? "Token refresh failed.";
-        const seedAccount: PublicDeviceSyncAccount = {
-          ...input.account,
-          lastErrorCode: sanitizedErrorCode,
-          lastErrorMessage: sanitizedErrorMessage,
-          lastSyncErrorAt: input.now,
-          nextReconcileAt: error.accountStatus === "disconnected" ? null : input.account.nextReconcileAt,
-          status: error.accountStatus,
-        };
-
-        await this.store.createSignal({
-          userId: input.userId,
-          connectionId: input.account.id,
-          provider: input.account.provider,
-          kind: error.accountStatus === "disconnected" ? "disconnected" : "reauthorization_required",
-          occurredAt: input.now,
-          reason: "token_refresh_failed",
-          revokeWarning: {
-            code: sanitizedErrorCode,
-            message: sanitizedErrorMessage,
-          },
-          createdAt: input.now,
-          tx: input.tx,
-        });
-        await this.store.syncDurableConnectionState(seedAccount, input.tx);
-        await this.store.persistStoredConnectionTokenBundle({
-          connectionId: input.account.id,
-          externalAccountId: input.account.externalAccountId,
-          provider: input.account.provider,
-          tokenBundle: error.accountStatus === "disconnected"
-            ? null
-            : { ...input.currentTokenBundle },
-          tx: input.tx,
-        });
-
-      }
-
-      return {
-        status: "error",
-        error,
-      };
-    }
-  }
-}
-
-function buildTokenExport(
-  tokenBundle: {
-    accessToken: string;
-    accessTokenExpiresAt: string | null;
-    keyVersion: string;
-    refreshToken: string | null;
-    tokenVersion: number;
-  },
-  exportedAt: string,
-): HostedTokenExport {
-  return {
-    accessToken: tokenBundle.accessToken,
-    refreshToken: tokenBundle.refreshToken ?? null,
-    accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt ?? null,
-    tokenVersion: tokenBundle.tokenVersion,
-    keyVersion: tokenBundle.keyVersion,
-    exportedAt,
-  };
-}
-
-function buildStoredTokenBundle(
-  account: HostedStoredDeviceSyncAccount | null,
-): {
-  accessToken: string;
-  accessTokenExpiresAt: string | null;
-  keyVersion: string;
-  refreshToken: string | null;
-  tokenVersion: number;
-} | null {
-  if (!account) {
-    return null;
-  }
-
-  return {
-    accessToken: account.accessToken,
-    accessTokenExpiresAt: account.accessTokenExpiresAt ?? null,
-    keyVersion: account.keyVersion,
-    refreshToken: account.refreshToken,
-    tokenVersion: account.tokenVersion,
-  };
-}
-
-
-function shouldRefreshHostedToken(accessTokenExpiresAt: string | null, now: string): boolean {
-  if (!accessTokenExpiresAt) {
-    return false;
-  }
-
-  return Date.parse(accessTokenExpiresAt) <= Date.parse(now) + TOKEN_REFRESH_LEEWAY_MS;
 }

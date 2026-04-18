@@ -1,9 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
-import {
-  buildHostedInviteUrl,
-  issueHostedInviteTx,
-} from "./invite-service";
+import { issueHostedInviteTx } from "./invite-service";
 import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
@@ -12,22 +9,10 @@ import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
-  upsertHostedMemberHomeLinqBindingTx,
-  upsertHostedMemberPendingLinqBindingTx,
-} from "./hosted-member-routing-store";
-import {
-  claimHostedLinqOnboardingLinkNotice,
-  claimHostedLinqQuotaReplyNotice,
-  incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
 } from "./linq-daily-state";
 import {
   type HostedLinqWebhookEvent,
-  requireHostedLinqMessageReceivedEvent,
-  resolveHostedLinqOccurredAt,
-  resolveHostedLinqParticipantPhoneNumber,
-  resolveHostedLinqRecipientPhoneNumber,
-  summarizeHostedLinqMessage,
 } from "./linq";
 import {
   resolveHostedLinqActiveRouteDecision,
@@ -39,46 +24,46 @@ import {
   createHostedPhoneLookupKey,
   sanitizeHostedLinqEventForStorage,
 } from "./contact-privacy";
-import {
-  createHostedWebhookLinqMessageSideEffect,
-  type HostedWebhookPlan,
-} from "./webhook-receipts";
 import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
-
-export type HostedOnboardingLinqWebhookResponse = {
-  duplicate?: boolean;
-  ignored?: boolean;
-  inviteCode?: string;
-  joinUrl?: string;
-  ok: true;
-  reason?: string;
-};
-
-export type HostedOnboardingLinqActiveMemberDirectFinalization =
-  | {
-      kind: "mark_daily_quota_reply_sent";
-      memberId: string;
-      occurredAt: string;
-    };
-
-export type HostedOnboardingLinqActiveMemberDirectPlan =
-  HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> & {
-    finalization: HostedOnboardingLinqActiveMemberDirectFinalization | null;
-  };
+import {
+  bindHostedMemberHomeLinqChatAndTrackInbound,
+  bindHostedMemberPendingLinqChatAndTrackInbound,
+  buildActiveMemberDirectPlan,
+  buildConversationHomeRedirectResponse,
+  buildDirectQuotaReplyResponse,
+  buildIgnoredLinqWebhookPlan,
+  buildQuotaReplyResponse,
+  buildSignupLinkResponse,
+  resolveHostedOnboardingLinqMessageContext,
+} from "./webhook-provider-linq-shared";
+export type {
+  HostedOnboardingLinqDirectFinalization,
+  HostedOnboardingLinqDirectPlan,
+  HostedOnboardingLinqWebhookResponse,
+} from "./webhook-provider-linq-types";
+import type {
+  HostedOnboardingLinqDirectPlan,
+  HostedOnboardingLinqWebhookResponse,
+} from "./webhook-provider-linq-types";
+import type { HostedLinqMessageSideEffect } from "./webhook-transport";
+import type { HostedWebhookPlan } from "./webhook-service-types";
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedWebhookPlan<HostedOnboardingLinqWebhookResponse>> {
+}): Promise<HostedOnboardingLinqDirectPlan> {
   if (input.event.event_type !== "message.received") {
     return buildIgnoredLinqWebhookPlan(input.event.event_type);
   }
 
-  const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
-  const summary = summarizeHostedLinqMessage(messageEvent);
-  const occurredAt = resolveHostedLinqOccurredAt(messageEvent);
-  const participantPhoneNumber = resolveHostedLinqParticipantPhoneNumber(messageEvent);
-  const recipientPhoneNumber = resolveHostedLinqRecipientPhoneNumber(messageEvent);
+  const context = resolveHostedOnboardingLinqMessageContext(input.event);
+  const {
+    messageEvent,
+    occurredAt,
+    participantPhoneNumber,
+    recipientPhoneNumber,
+    summary,
+  } = context;
 
   if (!participantPhoneNumber) {
     return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-phone");
@@ -218,325 +203,25 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
   }
 
-  const shouldSendInvite = await claimHostedLinqOnboardingLinkNotice({
-    memberId: member.id,
-    occurredAt,
-    prisma: input.prisma,
-  });
-
-  if (!shouldSendInvite) {
-    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
-  }
-
   const invite = await issueHostedInviteTx({
     channel: "linq",
     memberId: member.id,
     prisma: input.prisma,
   });
 
-  return buildSignupLinkResponse({
-    activeSubscription: hasHostedMemberActiveAccess(member),
-    chatId: summary.chatId,
-    inviteCode: invite.inviteCode,
-    inviteId: invite.id,
-    messageId: summary.messageId,
-    sourceEventId: input.event.event_id,
-  });
-}
-
-export async function planHostedOnboardingLinqActiveMemberDirect(input: {
-  event: HostedLinqWebhookEvent;
-  prisma: Prisma.TransactionClient;
-}): Promise<HostedOnboardingLinqActiveMemberDirectPlan | null> {
-  if (input.event.event_type !== "message.received") {
-    return null;
-  }
-
-  const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
-  const summary = summarizeHostedLinqMessage(messageEvent);
-  const occurredAt = resolveHostedLinqOccurredAt(messageEvent);
-  const participantPhoneNumber = resolveHostedLinqParticipantPhoneNumber(messageEvent);
-  const recipientPhoneNumber = resolveHostedLinqRecipientPhoneNumber(messageEvent);
-
-  if (!participantPhoneNumber) {
-    return null;
-  }
-
-  const existingMemberLookup = await lookupHostedMemberIdentityByPhoneNumber({
-    phoneNumber: participantPhoneNumber,
-    prisma: input.prisma,
-  });
-  const existingMember = existingMemberLookup?.core ?? null;
-
-  if (
-    !existingMember
-    || isHostedMemberSuspended(existingMember.suspendedAt)
-    || !hasHostedMemberActiveAccess(existingMember)
-  ) {
-    return null;
-  }
-
-  if (summary.isFromMe) {
-    await incrementHostedLinqOutboundDailyState({
-      memberId: existingMember.id,
-      occurredAt,
-      prisma: input.prisma,
-    });
-
-    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("own-message"));
-  }
-
-  const member = await readHostedMemberSnapshot({
-    memberId: existingMember.id,
-    prisma: input.prisma,
-  });
-
-  if (!member) {
-    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("missing-member"));
-  }
-
-  const routeDecision = resolveHostedLinqActiveRouteDecision({
-    homeChatId: member.routing?.linqChatId ?? null,
-    homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
-    incomingChatId: summary.chatId,
-    incomingRecipientPhone: recipientPhoneNumber,
-  });
-
-  if (routeDecision.kind === "redirect_to_home") {
-    return buildActiveMemberDirectPlan(buildConversationHomeRedirectResponse({
-      chatId: summary.chatId,
-      homeRecipientPhone: routeDecision.homeRecipientPhone,
-      memberId: existingMember.id,
-      messageId: summary.messageId,
-      sourceEventId: input.event.event_id,
-    }));
-  }
-
-  if (routeDecision.kind === "ignore_unknown_home") {
-    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("unknown-home-line"));
-  }
-
-  const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
-    chatId: summary.chatId,
-    memberId: existingMember.id,
-    occurredAt,
-    prisma: input.prisma,
-    recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
-      homeChatId: member.routing?.linqChatId ?? null,
-      homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
-      incomingChatId: summary.chatId,
-      incomingRecipientPhone: recipientPhoneNumber,
-    }),
-  });
-
-  if (dailyState.inboundCount > 100) {
-    if (dailyState.quotaReplySentAt) {
-      return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("daily-quota-reached"));
-    }
-
-    return buildDirectQuotaReplyResponse({
-      chatId: summary.chatId,
-      memberId: existingMember.id,
-      messageId: summary.messageId,
-      occurredAt,
-      sourceEventId: input.event.event_id,
-    });
-  }
-
-  const phoneLookupKey = createHostedPhoneLookupKey(participantPhoneNumber);
-
-  if (!phoneLookupKey) {
-    return buildActiveMemberDirectPlan(buildIgnoredLinqWebhookPlan("invalid-phone"));
-  }
-
-  await materializeHostedExecutionWakeTx({
-    wake: buildHostedExecutionLinqConversationMessageWake({
-      eventId: input.event.event_id,
-      linqEvent: sanitizeHostedLinqEventForStorage(
-        minimizeLinqMessageReceivedEvent(messageEvent),
-        {
-          omitRecipientPhone: true,
-          preserveFrom: true,
-        },
-      ),
-      linqMessageId: summary.messageId,
-      occurredAt,
-      phoneLookupKey,
-      userId: existingMember.id,
-    }),
-    tx: input.prisma,
-  });
-
-  return buildActiveMemberDirectPlan({
-    desiredSideEffects: [],
-    response: {
-      ok: true,
-      ignored: false,
-      reason: "wake-appended-active-member",
-    },
-  });
-}
-
-function buildIgnoredLinqWebhookPlan(
-  reason: string,
-): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
-  return {
-    desiredSideEffects: [],
-    response: {
-      ok: true,
-      ignored: true,
-      reason,
-    },
-  };
-}
-
-function buildSignupLinkResponse(input: {
-  activeSubscription: boolean;
-  chatId: string;
-  inviteCode: string;
-  inviteId: string;
-  messageId: string;
-  sourceEventId: string;
-}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
-  const joinUrl = buildHostedInviteUrl(input.inviteCode);
-
-  return {
-    desiredSideEffects: [
-      createHostedWebhookLinqMessageSideEffect({
-        chatId: input.chatId,
-        inviteId: input.inviteId,
-        replyToMessageId: input.messageId,
-        sourceEventId: input.sourceEventId,
-        template: input.activeSubscription ? "invite_signin" : "invite_signup",
-      }),
-    ],
-    response: {
-      ok: true,
-      inviteCode: input.inviteCode,
-      joinUrl,
-      reason: "sent-signup-link",
-    },
-  };
-}
-
-function buildActiveMemberDirectPlan(
-  plan: HostedWebhookPlan<HostedOnboardingLinqWebhookResponse>,
-  finalization: HostedOnboardingLinqActiveMemberDirectFinalization | null = null,
-): HostedOnboardingLinqActiveMemberDirectPlan {
-  return {
-    ...plan,
-    finalization,
-  };
-}
-
-function buildConversationHomeRedirectResponse(input: {
-  chatId: string;
-  homeRecipientPhone: string;
-  memberId: string;
-  messageId: string;
-  sourceEventId: string;
-}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
-  return {
-    desiredSideEffects: [
-      createHostedWebhookLinqMessageSideEffect({
-        chatId: input.chatId,
-        // Keep the current home line as an operational fallback so deferred
-        // receipt sends do not depend on routing still being present later.
-        homeRecipientPhone: input.homeRecipientPhone,
-        memberId: input.memberId,
-        replyToMessageId: input.messageId,
-        sourceEventId: input.sourceEventId,
-        template: "conversation_home_redirect",
-      }),
-    ],
-    response: {
-      ok: true,
-      reason: "redirected-to-home-line",
-    },
-  };
-}
-
-function buildQuotaReplyResponse(input: {
-  chatId: string;
-  messageId: string;
-  sourceEventId: string;
-}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
-  return {
-    desiredSideEffects: [
-      createHostedWebhookLinqMessageSideEffect({
-        chatId: input.chatId,
-        replyToMessageId: input.messageId,
-        sourceEventId: input.sourceEventId,
-        template: "daily_quota",
-      }),
-    ],
-    response: {
-      ok: true,
-      reason: "sent-daily-quota-reply",
-    },
-  };
-}
-
-function buildDirectQuotaReplyResponse(input: {
-  chatId: string;
-  memberId: string;
-  messageId: string;
-  occurredAt: string;
-  sourceEventId: string;
-}): HostedOnboardingLinqActiveMemberDirectPlan {
   return buildActiveMemberDirectPlan(
-    buildQuotaReplyResponse({
-      chatId: input.chatId,
-      messageId: input.messageId,
-      sourceEventId: input.sourceEventId,
+    buildSignupLinkResponse({
+      activeSubscription: hasHostedMemberActiveAccess(member),
+      chatId: summary.chatId,
+      inviteCode: invite.inviteCode,
+      inviteId: invite.id,
+      messageId: summary.messageId,
+      sourceEventId: input.event.event_id,
     }),
     {
-      kind: "mark_daily_quota_reply_sent",
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
+      kind: "mark_onboarding_link_sent",
+      memberId: member.id,
+      occurredAt,
     },
   );
-}
-
-async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
-  chatId: string;
-  memberId: string;
-  occurredAt: string;
-  prisma: Prisma.TransactionClient;
-  recipientPhone: string | null;
-}) {
-  await upsertHostedMemberHomeLinqBindingTx({
-    clearPending: true,
-    linqChatId: input.chatId,
-    memberId: input.memberId,
-    prisma: input.prisma,
-    recipientPhone: input.recipientPhone,
-  });
-
-  return incrementHostedLinqInboundDailyState({
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
-  });
-}
-
-async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
-  chatId: string;
-  memberId: string;
-  occurredAt: string;
-  prisma: Prisma.TransactionClient;
-  recipientPhone: string | null;
-}) {
-  await upsertHostedMemberPendingLinqBindingTx({
-    linqChatId: input.chatId,
-    memberId: input.memberId,
-    prisma: input.prisma,
-    recipientPhone: input.recipientPhone,
-  });
-
-  return incrementHostedLinqInboundDailyState({
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
-  });
 }

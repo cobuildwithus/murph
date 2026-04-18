@@ -10,6 +10,7 @@ import type {
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
+import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 
 import { JoinInviteEyebrow, type JoinInviteEyebrowTone } from "./join-invite-eyebrow";
 
@@ -33,6 +34,7 @@ import {
   useHostedInviteStatusRefresh,
 } from "./invite-status-client";
 import {
+  hasResolvedHostedInviteVerification,
   resolveInviteStatusAfterPrivyCompletion,
   resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteSubtitle,
@@ -66,7 +68,7 @@ export function JoinInviteClient({
 }: JoinInviteClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [hasCompletedInitialRefresh, setHasCompletedInitialRefresh] = useState(
-    initialStatus.stage !== "verify" || !initialStatus.session.authenticated,
+    hasResolvedHostedInviteVerification(initialStatus),
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [billingPlanCode, setBillingPlanCode] = useState<HostedBillingPlanCode | null>(
@@ -119,11 +121,11 @@ export function JoinInviteClient({
     onStatus: (payload) => {
       applyRefreshedStatus(payload);
       setStatusRefreshErrorMessage(null);
-      if (!payload.session.authenticated || payload.stage !== "verify") {
+      if (hasResolvedHostedInviteVerification(payload)) {
         setHasCompletedInitialRefresh(true);
       }
     },
-    shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.activationPending,
+    shouldPoll: isHostedOnboardingPendingStage(status.stage),
     disabled: preview,
   });
 
@@ -131,7 +133,7 @@ export function JoinInviteClient({
     const payload = await fetchHostedInviteStatus(inviteCode);
     applyRefreshedStatus(payload);
     setStatusRefreshErrorMessage(null);
-    if (!payload.session.authenticated || payload.stage !== "verify") {
+    if (hasResolvedHostedInviteVerification(payload)) {
       setHasCompletedInitialRefresh(true);
     }
     return payload;

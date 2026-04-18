@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
+import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
@@ -241,9 +242,6 @@ export function JoinInviteCheckoutPanel({
                   </span>
                 ) : null}
               </div>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                {plan.description}
-              </p>
             </button>
           );
         })}
@@ -274,20 +272,22 @@ export function JoinInviteCheckoutPanel({
 }
 
 export function JoinInviteActivePanel({
-  activationPending,
   murphPhoneNumber,
   pendingAction,
   shareImportState,
   sharePreview,
+  stage,
   onAcceptShare,
 }: {
-  activationPending: boolean;
   murphPhoneNumber: string | null;
   pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
+  stage: HostedAccessibleOnboardingStage;
   onAcceptShare: () => Promise<void>;
 }) {
+  const activationPending = stage === "activating";
+
   return (
     <div className="flex flex-col gap-8">
       {activationPending ? (

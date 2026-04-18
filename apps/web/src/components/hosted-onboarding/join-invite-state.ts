@@ -11,6 +11,12 @@ import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 
 export type JoinInviteShareImportState = "idle" | "processing" | "completed";
 
+export function hasResolvedHostedInviteVerification(
+  status: HostedInviteStatusPayload,
+): boolean {
+  return status.stage !== "verify" || !status.session.authenticated;
+}
+
 export function resolveInviteStatusAfterPrivyCompletion(
   status: HostedInviteStatusPayload,
   payload: HostedPrivyCompletionPayload,
@@ -52,7 +58,7 @@ export function shouldAwaitHostedInviteSessionResolution(input: {
   hasCompletedInitialRefresh: boolean;
   status: HostedInviteStatusPayload;
 }): boolean {
-  return input.status.stage === "verify" && !input.hasCompletedInitialRefresh;
+  return !input.hasCompletedInitialRefresh && !hasResolvedHostedInviteVerification(input.status);
 }
 
 export function resolveJoinInviteShareStateFromAccept(
@@ -101,6 +107,8 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
       return "Confirm your number";
     case "checkout":
       return "One last step";
+    case "activating":
+      return "Finishing your setup";
     case "blocked":
       return "Account blocked";
     case "active":
@@ -121,12 +129,11 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
       return status.messagingSetupRequired
         ? "Add a phone number or Telegram so Murph can reach you after payment."
         : "Choose a plan, then finish payment to start using Murph.";
+    case "activating":
+      return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;
     case "blocked":
       return "This account can’t continue from this invite.";
     case "active":
-      if (status.activationPending) {
-        return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;
-      }
       return status.murphPhoneNumber
         ? "Text Murph below to start."
         : "You’re all set.";

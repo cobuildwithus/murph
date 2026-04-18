@@ -7,8 +7,6 @@ import {
 
 import {
   createHostedPhoneLookupKey,
-  hostedPhoneLookupKeyMatchesValue,
-  readHostedPhoneHint,
 } from "./contact-privacy";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
@@ -20,26 +18,35 @@ import {
   type HostedOnboardingReadClient,
 } from "./shared";
 import {
-  isHostedOnboardingRevnetEnabled,
   normalizeHostedWalletAddress,
 } from "./revnet";
 import { createHostedMember, readHostedMemberCoreState } from "./hosted-member-store";
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
-  lookupHostedMemberIdentityByPrivyUserId,
-  lookupHostedMemberIdentityByWalletAddress,
   readHostedMemberIdentity,
   type HostedMemberIdentityLookup,
-  type HostedMemberIdentityLookupMatch,
   upsertHostedMemberIdentity,
 } from "./hosted-member-identity-store";
+import {
+  assertHostedPrivyIdentityMatchesExpectedPhone,
+  assertHostedPrivyWalletAvailableWhenRequired,
+  buildHostedMemberPhoneIdentityFields,
+  buildHostedMemberWalletIdentityFields,
+  buildHostedPersistedPhoneIdentityFields,
+} from "./member-identity-fields";
+import {
+  createHostedPrivyIdentityConflictError,
+  hasHostedMemberPrivyIdentity,
+  lookupHostedMemberForPrivyIdentity,
+  type HostedMemberPrivyIdentityLookup,
+} from "./member-identity-lookup";
 
-export interface HostedMemberPrivyIdentityLookup {
-  core: HostedMemberIdentityLookup["core"];
-  identity: HostedMemberIdentityLookup["identity"];
-  matchedBy: HostedMemberIdentityLookupMatch[];
-}
+export {
+  hasHostedMemberPrivyIdentity,
+  lookupHostedMemberForPrivyIdentity,
+};
+export type { HostedMemberPrivyIdentityLookup };
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
@@ -143,142 +150,6 @@ async function refreshHostedMemberForPhoneTx(input: {
     walletProvider: input.currentIdentity?.walletProvider ?? null,
   });
   return input.member;
-}
-
-function buildHostedMemberPhoneIdentityFields(phoneNumber: string) {
-  const maskedPhoneNumberHint = readHostedPhoneHint(phoneNumber);
-  const phoneLookupKey = createHostedPhoneLookupKey(phoneNumber);
-
-  if (!phoneLookupKey) {
-    throw hostedOnboardingError({
-      code: "PHONE_NUMBER_INVALID",
-      message: "A valid phone number is required to continue.",
-      httpStatus: 400,
-    });
-  }
-
-  return {
-    maskedPhoneNumberHint,
-    phoneLookupKey,
-    phoneNumberVerifiedAt: null,
-    phoneNumber: phoneNumber.trim(),
-    privyUserId: null,
-    walletAddress: null,
-    walletChainType: null,
-    walletCreatedAt: null,
-    walletProvider: null,
-  };
-}
-
-function buildHostedOptionalMemberPhoneIdentityFields(phone: HostedPrivyIdentity["phone"]) {
-  if (!phone) {
-    return {
-      maskedPhoneNumberHint: null,
-      phoneLookupKey: null,
-      phoneNumber: null,
-    };
-  }
-
-  const fields = buildHostedMemberPhoneIdentityFields(phone.number);
-
-  return {
-    maskedPhoneNumberHint: fields.maskedPhoneNumberHint,
-    phoneLookupKey: fields.phoneLookupKey,
-    phoneNumber: fields.phoneNumber,
-  };
-}
-
-function buildHostedPersistedPhoneIdentityFields(input: {
-  currentIdentity?: {
-    maskedPhoneNumberHint: string | null;
-    phoneLookupKey: string | null;
-    phoneNumber: string | null;
-    phoneNumberVerifiedAt: Date | null;
-  } | null;
-  now: Date;
-  phone: HostedPrivyIdentity["phone"];
-}) {
-  if (input.phone) {
-    return {
-      ...buildHostedOptionalMemberPhoneIdentityFields(input.phone),
-      phoneNumberVerifiedAt: input.now,
-    };
-  }
-
-  return {
-    maskedPhoneNumberHint: input.currentIdentity?.maskedPhoneNumberHint ?? null,
-    phoneLookupKey: input.currentIdentity?.phoneLookupKey ?? null,
-    phoneNumber: input.currentIdentity?.phoneNumber ?? null,
-    phoneNumberVerifiedAt: input.currentIdentity?.phoneNumberVerifiedAt ?? null,
-  };
-}
-
-function buildHostedMemberWalletIdentityFields(input: {
-  existingWalletAddress?: string | null;
-  existingWalletChainType?: string | null;
-  existingWalletCreatedAt?: Date | null;
-  existingWalletProvider?: string | null;
-  now: Date;
-  wallet: HostedPrivyIdentity["wallet"];
-}) {
-  if (!input.wallet) {
-    return {
-      walletAddress: input.existingWalletAddress ?? null,
-      walletChainType: input.existingWalletChainType ?? null,
-      walletCreatedAt: input.existingWalletCreatedAt ?? null,
-      walletProvider: input.existingWalletProvider ?? null,
-    };
-  }
-
-  return {
-    walletAddress: normalizeHostedWalletAddress(input.wallet.address),
-    walletChainType: input.wallet.chainType,
-    walletCreatedAt: input.existingWalletCreatedAt ?? input.now,
-    walletProvider: "privy" as const,
-  };
-}
-
-function assertHostedPrivyWalletAvailableWhenRequired(identity: HostedPrivyIdentity): void {
-  if (!identity.wallet && isHostedOnboardingRevnetEnabled()) {
-    throw hostedOnboardingError({
-      code: "PRIVY_WALLET_REQUIRED",
-      message: "Finish setup before continuing.",
-      httpStatus: 400,
-    });
-  }
-}
-
-function assertHostedPrivyIdentityMatchesExpectedPhone(input: {
-  expectedPhoneHint?: string;
-  expectedPhoneLookupKey?: string;
-  identity: HostedPrivyIdentity;
-}): void {
-  if (!input.expectedPhoneLookupKey) {
-    return;
-  }
-
-  if (!input.identity.phone) {
-    throw hostedOnboardingError({
-      code: "PRIVY_PHONE_REQUIRED",
-      message: "Finish phone verification before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  if (!hostedPhoneLookupKeyMatchesValue(input.identity.phone.number, input.expectedPhoneLookupKey)) {
-    throw hostedOnboardingError({
-      code: "PRIVY_PHONE_MISMATCH",
-      message: `Enter the same phone number that received this invite (${input.expectedPhoneHint ?? "your invited number"}).`,
-      httpStatus: 403,
-    });
-  }
-}
-
-export function hasHostedMemberPrivyIdentity(member: {
-  privyUserId?: string | null | undefined;
-  privyUserLookupKey?: string | null | undefined;
-}): boolean {
-  return Boolean(member.privyUserId ?? member.privyUserLookupKey);
 }
 
 export async function ensureHostedMemberForPrivyIdentity(input: {
@@ -452,102 +323,9 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     return currentMember;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw hostedOnboardingError({
-        code: "PRIVY_IDENTITY_CONFLICT",
-        message: "This verified phone session conflicts with an existing Murph account. Contact support so we can merge it safely.",
-        httpStatus: 409,
-      });
+      throw createHostedPrivyIdentityConflictError();
     }
 
     throw error;
   }
-}
-
-export async function lookupHostedMemberForPrivyIdentity(input: {
-  identity: HostedPrivyIdentity;
-  parallelizeReads?: boolean;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberPrivyIdentityLookup | null> {
-  const matches = new Map<string, HostedMemberPrivyIdentityLookup>();
-  const normalizedWalletAddress = input.identity.wallet
-    ? normalizeHostedWalletAddress(input.identity.wallet.address)
-    : null;
-  const phoneLookupKey = input.identity.phone
-    ? createHostedPhoneLookupKey(input.identity.phone.number)
-    : null;
-  const lookupByPrivyUserId = input.identity.userId
-    ? () => lookupHostedMemberIdentityByPrivyUserId({
-        privyUserId: input.identity.userId,
-        prisma: input.prisma,
-      })
-    : null;
-  const lookupByPhoneNumber = phoneLookupKey
-    ? () => lookupHostedMemberIdentityByPhoneNumber({
-        phoneNumber: input.identity.phone!.number,
-        prisma: input.prisma,
-      })
-    : null;
-  const lookupByWalletAddress = normalizedWalletAddress
-    ? () => lookupHostedMemberIdentityByWalletAddress({
-        prisma: input.prisma,
-        walletAddress: normalizedWalletAddress,
-      })
-    : null;
-
-  const [memberByPrivyUserId, memberByPhoneNumber, memberByWalletAddress] =
-    input.parallelizeReads
-      ? await Promise.all([
-          lookupByPrivyUserId?.() ?? Promise.resolve(null),
-          lookupByPhoneNumber?.() ?? Promise.resolve(null),
-          lookupByWalletAddress?.() ?? Promise.resolve(null),
-        ])
-      : [
-          lookupByPrivyUserId ? await lookupByPrivyUserId() : null,
-          lookupByPhoneNumber ? await lookupByPhoneNumber() : null,
-          lookupByWalletAddress ? await lookupByWalletAddress() : null,
-        ];
-
-  if (memberByPrivyUserId) {
-    addHostedMemberPrivyIdentityMatch(matches, memberByPrivyUserId);
-  }
-
-  if (memberByPhoneNumber) {
-    addHostedMemberPrivyIdentityMatch(matches, memberByPhoneNumber);
-  }
-
-  if (memberByWalletAddress) {
-    addHostedMemberPrivyIdentityMatch(matches, memberByWalletAddress);
-  }
-
-  if (matches.size > 1) {
-    throw hostedOnboardingError({
-      code: "PRIVY_IDENTITY_CONFLICT",
-      message: "This verified phone session conflicts with an existing Murph account. Contact support so we can merge it safely.",
-      httpStatus: 409,
-    });
-  }
-
-  return matches.values().next().value ?? null;
-}
-
-function addHostedMemberPrivyIdentityMatch(
-  matches: Map<string, HostedMemberPrivyIdentityLookup>,
-  match: HostedMemberIdentityLookup,
-): void {
-  const existingMatch = matches.get(match.core.id);
-
-  if (existingMatch) {
-    if (!existingMatch.matchedBy.includes(match.matchedBy)) {
-      existingMatch.matchedBy.push(match.matchedBy);
-    }
-    return;
-  }
-
-  matches.set(match.core.id, {
-    core: match.core,
-    identity: match.identity,
-    matchedBy: [
-      match.matchedBy,
-    ],
-  });
 }

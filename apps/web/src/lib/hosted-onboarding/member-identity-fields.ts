@@ -1,0 +1,150 @@
+import { type HostedPrivyIdentity } from "./privy";
+
+import {
+  createHostedPhoneLookupKey,
+  hostedPhoneLookupKeyMatchesValue,
+  readHostedPhoneHint,
+} from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
+import {
+  isHostedOnboardingRevnetEnabled,
+  normalizeHostedWalletAddress,
+} from "./revnet";
+
+export function buildHostedMemberPhoneIdentityFields(phoneNumber: string) {
+  const maskedPhoneNumberHint = readHostedPhoneHint(phoneNumber);
+  const phoneLookupKey = createHostedPhoneLookupKey(phoneNumber);
+
+  if (!phoneLookupKey) {
+    throw hostedOnboardingError({
+      code: "PHONE_NUMBER_INVALID",
+      message: "A valid phone number is required to continue.",
+      httpStatus: 400,
+    });
+  }
+
+  return {
+    maskedPhoneNumberHint,
+    phoneLookupKey,
+    phoneNumberVerifiedAt: null,
+    phoneNumber: phoneNumber.trim(),
+    privyUserId: null,
+    walletAddress: null,
+    walletChainType: null,
+    walletCreatedAt: null,
+    walletProvider: null,
+  };
+}
+
+export function buildHostedPersistedPhoneIdentityFields(input: {
+  currentIdentity?: {
+    maskedPhoneNumberHint: string | null;
+    phoneLookupKey: string | null;
+    phoneNumber: string | null;
+    phoneNumberVerifiedAt: Date | null;
+  } | null;
+  now: Date;
+  phone: HostedPrivyIdentity["phone"];
+}) {
+  if (input.phone) {
+    return {
+      ...buildHostedOptionalMemberPhoneIdentityFields(input.phone),
+      phoneNumberVerifiedAt: input.now,
+    };
+  }
+
+  return {
+    maskedPhoneNumberHint: input.currentIdentity?.maskedPhoneNumberHint ?? null,
+    phoneLookupKey: input.currentIdentity?.phoneLookupKey ?? null,
+    phoneNumber: input.currentIdentity?.phoneNumber ?? null,
+    phoneNumberVerifiedAt: input.currentIdentity?.phoneNumberVerifiedAt ?? null,
+  };
+}
+
+export function buildHostedMemberWalletIdentityFields(input: {
+  existingWalletAddress?: string | null;
+  existingWalletChainType?: string | null;
+  existingWalletCreatedAt?: Date | null;
+  existingWalletProvider?: string | null;
+  now: Date;
+  wallet: HostedPrivyIdentity["wallet"];
+}) {
+  if (!input.wallet) {
+    return {
+      walletAddress: input.existingWalletAddress ?? null,
+      walletChainType: input.existingWalletChainType ?? null,
+      walletCreatedAt: input.existingWalletCreatedAt ?? null,
+      walletProvider: input.existingWalletProvider ?? null,
+    };
+  }
+
+  return {
+    walletAddress: normalizeHostedWalletAddress(input.wallet.address),
+    walletChainType: input.wallet.chainType,
+    walletCreatedAt: input.existingWalletCreatedAt ?? input.now,
+    walletProvider: "privy" as const,
+  };
+}
+
+export function assertHostedPrivyWalletAvailableWhenRequired(
+  identity: HostedPrivyIdentity,
+): void {
+  if (!identity.wallet && isHostedOnboardingRevnetEnabled()) {
+    throw hostedOnboardingError({
+      code: "PRIVY_WALLET_REQUIRED",
+      message: "Finish setup before continuing.",
+      httpStatus: 400,
+    });
+  }
+}
+
+export function assertHostedPrivyIdentityMatchesExpectedPhone(input: {
+  expectedPhoneHint?: string;
+  expectedPhoneLookupKey?: string;
+  identity: HostedPrivyIdentity;
+}): void {
+  if (!input.expectedPhoneLookupKey) {
+    return;
+  }
+
+  if (!input.identity.phone) {
+    throw hostedOnboardingError({
+      code: "PRIVY_PHONE_REQUIRED",
+      message: "Finish phone verification before continuing.",
+      httpStatus: 400,
+    });
+  }
+
+  if (
+    !hostedPhoneLookupKeyMatchesValue(
+      input.identity.phone.number,
+      input.expectedPhoneLookupKey,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "PRIVY_PHONE_MISMATCH",
+      message: `Enter the same phone number that received this invite (${input.expectedPhoneHint ?? "your invited number"}).`,
+      httpStatus: 403,
+    });
+  }
+}
+
+function buildHostedOptionalMemberPhoneIdentityFields(
+  phone: HostedPrivyIdentity["phone"],
+) {
+  if (!phone) {
+    return {
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumber: null,
+    };
+  }
+
+  const fields = buildHostedMemberPhoneIdentityFields(phone.number);
+
+  return {
+    maskedPhoneNumberHint: fields.maskedPhoneNumberHint,
+    phoneLookupKey: fields.phoneLookupKey,
+    phoneNumber: fields.phoneNumber,
+  };
+}

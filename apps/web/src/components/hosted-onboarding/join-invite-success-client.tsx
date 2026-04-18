@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
@@ -9,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import { requestHostedBillingSuccess } from "./client-api";
@@ -40,7 +40,7 @@ export function JoinInviteSuccessClient({
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const successSyncStartedRef = useRef(false);
-  const shouldPoll = status.stage === "verify" || status.stage === "checkout" || status.activationPending;
+  const shouldPoll = isHostedOnboardingPendingStage(status.stage);
 
   useHostedInviteStatusRefresh({
     inviteCode,
@@ -131,7 +131,7 @@ export function JoinInviteSuccessClient({
         </Alert>
       ) : null}
 
-      <Button render={<Link href={href} />} nativeButton={false} size="lg" className="w-fit">
+      <Button type="button" onClick={() => window.location.assign(href)} size="lg" className="w-fit">
         {successState.buttonLabel}
       </Button>
     </div>
@@ -143,12 +143,18 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "active":
       return {
         buttonLabel: "Continue",
-        description: status.activationPending
-          ? JOIN_INVITE_ACTIVATION_PENDING_COPY.successDescription
-          : "Head back to your invite to start.",
+        description: "Head back to your invite to start.",
         pending: false,
         title: "You’re all set",
         variant: "active",
+      };
+    case "activating":
+      return {
+        buttonLabel: "Back to invite",
+        description: JOIN_INVITE_ACTIVATION_PENDING_COPY.successDescription,
+        pending: true,
+        title: "Finishing your setup",
+        variant: "pending",
       };
     case "verify":
       return {

@@ -31,6 +31,7 @@ import {
   ensureHostedMemberForPrivyIdentity,
   reconcileHostedPrivyIdentityOnMember,
 } from "./member-identity-service";
+import type { HostedPostVerificationStage } from "./stage";
 
 export async function completeHostedPrivyVerification(input: {
   identity: HostedPrivyIdentity;
@@ -38,12 +39,11 @@ export async function completeHostedPrivyVerification(input: {
   now?: Date;
   prisma?: PrismaClient;
 }): Promise<{
-  activationPending: boolean;
   inviteCode: string;
   joinUrl: string;
   memberId: string;
   messagingSetupRequired: boolean;
-  stage: "active" | "checkout" | "blocked";
+  stage: HostedPostVerificationStage;
 }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -109,6 +109,7 @@ export async function completeHostedPrivyVerification(input: {
         })
       : false;
     const stage = deriveHostedPostVerificationStage({
+      activationPending,
       billingStatus: member.billingStatus,
       suspendedAt: member.suspendedAt,
     });
@@ -124,7 +125,6 @@ export async function completeHostedPrivyVerification(input: {
     });
 
     return {
-      activationPending,
       inviteCode: activeInvite.inviteCode,
       joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
       memberId: member.id,
