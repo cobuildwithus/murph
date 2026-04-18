@@ -1,20 +1,18 @@
 import {
-  type HostedExecutionDispatchRequest,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import type {
   HostedBootstrapResult,
-  HostedDispatchExecutionMetrics,
+  HostedWakeExecutionMetrics,
   HostedMaintenanceMetrics,
 } from "./models.ts";
-import { assertNever, resolveHostedWake } from "./utils.ts";
+import { assertNever } from "./utils.ts";
 
-export function summarizeDispatch(
-  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
-  metrics: HostedDispatchExecutionMetrics & HostedMaintenanceMetrics,
+export function summarizeWake(
+  wake: HostedExecutionWake,
+  metrics: HostedWakeExecutionMetrics & HostedMaintenanceMetrics,
 ): string {
-  const wake = resolveHostedWake(dispatch);
   const suffix = ` Parser jobs: ${metrics.parserProcessed}. Device sync jobs: ${metrics.deviceSyncProcessed}${metrics.deviceSyncSkipped ? " (skipped: providers not configured)." : "."}`;
 
   switch (wake.kind) {

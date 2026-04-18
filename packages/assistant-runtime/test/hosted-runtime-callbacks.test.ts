@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickDispatch,
+  buildHostedExecutionAssistantCronTickWake,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
@@ -69,8 +69,8 @@ import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
-const HOSTED_DISPATCH = {
-  dispatch: buildHostedExecutionAssistantCronTickDispatch({
+const HOSTED_WAKE = {
+  wake: buildHostedExecutionAssistantCronTickWake({
     eventId: "evt_123",
     occurredAt: "2026-04-08T00:00:00.000Z",
     reason: "manual",
@@ -148,7 +148,7 @@ describe("hosted runtime callbacks", () => {
 
     const resumed = resumeHostedCommittedExecution({
       bundle: "bundle_123",
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       resume: {
         committedResult: {
           assistantDeliveryEffects: [sideEffect],
@@ -256,9 +256,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       effectsPort,
-      vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(outcomes).toEqual([
@@ -295,9 +295,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       effectsPort,
-      vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(outcomes).toEqual([
@@ -337,9 +337,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       effectsPort,
-      vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(outcomes).toEqual([
@@ -354,7 +354,7 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         intentId: effect.effectId,
         status: "failed",
-        vault: HOSTED_DISPATCH.vaultRoot,
+        vault: HOSTED_WAKE.vaultRoot,
       }),
     );
   });
@@ -389,9 +389,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       effectsPort,
-      vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(outcomes).toEqual([
@@ -409,7 +409,7 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         intentId: effect.effectId,
         status: "abandoned",
-        vault: HOSTED_DISPATCH.vaultRoot,
+        vault: HOSTED_WAKE.vaultRoot,
       }),
     );
     vi.useRealTimers();
@@ -433,9 +433,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       effectsPort,
-      vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(mocks.sendAssistantOutboxPayload).toHaveBeenCalledWith({
@@ -455,7 +455,7 @@ describe("hosted runtime callbacks", () => {
         threadIsDirect: effect.payload.threadIsDirect,
         turnId: effect.payload.turnId,
       },
-      vault: HOSTED_DISPATCH.vaultRoot,
+      vault: HOSTED_WAKE.vaultRoot,
     });
     expect(writes.map((record) => record.state)).toEqual(["sending", "sent"]);
     expect(mocks.beginAssistantOutboxIntentMirrorDispatch).toHaveBeenCalledTimes(1);
@@ -486,9 +486,9 @@ describe("hosted runtime callbacks", () => {
     await expect(
       drainHostedCommittedAssistantDeliveriesAfterCommit({
         assistantDeliveryEffects: [effect],
-        dispatch: HOSTED_DISPATCH.dispatch,
+        wake: HOSTED_WAKE.wake,
         effectsPort,
-        vaultRoot: HOSTED_DISPATCH.vaultRoot,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
       }),
     ).rejects.toMatchObject({
       code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
@@ -514,9 +514,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       effectsPort,
-      vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(writes.map((record) => record.state)).toEqual(["sending", "failed_ambiguous"]);
@@ -557,9 +557,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
-      dispatch: HOSTED_DISPATCH.dispatch,
+      wake: HOSTED_WAKE.wake,
       effectsPort,
-      vaultRoot: HOSTED_DISPATCH.vaultRoot,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(writes.map((record) => record.state)).toEqual(["sending", "failed"]);
@@ -587,9 +587,9 @@ describe("hosted runtime callbacks", () => {
     await expect(
       drainHostedCommittedAssistantDeliveriesAfterCommit({
         assistantDeliveryEffects: [effect],
-        dispatch: HOSTED_DISPATCH.dispatch,
+        wake: HOSTED_WAKE.wake,
         effectsPort,
-        vaultRoot: HOSTED_DISPATCH.vaultRoot,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
       }),
     ).rejects.toMatchObject({
       code: "HOSTED_SIDE_EFFECT_JOURNAL_FAILED",

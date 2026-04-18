@@ -103,19 +103,17 @@ function createDeviceSyncServiceForVault(vaultRoot: string) {
   });
 }
 
-function buildCronDispatch(occurredAt: string) {
+function buildCronWake(occurredAt: string) {
   return {
-    event: {
-      kind: "assistant.cron.tick" as const,
-      reason: "manual" as const,
-      userId: "member_123",
-    },
     eventId: "evt_cron",
+    kind: "assistant.cron.tick" as const,
     occurredAt,
+    reason: "manual" as const,
+    userId: "member_123",
   };
 }
 
-function buildWakeDispatch(input: {
+function buildDeviceSyncWake(input: {
   connectionId: string;
   hint?: {
     jobs?: Array<{
@@ -132,16 +130,14 @@ function buildWakeDispatch(input: {
   reason: "disconnected" | "reauthorization_required" | "webhook_hint";
 }) {
   return {
-    event: {
-      connectionId: input.connectionId,
-      ...(input.hint ? { hint: input.hint } : {}),
-      kind: "device-sync.wake" as const,
-      provider: "demo" as const,
-      reason: input.reason,
-      userId: "member_123",
-    },
+    connectionId: input.connectionId,
     eventId: "evt_device_sync_wake",
+    ...(input.hint ? { hint: input.hint } : {}),
+    kind: "device-sync.wake" as const,
     occurredAt: input.occurredAt,
+    provider: "demo" as const,
+    reason: input.reason,
+    userId: "member_123",
   };
 }
 
@@ -284,7 +280,7 @@ describe("hosted device-sync runtime", () => {
     try {
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: null,
-        dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -323,7 +319,7 @@ describe("hosted device-sync runtime", () => {
     try {
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -401,7 +397,7 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -479,31 +475,29 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
-        dispatch: {
-          event: {
-            connectionId: "hosted_conn_wake",
-            hint: {
-              jobs: [
-                {
-                  availableAt: "2026-04-04T10:05:00.000Z",
-                  dedupeKey: "wake:resource-sync",
-                  kind: "resource-sync",
-                  maxAttempts: 5,
-                  payload: {
-                    resourceId: "step-count",
-                  },
-                  priority: 7,
-                },
-              ],
-              nextReconcileAt: "2026-04-04T11:00:00.000Z",
-            },
-            kind: "device-sync.wake",
-            provider: "demo",
-            reason: "webhook_hint",
-            userId: "member_123",
-          },
+        wake: {
+          connectionId: "hosted_conn_wake",
           eventId: "evt_device_sync_wake",
+          hint: {
+            jobs: [
+              {
+                availableAt: "2026-04-04T10:05:00.000Z",
+                dedupeKey: "wake:resource-sync",
+                kind: "resource-sync",
+                maxAttempts: 5,
+                payload: {
+                  resourceId: "step-count",
+                },
+                priority: 7,
+              },
+            ],
+            nextReconcileAt: "2026-04-04T11:00:00.000Z",
+          },
+          kind: "device-sync.wake",
           occurredAt: "2026-04-04T10:00:00.000Z",
+          provider: "demo",
+          reason: "webhook_hint",
+          userId: "member_123",
         },
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -605,7 +599,7 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        dispatch: buildWakeDispatch({
+        wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_same_next_reconcile",
           hint: {
             nextReconcileAt: "2026-04-04T12:00:00.000Z",
@@ -676,7 +670,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildWakeDispatch({
+        wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_disconnect_wake",
           occurredAt: "2026-04-06T09:10:00.000Z",
           reason: "disconnected",
@@ -726,7 +720,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
-        dispatch: buildWakeDispatch({
+        wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_reauth",
           occurredAt: "2026-04-06T09:10:00.000Z",
           reason: "reauthorization_required",
@@ -794,7 +788,7 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -836,7 +830,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
-        dispatch: buildWakeDispatch({
+        wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_forward_next_reconcile",
           hint: {
             nextReconcileAt: "2026-04-04T13:00:00.000Z",
@@ -883,7 +877,7 @@ describe("hosted device-sync runtime", () => {
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
-        dispatch: buildWakeDispatch({
+        wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_no_hint",
           occurredAt: "2026-04-04T10:00:00.000Z",
           reason: "webhook_hint",
@@ -950,7 +944,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:11:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:11:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1004,7 +998,7 @@ describe("hosted device-sync runtime", () => {
             return snapshot;
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1032,7 +1026,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1083,7 +1077,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1111,7 +1105,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1161,7 +1155,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1189,7 +1183,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1239,7 +1233,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:06:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1267,7 +1261,7 @@ describe("hosted device-sync runtime", () => {
             });
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T09:07:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1338,7 +1332,7 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-02T12:35:00.000Z"),
+        wake: buildCronWake("2026-04-02T12:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1396,7 +1390,7 @@ describe("hosted device-sync runtime", () => {
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-02T13:10:00.000Z"),
+        wake: buildCronWake("2026-04-02T13:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
@@ -1466,7 +1460,7 @@ describe("hosted device-sync runtime", () => {
             return buildEmptyRuntimeSnapshot();
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state: {
@@ -1479,7 +1473,7 @@ describe("hosted device-sync runtime", () => {
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort: null,
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state: {
@@ -1527,7 +1521,7 @@ describe("hosted device-sync runtime", () => {
             return buildEmptyRuntimeSnapshot();
           },
         },
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state: {
@@ -1584,7 +1578,7 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1595,7 +1589,7 @@ describe("hosted device-sync runtime", () => {
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
@@ -1647,7 +1641,7 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1664,7 +1658,7 @@ describe("hosted device-sync runtime", () => {
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
@@ -1727,7 +1721,7 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1743,7 +1737,7 @@ describe("hosted device-sync runtime", () => {
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
@@ -1807,7 +1801,7 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
@@ -1820,7 +1814,7 @@ describe("hosted device-sync runtime", () => {
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
@@ -1871,14 +1865,14 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
@@ -1940,14 +1934,14 @@ describe("hosted device-sync runtime", () => {
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T09:35:00.000Z"),
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
-        dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,

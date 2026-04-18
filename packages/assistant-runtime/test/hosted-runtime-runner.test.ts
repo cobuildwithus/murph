@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildHostedExecutionTelegramMessageReceivedDispatch,
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import type {
@@ -16,12 +19,55 @@ const HOSTED_RUN_CONTEXT = {
   startedAt: "2026-04-08T00:00:00.000Z",
 } as const;
 
+function buildMemberActivatedWake(eventId: string) {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId,
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: false,
+    },
+    memberId: "member_123",
+    occurredAt: "2026-04-08T00:00:00.000Z",
+  });
+}
+
+function buildCronWake(
+  eventId: string,
+  reason: "alarm" | "device-sync" | "manual" = "manual",
+) {
+  return buildHostedExecutionAssistantCronTickWake({
+    eventId,
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    reason,
+    userId: "member_123",
+  });
+}
+
+function buildLinqWake(eventId: string) {
+  return buildHostedExecutionLinqConversationMessageWake({
+    eventId,
+    linqEvent: {
+      data: {
+        message: {
+          parts: [],
+        },
+      },
+      event_type: "message.received",
+    },
+    linqMessageId: "msg_123",
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    phoneLookupKey: "phone_123",
+    userId: "member_123",
+  });
+}
+
 const mocks = vi.hoisted(() => ({
   completeHostedExecutionAfterCommit: vi.fn(),
   createHostedArtifactResolver: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
-  executeHostedDispatchForCommit: vi.fn(),
+  executeHostedWakeForCommit: vi.fn(),
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
   parseCanonicalLinqMessageReceivedEvent: vi.fn(),
@@ -93,7 +139,7 @@ vi.mock("../src/hosted-runtime/environment.ts", async () => {
 
 vi.mock("../src/hosted-runtime/execution.ts", () => ({
   completeHostedExecutionAfterCommit: mocks.completeHostedExecutionAfterCommit,
-  executeHostedDispatchForCommit: mocks.executeHostedDispatchForCommit,
+  executeHostedWakeForCommit: mocks.executeHostedWakeForCommit,
 }));
 
 import {
@@ -209,7 +255,7 @@ beforeEach(() => {
       callback: () => Promise<unknown>,
     ) => callback(),
   );
-  mocks.executeHostedDispatchForCommit.mockResolvedValue(committedExecution);
+  mocks.executeHostedWakeForCommit.mockResolvedValue(committedExecution);
   mocks.resumeHostedCommittedExecution.mockReturnValue(committedExecution);
   mocks.completeHostedExecutionAfterCommit.mockResolvedValue(finalResult);
   mocks.materializeHostedExecutionArtifacts.mockResolvedValue(undefined);
@@ -260,7 +306,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       fetchSnapshot: vi.fn(),
     };
 
-    mocks.executeHostedDispatchForCommit.mockImplementation(async (input) => {
+    mocks.executeHostedWakeForCommit.mockImplementation(async (input) => {
       await input.executionContext.hosted.issueDeviceConnectLink({
         provider: "oura",
       });
@@ -282,19 +328,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             size: 42,
             updatedAt: "2026-04-08T00:00:00.000Z",
           },
-          dispatch: {
-            event: {
-              kind: "member.activated",
-              memberChannels: {
-                email: false,
-                linq: false,
-                telegram: false,
-              },
-              userId: "member_123",
-            },
-            eventId: "evt_123",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          wake: buildMemberActivatedWake("evt_123"),
           run: HOSTED_RUN_CONTEXT,
         },
         runtime: {
@@ -328,7 +362,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(deviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       provider: "oura",
     });
-    expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHostedCommittedExecution).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
@@ -427,15 +461,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         {
           request: {
             bundle: "incoming-bundle",
-            dispatch: {
-              event: {
-                kind: "assistant.cron.tick",
-                reason: "manual",
-                userId: "member_123",
-              },
-              eventId: "evt_runtime_normalization_failure",
-              occurredAt: "2026-04-08T00:00:00.000Z",
-            },
+            wake: buildCronWake("evt_runtime_normalization_failure"),
           },
         },
         {
@@ -467,7 +493,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
   });
 
   it("skips rematerialization when every requested artifact path is already materialized", async () => {
-    mocks.executeHostedDispatchForCommit.mockImplementation(async (input) => {
+    mocks.executeHostedWakeForCommit.mockImplementation(async (input) => {
       await input.artifactMaterializer?.(["vault/raw/a.bin"]);
       await input.artifactMaterializer?.(["vault/raw/a.bin", "vault/raw/a.bin"]);
       return committedExecution;
@@ -477,15 +503,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
-              userId: "member_123",
-            },
-            eventId: "evt_dedupe_artifacts",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          wake: buildCronWake("evt_dedupe_artifacts"),
         },
       },
       {
@@ -514,7 +532,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         resolveTypingStart = resolve;
       });
     });
-    mocks.executeHostedDispatchForCommit.mockImplementation(async () => {
+    mocks.executeHostedWakeForCommit.mockImplementation(async () => {
       steps.push("execute");
       return committedExecution;
     });
@@ -530,24 +548,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "linq.message.received",
-              linqEvent: {
-                data: {
-                  message: {
-                    parts: [],
-                  },
-                },
-                event_type: "message.received",
-              },
-              linqMessageId: "msg_123",
-              phoneLookupKey: "phone_123",
-              userId: "member_123",
-            },
-            eventId: "evt_linq_typing",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          wake: buildLinqWake("evt_linq_typing"),
         },
         runtime: {
           forwardedEnv: {
@@ -569,7 +570,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
 
     await vi.waitFor(() => {
-      expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+      expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
       expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     });
     expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
@@ -607,15 +608,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
-              userId: "member_123",
-            },
-            eventId: "evt_no_bundle",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          wake: buildCronWake("evt_no_bundle"),
         },
       },
       {
@@ -636,7 +629,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         bundle: null,
       }),
     );
-    expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledWith(
+    expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledWith(
       expect.objectContaining({
         artifactMaterializer: null,
       }),
@@ -649,15 +642,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
-              userId: "member_123",
-            },
-            eventId: "evt_resume",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          wake: buildCronWake("evt_resume"),
           resume: {
             committedResult: {
               assistantDeliveryEffects:
@@ -682,7 +667,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
     assert.deepEqual(result, finalResult);
     expect(mocks.resumeHostedCommittedExecution).toHaveBeenCalledTimes(1);
-    expect(mocks.executeHostedDispatchForCommit).not.toHaveBeenCalled();
+    expect(mocks.executeHostedWakeForCommit).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
   });
 
@@ -695,24 +680,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "linq.message.received",
-              linqEvent: {
-                data: {
-                  message: {
-                    parts: [],
-                  },
-                },
-                event_type: "message.received",
-              },
-              linqMessageId: "msg_123",
-              phoneLookupKey: "phone_123",
-              userId: "member_123",
-            },
-            eventId: "evt_linq_typing_start_failure",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          wake: buildLinqWake("evt_linq_typing_start_failure"),
         },
         runtime: {
           forwardedEnv: {
@@ -739,7 +707,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       phase: "committed",
       result: committedExecution.committedResult,
     });
-    expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -778,7 +746,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       }),
       writable: true,
     });
-    mocks.executeHostedDispatchForCommit.mockImplementation(async () => {
+    mocks.executeHostedWakeForCommit.mockImplementation(async () => {
       steps.push("execute");
       return committedExecution;
     });
@@ -791,7 +759,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
+          wake: buildHostedExecutionTelegramConversationMessageWake({
             eventId: "evt_telegram_typing",
             occurredAt: "2026-04-08T00:00:00.000Z",
             telegramMessage: {
@@ -822,7 +790,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
 
     await vi.waitFor(() => {
-      expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+      expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
       expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     });
     expect(typingSignal.aborted).toBe(false);
@@ -854,7 +822,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
+          wake: buildHostedExecutionTelegramConversationMessageWake({
             eventId: "evt_telegram_typing_start_failure",
             occurredAt: "2026-04-08T00:00:00.000Z",
             telegramMessage: {
@@ -890,7 +858,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       phase: "committed",
       result: committedExecution.committedResult,
     });
-    expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -902,7 +870,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
   });
 
   it("fails closed when hosted device links are requested without a configured control plane", async () => {
-    mocks.executeHostedDispatchForCommit.mockImplementation(async (input) => {
+    mocks.executeHostedWakeForCommit.mockImplementation(async (input) => {
       await input.executionContext.hosted.issueDeviceConnectLink({
         provider: "oura",
       });
@@ -914,19 +882,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         {
           request: {
             bundle: "incoming-bundle",
-            dispatch: {
-              event: {
-                kind: "member.activated",
-                memberChannels: {
-                  email: false,
-                  linq: false,
-                  telegram: false,
-                },
-                userId: "member_123",
-              },
-              eventId: "evt_missing_device_sync",
-              occurredAt: "2026-04-08T00:00:00.000Z",
-            },
+            wake: buildMemberActivatedWake("evt_missing_device_sync"),
           },
         },
         {
@@ -959,15 +915,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
-              userId: "member_123",
-            },
-            eventId: "evt_wrapper",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+          wake: buildCronWake("evt_wrapper"),
           resume: {
             committedResult: {
               assistantDeliveryEffects:

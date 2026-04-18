@@ -19,13 +19,11 @@ import type {
   HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionDispatchRequest,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
-import { resolveHostedWake } from "./hosted-runtime/utils.ts";
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -38,16 +36,14 @@ type HostedAccountHydrationInput = Parameters<DeviceSyncService["store"]["hydrat
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
-  dispatch: HostedExecutionDispatchRequest;
-  wake?: HostedExecutionWake;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
+  wake: HostedExecutionWake;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
-  const wake = resolveHostedWake(input);
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
   if (!client) {
-    if (wake.kind === "device-sync.wake") {
+    if (input.wake.kind === "device-sync.wake") {
       throw new Error(
         "Hosted device-sync wake dispatch requires a configured hosted device-sync control-plane port.",
       );
@@ -63,7 +59,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   const codec = createSecretCodec(input.secret);
-  const now = wake.occurredAt;
+  const now = input.wake.occurredAt;
 
   for (const entry of snapshot.connections) {
     state.observedTokenVersions.set(entry.connection.id, entry.tokenBundle?.tokenVersion ?? null);
@@ -96,9 +92,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     state.localToHostedAccountIds.set(stored.id, entry.connection.id);
   }
 
-  if (wake.kind === "device-sync.wake") {
+  if (input.wake.kind === "device-sync.wake") {
     applyHostedDeviceSyncWakeHint({
-      wake,
+      wake: input.wake,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
     });
@@ -108,14 +104,12 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 }
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
-  dispatch: HostedExecutionDispatchRequest;
-  wake?: HostedExecutionWake;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedExecutionWake;
 }): Promise<void> {
-  const wake = resolveHostedWake(input);
   if (!input.state.snapshot) {
     return;
   }
@@ -152,7 +146,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   }
 
   await client.applyUpdates({
-    occurredAt: wake.occurredAt,
+    occurredAt: input.wake.occurredAt,
     updates,
   });
 }

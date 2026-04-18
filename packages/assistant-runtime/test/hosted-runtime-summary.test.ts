@@ -3,21 +3,21 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickDispatch,
-  buildHostedExecutionDeviceSyncWakeDispatch,
-  buildHostedExecutionEmailMessageReceivedDispatch,
-  buildHostedExecutionLinqMessageReceivedDispatch,
-  buildHostedExecutionMemberActivatedDispatch,
-  buildHostedExecutionMemberChannelsUpdatedDispatch,
-  buildHostedExecutionTelegramMessageReceivedDispatch,
-  buildHostedExecutionVaultShareAcceptedDispatch,
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
+  buildHostedExecutionVaultShareAcceptedWake,
 } from "@murphai/hosted-execution";
 
-import { summarizeDispatch } from "../src/hosted-runtime/summary.ts";
+import { summarizeWake } from "../src/hosted-runtime/summary.ts";
 
-describe("summarizeDispatch", () => {
+describe("summarizeWake", () => {
   it("describes activation runs even when bootstrap state is unavailable", () => {
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_activation",
       memberId: "member_123",
       memberChannels: {
@@ -29,7 +29,7 @@ describe("summarizeDispatch", () => {
     });
 
     assert.equal(
-      summarizeDispatch(dispatch, {
+      summarizeWake(wake, {
         bootstrapResult: null,
         deviceSyncProcessed: 1,
         deviceSyncSkipped: true,
@@ -44,7 +44,7 @@ describe("summarizeDispatch", () => {
   });
 
   it("formats hosted assistant bootstrap details when activation seeded an explicit config", () => {
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_activation",
       memberId: "member_123",
       memberChannels: {
@@ -56,7 +56,7 @@ describe("summarizeDispatch", () => {
     });
 
     assert.equal(
-      summarizeDispatch(dispatch, {
+      summarizeWake(wake, {
         bootstrapResult: {
           assistantConfigStatus: "hosted-env",
           assistantConfigured: true,
@@ -80,7 +80,7 @@ describe("summarizeDispatch", () => {
   });
 
   it("covers the unavailable assistant bootstrap states when activation reuses an existing vault", () => {
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_activation",
       memberId: "member_123",
       memberChannels: {
@@ -92,7 +92,7 @@ describe("summarizeDispatch", () => {
     });
 
     assert.equal(
-      summarizeDispatch(dispatch, {
+      summarizeWake(wake, {
         bootstrapResult: {
           assistantConfigStatus: "missing",
           assistantConfigured: false,
@@ -116,7 +116,7 @@ describe("summarizeDispatch", () => {
   });
 
   it("covers the invalid, unready, and generic unavailable assistant bootstrap statuses", () => {
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_activation",
       memberId: "member_123",
       memberChannels: {
@@ -144,7 +144,7 @@ describe("summarizeDispatch", () => {
 
     for (const entry of statuses) {
       assert.equal(
-        summarizeDispatch(dispatch, {
+        summarizeWake(wake, {
           bootstrapResult: {
             assistantConfigStatus: entry.status,
             assistantConfigured: false,
@@ -169,7 +169,7 @@ describe("summarizeDispatch", () => {
   });
 
   it("summarizes explicit member channel sync events", () => {
-    const dispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+    const wake = buildHostedExecutionMemberChannelsUpdatedWake({
       eventId: "evt_member_channels",
       memberChannels: {
         email: true,
@@ -181,7 +181,7 @@ describe("summarizeDispatch", () => {
     });
 
     assert.equal(
-      summarizeDispatch(dispatch, {
+      summarizeWake(wake, {
         bootstrapResult: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
@@ -196,7 +196,7 @@ describe("summarizeDispatch", () => {
   });
 
   it("uses the share id fallback and notes logged meal imports", () => {
-    const dispatch = buildHostedExecutionVaultShareAcceptedDispatch({
+    const wake = buildHostedExecutionVaultShareAcceptedWake({
       eventId: "evt_share",
       memberId: "member_123",
       occurredAt: "2026-04-08T00:00:00.000Z",
@@ -207,7 +207,7 @@ describe("summarizeDispatch", () => {
     });
 
     assert.equal(
-      summarizeDispatch(dispatch, {
+      summarizeWake(wake, {
         bootstrapResult: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
@@ -233,9 +233,9 @@ describe("summarizeDispatch", () => {
   });
 
   it("summarizes hosted inbox and maintenance dispatch variants", () => {
-    const dispatches = [
+    const wakes = [
       {
-        dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
+        wake: buildHostedExecutionLinqConversationMessageWake({
           eventId: "evt_linq",
           linqEvent: {
             body: "hello",
@@ -248,7 +248,7 @@ describe("summarizeDispatch", () => {
         expected: "Persisted Linq capture on the hosted conversation lane.",
       },
       {
-        dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
+        wake: buildHostedExecutionTelegramConversationMessageWake({
           eventId: "evt_telegram",
           occurredAt: "2026-04-08T00:00:00.000Z",
           telegramMessage: {
@@ -262,7 +262,7 @@ describe("summarizeDispatch", () => {
         expected: "Persisted Telegram capture on the hosted conversation lane.",
       },
       {
-        dispatch: buildHostedExecutionEmailMessageReceivedDispatch({
+        wake: buildHostedExecutionEmailConversationMessageWake({
           eventId: "evt_email",
           identityId: "identity_123",
           occurredAt: "2026-04-08T00:00:00.000Z",
@@ -272,7 +272,7 @@ describe("summarizeDispatch", () => {
         expected: "Persisted hosted email capture on the hosted conversation lane.",
       },
       {
-        dispatch: buildHostedExecutionAssistantCronTickDispatch({
+        wake: buildHostedExecutionAssistantCronTickWake({
           eventId: "evt_cron",
           occurredAt: "2026-04-08T00:00:00.000Z",
           reason: "alarm",
@@ -281,7 +281,7 @@ describe("summarizeDispatch", () => {
         expected: "Processed assistant cron tick (alarm) and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
       },
       {
-        dispatch: buildHostedExecutionDeviceSyncWakeDispatch({
+        wake: buildHostedExecutionDeviceSyncWake({
           eventId: "evt_wake",
           occurredAt: "2026-04-08T00:00:00.000Z",
           reason: "connected",
@@ -291,18 +291,13 @@ describe("summarizeDispatch", () => {
       },
     ];
 
-    for (const entry of dispatches) {
+    for (const entry of wakes) {
       assert.equal(
-        summarizeDispatch(entry.dispatch, {
+        summarizeWake(entry.wake, {
           bootstrapResult: null,
           deviceSyncProcessed: 2,
           deviceSyncSkipped: false,
-          maintenanceRequired:
-            entry.dispatch.event.kind === "linq.message.received"
-            || entry.dispatch.event.kind === "telegram.message.received"
-            || entry.dispatch.event.kind === "email.message.received"
-              ? false
-              : true,
+          maintenanceRequired: entry.wake.kind !== "conversation.message",
           nextWakeAt: null,
           parserProcessed: 1,
           shareImportResult: null,

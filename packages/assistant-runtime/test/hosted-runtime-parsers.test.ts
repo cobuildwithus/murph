@@ -21,20 +21,18 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           size: 42,
           updatedAt: "2026-04-01T00:00:02.000Z",
         },
-        dispatch: {
-          event: {
-            firstContact: {
-              channel: "linq",
-              identityId: "hbidx:phone:v1:test",
-              threadId: "chat_123",
-              threadIsDirect: true,
-            },
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_123",
+          firstContact: {
+            channel: "linq",
+            identityId: "hbidx:phone:v1:test",
+            threadId: "chat_123",
+            threadIsDirect: true,
+          },
+          kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           occurredAt: "2026-04-01T00:00:00.000Z",
+          userId: "member_123",
         },
         run: {
           attempt: 2,
@@ -59,8 +57,9 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       },
     });
 
-    expect(parsed.request.dispatch.eventId).toBe("evt_123");
-    expect(parsed.request.dispatch.event).toEqual({
+    expect(parsed.request.wake.eventId).toBe("evt_123");
+    expect(parsed.request.wake).toEqual({
+      eventId: "evt_123",
       firstContact: {
         channel: "linq",
         identityId: "hbidx:phone:v1:test",
@@ -69,6 +68,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       },
       kind: "member.activated",
       memberChannels: defaultMemberChannels,
+      occurredAt: "2026-04-01T00:00:00.000Z",
       userId: "member_123",
     });
     expect(parsed.request.bundle).toBe("vault-bundle");
@@ -81,26 +81,25 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            firstContact: {
-              channel: "linq",
-              fromPhoneNumber: "+15550001111",
-              identityId: "hbidx:phone:v1:test",
-              kind: "linq-materialize-home-thread",
-              toPhoneNumber: "+15550002222",
-            },
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_materialize_linq_home",
+          firstContact: {
+            channel: "linq",
+            fromPhoneNumber: "+15550001111",
+            identityId: "hbidx:phone:v1:test",
+            kind: "linq-materialize-home-thread",
+            toPhoneNumber: "+15550002222",
+          },
+          kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           occurredAt: "2026-04-01T00:00:00.000Z",
+          userId: "member_123",
         },
       },
     });
 
-    expect(parsed.request.dispatch.event).toEqual({
+    expect(parsed.request.wake).toEqual({
+      eventId: "evt_materialize_linq_home",
       firstContact: {
         channel: "linq",
         fromPhoneNumber: "+15550001111",
@@ -110,6 +109,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       },
       kind: "member.activated",
       memberChannels: defaultMemberChannels,
+      occurredAt: "2026-04-01T00:00:00.000Z",
       userId: "member_123",
     });
   });
@@ -118,14 +118,12 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_123",
+          kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           occurredAt: "2026-04-01T00:00:00.000Z",
+          userId: "member_123",
         },
       },
       runtime: {
@@ -140,14 +138,12 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_123",
+          kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           occurredAt: "2026-04-01T00:00:00.000Z",
+          userId: "member_123",
         },
       },
       runtime: {
@@ -162,14 +158,12 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_legacy_side_effects",
+          kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           occurredAt: "2026-04-01T00:00:00.000Z",
+          userId: "member_123",
         },
         resume: {
           committedResult: {
@@ -195,14 +189,12 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           size: 42,
           updatedAt: "2026-04-01T00:00:02.000Z",
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_missing_run",
+          kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           occurredAt: "2026-04-01T00:00:00.000Z",
+          userId: "member_123",
         },
       },
     });

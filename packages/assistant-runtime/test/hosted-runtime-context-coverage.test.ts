@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
@@ -77,10 +81,10 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 });
 
 import {
-  prepareHostedDispatchContext,
+  prepareHostedWakeContext,
   readHostedAssistantRuntimeState,
   reconcileHostedAssistantChannelState,
-  requireHostedBootstrapForDispatch,
+  requireHostedBootstrapForWake,
 } from "../src/hosted-runtime/context.ts";
 import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
@@ -89,6 +93,31 @@ const DEFAULT_MEMBER_CHANNELS = {
   linq: true,
   telegram: true,
 } as const;
+
+function buildLegacyWake(input: {
+  event: Record<string, unknown> & { kind: string; userId?: string };
+  eventId: string;
+  occurredAt: string;
+}) {
+  switch (input.event.kind) {
+    case "assistant.cron.tick":
+      return buildHostedExecutionAssistantCronTickWake({
+        eventId: input.eventId,
+        occurredAt: input.occurredAt,
+        reason: input.event.reason as "alarm" | "device-sync" | "manual",
+        userId: input.event.userId ?? "member_123",
+      });
+    case "member.activated":
+      return buildHostedExecutionMemberActivatedWake({
+        eventId: input.eventId,
+        memberChannels: input.event.memberChannels as typeof DEFAULT_MEMBER_CHANNELS,
+        memberId: input.event.userId ?? "member_123",
+        occurredAt: input.occurredAt,
+      });
+    default:
+      throw new Error(`Unsupported legacy wake kind: ${input.event.kind}`);
+  }
+}
 
 async function createWorkspace(): Promise<{ cleanup: () => Promise<void>; vaultRoot: string }> {
   const root = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-coverage-"));
@@ -179,9 +208,9 @@ describe("hosted runtime context coverage", () => {
         source: "saved",
       });
 
-      const result = await prepareHostedDispatchContext(
+      const result = await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "assistant.cron.tick",
             reason: "manual",
@@ -189,7 +218,7 @@ describe("hosted runtime context coverage", () => {
           },
           eventId: "evt_tick",
           occurredAt: "2026-04-08T00:00:00.000Z",
-        },
+        }),
         {
           TELEGRAM_BOT_TOKEN: "telegram-token",
         },
@@ -225,9 +254,9 @@ describe("hosted runtime context coverage", () => {
         source: "saved",
       });
 
-      const result = await prepareHostedDispatchContext(
+      const result = await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: {
@@ -239,7 +268,7 @@ describe("hosted runtime context coverage", () => {
           },
           eventId: "evt_activation",
           occurredAt: "2026-04-08T00:05:00.000Z",
-        },
+        }),
         {
           HOSTED_EMAIL_DOMAIN: "mail.example.test",
           TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -523,33 +552,39 @@ describe("hosted runtime context coverage", () => {
     try {
       await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
       await expect(
-        requireHostedBootstrapForDispatch(vaultRoot, {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_123",
-          },
-          eventId: "evt_tick",
-          occurredAt: "2026-04-08T00:10:00.000Z",
-        }),
+        requireHostedBootstrapForWake(
+          vaultRoot,
+          buildLegacyWake({
+            event: {
+              kind: "assistant.cron.tick",
+              reason: "manual",
+              userId: "member_123",
+            },
+            eventId: "evt_tick",
+            occurredAt: "2026-04-08T00:10:00.000Z",
+          }),
+        ),
       ).resolves.toBeUndefined();
 
       await rm(path.join(vaultRoot, "vault.json"), { force: true });
 
       await expect(
-        requireHostedBootstrapForDispatch(vaultRoot, {
-          event: {
-            kind: "member.activated",
-            memberChannels: {
-              email: false,
-              linq: false,
-              telegram: false,
+        requireHostedBootstrapForWake(
+          vaultRoot,
+          buildLegacyWake({
+            event: {
+              kind: "member.activated",
+              memberChannels: {
+                email: false,
+                linq: false,
+                telegram: false,
+              },
+              userId: "member_123",
             },
-            userId: "member_123",
-          },
-          eventId: "evt_activation",
-          occurredAt: "2026-04-08T00:15:00.000Z",
-        }),
+            eventId: "evt_activation",
+            occurredAt: "2026-04-08T00:15:00.000Z",
+          }),
+        ),
       ).resolves.toBeUndefined();
     } finally {
       await cleanup();

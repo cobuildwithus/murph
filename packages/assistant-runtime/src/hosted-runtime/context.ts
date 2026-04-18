@@ -4,7 +4,6 @@ import path from "node:path";
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   emitHostedExecutionStructuredLog,
-  type HostedExecutionDispatchRequest,
   type HostedExecutionMemberChannels,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
@@ -37,7 +36,6 @@ import type {
   HostedAssistantRuntimeChannelCapabilities,
   HostedBootstrapResult,
 } from "./models.ts";
-import { resolveHostedWake } from "./utils.ts";
 
 interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
@@ -75,21 +73,20 @@ const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelStat
   telegramAutoReplyEnabled: false,
 };
 
-export async function prepareHostedDispatchContext(
+export async function prepareHostedWakeContext(
   vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
+  wake: HostedExecutionWake,
   runtimeEnv: Readonly<Record<string, string>>,
   resolvedConfig: {
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
   },
 ): Promise<HostedBootstrapResult | null> {
-  const wake = resolveHostedWake(dispatch);
   const isMemberActivation = wake.kind === "member.activated";
   const memberBootstrap = isMemberActivation
     ? await bootstrapHostedMemberContext(vaultRoot, wake)
     : null;
 
-  await requireHostedBootstrapForDispatch(vaultRoot, wake);
+  await requireHostedBootstrapForWake(vaultRoot, wake);
   await prepareHostedLocalRuntime(vaultRoot, wake.eventId);
 
   const assistantRuntimeState = await bootstrapHostedAssistantRuntimeState(
@@ -175,14 +172,14 @@ async function bootstrapHostedAssistantRuntimeState(
   const reconciledChannelCapabilities = options.enableAssistantChannelReconciliation
     ? await reconcileHostedAssistantChannelState(
         vaultRoot,
-        resolveHostedDispatchMemberChannels(wake),
+        resolveHostedWakeMemberChannels(wake),
         channelCapabilities,
         assistantBootstrap.configured,
         {
-          dispatch: wake,
+          wake,
         },
       )
-    : await ensureHostedAssistantAutoReplyChannelForDispatch(
+    : await ensureHostedAssistantAutoReplyChannelForWake(
         vaultRoot,
         wake,
         channelCapabilities,
@@ -203,7 +200,7 @@ async function bootstrapHostedAssistantRuntimeState(
   };
 }
 
-async function ensureHostedAssistantAutoReplyChannelForDispatch(
+async function ensureHostedAssistantAutoReplyChannelForWake(
   vaultRoot: string,
   wake: HostedExecutionWake,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
@@ -341,7 +338,7 @@ export async function reconcileHostedAssistantChannelState(
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   assistantConfigured: boolean,
   options?: {
-    dispatch?: HostedExecutionWake;
+    wake?: HostedExecutionWake;
   },
 ): Promise<Pick<
   HostedBootstrapResult,
@@ -366,7 +363,7 @@ export async function reconcileHostedAssistantChannelState(
     isManagedChannel: isHostedManagedAutoReplyChannel,
     vault: vaultRoot,
   });
-  if (options?.dispatch) {
+  if (options?.wake) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: {
@@ -378,7 +375,7 @@ export async function reconcileHostedAssistantChannelState(
         ).join(","),
         desiredAutoReplyChannels: desiredChannels.join(","),
       },
-      dispatch: options.dispatch,
+      dispatch: options.wake,
       message: "Hosted assistant auto-reply channels reconciled.",
       phase: "dispatch.running",
     });
@@ -459,7 +456,7 @@ function resolveHostedAssistantAutoReplyState(
   };
 }
 
-function resolveHostedDispatchMemberChannels(
+function resolveHostedWakeMemberChannels(
   wake: HostedExecutionWake,
 ): HostedExecutionMemberChannels {
   if (
@@ -488,11 +485,10 @@ function normalizeHostedAssistantBootstrapStatus(
   return result.source;
 }
 
-export async function requireHostedBootstrapForDispatch(
+export async function requireHostedBootstrapForWake(
   vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
+  wake: HostedExecutionWake,
 ): Promise<void> {
-  const wake = resolveHostedWake(dispatch);
   if (existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
     return;
   }

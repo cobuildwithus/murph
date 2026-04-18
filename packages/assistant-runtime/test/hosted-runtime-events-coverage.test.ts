@@ -3,23 +3,22 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickDispatch,
-  buildHostedExecutionDeviceSyncWakeDispatch,
-  buildHostedExecutionMemberActivatedDispatch,
-  buildHostedExecutionVaultShareAcceptedDispatch,
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionVaultShareAcceptedWake,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
-  handleHostedShareAcceptedDispatch: vi.fn(),
+  handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
-  prepareHostedDispatchContext: vi.fn(),
+  prepareHostedWakeContext: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
   hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
-  prepareHostedDispatchContext: mocks.prepareHostedDispatchContext,
+  prepareHostedWakeContext: mocks.prepareHostedWakeContext,
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -46,7 +45,7 @@ vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
-  handleHostedShareAcceptedDispatch: mocks.handleHostedShareAcceptedDispatch,
+  handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
 vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
@@ -57,7 +56,7 @@ vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
   withHostedInboxPipeline: vi.fn(),
 }));
 
-import { executeHostedDispatchEvent } from "../src/hosted-runtime/events.ts";
+import { executeHostedWakeEvent } from "../src/hosted-runtime/events.ts";
 import {
   createHostedRuntimeEffectsPortStub,
   createHostedRuntimeResolvedConfig,
@@ -92,8 +91,8 @@ function createRuntime() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
-  mocks.prepareHostedDispatchContext.mockResolvedValue(null);
-  mocks.handleHostedShareAcceptedDispatch.mockResolvedValue({
+  mocks.prepareHostedWakeContext.mockResolvedValue(null);
+  mocks.handleHostedShareAcceptedWake.mockResolvedValue({
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -105,7 +104,7 @@ afterEach(() => {
 
 describe("hosted runtime event coverage", () => {
   it("treats activation without first contact as a noop welcome path", async () => {
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_member_activated",
       memberId: "member_123",
       memberChannels: {
@@ -116,8 +115,8 @@ describe("hosted runtime event coverage", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    const result = await executeHostedDispatchEvent({
-      dispatch,
+    const result = await executeHostedWakeEvent({
+      wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
@@ -135,13 +134,13 @@ describe("hosted runtime event coverage", () => {
 
   it("returns noop metrics for assistant cron ticks and device-sync wakes", async () => {
     const runtime = createRuntime();
-    const cronDispatch = buildHostedExecutionAssistantCronTickDispatch({
+    const cronWake = buildHostedExecutionAssistantCronTickWake({
       eventId: "evt_cron",
       occurredAt: "2026-04-08T00:05:00.000Z",
       reason: "alarm",
       userId: "member_123",
     });
-    const wakeDispatch = buildHostedExecutionDeviceSyncWakeDispatch({
+    const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake",
       occurredAt: "2026-04-08T00:10:00.000Z",
       reason: "webhook_hint",
@@ -149,8 +148,8 @@ describe("hosted runtime event coverage", () => {
     });
 
     await expect(
-      executeHostedDispatchEvent({
-        dispatch: cronDispatch,
+      executeHostedWakeEvent({
+        wake: cronWake,
         executionContext,
         runtime,
         runtimeEnv: {},
@@ -164,8 +163,8 @@ describe("hosted runtime event coverage", () => {
     });
 
     await expect(
-      executeHostedDispatchEvent({
-        dispatch: wakeDispatch,
+      executeHostedWakeEvent({
+        wake: deviceSyncWake,
         executionContext,
         runtime,
         runtimeEnv: {},
@@ -180,11 +179,11 @@ describe("hosted runtime event coverage", () => {
   });
 
   it("delegates hydrated share acceptance to the share handler", async () => {
-    mocks.handleHostedShareAcceptedDispatch.mockResolvedValue({
+    mocks.handleHostedShareAcceptedWake.mockResolvedValue({
       shareImportResult: "imported",
       shareImportTitle: "Shared export",
     });
-    const dispatch = buildHostedExecutionVaultShareAcceptedDispatch({
+    const wake = buildHostedExecutionVaultShareAcceptedWake({
       eventId: "evt_share",
       memberId: "member_123",
       occurredAt: "2026-04-08T00:15:00.000Z",
@@ -204,8 +203,8 @@ describe("hosted runtime event coverage", () => {
       shareId: "share_123",
     };
 
-    const result = await executeHostedDispatchEvent({
-      dispatch,
+    const result = await executeHostedWakeEvent({
+      wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
@@ -213,8 +212,8 @@ describe("hosted runtime event coverage", () => {
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
     });
 
-    expect(mocks.handleHostedShareAcceptedDispatch).toHaveBeenCalledWith({
-      dispatch: buildHostedExecutionWakeFromDispatch(dispatch),
+    expect(mocks.handleHostedShareAcceptedWake).toHaveBeenCalledWith({
+      wake,
       sharePack,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
     });
@@ -226,15 +225,14 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
-  it("fails closed on unexpected dispatch event kinds", async () => {
+  it("fails closed on unexpected wake kinds", async () => {
     await expect(
-      executeHostedDispatchEvent({
-        dispatch: {
-          event: {
-            kind: "unexpected.event",
-          },
+      executeHostedWakeEvent({
+        wake: {
+          kind: "unexpected.event",
           eventId: "evt_unexpected",
           occurredAt: "2026-04-08T00:20:00.000Z",
+          userId: "member_123",
         } as never,
         executionContext,
         runtime: createRuntime(),

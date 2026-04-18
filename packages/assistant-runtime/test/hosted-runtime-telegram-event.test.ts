@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionTelegramMessageReceivedDispatch,
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionTelegramConversationMessageWake,
   isHostedTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 
@@ -70,7 +69,7 @@ afterEach(() => {
 
 describe("buildHostedTelegramCapture", () => {
   it("normalizes the hosted message payload into a capture", async () => {
-    const dispatch = buildHostedExecutionTelegramMessageReceivedDispatch({
+    const wake = buildHostedExecutionTelegramConversationMessageWake({
       eventId: "evt_telegram",
       occurredAt: "2026-04-08T00:00:00.000Z",
       telegramMessage: {
@@ -87,7 +86,6 @@ describe("buildHostedTelegramCapture", () => {
       },
       userId: "member_123",
     });
-    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
     if (!isHostedTelegramConversationMessageWake(wake)) {
       throw new Error("Expected Telegram conversation wake.");
     }

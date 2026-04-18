@@ -4,6 +4,11 @@ import path from "node:path";
 
 import { beforeEach, test, vi } from "vitest";
 
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
@@ -34,7 +39,7 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
 }));
 
 import {
-  prepareHostedDispatchContext,
+  prepareHostedWakeContext,
   readHostedAssistantExecutionDefaultTarget,
   reconcileHostedAssistantChannelState,
 } from "../src/hosted-runtime/context.ts";
@@ -49,6 +54,43 @@ const DEFAULT_MEMBER_CHANNELS = {
   linq: true,
   telegram: true,
 } as const;
+
+function buildLegacyWake(input: {
+  event: Record<string, unknown> & { kind: string; userId?: string };
+  eventId: string;
+  occurredAt: string;
+}) {
+  switch (input.event.kind) {
+    case "assistant.cron.tick":
+      return buildHostedExecutionAssistantCronTickWake({
+        eventId: input.eventId,
+        occurredAt: input.occurredAt,
+        reason: input.event.reason as "alarm" | "device-sync" | "manual",
+        userId: input.event.userId ?? "member_123",
+      });
+    case "member.activated":
+      return buildHostedExecutionMemberActivatedWake({
+        eventId: input.eventId,
+        firstContact: input.event.firstContact as
+          | Parameters<typeof buildHostedExecutionMemberActivatedWake>[0]["firstContact"]
+          | undefined,
+        memberChannels: input.event.memberChannels as typeof DEFAULT_MEMBER_CHANNELS,
+        memberId: input.event.userId ?? "member_123",
+        occurredAt: input.occurredAt,
+      });
+    case "linq.message.received":
+      return buildHostedExecutionLinqConversationMessageWake({
+        eventId: input.eventId,
+        linqEvent: input.event.linqEvent as Record<string, unknown>,
+        linqMessageId: (input.event.linqMessageId as string | null | undefined) ?? undefined,
+        occurredAt: input.occurredAt,
+        phoneLookupKey: input.event.phoneLookupKey as string,
+        userId: input.event.userId ?? "member_123",
+      });
+    default:
+      throw new Error(`Unsupported legacy wake kind: ${input.event.kind}`);
+  }
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -259,9 +301,9 @@ test("hosted dispatch context still requires member activation bootstrap before 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
       await assert.rejects(
-        prepareHostedDispatchContext(
+        prepareHostedWakeContext(
           vaultRoot,
-          {
+          buildLegacyWake({
             event: {
               kind: "assistant.cron.tick",
               reason: "manual",
@@ -269,16 +311,16 @@ test("hosted dispatch context still requires member activation bootstrap before 
             },
             eventId: "evt_tick_without_bootstrap",
             occurredAt: "2026-03-28T09:00:00.000Z",
-          },
+          }),
           {},
           HOSTED_RUNTIME_RESOLVED_CONFIG,
         ),
         /requires member\.activated bootstrap first/u,
       );
 
-      const bootstrapResult = await prepareHostedDispatchContext(
+      const bootstrapResult = await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: {
@@ -290,7 +332,7 @@ test("hosted dispatch context still requires member activation bootstrap before 
           },
           eventId: "evt_activation",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         {},
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
@@ -323,9 +365,9 @@ test("hosted member activation enables managed Linq auto-reply when first contac
 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
-      const bootstrapResult = await prepareHostedDispatchContext(
+      const bootstrapResult = await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             firstContact: {
@@ -339,7 +381,7 @@ test("hosted member activation enables managed Linq auto-reply when first contac
           },
           eventId: "evt_activation_linq",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
@@ -387,9 +429,9 @@ test("hosted assistant bootstrap exposes an execution default target for later m
 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: DEFAULT_MEMBER_CHANNELS,
@@ -397,7 +439,7 @@ test("hosted assistant bootstrap exposes an execution default target for later m
           },
           eventId: "evt_activation_default_target",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
@@ -429,9 +471,9 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             firstContact: {
@@ -445,14 +487,14 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
           },
           eventId: "evt_activation_linq_initial",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
 
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: DEFAULT_MEMBER_CHANNELS,
@@ -460,7 +502,7 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
           },
           eventId: "evt_activation_linq_replay",
           occurredAt: "2026-03-28T09:10:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
@@ -493,9 +535,9 @@ test("hosted Linq inbound dispatch self-heals managed Linq auto-reply when the h
 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: {
@@ -507,16 +549,16 @@ test("hosted Linq inbound dispatch self-heals managed Linq auto-reply when the h
           },
           eventId: "evt_activation_without_channels",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
 
       assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, []);
 
-      const result = await prepareHostedDispatchContext(
+      const result = await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "linq.message.received",
             linqEvent: {
@@ -529,7 +571,7 @@ test("hosted Linq inbound dispatch self-heals managed Linq auto-reply when the h
           },
           eventId: "evt_linq_message_received",
           occurredAt: "2026-03-28T09:10:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
@@ -556,9 +598,9 @@ test("hosted Linq inbound dispatch self-heal preserves existing managed channels
 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: {
@@ -570,14 +612,14 @@ test("hosted Linq inbound dispatch self-heal preserves existing managed channels
           },
           eventId: "evt_activation_email_only",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
 
-      const result = await prepareHostedDispatchContext(
+      const result = await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "linq.message.received",
             linqEvent: {
@@ -590,7 +632,7 @@ test("hosted Linq inbound dispatch self-heal preserves existing managed channels
           },
           eventId: "evt_linq_message_received",
           occurredAt: "2026-03-28T09:10:00.000Z",
-        },
+        }),
         buildHostedAssistantSeedRuntimeEnv(),
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
@@ -620,9 +662,9 @@ test("hosted Linq inbound dispatch self-heal does not enable auto-reply when the
 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: {
@@ -634,14 +676,14 @@ test("hosted Linq inbound dispatch self-heal does not enable auto-reply when the
           },
           eventId: "evt_activation_without_config",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         {},
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
 
-      const result = await prepareHostedDispatchContext(
+      const result = await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "linq.message.received",
             linqEvent: {
@@ -654,7 +696,7 @@ test("hosted Linq inbound dispatch self-heal does not enable auto-reply when the
           },
           eventId: "evt_linq_message_received_without_config",
           occurredAt: "2026-03-28T09:10:00.000Z",
-        },
+        }),
         {},
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
@@ -673,9 +715,9 @@ test("hosted dispatch context does not change auto-reply state on non-channel fo
 
   try {
     await withOperatorHomeRoot(operatorHomeRoot, async () => {
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "member.activated",
             memberChannels: {
@@ -687,15 +729,15 @@ test("hosted dispatch context does not change auto-reply state on non-channel fo
           },
           eventId: "evt_activation",
           occurredAt: "2026-03-28T09:05:00.000Z",
-        },
+        }),
         {},
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
       const autoReplyAfterActivation = (await readAutomationState(vaultRoot)).autoReply;
 
-      await prepareHostedDispatchContext(
+      await prepareHostedWakeContext(
         vaultRoot,
-        {
+        buildLegacyWake({
           event: {
             kind: "assistant.cron.tick",
             reason: "manual",
@@ -703,7 +745,7 @@ test("hosted dispatch context does not change auto-reply state on non-channel fo
           },
           eventId: "evt_tick_after_bootstrap",
           occurredAt: "2026-03-28T09:10:00.000Z",
-        },
+        }),
         HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
         HOSTED_RUNTIME_RESOLVED_CONFIG,
       );
