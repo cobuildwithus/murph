@@ -138,9 +138,6 @@ describe("hosted execution coverage gaps", () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
       "member.channels.updated",
-      "linq.message.received",
-      "telegram.message.received",
-      "email.message.received",
       "assistant.cron.tick",
       "device-sync.wake",
       "vault.share.accepted",
@@ -186,6 +183,12 @@ describe("hosted execution coverage gaps", () => {
 
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
+    expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
+    expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
+    expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
+    expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
+    expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     await expect(importBySpecifier("@murphai/hosted-execution/dispatch-ref")).rejects.toThrow();
     await expect(importBySpecifier("@murphai/hosted-execution/client")).rejects.toThrow();
     await expect(importBySpecifier("@murphai/hosted-execution/outbox-payload")).rejects.toThrow();

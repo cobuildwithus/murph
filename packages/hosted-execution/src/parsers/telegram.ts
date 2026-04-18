@@ -1,6 +1,7 @@
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
-  type HostedExecutionTelegramMessageReceivedEvent,
+  type HostedExecutionTelegramAttachment,
+  type HostedExecutionTelegramMessage,
 } from "../contracts.ts";
 
 import {
@@ -13,7 +14,7 @@ import {
 
 export function parseHostedExecutionTelegramMessage(
   value: unknown,
-): HostedExecutionTelegramMessageReceivedEvent["telegramMessage"] {
+): HostedExecutionTelegramMessage {
   const record = requireObject(value, "Hosted execution Telegram message telegramMessage");
   const attachmentsValue = record.attachments;
 
@@ -62,7 +63,7 @@ export function parseHostedExecutionTelegramMessage(
 function parseHostedExecutionTelegramAttachment(
   value: unknown,
   label: string,
-): NonNullable<HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["attachments"]>[number] {
+): HostedExecutionTelegramAttachment {
   const record = requireObject(value, label);
 
   return {
@@ -104,7 +105,7 @@ function parseHostedExecutionTelegramAttachment(
 function parseHostedExecutionTelegramAttachmentKind(
   value: unknown,
   label: string,
-): NonNullable<HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["attachments"]>[number]["kind"] {
+): HostedExecutionTelegramAttachment["kind"] {
   const kind = requireString(value, label);
 
   if (
@@ -125,7 +126,7 @@ function parseHostedExecutionTelegramAttachmentKind(
 
 function parseHostedExecutionTelegramMessageSchema(
   value: unknown,
-): HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["schema"] {
+): HostedExecutionTelegramMessage["schema"] {
   const schema = requireString(value, "Hosted execution Telegram message telegramMessage.schema");
 
   if (schema === HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA) {

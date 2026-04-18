@@ -2,14 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 } from "../src/contracts.js";
 import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
-  buildHostedWakeEmailMessageReceivedPayload,
-  buildHostedWakeLinqMessageReceivedPayload,
 } from "../src/builders.js";
 import {
   parseHostedExecutionEvent,
@@ -40,8 +37,11 @@ describe("hosted wake contract parsers", () => {
         id: "wake-123",
         kind: wake.kind,
         occurredAt: wake.occurredAt,
-        payloadJson: wake,
-        payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+        payloadJson: {
+          eventId: wake.eventId,
+          ...wake.message,
+        },
+        payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "42",
@@ -84,19 +84,6 @@ describe("hosted wake contract parsers", () => {
     expect(parseHostedWakeExecutionPayload({
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadJson: buildHostedWakeLinqMessageReceivedPayload({
-        eventId: wake.eventId,
-        linqEvent: wake.message.channel === "linq" ? wake.message.linqEvent : {},
-        linqMessageId: wake.message.channel === "linq" ? wake.message.linqMessageId : undefined,
-        phoneLookupKey: wake.message.channel === "linq" ? wake.message.phoneLookupKey : "",
-      }),
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-      userId: wake.userId,
-    })).toEqual(wake);
-
-    expect(parseHostedWakeExecutionPayload({
-      kind: wake.kind,
-      occurredAt: wake.occurredAt,
       payloadJson: {
         eventId: wake.eventId,
         ...wake.message,
@@ -119,13 +106,11 @@ describe("hosted wake contract parsers", () => {
     expect(parseHostedWakeExecutionPayload({
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadJson: buildHostedWakeEmailMessageReceivedPayload({
+      payloadJson: {
         eventId: wake.eventId,
-        identityId: wake.message.channel === "email" ? wake.message.identityId : null,
-        rawMessageKey: wake.message.channel === "email" ? wake.message.rawMessageKey : "",
-        selfAddress: wake.message.channel === "email" ? wake.message.selfAddress : undefined,
-      }),
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+        ...wake.message,
+      },
+      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
   });

@@ -61,76 +61,6 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("parses Telegram message events with attachment payloads", () => {
-    expect(
-      parseHostedExecutionEvent({
-        kind: "telegram.message.received",
-        telegramMessage: {
-          attachments: [
-            {
-              fileId: "file-1",
-              fileName: "photo.jpg",
-              fileSize: 42,
-              fileUniqueId: "unique-1",
-              height: 720,
-              kind: "photo",
-              mimeType: "image/jpeg",
-              width: 1280,
-            },
-          ],
-          mediaGroupId: null,
-          messageId: "message-1",
-          schema: "murph.hosted-telegram-message.v1",
-          text: "hello",
-          threadId: "thread-1",
-        },
-        userId: "user-1",
-      }),
-    ).toEqual({
-      kind: "telegram.message.received",
-      telegramMessage: {
-        attachments: [
-          {
-            fileId: "file-1",
-            fileName: "photo.jpg",
-            fileSize: 42,
-            fileUniqueId: "unique-1",
-            height: 720,
-            kind: "photo",
-            mimeType: "image/jpeg",
-            width: 1280,
-          },
-        ],
-        mediaGroupId: null,
-        messageId: "message-1",
-        schema: "murph.hosted-telegram-message.v1",
-        text: "hello",
-        threadId: "thread-1",
-      },
-      userId: "user-1",
-    });
-  });
-
-  it("rejects unsupported Telegram attachment kinds", () => {
-    expect(() =>
-      parseHostedExecutionEvent({
-        kind: "telegram.message.received",
-        telegramMessage: {
-          attachments: [
-            {
-              fileId: "file-1",
-              kind: "gif",
-            },
-          ],
-          messageId: "message-1",
-          schema: "murph.hosted-telegram-message.v1",
-          threadId: "thread-1",
-        },
-        userId: "user-1",
-      }),
-    ).toThrow(/supported hosted Telegram attachment kind/i);
-  });
-
   it("parses device-sync wake events with hint jobs and revoke warnings", () => {
     expect(
       parseHostedExecutionEvent({
@@ -228,5 +158,39 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toThrow(/requires channel linq/i);
+  });
+
+  it("rejects legacy provider message event kinds", () => {
+    expect(() =>
+      parseHostedExecutionEvent({
+        kind: "telegram.message.received",
+        telegramMessage: {
+          messageId: "message-1",
+          schema: "murph.hosted-telegram-message.v1",
+          threadId: "thread-1",
+        },
+        userId: "user-1",
+      }),
+    ).toThrow(/Unsupported hosted execution event kind/i);
+
+    expect(() =>
+      parseHostedExecutionEvent({
+        kind: "linq.message.received",
+        linqEvent: {
+          eventId: "linq_evt_123",
+        },
+        phoneLookupKey: "phone_lookup_123",
+        userId: "user-1",
+      }),
+    ).toThrow(/Unsupported hosted execution event kind/i);
+
+    expect(() =>
+      parseHostedExecutionEvent({
+        identityId: null,
+        kind: "email.message.received",
+        rawMessageKey: "raw_123",
+        userId: "user-1",
+      }),
+    ).toThrow(/Unsupported hosted execution event kind/i);
   });
 });
