@@ -2,16 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 import {
-  buildHostedExecutionAssistantCronTickDispatch,
-  buildHostedExecutionWakeFromDispatch,
-  buildHostedExecutionVaultShareAcceptedDispatch,
-  parseHostedExecutionDispatchRequest,
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionVaultShareAcceptedWake,
+} from "../src/index.ts";
+import {
   parseHostedExecutionRunnerRequest,
+  parseHostedExecutionWake,
 } from "../src/index.ts";
 
-describe("vault.share.accepted dispatch contract", () => {
-  it("preserves the tiny share ref in the dispatch payload", () => {
-    const dispatch = buildHostedExecutionVaultShareAcceptedDispatch({
+describe("vault.share.accepted wake contract", () => {
+  it("preserves the tiny share ref in the wake payload", () => {
+    const wake = buildHostedExecutionVaultShareAcceptedWake({
       eventId: "evt_share_accept",
       memberId: "member_123",
       occurredAt: "2026-04-06T00:00:00.000Z",
@@ -21,21 +22,19 @@ describe("vault.share.accepted dispatch contract", () => {
       },
     });
 
-    expect(parseHostedExecutionDispatchRequest(dispatch)).toEqual(dispatch);
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
   });
 
-  it("rejects share acceptance payloads that omit the owner share ref", () => {
+  it("rejects share acceptance wakes that omit the owner share ref", () => {
     expect(() =>
-      parseHostedExecutionDispatchRequest({
-        event: {
-          kind: "vault.share.accepted",
-          share: {
-            shareId: "hshare_123",
-          },
-          userId: "member_123",
-        },
+      parseHostedExecutionWake({
         eventId: "evt_share_accept",
+        kind: "vault.share.accepted",
         occurredAt: "2026-04-06T00:00:00.000Z",
+        share: {
+          shareId: "hshare_123",
+        },
+        userId: "member_123",
       }),
     ).toThrow(/ownerUserId/i);
   });
@@ -44,17 +43,15 @@ describe("vault.share.accepted dispatch contract", () => {
     expect(() =>
       parseHostedExecutionRunnerRequest({
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              ownerUserId: "member_sender",
-              shareId: "hshare_123",
-            },
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_share_accept",
+          kind: "vault.share.accepted",
           occurredAt: "2026-04-06T00:00:00.000Z",
+          share: {
+            ownerUserId: "member_sender",
+            shareId: "hshare_123",
+          },
+          userId: "member_123",
         },
       }),
     ).toThrow(/sharePack is required/i);
@@ -63,18 +60,6 @@ describe("vault.share.accepted dispatch contract", () => {
   it("accepts a hydrated runner share pack when it matches the share ref", () => {
     const request = {
       bundle: null,
-      dispatch: {
-        event: {
-          kind: "vault.share.accepted" as const,
-          share: {
-            ownerUserId: "member_sender",
-            shareId: "hshare_123",
-          },
-          userId: "member_123",
-        },
-        eventId: "evt_share_accept",
-        occurredAt: "2026-04-06T00:00:00.000Z",
-      },
       sharePack: {
         ownerUserId: "member_sender",
         pack: TEST_HOSTED_SHARE_PACK,
@@ -95,60 +80,58 @@ describe("vault.share.accepted dispatch contract", () => {
     expect(parseHostedExecutionRunnerRequest(request)).toEqual(request);
   });
 
-  it("rejects runner requests when the dispatch and wake metadata diverge", () => {
-    const dispatch = buildHostedExecutionAssistantCronTickDispatch({
-      eventId: "evt_runner_request",
-      occurredAt: "2026-04-06T00:00:00.000Z",
-      reason: "manual",
-      userId: "member_123",
-    });
-    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
+  it("rejects mismatched share-pack owner and share ids", () => {
+    const baseRequest = {
+      bundle: null,
+      sharePack: {
+        ownerUserId: "owner_999",
+        pack: TEST_HOSTED_SHARE_PACK,
+        shareId: "share_123",
+      },
+      wake: {
+        eventId: "evt_123",
+        kind: "vault.share.accepted" as const,
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        share: {
+          ownerUserId: "owner_123",
+          shareId: "share_123",
+        },
+        userId: "user_123",
+      },
+    };
+
+    expect(() => parseHostedExecutionRunnerRequest(baseRequest)).toThrow(
+      /ownerUserId must match/i,
+    );
 
     expect(() =>
       parseHostedExecutionRunnerRequest({
-        bundle: null,
-        dispatch: {
-          ...dispatch,
-          eventId: "evt_runner_request_dispatch_mismatch",
+        ...baseRequest,
+        sharePack: {
+          ...baseRequest.sharePack,
+          ownerUserId: "owner_123",
+          shareId: "share_999",
         },
-        wake,
       }),
-    ).toThrow(/wake.eventId must match dispatch.eventId/i);
+    ).toThrow(/shareId must match/i);
+  });
 
+  it("rejects share packs on non-share wakes", () => {
     expect(() =>
       parseHostedExecutionRunnerRequest({
         bundle: null,
-        dispatch: {
-          ...dispatch,
-          occurredAt: "2026-04-06T01:00:00.000Z",
+        sharePack: {
+          ownerUserId: "owner_123",
+          pack: TEST_HOSTED_SHARE_PACK,
+          shareId: "share_123",
         },
-        wake,
+        wake: buildHostedExecutionAssistantCronTickWake({
+          eventId: "evt_runner_request",
+          occurredAt: "2026-04-06T00:00:00.000Z",
+          reason: "manual",
+          userId: "member_123",
+        }),
       }),
-    ).toThrow(/wake.occurredAt must match dispatch.occurredAt/i);
-
-    expect(() =>
-      parseHostedExecutionRunnerRequest({
-        bundle: null,
-        dispatch: {
-          ...dispatch,
-          event: {
-            ...dispatch.event,
-            userId: "member_other",
-          },
-        },
-        wake,
-      }),
-    ).toThrow(/wake.userId must match dispatch.event.userId/i);
-
-    expect(() =>
-      parseHostedExecutionRunnerRequest({
-        bundle: null,
-        dispatch,
-        wake: {
-          ...wake,
-          reason: "alarm",
-        },
-      }),
-    ).toThrow(/wake must describe the same wake as dispatch/i);
+    ).toThrow(/sharePack is only supported/i);
   });
 });

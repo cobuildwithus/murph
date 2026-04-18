@@ -1,25 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 } from "../src/contracts.js";
 import {
-  buildHostedExecutionEmailMessageReceivedDispatch,
-  buildHostedExecutionLinqMessageReceivedDispatch,
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionLinqConversationMessageWake,
   buildHostedWakeEmailMessageReceivedPayload,
   buildHostedWakeLinqMessageReceivedPayload,
 } from "../src/builders.js";
 import {
-  parseHostedExecutionDispatchRequest,
-  parseHostedWakeDispatchPayload,
+  parseHostedExecutionEvent,
+  parseHostedWakeExecutionPayload,
   parseHostedWakeAppendResponse,
   parseHostedWakeQuarantineResponse,
 } from "../src/parsers.js";
 
 describe("hosted wake contract parsers", () => {
   it("parses hosted wake append and quarantine responses", () => {
-    const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+    const wake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "email:test-message",
       identityId: "me@example.com",
       occurredAt: "2026-04-17T00:00:00.000Z",
@@ -35,17 +36,17 @@ describe("hosted wake contract parsers", () => {
       wake: {
         behavior: "ordered",
         createdAt: "2026-04-17T00:00:00.000Z",
-        dedupeKey: "dispatch:email.message.received:email:test-message",
+        dedupeKey: "dispatch:conversation.message:email:test-message",
         id: "wake-123",
-        kind: dispatch.event.kind,
-        occurredAt: dispatch.occurredAt,
-        payloadJson: dispatch,
+        kind: wake.kind,
+        occurredAt: wake.occurredAt,
+        payloadJson: wake,
         payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "42",
         updatedAt: "2026-04-17T00:00:00.000Z",
-        userId: dispatch.event.userId,
+        userId: wake.userId,
       },
     })).toEqual({
       duplicate: false,
@@ -53,7 +54,7 @@ describe("hosted wake contract parsers", () => {
       updatedExisting: false,
       wake: expect.objectContaining({
         id: "wake-123",
-        kind: dispatch.event.kind,
+        kind: wake.kind,
         seq: "42",
       }),
     });
@@ -63,8 +64,8 @@ describe("hosted wake contract parsers", () => {
     });
   });
 
-  it("parses hosted wake payloads using the explicit message/system schema split", () => {
-    const dispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+  it("parses hosted wake payloads using the wake-first schema split", () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq:schema-split",
       linqEvent: {
         parts: [
@@ -80,22 +81,33 @@ describe("hosted wake contract parsers", () => {
       userId: "user-123",
     });
 
-    expect(parseHostedWakeDispatchPayload({
-      kind: dispatch.event.kind,
-      occurredAt: dispatch.occurredAt,
+    expect(parseHostedWakeExecutionPayload({
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
       payloadJson: buildHostedWakeLinqMessageReceivedPayload({
-        eventId: dispatch.eventId,
-        linqEvent: dispatch.event.linqEvent,
-        linqMessageId: dispatch.event.linqMessageId,
-        phoneLookupKey: dispatch.event.phoneLookupKey,
+        eventId: wake.eventId,
+        linqEvent: wake.message.channel === "linq" ? wake.message.linqEvent : {},
+        linqMessageId: wake.message.channel === "linq" ? wake.message.linqMessageId : undefined,
+        phoneLookupKey: wake.message.channel === "linq" ? wake.message.phoneLookupKey : "",
       }),
       payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-      userId: dispatch.event.userId,
-    })).toEqual(dispatch);
+      userId: wake.userId,
+    })).toEqual(wake);
+
+    expect(parseHostedWakeExecutionPayload({
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
+      payloadJson: {
+        eventId: wake.eventId,
+        ...wake.message,
+      },
+      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      userId: wake.userId,
+    })).toEqual(wake);
   });
 
   it("parses email message wakes through the explicit message lane", () => {
-    const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+    const wake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "email:direct-message-lane",
       identityId: "assistant@example.com",
       occurredAt: "2026-04-17T00:00:00.000Z",
@@ -104,32 +116,28 @@ describe("hosted wake contract parsers", () => {
       userId: "user-123",
     });
 
-    expect(parseHostedWakeDispatchPayload({
-      kind: dispatch.event.kind,
-      occurredAt: dispatch.occurredAt,
+    expect(parseHostedWakeExecutionPayload({
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
       payloadJson: buildHostedWakeEmailMessageReceivedPayload({
-        eventId: dispatch.eventId,
-        identityId: dispatch.event.identityId,
-        rawMessageKey: dispatch.event.rawMessageKey,
-        selfAddress: dispatch.event.selfAddress,
+        eventId: wake.eventId,
+        identityId: wake.message.channel === "email" ? wake.message.identityId : null,
+        rawMessageKey: wake.message.channel === "email" ? wake.message.rawMessageKey : "",
+        selfAddress: wake.message.channel === "email" ? wake.message.selfAddress : undefined,
       }),
       payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-      userId: dispatch.event.userId,
-    })).toEqual(dispatch);
+      userId: wake.userId,
+    })).toEqual(wake);
   });
 
-  it("rejects the removed gateway.message.send dispatch kind", () => {
-    expect(() => parseHostedExecutionDispatchRequest({
-      event: {
-        clientRequestId: null,
-        kind: "gateway.message.send",
-        replyToMessageId: null,
-        sessionKey: "session-123",
-        text: "hi",
-        userId: "user-123",
-      },
-      eventId: "gateway:test-message",
-      occurredAt: "2026-04-17T00:00:00.000Z",
+  it("rejects the removed gateway.message.send event kind", () => {
+    expect(() => parseHostedExecutionEvent({
+      clientRequestId: null,
+      kind: "gateway.message.send",
+      replyToMessageId: null,
+      sessionKey: "session-123",
+      text: "hi",
+      userId: "user-123",
     })).toThrow(/Unsupported hosted execution event kind|must be one of/i);
   });
 });
