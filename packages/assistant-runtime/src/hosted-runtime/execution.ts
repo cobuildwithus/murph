@@ -37,6 +37,7 @@ import {
 } from "./context.ts";
 import { executeHostedWakeEvent } from "./events.ts";
 import {
+  drainHostedParserQueueUntilSettled,
   runHostedConversationAssistantAutomation,
   runHostedMaintenanceLoop,
 } from "./maintenance.ts";
@@ -125,6 +126,7 @@ export async function executeHostedWakeForCommit(input: {
       })
     : isHostedConversationMessageWake(wake)
       ? await runHostedConversationAssistantAutomationAfterDispatch({
+          artifactMaterializer: input.artifactMaterializer ?? null,
           executionContext: dispatchExecutionContext,
           requestId: wake.eventId,
           run: input.request.run ?? null,
@@ -296,6 +298,7 @@ async function resolveSkippedHostedMaintenanceMetrics(input: {
 }
 
 async function runHostedConversationAssistantAutomationAfterDispatch(input: {
+  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   executionContext: AssistantExecutionContext;
   requestId: string;
   run?: HostedExecutionRunContext | null;
@@ -306,6 +309,10 @@ async function runHostedConversationAssistantAutomationAfterDispatch(input: {
   vaultRoot: string;
   wake: HostedExecutionWake;
 }): Promise<HostedMaintenanceMetrics> {
+  const parserResult = await drainHostedParserQueueUntilSettled({
+    artifactMaterializer: input.artifactMaterializer ?? null,
+    vaultRoot: input.vaultRoot,
+  });
   const assistantAutomation = await runHostedConversationAssistantAutomation({
     executionContext: input.executionContext,
     requestId: input.requestId,
@@ -322,9 +329,11 @@ async function runHostedConversationAssistantAutomationAfterDispatch(input: {
   return {
     ...preservedMetrics,
     nextWakeAt: earliestHostedWakeAt(
+      parserResult.nextWakeAt,
       assistantAutomation.nextWakeAt,
       preservedMetrics.nextWakeAt,
     ),
+    parserProcessed: parserResult.processedJobs,
   };
 }
 

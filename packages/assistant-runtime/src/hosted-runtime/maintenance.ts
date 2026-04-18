@@ -30,7 +30,6 @@ import {
 } from "../hosted-device-sync-runtime.ts";
 import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
-  HostedExecutionDispatchRequest,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -39,7 +38,6 @@ import {
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
-import { resolveHostedDispatch, resolveHostedWake } from "./utils.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_MAINTENANCE_PASSES = 10;
@@ -112,8 +110,7 @@ function reportHostedAssistantAutomationSkipped(
 export async function runHostedMaintenanceLoop(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
-  dispatch: HostedExecutionDispatchRequest;
-  wake?: HostedExecutionWake;
+  wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   requestId: string;
   resolvedConfig: {
@@ -123,13 +120,12 @@ export async function runHostedMaintenanceLoop(input: {
   timeoutMs: number | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
-  const wake = resolveHostedWake(input);
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
     skipAssistantAutomation: input.skipAssistantAutomation ?? false,
   });
 
   if (!assistantAutomation.configured) {
-    reportHostedAssistantAutomationSkipped(wake, assistantAutomation);
+    reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation);
   }
 
   let deviceSyncProcessed = 0;
@@ -142,7 +138,7 @@ export async function runHostedMaintenanceLoop(input: {
       artifactMaterializer: input.artifactMaterializer ?? null,
       assistantAutomation,
       deviceSyncPort: input.deviceSyncPort,
-      wake,
+      wake: input.wake,
       executionContext: input.executionContext,
       requestId: input.requestId,
       resolvedConfig: input.resolvedConfig,
@@ -216,6 +212,40 @@ export async function drainHostedParserQueue(input: {
   }
 }
 
+export async function drainHostedParserQueueUntilSettled(input: {
+  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  vaultRoot: string;
+}): Promise<{ nextWakeAt: string | null; processedJobs: number }> {
+  let processedJobs = 0;
+
+  for (let pass = 0; pass < HOSTED_MAX_MAINTENANCE_PASSES; pass += 1) {
+    const passResult = await drainHostedParserQueue(input);
+    processedJobs += passResult.processedJobs;
+
+    if (passResult.processedJobs === 0) {
+      return {
+        nextWakeAt: passResult.nextWakeAt,
+        processedJobs,
+      };
+    }
+
+    if (pass === HOSTED_MAX_MAINTENANCE_PASSES - 1) {
+      return {
+        nextWakeAt: earliestHostedWakeAt(
+          new Date().toISOString(),
+          passResult.nextWakeAt,
+        ),
+        processedJobs,
+      };
+    }
+  }
+
+  return {
+    nextWakeAt: null,
+    processedJobs,
+  };
+}
+
 async function hydratePendingHostedParserArtifacts(input: {
   artifactMaterializer: HostedWorkspaceArtifactMaterializer;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
@@ -246,9 +276,8 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
   executionContext: AssistantExecutionContext,
-  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
+  wake: HostedExecutionWake,
 ): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
-  const wake = resolveHostedWake(dispatch);
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
@@ -337,15 +366,39 @@ export async function runHostedAssistantAutomation(
   }
 }
 
+export async function runHostedConversationAssistantAutomation(input: {
+  executionContext: AssistantExecutionContext;
+  requestId: string;
+  vaultRoot: string;
+  wake: HostedExecutionWake;
+}): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
+  const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
+    skipAssistantAutomation: false,
+  });
+
+  if (!assistantAutomation.shouldRun) {
+    reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation);
+    return {
+      nextWakeAt: null,
+      progressed: false,
+    };
+  }
+
+  return runHostedAssistantAutomation(
+    input.vaultRoot,
+    input.requestId,
+    input.executionContext,
+    input.wake,
+  );
+}
+
 export async function runHostedDeviceSyncPass(
-  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
+  wake: HostedExecutionWake,
   vaultRoot: string,
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null,
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
-  const resolvedDispatch = resolveHostedDispatch(dispatch);
-  const wake = resolveHostedWake(dispatch);
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
     vaultRoot,
@@ -373,7 +426,6 @@ export async function runHostedDeviceSyncPass(
     if (secret) {
       try {
         syncState = await syncHostedDeviceSyncControlPlaneState({
-          dispatch: resolvedDispatch,
           deviceSyncPort,
           wake,
           secret,
@@ -395,7 +447,6 @@ export async function runHostedDeviceSyncPass(
     if (secret && controlPlaneSynced) {
       try {
         await reconcileHostedDeviceSyncControlPlaneState({
-          dispatch: resolvedDispatch,
           deviceSyncPort,
           wake,
           secret,

@@ -6,6 +6,7 @@ coverage/
 .next/
 .next-dev/
 .next-smoke/
+.next-smoke*/
 .agents/
 .claude/
 .windsurf/
