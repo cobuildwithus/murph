@@ -163,14 +163,6 @@ export class RunnerQueueStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async finalizeCommittedWake(input: {
-    eventId: string;
-    finishedAt?: string | null;
-    leaseOwner: RunnerLeaseOwnerInput;
-  }): Promise<RunnerStateRecord> {
-    return this.completeWakeRun(input);
-  }
-
   async failWakeRun(input: {
     error: unknown;
     eventId: string;

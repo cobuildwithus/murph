@@ -1,11 +1,11 @@
 import type {
   HostedExecutionBundleRef,
-  HostedExecutionDispatchLifecycleState,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
   HostedExecutionRunnerSharePack,
   HostedExecutionWake,
+  HostedWakeLifecycleState,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -98,7 +98,7 @@ export class RunnerWakeProcessor {
     options: {
       holdLeaseUntilCleanup?: boolean;
     } = {},
-  ): Promise<HostedExecutionDispatchLifecycleState> {
+  ): Promise<HostedWakeLifecycleState> {
     const userId = wake.userId;
     const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
     const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
@@ -731,7 +731,7 @@ export class RunnerWakeProcessor {
     eventId: string,
     wake: HostedExecutionWake | null = null,
   ): Promise<RunnerStateRecord> {
-    const record = await this.dependencies.queueStore.finalizeCommittedWake({
+    const record = await this.dependencies.queueStore.completeWakeRun({
       eventId,
       finishedAt: new Date().toISOString(),
       leaseOwner: {
