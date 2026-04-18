@@ -8,15 +8,11 @@ import {
   classifyRunnerJobError,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
-import {
-  setHostedExecutionIsolatedRunnerForTests,
-} from "../src/node-runner.js";
 import * as nodeRunner from "../src/node-runner.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 
 afterEach(async () => {
-  setHostedExecutionIsolatedRunnerForTests(null);
   vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.();

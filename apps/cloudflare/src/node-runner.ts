@@ -18,96 +18,35 @@ import {
 } from "./runtime-platform.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 
-let hostedExecutionRunStartHookForTests: (() => void) | null = null;
-let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
-let hostedExecutionIsolatedRunnerForTests:
-  | ((
-    input: HostedExecutionIsolatedRunnerInput,
-    options?: { signal?: AbortSignal },
-  ) => Promise<HostedAssistantRuntimeJobResult>)
-  | null = null;
 const hostedExecutionChildControlEnvKeys = new Set([
   "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
   "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
 ]);
 
-export function setHostedExecutionRunModeForTests(
-  mode: "in-process" | "isolated" | null,
-): void {
-  hostedExecutionRunModeForTests = mode;
+export type HostedExecutionJobRunMode = "in-process" | "isolated";
+
+export interface HostedExecutionJobOptions {
+  internalWorkerProxyToken?: string | null;
+  localInternalProxyBaseUrl?: string | null;
+  localLoopbackProxyToken?: string | null;
+  signal?: AbortSignal;
 }
 
-export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null): void {
-  hostedExecutionRunStartHookForTests = hook;
+export interface HostedExecutionJobRunnerDependencies {
+  buildRuntime?: typeof buildHostedExecutionJobRuntime;
+  buildRuntimePlatform?: typeof buildHostedExecutionRuntimePlatform;
+  onBeforeRun?: () => void;
+  readEnvironment?: typeof readHostedExecutionEnvironment;
+  runInProcess?: typeof runHostedAssistantRuntimeJobInProcessDetailed;
+  runIsolated?: (
+    input: HostedExecutionIsolatedRunnerInput,
+    options?: { signal?: AbortSignal },
+  ) => Promise<HostedAssistantRuntimeJobResult>;
+  runMode?: HostedExecutionJobRunMode;
 }
 
-export function setHostedExecutionIsolatedRunnerForTests(
-  runner:
-    | ((
-      input: HostedExecutionIsolatedRunnerInput,
-      options?: { signal?: AbortSignal },
-    ) => Promise<HostedAssistantRuntimeJobResult>)
-    | null,
-): void {
-  hostedExecutionIsolatedRunnerForTests = runner;
-}
-
-export function buildHostedExecutionJobRuntimeForTests(
-  requestedRuntime: HostedAssistantRuntimeConfig,
-): HostedAssistantRuntimeConfig {
-  return buildHostedExecutionJobRuntime(requestedRuntime);
-}
-
-export async function runHostedExecutionJob(
-  input: HostedAssistantRuntimeJobInput,
-  options?: {
-    internalWorkerProxyToken?: string | null;
-    localInternalProxyBaseUrl?: string | null;
-    localLoopbackProxyToken?: string | null;
-    signal?: AbortSignal;
-  },
-): Promise<HostedAssistantRuntimeJobResult> {
-  hostedExecutionRunStartHookForTests?.();
-  const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
-  const environment = readHostedExecutionEnvironment();
-  const runtimePlatform = buildHostedExecutionRuntimePlatform({
-    boundUserId: input.request.dispatch.event.userId,
-    commitTimeoutMs: runtime.commitTimeoutMs,
-    internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
-    localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
-    localLoopbackProxyToken: options?.localLoopbackProxyToken ?? null,
-    webCallbackSigning: environment.webCallbackSigning,
-    webControlBaseUrl: environment.hostedWebBaseUrl,
-  });
-
-  if (hostedExecutionRunModeForTests === "in-process") {
-    return await runHostedAssistantRuntimeJobInProcessDetailed({
-      request: input.request,
-      runtime,
-    }, {
-      platform: runtimePlatform,
-    });
-  }
-
-  const runIsolated =
-    hostedExecutionIsolatedRunnerForTests ?? runHostedExecutionJobIsolatedDetailed;
-
-  return await runIsolated(
-    {
-      internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
-      localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
-      localLoopbackProxyToken: options?.localLoopbackProxyToken ?? null,
-      job: {
-        request: input.request,
-        runtime,
-      },
-    },
-    options,
-  );
-}
-
-function buildHostedExecutionJobRuntime(
+export function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
 ): HostedAssistantRuntimeConfig {
   const forwardedEnv = requestedRuntime.forwardedEnv === undefined
@@ -129,6 +68,63 @@ function buildHostedExecutionJobRuntime(
     runnerSecrets: requestedRuntime.userEnv ?? {},
   });
 }
+
+export function createHostedExecutionJobRunner(
+  dependencies: HostedExecutionJobRunnerDependencies = {},
+) {
+  const buildRuntime = dependencies.buildRuntime ?? buildHostedExecutionJobRuntime;
+  const buildRuntimePlatform =
+    dependencies.buildRuntimePlatform ?? buildHostedExecutionRuntimePlatform;
+  const onBeforeRun = dependencies.onBeforeRun;
+  const readEnvironment = dependencies.readEnvironment ?? readHostedExecutionEnvironment;
+  const runInProcess =
+    dependencies.runInProcess ?? runHostedAssistantRuntimeJobInProcessDetailed;
+  const runIsolated =
+    dependencies.runIsolated ?? runHostedExecutionJobIsolatedDetailed;
+  const runMode = dependencies.runMode ?? "isolated";
+
+  return async function runHostedExecutionJob(
+    input: HostedAssistantRuntimeJobInput,
+    options?: HostedExecutionJobOptions,
+  ): Promise<HostedAssistantRuntimeJobResult> {
+    onBeforeRun?.();
+    const runtime = buildRuntime(input.runtime ?? {});
+    const environment = readEnvironment();
+    const runtimePlatform = buildRuntimePlatform({
+      boundUserId: input.request.dispatch.event.userId,
+      commitTimeoutMs: runtime.commitTimeoutMs,
+      internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
+      localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
+      localLoopbackProxyToken: options?.localLoopbackProxyToken ?? null,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: environment.hostedWebBaseUrl,
+    });
+
+    if (runMode === "in-process") {
+      return await runInProcess({
+        request: input.request,
+        runtime,
+      }, {
+        platform: runtimePlatform,
+      });
+    }
+
+    return await runIsolated(
+      {
+        internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
+        localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
+        localLoopbackProxyToken: options?.localLoopbackProxyToken ?? null,
+        job: {
+          request: input.request,
+          runtime,
+        },
+      },
+      options,
+    );
+  };
+}
+
+export const runHostedExecutionJob = createHostedExecutionJobRunner();
 
 function stripChildProcessControlEnvKeys(
   forwardedEnv: HostedAssistantRuntimeConfig["forwardedEnv"],

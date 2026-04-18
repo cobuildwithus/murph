@@ -51,11 +51,8 @@ vi.mock("@murphai/assistant-engine", async () => {
 });
 
 import {
-  buildHostedExecutionJobRuntimeForTests,
-  runHostedExecutionJob as runHostedExecutionJobInternal,
-  setHostedExecutionIsolatedRunnerForTests,
-  setHostedExecutionRunModeForTests,
-  setHostedExecutionRunStartHookForTests,
+  buildHostedExecutionJobRuntime,
+  createHostedExecutionJobRunner,
 } from "../src/node-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
@@ -81,6 +78,9 @@ const MEMBER_CHANNELS_LINQ = {
   ...MEMBER_CHANNELS_NONE,
   linq: true,
 } as const;
+let runHostedExecutionJobInternal = createHostedExecutionJobRunner({
+  runMode: "in-process",
+});
 
 type NodeRunnerTestInput =
   Pick<
@@ -309,8 +309,9 @@ describe("runHostedExecutionJob", () => {
 
   beforeEach(async () => {
     vi.restoreAllMocks();
-    setHostedExecutionIsolatedRunnerForTests(null);
-    setHostedExecutionRunModeForTests("in-process");
+    runHostedExecutionJobInternal = createHostedExecutionJobRunner({
+      runMode: "in-process",
+    });
     const requiredWorkerEnv = Object.fromEntries(
       Object.entries(createHostedExecutionTestEnv()).filter(([, value]) => typeof value === "string"),
     ) as Record<string, string>;
@@ -354,9 +355,6 @@ describe("runHostedExecutionJob", () => {
   });
 
   afterEach(async () => {
-    setHostedExecutionIsolatedRunnerForTests(null);
-    setHostedExecutionRunModeForTests(null);
-    setHostedExecutionRunStartHookForTests(null);
     restoreEnvVars(previousHostedDeviceSyncEnv);
     restoreEnvVars(previousHostedExecutionWorkerEnv);
     if (initialGlobalFetch) {
@@ -1836,7 +1834,9 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("applies caller-supplied forwarded env when launching isolated jobs", async () => {
-    setHostedExecutionRunModeForTests("isolated");
+    runHostedExecutionJobInternal = createHostedExecutionJobRunner({
+      runMode: "isolated",
+    });
 
     await expect(
       runHostedExecutionJob({
@@ -2051,7 +2051,6 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("allows concurrent hosted runs because each job uses isolated process env", async () => {
-    setHostedExecutionRunModeForTests("isolated");
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS;
     process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = "CUSTOM_API_KEY";
 
@@ -2064,17 +2063,42 @@ describe("runHostedExecutionJob", () => {
     let firstPhasesInFlight = 0;
     let maxFirstPhasesInFlight = 0;
 
-    setHostedExecutionRunStartHookForTests(() => {
-      startedInvocationCount += 1;
-    });
-    setHostedExecutionIsolatedRunnerForTests(async (input) => {
-      const userId = input.job.request.dispatch.event.userId;
-      const runtime = input.job.runtime ?? {};
-      seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
-      if (input.job.request.resume) {
+    runHostedExecutionJobInternal = createHostedExecutionJobRunner({
+      onBeforeRun: () => {
+        startedInvocationCount += 1;
+      },
+      runIsolated: async (input) => {
+        const userId = input.job.request.dispatch.event.userId;
+        const runtime = input.job.runtime ?? {};
+        seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
+        if (input.job.request.resume) {
+          return {
+            finalGatewayProjectionSnapshot: null,
+            phase: "completed",
+            result: {
+              bundle: null,
+              result: {
+                eventsHandled: 1,
+                summary: `ok:${userId}`,
+              },
+            },
+          };
+        }
+
+        firstPhaseCount += 1;
+        firstPhasesInFlight += 1;
+        maxFirstPhasesInFlight = Math.max(maxFirstPhasesInFlight, firstPhasesInFlight);
+        if (firstPhaseCount === 1) {
+          firstPhaseStarted.resolve();
+          await releaseFirstPhase.promise;
+        } else if (firstPhaseCount === 2) {
+          secondPhaseStarted.resolve();
+        }
+
         return {
-          finalGatewayProjectionSnapshot: null,
-          phase: "completed",
+          committedAssistantDeliveryEffects: [],
+          committedGatewayProjectionSnapshot: null,
+          phase: "committed",
           result: {
             bundle: null,
             result: {
@@ -2083,30 +2107,8 @@ describe("runHostedExecutionJob", () => {
             },
           },
         };
-      }
-
-      firstPhaseCount += 1;
-      firstPhasesInFlight += 1;
-      maxFirstPhasesInFlight = Math.max(maxFirstPhasesInFlight, firstPhasesInFlight);
-      if (firstPhaseCount === 1) {
-        firstPhaseStarted.resolve();
-        await releaseFirstPhase.promise;
-      } else if (firstPhaseCount === 2) {
-        secondPhaseStarted.resolve();
-      }
-
-      return {
-        committedAssistantDeliveryEffects: [],
-        committedGatewayProjectionSnapshot: null,
-        phase: "committed",
-        result: {
-          bundle: null,
-          result: {
-            eventsHandled: 1,
-            summary: `ok:${userId}`,
-          },
-        },
-      };
+      },
+      runMode: "isolated",
     });
 
     try {
@@ -2781,7 +2783,7 @@ describe("runHostedExecutionJob", () => {
     process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
 
     try {
-      const runtime = buildHostedExecutionJobRuntimeForTests({
+      const runtime = buildHostedExecutionJobRuntime({
         commitTimeoutMs: 45_000,
         forwardedEnv: {
           HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
@@ -2839,7 +2841,7 @@ describe("runHostedExecutionJob", () => {
     process.env.TELEGRAM_BOT_TOKEN = "ambient-telegram-token";
 
     try {
-      const runtime = buildHostedExecutionJobRuntimeForTests({
+      const runtime = buildHostedExecutionJobRuntime({
         forwardedEnv: {
           HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
           OPENAI_API_KEY: "job-openai-key",
@@ -2901,7 +2903,7 @@ describe("runHostedExecutionJob", () => {
     process.env.OPENAI_API_KEY = "ambient-openai-key";
 
     try {
-      const runtime = buildHostedExecutionJobRuntimeForTests({});
+      const runtime = buildHostedExecutionJobRuntime({});
 
       expect(runtime.forwardedEnv).toEqual({
         HOSTED_EMAIL_INGRESS_READY: "false",
@@ -2923,7 +2925,7 @@ describe("runHostedExecutionJob", () => {
     process.env.OPENAI_API_KEY = "ambient-openai-key";
 
     try {
-      const runtime = buildHostedExecutionJobRuntimeForTests({
+      const runtime = buildHostedExecutionJobRuntime({
         forwardedEnv: {},
       });
 
@@ -2942,7 +2944,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("derives explicit runtime capabilities from the forwarded runner env", () => {
-    const runtime = buildHostedExecutionJobRuntimeForTests({
+    const runtime = buildHostedExecutionJobRuntime({
       forwardedEnv: {
         DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
         DEVICE_SYNC_SECRET: "secret_123",
@@ -2976,7 +2978,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("preserves worker-resolved hosted email readiness instead of rereading ambient env", () => {
-    const runtime = buildHostedExecutionJobRuntimeForTests({
+    const runtime = buildHostedExecutionJobRuntime({
       forwardedEnv: {
         HOSTED_EMAIL_INGRESS_READY: "true",
         HOSTED_EMAIL_SEND_READY: "true",
@@ -3004,7 +3006,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("keeps worker-resolved hosted email readiness disabled", () => {
-    const runtime = buildHostedExecutionJobRuntimeForTests({
+    const runtime = buildHostedExecutionJobRuntime({
       forwardedEnv: {
         HOSTED_EMAIL_INGRESS_READY: "false",
         HOSTED_EMAIL_SEND_READY: "false",
@@ -3032,7 +3034,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("derives email channel readiness from forwarded capability flags when resolved config is absent", () => {
-    const runtime = buildHostedExecutionJobRuntimeForTests({
+    const runtime = buildHostedExecutionJobRuntime({
       forwardedEnv: {
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
         HOSTED_EMAIL_LOCAL_PART: "assistant",
