@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedInvitePageData: vi.fn(),
   buildHostedSharePageData: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  readHostedPhoneCountryCodeHint: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
@@ -40,6 +41,25 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/phone-country-hint-server", () => ({
+  readHostedPhoneCountryCodeHint: mocks.readHostedPhoneCountryCodeHint,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
+  HostedPhoneCountryCodeProvider(input: {
+    children: ReactNode;
+    countryCode: string | null;
+  }) {
+    return createElement(
+      "div",
+      {
+        "data-phone-country-code": input.countryCode ?? "",
+      },
+      input.children,
+    );
+  },
 }));
 
 beforeEach(() => {
@@ -97,6 +117,7 @@ beforeEach(() => {
       },
     },
   });
+  mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("GB");
 });
 
 test("JoinInvitePage passes invite status and share data into the client tree", async () => {
@@ -130,6 +151,8 @@ test("JoinInvitePage passes invite status and share data into the client tree", 
     inviteCode: "invite-code",
     shareCode: "share-code",
   });
+  expect(mocks.readHostedPhoneCountryCodeHint).toHaveBeenCalledTimes(1);
+  assert.match(markup, /data-phone-country-code="GB"/);
   assert.match(markup, /data-invite-code="invite-code"/);
   assert.match(markup, /data-share-code="share-code"/);
 });

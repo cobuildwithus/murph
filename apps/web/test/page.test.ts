@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  readHostedPhoneCountryCodeHint: vi.fn(),
   LandingAuthActions: vi.fn(
     (props: {
       authenticated: boolean;
@@ -33,6 +34,25 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/phone-country-hint-server", () => ({
+  readHostedPhoneCountryCodeHint: mocks.readHostedPhoneCountryCodeHint,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
+  HostedPhoneCountryCodeProvider(input: {
+    children: ReactNode;
+    countryCode: string | null;
+  }) {
+    return createElement(
+      "div",
+      {
+        "data-phone-country-code": input.countryCode ?? "",
+      },
+      input.children,
+    );
+  },
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedInstallScriptUrl: () => "https://www.withmurph.ai/install.sh",
 }));
@@ -46,12 +66,14 @@ test("HomePage renders the canonical landing page at the root route", async () =
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
+  mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("GB");
 
   const { default: HomePage } = await import("../app/page");
 
   const markup = renderToStaticMarkup(await HomePage());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.readHostedPhoneCountryCodeHint).toHaveBeenCalledTimes(1);
   expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     1,
@@ -92,6 +114,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     undefined
   );
   assert.match(markup, /#global-footer \{ display: none; \}/);
+  assert.match(markup, /data-phone-country-code="GB"/);
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
@@ -128,6 +151,7 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
   });
+  mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("US");
 
   const { default: HomePage } = await import("../app/page");
 
