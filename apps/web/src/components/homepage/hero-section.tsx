@@ -40,7 +40,7 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
           </div>
 
           <div className="mt-8 flex items-center gap-2 text-[0.8125rem] text-white/60">
-            <span>Launch pricing &middot; {launchPricingSummary}</span>
+            <span>Early access &middot; {launchPricingSummary}</span>
           </div>
         </div>
       </div>

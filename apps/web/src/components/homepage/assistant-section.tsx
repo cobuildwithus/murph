@@ -1,4 +1,4 @@
-const CHANNELS = ["iMessage", "Telegram", "WhatsApp", "Email"] as const;
+const CHANNELS = ["iMessage", "Telegram", "Email"] as const;
 
 const PRIVACY_ITEMS = [
   {
