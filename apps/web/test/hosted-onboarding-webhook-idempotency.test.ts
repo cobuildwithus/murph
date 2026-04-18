@@ -3,7 +3,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import {
-  buildHostedExecutionLinqMessageReceivedDispatch,
+  buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -2657,7 +2657,7 @@ function buildDispatchSideEffect(input: {
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
     payload: {
-      dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
+      dispatch: buildHostedExecutionLinqConversationMessageWake({
         eventId: input.eventId,
         linqEvent,
         occurredAt,
