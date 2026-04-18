@@ -56,7 +56,7 @@ import { RunnerScheduler } from "./runner-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 
-export type HostedExecutionDispatchProgressRecord =
+export type HostedExecutionWakeProgressRecord =
   Pick<HostedExecutionWake, "eventId" | "userId">;
 
 export interface RunnerUserStores {
@@ -68,15 +68,15 @@ export interface RunnerUserStores {
   userId: string;
 }
 
-interface RunnerDispatchTransitionInput<T> {
+interface RunnerWakeTransitionInput<T> {
   eventId: string;
   gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
   leaseOwner?: RunnerLeaseOwnerInput;
   run: (userId: string, stores: RunnerUserStores) => Promise<T>;
 }
 
-interface RunnerDispatchProcessorDependencies {
-  applyHostedTransition<T>(input: RunnerDispatchTransitionInput<T>): Promise<T>;
+interface RunnerWakeProcessorDependencies {
+  applyHostedTransition<T>(input: RunnerWakeTransitionInput<T>): Promise<T>;
   bucket: R2BucketLike;
   ensureRunnerStores(userId?: string): Promise<RunnerUserStores>;
   env: HostedExecutionEnvironment;
@@ -88,9 +88,9 @@ interface RunnerDispatchProcessorDependencies {
   scheduler: RunnerScheduler;
 }
 
-export class RunnerDispatchProcessor {
+export class RunnerWakeProcessor {
   constructor(
-    private readonly dependencies: RunnerDispatchProcessorDependencies,
+    private readonly dependencies: RunnerWakeProcessorDependencies,
   ) {}
 
   async executeNativeWakeDispatch(
@@ -689,7 +689,7 @@ export class RunnerDispatchProcessor {
 
   private async advanceRunPhase(input: {
     clearError?: boolean;
-    dispatch: HostedExecutionDispatchProgressRecord;
+    dispatch: HostedExecutionWakeProgressRecord;
     error?: unknown;
     level?: HostedExecutionRunLevel;
     message: string;

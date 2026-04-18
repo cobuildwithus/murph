@@ -1195,7 +1195,7 @@ describe("HostedUserRunner", () => {
     });
   });
 
-  it("reschedules the next wake when alarm handling requires the hosted web callback path", async () => {
+  it("clears the local alarm after using it only to refetch hosted wakes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const fetchSpy = vi.fn(async (url, init) => {
@@ -1250,9 +1250,8 @@ describe("HostedUserRunner", () => {
     const status = await runner.status();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(status.lastEventId).toBe("evt_seed_wake");
-    expect(status.nextWakeAt).not.toBe("2026-03-26T12:00:05.000Z");
-    expect(status.nextWakeAt).toBe("2026-03-26T12:00:15.000Z");
-    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:00:15.000Z"));
+    expect(status.nextWakeAt).toBeNull();
+    expect(storage.lastAlarm).toBeNull();
   });
 
   it("passes the worker commit callback metadata through the runner container invoke request", async () => {
@@ -2098,7 +2097,7 @@ describe("HostedUserRunner", () => {
     const [finalStatus] = await Promise.all([firstDispatch, alarmPromise]);
 
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingEventCount).toBe(1);
+    expect(finalStatus.pendingEventCount).toBe(0);
     expect(finalStatus.lastEventId).toBe("evt_long_finalize_lease");
     expect(finalStatus.run).toBeUndefined();
   });
@@ -2988,7 +2987,7 @@ describe("HostedUserRunner", () => {
     );
   });
 
-  it("reschedules the durable-object alarm when no hosted web callback path is configured", async () => {
+  it("leaves scheduler state alone when an alarm only nudges hosted wake refetch", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const resultPayload = {
@@ -3026,7 +3025,7 @@ describe("HostedUserRunner", () => {
     storage.lastAlarm = Date.parse("2026-03-26T12:05:00.000Z");
     await runner.alarm();
 
-    expect(storage.lastAlarm).toBeNull();
+    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:05:00.000Z"));
   });
 });
 

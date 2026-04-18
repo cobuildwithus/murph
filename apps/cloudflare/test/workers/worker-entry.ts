@@ -6,23 +6,16 @@ import type { R2BucketLike } from "../../src/bundle-store.js";
 import { persistHostedExecutionCommit } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
-import { hostedDispatchPayloadObjectKeyForSignature } from "../../src/storage-paths.ts";
-import { stringifyStructuredJson } from "../../src/structured-json.js";
 import { createHostedUserKeyStore } from "../../src/user-key-store.js";
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import {
-  armDispatchPayloadReadPause,
   armRunnerCommitPause,
   buildSeededDuplicateCommitPayload,
-  clearDispatchPayloadReadPause,
   clearRunnerInvocationState,
   clearRunnerCommitPause,
-  pauseDispatchPayloadReadIfArmed,
-  readDispatchPayloadReadPauseState,
   readRunnerInvocationState,
   readRunnerCommitPauseState,
-  releaseDispatchPayloadReadPause,
   releaseRunnerCommitPause,
 } from "./runner-e2e-control.ts";
 
@@ -238,72 +231,6 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     });
   }
 
-  if (url.pathname === "/__test/runner/payload-read-pause" && request.method === "POST") {
-    const body = await request.json() as { wake?: unknown };
-
-    if (!body.wake) {
-      return Response.json({ error: "wake is required." }, { status: 400 });
-    }
-
-    const wake = readTestWake(body.wake);
-    const expectedKey = await resolveWakePayloadObjectKey(wake);
-
-    await armDispatchPayloadReadPause({
-      bucket: (env as { BUNDLES: R2BucketLike }).BUNDLES,
-      eventId: wake.eventId,
-      expectedKey,
-    });
-    return Response.json({
-      eventId: wake.eventId,
-      expectedKey,
-      ok: true,
-    });
-  }
-
-  if (url.pathname === "/__test/runner/payload-read-pause" && request.method === "GET") {
-    const eventId = url.searchParams.get("eventId");
-
-    if (!eventId) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    return Response.json({
-      eventId,
-      ...await readDispatchPayloadReadPauseState((env as { BUNDLES: R2BucketLike }).BUNDLES, eventId),
-    });
-  }
-
-  if (url.pathname === "/__test/runner/payload-read-release" && request.method === "POST") {
-    const body = await request.json() as { eventId?: unknown };
-
-    if (typeof body.eventId !== "string" || body.eventId.length === 0) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    const released = await releaseDispatchPayloadReadPause(
-      (env as { BUNDLES: R2BucketLike }).BUNDLES,
-      body.eventId,
-    );
-    return Response.json({
-      eventId: body.eventId,
-      released,
-    }, { status: released ? 200 : 404 });
-  }
-
-  if (url.pathname === "/__test/runner/payload-read-clear" && request.method === "POST") {
-    const body = await request.json() as { eventId?: unknown };
-
-    if (typeof body.eventId !== "string" || body.eventId.length === 0) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    await clearDispatchPayloadReadPause((env as { BUNDLES: R2BucketLike }).BUNDLES, body.eventId);
-    return Response.json({
-      eventId: body.eventId,
-      ok: true,
-    });
-  }
-
   if (url.pathname === "/__test/runner/invocations" && request.method === "GET") {
     const userId = url.searchParams.get("userId");
 
@@ -372,27 +299,6 @@ async function resolveHostedUserCryptoContext(userId: string) {
   return store.requireUserCryptoContext(userId);
 }
 
-async function resolveWakePayloadObjectKey(
-  wake: HostedExecutionWake,
-): Promise<string> {
-  const crypto = await resolveHostedUserCryptoContext(wake.userId);
-
-  return await hostedDispatchPayloadObjectKeyForSignature(
-    crypto.rootKey,
-    wake.userId,
-    wake.eventId,
-    await createWakePayloadSignature(wake),
-  );
-}
-
-async function createWakePayloadSignature(
-  wake: HostedExecutionWake,
-): Promise<string> {
-  const canonicalJson = stringifyStructuredJson(wake);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 function readTestWake(value: unknown): HostedExecutionWake {
   return parseHostedExecutionWake(value);
 }
@@ -409,16 +315,7 @@ function createTestControlledBucket(bucket: R2BucketLike): R2BucketLike {
           return original;
         }
 
-        return async (key: string, ...args: unknown[]) => {
-          if (key.startsWith("transient/dispatch-payloads/")) {
-            await pauseDispatchPayloadReadIfArmed({
-              bucket,
-              key,
-            });
-          }
-
-          return await original.call(target, key, ...args);
-        };
+        return async (key: string, ...args: unknown[]) => await original.call(target, key, ...args);
       }
 
       const value = Reflect.get(target, property, receiver);

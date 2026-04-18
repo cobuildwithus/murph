@@ -4,7 +4,7 @@ import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/
 
 import { summarizeHostedAssistantDeliveryOutcomes } from "../src/user-runner/runner-dispatch-processor.ts";
 
-describe("runner dispatch processor delivery summaries", () => {
+describe("runner wake processor delivery summaries", () => {
   it("includes the first non-sent delivery message in the finalize summary", () => {
     const summary = summarizeHostedAssistantDeliveryOutcomes([
       {
