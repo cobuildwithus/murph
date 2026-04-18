@@ -34,16 +34,16 @@ import {
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "./linq-routing-policy";
 import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
+import { appendHostedExecutionWakeTx } from "../hosted-execution/dispatch-lifecycle";
 import {
   createHostedPhoneLookupKey,
   sanitizeHostedLinqEventForStorage,
 } from "./contact-privacy";
 import {
-  createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookPlan,
 } from "./webhook-receipts";
-import { buildHostedExecutionLinqMessageReceivedDispatch } from "@murphai/hosted-execution";
+import { buildHostedWakeLinqMessageReceivedPayload } from "@murphai/hosted-execution";
 
 export type HostedOnboardingLinqWebhookResponse = {
   duplicate?: boolean;
@@ -162,25 +162,30 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
     }
 
+    await appendHostedExecutionWakeTx({
+      eventId: input.event.event_id,
+      kind: "linq.message.received",
+      occurredAt,
+      payload: buildHostedWakeLinqMessageReceivedPayload({
+        eventId: input.event.event_id,
+        linqEvent: sanitizeHostedLinqEventForStorage(
+          minimizeLinqMessageReceivedEvent(messageEvent),
+          {
+            omitRecipientPhone: true,
+            preserveFrom: true,
+          },
+        ),
+        linqMessageId: summary.messageId,
+        phoneLookupKey,
+      }),
+      sourceId: `linq:${input.event.event_id}`,
+      sourceType: "hosted_webhook_receipt",
+      tx: input.prisma,
+      userId: existingMember.id,
+    });
+
     return {
-      desiredSideEffects: [
-        createHostedWebhookDispatchSideEffect({
-          dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
-            eventId: input.event.event_id,
-            linqEvent: sanitizeHostedLinqEventForStorage(
-              minimizeLinqMessageReceivedEvent(messageEvent),
-              {
-                omitRecipientPhone: true,
-                preserveFrom: true,
-              },
-            ),
-            linqMessageId: summary.messageId,
-            occurredAt,
-            phoneLookupKey,
-            userId: existingMember.id,
-          }),
-        }),
-      ],
+      desiredSideEffects: [],
       response: {
         ok: true,
         ignored: false,

@@ -1,5 +1,7 @@
-import { buildHostedExecutionTelegramMessageReceivedDispatch } from "@murphai/hosted-execution";
+import { type Prisma } from "@prisma/client";
+import { buildHostedWakeTelegramMessageReceivedPayload } from "@murphai/hosted-execution";
 
+import { appendHostedExecutionWakeTx } from "../hosted-execution/dispatch-lifecycle";
 import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
@@ -12,9 +14,7 @@ import {
 } from "./telegram";
 import { lookupHostedMemberRoutingByTelegramUserId } from "./hosted-member-routing-store";
 import {
-  createHostedWebhookDispatchSideEffect,
   type HostedWebhookPlan,
-  type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
 
 export type HostedOnboardingTelegramWebhookResponse = {
@@ -25,7 +25,7 @@ export type HostedOnboardingTelegramWebhookResponse = {
 };
 
 export async function planHostedOnboardingTelegramWebhook(input: {
-  prisma: HostedWebhookReceiptPersistenceClient;
+  prisma: Prisma.TransactionClient;
   update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
 }): Promise<HostedWebhookPlan<HostedOnboardingTelegramWebhookResponse>> {
   const summary = await summarizeHostedTelegramWebhook(input.update);
@@ -70,17 +70,22 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
 
+  await appendHostedExecutionWakeTx({
+    eventId: buildHostedTelegramWebhookEventId(input.update),
+    kind: "telegram.message.received",
+    occurredAt: summary.occurredAt,
+    payload: buildHostedWakeTelegramMessageReceivedPayload({
+      eventId: buildHostedTelegramWebhookEventId(input.update),
+      telegramMessage,
+    }),
+    sourceId: `telegram:${buildHostedTelegramWebhookEventId(input.update)}`,
+    sourceType: "hosted_webhook_receipt",
+    tx: input.prisma,
+    userId: existingMember.id,
+  });
+
   return {
-    desiredSideEffects: [
-      createHostedWebhookDispatchSideEffect({
-        dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
-          eventId: buildHostedTelegramWebhookEventId(input.update),
-          occurredAt: summary.occurredAt,
-          telegramMessage,
-          userId: existingMember.id,
-        }),
-      }),
-    ],
+    desiredSideEffects: [],
     response: {
       ok: true,
       reason: "dispatched-active-member",
