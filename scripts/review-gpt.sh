@@ -139,15 +139,24 @@ if [[ "$list_presets" == "1" ]]; then
 fi
 
 tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt.XXXXXX.log")"
+declare -a review_gpt_args=()
+
+if [[ "${#forward_args[@]}" -gt 0 ]]; then
+  case "${forward_args[0]}" in
+    delay|thread)
+      review_gpt_args=("${forward_args[0]}" --config "$config_path" "${forward_args[@]:1}")
+      ;;
+    *)
+      review_gpt_args=(--config "$config_path" "${forward_args[@]}")
+      ;;
+  esac
+else
+  review_gpt_args=(--config "$config_path")
+fi
 
 set +e
-if [[ "${#forward_args[@]}" -gt 0 ]]; then
-  pnpm exec cobuild-review-gpt --config "$config_path" "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
-  command_status="${PIPESTATUS[0]}"
-else
-  pnpm exec cobuild-review-gpt --config "$config_path" 2>&1 | tee "$tmp_log_path"
-  command_status="${PIPESTATUS[0]}"
-fi
+bash scripts/review-gpt-cli.sh "${review_gpt_args[@]}" 2>&1 | tee "$tmp_log_path"
+command_status="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$command_status" -ne 0 && -n "$chat_url" ]]; then

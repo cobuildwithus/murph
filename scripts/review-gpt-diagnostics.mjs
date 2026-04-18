@@ -358,9 +358,8 @@ async function exportThreadSnapshot({ browserEndpoint, chatUrl, outputDir }) {
   const exportLogPath = path.join(outputDir, 'thread-export.log');
   const temporaryExportPath = path.join(outputDir, 'thread.raw.json');
   const exportPath = path.join(outputDir, 'thread.json');
-  const result = await runCommand('pnpm', [
-    'exec',
-    'cobuild-review-gpt',
+  const result = await runCommand('bash', [
+    path.join(ROOT_DIR, 'scripts', 'review-gpt-cli.sh'),
     'thread',
     'export',
     '--browser-endpoint',
@@ -404,6 +403,15 @@ async function exportThreadSnapshot({ browserEndpoint, chatUrl, outputDir }) {
 }
 
 function resolveInstalledReviewGptVersion() {
+  const localPackageJsonPath = path.join(ROOT_DIR, '..', 'review-gpt', 'package.json');
+  if (existsSync(localPackageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(sanitizeText(readFileSync(localPackageJsonPath, 'utf8')));
+      return String(packageJson.version ?? '');
+    } catch {
+      return '';
+    }
+  }
   try {
     const packageJsonPath = require.resolve('@cobuild/review-gpt/package.json');
     const packageJson = JSON.parse(sanitizeText(readFileSync(packageJsonPath, 'utf8')));
