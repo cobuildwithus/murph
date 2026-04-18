@@ -1,5 +1,7 @@
 import {
+  parseHostedExecutionBundleRef,
   type HostedExecutionRunContext,
+  type HostedExecutionRunnerResult,
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   type HostedExecutionRunLevel,
@@ -7,7 +9,7 @@ import {
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
-import type { HostedExecutionCommittedResult } from "../execution-journal.js";
+import { parseHostedAssistantDeliveryEffects } from "@murphai/hosted-execution/side-effects";
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   appendBoundedRunnerTimelineEntry,
@@ -22,6 +24,7 @@ import {
 import {
   MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectStateLike,
+  type RunnerPendingCommitRecord,
   type RunnerBundleVersion,
   type RunnerStateRecord,
 } from "./types.js";
@@ -34,6 +37,7 @@ interface BundleRefSwapInput {
 interface RunnerMetaBundleRow extends RunnerMetaRow {
   bundle_ref_json: string | null;
   bundle_version: number;
+  pending_commit_json: string | null;
 }
 
 export interface RunnerLeaseOwnerInput {
@@ -90,32 +94,6 @@ export class RunnerStateStore {
       meta.next_wake_at = null;
       this.writeMetaRowSync(meta);
     }
-
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async syncCommittedBundles(
-    committed: HostedExecutionCommittedResult,
-    leaseOwner: RunnerLeaseOwnerInput | null = null,
-  ): Promise<RunnerStateRecord> {
-    await this.ready;
-    await this.bootstrapUser(committed.userId);
-
-    const meta = this.requireMetaRowSync();
-    const bundleState = readBundleStateFromMeta(meta);
-    assignRunnerBundleRefs(bundleState, committed.bundleRef);
-    writeBundleStateToMeta(meta, bundleState);
-    this.rememberLastEventMetaSync(meta, committed.eventId);
-    if (leaseOwner?.policy === "same-event") {
-      this.clearActiveRunLeaseSync(meta, {
-        eventId: committed.eventId,
-        policy: "same-event",
-        run: leaseOwner.run ?? null,
-      });
-    }
-    this.clearLastErrorMetaSync(meta);
-    meta.last_run_at = committed.committedAt;
-    this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
   }
@@ -343,6 +321,55 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async readPendingCommit(eventId?: string): Promise<RunnerPendingCommitRecord | null> {
+    await this.ready;
+
+    const pendingCommit = parsePendingCommitRecord(
+      this.requireMetaRowSync(),
+      this.tryResolveUserIdSync(),
+    );
+    if (!pendingCommit) {
+      return null;
+    }
+
+    if (eventId && pendingCommit.eventId !== eventId) {
+      return null;
+    }
+
+    return pendingCommit;
+  }
+
+  async writePendingCommit(input: RunnerPendingCommitRecord): Promise<RunnerStateRecord> {
+    await this.ready;
+    await this.bootstrapUser(input.userId);
+
+    const meta = this.requireMetaRowSync();
+    const existing = parsePendingCommitRecord(meta, input.userId);
+    if (existing && existing.eventId !== input.eventId) {
+      throw new Error(
+        `Hosted runner pending commit ${existing.eventId} must be cleared before ${input.eventId}.`,
+      );
+    }
+
+    meta.pending_commit_json = JSON.stringify(input);
+    this.rememberLastEventMetaSync(meta, input.eventId);
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async clearPendingCommit(eventId?: string): Promise<RunnerStateRecord> {
+    await this.ready;
+
+    const meta = this.requireMetaRowSync();
+    const existing = parsePendingCommitRecord(meta, meta.user_id);
+    if (existing && (!eventId || existing.eventId === eventId)) {
+      meta.pending_commit_json = null;
+      this.writeMetaRowSync(meta);
+    }
+
+    return this.readStateFromMetaSync(meta);
+  }
+
   private readStateSync(): RunnerStateRecord {
     return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
@@ -409,7 +436,8 @@ export class RunnerStateStore {
         last_error_code,
         last_event_id,
         last_run_at,
-        next_wake_at
+        next_wake_at,
+        pending_commit_json
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -438,8 +466,9 @@ export class RunnerStateStore {
         last_error_code,
         last_event_id,
         last_run_at,
-        next_wake_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        next_wake_at,
+        pending_commit_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.bundle_ref_json ?? null,
@@ -455,6 +484,7 @@ export class RunnerStateStore {
       meta.last_event_id,
       meta.last_run_at,
       meta.next_wake_at,
+      meta.pending_commit_json,
     );
   }
 
@@ -588,6 +618,7 @@ function createDefaultRunnerMetaBundleRow(userId: string): RunnerMetaBundleRow {
     ...createDefaultRunnerMetaRow(userId),
     bundle_ref_json: null,
     bundle_version: 0,
+    pending_commit_json: null,
   };
 }
 
@@ -617,4 +648,87 @@ function sameHostedExecutionRun(
   return left.attempt === right.attempt
     && left.runId === right.runId
     && left.startedAt === right.startedAt;
+}
+
+function parsePendingCommitRecord(
+  meta: Pick<RunnerMetaBundleRow, "pending_commit_json">,
+  userId: string | null,
+): RunnerPendingCommitRecord | null {
+  if (!meta.pending_commit_json || !userId) {
+    return null;
+  }
+
+  try {
+    const value = JSON.parse(meta.pending_commit_json) as {
+      assistantDeliveryEffects?: unknown;
+      bundleRef?: unknown;
+      committedAt?: unknown;
+      eventId?: unknown;
+      finalizedAt?: unknown;
+      result?: unknown;
+      schemaVersion?: unknown;
+      userId?: unknown;
+    };
+    if (value.schemaVersion !== 1 || value.userId !== userId || typeof value.eventId !== "string") {
+      return null;
+    }
+
+    const result = parsePendingCommitResult(value.result);
+    if (!result || typeof value.committedAt !== "string") {
+      return null;
+    }
+
+    return {
+      assistantDeliveryEffects: parseHostedAssistantDeliveryEffects(
+        value.assistantDeliveryEffects ?? [],
+      ),
+      bundleRef: parseHostedExecutionBundleRef(
+        value.bundleRef === undefined ? null : value.bundleRef,
+        "Hosted runner pending commit bundleRef",
+      ),
+      committedAt: value.committedAt,
+      eventId: value.eventId,
+      finalizedAt: value.finalizedAt === null || typeof value.finalizedAt === "string"
+        ? value.finalizedAt
+        : null,
+      result,
+      schemaVersion: 1,
+      userId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePendingCommitResult(
+  value: unknown,
+): HostedExecutionRunnerResult["result"] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as {
+    eventsHandled?: unknown;
+    nextWakeAt?: unknown;
+    summary?: unknown;
+  };
+  if (
+    typeof record.summary !== "string"
+    || typeof record.eventsHandled !== "number"
+    || !Number.isSafeInteger(record.eventsHandled)
+    || record.eventsHandled < 0
+    || (
+      record.nextWakeAt !== undefined
+      && record.nextWakeAt !== null
+      && typeof record.nextWakeAt !== "string"
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    eventsHandled: record.eventsHandled,
+    ...(record.nextWakeAt !== undefined ? { nextWakeAt: record.nextWakeAt ?? null } : {}),
+    summary: record.summary,
+  };
 }

@@ -105,8 +105,6 @@ export interface HostedAssistantDeliveryOutcome {
   deliveryStatus: HostedAssistantDeliveryOutcomeStatus;
   effectFingerprint: string;
   effectId: string;
-  journalMethod: "DELETE" | "GET" | "PUT" | null;
-  journalStatus: string | null;
   providerMessageId: string | null;
   providerThreadId: string | null;
   retryable: boolean;

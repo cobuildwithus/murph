@@ -34,7 +34,7 @@ describe("readHostedRawEmailMessage", () => {
             return null;
           },
           async sendEmail() {},
-          async writeAssistantDeliveryRecord(record) {
+          async writeAssistantDeliveryRecord(record: {}) {
             return record;
           },
         },
@@ -69,7 +69,7 @@ describe("readHostedRawEmailMessage", () => {
           return null;
         },
         async sendEmail() {},
-        async writeAssistantDeliveryRecord(record) {
+        async writeAssistantDeliveryRecord(record: {}) {
           return record;
         },
       },

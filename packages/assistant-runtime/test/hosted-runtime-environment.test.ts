@@ -38,7 +38,7 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
       async sendEmail() {
         return undefined;
       },
-      async writeAssistantDeliveryRecord(record) {
+      async writeAssistantDeliveryRecord(record: {}) {
         return record;
       },
     },

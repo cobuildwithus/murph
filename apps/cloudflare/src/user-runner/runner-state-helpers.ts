@@ -35,6 +35,7 @@ export interface RunnerMetaRow {
   last_event_id: string | null;
   last_run_at: string | null;
   next_wake_at: string | null;
+  pending_commit_json: string | null;
   user_id: string;
 }
 
@@ -90,6 +91,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     last_event_id: null,
     last_run_at: null,
     next_wake_at: null,
+    pending_commit_json: null,
     user_id: userId,
   };
 }

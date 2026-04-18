@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { createAssistantOutboxIntent } from '@murphai/assistant-engine'
 import {
   buildHostedExecutionMemberChannelsUpdatedWake,
 } from '@murphai/hosted-execution'
@@ -37,11 +38,21 @@ describe('hosted runtime email subject support', () => {
     const sentRequests: HostedEmailSendRequest[] = []
 
     try {
+      const intent = await createAssistantOutboxIntent({
+        channel: 'email',
+        explicitTarget: 'user@example.com',
+        identityId: 'assistant@example.com',
+        message: 'Hello from Murph',
+        sessionId: 'session_123',
+        subject: 'Daily check-in',
+        turnId: 'turn_123',
+        vault: vaultRoot,
+      })
       const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
         assistantDeliveryEffects: [
           buildHostedAssistantDeliveryEffect({
-            dedupeKey: 'dedupe_123',
-            effectId: 'effect_123',
+            dedupeKey: intent.dedupeKey,
+            effectId: intent.intentId,
             payload: {
               actorId: null,
               bindingDeliveryKind: null,
@@ -85,7 +96,7 @@ describe('hosted runtime email subject support', () => {
               target: 'hosted-thread-target',
             }
           },
-          async writeAssistantDeliveryRecord(record) {
+          async writeAssistantDeliveryRecord(record: {}) {
             return record
           },
         },
