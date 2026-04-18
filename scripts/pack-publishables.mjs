@@ -105,7 +105,12 @@ async function copyPublishPayload(entry, targetDir) {
   }
 }
 
-function buildTarballPackageJson(entry, context, bundledWorkspaceDependencies) {
+function buildTarballPackageJson(
+  entry,
+  context,
+  bundledWorkspaceDependencies,
+  options = {},
+) {
   const tarballPackageJson = clonePackageJsonWithResolvedWorkspaceVersions(
     entry.packageJson,
     context.workspacePackageByName,
@@ -113,6 +118,15 @@ function buildTarballPackageJson(entry, context, bundledWorkspaceDependencies) {
 
   delete tarballPackageJson.devDependencies;
   delete tarballPackageJson.scripts;
+
+  if (options.stripBundledDependencyMetadata === true) {
+    delete tarballPackageJson.dependencies;
+    delete tarballPackageJson.optionalDependencies;
+    delete tarballPackageJson.peerDependencies;
+    delete tarballPackageJson.bundleDependencies;
+    delete tarballPackageJson.bundledDependencies;
+    return tarballPackageJson;
+  }
 
   if (bundledWorkspaceDependencies.length > 0) {
     tarballPackageJson.bundleDependencies = bundledWorkspaceDependencies;
@@ -158,7 +172,9 @@ async function materializeStage(entry, context, stageDir) {
     await copyPublishPayload(dependencyEntry, dependencyTargetDir);
     await writeJson(
       path.join(dependencyTargetDir, 'package.json'),
-      buildTarballPackageJson(dependencyEntry, context, []),
+      buildTarballPackageJson(dependencyEntry, context, [], {
+        stripBundledDependencyMetadata: true,
+      }),
     );
   }
 
