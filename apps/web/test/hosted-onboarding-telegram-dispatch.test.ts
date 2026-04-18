@@ -196,12 +196,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceId: "telegram:telegram:update:321",
-        sourceType: "hosted_webhook_receipt",
         wake: expect.objectContaining({
           eventId: "telegram:update:321",
           kind: "conversation.message",
@@ -278,7 +276,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       secretToken: "telegram-secret",
     })).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
 
     expect(deferred).toHaveLength(1);
@@ -358,7 +356,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     await expect(responsePromise).resolves.toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
     expect(deferred).toHaveLength(1);
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
@@ -431,7 +429,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(response).toMatchObject({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
     expect(hostedMemberRoutingFindUnique).toHaveBeenCalled();
   });
@@ -717,7 +715,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     expect(response).toEqual({
       ok: true,
-      reason: "dispatched-active-member",
+      reason: "wake-appended-active-member",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -881,7 +879,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
       expect(response).toEqual({
         ok: true,
-        reason: "dispatched-active-member",
+        reason: "wake-appended-active-member",
       });
 
       const enqueueCall = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0] as {

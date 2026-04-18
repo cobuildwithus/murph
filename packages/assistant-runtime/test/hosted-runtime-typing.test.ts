@@ -156,7 +156,7 @@ describe("hosted runtime typing helpers", () => {
         },
         level: "warn",
         message: "Hosted Linq typing indicator could not be started.",
-        phase: "dispatch.running",
+        phase: "wake.running",
       }),
     );
   });
@@ -201,7 +201,7 @@ describe("hosted runtime typing helpers", () => {
             startLatencyMs: expect.any(Number),
           }),
           message: "Hosted Linq typing indicator started.",
-          phase: "dispatch.running",
+          phase: "wake.running",
         }),
       );
     });
@@ -248,7 +248,7 @@ describe("hosted runtime typing helpers", () => {
             startLatencyMs: expect.any(Number),
           }),
           message: "Hosted Linq typing indicator started.",
-          phase: "dispatch.running",
+          phase: "wake.running",
         }),
       );
     });
@@ -304,7 +304,7 @@ describe("hosted runtime typing helpers", () => {
           targetParseable: true,
         }),
         message: "Hosted Telegram typing indicator requested.",
-        phase: "dispatch.running",
+        phase: "wake.running",
       }),
     );
     expect(stopHandle).toHaveBeenCalledTimes(1);
@@ -340,7 +340,7 @@ describe("hosted runtime typing helpers", () => {
             targetParseable: false,
           },
           message: "Hosted Telegram typing indicator requested.",
-          phase: "dispatch.running",
+          phase: "wake.running",
         }),
       );
     });
@@ -385,7 +385,7 @@ describe("hosted runtime typing helpers", () => {
             targetParseable: true,
           }),
           message: "Hosted Telegram typing indicator requested.",
-          phase: "dispatch.running",
+          phase: "wake.running",
         }),
       );
     });
@@ -423,7 +423,7 @@ describe("hosted runtime typing helpers", () => {
         error: startError,
         level: "warn",
         message: "Hosted Telegram typing indicator could not be started.",
-        phase: "dispatch.running",
+        phase: "wake.running",
       }),
     );
   });

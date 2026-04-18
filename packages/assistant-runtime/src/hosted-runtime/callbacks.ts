@@ -118,11 +118,11 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
         userId: input.wake.userId,
       }),
       wake: input.wake,
-      message: "Hosted assistant delivery dispatch starting.",
+      message: "Hosted assistant delivery starting.",
       phase: "side-effects.draining",
       userId: input.wake.userId,
     });
-    outcomes.push(await dispatchHostedCommittedAssistantDelivery({
+    outcomes.push(await deliverHostedCommittedAssistantDelivery({
       wake: input.wake,
       effectsPort: input.effectsPort,
       assistantDeliveryEffect,
@@ -134,7 +134,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
   return outcomes;
 }
 
-async function dispatchHostedCommittedAssistantDelivery(input: {
+async function deliverHostedCommittedAssistantDelivery(input: {
   wake: HostedExecutionWake;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
@@ -506,14 +506,14 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
         effectFingerprint: input.assistantDeliveryEffect.fingerprint,
         effectId: input.assistantDeliveryEffect.effectId,
         extra: {
-          failureDomain: "dispatch",
+          failureDomain: "delivery",
           retryable: readHostedAssistantDeliveryRetryableFlag(error),
         },
         userId: input.userId,
       }),
       wake: input.wake,
       error: enrichedError,
-      message: "Hosted assistant delivery threw during post-commit dispatch.",
+      message: "Hosted assistant delivery threw during post-commit delivery.",
       phase: "side-effects.draining",
       userId: input.userId,
     });
@@ -535,14 +535,14 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
       extra: {
         deliveryChannel: input.delivery.channel,
         deliveryStatus: "sent",
-        failureDomain: "dispatch",
+        failureDomain: "delivery",
         retryable: false,
         targetKind: input.delivery.targetKind,
       },
       userId: input.userId,
     }),
     wake: input.wake,
-    message: "Hosted assistant delivery sent successfully during post-commit dispatch.",
+    message: "Hosted assistant delivery sent successfully during post-commit delivery.",
     phase: "side-effects.draining",
     userId: input.userId,
   });
@@ -565,14 +565,14 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
         deliveryErrorCode: input.deliveryError?.code ?? null,
         deliveryErrorMessage: input.deliveryError?.message ?? null,
         deliveryStatus: input.deliveryStatus,
-        failureDomain: "dispatch",
+        failureDomain: "delivery",
         retryable: input.retryable,
       },
       userId: input.userId,
     }),
     wake: input.wake,
     level: input.retryable ? "warn" : "error",
-    message: `Hosted assistant delivery finished with ${input.deliveryStatus} status during post-commit dispatch.`,
+    message: `Hosted assistant delivery finished with ${input.deliveryStatus} status during post-commit delivery.`,
     phase: "side-effects.draining",
     userId: input.userId,
   });

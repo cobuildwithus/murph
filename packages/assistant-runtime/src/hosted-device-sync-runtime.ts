@@ -45,7 +45,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   if (!client) {
     if (input.wake.kind === "device-sync.wake") {
       throw new Error(
-        "Hosted device-sync wake dispatch requires a configured hosted device-sync control-plane port.",
+        "Hosted device-sync wake handling requires a configured hosted device-sync control-plane port.",
       );
     }
 

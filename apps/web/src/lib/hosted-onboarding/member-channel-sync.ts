@@ -74,8 +74,6 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
 
   await materializeHostedExecutionWakeTx({
     wake,
-    sourceId: wake.eventId,
-    sourceType: input.sourceType,
     tx: input.prisma,
   });
 

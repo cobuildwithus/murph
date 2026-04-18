@@ -176,13 +176,13 @@ These are browser-initiated but lower-level than the settings surface. They must
 
 These are authenticated by local-agent credentials, not browser cookies.
 
-### Hosted internal runner/control routes
+### Hosted internal runtime/control routes
 
-- `GET|POST /internal/users/:userId/device-sync/runtime` on the Cloudflare worker
-- `PUT /internal/users/:userId/device-sync/runtime/snapshot` on the Cloudflare worker
+- `POST /api/internal/device-sync/runtime/snapshot` on `apps/web`
+- `POST /api/internal/device-sync/runtime/apply` on `apps/web`
 - `POST /api/internal/device-sync/providers/:provider/connect-link` on `apps/web`
 
-These routes are authenticated by signed server-to-server traffic that never reaches the browser. They let Cloudflare remain the owner of decryptable token escrow while `apps/web` drives OAuth, export/refresh, disconnect, and short-lived connect-link issuance.
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. `apps/web` remains the canonical control plane while the Cloudflare worker only invokes the signed runtime callbacks it needs during execution.
 
 ## Token strategy
 

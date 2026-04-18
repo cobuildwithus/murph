@@ -112,7 +112,7 @@ function startHostedLinqWakeTypingIndicator(input: {
       error,
       level: "warn",
       message: "Hosted Linq typing indicator could not be started.",
-      phase: "dispatch.running",
+      phase: "wake.running",
       run: input.run,
     });
     return null;
@@ -164,7 +164,7 @@ function startHostedTelegramWakeTypingIndicator(input: {
     details: startLogDetails,
     wake: input.wake,
     message: "Hosted Telegram typing indicator requested.",
-    phase: "dispatch.running",
+    phase: "wake.running",
     run: input.run,
   });
 
@@ -239,7 +239,7 @@ function createAsyncHostedTypingIndicator(input: {
         },
         wake: input.wake,
         message: `Hosted ${input.channelLabel} typing indicator started.`,
-        phase: "dispatch.running",
+        phase: "wake.running",
         run: input.run,
       });
       if (stopRequested) {
@@ -254,7 +254,7 @@ function createAsyncHostedTypingIndicator(input: {
         error,
         level: "warn",
         message: `Hosted ${input.channelLabel} typing indicator could not be started.`,
-        phase: "dispatch.running",
+        phase: "wake.running",
         run: input.run,
       });
     });

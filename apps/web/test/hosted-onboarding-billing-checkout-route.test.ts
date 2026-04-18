@@ -47,6 +47,13 @@ describe("hosted onboarding billing checkout route", () => {
       inviteCode: "invite_123",
     });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "member@example.test",
+          type: "email",
+          verified_at: 1_710_000_000,
+        },
+      ],
       member: {
         id: "member_123",
       },
@@ -74,6 +81,13 @@ describe("hosted onboarding billing checkout route", () => {
     });
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite_123",
+      linkedAccounts: [
+        {
+          address: "member@example.test",
+          type: "email",
+          verified_at: 1_710_000_000,
+        },
+      ],
       member: {
         id: "member_123",
       },

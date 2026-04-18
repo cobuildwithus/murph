@@ -121,8 +121,6 @@ describe("hosted onboarding member activation", () => {
           telegram: false,
         },
       }),
-      sourceId: "stripe:evt_123",
-      sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
   });
@@ -150,8 +148,6 @@ describe("hosted onboarding member activation", () => {
     });
     expect(mocks.materializeHostedExecutionWakeTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceId: "revnet_evt_123",
-        sourceType: "hosted_revnet_issuance",
       }),
     );
   });
@@ -195,8 +191,6 @@ describe("hosted onboarding member activation", () => {
           toPhoneNumber: "+15550100001",
         },
       }),
-      sourceId: "stripe:evt_materialize",
-      sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
   });
@@ -251,8 +245,6 @@ describe("hosted onboarding member activation", () => {
           telegram: true,
         },
       }),
-      sourceId: "stripe:evt_telegram",
-      sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
   });
@@ -326,8 +318,6 @@ describe("hosted onboarding member activation", () => {
           telegram: true,
         },
       }),
-      sourceId: "stripe:evt_member_channels",
-      sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
   });
@@ -378,8 +368,6 @@ describe("hosted onboarding member activation", () => {
           telegram: true,
         },
       }),
-      sourceId: "stripe:evt_member_channels",
-      sourceType: "hosted_stripe_event",
       tx: expect.anything(),
     });
   });

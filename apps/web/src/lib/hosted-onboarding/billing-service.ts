@@ -3,7 +3,6 @@ import {
   type HostedMember,
   type PrismaClient,
 } from "@prisma/client";
-import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { buildStripeCancelUrl, buildStripeSuccessUrl } from "./billing";
@@ -14,7 +13,6 @@ import {
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
-  bindHostedMemberStripeCustomerIdIfMissing,
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
@@ -26,6 +24,10 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
+import {
+  extractHostedPrivyVerifiedEmailAccount,
+  type PrivyLinkedAccountLike,
+} from "./privy-shared";
 import { coerceHostedWalletAddress } from "./revnet";
 import {
   requireHostedOnboardingPublicBaseUrl,
@@ -36,6 +38,7 @@ import { normalizeNullableString } from "./shared";
 export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
   inviteCode: string;
+  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   member?: HostedMember;
   now?: Date;
   prisma?: PrismaClient;
@@ -112,11 +115,13 @@ export async function createHostedBillingCheckout(
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-    const customerId = await ensureHostedStripeCustomer({
+    const customerId = await resolveHostedStripeCustomerId({
       memberId: invite.member.id,
       prisma,
-      stripe,
     });
+    const verifiedEmail = customerId
+      ? null
+      : extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
     const checkoutMetadata: Record<string, string> = {
       billingPlanCode,
       memberId: invite.member.id,
@@ -124,7 +129,8 @@ export async function createHostedBillingCheckout(
     const checkoutSession = await stripe.checkout.sessions.create({
       cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, shareCode),
       client_reference_id: invite.member.id,
-      customer: customerId,
+      ...(customerId ? { customer: customerId } : {}),
+      ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
       line_items: [
         {
           price: priceId,
@@ -174,63 +180,23 @@ async function resolveHostedBillingCheckoutAuth(
   throw new TypeError("Hosted billing checkout requires the authenticated hosted member.");
 }
 
-async function ensureHostedStripeCustomer(input: {
+async function resolveHostedStripeCustomerId(input: {
   memberId: string;
   prisma: PrismaClient;
-  stripe: Stripe;
-}): Promise<string> {
-  const timing = startHostedOnboardingTiming("hosted-onboarding.billing.ensure-stripe-customer");
-  const customerMetadata = {
-    memberId: input.memberId,
-  };
+}): Promise<string | null> {
+  const timing = startHostedOnboardingTiming("hosted-onboarding.billing.resolve-stripe-customer");
   const currentBillingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma: input.prisma,
   });
   const currentStripeCustomerId = currentBillingRef?.stripeCustomerId ?? null;
-  let customerPath = "none";
+  const customerPath = currentStripeCustomerId ? "existing" : "checkout-create";
 
   try {
-    if (currentStripeCustomerId) {
-      customerPath = "existing";
-      finishHostedOnboardingTiming(timing, "completed", {
-        customerPath,
-      });
-
-      return currentStripeCustomerId;
-    }
-
-    const customer = await input.stripe.customers.create(
-      {
-        metadata: customerMetadata,
-      },
-      {
-        idempotencyKey: buildHostedStripeCustomerIdempotencyKey(input.memberId),
-      },
-    );
-
-    const billingRef = await bindHostedMemberStripeCustomerIdIfMissing({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      stripeCustomerId: customer.id,
+    finishHostedOnboardingTiming(timing, "completed", {
+      customerPath,
     });
-
-    if (billingRef?.stripeCustomerId) {
-      customerPath = billingRef.stripeCustomerId === customer.id ? "created" : "raced-existing";
-      finishHostedOnboardingTiming(timing, "completed", {
-        customerPath,
-      });
-
-      return billingRef.stripeCustomerId;
-    }
-
-    customerPath = "bind-failed";
-    throw hostedOnboardingError({
-      code: "STRIPE_CUSTOMER_BIND_FAILED",
-      message: "Stripe customer creation succeeded, but the hosted member could not be bound safely.",
-      httpStatus: 503,
-      retryable: true,
-    });
+    return currentStripeCustomerId;
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       customerPath,
@@ -238,10 +204,6 @@ async function ensureHostedStripeCustomer(input: {
     });
     throw error;
   }
-}
-
-function buildHostedStripeCustomerIdempotencyKey(memberId: string): string {
-  return `hosted-onboarding:stripe-customer:${memberId}`;
 }
 
 export function requireHostedMemberWalletAddressForRevnet(member: {

@@ -26,6 +26,7 @@ export const POST = withJsonError(async (request: Request) => {
     const checkout = await createHostedBillingCheckout({
       ...(billingPlanCode ? { billingPlanCode } : {}),
       inviteCode,
+      linkedAccounts: auth.linkedAccounts,
       member: auth.member,
       ...(typeof body.shareCode === "string" ? { shareCode: body.shareCode } : {}),
     });

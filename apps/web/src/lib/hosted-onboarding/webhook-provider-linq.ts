@@ -186,7 +186,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       response: {
         ok: true,
         ignored: false,
-        reason: "dispatched-active-member",
+        reason: "wake-appended-active-member",
       },
     };
   }
@@ -360,7 +360,7 @@ export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
   return {
     ok: true,
     ignored: false,
-    reason: "dispatched-active-member",
+    reason: "wake-appended-active-member",
   };
 }
 

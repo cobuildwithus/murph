@@ -10,7 +10,7 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedExecutionWakePayloadTx,
-} from "@/src/lib/hosted-wake/dispatch";
+} from "@/src/lib/hosted-wake/queue";
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);

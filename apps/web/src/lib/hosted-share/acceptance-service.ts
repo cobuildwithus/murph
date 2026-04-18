@@ -149,8 +149,6 @@ export async function acceptHostedShareLink(input: {
         ownerUserId: latest.senderMemberId,
         shareId: record.id,
       }),
-      sourceId: record.id,
-      sourceType: "hosted_share_link",
       tx,
     });
 
