@@ -453,7 +453,7 @@ describe("hosted wake parser contracts", () => {
     })).toThrow(/system kinds require the system payload schema/i);
   });
 
-  it("parses wake status responses with optional dispatch state", () => {
+  it("parses wake status responses with canonical wakeState input", () => {
     expect(parseHostedWakeStatusResponse({
       cursor: {
         committedSeq: "1",
@@ -464,7 +464,7 @@ describe("hosted wake parser contracts", () => {
         userId: "member-1",
         version: "1",
       },
-      dispatchState: null,
+      wakeState: null,
       pendingWakeCount: 0,
     })).toEqual({
       cursor: {
@@ -476,8 +476,52 @@ describe("hosted wake parser contracts", () => {
         userId: "member-1",
         version: "1",
       },
-      dispatchState: null,
       pendingWakeCount: 0,
+      wakeState: null,
+    });
+  });
+
+  it("rejects the removed dispatchState input alias for wake status responses", () => {
+    expect(() => parseHostedWakeStatusResponse({
+      cursor: {
+        committedSeq: "1",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "2",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "1",
+      },
+      dispatchState: "queued",
+      pendingWakeCount: 0,
+    })).toThrow(/dispatchState is no longer supported/i);
+  });
+
+  it("returns canonical wakeState output when wakeState is present", () => {
+    expect(parseHostedWakeStatusResponse({
+      cursor: {
+        committedSeq: "1",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "2",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "1",
+      },
+      wakeState: "queued",
+      pendingWakeCount: 0,
+    })).toEqual({
+      cursor: {
+        committedSeq: "1",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "2",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "1",
+      },
+      pendingWakeCount: 0,
+      wakeState: "queued",
     });
   });
 });
