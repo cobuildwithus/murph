@@ -1,5 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
-
 import { getPrisma } from "../prisma";
 import {
   assertBrowserMutationOrigin,
@@ -14,15 +12,7 @@ import {
 import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readRawBodyBuffer } from "../http";
-import {
-  markHostedWebhookReceiptCompleted,
-  markHostedWebhookReceiptFailed,
-  queueHostedWebhookReceiptSideEffects,
-  recordHostedWebhookReceipt,
-  type HostedWebhookReceiptClaim,
-} from "../hosted-webhook-receipts";
 import { hostedLinqError } from "./errors";
 import { fetchLinqApi, LinqApiTimeoutError } from "./api";
 import { readHostedLinqEnvironment } from "./env";
@@ -38,7 +28,6 @@ export const HOSTED_LINQ_WEBHOOK_PATH = `${HOSTED_LINQ_BASE_PATH}/webhook`;
 export const HOSTED_LINQ_BINDINGS_PATH = `${HOSTED_LINQ_BASE_PATH}/bindings`;
 export const HOSTED_LINQ_AGENT_PAIR_PATH = `${HOSTED_LINQ_BASE_PATH}/agents/pair`;
 export const HOSTED_LINQ_AGENT_EVENTS_PATH = `${HOSTED_LINQ_BASE_PATH}/agent/events`;
-const HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE = "linq-control-plane";
 
 type HostedLinqWebhookResponse = ReturnType<typeof buildIgnoredWebhookResult> | {
   accepted: true;
@@ -198,31 +187,7 @@ export class HostedLinqControlPlane {
       webhookSecret: this.env.webhookSecret,
     });
 
-    return this.runWebhookWithReceipt(event);
-  }
-
-  private async runWebhookWithReceipt(event: LinqWebhookEvent): Promise<HostedLinqWebhookResponse> {
-    const prisma = getPrisma();
-    let claimedReceipt = await this.recordWebhookReceipt(event, prisma);
-
-    if (!claimedReceipt) {
-      return this.readDuplicateWebhookResponse(event, prisma);
-    }
-
-    let response: HostedLinqWebhookResponse | null = null;
-
-    try {
-      if (!claimedReceipt.state.plannedAt) {
-        response = await this.planWebhookResponse(event);
-        claimedReceipt = await this.queueWebhookReceiptResponse(claimedReceipt, event, prisma);
-      }
-
-      await this.markWebhookReceiptCompleted(claimedReceipt, event, prisma);
-      return response ?? await this.readDuplicateWebhookResponse(event, prisma);
-    } catch (error) {
-      await this.markWebhookReceiptFailed(claimedReceipt, error, event, prisma);
-      throw error;
-    }
+    return this.planWebhookResponse(event);
   }
 
   private async assertRecipientPhoneOwnedByConfiguredAccount(recipientPhone: string): Promise<void> {
@@ -354,108 +319,6 @@ export class HostedLinqControlPlane {
       queueId: queued.event.id,
     };
   }
-
-  private async recordWebhookReceipt(
-    event: LinqWebhookEvent,
-    prisma: PrismaClient,
-  ): Promise<HostedWebhookReceiptClaim | null> {
-    try {
-      return await recordHostedWebhookReceipt({
-        eventId: event.event_id,
-        prisma,
-        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
-      });
-    } catch (error) {
-      throw mapHostedLinqReceiptError(error);
-    }
-  }
-
-  private async queueWebhookReceiptResponse(
-    claimedReceipt: HostedWebhookReceiptClaim,
-    event: LinqWebhookEvent,
-    prisma: PrismaClient,
-  ): Promise<HostedWebhookReceiptClaim> {
-    try {
-      return await queueHostedWebhookReceiptSideEffects({
-        claimedReceipt,
-        desiredSideEffects: [],
-        eventId: event.event_id,
-        prisma,
-        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
-      });
-    } catch (error) {
-      throw mapHostedLinqReceiptError(error);
-    }
-  }
-
-  private async markWebhookReceiptCompleted(
-    claimedReceipt: HostedWebhookReceiptClaim,
-    event: LinqWebhookEvent,
-    prisma: PrismaClient,
-  ): Promise<void> {
-    try {
-      await markHostedWebhookReceiptCompleted({
-        claimedReceipt,
-        eventId: event.event_id,
-        prisma,
-        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
-      });
-    } catch (error) {
-      throw mapHostedLinqReceiptError(error);
-    }
-  }
-
-  private async markWebhookReceiptFailed(
-    claimedReceipt: HostedWebhookReceiptClaim,
-    error: unknown,
-    event: LinqWebhookEvent,
-    prisma: PrismaClient,
-  ): Promise<void> {
-    try {
-      await markHostedWebhookReceiptFailed({
-        claimedReceipt,
-        error,
-        eventId: event.event_id,
-        prisma,
-        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
-      });
-    } catch (markError) {
-      throw mapHostedLinqReceiptError(markError);
-    }
-  }
-
-  private async readDuplicateWebhookResponse(
-    event: LinqWebhookEvent,
-    prisma: PrismaClient,
-  ): Promise<HostedLinqWebhookResponse> {
-    const queuedEvent = await prisma.linqWebhookEvent.findUnique({
-      where: {
-        eventId: event.event_id,
-      },
-      include: {
-        binding: true,
-      },
-    });
-
-    if (queuedEvent) {
-      return {
-        accepted: true,
-        duplicate: true,
-        routed: true,
-        bindingId: queuedEvent.bindingId,
-        recipientPhone: queuedEvent.binding.recipientPhoneMask ?? readHostedPhoneHint(queuedEvent.recipientPhone),
-        eventId: queuedEvent.eventId,
-        eventType: queuedEvent.eventType,
-        traceId: queuedEvent.traceId,
-        queueId: queuedEvent.id,
-      };
-    }
-
-    return {
-      ...buildIgnoredWebhookResult(event),
-      duplicate: true,
-    };
-  }
 }
 
 export function createHostedLinqControlPlane(request: Request): HostedLinqControlPlane {
@@ -548,18 +411,4 @@ function normalizeRequiredRecipientPhone(value: unknown): string {
     message: "Linq recipientPhone must be a valid phone number.",
     httpStatus: 400,
   });
-}
-
-function mapHostedLinqReceiptError(error: unknown): never {
-  if (isHostedOnboardingError(error)) {
-    throw hostedLinqError({
-      code: error.code,
-      details: error.details,
-      httpStatus: error.httpStatus,
-      message: error.message,
-      retryable: error.retryable,
-    });
-  }
-
-  throw error;
 }
