@@ -139,9 +139,13 @@ export interface HostedWakeEffect {
   shareImportTitle: string | null;
 }
 
+export type HostedWakeFollowupExecution =
+  | "conversation-message"
+  | "system-maintenance";
+
 export interface HostedWakeExecutionMetrics extends HostedWakeEffect {
   bootstrapResult: HostedBootstrapResult | null;
-  maintenanceRequired: boolean;
+  followupExecution: HostedWakeFollowupExecution;
 }
 
 export interface HostedMaintenanceMetrics {

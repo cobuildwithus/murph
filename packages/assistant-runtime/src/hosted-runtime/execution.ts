@@ -13,7 +13,6 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
-  isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   getAssistantCronStatus,
@@ -45,8 +44,9 @@ import type {
   HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedCommittedExecutionState,
-  HostedMaintenanceMetrics,
   HostedRestoredExecutionContext,
+  HostedWakeFollowupExecution,
+  HostedMaintenanceMetrics,
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
@@ -113,33 +113,17 @@ export async function executeHostedWakeForCommit(input: {
     phase: "dispatch.running",
     run: input.request.run ?? null,
   });
-  const maintenanceMetrics = dispatchMetrics.maintenanceRequired
-      ? await runHostedMaintenanceAfterDispatch({
-        artifactMaterializer: input.artifactMaterializer ?? null,
-        bootstrapResult: dispatchMetrics.bootstrapResult,
-        wake,
-        executionContext: dispatchExecutionContext,
-        requestId: wake.eventId,
-        run: input.request.run ?? null,
-        runtime: input.runtime,
-        vaultRoot: input.restored.vaultRoot,
-      })
-    : isHostedConversationMessageWake(wake)
-      ? await runHostedConversationAssistantAutomationAfterDispatch({
-          artifactMaterializer: input.artifactMaterializer ?? null,
-          executionContext: dispatchExecutionContext,
-          requestId: wake.eventId,
-          run: input.request.run ?? null,
-          runtime: input.runtime,
-          vaultRoot: input.restored.vaultRoot,
-          wake,
-        })
-    : await resolveSkippedHostedMaintenanceMetrics({
-        wake,
-        run: input.request.run ?? null,
-        runtime: input.runtime,
-        vaultRoot: input.restored.vaultRoot,
-      });
+  const maintenanceMetrics = await runHostedWakeFollowupExecution({
+    artifactMaterializer: input.artifactMaterializer ?? null,
+    bootstrapResult: dispatchMetrics.bootstrapResult,
+    executionContext: dispatchExecutionContext,
+    followupExecution: dispatchMetrics.followupExecution,
+    requestId: wake.eventId,
+    run: input.request.run ?? null,
+    runtime: input.runtime,
+    vaultRoot: input.restored.vaultRoot,
+    wake,
+  });
   const snapshotStartedAtMs = Date.now();
   const committedSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
@@ -210,6 +194,45 @@ async function resolveHostedMaintenanceExecutionContext(
   return hydrateHostedExecutionDefaultTarget(executionContext);
 }
 
+async function runHostedWakeFollowupExecution(input: {
+  artifactMaterializer: HostedWorkspaceArtifactMaterializer | null;
+  bootstrapResult: Awaited<ReturnType<typeof executeHostedWakeEvent>>["bootstrapResult"];
+  executionContext: AssistantExecutionContext;
+  followupExecution: HostedWakeFollowupExecution;
+  requestId: string;
+  run?: HostedExecutionRunContext | null;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "platform" | "resolvedConfig"
+  >;
+  vaultRoot: string;
+  wake: HostedExecutionWake;
+}): Promise<HostedMaintenanceMetrics> {
+  switch (input.followupExecution) {
+    case "system-maintenance":
+      return runHostedMaintenanceAfterDispatch({
+        artifactMaterializer: input.artifactMaterializer,
+        bootstrapResult: input.bootstrapResult,
+        executionContext: input.executionContext,
+        requestId: input.requestId,
+        run: input.run ?? null,
+        runtime: input.runtime,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+    case "conversation-message":
+      return runHostedConversationAssistantAutomationAfterDispatch({
+        artifactMaterializer: input.artifactMaterializer,
+        executionContext: input.executionContext,
+        requestId: input.requestId,
+        run: input.run ?? null,
+        runtime: input.runtime,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+  }
+}
+
 async function runHostedMaintenanceAfterDispatch(input: {
   artifactMaterializer: HostedWorkspaceArtifactMaterializer | null;
   bootstrapResult: Awaited<ReturnType<typeof executeHostedWakeEvent>>["bootstrapResult"];
@@ -253,7 +276,7 @@ async function runHostedMaintenanceAfterDispatch(input: {
   return maintenanceMetrics;
 }
 
-async function resolveSkippedHostedMaintenanceMetrics(input: {
+async function resolveHostedConversationPreservedWakeMetrics(input: {
   wake: HostedExecutionWake;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">;
@@ -284,7 +307,8 @@ async function resolveSkippedHostedMaintenanceMetrics(input: {
       nextWakeAt,
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
     },
-    message: "Hosted runtime skipped the generic maintenance loop for this message wake.",
+    message:
+      "Hosted runtime resolved preserved assistant and device-sync wakes for this conversation lane.",
     phase: "dispatch.running",
     run: input.run ?? null,
   });
@@ -319,7 +343,7 @@ async function runHostedConversationAssistantAutomationAfterDispatch(input: {
     vaultRoot: input.vaultRoot,
     wake: input.wake,
   });
-  const preservedMetrics = await resolveSkippedHostedMaintenanceMetrics({
+  const preservedMetrics = await resolveHostedConversationPreservedWakeMetrics({
     wake: input.wake,
     run: input.run ?? null,
     runtime: input.runtime,

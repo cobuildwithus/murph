@@ -202,7 +202,7 @@ beforeEach(() => {
       telegramAutoReplyEnabled: false,
       vaultCreated: true,
     },
-    maintenanceRequired: true,
+    followupExecution: "system-maintenance",
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -528,7 +528,7 @@ describe("executeHostedWakeForCommit", () => {
   it("skips the generic maintenance loop when dispatch handlers do not require it", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
-      maintenanceRequired: false,
+      followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -628,7 +628,7 @@ describe("executeHostedWakeForCommit", () => {
   it("schedules an immediate follow-up wake when conversation parser backlog does not settle in-turn", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
-      maintenanceRequired: false,
+      followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -712,7 +712,7 @@ describe("executeHostedWakeForCommit", () => {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
       mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
-        maintenanceRequired: false,
+        followupExecution: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
       });
@@ -806,7 +806,7 @@ describe("executeHostedWakeForCommit", () => {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
       mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
-        maintenanceRequired: false,
+        followupExecution: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
       });
@@ -924,7 +924,7 @@ describe("executeHostedWakeForCommit", () => {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
       mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
-        maintenanceRequired: false,
+        followupExecution: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
       });
@@ -1020,7 +1020,7 @@ describe("executeHostedWakeForCommit", () => {
   it("falls back to a null preserved wake when assistant and device-sync wake lookups fail", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
-      maintenanceRequired: false,
+      followupExecution: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
     });
