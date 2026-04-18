@@ -3,23 +3,12 @@ import { createHmac } from "node:crypto";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
-const TEST_HOSTED_PRIVACY_VERSION = "v1";
 const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
 const HOSTED_OPAQUE_ID_PREFIX = "hbid";
 const MASKED_PHONE_HINT_PATTERN = /^\*{3}\s+\d{4}$/u;
 const HOSTED_LINQ_ATTACHMENT_CDN_HOST = "cdn.linqapp.com";
 const HOSTED_BLIND_INDEX_PATTERN =
   /^(?<prefix>hbidx):(?<kind>[a-z0-9-]+):(?<version>v[0-9]+):(?<digest>[0-9a-f]+)$/u;
-const TEST_HOSTED_PRIVACY_KEYRING = {
-  currentVersion: TEST_HOSTED_PRIVACY_VERSION,
-  keysByVersion: {
-    [TEST_HOSTED_PRIVACY_VERSION]: Buffer.from(
-      "vitest-hosted-contact-privacy-root-key",
-      "utf8",
-    ),
-  },
-  readVersions: [TEST_HOSTED_PRIVACY_VERSION],
-} as const;
 
 export type HostedBlindIndexKind =
   | "email"
@@ -520,30 +509,7 @@ function readHostedPrivacyKeyring(): {
   keysByVersion: Readonly<Record<string, Buffer>>;
   readVersions: readonly string[];
 } {
-  let environment: ReturnType<typeof getHostedOnboardingEnvironment> | null = null;
-
-  try {
-    environment = getHostedOnboardingEnvironment();
-  } catch (error) {
-    if (!(process.env.NODE_ENV === "test" || typeof process.env.VITEST === "string")) {
-      throw error;
-    }
-  }
-
-  if (
-    environment
-    && environment.contactPrivacyKeyring
-  ) {
-    return environment.contactPrivacyKeyring;
-  }
-
-  if (process.env.NODE_ENV === "test" || typeof process.env.VITEST === "string") {
-    return TEST_HOSTED_PRIVACY_KEYRING;
-  }
-
-  throw new TypeError(
-    "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
-  );
+  return getHostedOnboardingEnvironment().contactPrivacyKeyring;
 }
 
 function normalizeHostedOpaqueInput(

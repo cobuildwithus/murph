@@ -18,10 +18,6 @@ const HOSTED_WEB_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
 const HOSTED_WEB_ENCRYPTION_KEYRING_JSON_ENV_KEYS = [
   "HOSTED_WEB_ENCRYPTION_KEYRING_JSON",
 ] as const;
-const TEST_HOSTED_WEB_ENCRYPTION_KEY = Buffer.from(
-  "vitest-hosted-web-encryption-key",
-  "utf8",
-);
 
 interface HostedWebEncryptionEnvironment {
   encryptionKey: Buffer;
@@ -75,7 +71,7 @@ export function getHostedWebEncryptionCodec(): HostedSecretCodec {
     keysByVersion: environment.encryptionKeysByVersion,
   });
 
-  if (!isHostedWebEncryptionTestMode()) {
+  if (process.env.NODE_ENV !== "test") {
     globalForHostedWebEncryption.__murphHostedWebEncryptionCodec = codec;
   }
 
@@ -139,7 +135,7 @@ function readHostedWebEncryptionEnvironment(
     const encryptionKeyringJson = readEnv(source, HOSTED_WEB_ENCRYPTION_KEYRING_JSON_ENV_KEYS);
     const encryptionKey = encryptionKeyValue
       ? decodeHostedEncryptionKey(encryptionKeyValue)
-      : readHostedWebTestEncryptionKey();
+      : readRequiredHostedWebEncryptionKey();
 
     return {
       encryptionKey,
@@ -156,16 +152,12 @@ function readHostedWebEncryptionEnvironment(
   }
 }
 
-function readHostedWebTestEncryptionKey(): Buffer {
-  if (!isHostedWebEncryptionTestMode()) {
-    throw hostedWebConfigurationError({
-      code: "HOSTED_WEB_ENCRYPTION_KEY_REQUIRED",
-      httpStatus: 500,
-      message: "HOSTED_WEB_ENCRYPTION_KEY must be configured for hosted member private field encryption.",
-    });
-  }
-
-  return TEST_HOSTED_WEB_ENCRYPTION_KEY;
+function readRequiredHostedWebEncryptionKey(): never {
+  throw hostedWebConfigurationError({
+    code: "HOSTED_WEB_ENCRYPTION_KEY_REQUIRED",
+    httpStatus: 500,
+    message: "HOSTED_WEB_ENCRYPTION_KEY must be configured for hosted member private field encryption.",
+  });
 }
 
 function readEnv(
@@ -182,11 +174,6 @@ function readEnv(
 
   return null;
 }
-
-function isHostedWebEncryptionTestMode(): boolean {
-  return process.env.NODE_ENV === "test" || typeof process.env.VITEST === "string";
-}
-
 function toHostedWebConfigurationError(error: unknown): HostedWebConfigurationError | never {
   if (isHostedWebConfigurationError(error)) {
     return error;

@@ -7,20 +7,12 @@ import {
 } from "@/src/lib/hosted-web/encryption";
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
-const ORIGINAL_VITEST = process.env.VITEST;
 const ORIGINAL_HOSTED_WEB_ENCRYPTION_KEY = process.env.HOSTED_WEB_ENCRYPTION_KEY;
 const ORIGINAL_HOSTED_WEB_ENCRYPTION_KEYRING_JSON = process.env.HOSTED_WEB_ENCRYPTION_KEYRING_JSON;
 const ORIGINAL_HOSTED_WEB_ENCRYPTION_KEY_VERSION = process.env.HOSTED_WEB_ENCRYPTION_KEY_VERSION;
 
 afterEach(() => {
   restoreEnvValue("NODE_ENV", ORIGINAL_NODE_ENV);
-
-  if (ORIGINAL_VITEST === undefined) {
-    delete process.env.VITEST;
-  } else {
-    process.env.VITEST = ORIGINAL_VITEST;
-  }
-
   restoreEnvValue("HOSTED_WEB_ENCRYPTION_KEY", ORIGINAL_HOSTED_WEB_ENCRYPTION_KEY);
   restoreEnvValue("HOSTED_WEB_ENCRYPTION_KEYRING_JSON", ORIGINAL_HOSTED_WEB_ENCRYPTION_KEYRING_JSON);
   restoreEnvValue("HOSTED_WEB_ENCRYPTION_KEY_VERSION", ORIGINAL_HOSTED_WEB_ENCRYPTION_KEY_VERSION);
@@ -46,7 +38,6 @@ describe("hosted device-sync secret codec", () => {
 
   it("surfaces a hosted-web config error when hosted private-field encryption runs without a key outside test mode", () => {
     restoreEnvValue("NODE_ENV", "development");
-    delete process.env.VITEST;
     delete process.env.HOSTED_WEB_ENCRYPTION_KEY;
     delete process.env.HOSTED_WEB_ENCRYPTION_KEYRING_JSON;
     delete process.env.HOSTED_WEB_ENCRYPTION_KEY_VERSION;
@@ -70,7 +61,6 @@ describe("hosted device-sync secret codec", () => {
 
   it("surfaces malformed hosted-web encryption config as a server-side config error", () => {
     restoreEnvValue("NODE_ENV", "development");
-    delete process.env.VITEST;
     process.env.HOSTED_WEB_ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64url");
     process.env.HOSTED_WEB_ENCRYPTION_KEYRING_JSON = "{";
     delete process.env.HOSTED_WEB_ENCRYPTION_KEY_VERSION;
