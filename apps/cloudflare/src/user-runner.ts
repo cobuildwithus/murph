@@ -1,11 +1,11 @@
 import type {
-  HostedExecutionCursorState,
   HostedExecutionWake,
   HostedExecutionUserStatus,
   HostedWakeExecutionResult,
   HostedWakeStatus,
 } from "@murphai/hosted-execution";
 import type { HostedWakeRecord } from "@murphai/hosted-execution/contracts";
+import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -13,17 +13,10 @@ import {
   parseHostedExecutionBundleRef,
   parseHostedWakeExecutionPayload,
 } from "@murphai/hosted-execution/parsers";
-import {
-  sameHostedBundlePayloadRef,
-} from "@murphai/runtime-state";
-
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import { toStringEnvSource } from "./string-env.js";
-import {
-  type HostedExecutionCommitPayload,
-} from "./execution-journal.js";
 import {
   createHostedUserKeyStore,
   type HostedUserCryptoContext,
@@ -35,9 +28,6 @@ import {
 import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
-import {
-  createRunnerCommitRecovery,
-} from "./user-runner/runner-commit-recovery.js";
 import {
   appendHostedWakeInWeb,
   commitHostedWakeCursorToWeb,
@@ -74,7 +64,7 @@ const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
 interface HostedWakeDrainOutcome {
-  postCursorAction: "cleanup-only" | "finalize-committed";
+  postCursorAction: "cleanup-only";
   wake: HostedExecutionWake | null;
   seq: bigint;
   state: HostedWakeDrainState;
@@ -134,7 +124,7 @@ export class HostedUserRunner {
     this.wakeProcessor = new RunnerWakeProcessor({
       applyHostedTransition: <T>(input: {
         eventId: string;
-        gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+        gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
         leaseOwner?: RunnerLeaseOwnerInput;
         run: (userId: string, stores: RunnerUserStores) => Promise<T>;
       }) => this.applyHostedTransition(input),
@@ -187,14 +177,6 @@ export class HostedUserRunner {
         crypto.keysById,
         this.stateStore,
       ),
-      commitRecovery: createRunnerCommitRecovery({
-        bucket: this.bucket,
-        platformEnvelopeKey: crypto.rootKey,
-        platformEnvelopeKeyId: crypto.rootKeyId,
-        platformEnvelopeKeysById: crypto.keysById,
-        stateStore: this.stateStore,
-        wakeScheduler: this.wakeScheduler,
-      }),
       crypto,
       gatewayStore: new HostedGatewayProjectionStore(this.state, {
         key: crypto.rootKey,
@@ -389,9 +371,11 @@ export class HostedUserRunner {
       afterSeq = commit.cursor.committedSeq;
       expectedVersion = commit.cursor.version;
       await this.syncHostedWakeBundleCacheToCursor(commit.cursor.snapshotRef);
-      if (commit.committed) {
-        await this.settleCommittedHostedWakesLocally({
-          committedCursor: commit.cursor,
+      if (
+        commit.committed
+        || BigInt(commit.cursor.committedSeq) >= BigInt(highestCommittedWakeSeq)
+      ) {
+        await this.cleanupCommittedHostedWakesLocally({
           wakes: advancedWakes,
         });
       }
@@ -555,112 +539,29 @@ export class HostedUserRunner {
     }
   }
 
-  private async settleCommittedHostedWakesLocally(input: {
-    committedCursor: HostedExecutionCursorState;
+  private async cleanupCommittedHostedWakesLocally(input: {
     wakes: readonly HostedWakeDrainOutcome[];
   }): Promise<void> {
-    const committedThroughSeq = BigInt(input.committedCursor.committedSeq);
-    const committedOutcomes = input.wakes.filter((outcome) =>
-      outcome.wake && outcome.seq <= committedThroughSeq
-    );
+    for (const outcome of input.wakes) {
+      if (!outcome.wake) {
+        continue;
+      }
 
-    if (committedOutcomes.length === 0) {
-      return;
-    }
-
-    const finalOutcome = committedOutcomes[committedOutcomes.length - 1]!;
-    let finalCommittedResult: Awaited<
-      ReturnType<typeof this.wakeProcessor.finalizeWakeAfterCursorCommit>
-    > = null;
-
-    for (const outcome of committedOutcomes) {
       try {
-        if (outcome.postCursorAction === "finalize-committed") {
-          const finalizedCommit = await this.wakeProcessor.finalizeWakeAfterCursorCommit({
-            wake: outcome.wake!,
-          });
-
-          if (outcome === finalOutcome) {
-            finalCommittedResult = finalizedCommit;
-            continue;
-          }
-        }
-
-        if (outcome === finalOutcome) {
-          continue;
-        }
-
         await this.wakeProcessor.cleanupWakeAfterCursorCommit({
-          wake: outcome.wake!,
+          wake: outcome.wake,
         });
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           error,
-          eventId: outcome.wake!.eventId,
+          eventId: outcome.wake.eventId,
           level: "warn",
-          message: "Hosted wake finalization failed after the cursor had already advanced.",
+          message: "Hosted wake cleanup failed after the cursor had already advanced.",
           phase: "completed",
-          userId: outcome.wake!.userId,
+          userId: outcome.wake.userId,
         });
       }
-    }
-
-    try {
-      if (!finalCommittedResult) {
-        await this.wakeProcessor.cleanupWakeAfterCursorCommit({
-          wake: finalOutcome.wake!,
-        });
-        return;
-      }
-
-      const cursorSnapshotRef = parseHostedExecutionBundleRef(
-        input.committedCursor.snapshotRef,
-        "Hosted wake committed cursor snapshotRef",
-      );
-
-      if (!sameHostedBundlePayloadRef(finalCommittedResult.bundleRef, cursorSnapshotRef)) {
-        const snapshotCommit = await commitHostedWakeCursorToWeb({
-          baseUrl: this.readHostedWebControlBaseUrl(),
-          body: {
-            committedSeq: input.committedCursor.committedSeq,
-            expectedVersion: input.committedCursor.version,
-            snapshotRef: finalCommittedResult.bundleRef ?? null,
-          },
-          boundUserId: finalOutcome.wake!.userId,
-          callbackSigning: this.env.webCallbackSigning,
-          timeoutMs: this.env.runnerTimeoutMs,
-        });
-
-        await this.syncHostedWakeBundleCacheToCursor(snapshotCommit.cursor.snapshotRef);
-
-        if (
-          !snapshotCommit.committed
-          && !sameHostedBundlePayloadRef(
-            finalCommittedResult.bundleRef,
-            parseHostedExecutionBundleRef(
-              snapshotCommit.cursor.snapshotRef,
-              "Hosted wake finalized cursor snapshotRef",
-            ),
-          )
-        ) {
-          throw new Error("Hosted wake finalized snapshot lost the cursor compare-and-swap race.");
-        }
-      }
-
-      await this.wakeProcessor.cleanupWakeAfterCursorCommit({
-        wake: finalOutcome.wake!,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        eventId: finalOutcome.wake!.eventId,
-        level: "warn",
-        message: "Hosted wake finalization failed after the cursor had already advanced.",
-        phase: "completed",
-        userId: finalOutcome.wake!.userId,
-      });
     }
   }
 
@@ -745,7 +646,7 @@ export class HostedUserRunner {
 
   private async applyHostedTransition<T>(input: {
     eventId: string;
-    gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+    gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
     leaseOwner?: RunnerLeaseOwnerInput;
     run: (userId: string, stores: RunnerUserStores) => Promise<T>;
   }): Promise<T> {

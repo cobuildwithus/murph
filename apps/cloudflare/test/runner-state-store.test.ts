@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { HostedExecutionCommittedResult } from "../src/execution-journal.js";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
+import type { RunnerPendingCommitRecord } from "../src/user-runner/types.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
 function createQueueHarness(state: { storage: { sql: ReturnType<typeof createTestSqlStorage> } }) {
@@ -10,19 +10,19 @@ function createQueueHarness(state: { storage: { sql: ReturnType<typeof createTes
   };
 }
 
-function createCommittedResult(): HostedExecutionCommittedResult {
+function createPendingCommit(): RunnerPendingCommitRecord {
   return {
     assistantDeliveryEffects: [],
     bundleRef: null,
     committedAt: "2026-04-18T12:00:00.000Z",
     eventId: "evt_committed",
     finalizedAt: null,
-    gatewayProjectionSnapshot: null,
     result: {
       eventsHandled: 1,
       nextWakeAt: null,
       summary: "ok",
     },
+    schemaVersion: 1,
     userId: "member_123",
   };
 }
@@ -184,7 +184,7 @@ describe("RunnerStateStore", () => {
     }
   });
 
-  it("clears retry metadata and releases the lease after committed wake cleanup completes", async () => {
+  it("stores and clears DO-local pending commit recovery metadata", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
@@ -198,13 +198,9 @@ describe("RunnerStateStore", () => {
       userId: "member_123",
     });
 
-    const afterCommit = await store.syncCommittedBundles(createCommittedResult(), {
-      eventId: "evt_committed",
-      policy: "same-event",
-      run: null,
-    });
-    expect(afterCommit.inFlight).toBe(false);
-    expect(afterCommit.lastRunAt).toBe("2026-04-18T12:00:00.000Z");
+    const afterCommit = await store.writePendingCommit(createPendingCommit());
+    expect(afterCommit.inFlight).toBe(true);
+    expect(await store.readPendingCommit("evt_committed")).toEqual(createPendingCommit());
 
     const finalized = await store.completeWakeRun({
       eventId: "evt_committed",
@@ -215,10 +211,12 @@ describe("RunnerStateStore", () => {
         run: null,
       },
     });
+    await store.clearPendingCommit("evt_committed");
     expect(finalized.inFlight).toBe(false);
     expect(finalized.lastEventId).toBe("evt_committed");
     expect(finalized.lastRunAt).toBe("2026-04-18T12:00:01.000Z");
     expect(finalized.pendingWakeCount).toBe(0);
+    await expect(store.readPendingCommit("evt_committed")).resolves.toBeNull();
   });
 });
 

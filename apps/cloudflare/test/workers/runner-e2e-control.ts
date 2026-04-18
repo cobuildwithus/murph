@@ -160,7 +160,7 @@ export async function buildSeededDuplicateCommitPayload(
   bucket: R2BucketLike,
   eventId: string,
 ): Promise<HostedAssistantRuntimeJobResult | null> {
-  const request = (await readPauseState(bucket, eventId))?.request ?? null;
+  const request = await readRunnerCommitPauseRequest(bucket, eventId);
 
   if (!request) {
     return null;
@@ -169,6 +169,13 @@ export async function buildSeededDuplicateCommitPayload(
   return buildSyntheticCommittedRunnerResult(request, {
     effectId: `outbox_seeded_${eventId.replace(/[^a-zA-Z0-9]+/g, "_")}`,
   });
+}
+
+export async function readRunnerCommitPauseRequest(
+  bucket: R2BucketLike,
+  eventId: string,
+): Promise<HostedAssistantRuntimeJobRequest | null> {
+  return (await readPauseState(bucket, eventId))?.request ?? null;
 }
 
 export function buildSyntheticCommittedRunnerResult(

@@ -7,27 +7,17 @@ import {
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
-  buildHostedAssistantDeliveryFailedRecord,
-  buildHostedAssistantDeliverySendingRecord,
-  buildHostedAssistantDeliverySentRecord,
   type HostedAssistantDeliveryPayload,
-  type HostedAssistantDeliveryRecord,
 } from "@murphai/hosted-execution/side-effects";
 
 const mocks = vi.hoisted(() => ({
-  beginAssistantOutboxIntentMirrorDispatch: vi.fn(),
   createAssistantDeliveryAmbiguousError: vi.fn(),
+  dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
-  errorImpliesAssistantDeliveryMayHaveSucceeded: vi.fn(),
-  isAssistantOutboxRetryableError: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
-  markAssistantOutboxIntentMirrorRetryableById: vi.fn(),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
-  markAssistantOutboxIntentSentById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
-  saveAssistantSession: vi.fn(),
-  sendAssistantOutboxPayload: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
 
@@ -42,24 +32,15 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 vi.mock("@murphai/assistant-engine", () => ({
-  beginAssistantOutboxIntentMirrorDispatch:
-    mocks.beginAssistantOutboxIntentMirrorDispatch,
   createAssistantDeliveryAmbiguousError:
     mocks.createAssistantDeliveryAmbiguousError,
-  errorImpliesAssistantDeliveryMayHaveSucceeded:
-    mocks.errorImpliesAssistantDeliveryMayHaveSucceeded,
-  isAssistantOutboxRetryableError: mocks.isAssistantOutboxRetryableError,
+  dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
-  markAssistantOutboxIntentMirrorRetryableById:
-    mocks.markAssistantOutboxIntentMirrorRetryableById,
   markAssistantOutboxIntentMirrorTerminalById:
     mocks.markAssistantOutboxIntentMirrorTerminalById,
-  markAssistantOutboxIntentSentById: mocks.markAssistantOutboxIntentSentById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
-  saveAssistantSession: mocks.saveAssistantSession,
-  sendAssistantOutboxPayload: mocks.sendAssistantOutboxPayload,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
 
@@ -143,6 +124,23 @@ function createMirrorState(
   };
 }
 
+function createDispatchResult(
+  intentOverrides: Record<string, unknown>,
+  deliveryError: { code: string | null; message: string } | null = null,
+) {
+  return {
+    deliveryError,
+    intent: {
+      delivery: null,
+      intentId: "intent_123",
+      lastError: deliveryError,
+      status: "pending",
+      ...intentOverrides,
+    },
+    session: null,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createAssistantDeliveryAmbiguousError.mockImplementation((cause?: { message?: string }) => ({
@@ -150,14 +148,23 @@ beforeEach(() => {
     message: cause?.message ?? "ambiguous",
     retryable: false,
   }));
-  mocks.errorImpliesAssistantDeliveryMayHaveSucceeded.mockReturnValue(false);
-  mocks.isAssistantOutboxRetryableError.mockReturnValue(false);
+  mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
+    createDispatchResult({
+      delivery: createDelivery(),
+      status: "sent",
+    }),
+  );
   mocks.normalizeAssistantDeliveryError.mockImplementation((error: Error & { code?: string | null }) => ({
     code: error.code ?? null,
     message: error.message,
   }));
   mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
-    createMirrorState(null),
+    createMirrorState({
+      delivery: null,
+      intentId: "intent_123",
+      lastError: null,
+      status: "pending",
+    }),
   );
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
 });
@@ -262,44 +269,8 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("returns sent without re-sending when the journal already has a sent record", async () => {
+  it("returns sent without re-dispatching when the outbox mirror already has a sent record", async () => {
     const effect = createEffect();
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async readAssistantDeliveryRecord() {
-        return buildHostedAssistantDeliverySentRecord({
-          dedupeKey: effect.fingerprint,
-          delivery: createDelivery(),
-          effectId: effect.effectId,
-        });
-      },
-    });
-
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      assistantDeliveryEffects: [effect],
-      wake: HOSTED_WAKE.wake,
-      effectsPort,
-      vaultRoot: HOSTED_WAKE.vaultRoot,
-    });
-
-    expect(outcomes).toEqual([
-      expect.objectContaining({
-        deliveryStatus: "sent",
-        effectId: effect.effectId,
-        retryable: false,
-      }),
-    ]);
-    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
-    expect(mocks.markAssistantOutboxIntentSentById).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns sent from the portable outbox mirror without consulting the hosted journal", async () => {
-    const effect = createEffect();
-    const readAssistantDeliveryRecord = vi.fn(async () => {
-      throw new Error("journal read should not run");
-    });
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      readAssistantDeliveryRecord,
-    });
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState({
         delivery: createDelivery(),
@@ -312,46 +283,33 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
-        journalMethod: null,
         retryable: false,
       }),
     ]);
-    expect(readAssistantDeliveryRecord).not.toHaveBeenCalled();
-    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("waits on an in-flight sending journal record instead of sending again", async () => {
+  it("waits on an in-flight sending mirror state instead of dispatching again", async () => {
     const effect = createEffect();
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async readAssistantDeliveryRecord() {
-        return buildHostedAssistantDeliverySendingRecord({
-          attempt: {
-            channel: "telegram",
-            idempotencyKey: effect.payload.idempotencyKey,
-            messageLength: effect.payload.message.length,
-            providerMessageId: null,
-            providerThreadId: null,
-            startedAt: new Date().toISOString(),
-            target: "chat_123",
-            targetKind: "participant",
-          },
-          dedupeKey: effect.fingerprint,
-          effectId: effect.effectId,
-        });
-      },
-    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        intentId: effect.effectId,
+        lastError: null,
+        status: "sending",
+      }),
+    );
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
@@ -361,39 +319,67 @@ describe("hosted runtime callbacks", () => {
         retryable: true,
       }),
     ]);
-    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("does not resend non-idempotent effects after the journal already recorded failed", async () => {
-    const effect = createEffect({ transportIdempotent: false });
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async readAssistantDeliveryRecord() {
-        return buildHostedAssistantDeliveryFailedRecord({
-          attempt: {
-            channel: "telegram",
-            idempotencyKey: effect.payload.idempotencyKey,
-            messageLength: effect.payload.message.length,
-            providerMessageId: null,
-            providerThreadId: null,
-            startedAt: "2026-04-08T00:00:00.000Z",
-            target: "chat_123",
-            targetKind: "participant",
-          },
-          dedupeKey: effect.fingerprint,
-          effectId: effect.effectId,
-          failure: {
-            code: "ASSISTANT_DELIVERY_FAILED",
-            failedAt: "2026-04-08T00:01:00.000Z",
-            message: "telegram rejected the message",
-          },
-        });
-      },
-    });
+  it("re-dispatches an idempotent stale sending mirror state instead of abandoning it", async () => {
+    const effect = createEffect({ transportIdempotent: true });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingPastGraceWindow: true,
+          sendingStartedAt: "2026-04-08T00:00:00.000Z",
+        },
+      ),
+    );
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({
+      dependencies: expect.any(Object),
+      intentId: effect.effectId,
+      now: expect.any(Date),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+    expect(outcomes[0]).toEqual(
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    );
+    vi.useRealTimers();
+  });
+
+  it("surfaces terminal failed mirror state without dispatching again", async () => {
+    const effect = createEffect({ transportIdempotent: false });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        intentId: effect.effectId,
+        lastError: {
+          code: "ASSISTANT_DELIVERY_FAILED",
+          message: "telegram rejected the message",
+        },
+        status: "failed",
+      }),
+    );
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
@@ -404,48 +390,31 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
-    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
-    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentId: effect.effectId,
-        status: "failed",
-        vault: HOSTED_WAKE.vaultRoot,
-      }),
-    );
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
   it("ages a stale non-idempotent sending record into terminal ambiguity", async () => {
     const effect = createEffect({ transportIdempotent: false });
-    const writes: HostedAssistantDeliveryRecord[] = [];
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async readAssistantDeliveryRecord() {
-        return buildHostedAssistantDeliverySendingRecord({
-          attempt: {
-            channel: effect.payload.channel,
-            idempotencyKey: effect.payload.idempotencyKey,
-            messageLength: effect.payload.message.length,
-            providerMessageId: null,
-            providerThreadId: null,
-            startedAt: "2026-04-08T00:00:00.000Z",
-            target: effect.payload.bindingDeliveryTarget,
-            targetKind: "participant",
-          },
-          dedupeKey: effect.fingerprint,
-          effectId: effect.effectId,
-        });
-      },
-      async writeAssistantDeliveryRecord(record) {
-        writes.push(record);
-        return record;
-      },
-    });
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingPastGraceWindow: true,
+          sendingStartedAt: "2026-04-08T00:00:00.000Z",
+        },
+      ),
+    );
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
@@ -455,11 +424,6 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
-    expect(writes.at(-1)).toEqual(
-      expect.objectContaining({
-        state: "failed_ambiguous",
-      }),
-    );
     expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
       expect.objectContaining({
         intentId: effect.effectId,
@@ -467,17 +431,12 @@ describe("hosted runtime callbacks", () => {
         vault: HOSTED_WAKE.vaultRoot,
       }),
     );
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
-  it("returns failed_ambiguous from an abandoned portable outbox mirror without consulting the hosted journal", async () => {
+  it("returns failed_ambiguous from an abandoned portable outbox mirror without dispatching again", async () => {
     const effect = createEffect({ transportIdempotent: false });
-    const readAssistantDeliveryRecord = vi.fn(async () => {
-      throw new Error("journal read should not run");
-    });
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      readAssistantDeliveryRecord,
-    });
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState({
         intentId: effect.effectId,
@@ -492,66 +451,41 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "failed_ambiguous",
-        journalMethod: null,
         retryable: false,
       }),
     ]);
-    expect(readAssistantDeliveryRecord).not.toHaveBeenCalled();
-    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("sends fresh effects directly from the committed payload and journals the sent receipt", async () => {
+  it("dispatches due effects through the shared outbox mirror flow", async () => {
     const effect = createEffect();
-    const writes: HostedAssistantDeliveryRecord[] = [];
-    mocks.sendAssistantOutboxPayload.mockResolvedValue({
-      delivery: createDelivery(),
-      deliveryDeduplicated: false,
-      outboxIntentId: null,
-      session: undefined,
-    });
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async writeAssistantDeliveryRecord(record) {
-        writes.push(record);
-        return record;
-      },
-    });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
+      createDispatchResult({
+        delivery: createDelivery(),
+        status: "sent",
+      }),
+    );
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(mocks.sendAssistantOutboxPayload).toHaveBeenCalledWith({
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({
       dependencies: expect.any(Object),
-      payload: {
-        actorId: effect.payload.actorId,
-        bindingDelivery: { kind: "participant", target: "chat_123" },
-        channel: effect.payload.channel,
-        deliveryIdempotencyKey: effect.payload.idempotencyKey,
-        explicitTarget: effect.payload.explicitTarget,
-        identityId: effect.payload.identityId,
-        message: effect.payload.message,
-        replyToMessageId: effect.payload.replyToMessageId,
-        sessionId: effect.payload.sessionId,
-        subject: effect.payload.subject,
-        threadId: effect.payload.threadId,
-        threadIsDirect: effect.payload.threadIsDirect,
-        turnId: effect.payload.turnId,
-      },
+      intentId: effect.effectId,
+      now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
     });
-    expect(writes.map((record) => record.state)).toEqual(["sending", "sent"]);
-    expect(mocks.beginAssistantOutboxIntentMirrorDispatch).toHaveBeenCalledTimes(1);
-    expect(mocks.markAssistantOutboxIntentSentById).toHaveBeenCalledTimes(1);
     expect(outcomes[0]).toEqual(
       expect.objectContaining({
         deliveryStatus: "sent",
@@ -560,7 +494,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("rejects hosted email participant routes before journaling or sending", async () => {
+  it("rejects hosted email participant routes before dispatching", async () => {
     const effect = createEffect({
       bindingDeliveryKind: "participant",
       bindingDeliveryTarget: "user@example.com",
@@ -568,50 +502,45 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: null,
       identityId: "assistant@example.com",
     });
-    const writeAssistantDeliveryRecord = vi.fn(async (record: HostedAssistantDeliveryRecord) => record);
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async writeAssistantDeliveryRecord(record) {
-        return await writeAssistantDeliveryRecord(record);
-      },
-    });
 
     await expect(
       drainHostedCommittedAssistantDeliveriesAfterCommit({
         assistantDeliveryEffects: [effect],
         wake: HOSTED_WAKE.wake,
-        effectsPort,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
         vaultRoot: HOSTED_WAKE.vaultRoot,
       }),
     ).rejects.toMatchObject({
       code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
     });
-    expect(writeAssistantDeliveryRecord).not.toHaveBeenCalled();
-    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("marks non-idempotent ambiguous send failures terminal without auto-retry", async () => {
+  it("promotes non-idempotent confirmation-pending retries into abandoned terminal state", async () => {
     const effect = createEffect({ transportIdempotent: false });
-    const writes: HostedAssistantDeliveryRecord[] = [];
-    const ambiguousError = Object.assign(new Error("telegram timeout"), {
-      code: "ASSISTANT_DELIVERY_TIMEOUT",
-    });
-    mocks.errorImpliesAssistantDeliveryMayHaveSucceeded.mockReturnValue(true);
-    mocks.sendAssistantOutboxPayload.mockRejectedValue(ambiguousError);
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async writeAssistantDeliveryRecord(record) {
-        writes.push(record);
-        return record;
-      },
-    });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
+      createDispatchResult(
+        {
+          lastError: {
+            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            message: "telegram timeout",
+          },
+          status: "retryable",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "telegram timeout",
+        },
+      ),
+    );
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(writes.map((record) => record.state)).toEqual(["sending", "failed_ambiguous"]);
     expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
       expect.objectContaining({
         intentId: effect.effectId,
@@ -626,40 +555,32 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("keeps idempotent failures retryable and records a non-terminal failed journal state", async () => {
-    const effect = createEffect({
-      bindingDeliveryKind: "thread",
-      bindingDeliveryTarget: "thread_123",
-      channel: "linq",
-      explicitTarget: "thread_123",
-      transportIdempotent: true,
-    });
-    const writes: HostedAssistantDeliveryRecord[] = [];
-    const retryableError = Object.assign(new Error("linq temporarily unavailable"), {
-      code: "ASSISTANT_DELIVERY_UNAVAILABLE",
-    });
-    mocks.isAssistantOutboxRetryableError.mockReturnValue(true);
-    mocks.sendAssistantOutboxPayload.mockRejectedValue(retryableError);
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async writeAssistantDeliveryRecord(record) {
-        writes.push(record);
-        return record;
-      },
-    });
+  it("keeps idempotent confirmation-pending retries retryable instead of abandoning them", async () => {
+    const effect = createEffect({ transportIdempotent: true });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
+      createDispatchResult(
+        {
+          lastError: {
+            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            message: "telegram timeout",
+          },
+          status: "retryable",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "telegram timeout",
+        },
+      ),
+    );
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(writes.map((record) => record.state)).toEqual(["sending", "failed"]);
-    expect(mocks.markAssistantOutboxIntentMirrorRetryableById).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentId: effect.effectId,
-      }),
-    );
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
     expect(outcomes[0]).toEqual(
       expect.objectContaining({
         deliveryStatus: "retryable",
@@ -668,23 +589,87 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("throws a hosted journal error when the journal read fails", async () => {
-    const effect = createEffect();
-    const effectsPort = createHostedRuntimeEffectsPortStub({
-      async readAssistantDeliveryRecord() {
-        throw Object.assign(new Error("boom"), { status: 503 });
-      },
+  it("keeps idempotent failures retryable on the shared outbox mirror", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "thread_123",
+      channel: "linq",
+      explicitTarget: "thread_123",
+      transportIdempotent: true,
     });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
+      createDispatchResult(
+        {
+          lastError: {
+            code: "ASSISTANT_DELIVERY_UNAVAILABLE",
+            message: "linq temporarily unavailable",
+          },
+          status: "retryable",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_UNAVAILABLE",
+          message: "linq temporarily unavailable",
+        },
+      ),
+    );
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes[0]).toEqual(
+      expect.objectContaining({
+        deliveryStatus: "retryable",
+        retryable: true,
+      }),
+    );
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+  });
+
+  it("returns missing-result when the committed outbox intent disappeared", async () => {
+    const effect = createEffect();
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(null),
+    );
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_MISSING_RESULT",
+        deliveryStatus: "missing-result",
+        retryable: false,
+      }),
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
+  it("rethrows outbox dispatch failures with effect details attached", async () => {
+    const effect = createEffect();
+    mocks.dispatchAssistantOutboxIntent.mockRejectedValue(new Error("boom"));
 
     await expect(
       drainHostedCommittedAssistantDeliveriesAfterCommit({
         assistantDeliveryEffects: [effect],
         wake: HOSTED_WAKE.wake,
-        effectsPort,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
         vaultRoot: HOSTED_WAKE.vaultRoot,
       }),
     ).rejects.toMatchObject({
-      code: "HOSTED_SIDE_EFFECT_JOURNAL_FAILED",
+      details: expect.objectContaining({
+        effectFingerprint: effect.fingerprint,
+        effectId: effect.effectId,
+        userId: HOSTED_WAKE.wake.userId,
+      }),
+      message: "boom",
     });
   });
 });

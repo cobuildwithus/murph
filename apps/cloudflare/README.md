@@ -39,7 +39,7 @@ Hosted assistant post-commit delivery recovery now comes from the shared outbox 
 - Large files are externalized into separately encrypted artifact blobs in the same bucket.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, finalize-retry state, alarm hints, timestamps, and encrypted bundle references. Canonical wake ordering and cursor progress stay web-owned.
-- The checked-in lifecycle rules backstop the short-lived production prefixes `transient/execution-journal/` and `transient/hosted-email/messages/`.
+- The checked-in lifecycle rules backstop the short-lived production prefix `transient/hosted-email/messages/`.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-secrets blobs, and queue-local execution sidecars. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 
 ## Worker Contract

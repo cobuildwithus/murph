@@ -379,15 +379,11 @@ function buildHostedRuntimeStartDetails(
       ]),
     },
     forwardedEnvKeyCount: Object.keys(runtime.forwardedEnv).length,
-    platformBindings: {
-      artifactStoreBound: Boolean(runtime.platform.artifactStore),
-      assistantDeliveryJournalBound:
-        typeof runtime.platform.effectsPort.deletePreparedAssistantDelivery === "function"
-        && typeof runtime.platform.effectsPort.readAssistantDeliveryRecord === "function"
-        && typeof runtime.platform.effectsPort.writeAssistantDeliveryRecord === "function",
-      effectsPortBound: Boolean(runtime.platform.effectsPort),
-      usageExportBound: Boolean(runtime.platform.usageExportPort),
-    },
+      platformBindings: {
+        artifactStoreBound: Boolean(runtime.platform.artifactStore),
+        effectsPortBound: Boolean(runtime.platform.effectsPort),
+        usageExportBound: Boolean(runtime.platform.usageExportPort),
+      },
     runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
     resumeFromCommit: Boolean(input.request.resume?.committedResult),
     sharePackAttached: Boolean(input.request.sharePack),

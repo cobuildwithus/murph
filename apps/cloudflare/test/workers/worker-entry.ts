@@ -22,8 +22,8 @@ import {
   releaseRunnerCommitPause,
 } from "./runner-e2e-control.ts";
 
+import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import type {
-  HostedAssistantRuntimeJobResult,
   HostedExecutionWake,
   HostedWakeExecutionResult,
   HostedExecutionUserStatus,
@@ -34,14 +34,20 @@ type TestWorkerEnvironment = WorkerEnvironmentSource & {
 };
 
 export class VitestUserRunnerDurableObject extends DurableObject {
+  private readonly bucket: R2BucketLike;
+  private readonly stateStore: RunnerStateStore;
   private readonly runner: HostedUserRunner;
 
   constructor(ctx: DurableObjectState, env: TestWorkerEnvironment) {
     super(ctx, env);
+    this.bucket = createTestControlledBucket(env.BUNDLES);
+    this.stateStore = new RunnerStateStore(
+      ctx as unknown as import("../../src/user-runner.ts").DurableObjectStateLike,
+    );
     this.runner = new HostedUserRunner(
       ctx as unknown as import("../../src/user-runner.ts").DurableObjectStateLike,
       readHostedExecutionEnvironment(env as unknown as Readonly<Record<string, string | undefined>>),
-      createTestControlledBucket(env.BUNDLES),
+      this.bucket,
       env,
       env.RUNNER_CONTAINER,
     );
@@ -65,6 +71,39 @@ export class VitestUserRunnerDurableObject extends DurableObject {
 
   async runAlarmForTest(): Promise<void> {
     await this.runner.alarm();
+  }
+
+  async seedPendingCommitForTest(input: {
+    payload: Extract<HostedAssistantRuntimeJobResult, { phase: "committed" }>;
+    userId: string;
+    wake: HostedExecutionWake;
+  }): Promise<void> {
+    await this.runner.bootstrapUser(input.userId);
+    const crypto = await resolveHostedUserCryptoContext(input.userId);
+    const bundleSync = new RunnerBundleSync(
+      this.bucket,
+      crypto.rootKey,
+      crypto.rootKeyId,
+      crypto.keysById,
+      this.stateStore,
+    );
+    const bundleState = await this.stateStore.readBundleMetaState();
+    const bundleRecord = await bundleSync.applyRunnerResultBundles(
+      input.userId,
+      bundleState.bundleVersion,
+      input.payload.result.bundle,
+    );
+    const pendingCommit: RunnerPendingCommitRecord = {
+      assistantDeliveryEffects: [...input.payload.committedAssistantDeliveryEffects],
+      bundleRef: bundleRecord.bundleRef,
+      committedAt: new Date().toISOString(),
+      eventId: input.wake.eventId,
+      finalizedAt: null,
+      result: input.payload.result.result,
+      schemaVersion: 1,
+      userId: input.userId,
+    };
+    await this.stateStore.writePendingCommit(pendingCommit);
   }
 
   override async alarm(): Promise<void> {
@@ -197,6 +236,22 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
       }, { status: 409 });
     }
 
+    const pausedRequest = await readRunnerCommitPauseRequest(
+      (env as { BUNDLES: R2BucketLike }).BUNDLES,
+      body.eventId,
+    );
+    if (!pausedRequest) {
+      return Response.json({
+        error: `No paused committed runner request is available for ${body.eventId}.`,
+      }, { status: 409 });
+    }
+
+    await getUserRunnerStub(body.userId).seedPendingCommitForTest({
+      payload: seeded,
+      userId: body.userId,
+      wake: pausedRequest.wake,
+    });
+
     return Response.json({
       eventId: body.eventId,
       ok: true,
@@ -254,6 +309,11 @@ function getUserRunnerStub(userId: string) {
       USER_RUNNER: {
         getByName(name: string): {
           bootstrapUser(userId: string): Promise<{ userId: string }>;
+          seedPendingCommitForTest(input: {
+            payload: Extract<HostedAssistantRuntimeJobResult, { phase: "committed" }>;
+            userId: string;
+            wake: HostedExecutionWake;
+          }): Promise<void>;
           wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
           status(): Promise<HostedExecutionUserStatus>;

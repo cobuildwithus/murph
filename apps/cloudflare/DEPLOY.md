@@ -32,7 +32,6 @@ Before the first deploy:
 
 The checked-in lifecycle file backstops the production execution-transient blobs that still exist on the live runner path:
 
-- `transient/execution-journal/` expires after 6 hours
 - `transient/hosted-email/messages/` expires after 1 hour
 
 Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-secret blobs, and queue-local execution sidecars.

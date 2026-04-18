@@ -14,8 +14,6 @@ describe("runner wake processor delivery summaries", () => {
         deliveryStatus: "failed",
         effectFingerprint: "dedupe-1",
         effectId: "outbox-1",
-        journalMethod: "DELETE",
-        journalStatus: null,
         providerMessageId: null,
         providerThreadId: null,
         retryable: false,
@@ -32,8 +30,6 @@ describe("runner wake processor delivery summaries", () => {
       assistantDeliveryFirstNonSentCode: "LINQ_API_REQUEST_FAILED",
       assistantDeliveryFirstNonSentMessage:
         "Linq request POST /chats/stale/messages failed with HTTP 404. Chat not found",
-      assistantDeliveryFirstNonSentJournalMethod: "DELETE",
-      assistantDeliveryFirstNonSentJournalStatus: "unknown",
       assistantDeliveryFirstNonSentStatus: "failed",
     });
   });

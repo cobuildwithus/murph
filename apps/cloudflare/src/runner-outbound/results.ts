@@ -6,9 +6,6 @@ import {
   type HostedExecutionRunPhase,
 } from "@murphai/hosted-execution";
 import {
-  parseHostedAssistantDeliveryRecord,
-} from "@murphai/hosted-execution/side-effects";
-import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -20,10 +17,6 @@ import {
   readHostedEmailRawMessage,
   sendHostedEmailMessage,
 } from "../hosted-email.ts";
-import {
-  HostedAssistantDeliveryConflictError,
-  createHostedAssistantDeliveryJournalStore,
-} from "../side-effect-journal.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   decodeRouteParam,
@@ -42,23 +35,6 @@ export async function handleRunnerResultsRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
-  const sideEffectMatch = /^\/effects\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
-  if (sideEffectMatch?.groups) {
-    if (input.request.method !== "DELETE" && input.request.method !== "GET" && input.request.method !== "PUT") {
-      return methodNotAllowed();
-    }
-
-    return handleRunnerAssistantDeliveryRequest({
-      bucket: input.bucket,
-      env: input.env,
-      effectId: decodeRouteParam(sideEffectMatch.groups.effectId),
-      environment: input.environment,
-      request: input.request,
-      url: input.url,
-      userId: input.userId,
-    });
-  }
-
   if (input.url.pathname === HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH) {
     if (input.request.method !== "POST") {
       return methodNotAllowed();
@@ -157,168 +133,6 @@ async function handleRunnerEmailSendRequest(input: {
       return jsonError(error.message, 400);
     }
 
-    throw error;
-  }
-}
-
-async function handleRunnerAssistantDeliveryRequest(input: {
-  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
-  env: RunnerOutboundEnvironmentSource;
-  effectId: string;
-  environment: ReturnType<typeof readHostedExecutionEnvironment>;
-  request: Request;
-  url: URL;
-  userId: string;
-}): Promise<Response> {
-  emitHostedExecutionStructuredLog({
-    component: "runner",
-    details: {
-      effectId: input.effectId,
-      fingerprintPresent: input.url.searchParams.has("fingerprint"),
-      journalMethod: input.request.method,
-      userId: input.userId,
-    },
-    message: "Hosted runner side-effect journal request received.",
-    phase: "wake.running",
-    userId: input.userId,
-  });
-  const crypto = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.bucket,
-    env: input.env,
-    environment: input.environment,
-    userId: input.userId,
-  });
-  const journalStore = createHostedAssistantDeliveryJournalStore({
-    bucket: input.bucket,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  });
-
-  try {
-    if (input.request.method === "GET" || input.request.method === "DELETE") {
-      const fingerprint = input.url.searchParams.get("fingerprint");
-
-      if (input.request.method === "DELETE") {
-        await journalStore.deletePrepared({
-          effectId: input.effectId,
-          fingerprint,
-          userId: input.userId,
-        });
-
-        emitHostedExecutionStructuredLog({
-          component: "runner",
-          details: {
-            effectId: input.effectId,
-            fingerprintPresent: fingerprint !== null,
-            journalMethod: input.request.method,
-            outcome: "deleted",
-            userId: input.userId,
-          },
-          message: "Hosted runner side-effect journal request succeeded.",
-          phase: "wake.running",
-          userId: input.userId,
-        });
-
-        return json({
-          effectId: input.effectId,
-          ok: true,
-        });
-      }
-
-      const record = await journalStore.read({
-        effectId: input.effectId,
-        fingerprint,
-        userId: input.userId,
-      });
-
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          effectId: input.effectId,
-          fingerprintPresent: fingerprint !== null,
-          journalMethod: input.request.method,
-          outcome: record ? "record" : "empty",
-          recordState: record?.state ?? null,
-          userId: input.userId,
-        },
-        message: "Hosted runner side-effect journal request succeeded.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-
-      return json({
-        effectId: record?.effectId ?? input.effectId,
-        record: record ?? null,
-      });
-    }
-
-    const nextRecord = parseHostedAssistantDeliveryRecord(await readJsonObject(input.request));
-    if (nextRecord.effectId !== input.effectId) {
-      return json({
-        error: `effectId mismatch: expected ${input.effectId}, received ${nextRecord.effectId}.`,
-      }, 400);
-    }
-
-    const savedRecord = await journalStore.write({
-      record: nextRecord,
-      userId: input.userId,
-    });
-
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        effectId: savedRecord.effectId,
-        fingerprintPresent: true,
-        journalMethod: input.request.method,
-        outcome: "written",
-        recordState: savedRecord.state,
-        userId: input.userId,
-      },
-      message: "Hosted runner side-effect journal request succeeded.",
-      phase: "wake.running",
-      userId: input.userId,
-    });
-
-    return json({
-      effectId: savedRecord.effectId,
-      record: savedRecord,
-    });
-  } catch (error) {
-    if (error instanceof HostedAssistantDeliveryConflictError) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          effectId: input.effectId,
-          fingerprintPresent: input.url.searchParams.has("fingerprint"),
-          journalMethod: input.request.method,
-          userId: input.userId,
-        },
-        error,
-        level: "warn",
-        message: "Hosted runner side-effect journal request conflicted.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      return json({
-        error: error.message,
-      }, 409);
-    }
-
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        effectId: input.effectId,
-        fingerprintPresent: input.url.searchParams.has("fingerprint"),
-        journalMethod: input.request.method,
-        userId: input.userId,
-      },
-      error,
-      level: "warn",
-      message: "Hosted runner side-effect journal request failed.",
-      phase: "wake.running",
-      userId: input.userId,
-    });
     throw error;
   }
 }

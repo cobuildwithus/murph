@@ -5,7 +5,7 @@ import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 describe("buildHostedExecutionRuntimePlatform", () => {
-  it("routes effects through the Cloudflare internal effects port and attaches the per-run proxy token", async () => {
+  it("routes raw email reads through the Cloudflare internal effects port and attaches the per-run proxy token", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -13,10 +13,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       internalWorkerProxyToken: "runner-proxy-token",
     });
 
-    await platform.effectsPort.deletePreparedAssistantDelivery({
-      effectId: "effect_123",
-      fingerprint: "fingerprint_123",
-    });
+    await platform.effectsPort.readRawEmailMessage("raw_123");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
@@ -25,13 +22,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
-    expect((request as Request).url).toBe(
-      "http://results.worker/effects/effect_123?fingerprint=fingerprint_123",
-    );
+    expect((request as Request).url).toBe("http://results.worker/messages/raw_123");
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
-    expect((request as Request).method).toBe("DELETE");
+    expect((request as Request).method).toBe("GET");
   });
 
   it("fails closed before issuing internal-host requests when the per-run proxy token is missing", async () => {
@@ -42,17 +37,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(
-      platform.effectsPort.deletePreparedAssistantDelivery({
-        effectId: "effect_123",
-        fingerprint: "fingerprint_123",
-      }),
+      platform.effectsPort.readRawEmailMessage("raw_123"),
     ).rejects.toThrow(
-      "Hosted side-effect delete effect_123 request failed.",
+      "Hosted raw email read raw_123 request failed.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("routes local hosted internal requests through the worker loopback bridge when configured", async () => {
+  it("routes local hosted internal message reads through the worker loopback bridge when configured", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -62,10 +54,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       localLoopbackProxyToken: "local-loopback-token",
     });
 
-    await platform.effectsPort.deletePreparedAssistantDelivery({
-      effectId: "effect_123",
-      fingerprint: "fingerprint_123",
-    });
+    await platform.effectsPort.readRawEmailMessage("raw_123");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
@@ -75,13 +64,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
     expect((request as Request).url).toBe(
-      "http://127.0.0.1:8787/__murph/local-internal-proxy/local-loopback-token/results.worker/effects/effect_123?fingerprint=fingerprint_123",
+      "http://127.0.0.1:8787/__murph/local-internal-proxy/local-loopback-token/results.worker/messages/raw_123",
     );
     expect((request as Request).headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
-    expect((request as Request).method).toBe("DELETE");
+    expect((request as Request).method).toBe("GET");
   });
 
   it("fails closed before issuing loopback bridge requests when the local loopback token is missing", async () => {
@@ -94,12 +83,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(
-      platform.effectsPort.deletePreparedAssistantDelivery({
-        effectId: "effect_123",
-        fingerprint: "fingerprint_123",
-      }),
+      platform.effectsPort.readRawEmailMessage("raw_123"),
     ).rejects.toThrow(
-      "Hosted side-effect delete effect_123 request failed.",
+      "Hosted raw email read raw_123 request failed.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -199,34 +185,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
-  it("supports the assistant-delivery-specific journal method names", async () => {
-    const record = {
-      delivery: {
-        channel: "email",
-        idempotencyKey: "idem_123",
-        messageLength: 42,
-        providerMessageId: null,
-        providerThreadId: null,
-        sentAt: "2026-04-08T00:00:00.000Z",
-        target: "assistant@example.com",
-        targetKind: "participant" as const,
-      },
-      effectId: "intent_123",
-      fingerprint: "dedupe_123",
-      kind: "assistant.delivery" as const,
-      recordedAt: "2026-04-08T00:00:00.000Z",
-      state: "sent" as const,
-    };
+  it("exposes only the shared hosted effects port methods needed after the cutover", async () => {
+    const rawMessage = new Uint8Array([0x61, 0x62, 0x63]);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
 
-      if (request.method === "DELETE") {
-        return new Response(null, { status: 200 });
+      if (request.method === "GET") {
+        return new Response(rawMessage, {
+          headers: {
+            "content-type": "message/rfc822",
+          },
+          status: 200,
+        });
       }
 
       return new Response(JSON.stringify({
         ok: true,
-        record,
+        target: "assistant@example.com",
       }), {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -241,44 +216,33 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
     const { effectsPort } = platform;
 
-    if (
-      !("deletePreparedAssistantDelivery" in effectsPort)
-      || !("readAssistantDeliveryRecord" in effectsPort)
-      || !("writeAssistantDeliveryRecord" in effectsPort)
-      || !effectsPort.deletePreparedAssistantDelivery
-      || !effectsPort.readAssistantDeliveryRecord
-      || !effectsPort.writeAssistantDeliveryRecord
-    ) {
-      throw new Error("Expected assistant-delivery journal methods to be available.");
-    }
+    expect("deletePreparedAssistantDelivery" in effectsPort).toBe(false);
+    expect("readAssistantDeliveryRecord" in effectsPort).toBe(false);
+    expect("writeAssistantDeliveryRecord" in effectsPort).toBe(false);
 
-    await effectsPort.deletePreparedAssistantDelivery({
-      effectId: "intent_123",
-      fingerprint: "dedupe_123",
+    const readResult = await effectsPort.readRawEmailMessage("raw_123");
+    const sendResult = await effectsPort.sendEmail({
+      identityId: "identity_123",
+      message: "hello",
+      subject: "subject",
+      target: "assistant@example.com",
+      targetKind: "explicit",
     });
-    const readRecord = await effectsPort.readAssistantDeliveryRecord({
-      effectId: "intent_123",
-      fingerprint: "dedupe_123",
-    });
-    const writtenRecord = await effectsPort.writeAssistantDeliveryRecord(record);
 
-    expect(readRecord).toEqual(record);
-    expect(writtenRecord).toEqual(record);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(readResult).toEqual(rawMessage);
+    expect(sendResult).toEqual({ target: "assistant@example.com" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    const deleteRequest = fetchMock.mock.calls[0]?.[0] as Request;
-    const readRequest = fetchMock.mock.calls[1]?.[0] as Request;
-    const writeRequest = fetchMock.mock.calls[2]?.[0] as Request;
+    const readRequest = fetchMock.mock.calls[0]?.[0] as Request;
+    const sendRequest = fetchMock.mock.calls[1]?.[0] as Request;
 
-    expect(deleteRequest).toBeInstanceOf(Request);
     expect(readRequest).toBeInstanceOf(Request);
-    expect(writeRequest).toBeInstanceOf(Request);
-    expect(deleteRequest.url).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
-    expect(readRequest.url).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
-    expect(writeRequest.url).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+    expect(sendRequest).toBeInstanceOf(Request);
+    expect(readRequest.url).toBe("http://results.worker/messages/raw_123");
+    expect(sendRequest.url).toBe("http://results.worker/send");
   });
 
-  it("preserves HTTP status on hosted assistant-delivery journal failures", async () => {
+  it("preserves HTTP status on hosted raw email read failures", async () => {
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: vi.fn(async () => new Response("unavailable", { status: 503 })) as typeof fetch,
@@ -286,12 +250,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(
-      platform.effectsPort.readAssistantDeliveryRecord({
-        effectId: "intent_123",
-        fingerprint: "dedupe_123",
-      }),
+      platform.effectsPort.readRawEmailMessage("raw_123"),
+    ).rejects.toThrow(/Hosted raw email read raw_123 failed with HTTP 503/u);
+
+    await expect(
+      platform.effectsPort.readRawEmailMessage("raw_123"),
     ).rejects.toMatchObject({
-      message: "Hosted side-effect read intent_123 failed with HTTP 503. unavailable",
       status: 503,
       statusCode: 503,
     });

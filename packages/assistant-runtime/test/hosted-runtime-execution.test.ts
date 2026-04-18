@@ -233,8 +233,6 @@ beforeEach(() => {
       deliveryStatus: "sent",
       effectFingerprint: "dedupe_123",
       effectId: "intent_123",
-      journalMethod: null,
-      journalStatus: null,
       providerMessageId: "linq_message_123",
       providerThreadId: "chat_123",
       retryable: false,
@@ -352,7 +350,7 @@ describe("executeHostedWakeForCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },
@@ -503,7 +501,7 @@ describe("executeHostedWakeForCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },
@@ -581,7 +579,7 @@ describe("executeHostedWakeForCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },
@@ -662,7 +660,7 @@ describe("executeHostedWakeForCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },
@@ -742,7 +740,7 @@ describe("executeHostedWakeForCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },
@@ -833,7 +831,7 @@ describe("executeHostedWakeForCommit", () => {
                 return null;
               },
               async sendEmail() {},
-              async writeAssistantDeliveryRecord(record) {
+              async writeAssistantDeliveryRecord(record: {}) {
                 return record;
               },
             },
@@ -960,7 +958,7 @@ describe("executeHostedWakeForCommit", () => {
                 return null;
               },
               async sendEmail() {},
-              async writeAssistantDeliveryRecord(record) {
+              async writeAssistantDeliveryRecord(record: {}) {
                 return record;
               },
             },
@@ -1059,7 +1057,7 @@ describe("executeHostedWakeForCommit", () => {
                 return null;
               },
               async sendEmail() {},
-              async writeAssistantDeliveryRecord(record) {
+              async writeAssistantDeliveryRecord(record: {}) {
                 return record;
               },
             },
@@ -1146,7 +1144,7 @@ describe("executeHostedWakeForCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },
@@ -1256,7 +1254,7 @@ describe("completeHostedExecutionAfterCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },
@@ -1320,8 +1318,6 @@ describe("completeHostedExecutionAfterCommit", () => {
           deliveryStatus: "sent",
           effectFingerprint: "dedupe_123",
           effectId: "intent_123",
-          journalMethod: null,
-          journalStatus: null,
           providerMessageId: "linq_message_123",
           providerThreadId: "chat_123",
           retryable: false,
@@ -1373,6 +1369,160 @@ describe("completeHostedExecutionAfterCommit", () => {
         component: "runtime",
         details: expect.objectContaining({
           assistantDeliveryOutcomeSummary: "linq:sent=1",
+        }),
+        message: "Hosted runtime drained committed side effects.",
+        phase: "side-effects.draining",
+      }),
+    );
+  });
+
+  it("preserves ambiguous and retryable delivery outcomes through final result shaping", async () => {
+    const retryableEffect = {
+      ...hostedDeliveryEffect,
+      effectId: "intent_456",
+      fingerprint: "dedupe_456",
+      payload: {
+        ...hostedDeliveryEffect.payload,
+        bindingDeliveryKind: "thread" as const,
+        bindingDeliveryTarget: "thread_456",
+        channel: "linq",
+        explicitTarget: "thread_456",
+        transportIdempotent: true,
+      },
+    };
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+      {
+        deliveryChannel: "telegram",
+        deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        deliveryErrorMessage: "mirror abandoned the delivery",
+        deliveryStatus: "failed_ambiguous",
+        effectFingerprint: hostedDeliveryEffect.fingerprint,
+        effectId: hostedDeliveryEffect.effectId,
+        providerMessageId: null,
+        providerThreadId: null,
+        retryable: false,
+        target: "chat_123",
+        targetKind: "participant",
+      },
+      {
+        deliveryChannel: "linq",
+        deliveryErrorCode: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        deliveryErrorMessage: "linq confirmation pending",
+        deliveryStatus: "retryable",
+        effectFingerprint: retryableEffect.fingerprint,
+        effectId: retryableEffect.effectId,
+        providerMessageId: null,
+        providerThreadId: "thread_456",
+        retryable: true,
+        target: "thread_456",
+        targetKind: "thread",
+      },
+    ]);
+
+    const result = await completeHostedExecutionAfterCommit({
+      committedExecution: {
+        committedGatewayProjectionSnapshot: {
+          schema: "murph.gateway-projection-snapshot.v1",
+          generatedAt: "2026-04-08T00:00:00.000Z",
+          conversations: [],
+          messages: [],
+          permissions: [],
+        },
+        committedResult: {
+          bundle: "committed-bundle",
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "completed summary",
+          },
+        },
+        committedAssistantDeliveryEffects: [
+          hostedDeliveryEffect,
+          retryableEffect,
+        ],
+      },
+      wake: buildHostedExecutionAssistantCronTickWake({
+        eventId: "evt_delivery_outcomes",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "manual",
+        userId: "member_123",
+      }),
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      run: {
+        attempt: 1,
+        runId: "run_delivery_outcomes",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record: {}) {
+              return record;
+            },
+          },
+          usageExportPort: {
+            async recordUsage() {
+              return { recorded: 1, usageIds: ["usage_123"] };
+            },
+          },
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+    });
+
+    expect(result.assistantDeliveryOutcomes).toEqual([
+      {
+        deliveryChannel: "telegram",
+        deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        deliveryErrorMessage: "mirror abandoned the delivery",
+        deliveryStatus: "failed_ambiguous",
+        effectFingerprint: hostedDeliveryEffect.fingerprint,
+        effectId: hostedDeliveryEffect.effectId,
+        providerMessageId: null,
+        providerThreadId: null,
+        retryable: false,
+        target: "chat_123",
+        targetKind: "participant",
+      },
+      {
+        deliveryChannel: "linq",
+        deliveryErrorCode: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        deliveryErrorMessage: "linq confirmation pending",
+        deliveryStatus: "retryable",
+        effectFingerprint: retryableEffect.fingerprint,
+        effectId: retryableEffect.effectId,
+        providerMessageId: null,
+        providerThreadId: "thread_456",
+        retryable: true,
+        target: "thread_456",
+        targetKind: "thread",
+      },
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          assistantDeliveryOutcomeSummary: "linq:retryable=1,telegram:failed_ambiguous=1",
         }),
         message: "Hosted runtime drained committed side effects.",
         phase: "side-effects.draining",
@@ -1441,7 +1591,7 @@ describe("completeHostedExecutionAfterCommit", () => {
               return null;
             },
             async sendEmail() {},
-            async writeAssistantDeliveryRecord(record) {
+            async writeAssistantDeliveryRecord(record: {}) {
               return record;
             },
           },

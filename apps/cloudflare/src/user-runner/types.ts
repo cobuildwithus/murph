@@ -1,9 +1,11 @@
 import type {
+  HostedExecutionRunnerResult,
   HostedExecutionBundleRef,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type { HostedAssistantDeliveryEffect } from "@murphai/hosted-execution/side-effects";
 
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
@@ -55,6 +57,17 @@ export interface RunnerStateRecord {
   pendingWakeCount: number;
   run: HostedExecutionRunStatus | null;
   timeline: HostedExecutionTimelineEntry[];
+  userId: string;
+}
+
+export interface RunnerPendingCommitRecord {
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  bundleRef: HostedExecutionBundleRef | null;
+  committedAt: string;
+  eventId: string;
+  finalizedAt: string | null;
+  result: HostedExecutionRunnerResult["result"];
+  schemaVersion: 1;
   userId: string;
 }
 

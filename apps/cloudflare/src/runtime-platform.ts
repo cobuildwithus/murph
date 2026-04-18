@@ -4,9 +4,6 @@ import {
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  parseHostedAssistantDeliveryRecord,
-} from "@murphai/hosted-execution/side-effects";
-import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -16,7 +13,6 @@ import {
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   buildHostedExecutionRunnerEmailMessagePath,
-  buildHostedExecutionRunnerSideEffectPath,
 } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -100,20 +96,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
     },
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
     effectsPort: {
-      async deletePreparedAssistantDelivery(sideEffect) {
-        const url = createHostedAssistantDeliveryUrl(sideEffect);
-        const response = await fetchHostedResponse({
-          description: `Hosted side-effect delete ${sideEffect.effectId}`,
-          fetchImpl,
-          init: {
-            method: "DELETE",
-          },
-          timeoutMs,
-          url,
-        });
-
-        assertHostedOk(response, `Hosted side-effect delete ${sideEffect.effectId}`);
-      },
       async readRawEmailMessage(rawMessageKey) {
         const response = await fetchHostedResponse({
           description: `Hosted raw email read ${rawMessageKey}`,
@@ -132,19 +114,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         assertHostedOk(response, `Hosted raw email read ${rawMessageKey}`);
         return new Uint8Array(await response.arrayBuffer());
       },
-      async readAssistantDeliveryRecord(sideEffect) {
-        const payload = await fetchHostedJson({
-          allowNotFound: false,
-          description: `Hosted side-effect read ${sideEffect.effectId}`,
-          fetchImpl,
-          method: "GET",
-          timeoutMs,
-          url: createHostedAssistantDeliveryUrl(sideEffect),
-        });
-
-        const record = readHostedRecordField(payload, "record");
-        return record === null ? null : parseHostedAssistantDeliveryRecord(record);
-      },
       async sendEmail(request) {
         const payload = await fetchHostedJson({
           body: request,
@@ -160,20 +129,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         const target = readOptionalStringField(payload, "target");
 
         return target ? { target } : undefined;
-      },
-      async writeAssistantDeliveryRecord(record) {
-        const payload = await fetchHostedJson({
-          body: record,
-          description: `Hosted side-effect write ${record.effectId}`,
-          fetchImpl,
-          method: "PUT",
-          timeoutMs,
-          url: createHostedAssistantDeliveryUrl(record),
-        });
-
-        return parseHostedAssistantDeliveryRecord(
-          requireRecordField(payload, "record"),
-        );
       },
     },
     ...(webControlBaseUrl && webCallbackSigning
@@ -352,18 +307,6 @@ function createHostedInternalProxyRequest(
   }
 
   return new Request(proxiedUrl, init);
-}
-
-function createHostedAssistantDeliveryUrl(input: {
-  effectId: string;
-  fingerprint: string;
-}): URL {
-  const url = new URL(
-    buildHostedExecutionRunnerSideEffectPath(input.effectId),
-    `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
-  );
-  url.searchParams.set("fingerprint", input.fingerprint);
-  return url;
 }
 
 function ensureTrailingSlash(value: URL): URL {
@@ -600,36 +543,6 @@ function assertHostedOk(response: Response, description: string): void {
   error.status = response.status;
   error.statusCode = response.status;
   throw error;
-}
-
-function readHostedRecordField(
-  value: unknown,
-  field: string,
-): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime response must be an object.");
-  }
-
-  const entry = (value as Record<string, unknown>)[field];
-  if (entry === null || entry === undefined) {
-    return null;
-  }
-
-  if (typeof entry !== "object" || Array.isArray(entry)) {
-    throw new TypeError(`Hosted runtime response.${field} must be an object or null.`);
-  }
-
-  return entry as Record<string, unknown>;
-}
-
-function requireRecordField(value: unknown, field: string): Record<string, unknown> {
-  const record = readHostedRecordField(value, field);
-
-  if (!record) {
-    throw new TypeError(`Hosted runtime response.${field} must be present.`);
-  }
-
-  return record;
 }
 
 function readOptionalStringField(value: unknown, field: string): string | null {

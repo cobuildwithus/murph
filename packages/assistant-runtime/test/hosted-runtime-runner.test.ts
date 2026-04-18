@@ -399,7 +399,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           forwardedEnvKeyCount: 1,
           platformBindings: expect.objectContaining({
             artifactStoreBound: true,
-            assistantDeliveryJournalBound: true,
             effectsPortBound: true,
             usageExportBound: false,
           }),
