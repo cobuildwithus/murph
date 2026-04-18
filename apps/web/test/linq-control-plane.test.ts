@@ -26,6 +26,12 @@ const mocks = vi.hoisted(() => ({
     queueWebhookEventIfNew: vi.fn(),
     listEventsForUser: vi.fn(),
   },
+  hostedWebhookReceipts: {
+    isHostedWebhookReceiptReplayBlocked: vi.fn(),
+    markHostedWebhookReceiptCompleted: vi.fn(),
+    markHostedWebhookReceiptFailed: vi.fn(),
+    recordHostedWebhookReceipt: vi.fn(),
+  },
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -43,6 +49,13 @@ vi.mock("@/src/lib/hosted-agent-sessions", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-webhook-receipts", () => ({
+  isHostedWebhookReceiptReplayBlocked: mocks.hostedWebhookReceipts.isHostedWebhookReceiptReplayBlocked,
+  markHostedWebhookReceiptCompleted: mocks.hostedWebhookReceipts.markHostedWebhookReceiptCompleted,
+  markHostedWebhookReceiptFailed: mocks.hostedWebhookReceipts.markHostedWebhookReceiptFailed,
+  recordHostedWebhookReceipt: mocks.hostedWebhookReceipts.recordHostedWebhookReceipt,
 }));
 
 vi.mock("@/src/lib/linq/prisma-store", () => ({
@@ -63,12 +76,14 @@ vi.mock("@murphai/messaging-ingress/linq-webhook", async () => {
 
 type LinqControlPlaneModule = typeof import("../src/lib/linq/control-plane");
 type MessagingIngressLinqModule = typeof import("@murphai/messaging-ingress/linq-webhook");
+type HostedOnboardingErrorsModule = typeof import("../src/lib/hosted-onboarding/errors");
 
 let linqControlPlane: LinqControlPlaneModule;
 let inboxd: Pick<
   MessagingIngressLinqModule,
   "parseCanonicalLinqMessageReceivedEvent" | "verifyAndParseLinqWebhookRequest"
 >;
+let hostedOnboardingErrors: HostedOnboardingErrorsModule;
 const REMOVED_LINQ_WEBHOOK_SECRET_ALIAS = ["HEALTHY", "BOB", "LINQ", "WEBHOOK", "SECRET"].join("_");
 const describe = baseDescribe.sequential;
 
@@ -77,6 +92,7 @@ describe("HostedLinqControlPlane", () => {
     vi.stubGlobal("fetch", mocks.fetch);
     linqControlPlane = await import("../src/lib/linq/control-plane");
     inboxd = await vi.importActual<MessagingIngressLinqModule>("@murphai/messaging-ingress/linq-webhook");
+    hostedOnboardingErrors = await import("../src/lib/hosted-onboarding/errors");
   });
 
   afterEach(() => {
@@ -110,6 +126,26 @@ describe("HostedLinqControlPlane", () => {
     }));
     mocks.requireAuthenticatedHostedUser.mockResolvedValue({
       id: "user-123",
+    });
+    mocks.hostedWebhookReceipts.isHostedWebhookReceiptReplayBlocked.mockResolvedValue(false);
+    mocks.hostedWebhookReceipts.markHostedWebhookReceiptCompleted.mockResolvedValue(undefined);
+    mocks.hostedWebhookReceipts.markHostedWebhookReceiptFailed.mockResolvedValue(undefined);
+    mocks.hostedWebhookReceipts.recordHostedWebhookReceipt.mockResolvedValue({
+      eventId: "evt_claimed",
+      source: "linq-control-plane.ignored",
+      state: {
+        attemptCount: 1,
+        attemptId: "attempt_123",
+        claimExpiresAt: null,
+        completedAt: null,
+        firstReceivedAt: "2026-03-25T10:00:00.000Z",
+        lastError: null,
+        lastReceivedAt: "2026-03-25T10:00:00.000Z",
+        plannedAt: null,
+        sideEffects: [],
+        status: "processing",
+      },
+      version: 1,
     });
     mocks.store.getBindingByRecipientPhone.mockResolvedValue(null);
     mocks.fetch.mockResolvedValue({
@@ -182,6 +218,12 @@ describe("HostedLinqControlPlane", () => {
     expect(mocks.verifyAndParseLinqWebhookRequest).toHaveBeenCalledTimes(1);
     expect(mocks.store.getBindingByRecipientPhone).toHaveBeenCalledWith("+15557654321");
     expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
+    expect(mocks.hostedWebhookReceipts.recordHostedWebhookReceipt).toHaveBeenCalledWith({
+      eventId: "evt_123",
+      prisma: mocks.getPrisma.mock.results[0]?.value,
+      source: "linq-control-plane.ignored",
+    });
+    expect(mocks.hostedWebhookReceipts.markHostedWebhookReceiptCompleted).toHaveBeenCalledTimes(1);
   });
 
   it("reuses the hosted device-sync browser auth flow for binding reads", async () => {
@@ -457,7 +499,7 @@ describe("HostedLinqControlPlane", () => {
     expect(JSON.stringify(queuedInput)).not.toContain("att_private_123");
   });
 
-  it("ignores non-message Linq webhooks without writing queue or receipt state", async () => {
+  it("ignores non-message Linq webhooks without queueing routed event state", async () => {
     process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
     const event = {
       api_version: "v3",
@@ -488,6 +530,102 @@ describe("HostedLinqControlPlane", () => {
       eventType: "message.delivered",
     });
     expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
+    expect(mocks.hostedWebhookReceipts.recordHostedWebhookReceipt).toHaveBeenCalledWith({
+      eventId: "evt_ignored_123",
+      prisma: mocks.getPrisma.mock.results[0]?.value,
+      source: "linq-control-plane.ignored",
+    });
+  });
+
+  it("keeps a previously ignored event ignored after a later binding appears", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+    const event = {
+      api_version: "v3",
+      event_id: "evt_replayed_ignored_123",
+      created_at: "2026-03-25T10:00:00.000Z",
+      event_type: "message.received",
+      trace_id: "trace_replayed_ignored_123",
+      data: {
+        chat_id: "chat_123",
+        recipient_phone: "15557654321",
+        message: {
+          id: "msg_123",
+        },
+      },
+    };
+
+    mocks.verifyAndParseLinqWebhookRequest.mockReturnValue(event);
+    mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue(event);
+    mocks.hostedWebhookReceipts.isHostedWebhookReceiptReplayBlocked.mockResolvedValue(true);
+    mocks.store.getBindingByRecipientPhone.mockResolvedValue({
+      id: "linqb_123",
+      userId: "user-123",
+      recipientPhone: "+15557654321",
+      label: "Primary",
+      createdAt: "2026-03-25T09:00:00.000Z",
+      updatedAt: "2026-03-25T09:00:00.000Z",
+    });
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook()).resolves.toMatchObject({
+      accepted: true,
+      duplicate: true,
+      ignored: true,
+      routed: false,
+      eventId: "evt_replayed_ignored_123",
+      eventType: "message.received",
+    });
+    expect(mocks.store.getBindingByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
+    expect(mocks.hostedWebhookReceipts.recordHostedWebhookReceipt).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges concurrent ignored duplicates instead of surfacing receipt lease errors", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+    const event = {
+      api_version: "v3",
+      event_id: "evt_ignored_race_123",
+      created_at: "2026-03-25T10:00:00.000Z",
+      event_type: "message.delivered",
+      trace_id: "trace_ignored_race_123",
+      data: {
+        chat_id: "chat_123",
+      },
+    };
+
+    mocks.verifyAndParseLinqWebhookRequest.mockReturnValue(event);
+    mocks.hostedWebhookReceipts.recordHostedWebhookReceipt.mockRejectedValue(
+      hostedOnboardingErrors.hostedOnboardingError({
+        code: "WEBHOOK_RECEIPT_IN_PROGRESS",
+        httpStatus: 503,
+        message: "Hosted webhook receipt is already being processed.",
+        retryable: true,
+      }),
+    );
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook()).resolves.toMatchObject({
+      accepted: true,
+      duplicate: true,
+      ignored: true,
+      routed: false,
+      eventId: "evt_ignored_race_123",
+      eventType: "message.delivered",
+    });
+    expect(mocks.hostedWebhookReceipts.markHostedWebhookReceiptCompleted).not.toHaveBeenCalled();
+    expect(mocks.hostedWebhookReceipts.markHostedWebhookReceiptFailed).not.toHaveBeenCalled();
   });
 
   it("reports duplicate routed events from the canonical Linq queue store", async () => {

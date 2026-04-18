@@ -1,6 +1,7 @@
 export { readHostedWebhookReceiptState } from "./hosted-onboarding/webhook-receipt-codec";
 export {
   buildHostedWebhookReceiptLeaseWriteData,
+  isHostedWebhookReceiptReplayBlocked,
   markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,

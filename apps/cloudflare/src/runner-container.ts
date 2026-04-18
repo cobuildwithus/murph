@@ -178,7 +178,7 @@ export class RunnerContainer extends Container {
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       emitHostedExecutionStructuredLog({
         component: "container",
-        dispatch,
+        wake: dispatch,
         details: {
           remainingTimeoutMs,
           runElapsedMs: computeHostedRunElapsedMs(run),
@@ -210,7 +210,7 @@ export class RunnerContainer extends Container {
       );
       emitHostedExecutionStructuredLog({
         component: "container",
-        dispatch,
+        wake: dispatch,
         details: {
           responseStatus: response.status,
           runElapsedMs: computeHostedRunElapsedMs(run),
@@ -230,7 +230,7 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
-        dispatch,
+        wake: dispatch,
         error,
         message: "Hosted execution container failed.",
         phase: "failed",
@@ -259,7 +259,7 @@ export class RunnerContainer extends Container {
         await assertRunnerHealthy(this, Math.min(input.timeoutMs, readRunnerReadyTimeoutMs(this.environment)));
         emitHostedExecutionStructuredLog({
           component: "container",
-          dispatch,
+          wake: dispatch,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
             runElapsedMs: computeHostedRunElapsedMs(run),
@@ -273,7 +273,7 @@ export class RunnerContainer extends Container {
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
-          dispatch,
+          wake: dispatch,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
             runElapsedMs: computeHostedRunElapsedMs(run),
@@ -293,7 +293,7 @@ export class RunnerContainer extends Container {
 
     emitHostedExecutionStructuredLog({
       component: "container",
-      dispatch,
+      wake: dispatch,
       details: {
         runElapsedMs: computeHostedRunElapsedMs(run),
         startMode: "cold",
@@ -327,7 +327,7 @@ export class RunnerContainer extends Container {
 
     emitHostedExecutionStructuredLog({
       component: "container",
-      dispatch,
+      wake: dispatch,
       details: {
         readinessLatencyMs: Date.now() - readinessStartedAt,
         runElapsedMs: computeHostedRunElapsedMs(run),
@@ -372,7 +372,7 @@ export class RunnerContainer extends Container {
         if (attempt > 1) {
           emitHostedExecutionStructuredLog({
             component: "container",
-            dispatch: input.dispatch,
+            wake: input.dispatch,
             details: {
               outboundHandlerInstallAttempt: attempt,
               outboundHandlerInstallRetryCount: attempt - 1,
@@ -395,7 +395,7 @@ export class RunnerContainer extends Container {
 
         emitHostedExecutionStructuredLog({
           component: "container",
-          dispatch: input.dispatch,
+          wake: input.dispatch,
           details: {
             outboundHandlerInstallAttempt: attempt,
             outboundHandlerInstallRetryDelayMs: OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS,

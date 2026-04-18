@@ -193,7 +193,7 @@ export async function startHostedContainerEntrypoint(input: {
           resumeFromCommit: Boolean(job.request.resume?.committedResult),
           runnerSecretKeyCount: Object.keys(job.runtime?.userEnv ?? {}).length,
         },
-        dispatch: job.request.wake,
+        wake: job.request.wake,
         message: "Hosted container entrypoint accepted runner job.",
         phase: "dispatch.running",
         run: job.request.run ?? null,
@@ -218,7 +218,7 @@ export async function startHostedContainerEntrypoint(input: {
         details: {
           resultPhase: result.phase ?? null,
         },
-        dispatch: job.request.wake,
+        wake: job.request.wake,
         message: "Hosted container entrypoint completed runner job.",
         phase: "dispatch.running",
         run: job.request.run ?? null,
@@ -233,7 +233,7 @@ export async function startHostedContainerEntrypoint(input: {
 
       emitHostedExecutionStructuredLog({
         component: "container",
-        dispatch: typeof job === "object" && job ? job.request.wake : null,
+        wake: typeof job === "object" && job ? job.request.wake : null,
         error,
         message: "Hosted container entrypoint failed a runner job.",
         phase: "failed",

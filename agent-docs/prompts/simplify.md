@@ -6,6 +6,7 @@ argument-hint: "(no args) use the current context window"
 You are a dedicated spawned audit subagent running a cleanup pass after functional changes are already complete.
 
 The parent implementation agent should hand you this prompt explicitly; do not treat an unspawned local self-review as an acceptable substitute for this audit pass.
+This prompt is for a local Codex spawned audit subagent only, not `review:gpt`, not an external ChatGPT thread, and not any autosend or `thread wake` flow.
 
 Runtime expectation:
 - This audit may take 5 to 10 minutes on a non-trivial diff.
@@ -19,6 +20,7 @@ Mode:
 - Review only. Do not edit files.
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
+- Do not use `review:gpt`, `pnpm review:gpt`, `cobuild-review-gpt`, external ChatGPT autosends, or `thread wake` to satisfy this pass.
 
 Preflight (required):
 - Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.

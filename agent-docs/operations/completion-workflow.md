@@ -6,6 +6,7 @@ This workflow applies to repo code/docs/test/config changes after implementation
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
 When the routed task class requires audit passes such as `coverage-write`, `frontend-review`, or `task-finish-review`, treat them as mandatory completion steps before handoff, not optional close-out checks after code, tests, or commit.
+Those required audit passes are local Codex subagent passes, not `review:gpt`, not external ChatGPT autosends, and not `thread wake` workflows.
 
 ## Sequence
 
@@ -57,6 +58,8 @@ It does not skip `coverage-write` when the task's verification lane already incl
 - `frontend-review` is a review-only pass for user-facing `apps/web` pages, components, and design-system-facing UI. It should read `agent-docs/FRONTEND.md` and focus on design-system alignment, product context, UX quality, and unnecessary UI drift.
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
+- Do not satisfy required audit passes with `pnpm review:gpt`, `review:gpt` presets, external ChatGPT threads, `cobuild-review-gpt`, or any `thread wake`/autosend flow. Those are separate optional tools, not the repo-required completion workflow.
+- If a spawned subagent cannot itself spawn another worker, it must report that limitation back to the parent agent rather than substituting an external review workflow.
 - Review-mode audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
 - Prefer a fresh non-forked handoff packet over inheriting the full implementation thread. Widen context only when a specific review question cannot be answered from the narrowed packet.
 - Use a fresh subagent per required pass unless the user explicitly instructs otherwise.
