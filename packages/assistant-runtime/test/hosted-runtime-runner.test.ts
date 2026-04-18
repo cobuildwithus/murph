@@ -899,7 +899,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       expect.objectContaining({
         level: "warn",
         message:
-          "Hosted runtime could not finish post-commit delivery draining; returning the committed compatibility result.",
+          "Hosted runtime could not complete the critical post-commit finalization path; returning the committed compatibility result.",
         phase: "commit.recorded",
       }),
     );
