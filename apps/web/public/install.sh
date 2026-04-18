@@ -662,11 +662,6 @@ npm_global_bin_dir() {
 }
 
 resolve_murph_bin() {
-  if command_exists murph; then
-    command -v murph
-    return 0
-  fi
-
   local npm_bin
   npm_bin="$(npm_global_bin_dir || true)"
   if [[ -n "$npm_bin" && -x "${npm_bin}/murph" ]]; then
@@ -676,6 +671,11 @@ resolve_murph_bin() {
 
   if [[ -x "${HOME}/.local/bin/murph" ]]; then
     echo "${HOME}/.local/bin/murph"
+    return 0
+  fi
+
+  if command_exists murph; then
+    command -v murph
     return 0
   fi
 
