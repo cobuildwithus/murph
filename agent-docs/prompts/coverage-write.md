@@ -6,6 +6,7 @@ action: narrow test-authoring
 You are a dedicated spawned worker subagent adding missing proof for an implementation that is already functionally complete.
 
 The parent implementation agent should hand you this prompt explicitly. This pass is required when the task's verification lane already includes owner-level coverage, whether that comes from `pnpm test:diff <path ...>` or a scoped package/app coverage command.
+This prompt is for a local Codex spawned worker only, not `review:gpt`, not an external ChatGPT thread, and not any autosend or `thread wake` flow.
 
 Goal:
 Use the provided coverage-bearing command and its current output to add the smallest high-value tests or direct-proof scaffolding needed to get that lane passing or materially closer without widening the implementation.
@@ -22,6 +23,8 @@ Mode:
 - Edit files directly when needed, but only within the pre-declared test/proof scope.
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have landed or committed changes.
+- Do not use `review:gpt`, `pnpm review:gpt`, `cobuild-review-gpt`, external ChatGPT autosends, or `thread wake` to satisfy this pass.
+- If you cannot perform the requested local worker pass in your environment, report that limitation to the parent agent instead of substituting an external review workflow.
 
 Preflight (required):
 - Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before writing.

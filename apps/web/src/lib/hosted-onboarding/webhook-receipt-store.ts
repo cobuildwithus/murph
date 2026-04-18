@@ -26,6 +26,17 @@ type HostedWebhookReceiptWriteResult = {
   updatedCount: number;
 };
 
+type HostedWebhookReceiptReplayLookupClient = {
+  hostedWebhookReceipt: Pick<PrismaClient["hostedWebhookReceipt"], "findUnique">;
+};
+
+type HostedWebhookReceiptReplayLookupRecord = {
+  claimExpiresAt: Date | null;
+  lastErrorRetryable: boolean | null;
+  status: HostedWebhookReceiptState["status"];
+  updatedAt: Date;
+} | null;
+
 export async function recordHostedWebhookReceipt(input: {
   eventId: string;
   prisma: PrismaClient;
@@ -60,6 +71,54 @@ export async function recordHostedWebhookReceipt(input: {
 
     throw error;
   }
+}
+
+export async function isHostedWebhookReceiptReplayBlocked(input: {
+  eventId: string;
+  prisma: HostedWebhookReceiptReplayLookupClient;
+  source: string;
+  now?: string;
+}): Promise<boolean> {
+  const now = new Date(input.now ?? new Date().toISOString());
+  const receipt: HostedWebhookReceiptReplayLookupRecord = await input.prisma.hostedWebhookReceipt.findUnique({
+    where: {
+      source_eventId: {
+        eventId: input.eventId,
+        source: input.source,
+      },
+    },
+    select: {
+      claimExpiresAt: true,
+      lastErrorRetryable: true,
+      status: true,
+      updatedAt: true,
+    },
+  });
+
+  return isHostedWebhookReceiptReplayBlockedState(receipt, now);
+}
+
+export function isHostedWebhookReceiptReplayBlockedState(
+  receipt: HostedWebhookReceiptReplayLookupRecord,
+  now: Date,
+): boolean {
+  if (!receipt) {
+    return false;
+  }
+
+  if (receipt.status === "completed") {
+    return true;
+  }
+
+  if (receipt.status === "failed") {
+    return receipt.lastErrorRetryable === false;
+  }
+
+  if (receipt.status !== "processing") {
+    return false;
+  }
+
+  return !isHostedWebhookReceiptClaimExpired(receipt.claimExpiresAt, receipt.updatedAt, now);
 }
 
 export async function claimHostedWebhookReceiptForContinuation(input: {
