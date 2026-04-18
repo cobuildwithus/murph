@@ -2,72 +2,44 @@ import type {
   Prisma,
   PrismaClient,
 } from "@prisma/client";
-import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
-import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
-import { claimHostedLinqQuotaReplyNotice } from "./linq-daily-state";
+import {
+  claimHostedLinqOnboardingLinkNotice,
+  claimHostedLinqQuotaReplyNotice,
+} from "./linq-daily-state";
 import {
   requireHostedLinqMessageReceivedEvent,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
-import {
-  requireHostedStripeWebhookVerificationConfig,
-} from "./runtime";
-import {
-  readHostedWakeTarget,
-} from "../hosted-execution/wake-lifecycle";
-import {
-  handoffHostedExecutionWakeBestEffort,
-  triggerHostedWakeUserBestEffort,
-} from "../hosted-wake/control";
-import {
-  reconcileHostedStripeEventById,
-  recordHostedStripeEvent,
-} from "./stripe-event-reconciliation";
-import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
-  claimHostedWebhookReceiptForContinuation,
-  continueHostedWebhookReceipt,
-  listHostedWebhookReceiptContinuationCandidates,
-  HostedWebhookReceiptSideEffectDrainError,
-  type HostedWebhookReceiptClaim,
-  type HostedWebhookPlan,
-  type HostedWebhookSideEffect,
-} from "./webhook-receipts";
-import {
-  markHostedWebhookReceiptFailed,
-  queueHostedWebhookReceiptSideEffects,
-  recordHostedWebhookReceipt,
-} from "./webhook-receipt-store";
-import {
   planHostedOnboardingLinqWebhook,
-  planHostedOnboardingLinqActiveMemberDirect,
-  type HostedOnboardingLinqActiveMemberDirectPlan,
+  type HostedOnboardingLinqDirectPlan,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
   planHostedOnboardingTelegramWebhook,
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
-import { sanitizeHostedOnboardingLogString } from "./http";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
-import { createHostedWebhookReceiptHandlers } from "./webhook-transport";
+import {
+  drainHostedLinqSideEffectsDirect,
+} from "./webhook-transport";
+import {
+  maybeHandoffHostedExecutionWebhookWake,
+} from "./webhook-service-wake";
 
-export type HostedStripeWebhookResponse = {
-  duplicate?: boolean;
-  ok: true;
-  type: string;
-};
-
-type HostedWebhookServiceResponse =
-  | HostedOnboardingLinqWebhookResponse
-  | HostedOnboardingTelegramWebhookResponse;
+export {
+  handleHostedStripeWebhook,
+} from "./webhook-service-stripe";
+export type {
+  HostedStripeWebhookResponse,
+} from "./webhook-service-types";
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
@@ -108,101 +80,51 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType,
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
-    const prisma = input.prisma ?? getPrisma();
-    const handlers = createHostedWebhookReceiptHandlers();
+
     if (event.event_type === "message.received") {
       requireHostedLinqMessageReceivedEvent(event);
-
-      const directPlan = await runHostedOnboardingWebhookTransaction(
-        prisma,
-        (transaction) =>
-          planHostedOnboardingLinqActiveMemberDirect({
-            event,
-            prisma: transaction,
-          }),
-      );
-
-      if (directPlan) {
-        if (directPlan.desiredSideEffects.length > 0) {
-          await drainHostedWebhookSideEffectsDirect({
-            handlers,
-            prisma,
-            sideEffects: directPlan.desiredSideEffects,
-            signal: input.signal,
-          });
-          await finalizeHostedOnboardingLinqActiveMemberDirectPlan({
-            plan: directPlan,
-            prisma,
-          });
-        }
-
-        responseReason = directPlan.response.reason ?? null;
-        await maybeHandoffHostedExecutionWebhookWake({
-          defer: input.defer,
-          eventId: event.event_id,
-          maxInlineDrainMs: input.maxInlineDrainMs,
-          prisma,
-          response: directPlan.response,
-          source: "linq",
-        });
-        finishHostedOnboardingTiming(timing, "completed", {
-          duplicate: Boolean(directPlan.response.duplicate),
-          eventId,
-          eventType,
-          responseReason,
-          signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-        });
-        return directPlan.response;
-      }
     }
-    const receiptTiming = startHostedOnboardingTiming(
-      "hosted-onboarding.webhook.linq.receipt",
-      {
-        eventId,
-        eventType,
-      },
-    );
-    const result = await processHostedOnboardingWebhookPlan({
-      deferSideEffectDrain: input.defer,
-      duplicateResponse: {
-        ok: true,
-        duplicate: true,
-      },
-      eventId: event.event_id,
-      handlers,
-      plan: (transaction) =>
+
+    const prisma = input.prisma ?? getPrisma();
+    const plan = await runHostedOnboardingWebhookTransaction(
+      prisma,
+      (transaction) =>
         planHostedOnboardingLinqWebhook({
           event,
           prisma: transaction,
         }),
+    );
+
+    if (plan.desiredSideEffects.length > 0) {
+      await drainHostedLinqSideEffectsDirect({
+        prisma,
+        sideEffects: plan.desiredSideEffects,
+        signal: input.signal,
+      });
+    }
+
+    await finalizeHostedOnboardingLinqPlan({
+      plan,
       prisma,
-      signal: input.signal,
-      source: "linq",
     });
-    const response = result.response;
-    responseReason = response.reason ?? null;
-    finishHostedOnboardingTiming(receiptTiming, "completed", {
-      duplicate: Boolean(response.duplicate),
-      eventId,
-      eventType,
-      responseReason,
-    });
+
+    responseReason = plan.response.reason ?? null;
     await maybeHandoffHostedExecutionWebhookWake({
       defer: input.defer,
       eventId: event.event_id,
       maxInlineDrainMs: input.maxInlineDrainMs,
       prisma,
-      response,
+      response: plan.response,
       source: "linq",
     });
     finishHostedOnboardingTiming(timing, "completed", {
-      duplicate: Boolean(response.duplicate),
+      duplicate: Boolean(plan.response.duplicate),
       eventId,
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
     });
-    return response;
+    return plan.response;
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -238,11 +160,9 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       }),
   );
 
-  // Telegram ingress is wake-only or ignored. Hosted wake dedupe owns
-  // idempotency here, so receipt claim/state should not own this path.
   if (plan.desiredSideEffects.length > 0) {
     throw new Error(
-      "Hosted Telegram webhook planning unexpectedly queued receipt-local side effects.",
+      "Hosted Telegram webhook planning unexpectedly queued local side effects.",
     );
   }
 
@@ -257,386 +177,8 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   return plan.response;
 }
 
-export async function handleHostedStripeWebhook(input: {
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
-  rawBody: string;
-  signature: string | null;
-  prisma?: PrismaClient;
-}): Promise<HostedStripeWebhookResponse> {
-  const prisma = input.prisma ?? getPrisma();
-  const { stripe, webhookSecret } = requireHostedStripeWebhookVerificationConfig();
-
-  if (!webhookSecret) {
-    throw hostedOnboardingError({
-      code: "STRIPE_WEBHOOK_SECRET_REQUIRED",
-      message: "STRIPE_WEBHOOK_SECRET must be configured for Stripe webhooks.",
-      httpStatus: 500,
-    });
-  }
-
-  if (!input.signature) {
-    throw hostedOnboardingError({
-      code: "STRIPE_SIGNATURE_REQUIRED",
-      message: "Missing Stripe webhook signature.",
-      httpStatus: 401,
-    });
-  }
-
-  const event = constructStripeWebhookEvent({
-    rawBody: input.rawBody,
-    signature: input.signature,
-    stripe,
-    webhookSecret,
-  });
-
-  const recorded = await recordHostedStripeEvent({
-    event,
-    prisma,
-  });
-
-  if (!recorded.duplicate) {
-    const reconciled = await reconcileHostedStripeEventById({
-      eventId: event.id,
-      prisma,
-    });
-
-    if (reconciled?.createdOrUpdatedRevnetIssuance) {
-      if (input.defer) {
-        await input.defer(() => drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma));
-      } else {
-        await drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma);
-      }
-    }
-
-    const hostedExecutionEventId = reconciled?.hostedExecutionEventId ?? null;
-
-    if (hostedExecutionEventId) {
-      if (input.defer) {
-        await input.defer(async () => {
-          await handoffHostedExecutionWakeBestEffort({
-            context: "stripe.webhook",
-            eventId: hostedExecutionEventId,
-            prisma,
-          });
-        });
-      } else {
-        await handoffHostedExecutionWakeBestEffort({
-          context: "stripe.webhook",
-          eventId: hostedExecutionEventId,
-          prisma,
-        });
-      }
-    }
-  }
-
-  return {
-    duplicate: recorded.duplicate || undefined,
-    ok: true,
-    type: recorded.type,
-  };
-}
-
-export async function drainHostedOnboardingWebhookReceipts(input: {
-  limit?: number;
-  prisma?: PrismaClient;
-} = {}): Promise<Array<{
-  eventId: string;
-  source: string;
-  status: "continued" | "failed" | "skipped";
-}>> {
-  const prisma = input.prisma ?? getPrisma();
-  const candidates = await listHostedWebhookReceiptContinuationCandidates({
-    limit: input.limit,
-    prisma,
-  });
-  const drained: Array<{
-    eventId: string;
-    source: string;
-    status: "continued" | "failed" | "skipped";
-  }> = [];
-
-  for (const candidate of candidates) {
-    let claimedReceipt;
-
-    try {
-      claimedReceipt = await claimHostedWebhookReceiptForContinuation({
-        eventId: candidate.eventId,
-        prisma,
-        source: candidate.source,
-      });
-    } catch (error) {
-      if (isHostedWebhookReceiptInProgressError(error)) {
-        drained.push({
-          eventId: candidate.eventId,
-          source: candidate.source,
-          status: "skipped",
-        });
-        continue;
-      }
-
-      console.error(
-        "Hosted webhook receipt claim failed during cron recovery.",
-        sanitizeHostedOnboardingLogString(
-          error instanceof Error ? error.message : String(error),
-        ) ?? "Unknown error.",
-      );
-      drained.push({
-        eventId: candidate.eventId,
-        source: candidate.source,
-        status: "failed",
-      });
-      continue;
-    }
-
-    if (!claimedReceipt) {
-      drained.push({
-        eventId: candidate.eventId,
-        source: candidate.source,
-        status: "skipped",
-      });
-      continue;
-    }
-
-    try {
-      await continueHostedWebhookReceipt({
-        claimedReceipt,
-        eventId: candidate.eventId,
-        handlers: createHostedWebhookReceiptHandlers(),
-        prisma,
-        source: candidate.source,
-      });
-      drained.push({
-        eventId: candidate.eventId,
-        source: candidate.source,
-        status: "continued",
-      });
-    } catch {
-      drained.push({
-        eventId: candidate.eventId,
-        source: candidate.source,
-        status: "failed",
-      });
-    }
-  }
-
-  return drained;
-}
-
-function isHostedWebhookReceiptInProgressError(error: unknown): boolean {
-  return isHostedOnboardingError(error) && error.code === "WEBHOOK_RECEIPT_IN_PROGRESS";
-}
-
-function constructStripeWebhookEvent(input: {
-  rawBody: string;
-  signature: string;
-  stripe: ReturnType<typeof requireHostedStripeWebhookVerificationConfig>["stripe"];
-  webhookSecret: string;
-}): Stripe.Event {
-  try {
-    return input.stripe.webhooks.constructEvent(input.rawBody, input.signature, input.webhookSecret);
-  } catch (error) {
-    throw hostedOnboardingError({
-      code: "STRIPE_SIGNATURE_INVALID",
-      message: error instanceof Error ? error.message : "Invalid Stripe webhook signature.",
-      httpStatus: 401,
-    });
-  }
-}
-
-async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
-  prisma: PrismaClient,
-): Promise<void> {
-  try {
-    await drainHostedRevnetIssuanceSubmissionQueue({
-      limit: 1,
-      prisma,
-    });
-  } catch (error) {
-    console.error(
-      "Hosted RevNet issuance best-effort drain failed.",
-      sanitizeHostedOnboardingLogString(
-        error instanceof Error ? error.message : String(error),
-      ) ?? "Unknown error.",
-    );
-  }
-}
-
-async function maybeHandoffHostedExecutionWebhookWake(input: {
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
-  eventId: string;
-  maxInlineDrainMs?: number;
-  prisma: PrismaClient;
-  response:
-    | HostedOnboardingLinqWebhookResponse
-    | HostedOnboardingTelegramWebhookResponse;
-  source: "linq" | "telegram";
-}): Promise<void> {
-  if (input.response.reason !== "wake-appended-active-member") {
-    return;
-  }
-
-  const wakeTarget = await readHostedWakeTarget({
-    eventId: input.eventId,
-    prisma: input.prisma,
-  });
-
-  if (!wakeTarget) {
-    return;
-  }
-
-  const handoffTiming = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.wake-handoff`,
-    {
-      deferred: Boolean(input.defer),
-      eventId: input.eventId,
-      inlineTimeoutMs: input.maxInlineDrainMs ?? null,
-      responseReason: input.response.reason,
-    },
-  );
-
-  if (typeof input.maxInlineDrainMs === "number" && input.maxInlineDrainMs > 0) {
-    const completedInline = await waitForHostedExecutionWebhookWake({
-      eventId: input.eventId,
-      responseReason: input.response.reason,
-      source: input.source,
-      targetSeqHint: wakeTarget.seq ?? null,
-      timeoutMs: input.maxInlineDrainMs,
-      userId: wakeTarget.userId,
-    });
-
-    if (completedInline) {
-      finishHostedOnboardingTiming(handoffTiming, "completed", {
-        deferred: false,
-      });
-      return;
-    }
-
-    if (input.defer) {
-      await input.defer(() =>
-        handoffHostedExecutionWebhookWake({
-          deferred: true,
-          eventId: input.eventId,
-          responseReason: input.response.reason,
-          source: input.source,
-          targetSeqHint: wakeTarget.seq ?? null,
-          userId: wakeTarget.userId,
-        }),
-      );
-      finishHostedOnboardingTiming(handoffTiming, "scheduled", {
-        deferred: true,
-        timedOut: true,
-      });
-      return;
-    }
-
-    finishHostedOnboardingTiming(handoffTiming, "completed", {
-      deferred: false,
-      timedOut: true,
-    });
-    return;
-  }
-
-  if (input.defer) {
-    await input.defer(() =>
-      handoffHostedExecutionWebhookWake({
-        deferred: true,
-        eventId: input.eventId,
-        responseReason: input.response.reason,
-        source: input.source,
-        targetSeqHint: wakeTarget.seq ?? null,
-        userId: wakeTarget.userId,
-      }),
-    );
-    finishHostedOnboardingTiming(handoffTiming, "scheduled", {
-      deferred: true,
-    });
-    return;
-  }
-
-  await handoffHostedExecutionWebhookWake({
-    deferred: false,
-    eventId: input.eventId,
-    responseReason: input.response.reason,
-    source: input.source,
-    targetSeqHint: wakeTarget.seq ?? null,
-    userId: wakeTarget.userId,
-  });
-  finishHostedOnboardingTiming(handoffTiming, "completed", {
-    deferred: false,
-  });
-}
-
-async function handoffHostedExecutionWebhookWake(input: {
-  deferred: boolean;
-  eventId: string;
-  responseReason: string | undefined;
-  source: "linq" | "telegram";
-  targetSeqHint: string | null;
-  userId: string;
-}): Promise<void> {
-  const drainTiming = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.wake-drain`,
-    {
-      deferred: input.deferred,
-      eventId: input.eventId,
-      responseReason: input.responseReason,
-      targetSeqHint: input.targetSeqHint,
-      userId: input.userId,
-    },
-  );
-  await triggerHostedWakeUserBestEffort({
-    context: `webhook:${input.source}`,
-    targetSeqHint: input.targetSeqHint,
-    userId: input.userId,
-  });
-  finishHostedOnboardingTiming(drainTiming, "completed");
-}
-
-async function waitForHostedExecutionWebhookWake(input: {
-  eventId: string;
-  responseReason: string | undefined;
-  source: "linq" | "telegram";
-  targetSeqHint: string | null;
-  timeoutMs: number;
-  userId: string;
-}): Promise<boolean> {
-  const timeoutMs = Math.max(1, Math.floor(input.timeoutMs));
-
-  if (!Number.isFinite(timeoutMs)) {
-    return false;
-  }
-
-  return triggerHostedWakeUserBestEffort({
-    context: `webhook:${input.source}`,
-    targetSeqHint: input.targetSeqHint,
-    timeoutMs,
-    userId: input.userId,
-  });
-}
-
-async function drainHostedWebhookSideEffectsDirect(input: {
-  handlers: ReturnType<typeof createHostedWebhookReceiptHandlers>;
-  prisma: PrismaClient;
-  sideEffects: readonly HostedWebhookSideEffect[];
-  signal?: AbortSignal;
-}): Promise<void> {
-  for (const effect of input.sideEffects) {
-    await input.handlers.performSideEffect(effect, {
-      prisma: input.prisma,
-      signal: input.signal,
-    });
-
-    if (input.handlers.afterSideEffectSent) {
-      await input.handlers.afterSideEffectSent({
-        effect,
-        prisma: input.prisma,
-      });
-    }
-  }
-}
-
-async function finalizeHostedOnboardingLinqActiveMemberDirectPlan(input: {
-  plan: HostedOnboardingLinqActiveMemberDirectPlan;
+async function finalizeHostedOnboardingLinqPlan(input: {
+  plan: HostedOnboardingLinqDirectPlan;
   prisma: PrismaClient;
 }): Promise<void> {
   if (!input.plan.finalization) {
@@ -651,117 +193,13 @@ async function finalizeHostedOnboardingLinqActiveMemberDirectPlan(input: {
         prisma: input.prisma,
       });
       return;
-  }
-}
-
-async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookServiceResponse>(input: {
-  deferSideEffectDrain?: (drain: () => Promise<void>) => Promise<void> | void;
-  duplicateResponse: TResult;
-  eventId: string;
-  handlers: ReturnType<typeof createHostedWebhookReceiptHandlers>;
-  plan: (prisma: Prisma.TransactionClient) => Promise<HostedWebhookPlan<TResult>>;
-  prisma: PrismaClient;
-  signal?: AbortSignal;
-  source: "linq" | "telegram";
-}): Promise<{
-  response: TResult;
-}> {
-  let claimedReceipt = await recordHostedWebhookReceipt({
-    eventId: input.eventId,
-    prisma: input.prisma,
-    source: input.source,
-  });
-
-  if (!claimedReceipt) {
-    return {
-      response: input.duplicateResponse,
-    };
-  }
-
-  const activeClaim = claimedReceipt;
-  let response: TResult | null = null;
-
-  try {
-    if (!activeClaim.state.plannedAt) {
-      const plannedResult = await runHostedOnboardingWebhookTransaction(
-        input.prisma,
-        async (transaction) => {
-          const plan = await input.plan(transaction);
-          const nextClaim = await queueHostedWebhookReceiptSideEffects({
-            claimedReceipt: activeClaim,
-            desiredSideEffects: plan.desiredSideEffects,
-            eventId: input.eventId,
-            prisma: transaction,
-            source: input.source,
-          });
-
-          return {
-            claimedReceipt: nextClaim,
-            response: plan.response,
-          };
-        },
-      );
-
-      claimedReceipt = plannedResult.claimedReceipt;
-      response = plannedResult.response;
-    }
-
-    if (input.deferSideEffectDrain && hasDeferredHostedWebhookSideEffects(claimedReceipt)) {
-      const deferredClaim = claimedReceipt;
-
-      try {
-        await input.deferSideEffectDrain(() =>
-          continueHostedWebhookReceipt({
-            claimedReceipt: deferredClaim,
-            eventId: input.eventId,
-            handlers: input.handlers,
-            markFailure: true,
-            prisma: input.prisma,
-            source: input.source,
-          }),
-        );
-        return {
-          response: response ?? input.duplicateResponse,
-        };
-      } catch (error) {
-        console.error(
-          "Hosted webhook side-effect drain scheduling failed.",
-          sanitizeHostedOnboardingLogString(
-            error instanceof Error ? error.message : String(error),
-          ) ?? "Unknown error.",
-        );
-      }
-    }
-
-    await continueHostedWebhookReceipt({
-      claimedReceipt,
-      eventId: input.eventId,
-      handlers: input.handlers,
-      markFailure: false,
-      prisma: input.prisma,
-      signal: input.signal,
-      source: input.source,
-    });
-
-    return {
-      response: response ?? input.duplicateResponse,
-    };
-  } catch (error) {
-    const failure = error instanceof HostedWebhookReceiptSideEffectDrainError
-      ? error.cause
-      : error;
-    claimedReceipt = error instanceof HostedWebhookReceiptSideEffectDrainError
-      ? error.claimedReceipt
-      : claimedReceipt;
-
-    await markHostedWebhookReceiptFailed({
-      claimedReceipt,
-      error: failure,
-      eventId: input.eventId,
-      prisma: input.prisma,
-      source: input.source,
-    });
-    throw failure;
+    case "mark_onboarding_link_sent":
+      await claimHostedLinqOnboardingLinkNotice({
+        memberId: input.plan.finalization.memberId,
+        occurredAt: input.plan.finalization.occurredAt,
+        prisma: input.prisma,
+      });
+      return;
   }
 }
 
@@ -772,10 +210,4 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
   return typeof prisma.$transaction === "function"
     ? prisma.$transaction(callback)
     : callback(prisma as Prisma.TransactionClient);
-}
-
-function hasDeferredHostedWebhookSideEffects(
-  claimedReceipt: HostedWebhookReceiptClaim,
-): boolean {
-  return claimedReceipt.state.sideEffects.length > 0;
 }

@@ -2,12 +2,9 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  claimHostedWebhookIngressEvent: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
-  completeHostedWebhookIngressEvent: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
-  failHostedWebhookIngressEvent: vi.fn(),
   getPrisma: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
@@ -17,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberSnapshot: vi.fn(),
   readHostedWakeTarget: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
-  storeHostedWebhookIngressEventCheckpoint: vi.fn(),
   triggerHostedWakeUserBestEffort: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
@@ -59,14 +55,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-ingress-event-gate", () => ({
-  claimHostedWebhookIngressEvent: mocks.claimHostedWebhookIngressEvent,
-  completeHostedWebhookIngressEvent: mocks.completeHostedWebhookIngressEvent,
-  failHostedWebhookIngressEvent: mocks.failHostedWebhookIngressEvent,
-  storeHostedWebhookIngressEventCheckpoint:
-    mocks.storeHostedWebhookIngressEventCheckpoint,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
@@ -99,13 +87,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.verifyAndParseHostedLinqWebhookRequest.mockImplementation((input: { rawBody: string }) =>
       linq.parseHostedLinqWebhookEvent(input.rawBody),
     );
-    mocks.claimHostedWebhookIngressEvent.mockResolvedValue({
-      checkpoint: null,
-      kind: "claimed",
-    });
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
-    mocks.completeHostedWebhookIngressEvent.mockResolvedValue(undefined);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue({
       dayUtc: new Date("2026-03-26T00:00:00.000Z"),
       inboundCount: 1,
@@ -123,7 +106,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       userId: "member_123",
     });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
-    mocks.storeHostedWebhookIngressEventCheckpoint.mockResolvedValue(undefined);
     mocks.triggerHostedWakeUserBestEffort.mockResolvedValue(true);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
@@ -151,16 +133,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.materializeHostedExecutionWakeTx).not.toHaveBeenCalled();
     expect(mocks.triggerHostedWakeUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.claimHostedWebhookIngressEvent).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      prisma,
-      source: "linq",
-    });
-    expect(mocks.completeHostedWebhookIngressEvent).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      prisma,
-      source: "linq",
-    });
   });
 
   it("sends the signup link directly for an inactive member and finalizes without receipt state", async () => {
@@ -224,17 +196,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
-    });
-    expect(mocks.storeHostedWebhookIngressEventCheckpoint).toHaveBeenCalledWith({
-      checkpoint: expect.any(Object),
-      eventId: "evt_123",
-      prisma,
-      source: "linq",
-    });
-    expect(mocks.completeHostedWebhookIngressEvent).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      prisma,
-      source: "linq",
     });
     expect(mocks.materializeHostedExecutionWakeTx).not.toHaveBeenCalled();
     expect(mocks.triggerHostedWakeUserBestEffort).not.toHaveBeenCalled();
@@ -303,17 +264,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.storeHostedWebhookIngressEventCheckpoint).toHaveBeenCalledWith({
-      checkpoint: expect.any(Object),
-      eventId: "evt_123",
-      prisma,
-      source: "linq",
-    });
-    expect(mocks.completeHostedWebhookIngressEvent).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      prisma,
-      source: "linq",
-    });
   });
 });
 

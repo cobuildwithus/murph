@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import {
+  normalizeHostedLinqConversationMessage,
   normalizeLinqWebhookEvent,
   toLinqChatMessage,
 } from "../src/index.ts";
@@ -87,6 +88,20 @@ test("normalizeLinqWebhookEvent falls back to created_at when received_at is mis
   assert.equal(capture.externalId, "linq:msg_missing_received_at");
   assert.equal(capture.occurredAt, "2026-03-24T10:00:05.000Z");
   assert.equal(capture.receivedAt, "2026-03-24T10:00:05.000Z");
+});
+
+test("normalizeLinqWebhookEvent prefers recipient_phone over defaultAccountId when both are present", async () => {
+  const capture = await normalizeLinqWebhookEvent({
+    defaultAccountId: "hbidx:phone:v1:test",
+    event: buildV2026LinqWebhookEvent({
+      data: {
+        recipient_phone: "+15557654321",
+      },
+      eventId: "evt_recipient_phone_priority",
+    }),
+  });
+
+  assert.equal(capture.accountId, "+15557654321");
 });
 
 test("normalizeLinqWebhookEvent treats multiple media parts and voice memos as attachments", async () => {
@@ -271,6 +286,67 @@ test("normalizeLinqWebhookEvent accepts minimized canonical Linq events from hos
   assert.equal(capture.thread.id, "chat_stored");
   assert.equal(capture.text, "Stored webhook snapshot");
   assert.equal(capture.raw.event_type, "message.received");
+});
+
+test("normalizeHostedLinqConversationMessage preserves hosted account ids and reply-thread message ids", async () => {
+  const capture = await normalizeHostedLinqConversationMessage({
+    accountId: "hbid:linq.recipient:v1:test",
+    attachmentDownloadTimeoutMs: 5_000,
+    downloadDriver: {
+      async downloadUrl() {
+        throw new Error("download should not run");
+      },
+    },
+    linqEvent: {
+      api_version: "v3",
+      created_at: "2026-04-02T04:00:00.000Z",
+      webhook_version: "2026-02-03",
+      data: {
+        chat: {
+          id: "chat_stored",
+          owner_handle: {
+            handle: "hbid:linq.recipient:v1:test",
+            id: "handle_owner_stored",
+            is_me: true,
+            service: "iMessage",
+          },
+        },
+        chat_id: "chat_stored",
+        direction: "inbound",
+        from: "hbid:linq.from:v1:test",
+        from_handle: {
+          handle: "hbid:linq.from:v1:test",
+          id: "handle_sender_stored",
+          service: "iMessage",
+        },
+        is_from_me: false,
+        message: {
+          id: "hbid:linq.message:v1:test",
+          parts: [
+            {
+              type: "text",
+              value: "Stored hosted wake snapshot",
+            },
+          ],
+        },
+        received_at: "2026-04-02T04:00:01.000Z",
+        sender_handle: {
+          handle: "hbid:linq.from:v1:test",
+          id: "handle_sender_stored",
+          service: "iMessage",
+        },
+        service: "iMessage",
+      },
+      event_id: "evt_stored",
+      event_type: "message.received",
+    },
+    linqMessageId: " msg_real_123 ",
+  });
+
+  assert.equal(capture.accountId, "hbid:linq.recipient:v1:test");
+  assert.equal(capture.externalId, "linq:msg_real_123");
+  assert.equal(capture.thread.id, "chat_stored");
+  assert.equal(capture.text, "Stored hosted wake snapshot");
 });
 
 test("toLinqChatMessage validates stable message and chat ids", async () => {

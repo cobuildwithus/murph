@@ -33,6 +33,16 @@ export interface NormalizeLinqWebhookEventInput {
   attachmentDownloadTimeoutMs?: number | null;
 }
 
+export interface NormalizeHostedLinqConversationMessageInput {
+  accountId: string;
+  linqEvent: Record<string, unknown>;
+  linqMessageId?: string | null;
+  source?: string;
+  downloadDriver?: LinqAttachmentDownloadDriver | null;
+  signal?: AbortSignal;
+  attachmentDownloadTimeoutMs?: number | null;
+}
+
 export async function normalizeLinqWebhookEvent({
   event,
   source = "linq",
@@ -44,16 +54,38 @@ export async function normalizeLinqWebhookEvent({
   const messageEvent = parseCanonicalLinqMessageReceivedEvent(event);
   const accountId =
     normalizeTextValue(messageEvent.data.recipient_phone ?? null) ?? defaultAccountId;
-  const message = await toLinqChatMessage({
+  return normalizeLinqMessageReceivedEvent({
+    accountId,
     attachmentDownloadTimeoutMs,
     downloadDriver,
-    event: messageEvent,
+    messageEvent,
     signal,
+    source,
   });
+}
 
-  return createInboundCaptureFromChatMessage({
+export async function normalizeHostedLinqConversationMessage({
+  accountId,
+  linqEvent,
+  linqMessageId = null,
+  source = "linq",
+  downloadDriver = null,
+  signal,
+  attachmentDownloadTimeoutMs = null,
+}: NormalizeHostedLinqConversationMessageInput): Promise<InboundCapture> {
+  if (!isCanonicalLinqWebhookEvent(linqEvent)) {
+    throw new TypeError("Hosted Linq conversation wake is missing a canonical webhook event.");
+  }
+
+  const messageEvent = parseCanonicalLinqMessageReceivedEvent(linqEvent);
+  const normalizedLinqMessageId = normalizeTextValue(linqMessageId);
+  return normalizeLinqMessageReceivedEvent({
     accountId,
-    message,
+    attachmentDownloadTimeoutMs,
+    downloadDriver,
+    externalIdOverride: normalizedLinqMessageId ? `linq:${normalizedLinqMessageId}` : null,
+    messageEvent,
+    signal,
     source,
   });
 }
@@ -105,6 +137,52 @@ export async function toLinqChatMessage(input: {
     ),
     raw: minimizeLinqWebhookEvent(event),
   };
+}
+
+async function normalizeLinqMessageReceivedEvent(input: {
+  accountId?: string | null;
+  attachmentDownloadTimeoutMs?: number | null;
+  downloadDriver?: LinqAttachmentDownloadDriver | null;
+  externalIdOverride?: string | null;
+  messageEvent: LinqMessageReceivedEvent;
+  signal?: AbortSignal;
+  source: string;
+}): Promise<InboundCapture> {
+  const message = await toLinqChatMessage({
+    attachmentDownloadTimeoutMs: input.attachmentDownloadTimeoutMs,
+    downloadDriver: input.downloadDriver,
+    event: input.messageEvent,
+    signal: input.signal,
+  });
+
+  return createInboundCaptureFromChatMessage({
+    accountId:
+      normalizeTextValue(input.accountId ?? null)
+      ?? normalizeTextValue(input.messageEvent.data.recipient_phone ?? null),
+    message: input.externalIdOverride
+      ? {
+          ...message,
+          externalId: input.externalIdOverride,
+        }
+      : message,
+    source: input.source,
+  });
+}
+
+function isCanonicalLinqWebhookEvent(value: unknown): value is LinqWebhookEvent {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.api_version === "string"
+    && typeof record.created_at === "string"
+    && typeof record.event_id === "string"
+    && typeof record.event_type === "string"
+    && typeof record.data === "object"
+    && record.data !== null
+  );
 }
 
 async function buildLinqAttachments(
