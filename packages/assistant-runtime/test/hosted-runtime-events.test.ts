@@ -16,14 +16,11 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
-  buildHostedEmailCapture: vi.fn(),
-  buildHostedLinqCapture: vi.fn(),
-  buildHostedTelegramCapture: vi.fn(),
   handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   prepareHostedWakeContext: vi.fn(),
+  processHostedConversationMessageWake: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
-  withHostedInboxPipeline: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -35,24 +32,12 @@ vi.mock("@murphai/assistant-engine", () => ({
   queueAssistantFirstContactWelcome: mocks.queueAssistantFirstContactWelcome,
 }));
 
-vi.mock("../src/hosted-runtime/events/email.ts", () => ({
-  buildHostedEmailCapture: mocks.buildHostedEmailCapture,
-}));
-
-vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
-  buildHostedLinqCapture: mocks.buildHostedLinqCapture,
+vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
+  processHostedConversationMessageWake: mocks.processHostedConversationMessageWake,
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
   handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
-}));
-
-vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
-  buildHostedTelegramCapture: mocks.buildHostedTelegramCapture,
-}));
-
-vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
-  withHostedInboxPipeline: mocks.withHostedInboxPipeline,
 }));
 
 import { executeHostedWakeEvent } from "../src/hosted-runtime/events.ts";
@@ -91,9 +76,7 @@ afterEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
-  mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
-    processCapture: vi.fn(async () => {}),
-  }));
+  mocks.processHostedConversationMessageWake.mockResolvedValue(undefined);
 });
 
 describe("executeHostedWakeEvent", () => {
@@ -265,10 +248,6 @@ describe("executeHostedWakeEvent", () => {
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
     });
     const vaultRoot = "/tmp/assistant-runtime-events";
-    const processCapture = vi.fn(async () => {});
-    mocks.withHostedInboxPipeline.mockImplementation(async (_vaultRoot, callback) => callback({
-      processCapture,
-    }));
 
     const linqWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
@@ -324,17 +303,21 @@ describe("executeHostedWakeEvent", () => {
       vaultRoot,
     });
 
-    expect(mocks.buildHostedLinqCapture).toHaveBeenCalledWith(
-      linqWake,
-    );
-    expect(mocks.buildHostedTelegramCapture).toHaveBeenCalledWith(
-      telegramWake,
-    );
-    expect(mocks.buildHostedEmailCapture).toHaveBeenCalledWith(
-      emailWake,
-      runtime.platform.effectsPort,
-    );
-    expect(processCapture).toHaveBeenCalledTimes(3);
+    expect(mocks.processHostedConversationMessageWake).toHaveBeenNthCalledWith(1, {
+      runtime,
+      vaultRoot,
+      wake: linqWake,
+    });
+    expect(mocks.processHostedConversationMessageWake).toHaveBeenNthCalledWith(2, {
+      runtime,
+      vaultRoot,
+      wake: telegramWake,
+    });
+    expect(mocks.processHostedConversationMessageWake).toHaveBeenNthCalledWith(3, {
+      runtime,
+      vaultRoot,
+      wake: emailWake,
+    });
     assert.deepEqual(linqResult, {
       bootstrapResult: null,
       followupExecution: "conversation-message",

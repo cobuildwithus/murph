@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
+  processHostedConversationMessageWake: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
 }));
 
@@ -36,24 +37,12 @@ vi.mock("@murphai/gateway-local", () => ({
   sendGatewayMessageLocal: vi.fn(),
 }));
 
-vi.mock("../src/hosted-runtime/events/email.ts", () => ({
-  buildHostedEmailCapture: vi.fn(),
-}));
-
-vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
-  buildHostedLinqCapture: vi.fn(),
+vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
+  processHostedConversationMessageWake: mocks.processHostedConversationMessageWake,
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
   handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
-}));
-
-vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
-  buildHostedTelegramCapture: vi.fn(),
-}));
-
-vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
-  withHostedInboxPipeline: vi.fn(),
 }));
 
 import { executeHostedWakeEvent } from "../src/hosted-runtime/events.ts";
@@ -96,6 +85,7 @@ beforeEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
+  mocks.processHostedConversationMessageWake.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
