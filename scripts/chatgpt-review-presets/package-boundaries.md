@@ -16,7 +16,7 @@ For each concrete change you choose to make:
 
 - cite the files, packages, and boundary seam involved
 - explain the current coupling, ownership confusion, or cycle risk
-- keep follow-up notes brief when a larger cleanup is warranted but unsafe to land in one patch
+- keep follow-up notes brief when a larger cleanup is warranted but unsafe to land in one pass
 
 Constraints:
 
@@ -30,7 +30,7 @@ Execution mode:
 
 Final response contract:
 
-- Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
-- Also return a short plain-text summary that says what you changed, what those changes fix or improve, and any important residual concerns you left untouched.
-- Keep the summary concise and factual; do not return a long prose review or any alternate structured findings template.
-- If you find no safe actionable changes, return a short plain-text summary saying so and attach no patch.
+- Return a concise plain-text review with the highest-value package-boundary recommendations from this pass.
+- For each recommendation, cite the concrete files, packages, and seam involved, explain the coupling or ownership problem, and recommend the smallest safe follow-up.
+- Keep the response concise and factual; do not return a long prose review, a patch, or a diff.
+- If you find no safe actionable changes, return a short plain-text summary saying so.

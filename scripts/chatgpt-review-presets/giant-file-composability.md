@@ -15,7 +15,7 @@ For each recommendation:
 - cite the concrete file and symbols that should move or separate
 - explain why the current file shape hurts composability or maintenance
 - describe the smaller target module boundaries in concrete terms
-- suggest an incremental extraction path that can land safely in follow-up patches
+- suggest an incremental extraction path that can land safely in follow-up changes
 - call out when a large file should stay intact because its size reflects a real boundary rather than accidental sprawl
 
 Constraints:
@@ -28,7 +28,7 @@ Constraints:
 
 Final response contract:
 
-- Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
-- Also return a short plain-text summary that says what you changed, what those changes fix or improve, and any important residual concerns you left untouched.
-- Keep the summary concise and factual; do not return a long prose review or any alternate structured findings template.
-- If you find no safe actionable changes, return a short plain-text summary saying so and attach no patch.
+- Return a concise plain-text review with the highest-value giant-file composability recommendations from this pass.
+- For each recommendation, cite the concrete file or symbols involved, explain the responsibility split you recommend, and suggest the safest incremental extraction path.
+- Keep the response concise and factual; do not return a long prose review, a patch, or a diff.
+- If you find no safe actionable changes, return a short plain-text summary saying so.
