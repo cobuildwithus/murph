@@ -64,22 +64,24 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqApiBaseUrl).toBe("https://api.linqapp.com/api/partner/v3");
   });
 
-  it("falls back to a local development contact privacy keyring when keys are absent", () => {
+  it("requires contact privacy keys even outside production", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment({
+        NODE_ENV: "development",
+      }),
+    ).toThrow(/HOSTED_CONTACT_PRIVACY_KEYS/u);
+  });
+
+  it("reads an explicit contact privacy keyring", () => {
     const environment = readHostedOnboardingEnvironment({
       NODE_ENV: "development",
+      HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v1",
+      HOSTED_CONTACT_PRIVACY_KEYS: `v1:${TEST_KEY}`,
     });
 
     expect(environment.contactPrivacyKeyring.currentVersion).toBe("v1");
     expect(environment.contactPrivacyKeyring.readVersions).toEqual(["v1"]);
     expect(environment.contactPrivacyKeyring.keysByVersion.v1).toBeInstanceOf(Buffer);
-  });
-
-  it("still requires HOSTED_CONTACT_PRIVACY_KEYS in production", () => {
-    expect(() =>
-      readHostedOnboardingEnvironment({
-        NODE_ENV: "production",
-      }),
-    ).toThrow(/HOSTED_CONTACT_PRIVACY_KEYS/u);
   });
 
   it("rejects non-localhost HTTP public base URLs", () => {
