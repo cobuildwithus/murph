@@ -18,7 +18,9 @@ import {
 } from "./billing-plans";
 import {
   createHostedPrivyUserLookupKey,
+  createHostedPrivyUserLookupKeyReadCandidates,
   createHostedWalletAddressLookupKey,
+  createHostedWalletAddressLookupKeyReadCandidates,
   hostedPhoneLookupKeyMatchesValue,
   readHostedPhoneHint,
 } from "./contact-privacy";
@@ -518,9 +520,12 @@ function resolveHostedInviteSessionMatchesInvite(
   const invitePrivyUserLookupKey =
     inviteIdentity.privyUserLookupKey
     ?? createHostedPrivyUserLookupKey(inviteIdentity.privyUserId ?? null);
+  const sessionPrivyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(
+    sessionIdentity.userId,
+  );
   if (
     invitePrivyUserLookupKey
-    && createHostedPrivyUserLookupKey(sessionIdentity.userId) === invitePrivyUserLookupKey
+    && sessionPrivyUserLookupKeys.includes(invitePrivyUserLookupKey)
   ) {
     return true;
   }
@@ -540,10 +545,13 @@ function resolveHostedInviteSessionMatchesInvite(
   const sessionWalletAddress = normalizeHostedWalletAddress(
     sessionIdentity.wallet?.address ?? null,
   );
+  const sessionWalletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
+    sessionWalletAddress,
+  );
 
   if (
     inviteWalletAddressLookupKey
-    && createHostedWalletAddressLookupKey(sessionWalletAddress) === inviteWalletAddressLookupKey
+    && sessionWalletAddressLookupKeys.includes(inviteWalletAddressLookupKey)
   ) {
     return true;
   }
