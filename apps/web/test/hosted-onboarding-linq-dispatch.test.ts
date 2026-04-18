@@ -181,6 +181,18 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+  hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
+  normalizeHostedWalletAddress: vi.fn(() => null),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
+  handleHostedStripeWebhook: vi.fn(),
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => {
     throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-dispatch.test.ts");
@@ -764,6 +776,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    );
   });
 
   it("keeps first-contact signup replies inline even when a defer hook is provided", async () => {
@@ -1246,6 +1261,61 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("suppresses signup links when another transaction already claimed the one-shot notice", async () => {
+    mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValueOnce(false);
+    const hostedInviteCreate = vi.fn();
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: hostedInviteCreate,
+        findFirst: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_signup_claim_lost",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "signup-link-already-sent",
+    });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(hostedInviteCreate).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+  });
+
   it("sends one daily quota reply after the 100th active-member inbound message", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 101,
@@ -1290,6 +1360,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -1318,7 +1391,58 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("leaves the daily quota marker unset when the inline active-member quota reply fails", async () => {
+  it("suppresses duplicate quota replies when another transaction already claimed the daily notice", async () => {
+    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
+      inboundCount: 101,
+    }));
+    mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValueOnce(false);
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_over_limit_claim_lost",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "daily-quota-reached",
+    });
+    expect(mocks.claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("keeps the daily quota marker claimed when the inline active-member quota reply fails", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 101,
     }));
@@ -1354,7 +1478,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timestamp: null,
     })).rejects.toThrow("linq send failed");
 
-    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    );
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(
       (prisma as unknown as {

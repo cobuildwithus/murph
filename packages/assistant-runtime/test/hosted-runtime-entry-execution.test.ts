@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   resumeHostedCommittedExecution: vi.fn(),
   runHostedConversationAssistantAutomation: vi.fn(),
   runHostedDeviceSyncPass: vi.fn(),
+  runHostedMaintenanceLoop: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
   withHostedProcessEnvironment: vi.fn(),
 }));
@@ -97,6 +98,7 @@ vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedConversationAssistantAutomation:
     mocks.runHostedConversationAssistantAutomation,
   runHostedDeviceSyncPass: mocks.runHostedDeviceSyncPass,
+  runHostedMaintenanceLoop: mocks.runHostedMaintenanceLoop,
 }));
 
 vi.mock("../src/hosted-runtime/usage.ts", () => ({
@@ -147,6 +149,12 @@ beforeEach(() => {
     nextWakeAt: null,
     processedJobs: 0,
     skipped: false,
+  });
+  mocks.runHostedMaintenanceLoop.mockResolvedValue({
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: false,
+    nextWakeAt: "2026-04-08T00:30:00.000Z",
+    parserProcessed: 0,
   });
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
@@ -323,27 +331,30 @@ describe("executeHostedWakeForCommit", () => {
       },
     });
 
-    expect(mocks.runHostedConversationAssistantAutomation).toHaveBeenCalledWith({
-      executionContext: expect.objectContaining({
-        hosted: expect.objectContaining({
-          defaultTarget: expect.objectContaining({
-            adapter: "openai-compatible",
+    expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({
+            defaultTarget: expect.objectContaining({
+              adapter: "openai-compatible",
+            }),
+            issueDeviceConnectLink: expect.any(Function),
+            memberId: "member_123",
+            userEnvKeys: [],
           }),
-          issueDeviceConnectLink: expect.any(Function),
-          memberId: "member_123",
-          userEnvKeys: [],
         }),
+        requestId: "evt_tick",
+        timeoutMs: 45_000,
+        vaultRoot: "/tmp/vault-root",
+        wake: {
+          eventId: "evt_tick",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "manual",
+          userId: "member_123",
+        },
       }),
-      requestId: "evt_tick",
-      vaultRoot: "/tmp/vault-root",
-      wake: {
-        eventId: "evt_tick",
-        kind: "assistant.cron.tick",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
-        userId: "member_123",
-      },
-    });
+    );
     expect(mocks.createHostedArtifactUploadSink).toHaveBeenCalledWith({
       artifactStore: expect.any(Object),
       knownArtifactHashes: new Set(),

@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => {
       });
       return "outbox";
     }),
-    readHostedMemberSnapshot: vi.fn(),
+    readHostedMemberCoreState: vi.fn(),
     resolveHostedMemberEmailLinked: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
@@ -55,9 +55,16 @@ vi.mock("@/src/lib/hosted-wake/control", () => ({
   handoffHostedExecutionWakeBestEffort: mocks.handoffHostedExecutionWakeBestEffort,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
-  readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
-}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-store");
+
+  return {
+    composeHostedMemberBillingSnapshot: actual.composeHostedMemberBillingSnapshot,
+    readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(
@@ -83,9 +90,16 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: mocks.requireHostedStripeApi,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", () => ({
-  findMemberForStripeObject: mocks.findMemberForStripeObject,
-}));
+vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/stripe-billing-lookup")
+  >("@/src/lib/hosted-onboarding/stripe-billing-lookup");
+
+  return {
+    ...actual,
+    findMemberForStripeCheckoutSession: mocks.findMemberForStripeObject,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", () => ({
   updateHostedMemberStripeBillingIfFreshTx: mocks.updateHostedMemberStripeBillingIfFresh,
@@ -106,7 +120,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       inviteCode: "invite-code",
       memberId: "member_123",
     });
-    mocks.readHostedMemberSnapshot.mockResolvedValue(createMemberSnapshot());
+    mocks.readHostedMemberCoreState.mockResolvedValue(createMemberSnapshot().core);
     mocks.findMemberForStripeObject.mockResolvedValue(createMemberSnapshot());
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
       client_reference_id: "member_123",
@@ -131,8 +145,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       memberId: "member_123",
     });
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
-      activationPending: true,
-      stage: "active",
+      stage: "activating",
     }));
   });
 
@@ -150,8 +163,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma: prisma as never,
       sessionId: "cs_123",
     })).resolves.toEqual(createStatus({
-      activationPending: true,
-      stage: "active",
+      stage: "activating",
     }));
 
     expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_123", {
@@ -219,8 +231,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma: prisma as never,
       sessionId: "cs_no_subscription",
     })).resolves.toEqual(createStatus({
-      activationPending: true,
-      stage: "active",
+      stage: "activating",
     }));
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -240,6 +251,28 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
+  it("trusts the explicit checkout member identifiers before any Stripe-object lookup", async () => {
+    const tx = {
+      __tag: "tx",
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+
+    mocks.findMemberForStripeObject.mockRejectedValueOnce(new Error("should not run"));
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).resolves.toEqual(createStatus({
+      stage: "activating",
+    }));
+
+    expect(mocks.findMemberForStripeObject).not.toHaveBeenCalled();
+  });
+
   it("rejects checkout sessions that resolve to a different member", async () => {
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
       client_reference_id: "member_other",
@@ -253,14 +286,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         status: "active",
       },
     });
-    mocks.findMemberForStripeObject.mockResolvedValueOnce({
-      ...createMemberSnapshot(),
-      core: {
-        ...createMemberSnapshot().core,
-        id: "member_other",
-      },
-    });
-
     await expect(reconcileHostedBillingCheckoutSuccess({
       inviteCode: "invite-code",
       member: createAuthenticatedMember(),
@@ -309,11 +334,9 @@ function createMemberSnapshot(input?: {
 }
 
 function createStatus(input?: {
-  activationPending?: boolean;
   stage?: HostedInviteStatusPayload["stage"];
 }): HostedInviteStatusPayload {
   return {
-    activationPending: input?.activationPending ?? false,
     billing: {
       defaultPlanCode: getHostedDefaultBillingPlanCode(),
       plans: listHostedBillingPlanPresentations(),

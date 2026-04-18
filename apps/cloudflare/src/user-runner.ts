@@ -301,6 +301,7 @@ export class HostedUserRunner {
     const userId = await this.requireBoundUserId();
     await this.stateStore.bootstrapUser(userId);
     const targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
+    await this.resumePendingCommittedCleanupIfNeeded();
     let afterSeq: string | null = null;
     let expectedVersion: string | null = null;
 
@@ -331,66 +332,65 @@ export class HostedUserRunner {
         break;
       }
 
-      let highestCommittedWakeSeq: string | null = null;
-      let advancedWakeCount = 0;
-      const advancedWakes: HostedWakeDrainOutcome[] = [];
       let stoppingState: HostedWakeDrainState | null = null;
 
       for (const wake of batch.wakes) {
         const outcome = await this.executeHostedWakeRecord(wake);
 
-        if (shouldAdvanceHostedWakeCursor(outcome.state)) {
-          highestCommittedWakeSeq = wake.seq;
-          advancedWakeCount += 1;
-          advancedWakes.push(outcome);
-        }
-
         if (!shouldAdvanceHostedWakeCursor(outcome.state)) {
           stoppingState = outcome.state;
           break;
         }
-      }
 
-      if (!highestCommittedWakeSeq || !expectedVersion) {
-        break;
-      }
+        if (!expectedVersion) {
+          stoppingState = outcome.state;
+          break;
+        }
 
-      const bundleState = await this.stateStore.readBundleMetaState();
-      const commit = await commitHostedWakeCursorToWeb({
-        baseUrl: this.env.hostedWebBaseUrl,
-        body: {
-          committedSeq: highestCommittedWakeSeq,
-          expectedVersion,
-          snapshotRef: bundleState.bundleRef ?? null,
-        },
-        boundUserId: userId,
-        callbackSigning: this.env.webCallbackSigning,
-        timeoutMs: this.env.runnerTimeoutMs,
-      });
-
-      afterSeq = commit.cursor.committedSeq;
-      expectedVersion = commit.cursor.version;
-      await this.syncHostedWakeBundleCacheToCursor(commit.cursor.snapshotRef);
-      if (
-        commit.committed
-        || BigInt(commit.cursor.committedSeq) >= BigInt(highestCommittedWakeSeq)
-      ) {
-        await this.cleanupCommittedHostedWakesLocally({
-          wakes: advancedWakes,
+        const bundleState = await this.stateStore.readBundleMetaState();
+        const commit = await commitHostedWakeCursorToWeb({
+          baseUrl: this.env.hostedWebBaseUrl,
+          body: {
+            committedSeq: wake.seq,
+            expectedVersion,
+            snapshotRef: bundleState.bundleRef ?? null,
+          },
+          boundUserId: userId,
+          callbackSigning: this.env.webCallbackSigning,
+          timeoutMs: this.env.runnerTimeoutMs,
         });
+
+        let cursor = commit.cursor;
+        await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
+        if (commit.committed) {
+          cursor = await this.cleanupCommittedHostedWakesLocally({
+            cursor,
+            wake: outcome.wake,
+          });
+        } else {
+          if (outcome.wake) {
+            await this.wakeProcessor.discardWakeAfterLostCursorRace({
+              wake: outcome.wake,
+            });
+          }
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            level: "info",
+            message: "Hosted wake cursor commit lost a compare-and-swap race; refetching cursor state.",
+            phase: "wake.running",
+            userId,
+          });
+          afterSeq = cursor.committedSeq;
+          expectedVersion = cursor.version;
+          stoppingState = "backpressured";
+          break;
+        }
+
+        afterSeq = cursor.committedSeq;
+        expectedVersion = cursor.version;
       }
 
-      if (!commit.committed) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          level: "info",
-          message: "Hosted wake cursor commit lost a compare-and-swap race; refetching cursor state.",
-          phase: "wake.running",
-          userId,
-        });
-      }
-
-      if (advancedWakeCount < batch.wakes.length) {
+      if (stoppingState) {
         if (stoppingState === "poisoned") {
           continue;
         }
@@ -400,6 +400,7 @@ export class HostedUserRunner {
 
       if (
         batch.wakes.length < DEFAULT_HOSTED_WAKE_BATCH_LIMIT
+        && afterSeq
         && (!targetSeqHint || BigInt(afterSeq) >= targetSeqHint)
       ) {
         break;
@@ -481,8 +482,21 @@ export class HostedUserRunner {
     }
 
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
+    const payloadCiphertext = wake.payloadCiphertext;
+    if (typeof payloadCiphertext !== "string" || payloadCiphertext.length === 0) {
+      throw new TypeError("Hosted wake payload ciphertext is required.");
+    }
     const execution = await this.wakeProcessor.executeWake(hostedWake, {
       holdLeaseUntilCleanup: true,
+      wakeRecord: {
+        eventId: hostedWake.eventId,
+        kind: wake.kind,
+        occurredAt: wake.occurredAt,
+        payloadCiphertext,
+        payloadSchema: wake.payloadSchema,
+        seq: wake.seq,
+        userId,
+      },
     });
 
     return {
@@ -540,29 +554,51 @@ export class HostedUserRunner {
   }
 
   private async cleanupCommittedHostedWakesLocally(input: {
-    wakes: readonly HostedWakeDrainOutcome[];
-  }): Promise<void> {
-    for (const outcome of input.wakes) {
-      if (!outcome.wake) {
-        continue;
-      }
-
-      try {
-        await this.wakeProcessor.cleanupWakeAfterCursorCommit({
-          wake: outcome.wake,
-        });
-      } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          error,
-          eventId: outcome.wake.eventId,
-          level: "warn",
-          message: "Hosted wake cleanup failed after the cursor had already advanced.",
-          phase: "completed",
-          userId: outcome.wake.userId,
-        });
-      }
+    cursor: Awaited<ReturnType<typeof commitHostedWakeCursorToWeb>>["cursor"];
+    wake: HostedExecutionWake | null;
+  }): Promise<Awaited<ReturnType<typeof commitHostedWakeCursorToWeb>>["cursor"]> {
+    try {
+      return await this.wakeProcessor.cleanupWakeAfterCursorCommit({
+        cursor: input.cursor,
+        wake: input.wake,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        eventId: input.wake?.eventId ?? "pending-commit-cleanup",
+        level: "warn",
+        message: "Hosted wake cleanup failed after the cursor had already advanced.",
+        phase: "completed",
+        userId: input.wake?.userId ?? (await this.requireBoundUserId()),
+      });
+      return input.cursor;
     }
+  }
+
+  private async resumePendingCommittedCleanupIfNeeded(): Promise<void> {
+    const pendingCommit = await this.stateStore.readPendingCommit();
+    if (!pendingCommit) {
+      return;
+    }
+
+    const status = await readHostedWakeStatusFromWeb({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      boundUserId: pendingCommit.userId,
+      callbackSigning: this.env.webCallbackSigning,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
+
+    if (BigInt(status.cursor.committedSeq) < BigInt(pendingCommit.wake.seq)) {
+      await this.syncHostedWakeBundleCacheToCursor(status.cursor.snapshotRef);
+      return;
+    }
+
+    const cursor = await this.cleanupCommittedHostedWakesLocally({
+      cursor: status.cursor,
+      wake: null,
+    });
+    await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
   }
 
   private async syncHostedWakeBundleCacheToCursor(

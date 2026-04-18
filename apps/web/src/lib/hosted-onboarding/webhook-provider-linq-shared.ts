@@ -23,7 +23,6 @@ import {
   type HostedLinqMessageSideEffect,
 } from "./webhook-transport";
 import type {
-  HostedOnboardingLinqDirectFinalization,
   HostedOnboardingLinqDirectPlan,
   HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
@@ -55,15 +54,15 @@ export function resolveHostedOnboardingLinqMessageContext(
 
 export function buildIgnoredLinqWebhookPlan(
   reason: string,
-): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect> {
-  return {
+): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
     desiredSideEffects: [],
     response: {
       ok: true,
       ignored: true,
       reason,
     },
-  };
+  });
 }
 
 export function buildSignupLinkResponse(input: {
@@ -73,10 +72,10 @@ export function buildSignupLinkResponse(input: {
   inviteId: string;
   messageId: string;
   sourceEventId: string;
-}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect> {
+}): HostedOnboardingLinqDirectPlan {
   const joinUrl = buildHostedInviteUrl(input.inviteCode);
 
-  return {
+  return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
@@ -92,17 +91,13 @@ export function buildSignupLinkResponse(input: {
       joinUrl,
       reason: "sent-signup-link",
     },
-  };
+  });
 }
 
 export function buildActiveMemberDirectPlan(
   plan: HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>,
-  finalization: HostedOnboardingLinqDirectFinalization | null = null,
 ): HostedOnboardingLinqDirectPlan {
-  return {
-    ...plan,
-    finalization,
-  };
+  return plan;
 }
 
 export function buildConversationHomeRedirectResponse(input: {
@@ -111,8 +106,8 @@ export function buildConversationHomeRedirectResponse(input: {
   memberId: string;
   messageId: string;
   sourceEventId: string;
-}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect> {
-  return {
+}): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
@@ -129,15 +124,15 @@ export function buildConversationHomeRedirectResponse(input: {
       ok: true,
       reason: "redirected-to-home-line",
     },
-  };
+  });
 }
 
 export function buildQuotaReplyResponse(input: {
   chatId: string;
   messageId: string;
   sourceEventId: string;
-}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect> {
-  return {
+}): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
@@ -150,28 +145,7 @@ export function buildQuotaReplyResponse(input: {
       ok: true,
       reason: "sent-daily-quota-reply",
     },
-  };
-}
-
-export function buildDirectQuotaReplyResponse(input: {
-  chatId: string;
-  memberId: string;
-  messageId: string;
-  occurredAt: string;
-  sourceEventId: string;
-}): HostedOnboardingLinqDirectPlan {
-  return buildActiveMemberDirectPlan(
-    buildQuotaReplyResponse({
-      chatId: input.chatId,
-      messageId: input.messageId,
-      sourceEventId: input.sourceEventId,
-    }),
-    {
-      kind: "mark_daily_quota_reply_sent",
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
-    },
-  );
+  });
 }
 
 export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {

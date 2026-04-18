@@ -9,6 +9,8 @@ import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
+  claimHostedLinqOnboardingLinkNotice,
+  claimHostedLinqQuotaReplyNotice,
   incrementHostedLinqOutboundDailyState,
 } from "./linq-daily-state";
 import {
@@ -30,14 +32,12 @@ import {
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
-  buildDirectQuotaReplyResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 export type {
-  HostedOnboardingLinqDirectFinalization,
   HostedOnboardingLinqDirectPlan,
   HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
@@ -45,8 +45,6 @@ import type {
   HostedOnboardingLinqDirectPlan,
   HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
-import type { HostedLinqMessageSideEffect } from "./webhook-transport";
-import type { HostedWebhookPlan } from "./webhook-service-types";
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
@@ -142,13 +140,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
 
     if (dailyState.inboundCount > 100) {
-      const shouldReply = await claimHostedLinqQuotaReplyNotice({
+      if (dailyState.quotaReplySentAt) {
+        return buildIgnoredLinqWebhookPlan("daily-quota-reached");
+      }
+
+      const claimedQuotaReply = await claimHostedLinqQuotaReplyNotice({
         memberId: existingMember.id,
         occurredAt,
         prisma: input.prisma,
       });
 
-      if (!shouldReply) {
+      if (!claimedQuotaReply) {
         return buildIgnoredLinqWebhookPlan("daily-quota-reached");
       }
 
@@ -177,14 +179,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
       tx: input.prisma,
     });
 
-    return {
+    return buildActiveMemberDirectPlan({
       desiredSideEffects: [],
       response: {
         ok: true,
         ignored: false,
         reason: "wake-appended-active-member",
       },
-    };
+    });
   }
 
   const member = existingMember ?? await ensureHostedMemberForPhoneTx({
@@ -203,25 +205,28 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
   }
 
+  const claimedOnboardingLink = await claimHostedLinqOnboardingLinkNotice({
+    memberId: member.id,
+    occurredAt,
+    prisma: input.prisma,
+  });
+
+  if (!claimedOnboardingLink) {
+    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
+  }
+
   const invite = await issueHostedInviteTx({
     channel: "linq",
     memberId: member.id,
     prisma: input.prisma,
   });
 
-  return buildActiveMemberDirectPlan(
-    buildSignupLinkResponse({
-      activeSubscription: hasHostedMemberActiveAccess(member),
-      chatId: summary.chatId,
-      inviteCode: invite.inviteCode,
-      inviteId: invite.id,
-      messageId: summary.messageId,
-      sourceEventId: input.event.event_id,
-    }),
-    {
-      kind: "mark_onboarding_link_sent",
-      memberId: member.id,
-      occurredAt,
-    },
-  );
+  return buildSignupLinkResponse({
+    activeSubscription: hasHostedMemberActiveAccess(member),
+    chatId: summary.chatId,
+    inviteCode: invite.inviteCode,
+    inviteId: invite.id,
+    messageId: summary.messageId,
+    sourceEventId: input.event.event_id,
+  });
 }

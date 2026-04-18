@@ -162,8 +162,6 @@ describe("hosted Prisma baseline migration", () => {
       'CREATE INDEX "hosted_wake_payload_user_id_idx"',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
-    expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
-    expect(baselineMigrationSql).toContain('"result_json" JSONB');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
     expect(baselineMigrationSql).not.toContain('"phone_number" TEXT');
     expect(baselineMigrationSql).not.toContain('"normalized_phone_number" TEXT');
@@ -178,9 +176,28 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).not.toContain(
       'CREATE INDEX "execution_outbox_next_attempt_at_created_at_idx" ON "execution_outbox"("next_attempt_at", "created_at")',
     );
+    expect(baselineMigrationSql).not.toContain('"payload_json" JSONB NOT NULL');
+    expect(baselineMigrationSql).not.toContain('"result_json" JSONB');
     expect(baselineMigrationSql).not.toContain('CREATE TYPE "ExecutionOutboxStatus"');
     expect(baselineMigrationSql).not.toContain('"status" "ExecutionOutboxStatus"');
     expect(baselineMigrationSql).not.toContain('"execution_outbox_status_next_attempt_at_created_at_idx"');
+    expect(baselineMigrationSql).not.toContain('CREATE TYPE "HostedWebhookReceiptStatus"');
+    expect(baselineMigrationSql).not.toContain('CREATE TYPE "HostedWebhookReceiptSideEffectKind"');
+    expect(baselineMigrationSql).not.toContain('CREATE TYPE "HostedWebhookReceiptSideEffectStatus"');
+    expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_webhook_receipt"');
+    expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_webhook_receipt_side_effect"');
+    expect(baselineMigrationSql).not.toContain(
+      'CREATE INDEX "hosted_webhook_receipt_first_received_at_idx" ON "hosted_webhook_receipt"("first_received_at")',
+    );
+    expect(baselineMigrationSql).not.toContain(
+      'CREATE INDEX "hosted_webhook_receipt_status_claim_expires_at_first_receiv_idx" ON "hosted_webhook_receipt"("status", "claim_expires_at", "first_received_at")',
+    );
+    expect(baselineMigrationSql).not.toContain(
+      'CREATE INDEX "hosted_webhook_receipt_side_effect_source_event_id_status_idx" ON "hosted_webhook_receipt_side_effect"("source", "event_id", "status")',
+    );
+    expect(baselineMigrationSql).not.toContain(
+      'ALTER TABLE "hosted_webhook_receipt_side_effect" ADD CONSTRAINT "hosted_webhook_receipt_side_effect_source_event_id_fkey"',
+    );
   });
 
   it("keeps hosted-member models on the reviewed owner-table set", () => {

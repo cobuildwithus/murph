@@ -5,17 +5,12 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
-  claimHostedLinqOnboardingLinkNotice,
-  claimHostedLinqQuotaReplyNotice,
-} from "./linq-daily-state";
-import {
   requireHostedLinqMessageReceivedEvent,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
-  type HostedOnboardingLinqDirectPlan,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -103,11 +98,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await finalizeHostedOnboardingLinqPlan({
-      plan,
-      prisma,
-    });
-
     responseReason = plan.response.reason ?? null;
     await maybeHandoffHostedExecutionWebhookWake({
       defer: input.defer,
@@ -175,32 +165,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     source: "telegram",
   });
   return plan.response;
-}
-
-async function finalizeHostedOnboardingLinqPlan(input: {
-  plan: HostedOnboardingLinqDirectPlan;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (!input.plan.finalization) {
-    return;
-  }
-
-  switch (input.plan.finalization.kind) {
-    case "mark_daily_quota_reply_sent":
-      await claimHostedLinqQuotaReplyNotice({
-        memberId: input.plan.finalization.memberId,
-        occurredAt: input.plan.finalization.occurredAt,
-        prisma: input.prisma,
-      });
-      return;
-    case "mark_onboarding_link_sent":
-      await claimHostedLinqOnboardingLinkNotice({
-        memberId: input.plan.finalization.memberId,
-        occurredAt: input.plan.finalization.occurredAt,
-        prisma: input.prisma,
-      });
-      return;
-  }
 }
 
 async function runHostedOnboardingWebhookTransaction<TResult>(

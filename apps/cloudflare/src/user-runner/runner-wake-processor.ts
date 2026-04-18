@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionCursorState,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
@@ -12,7 +13,11 @@ import {
   emitHostedExecutionStructuredLog,
   formatHostedExecutionLogMessage,
 } from "@murphai/hosted-execution";
-import { parseHostedExecutionRunnerSharePack } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedExecutionRunnerSharePack,
+  parseHostedExecutionBundleRef,
+  parseHostedWakeExecutionPayload,
+} from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantDeliveryOutcome,
@@ -23,6 +28,7 @@ import type { R2BucketLike } from "../bundle-store.js";
 import { createHostedBrowserVaultSnapshotStore } from "../browser-vault-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
 import { deleteHostedEmailRawMessage } from "../hosted-email.js";
+import { decryptHostedWakePayloadCiphertext } from "../hosted-web-encryption.ts";
 import { type HostedUserCryptoContext } from "../user-key-store.js";
 import { HostedGatewayProjectionStore } from "../gateway-store.js";
 import {
@@ -43,7 +49,10 @@ import { RunnerStateStore } from "./runner-state-store.js";
 import type { RunnerLeaseOwnerInput } from "./runner-state-store.js";
 import { RunnerWakeScheduler } from "./runner-wake-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
-import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
+import {
+  commitHostedWakeCursorToWeb,
+  fetchHostedExecutionWebControlPlaneResponse,
+} from "../web-control-plane.ts";
 
 export type HostedExecutionWakeProgressRecord =
   Pick<HostedExecutionWake, "eventId" | "userId">;
@@ -90,7 +99,8 @@ export class RunnerWakeProcessor {
     wake: HostedExecutionWake,
     options: {
       holdLeaseUntilCleanup?: boolean;
-    } = {},
+      wakeRecord: RunnerPendingCommitRecord["wake"];
+    },
   ): Promise<RunnerWakeExecutionResult> {
     const userId = wake.userId;
     const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
@@ -98,7 +108,7 @@ export class RunnerWakeProcessor {
       wake.eventId,
     );
 
-    if (existingPendingCommit?.finalizedAt) {
+    if (existingPendingCommit) {
       await this.restorePendingCommitState(existingPendingCommit);
       emitHostedExecutionStructuredLog({
         component: "runner",
@@ -107,7 +117,9 @@ export class RunnerWakeProcessor {
           existingFinalizedAt: existingPendingCommit.finalizedAt,
         },
         eventId: wake.eventId,
-        message: "Hosted wake execution reused an already-finalized DO-local pending commit.",
+        message: existingPendingCommit.finalizedAt
+          ? "Hosted wake execution reused an already-finalized DO-local pending commit."
+          : "Hosted wake execution reused a DO-local committed result that is still awaiting cursor commit or post-commit cleanup.",
         phase: "completed",
         run: null,
         userId,
@@ -143,7 +155,7 @@ export class RunnerWakeProcessor {
       await this.dependencies.stateStore.readState(),
       {
         eventId: wake.eventId,
-        startedAt: existingPendingCommit?.committedAt ?? new Date().toISOString(),
+        startedAt: new Date().toISOString(),
       },
     );
     const leaseOwner: RunnerLeaseOwnerInput = {
@@ -176,16 +188,9 @@ export class RunnerWakeProcessor {
         phase: "wake.running",
         run,
       });
-      let finalRunnerResult: HostedAssistantRuntimeCompletedJobResult;
+      let finalRunnerResult: HostedAssistantRuntimeCompletedJobResult | null = null;
 
-      if (existingPendingCommit) {
-        finalRunnerResult = await this.resumePendingCommitToFinalResult({
-          pendingCommit: existingPendingCommit,
-          run,
-          userId,
-          wake,
-        });
-      } else {
+      if (!existingPendingCommit) {
         const runnerResult = await this.invokeRunner(
           userId,
           wake,
@@ -194,12 +199,13 @@ export class RunnerWakeProcessor {
         );
 
         if (runnerResult.phase === "committed") {
-          const pendingCommit = await this.persistPendingCommit({
+          await this.persistPendingCommit({
             assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
             gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
             result: runnerResult.result,
             run,
             wake,
+            wakeRecord: options.wakeRecord,
           });
 
           await this.advanceRunPhase({
@@ -208,13 +214,6 @@ export class RunnerWakeProcessor {
             message: "Hosted wake execution recorded a DO-local pending commit.",
             phase: "commit.recorded",
             run,
-          });
-
-          finalRunnerResult = await this.resumePendingCommitToFinalResult({
-            pendingCommit,
-            run,
-            userId,
-            wake,
           });
         } else {
           finalRunnerResult = runnerResult;
@@ -227,10 +226,12 @@ export class RunnerWakeProcessor {
         }
       }
 
-      await this.persistBrowserVaultSnapshotBestEffort(
-        userId,
-        finalRunnerResult.browserVaultSnapshot ?? null,
-      );
+      if (finalRunnerResult) {
+        await this.persistBrowserVaultSnapshotBestEffort(
+          userId,
+          finalRunnerResult.browserVaultSnapshot ?? null,
+        );
+      }
       await this.advanceRunPhase({
         clearError: true,
         wake,
@@ -329,14 +330,49 @@ export class RunnerWakeProcessor {
   }
 
   async cleanupWakeAfterCursorCommit(input: {
+    cursor: HostedExecutionCursorState;
+    wake: HostedExecutionWake | null;
+  }): Promise<HostedExecutionCursorState> {
+    await this.dependencies.stateStore.markRuntimeBootstrapped();
+    let cursor = input.cursor;
+    const pendingCommit = input.wake
+      ? await this.dependencies.stateStore.readPendingCommit(input.wake.eventId)
+      : await this.dependencies.stateStore.readPendingCommit();
+
+    if (pendingCommit) {
+      cursor = await this.finalizePendingCommitAfterCursorCommit({
+        cursor,
+        pendingCommit,
+        wake: input.wake,
+      });
+    }
+
+    const cleanupWake = input.wake ?? (pendingCommit
+      ? await this.restoreWakeFromPendingCommit(pendingCommit)
+      : null);
+    await this.rememberCommittedEventAndCleanup(
+      pendingCommit?.userId
+        ?? cleanupWake?.userId
+        ?? (await this.dependencies.stateStore.readState()).userId,
+      pendingCommit?.eventId ?? cleanupWake?.eventId ?? "unknown",
+      cleanupWake,
+    );
+    return cursor;
+  }
+
+  async discardWakeAfterLostCursorRace(input: {
     wake: HostedExecutionWake;
   }): Promise<void> {
-    await this.dependencies.stateStore.markRuntimeBootstrapped();
-    await this.rememberCommittedEventAndCleanup(
-      input.wake.userId,
-      input.wake.eventId,
-      input.wake,
-      );
+    await this.dependencies.stateStore.clearPendingCommit(input.wake.eventId);
+    await this.dependencies.stateStore.completeWakeRun({
+      eventId: input.wake.eventId,
+      finishedAt: new Date().toISOString(),
+      leaseOwner: {
+        eventId: input.wake.eventId,
+        policy: "same-event",
+        run: null,
+      },
+    });
   }
 
   private async restorePendingCommitState(
@@ -377,6 +413,91 @@ export class RunnerWakeProcessor {
       run: input.run,
     });
     return finalRunnerResult;
+  }
+
+  private async finalizePendingCommitAfterCursorCommit(input: {
+    cursor: HostedExecutionCursorState;
+    pendingCommit: RunnerPendingCommitRecord;
+    wake: HostedExecutionWake | null;
+  }): Promise<HostedExecutionCursorState> {
+    let cursor = input.cursor;
+    const wake = input.wake ?? await this.restoreWakeFromPendingCommit(input.pendingCommit);
+    const run = await this.resolvePendingCommitCleanupRun({
+      pendingCommit: input.pendingCommit,
+      wake,
+    });
+
+    if (!input.pendingCommit.finalizedAt) {
+      const finalRunnerResult = await this.resumePendingCommitToFinalResult({
+        pendingCommit: input.pendingCommit,
+        run,
+        userId: input.pendingCommit.userId,
+        wake,
+      });
+      await this.persistBrowserVaultSnapshotBestEffort(
+        input.pendingCommit.userId,
+        finalRunnerResult.browserVaultSnapshot ?? null,
+      );
+    } else {
+      await this.restorePendingCommitState(input.pendingCommit);
+    }
+
+    const bundleState = await this.dependencies.stateStore.readBundleMetaState();
+    if (JSON.stringify(bundleState.bundleRef ?? null) !== JSON.stringify(cursor.snapshotRef ?? null)) {
+      const snapshotCommit = await commitHostedWakeCursorToWeb({
+        baseUrl: this.dependencies.env.hostedWebBaseUrl,
+        body: {
+          committedSeq: cursor.committedSeq,
+          expectedVersion: cursor.version,
+          snapshotRef: bundleState.bundleRef ?? null,
+        },
+        boundUserId: input.pendingCommit.userId,
+        callbackSigning: this.dependencies.env.webCallbackSigning,
+        timeoutMs: this.dependencies.env.runnerTimeoutMs,
+      });
+      cursor = snapshotCommit.cursor;
+      await this.dependencies.stateStore.syncBundleRefCache(
+        parseHostedExecutionBundleRef(
+          snapshotCommit.cursor.snapshotRef === undefined ? null : snapshotCommit.cursor.snapshotRef,
+          "Hosted wake cleanup cursor snapshotRef",
+        ),
+      );
+    }
+
+    return cursor;
+  }
+
+  private async resolvePendingCommitCleanupRun(input: {
+    pendingCommit: RunnerPendingCommitRecord;
+    wake: HostedExecutionWake;
+  }): Promise<HostedExecutionRunContext> {
+    const activeLease = await this.dependencies.stateStore.readActiveRunLease();
+    if (activeLease && activeLease.eventId === input.pendingCommit.eventId) {
+      return activeLease.run;
+    }
+
+    return this.resolveRunContext(await this.dependencies.stateStore.readState(), {
+      eventId: input.pendingCommit.eventId,
+      startedAt: input.pendingCommit.committedAt,
+    });
+  }
+
+  private async restoreWakeFromPendingCommit(
+    pendingCommit: RunnerPendingCommitRecord,
+  ): Promise<HostedExecutionWake> {
+    const decryptedPayload = await decryptHostedWakePayloadCiphertext({
+      ciphertext: pendingCommit.wake.payloadCiphertext,
+      environment: this.dependencies.env.hostedWebEncryption,
+      userId: pendingCommit.userId,
+    });
+
+    return parseHostedWakeExecutionPayload({
+      decryptedPayload,
+      kind: pendingCommit.wake.kind,
+      occurredAt: pendingCommit.wake.occurredAt,
+      payloadSchema: pendingCommit.wake.payloadSchema,
+      userId: pendingCommit.userId,
+    });
   }
 
   private async invokeRunner(
@@ -530,6 +651,7 @@ export class RunnerWakeProcessor {
     result: HostedExecutionRunnerResult;
     run: HostedExecutionRunContext;
     wake: HostedExecutionWake;
+    wakeRecord: RunnerPendingCommitRecord["wake"];
   }): Promise<RunnerPendingCommitRecord> {
     return this.dependencies.applyHostedTransition({
       eventId: input.wake.eventId,
@@ -554,6 +676,7 @@ export class RunnerWakeProcessor {
           result: input.result.result,
           schemaVersion: 1,
           userId,
+          wake: input.wakeRecord,
         };
         await this.dependencies.stateStore.writePendingCommit(pendingCommit);
         await this.dependencies.wakeScheduler.syncNextWake(input.result.result.nextWakeAt ?? null);

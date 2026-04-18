@@ -1,7 +1,11 @@
+import type {
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
+
 import { hostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
-import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { buildHostedInviteUrl } from "./invite-service";
 import {
   buildHostedDailyQuotaReply,
@@ -9,99 +13,128 @@ import {
   buildHostedLinqConversationHomeRedirectReply,
   sendHostedLinqChatMessage,
 } from "./linq";
-import { maybeIssueHostedRevnetForStripeInvoice } from "./stripe-revnet-issuance";
-import type {
-  HostedWebhookLinqConversationHomeRedirectPayload,
-  HostedWebhookLinqInviteMessagePayload,
-  HostedWebhookLinqMessagePayload,
-  HostedWebhookReceiptPersistenceClient,
-  HostedWebhookReceiptHandlers,
-  HostedWebhookSideEffect,
-} from "./webhook-receipt-types";
 import { sanitizeHostedOnboardingStructuredLogDetails } from "./logging";
 
-export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandlers {
+type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
+
+export type HostedLinqConversationHomeRedirectPayload = {
+  chatId: string;
+  homeRecipientPhone: string | null;
+  memberId: string | null;
+  replyToMessageId: string | null;
+  template: "conversation_home_redirect";
+};
+
+export type HostedLinqDailyQuotaPayload = {
+  chatId: string;
+  replyToMessageId: string | null;
+  template: "daily_quota";
+};
+
+export type HostedLinqInviteMessagePayload = {
+  chatId: string;
+  inviteId: string;
+  replyToMessageId: string | null;
+  template: "invite_signin" | "invite_signup";
+};
+
+export type HostedLinqMessagePayload =
+  | HostedLinqConversationHomeRedirectPayload
+  | HostedLinqDailyQuotaPayload
+  | HostedLinqInviteMessagePayload;
+
+export type HostedLinqMessageSideEffect = {
+  effectId: string;
+  payload: HostedLinqMessagePayload;
+};
+
+export type CreateHostedWebhookLinqMessageSideEffectInput =
+  | {
+      chatId: string;
+      homeRecipientPhone?: string | null;
+      memberId: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "conversation_home_redirect";
+    }
+  | {
+      chatId: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "daily_quota";
+    }
+  | {
+      chatId: string;
+      inviteId: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "invite_signin" | "invite_signup";
+    };
+
+export function createHostedWebhookLinqMessageSideEffect(
+  input: CreateHostedWebhookLinqMessageSideEffectInput,
+): HostedLinqMessageSideEffect {
+  const replyToMessageId = input.replyToMessageId ?? null;
+
   return {
-    afterSideEffectSent: async ({
-      effect,
-      prisma,
-    }: {
-      effect: HostedWebhookSideEffect;
-      prisma: HostedWebhookReceiptPersistenceClient;
-    }) => {
-      if (effect.kind === "linq_message_send" && isHostedInviteLinqMessagePayload(effect.payload)) {
-        await markHostedInviteSentBestEffort(effect.payload.inviteId, prisma);
-      }
-    },
-    performSideEffect: performHostedWebhookSideEffect,
+    effectId: `linq-message:${input.sourceEventId}`,
+    payload: buildHostedWebhookLinqMessagePayload(input, replyToMessageId),
   };
 }
 
-async function performHostedWebhookSideEffect(
-  effect: HostedWebhookSideEffect,
-  options: {
-    prisma: HostedWebhookReceiptPersistenceClient;
-    signal?: AbortSignal;
-  },
-): Promise<
-  | { delivered: true }
-  | { handled: true }
-> {
-  switch (effect.kind) {
-    case "linq_message_send": {
-      const startedAtMs = Date.now();
-      try {
-        await sendHostedLinqChatMessage({
-          chatId: effect.payload.chatId,
-          idempotencyKey: effect.effectId,
-          message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
-          replyToMessageId: effect.payload.replyToMessageId,
-          signal: options.signal,
-        });
-      } catch (error) {
-        console.error(
-          "Hosted Linq side-effect delivery failed.",
-          buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
-        );
-        throw error;
-      }
-      console.info(
-        "Hosted Linq side-effect delivery completed.",
-        buildHostedLinqSideEffectLogDetails(effect, null, Date.now() - startedAtMs),
-      );
-      return { delivered: true };
+export async function drainHostedLinqSideEffectsDirect(input: {
+  prisma: HostedLinqTransportPersistenceClient;
+  sideEffects: readonly HostedLinqMessageSideEffect[];
+  signal?: AbortSignal;
+}): Promise<void> {
+  for (const effect of input.sideEffects) {
+    await sendHostedLinqSideEffect(effect, {
+      prisma: input.prisma,
+      signal: input.signal,
+    });
+
+    if (isHostedInviteLinqMessagePayload(effect.payload)) {
+      await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
-    case "revnet_invoice_issue": {
-      const member = await readHostedMemberSnapshot({
-        memberId: effect.payload.memberId,
-        prisma: options.prisma,
-      });
-
-      if (!member) {
-        return { handled: true };
-      }
-
-      await maybeIssueHostedRevnetForStripeInvoice({
-        invoice: {
-          amount_paid: effect.payload.amountPaid,
-          charge: effect.payload.chargeId,
-          currency: effect.payload.currency,
-          id: effect.payload.invoiceId,
-          payment_intent: effect.payload.paymentIntentId,
-        } as never,
-        member,
-        prisma: options.prisma,
-      });
-
-      return { handled: true };
-    }
-    default:
-      throw new Error(`Unsupported hosted webhook side effect kind: ${JSON.stringify(effect)}`);
   }
 }
 
+async function sendHostedLinqSideEffect(
+  effect: {
+    effectId: string;
+    payload: HostedLinqMessagePayload;
+  },
+  options: {
+    prisma: HostedLinqTransportPersistenceClient;
+    signal?: AbortSignal;
+  },
+): Promise<void> {
+  const startedAtMs = Date.now();
+
+  try {
+    await sendHostedLinqChatMessage({
+      chatId: effect.payload.chatId,
+      idempotencyKey: effect.effectId,
+      message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
+      replyToMessageId: effect.payload.replyToMessageId,
+      signal: options.signal,
+    });
+  } catch (error) {
+    console.error(
+      "Hosted Linq side-effect delivery failed.",
+      buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
+    );
+    throw error;
+  }
+
+  console.info(
+    "Hosted Linq side-effect delivery completed.",
+    buildHostedLinqSideEffectLogDetails(effect, null, Date.now() - startedAtMs),
+  );
+}
+
 function buildHostedLinqSideEffectLogDetails(
-  effect: Extract<HostedWebhookSideEffect, { kind: "linq_message_send" }>,
+  effect: HostedLinqMessageSideEffect,
   error: unknown,
   elapsedMs: number,
 ): Record<string, boolean | number | string> {
@@ -154,8 +187,8 @@ function readHostedLinqSideEffectString(
 }
 
 async function buildHostedLinqSideEffectMessage(
-  effect: Extract<HostedWebhookSideEffect, { kind: "linq_message_send" }>,
-  prisma: HostedWebhookReceiptPersistenceClient,
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
 ): Promise<string> {
   switch (effect.payload.template) {
     case "daily_quota":
@@ -187,8 +220,8 @@ async function buildHostedLinqSideEffectMessage(
 }
 
 async function resolveHostedHomeRecipientPhone(
-  payload: HostedWebhookLinqConversationHomeRedirectPayload,
-  prisma: HostedWebhookReceiptPersistenceClient,
+  payload: HostedLinqConversationHomeRedirectPayload,
+  prisma: HostedLinqTransportPersistenceClient,
 ): Promise<string | null> {
   if (payload.memberId) {
     const routing = await readHostedMemberRoutingState({
@@ -206,8 +239,8 @@ async function resolveHostedHomeRecipientPhone(
 
 async function buildHostedInviteSideEffectMessage(input: {
   effectId: string;
-  payload: HostedWebhookLinqInviteMessagePayload;
-  prisma: HostedWebhookReceiptPersistenceClient;
+  payload: HostedLinqInviteMessagePayload;
+  prisma: HostedLinqTransportPersistenceClient;
 }): Promise<string> {
   const inviteLookup =
     "findUnique" in input.prisma.hostedInvite && typeof input.prisma.hostedInvite.findUnique === "function"
@@ -245,14 +278,14 @@ async function buildHostedInviteSideEffectMessage(input: {
 }
 
 function isHostedInviteLinqMessagePayload(
-  payload: HostedWebhookLinqMessagePayload,
-): payload is HostedWebhookLinqInviteMessagePayload {
+  payload: HostedLinqMessagePayload,
+): payload is HostedLinqInviteMessagePayload {
   return payload.template === "invite_signin" || payload.template === "invite_signup";
 }
 
 async function markHostedInviteSentBestEffort(
   inviteId: string,
-  prisma: HostedWebhookReceiptPersistenceClient,
+  prisma: HostedLinqTransportPersistenceClient,
 ): Promise<void> {
   try {
     await prisma.hostedInvite.update({
@@ -270,5 +303,35 @@ async function markHostedInviteSentBestEffort(
         error instanceof Error ? error.message : String(error),
       ) ?? "Unknown error.",
     );
+  }
+}
+
+function buildHostedWebhookLinqMessagePayload(
+  input: CreateHostedWebhookLinqMessageSideEffectInput,
+  replyToMessageId: string | null,
+): HostedLinqMessagePayload {
+  switch (input.template) {
+    case "conversation_home_redirect":
+      return {
+        chatId: input.chatId,
+        homeRecipientPhone: input.homeRecipientPhone ?? null,
+        memberId: input.memberId,
+        replyToMessageId,
+        template: input.template,
+      };
+    case "daily_quota":
+      return {
+        chatId: input.chatId,
+        replyToMessageId,
+        template: input.template,
+      };
+    case "invite_signin":
+    case "invite_signup":
+      return {
+        chatId: input.chatId,
+        inviteId: input.inviteId,
+        replyToMessageId,
+        template: input.template,
+      };
   }
 }

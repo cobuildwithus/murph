@@ -1,4 +1,8 @@
 import type {
+  HostedAssistantDeliveryRecord,
+  HostedAssistantDeliverySideEffect,
+} from "@murphai/hosted-execution/side-effects";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -17,13 +21,20 @@ export interface HostedRuntimeArtifactStore {
 }
 
 type HostedRuntimeEffectsPortBase = {
+  deletePreparedAssistantDelivery?(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<void>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
+  readAssistantDeliveryRecord?(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<HostedAssistantDeliveryRecord | null>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
+  writeAssistantDeliveryRecord?(
+    record: HostedAssistantDeliveryRecord,
+  ): Promise<HostedAssistantDeliveryRecord>;
 };
 
-export type HostedRuntimeEffectsPort =
-  HostedRuntimeEffectsPortBase
-  & Record<string, unknown>;
+export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 
 export interface HostedRuntimeDeviceSyncPort {
   applyUpdates(input: {

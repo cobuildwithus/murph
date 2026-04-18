@@ -28,8 +28,10 @@ import {
   buildHostedLinqConversationHomeRedirectReply,
   sendHostedLinqChatMessage,
 } from "@/src/lib/hosted-onboarding/linq";
-import { createHostedWebhookLinqMessageSideEffect } from "@/src/lib/hosted-onboarding/webhook-receipt-types";
-import { createHostedWebhookReceiptHandlers } from "@/src/lib/hosted-onboarding/webhook-transport";
+import {
+  createHostedWebhookLinqMessageSideEffect,
+  drainHostedLinqSideEffectsDirect,
+} from "@/src/lib/hosted-onboarding/webhook-transport";
 
 describe("hosted Linq webhook transport", () => {
   beforeEach(() => {
@@ -38,7 +40,6 @@ describe("hosted Linq webhook transport", () => {
 
   it("uses the stored redirect phone fallback when current routing is unavailable", async () => {
     vi.mocked(readHostedMemberRoutingState).mockResolvedValue(null);
-    const handlers = createHostedWebhookReceiptHandlers();
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       homeRecipientPhone: "+15555550100",
@@ -49,10 +50,11 @@ describe("hosted Linq webhook transport", () => {
     });
 
     await expect(
-      handlers.performSideEffect(effect, {
+      drainHostedLinqSideEffectsDirect({
         prisma: {} as never,
+        sideEffects: [effect],
       }),
-    ).resolves.toEqual({ delivered: true });
+    ).resolves.toBeUndefined();
 
     expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith({
       homeRecipientPhone: "+15555550100",
@@ -77,7 +79,6 @@ describe("hosted Linq webhook transport", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
-    const handlers = createHostedWebhookReceiptHandlers();
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       homeRecipientPhone: "+15555550100",
@@ -88,10 +89,11 @@ describe("hosted Linq webhook transport", () => {
     });
 
     await expect(
-      handlers.performSideEffect(effect, {
+      drainHostedLinqSideEffectsDirect({
         prisma: {} as never,
+        sideEffects: [effect],
       }),
-    ).resolves.toEqual({ delivered: true });
+    ).resolves.toBeUndefined();
 
     expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith({
       homeRecipientPhone: "+15555550200",
@@ -111,7 +113,6 @@ describe("hosted Linq webhook transport", () => {
         retryable: true,
       },
     ));
-    const handlers = createHostedWebhookReceiptHandlers();
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       replyToMessageId: "message-1",
@@ -121,8 +122,9 @@ describe("hosted Linq webhook transport", () => {
 
     try {
       await expect(
-        handlers.performSideEffect(effect, {
+        drainHostedLinqSideEffectsDirect({
           prisma: {} as never,
+          sideEffects: [effect],
         }),
       ).rejects.toThrow("send failed");
 

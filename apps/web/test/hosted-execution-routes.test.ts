@@ -5,9 +5,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   buildHostedSharePageData: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
-  drainHostedOnboardingWebhookReceipts: vi.fn(),
   getPrisma: vi.fn(),
-  pruneHostedWebhookReceiptHistory: vi.fn(),
   requireVercelCronRequest: vi.fn(),
   getPrivyMemberAuth: vi.fn(),
 }));
@@ -24,14 +22,6 @@ vi.mock("@/src/lib/hosted-share/service", () => ({
   buildHostedSharePageData: mocks.buildHostedSharePageData,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
-  drainHostedOnboardingWebhookReceipts: mocks.drainHostedOnboardingWebhookReceipts,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/webhook-receipt-store", () => ({
-  pruneHostedWebhookReceiptHistory: mocks.pruneHostedWebhookReceiptHistory,
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -41,17 +31,14 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 }));
 
 type HostedExecutionUsageCronRouteModule = typeof import("../app/api/internal/hosted-execution/usage/cron/route");
-type HostedOnboardingWebhookReceiptCronRouteModule = typeof import("../app/api/internal/hosted-onboarding/webhook-receipts/cron/route");
 type HostedShareStatusRouteModule = typeof import("../app/api/hosted-share/[shareCode]/status/route");
 
 let hostedExecutionUsageCronRoute: HostedExecutionUsageCronRouteModule;
-let hostedOnboardingWebhookReceiptCronRoute: HostedOnboardingWebhookReceiptCronRouteModule;
 let hostedShareStatusRoute: HostedShareStatusRouteModule;
 
 describe("hosted execution async routes", () => {
   beforeAll(async () => {
     hostedExecutionUsageCronRoute = await import("../app/api/internal/hosted-execution/usage/cron/route");
-    hostedOnboardingWebhookReceiptCronRoute = await import("../app/api/internal/hosted-onboarding/webhook-receipts/cron/route");
     hostedShareStatusRoute = await import("../app/api/hosted-share/[shareCode]/status/route");
   });
 
@@ -79,24 +66,6 @@ describe("hosted execution async routes", () => {
       metered: 1,
       skipped: 1,
     });
-    mocks.drainHostedOnboardingWebhookReceipts.mockResolvedValue([
-      {
-        eventId: "evt_linq",
-        source: "linq",
-        status: "continued",
-      },
-      {
-        eventId: "evt_telegram",
-        source: "telegram",
-        status: "skipped",
-      },
-      {
-        eventId: "evt_failed",
-        source: "linq",
-        status: "failed",
-      },
-    ]);
-    mocks.pruneHostedWebhookReceiptHistory.mockResolvedValue(2);
   });
 
   it("returns the hosted Stripe metering cron summary", async () => {
@@ -116,36 +85,6 @@ describe("hosted execution async routes", () => {
         metered: 1,
         skipped: 1,
       },
-    });
-  });
-
-  it("returns aggregate hosted webhook receipt cron counts without receipt identifiers", async () => {
-    const response = await hostedOnboardingWebhookReceiptCronRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-onboarding/webhook-receipts/cron", {
-        headers: {
-          authorization: "Bearer cron-token",
-        },
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireVercelCronRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedOnboardingWebhookReceipts).toHaveBeenCalledWith({
-      prisma: {
-        prisma: true,
-      },
-    });
-    expect(mocks.pruneHostedWebhookReceiptHistory).toHaveBeenCalledWith({
-      prisma: {
-        prisma: true,
-      },
-    });
-    await expect(response.json()).resolves.toEqual({
-      continued: 1,
-      failed: 1,
-      pruned: 2,
-      skipped: 1,
     });
   });
 

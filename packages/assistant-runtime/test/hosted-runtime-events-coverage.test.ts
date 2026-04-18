@@ -120,7 +120,7 @@ describe("hosted runtime event coverage", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "system-maintenance",
+      followupExecution: "member-activated",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -152,7 +152,7 @@ describe("hosted runtime event coverage", () => {
     ).resolves.toEqual({
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "system-maintenance",
+      followupExecution: "assistant-cron",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -168,7 +168,7 @@ describe("hosted runtime event coverage", () => {
     ).resolves.toEqual({
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "system-maintenance",
+      followupExecution: "device-sync",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -216,7 +216,7 @@ describe("hosted runtime event coverage", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "system-maintenance",
+      followupExecution: "vault-share-accepted",
       shareImportResult: "imported",
       shareImportTitle: "Shared export",
     });

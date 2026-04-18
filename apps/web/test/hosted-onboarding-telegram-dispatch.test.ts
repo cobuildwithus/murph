@@ -115,6 +115,18 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+  hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
+  normalizeHostedWalletAddress: vi.fn(() => null),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
+  handleHostedStripeWebhook: vi.fn(),
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => {
     throw new Error("Unexpected getPrisma call in hosted-onboarding-telegram-dispatch.test.ts");
