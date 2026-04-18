@@ -7,10 +7,9 @@ import Script from "next/script";
 import { Providers } from "./providers";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import {
-  resolveHostedPrivyClientAppId,
+  requireHostedPrivyClientAppId,
   resolveHostedPrivyClientId,
 } from "@/src/lib/hosted-onboarding/landing";
-import { isHostedWebSmokeEnvironment } from "../next-artifacts";
 
 import "./globals.css";
 import { cn } from "@/src/lib/utils";
@@ -34,7 +33,6 @@ const dmMono = DM_Mono({
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 const SUPPORT_EMAIL = "support@withmurph.ai";
-const hostedWebAllowMissingPrivyAppIdEnvVarName = "MURPH_HOSTED_WEB_ALLOW_MISSING_PRIVY_APP_ID";
 
 const metadataBase = resolveMetadataBase();
 
@@ -45,25 +43,13 @@ export const metadata: Metadata = metadataBase
   : {};
 
 export default function RootLayout(input: { children: React.ReactNode }) {
-  const privyAppId = resolveHostedPrivyClientAppId();
+  const privyAppId = requireHostedPrivyClientAppId();
   const privyClientId = resolveHostedPrivyClientId();
-  const bypassPrivyProvider = !privyAppId && (
-    isHostedWebSmokeEnvironment(process.env)
-    || process.env[hostedWebAllowMissingPrivyAppIdEnvVarName] === "1"
-  );
-
-  if (!bypassPrivyProvider && !privyAppId) {
-    throw new TypeError("NEXT_PUBLIC_PRIVY_APP_ID must be configured for hosted Privy signup.");
-  }
 
   return (
     <html lang="en" className={cn(fraunces.variable, dmSans.variable, dmMono.variable)}>
       <body className="bg-background text-foreground font-sans antialiased">
-        <Providers
-          bypassPrivyProvider={bypassPrivyProvider}
-          privyAppId={privyAppId}
-          privyClientId={privyClientId}
-        >
+        <Providers privyAppId={privyAppId} privyClientId={privyClientId}>
           <div className="flex min-h-screen flex-col">
             <div className="flex-1">{input.children}</div>
             <footer id="global-footer" className="border-t border-stone-200 bg-cream-dark/60">

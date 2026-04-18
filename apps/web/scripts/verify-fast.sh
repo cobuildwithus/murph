@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
 hosted_web_default_database_url="postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"
+hosted_web_build_default_privy_app_id="cm_app_build"
 
 if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/web verify" -- \
@@ -29,6 +30,10 @@ compose_node_options_with_sqlite_warning_filter() {
 
 compose_database_url_for_build() {
   printf '%s\n' "${DATABASE_URL:-$hosted_web_default_database_url}"
+}
+
+compose_privy_app_id_for_build() {
+  printf '%s\n' "${NEXT_PUBLIC_PRIVY_APP_ID:-$hosted_web_build_default_privy_app_id}"
 }
 
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
@@ -135,8 +140,9 @@ if [[ "$verify_step_parallel" != "1" ]]; then
   MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 pnpm dev:smoke
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   build_database_url="$(compose_database_url_for_build)"
+  build_privy_app_id="$(compose_privy_app_id_for_build)"
   DATABASE_URL="$build_database_url" \
-    MURPH_HOSTED_WEB_ALLOW_MISSING_PRIVY_APP_ID=1 \
+    NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
     NODE_OPTIONS="$next_build_node_options" \
     next build
   exit 0
@@ -156,8 +162,9 @@ register_background_pid "$lint_pid"
 MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 pnpm dev:smoke
 next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
 build_database_url="$(compose_database_url_for_build)"
+build_privy_app_id="$(compose_privy_app_id_for_build)"
 DATABASE_URL="$build_database_url" \
-  MURPH_HOSTED_WEB_ALLOW_MISSING_PRIVY_APP_ID=1 \
+  NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
   NODE_OPTIONS="$next_build_node_options" \
   next build
 wait_for_background_jobs "$test_pid" "$lint_pid"

@@ -25,7 +25,7 @@ vi.mock("next/font/google", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
-  resolveHostedPrivyClientAppId: () => "cm_app_123",
+  requireHostedPrivyClientAppId: () => "cm_app_123",
   resolveHostedPrivyClientId: () => "client_123",
 }));
 

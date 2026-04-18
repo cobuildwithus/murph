@@ -8,6 +8,7 @@ const hostedWebDevFileSystemCacheEnvVarName = "MURPH_NEXT_DEV_FILESYSTEM_CACHE";
 const hostedWebDistModeEnvVarName = "NEXT_DIST_DIR_MODE";
 const hostedWebSmokeDistMode = "smoke";
 const hostedWebSmokeDefaultDatabaseUrl = "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync";
+const hostedWebSmokeDefaultPrivyAppId = "cm_app_smoke";
 
 export function createHostedWebSmokeEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
@@ -15,14 +16,9 @@ export function createHostedWebSmokeEnvironment(
   return {
     ...environment,
     DATABASE_URL: environment.DATABASE_URL ?? hostedWebSmokeDefaultDatabaseUrl,
+    NEXT_PUBLIC_PRIVY_APP_ID: environment.NEXT_PUBLIC_PRIVY_APP_ID ?? hostedWebSmokeDefaultPrivyAppId,
     [hostedWebDistModeEnvVarName]: hostedWebSmokeDistMode,
   };
-}
-
-export function isHostedWebSmokeEnvironment(
-  environment: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return environment[hostedWebDistModeEnvVarName] === hostedWebSmokeDistMode;
 }
 
 export function isHostedWebDevFileSystemCacheEnabled(
