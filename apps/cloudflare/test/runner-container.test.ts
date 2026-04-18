@@ -628,6 +628,40 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("treats missing containers as already destroyed during explicit cleanup", async () => {
+    const destroy = vi.fn(async () => {
+      throw new Error(
+        "Monitoring container failed with: 404 {\"message\":\"No such container: workerd-murph-hosted-RunnerContainer-abc\"}",
+      );
+    });
+    const { container } = createContainerDouble({
+      destroy,
+      initialStatus: "running",
+    });
+
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats missing containers as stopped when the status lookup races the destroy", async () => {
+    const getState = vi.fn(async () => {
+      throw new Error(
+        "Monitoring container failed with: 404 {\"message\":\"No such container: workerd-murph-hosted-RunnerContainer-abc\"}",
+      );
+    });
+    const { container, destroy } = createContainerDouble({
+      destroy: vi.fn(async () => {
+        throw new Error("destroy should not run once the shell is already gone");
+      }),
+      getState,
+      initialStatus: "running",
+    });
+
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+    expect(getState).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("fails closed before reuse when destroying an ambiguous warm shell throws", async () => {
     const destroy = vi.fn(async () => {
       throw new Error("destroy failed");

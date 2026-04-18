@@ -6,10 +6,15 @@ import {
 import { upsertHostedMemberIdentity } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
 import { createHostedMember } from "../src/lib/hosted-onboarding/hosted-member-store";
 import { upsertHostedMemberHomeLinqRecipientPhoneTx } from "../src/lib/hosted-onboarding/hosted-member-routing-store";
+import { createHostedWebSmokeEnvironment } from "../next-artifacts";
 
-const memberId = process.env.MURPH_E2E_MEMBER_ID?.trim() || "";
-const memberPhone = process.env.MURPH_E2E_MEMBER_PHONE?.trim() || "";
-const homePhone = process.env.MURPH_E2E_HOME_PHONE?.trim() || "";
+const runtimeEnv = createHostedWebSmokeEnvironment(process.env);
+
+Object.assign(process.env, runtimeEnv);
+
+const memberId = runtimeEnv.MURPH_E2E_MEMBER_ID?.trim() || "";
+const memberPhone = runtimeEnv.MURPH_E2E_MEMBER_PHONE?.trim() || "";
+const homePhone = runtimeEnv.MURPH_E2E_HOME_PHONE?.trim() || "";
 const phoneLookupKey = createHostedPhoneLookupKey(memberPhone);
 
 async function main(): Promise<void> {

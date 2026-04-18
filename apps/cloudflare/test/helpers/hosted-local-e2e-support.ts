@@ -1,6 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
 
+const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
+const hostedLocalE2eRunnerTimeoutMs = "240000";
+
 export async function startAssistantProviderStubServer(input: {
   messageText?: string;
   modelId?: string;
@@ -105,6 +109,9 @@ export function resolveHostedAssistantLocalDevEnv(
       HOSTED_ASSISTANT_PROVIDER: "openrouter",
       HOSTED_ASSISTANT_PROVIDER_NAME: "local-openrouter-stub",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS:
+        source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim()
+        || hostedLocalE2eRunnerTimeoutMs,
       OPENAI_API_KEY: "stub-local-openrouter-key",
     };
   }
@@ -121,6 +128,9 @@ export function resolveHostedAssistantLocalDevEnv(
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS:
+        source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim()
+        || hostedLocalE2eRunnerTimeoutMs,
     };
   }
 
@@ -130,6 +140,25 @@ export function resolveHostedAssistantLocalDevEnv(
       "Set HOSTED_ASSISTANT_PROVIDER and HOSTED_ASSISTANT_MODEL, or provide OPENAI_API_KEY for the local fallback profile.",
     ].join(" "),
   );
+}
+
+export function resolveHostedLocalSmokeWebEnv(
+  source: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION:
+      source.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION
+      ?? hostedWebSmokeDefaultEncryptionKeyVersion,
+    HOSTED_CONTACT_PRIVACY_KEYS:
+      source.HOSTED_CONTACT_PRIVACY_KEYS
+      ?? `v1:${hostedWebSmokeDefaultEncryptionKey}`,
+    HOSTED_WEB_ENCRYPTION_KEY:
+      source.HOSTED_WEB_ENCRYPTION_KEY
+      ?? hostedWebSmokeDefaultEncryptionKey,
+    HOSTED_WEB_ENCRYPTION_KEY_VERSION:
+      source.HOSTED_WEB_ENCRYPTION_KEY_VERSION
+      ?? hostedWebSmokeDefaultEncryptionKeyVersion,
+  };
 }
 
 export function shouldUseAssistantProviderStub(source: NodeJS.ProcessEnv): boolean {

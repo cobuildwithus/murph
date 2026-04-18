@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -59,6 +59,9 @@ export async function startHostedLocalDevHarness(input: {
     ?? path.resolve(repoRoot, persistDirOverride ?? "");
   const readyToken = randomUUID();
   const nextDistDirSuffix = `e2e-${readyToken}`.toLowerCase();
+  const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
+  const originalNextEnvContents = await readFile(nextEnvPath, "utf8");
+  let nextDistDir: string | null = null;
   let child: ChildProcess | null = null;
   let oidcToken = "";
   let stdout = "";
@@ -70,6 +73,8 @@ export async function startHostedLocalDevHarness(input: {
     }
 
     child = null;
+
+    await restoreNextArtifacts().catch(() => {});
 
     if (createdTempPersistDir !== null) {
       await rm(createdTempPersistDir, { force: true, recursive: true });
@@ -83,12 +88,17 @@ export async function startHostedLocalDevHarness(input: {
       await mkdir(persistDir, { recursive: true });
     }
 
+    const resolvedNextDistDirSuffix = input.env.NEXT_DIST_DIR_SUFFIX?.trim() || nextDistDirSuffix;
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...input.env,
       MURPH_DEV_CF_PERSIST_DIR: persistDir,
       MURPH_DEV_READY_TOKEN: readyToken,
-      NEXT_DIST_DIR_SUFFIX: input.env.NEXT_DIST_DIR_SUFFIX?.trim() || nextDistDirSuffix,
+      NEXT_DIST_DIR_SUFFIX: resolvedNextDistDirSuffix,
     };
+    nextDistDir = resolveHostedLocalHarnessDistDir(
+      runtimeEnv.NEXT_DIST_DIR_MODE,
+      resolvedNextDistDirSuffix,
+    );
 
     child = spawn("pnpm", ["dev"], {
       cwd: repoRoot,
@@ -254,10 +264,33 @@ export async function startHostedLocalDevHarness(input: {
       ], stdout, stderr));
     }
   }
+
+  async function restoreNextArtifacts(): Promise<void> {
+    const currentNextEnvContents = await readFile(nextEnvPath, "utf8").catch(() => null);
+
+    if (currentNextEnvContents !== originalNextEnvContents) {
+      await writeFile(nextEnvPath, originalNextEnvContents, "utf8");
+    }
+
+    if (nextDistDir !== null) {
+      await rm(path.join(repoRoot, "apps/web", nextDistDir), {
+        force: true,
+        recursive: true,
+      });
+    }
+  }
 }
 
 function resolveLocalHarnessBaseHost(host: string): string {
   return host === "0.0.0.0" ? "127.0.0.1" : host;
+}
+
+function resolveHostedLocalHarnessDistDir(
+  nextDistDirMode: string | undefined,
+  nextDistDirSuffix: string,
+): string {
+  const baseDistDir = nextDistDirMode === "smoke" ? ".next-smoke" : ".next-dev";
+  return `${baseDistDir}-${nextDistDirSuffix}`;
 }
 
 async function readHostedUserStatus(input: {

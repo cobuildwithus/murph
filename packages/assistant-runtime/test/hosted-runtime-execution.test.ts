@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
+} from "@murphai/hosted-execution";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
@@ -13,10 +20,11 @@ const mocks = vi.hoisted(() => ({
   createDeviceSyncRegistry: vi.fn(),
   createDeviceSyncService: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
+  drainHostedParserQueueUntilSettled: vi.fn(),
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
-  executeHostedDispatchEvent: vi.fn(),
+  executeHostedWakeEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
   getAssistantCronStatus: vi.fn(),
@@ -25,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   listHostedBundleArtifacts: vi.fn(),
   readHostedAssistantExecutionDefaultTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
+  runHostedConversationAssistantAutomation: vi.fn(),
   runHostedMaintenanceLoop: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
 }));
@@ -92,10 +101,13 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
-  executeHostedDispatchEvent: mocks.executeHostedDispatchEvent,
+  executeHostedWakeEvent: mocks.executeHostedWakeEvent,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
+  drainHostedParserQueueUntilSettled: mocks.drainHostedParserQueueUntilSettled,
+  runHostedConversationAssistantAutomation:
+    mocks.runHostedConversationAssistantAutomation,
   runHostedMaintenanceLoop: mocks.runHostedMaintenanceLoop,
 }));
 
@@ -112,7 +124,7 @@ vi.mock("../src/hosted-runtime/usage.ts", () => ({
 
 import {
   completeHostedExecutionAfterCommit,
-  executeHostedDispatchForCommit,
+  executeHostedWakeForCommit,
 } from "../src/hosted-runtime/execution.ts";
 import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
@@ -179,7 +191,7 @@ beforeEach(() => {
     messages: [],
     permissions: [],
   });
-  mocks.executeHostedDispatchEvent.mockResolvedValue({
+  mocks.executeHostedWakeEvent.mockResolvedValue({
     bootstrapResult: {
       assistantConfigStatus: "missing",
       assistantConfigured: false,
@@ -199,6 +211,14 @@ beforeEach(() => {
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 3,
+  });
+  mocks.runHostedConversationAssistantAutomation.mockResolvedValue({
+    nextWakeAt: null,
+    progressed: false,
+  });
+  mocks.drainHostedParserQueueUntilSettled.mockResolvedValue({
+    nextWakeAt: null,
+    processedJobs: 0,
   });
   mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([
     {
@@ -262,7 +282,7 @@ beforeEach(() => {
   });
 });
 
-describe("executeHostedDispatchForCommit", () => {
+describe("executeHostedWakeForCommit", () => {
   it("runs the dispatch and maintenance loops, snapshots the workspace, and summarizes the commit", async () => {
     mocks.listHostedBundleArtifacts.mockReturnValue([
       {
@@ -273,7 +293,7 @@ describe("executeHostedDispatchForCommit", () => {
       },
     ]);
 
-    const result = await executeHostedDispatchForCommit({
+    const result = await executeHostedWakeForCommit({
       artifactMaterializer: vi.fn(),
       executionContext: {
         hosted: {
@@ -285,19 +305,16 @@ describe("executeHostedDispatchForCommit", () => {
       materializedArtifactPaths: new Set(["vault/raw/already-materialized.bin"]),
       request: {
         bundle: "incoming-bundle",
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: {
-              email: false,
-              linq: false,
-              telegram: false,
-            },
-            userId: "member_123",
-          },
+        wake: buildHostedExecutionMemberActivatedWake({
           eventId: "evt_123",
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: false,
+          },
+          memberId: "member_123",
           occurredAt: "2026-04-08T00:00:00.000Z",
-        },
+        }),
       },
       restored: {
         assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -336,20 +353,17 @@ describe("executeHostedDispatchForCommit", () => {
       },
     });
 
-    expect(mocks.executeHostedDispatchEvent).toHaveBeenCalledWith({
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: {
-            email: false,
-            linq: false,
-            telegram: false,
-          },
-          userId: "member_123",
-        },
+    expect(mocks.executeHostedWakeEvent).toHaveBeenCalledWith({
+      wake: buildHostedExecutionMemberActivatedWake({
         eventId: "evt_123",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
+        memberId: "member_123",
         occurredAt: "2026-04-08T00:00:00.000Z",
-      },
+      }),
       executionContext: {
         hosted: {
           defaultTarget: {
@@ -444,7 +458,7 @@ describe("executeHostedDispatchForCommit", () => {
       webSearch: "murph" as const,
     };
 
-    await executeHostedDispatchForCommit({
+    await executeHostedWakeForCommit({
       artifactMaterializer: vi.fn(),
       executionContext: {
         hosted: {
@@ -456,15 +470,12 @@ describe("executeHostedDispatchForCommit", () => {
       },
       request: {
         bundle: "incoming-bundle",
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_123",
-          },
+        wake: buildHostedExecutionAssistantCronTickWake({
           eventId: "evt_existing_default_target",
           occurredAt: "2026-04-08T00:00:00.000Z",
-        },
+          reason: "manual",
+          userId: "member_123",
+        }),
       },
       restored: {
         assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -515,14 +526,14 @@ describe("executeHostedDispatchForCommit", () => {
   });
 
   it("skips the generic maintenance loop when dispatch handlers do not require it", async () => {
-    mocks.executeHostedDispatchEvent.mockResolvedValue({
+    mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
       maintenanceRequired: false,
       shareImportResult: null,
       shareImportTitle: null,
     });
 
-    const result = await executeHostedDispatchForCommit({
+    const result = await executeHostedWakeForCommit({
       artifactMaterializer: vi.fn(),
       executionContext: {
         hosted: {
@@ -533,18 +544,15 @@ describe("executeHostedDispatchForCommit", () => {
       },
       request: {
         bundle: "incoming-bundle",
-        dispatch: {
-          event: {
-            kind: "linq.message.received",
-            linqEvent: {
-              event_type: "message.received",
-            },
-            phoneLookupKey: "15551234567",
-            userId: "member_123",
-          },
+        wake: buildHostedExecutionLinqConversationMessageWake({
           eventId: "evt_linq_message",
+          linqEvent: {
+            event_type: "message.received",
+          },
           occurredAt: "2026-04-08T00:00:00.000Z",
-        },
+          phoneLookupKey: "15551234567",
+          userId: "member_123",
+        }),
       },
       restored: {
         assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -582,10 +590,118 @@ describe("executeHostedDispatchForCommit", () => {
     });
 
     expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
+    expect(mocks.drainHostedParserQueueUntilSettled).toHaveBeenCalledWith({
+      artifactMaterializer: expect.any(Function),
+      vaultRoot: "/tmp/vault-root",
+    });
+    expect(mocks.runHostedConversationAssistantAutomation).toHaveBeenCalledWith({
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_message",
+        linqEvent: {
+          event_type: "message.received",
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+      executionContext: {
+        hosted: {
+          defaultTarget: expect.objectContaining({
+            adapter: "openai-compatible",
+            model: "gpt-4.1-mini",
+          }),
+          issueDeviceConnectLink: expect.any(Function),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "evt_linq_message",
+      vaultRoot: "/tmp/vault-root",
+    });
     assert.equal(result.committedResult.result.nextWakeAt, null);
     assert.equal(
       result.committedResult.result.summary,
       "Persisted Linq capture on the hosted conversation lane.",
+    );
+  });
+
+  it("schedules an immediate follow-up wake when conversation parser backlog does not settle in-turn", async () => {
+    mocks.executeHostedWakeEvent.mockResolvedValue({
+      bootstrapResult: null,
+      maintenanceRequired: false,
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+    mocks.drainHostedParserQueueUntilSettled.mockResolvedValue({
+      nextWakeAt: "2026-04-08T00:00:00.000Z",
+      processedJobs: 2,
+    });
+    mocks.runHostedConversationAssistantAutomation.mockResolvedValue({
+      nextWakeAt: null,
+      progressed: false,
+    });
+
+    const result = await executeHostedWakeForCommit({
+      artifactMaterializer: vi.fn(),
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        wake: buildHostedExecutionTelegramConversationMessageWake({
+          eventId: "evt_telegram_message",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          telegramMessage: {
+            messageId: "tg_message_123",
+            schema: "murph.hosted-telegram-message.v1",
+            threadId: "thread_123",
+          },
+          userId: "member_123",
+        }),
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          deviceSyncPort: null,
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    expect(result.committedResult.result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
+    expect(result.committedResult.result.summary).toBe(
+      "Persisted Telegram capture on the hosted conversation lane.",
     );
   });
 
@@ -594,7 +710,7 @@ describe("executeHostedDispatchForCommit", () => {
 
     try {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
-      mocks.executeHostedDispatchEvent.mockResolvedValue({
+      mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
         maintenanceRequired: false,
         shareImportResult: null,
@@ -610,7 +726,7 @@ describe("executeHostedDispatchForCommit", () => {
         nextRunAt: "2026-04-08T00:30:00.000Z",
       });
 
-      const result = await executeHostedDispatchForCommit({
+      const result = await executeHostedWakeForCommit({
         artifactMaterializer: vi.fn(),
         executionContext: {
           hosted: {
@@ -621,20 +737,17 @@ describe("executeHostedDispatchForCommit", () => {
         },
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "telegram.message.received",
-              telegramMessage: {
-                messageId: "telegram_message_123",
-                schema: "murph.hosted-telegram-message.v1",
-                text: "hello",
-                threadId: "telegram_thread_123",
-              },
-              userId: "member_123",
-            },
+          wake: buildHostedExecutionTelegramConversationMessageWake({
             eventId: "evt_telegram_message",
             occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+            telegramMessage: {
+              messageId: "telegram_message_123",
+              schema: "murph.hosted-telegram-message.v1",
+              text: "hello",
+              threadId: "telegram_thread_123",
+            },
+            userId: "member_123",
+          }),
         },
         restored: {
           assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -691,7 +804,7 @@ describe("executeHostedDispatchForCommit", () => {
 
     try {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
-      mocks.executeHostedDispatchEvent.mockResolvedValue({
+      mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
         maintenanceRequired: false,
         shareImportResult: null,
@@ -740,7 +853,7 @@ describe("executeHostedDispatchForCommit", () => {
         ],
       });
 
-      const result = await executeHostedDispatchForCommit({
+      const result = await executeHostedWakeForCommit({
         artifactMaterializer: vi.fn(),
         executionContext: {
           hosted: {
@@ -751,16 +864,13 @@ describe("executeHostedDispatchForCommit", () => {
         },
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "email.message.received",
-              identityId: null,
-              rawMessageKey: "raw/message.eml",
-              userId: "member_123",
-            },
+          wake: buildHostedExecutionEmailConversationMessageWake({
             eventId: "evt_email_message",
+            identityId: null,
             occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+            rawMessageKey: "raw/message.eml",
+            userId: "member_123",
+          }),
         },
         restored: {
           assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -812,7 +922,7 @@ describe("executeHostedDispatchForCommit", () => {
 
     try {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
-      mocks.executeHostedDispatchEvent.mockResolvedValue({
+      mocks.executeHostedWakeEvent.mockResolvedValue({
         bootstrapResult: null,
         maintenanceRequired: false,
         shareImportResult: null,
@@ -836,7 +946,7 @@ describe("executeHostedDispatchForCommit", () => {
         },
       });
 
-      const result = await executeHostedDispatchForCommit({
+      const result = await executeHostedWakeForCommit({
         artifactMaterializer: vi.fn(),
         executionContext: {
           hosted: {
@@ -847,18 +957,15 @@ describe("executeHostedDispatchForCommit", () => {
         },
         request: {
           bundle: "incoming-bundle",
-          dispatch: {
-            event: {
-              kind: "linq.message.received",
-              linqEvent: {
-                event_type: "message.received",
-              },
-              phoneLookupKey: "15551234567",
-              userId: "member_123",
-            },
+          wake: buildHostedExecutionLinqConversationMessageWake({
             eventId: "evt_linq_message_device_sync",
+            linqEvent: {
+              event_type: "message.received",
+            },
             occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+            phoneLookupKey: "15551234567",
+            userId: "member_123",
+          }),
         },
         restored: {
           assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -911,7 +1018,7 @@ describe("executeHostedDispatchForCommit", () => {
   });
 
   it("falls back to a null preserved wake when assistant and device-sync wake lookups fail", async () => {
-    mocks.executeHostedDispatchEvent.mockResolvedValue({
+    mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
       maintenanceRequired: false,
       shareImportResult: null,
@@ -922,7 +1029,7 @@ describe("executeHostedDispatchForCommit", () => {
       throw new Error("device sync init failed");
     });
 
-    const result = await executeHostedDispatchForCommit({
+    const result = await executeHostedWakeForCommit({
       artifactMaterializer: vi.fn(),
       executionContext: {
         hosted: {
@@ -933,18 +1040,15 @@ describe("executeHostedDispatchForCommit", () => {
       },
       request: {
         bundle: "incoming-bundle",
-        dispatch: {
-          event: {
-            kind: "linq.message.received",
-            linqEvent: {
-              event_type: "message.received",
-            },
-            phoneLookupKey: "15551234567",
-            userId: "member_123",
-          },
+        wake: buildHostedExecutionLinqConversationMessageWake({
           eventId: "evt_linq_message_error",
+          linqEvent: {
+            event_type: "message.received",
+          },
           occurredAt: "2026-04-08T00:00:00.000Z",
-        },
+          phoneLookupKey: "15551234567",
+          userId: "member_123",
+        }),
       },
       restored: {
         assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -1043,15 +1147,12 @@ describe("completeHostedExecutionAfterCommit", () => {
           hostedDeliveryEffect,
         ],
       },
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
+      wake: buildHostedExecutionAssistantCronTickWake({
         eventId: "evt_123",
         occurredAt: "2026-04-08T00:00:00.000Z",
-      },
+        reason: "manual",
+        userId: "member_123",
+      }),
       materializedArtifactPaths: new Set(["vault/raw/already-materialized.bin"]),
       restored: {
         assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -1097,15 +1198,12 @@ describe("completeHostedExecutionAfterCommit", () => {
     });
 
     expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
+      wake: buildHostedExecutionAssistantCronTickWake({
         eventId: "evt_123",
         occurredAt: "2026-04-08T00:00:00.000Z",
-      },
+        reason: "manual",
+        userId: "member_123",
+      }),
       effectsPort: expect.any(Object),
       assistantDeliveryEffects: [
         hostedDeliveryEffect,

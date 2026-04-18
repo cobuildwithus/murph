@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
-  executeHostedDispatchEvent: vi.fn(),
+  executeHostedWakeEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
   getAssistantCronStatus: vi.fn(),
@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   refreshAssistantStatusSnapshot: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
   resumeHostedCommittedExecution: vi.fn(),
+  runHostedConversationAssistantAutomation: vi.fn(),
   runHostedMaintenanceLoop: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
   withHostedProcessEnvironment: vi.fn(),
@@ -88,10 +89,12 @@ vi.mock("../src/hosted-runtime/environment.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
-  executeHostedDispatchEvent: mocks.executeHostedDispatchEvent,
+  executeHostedWakeEvent: mocks.executeHostedWakeEvent,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
+  runHostedConversationAssistantAutomation:
+    mocks.runHostedConversationAssistantAutomation,
   runHostedMaintenanceLoop: mocks.runHostedMaintenanceLoop,
 }));
 
@@ -112,7 +115,7 @@ import {
 } from "../src/hosted-runtime/child-result.ts";
 import {
   completeHostedExecutionAfterCommit,
-  executeHostedDispatchForCommit,
+  executeHostedWakeForCommit,
 } from "../src/hosted-runtime/execution.ts";
 import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
@@ -128,7 +131,7 @@ beforeEach(() => {
     Buffer.from(bytes).toString("base64"),
   );
   mocks.createHostedArtifactUploadSink.mockReturnValue(Symbol("artifact-sink"));
-  mocks.executeHostedDispatchEvent.mockResolvedValue({
+  mocks.executeHostedWakeEvent.mockResolvedValue({
     bootstrapResult: null,
     maintenanceRequired: true,
     shareImportResult: null,
@@ -139,6 +142,10 @@ beforeEach(() => {
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 0,
+  });
+  mocks.runHostedConversationAssistantAutomation.mockResolvedValue({
+    nextWakeAt: null,
+    progressed: false,
   });
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
@@ -258,9 +265,9 @@ describe("hosted runtime child helpers", () => {
   });
 });
 
-describe("executeHostedDispatchForCommit", () => {
+describe("executeHostedWakeForCommit", () => {
   it("falls back to empty artifact metadata when the incoming bundle is absent", async () => {
-    const result = await executeHostedDispatchForCommit({
+    const result = await executeHostedWakeForCommit({
       executionContext: {
         hosted: {
           issueDeviceConnectLink: vi.fn(),
@@ -270,14 +277,12 @@ describe("executeHostedDispatchForCommit", () => {
       },
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_123",
-          },
+        wake: {
           eventId: "evt_tick",
+          kind: "assistant.cron.tick",
           occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "manual",
+          userId: "member_123",
         },
       },
       restored: {
@@ -362,14 +367,12 @@ describe("completeHostedExecutionAfterCommit", () => {
         },
         committedAssistantDeliveryEffects: [],
       },
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
+      wake: {
         eventId: "evt_123",
+        kind: "assistant.cron.tick",
         occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "manual",
+        userId: "member_123",
       },
       restored: {
         assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
@@ -406,14 +409,12 @@ describe("completeHostedExecutionAfterCommit", () => {
     });
 
     expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
+      wake: {
         eventId: "evt_123",
+        kind: "assistant.cron.tick",
         occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "manual",
+        userId: "member_123",
       },
       effectsPort: expect.any(Object),
       assistantDeliveryEffects: [],
