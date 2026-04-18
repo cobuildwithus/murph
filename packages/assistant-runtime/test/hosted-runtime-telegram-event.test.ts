@@ -3,20 +3,6 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionTelegramConversationMessageWake,
-  isHostedTelegramConversationMessageWake,
-} from "@murphai/hosted-execution";
-
-const mocks = vi.hoisted(() => ({
-  normalizeHostedTelegramMessage: vi.fn(),
-}));
-
-vi.mock("@murphai/inboxd/connectors/telegram/normalize", () => ({
-  normalizeHostedTelegramMessage: mocks.normalizeHostedTelegramMessage,
-}));
-
-import {
-  buildHostedTelegramCapture,
   createHostedTelegramAttachmentDownloadDriver,
 } from "../src/hosted-runtime/events/telegram.ts";
 
@@ -62,49 +48,8 @@ function restoreTelegramEnv() {
 }
 
 afterEach(() => {
-  vi.clearAllMocks();
   restoreFetch();
   restoreTelegramEnv();
-});
-
-describe("buildHostedTelegramCapture", () => {
-  it("normalizes the hosted message payload into a capture", async () => {
-    const wake = buildHostedExecutionTelegramConversationMessageWake({
-      eventId: "evt_telegram",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      telegramMessage: {
-        attachments: [
-          {
-            fileId: "file_123",
-            kind: "photo",
-          },
-        ],
-        messageId: "tg_message_123",
-        schema: "murph.hosted-telegram-message.v1",
-        text: "hello",
-        threadId: "chat_123",
-      },
-      userId: "member_123",
-    });
-    if (!isHostedTelegramConversationMessageWake(wake)) {
-      throw new Error("Expected Telegram conversation wake.");
-    }
-    const capture = {
-      source: "telegram",
-    };
-    mocks.normalizeHostedTelegramMessage.mockResolvedValue(capture);
-
-    await expect(buildHostedTelegramCapture(wake)).resolves.toEqual(capture);
-
-    expect(mocks.normalizeHostedTelegramMessage).toHaveBeenCalledWith({
-      accountId: "bot",
-      downloadDriver: null,
-      externalId: "evt_telegram",
-      message: wake.message.telegramMessage,
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      receivedAt: "2026-04-08T00:00:00.000Z",
-    });
-  });
 });
 
 describe("createHostedTelegramAttachmentDownloadDriver", () => {

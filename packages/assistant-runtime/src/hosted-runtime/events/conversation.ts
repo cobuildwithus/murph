@@ -3,16 +3,34 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
+  resolveHostedEmailSelfAddresses,
 } from "@murphai/hosted-execution";
+import {
+  normalizeParsedEmailMessage,
+} from "@murphai/inboxd/connectors/email/normalize-parsed";
+import {
+  parseRawEmailMessage,
+} from "@murphai/inboxd/connectors/email/parsed";
+import {
+  normalizeLinqWebhookEvent,
+} from "@murphai/inboxd/connectors/linq/normalize";
+import {
+  normalizeHostedTelegramMessage,
+} from "@murphai/inboxd/connectors/telegram/normalize";
 import {
   createParsedInboxPipeline,
   openInboxRuntime,
 } from "@murphai/inboxd";
+import { parseLinqWebhookEvent } from "@murphai/messaging-ingress/linq-webhook";
 import { createConfiguredParserRegistry } from "@murphai/parsers";
 
-import { buildHostedEmailCapture } from "./email.ts";
-import { buildHostedLinqCapture } from "./linq.ts";
-import { buildHostedTelegramCapture } from "./telegram.ts";
+import { readHostedRawEmailMessage } from "./email.ts";
+import {
+  createHostedLinqAttachmentDownloadDriver,
+  HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+  resolveHostedLinqCaptureExternalId,
+} from "./linq.ts";
+import { createHostedTelegramAttachmentDownloadDriver } from "./telegram.ts";
 import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -23,7 +41,7 @@ export async function ingestHostedConversationMessageWake(input: {
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
-  const capture = await buildHostedInboxCaptureForConversationWake(input);
+  const capture = await normalizeHostedConversationMessageWake(input);
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
   });
@@ -58,23 +76,58 @@ export async function ingestHostedConversationMessageWake(input: {
   }
 }
 
-async function buildHostedInboxCaptureForConversationWake(input: {
+async function normalizeHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
-    return buildHostedLinqCapture(input.wake);
+    const event = parseLinqWebhookEvent(JSON.stringify(input.wake.message.linqEvent));
+    const capture = await normalizeLinqWebhookEvent({
+      attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+      defaultAccountId: input.wake.message.phoneLookupKey,
+      downloadDriver: createHostedLinqAttachmentDownloadDriver(),
+      event,
+    });
+
+    return {
+      ...capture,
+      accountId: input.wake.message.phoneLookupKey,
+      externalId: resolveHostedLinqCaptureExternalId({
+        fallbackExternalId: capture.externalId,
+        linqMessageId: input.wake.message.linqMessageId ?? null,
+      }),
+    };
   }
 
   if (isHostedTelegramConversationMessageWake(input.wake)) {
-    return buildHostedTelegramCapture(input.wake);
+    return normalizeHostedTelegramMessage({
+      accountId: "bot",
+      downloadDriver: createHostedTelegramAttachmentDownloadDriver(),
+      externalId: input.wake.eventId,
+      message: input.wake.message.telegramMessage,
+      occurredAt: input.wake.occurredAt,
+      receivedAt: input.wake.occurredAt,
+    });
   }
 
   if (isHostedEmailConversationMessageWake(input.wake)) {
-    return buildHostedEmailCapture(
+    const bytes = await readHostedRawEmailMessage(
       input.wake,
       input.runtime.platform.effectsPort,
     );
+    const parsedMessage = parseRawEmailMessage(bytes);
+
+    return normalizeParsedEmailMessage({
+      accountAddress: input.wake.message.identityId,
+      accountId: input.wake.message.identityId,
+      message: parsedMessage,
+      selfAddresses: resolveHostedEmailSelfAddresses({
+        extra: [input.wake.message.selfAddress],
+        senderIdentity: input.wake.message.identityId,
+      }),
+      source: "email",
+      threadTarget: null,
+    });
   }
 
   throw new TypeError("Unsupported hosted conversation message wake kind.");

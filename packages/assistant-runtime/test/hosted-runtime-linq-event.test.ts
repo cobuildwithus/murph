@@ -3,27 +3,9 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionLinqConversationMessageWake,
-  isHostedLinqConversationMessageWake,
-} from "@murphai/hosted-execution";
-
-const mocks = vi.hoisted(() => ({
-  normalizeLinqWebhookEvent: vi.fn(),
-  parseLinqWebhookEvent: vi.fn(),
-}));
-
-vi.mock("@murphai/inboxd/connectors/linq/normalize", () => ({
-  normalizeLinqWebhookEvent: mocks.normalizeLinqWebhookEvent,
-}));
-
-vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
-  parseLinqWebhookEvent: mocks.parseLinqWebhookEvent,
-}));
-
-import {
-  buildHostedLinqCapture,
   createHostedLinqAttachmentDownloadDriver,
   normalizeHostedLinqAttachmentUrl,
+  resolveHostedLinqCaptureExternalId,
 } from "../src/hosted-runtime/events/linq.ts";
 
 const originalFetch = globalThis.fetch;
@@ -49,101 +31,25 @@ afterEach(() => {
   restoreFetch();
 });
 
-describe("buildHostedLinqCapture", () => {
-  it("normalizes the webhook event into a hosted capture", async () => {
-    const wake = buildHostedExecutionLinqConversationMessageWake({
-      eventId: "evt_linq",
-      linqEvent: {
-        event_type: "message.received",
-        id: "linq_123",
-      },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      phoneLookupKey: "15551234567",
-      userId: "member_123",
-    });
-    if (!isHostedLinqConversationMessageWake(wake)) {
-      throw new Error("Expected Linq conversation wake.");
-    }
-    const parsedEvent = {
-      parsed: true,
-    };
-    const capture = {
-      accountId: "raw-recipient-phone",
-      externalId: "linq:msg_123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      raw: {},
-      source: "linq",
-      text: "hello",
-      thread: {
-        id: "chat_123",
-        isDirect: true,
-      },
-      actor: {
-        isSelf: false,
-      },
-      attachments: [],
-    };
-    mocks.parseLinqWebhookEvent.mockReturnValue(parsedEvent);
-    mocks.normalizeLinqWebhookEvent.mockResolvedValue(capture);
-
-    await expect(buildHostedLinqCapture(wake)).resolves.toEqual({
-      ...capture,
-      accountId: "15551234567",
-    });
-
-    expect(mocks.parseLinqWebhookEvent).toHaveBeenCalledWith(JSON.stringify(wake.message.linqEvent));
-    expect(mocks.normalizeLinqWebhookEvent).toHaveBeenCalledWith({
-      attachmentDownloadTimeoutMs: 5_000,
-      defaultAccountId: "15551234567",
-      downloadDriver: expect.objectContaining({
-        downloadUrl: expect.any(Function),
+describe("resolveHostedLinqCaptureExternalId", () => {
+  it("prefers the explicit hosted Linq message id for reply threading", () => {
+    assert.equal(
+      resolveHostedLinqCaptureExternalId({
+        fallbackExternalId: "linq:hbid:linq.message:v1:opaque",
+        linqMessageId: " msg_real_123 ",
       }),
-      event: parsedEvent,
-    });
+      "linq:msg_real_123",
+    );
   });
 
-  it("preserves the raw Linq message id for hosted reply threading", async () => {
-    const wake = buildHostedExecutionLinqConversationMessageWake({
-      eventId: "evt_linq_raw_reply_id",
-      linqEvent: {
-        event_type: "message.received",
-        message: {
-          id: "hbid:linq.message:v1:opaque",
-        },
-      },
-      linqMessageId: "msg_real_123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      phoneLookupKey: "15551234567",
-      userId: "member_123",
-    });
-    if (!isHostedLinqConversationMessageWake(wake)) {
-      throw new Error("Expected Linq conversation wake.");
-    }
-
-    const capture = {
-      accountId: "raw-recipient-phone",
-      externalId: "linq:hbid:linq.message:v1:opaque",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      raw: {},
-      source: "linq",
-      text: "hello",
-      thread: {
-        id: "chat_123",
-        isDirect: true,
-      },
-      actor: {
-        isSelf: false,
-      },
-      attachments: [],
-    };
-    mocks.parseLinqWebhookEvent.mockReturnValue({ parsed: true });
-    mocks.normalizeLinqWebhookEvent.mockResolvedValue(capture);
-
-    await expect(buildHostedLinqCapture(wake)).resolves.toEqual({
-      ...capture,
-      accountId: "15551234567",
-      externalId: "linq:msg_real_123",
-    });
+  it("falls back to the normalized capture external id when the hosted message id is absent", () => {
+    assert.equal(
+      resolveHostedLinqCaptureExternalId({
+        fallbackExternalId: " linq:msg_fallback_123 ",
+        linqMessageId: null,
+      }),
+      "linq:msg_fallback_123",
+    );
   });
 });
 
