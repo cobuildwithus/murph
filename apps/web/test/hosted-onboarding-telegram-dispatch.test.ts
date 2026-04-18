@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
     enqueueHostedExecutionOutbox: vi.fn(),
     lastScheduledDispatchEventId: null as string | null,
     lastScheduledDispatchPrisma: null as unknown,
-    readHostedExecutionWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
+    readHostedWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
       state.lastScheduledDispatchEventId = input.eventId;
       state.lastScheduledDispatchPrisma = input.prisma ?? null;
       return {
@@ -49,7 +49,7 @@ const mocks = vi.hoisted(() => {
       telegramBotUsername: "murph_bot",
       telegramWebhookSecret: null as string | null,
     },
-    appendHostedExecutionWakeTx: vi.fn(async (input: {
+    materializeHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       eventId?: string;
       wake?: { eventId: string };
@@ -92,15 +92,15 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/dispatch-lifecycle")>(
-    "@/src/lib/hosted-execution/dispatch-lifecycle",
+vi.mock("@/src/lib/hosted-execution/wake-lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/wake-lifecycle")>(
+    "@/src/lib/hosted-execution/wake-lifecycle",
   );
 
   return {
     ...actual,
-    appendHostedExecutionWakeTx: mocks.appendHostedExecutionWakeTx,
-    readHostedExecutionWakeTarget: mocks.readHostedExecutionWakeTarget,
+    materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
+    readHostedWakeTarget: mocks.readHostedWakeTarget,
   };
 });
 

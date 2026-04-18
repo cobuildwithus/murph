@@ -12,13 +12,13 @@ import {
 } from "@murphai/contracts";
 import {
   buildHostedExecutionVaultShareAcceptedWake,
-  type HostedExecutionDispatchLifecycleState,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import {
-  readHostedExecutionWakeLifecycleState,
-} from "../hosted-execution/dispatch-lifecycle";
+  readHostedWakeLifecycleState,
+  type HostedWakeLifecycleState,
+} from "../hosted-execution/wake-lifecycle";
 import {
   requireHostedOnboardingPublicBaseUrl,
 } from "../hosted-onboarding/runtime";
@@ -275,12 +275,12 @@ export async function finalizeHostedShareAcceptance(input: {
   };
 }
 
-export async function readHostedShareExecutionLifecycleState(input: {
+export async function readHostedShareWakeLifecycleState(input: {
   eventId: string;
   memberId: string;
   prisma: HostedSharePrismaClient;
-}): Promise<HostedExecutionDispatchLifecycleState> {
-  return readHostedExecutionWakeLifecycleState({
+}): Promise<HostedWakeLifecycleState> {
+  return readHostedWakeLifecycleState({
     eventId: input.eventId,
     prisma: input.prisma,
   });
@@ -291,8 +291,8 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
   memberId: string;
   prisma: HostedSharePrismaClient;
   shareId: string;
-}): Promise<HostedExecutionDispatchLifecycleState> {
-  const state = await readHostedShareExecutionLifecycleState({
+}): Promise<HostedWakeLifecycleState> {
+  const state = await readHostedShareWakeLifecycleState({
     eventId: input.eventId,
     memberId: input.memberId,
     prisma: input.prisma,

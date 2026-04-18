@@ -7,8 +7,8 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
-  appendHostedExecutionWakeTx,
-} from "../hosted-execution/dispatch-lifecycle";
+  materializeHostedExecutionWakeTx,
+} from "../hosted-execution/wake-lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -141,7 +141,7 @@ export async function acceptHostedShareLink(input: {
           },
         });
 
-    await appendHostedExecutionWakeTx({
+    await materializeHostedExecutionWakeTx({
       wake: buildHostedShareAcceptanceWake({
         acceptedAt: acceptedAt.toISOString(),
         eventId,

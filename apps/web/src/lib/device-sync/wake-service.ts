@@ -20,8 +20,8 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
-  appendHostedExecutionWakeTx,
-} from "../hosted-execution/dispatch-lifecycle";
+  materializeHostedExecutionWakeTx,
+} from "../hosted-execution/wake-lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import {
   buildHostedDeviceSyncWake,
@@ -343,7 +343,7 @@ async function persistHostedDeviceSyncWake(input: {
   // tied to the stable wake event id instead of the transient signal primary key.
   await input.store.prisma.$transaction(async (tx) => {
     await input.persist(tx);
-    await appendHostedExecutionWakeTx({
+    await materializeHostedExecutionWakeTx({
       wake: input.wake,
       sourceId: input.wake.eventId,
       sourceType: "device_sync_signal",

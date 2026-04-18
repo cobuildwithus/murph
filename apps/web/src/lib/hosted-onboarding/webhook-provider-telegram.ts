@@ -1,7 +1,7 @@
 import { type Prisma } from "@prisma/client";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 
-import { appendHostedExecutionWakeTx } from "../hosted-execution/dispatch-lifecycle";
+import { materializeHostedExecutionWakeTx } from "../hosted-execution/wake-lifecycle";
 import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
@@ -70,7 +70,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
 
-  await appendHostedExecutionWakeTx({
+  await materializeHostedExecutionWakeTx({
     wake: buildHostedExecutionTelegramConversationMessageWake({
       eventId: buildHostedTelegramWebhookEventId(input.update),
       occurredAt: summary.occurredAt,

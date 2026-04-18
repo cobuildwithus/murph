@@ -51,7 +51,7 @@ const mocks = vi.hoisted(() => {
         userId: input.userId ?? "member_123",
       });
     },
-    readHostedExecutionWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
+    readHostedWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
       const wakeTarget = state.wakeTargets.get(input.eventId) ?? null;
 
       if (!wakeTarget) {
@@ -66,7 +66,7 @@ const mocks = vi.hoisted(() => {
         userId: wakeTarget.userId,
       };
     }),
-    appendHostedExecutionWakeTx: vi.fn(async (input: {
+    materializeHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       eventId?: string;
       tx?: unknown;
@@ -127,15 +127,15 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/dispatch-lifecycle")>(
-    "@/src/lib/hosted-execution/dispatch-lifecycle",
+vi.mock("@/src/lib/hosted-execution/wake-lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/wake-lifecycle")>(
+    "@/src/lib/hosted-execution/wake-lifecycle",
   );
 
   return {
     ...actual,
-    appendHostedExecutionWakeTx: mocks.appendHostedExecutionWakeTx,
-    readHostedExecutionWakeTarget: mocks.readHostedExecutionWakeTarget,
+    materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
+    readHostedWakeTarget: mocks.readHostedWakeTarget,
   };
 });
 vi.mock("@/src/lib/hosted-wake/control", () => ({
@@ -268,8 +268,8 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.isHostedOnboardingRevnetEnabled.mockReset();
     mocks.normalizeHostedWalletAddress.mockReset();
     mocks.recordHostedStripeEvent.mockReset();
-    mocks.readHostedExecutionWakeTarget.mockClear();
-    mocks.appendHostedExecutionWakeTx.mockClear();
+    mocks.readHostedWakeTarget.mockClear();
+    mocks.materializeHostedExecutionWakeTx.mockClear();
     mocks.requireHostedRevnetConfig.mockReset();
     mocks.reconcileHostedStripeEventById.mockReset();
     mocks.sendHostedLinqChatMessage.mockReset();
