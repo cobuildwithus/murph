@@ -37,7 +37,7 @@ The supported worker HTTP surface stops at those three control routes plus the p
 - The `vault` bundle slot stores one encrypted hosted workspace snapshot. That snapshot is still sensitive canonical vault material, not a second product database.
 - Large files are externalized into separately encrypted artifact blobs in the same bucket.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
-- Durable Object SQLite stores execution coordination only: queue state, retries, in-flight markers, timestamps, and encrypted bundle references.
+- Durable Object SQLite stores execution coordination only: lease and stale-result fencing, finalize-retry state, alarm hints, timestamps, and encrypted bundle references. Canonical wake ordering and cursor progress stay web-owned.
 - Lifecycle rules backstop only the short-lived `transient/execution-journal/`, `transient/dispatch-payloads/`, `transient/side-effects/`, and `transient/hosted-email/messages/` prefixes. `transient/dispatch-payloads/` is an internal queue spillover detail for encrypted pending dispatch envelopes, not a control-plane CRUD seam.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-secrets blobs, and queue-local execution sidecars. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 
@@ -60,6 +60,7 @@ Required worker secrets:
 
 Required worker vars:
 
+- `HOSTED_WEB_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 
@@ -75,7 +76,7 @@ Defaulted worker vars:
 
 Optional execution vars and secrets:
 
-- `HOSTED_WEB_BASE_URL` and `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for the narrow signed web-proxy path
+- `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`, and `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` for staged key rotation or future envelope lanes
 - `HOSTED_ASSISTANT_*` config plus supported assistant provider API keys

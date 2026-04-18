@@ -11,7 +11,6 @@ import {
 } from "@murphai/gateway-core";
 import {
   deriveHostedExecutionErrorCode,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution";
 import type {
   HostedAssistantDeliveryEffect,
@@ -60,6 +59,13 @@ import {
   TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
 } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.js";
+import {
+  appendTestHostedWake,
+  commitTestHostedWakeCursor,
+  fetchTestHostedWakeBatch,
+  quarantineTestHostedWake,
+  readTestHostedWakeStatus,
+} from "./workers/test-hosted-wake-control.ts";
 
 const describe = baseDescribe.sequential;
 
@@ -1117,7 +1123,8 @@ describe("HostedUserRunner", () => {
 
   it("sends forwarded env and worker-only runtime config through the per-job runtime payload instead of the container start envelope", async () => {
     const fetchSpy = vi.fn(async (url, init) => {
-      const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
         init,
         url,
       });
@@ -1214,9 +1221,16 @@ describe("HostedUserRunner", () => {
   it("reschedules the next wake when alarm handling requires the hosted web callback path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url, init) => {
+    const fetchSpy = vi.fn(async (url, init) => {
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
+        init,
+        url,
+      });
+      if (hostedWakeResponse) {
+        return hostedWakeResponse;
+      }
+
         const payload = {
           bundles: {
             agentState: Buffer.from("agent-state").toString("base64"),
@@ -1235,11 +1249,11 @@ describe("HostedUserRunner", () => {
           requestBody: JSON.parse(String(init?.body)),
         });
 
-        return new Response(JSON.stringify(serializeRunnerSuccessPayload(payload)), {
-          status: 200,
-        });
-      }),
-    );
+      return new Response(JSON.stringify(serializeRunnerSuccessPayload(payload)), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
     await seedRunnerQueueState({
       runtimeBootstrapped: true,
       bucket,
@@ -1710,7 +1724,8 @@ describe("HostedUserRunner", () => {
     });
     const fetchSpy = vi.fn()
       .mockImplementation(async (url, init) => {
-        const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+        const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+          bucket,
           init,
           url,
         });
@@ -1727,7 +1742,8 @@ describe("HostedUserRunner", () => {
         throw new Error("finalize failed");
       })
       .mockImplementationOnce(async (url, init) => {
-        const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+        const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+          bucket,
           init,
           url,
         });
@@ -2214,7 +2230,8 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url, init) => {
-        const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+        const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+          bucket,
           init,
           url,
         });
@@ -2439,7 +2456,8 @@ describe("HostedUserRunner", () => {
       storage,
       userId: "member_123",
     });
-    const fetchMock = vi.fn(async (url, init) => maybeCreateHostedWakeControlResponse({
+    const fetchMock = vi.fn(async (url, init) => await maybeCreateHostedWakeControlResponse({
+      bucket,
       init,
       url,
     }));
@@ -2459,7 +2477,8 @@ describe("HostedUserRunner", () => {
 
   it("reports duplicate consumed events through the shared dispatch outcome surface", async () => {
     const fetchMock = vi.fn(async (url, init) => {
-      const hostedWakeResponse = maybeCreateHostedWakeControlResponse({
+      const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
+        bucket,
         init,
         url,
       });
@@ -3704,12 +3723,14 @@ function serializeRunnerCommittedPayload(
   };
 }
 
-function maybeCreateHostedWakeControlResponse(input: {
+async function maybeCreateHostedWakeControlResponse(input: {
+  bucket: ReturnType<typeof createBucket>;
   init?: RequestInit;
   url: unknown;
-}): Response | null {
+}): Promise<Response | null> {
   const url = String(input.url);
-  const now = "2026-03-26T12:00:00.000Z";
+  const headers = new Headers(input.init?.headers);
+  const userId = headers.get("x-hosted-execution-user-id") ?? "member_123";
 
   if (url.endsWith("/api/internal/hosted-wake/append")) {
     const requestBody = JSON.parse(String(input.init?.body ?? "{}")) as {
@@ -3723,46 +3744,47 @@ function maybeCreateHostedWakeControlResponse(input: {
       };
     };
     const dispatch = requestBody.dispatch;
-    const userId = typeof dispatch?.event?.userId === "string" ? dispatch.event.userId : "member_123";
-    const eventId = typeof dispatch?.eventId === "string" ? dispatch.eventId : "evt_hosted_wake";
-    const occurredAt = typeof dispatch?.occurredAt === "string" ? dispatch.occurredAt : now;
-    const kind = typeof dispatch?.event?.kind === "string" ? dispatch.event.kind : "assistant.cron.tick";
+    if (!dispatch) {
+      throw new TypeError("Expected hosted wake append request to include a dispatch.");
+    }
 
-    return Response.json({
-      duplicate: false,
-      inserted: true,
-      updatedExisting: false,
-      wake: {
-        behavior: "ordered",
-        createdAt: now,
-        dedupeKey: eventId,
-        id: "wake_1",
-        kind,
-        occurredAt,
-        payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-        seq: "1",
-        updatedAt: now,
-        userId,
-      },
-    });
+    return Response.json(await appendTestHostedWake({
+      bucket: input.bucket.api,
+      dispatch,
+    }));
+  }
+
+  if (url.endsWith("/api/internal/hosted-wake/unseen")) {
+    return Response.json(await fetchTestHostedWakeBatch({
+      afterSeq: null,
+      body: JSON.parse(String(input.init?.body ?? "{}")),
+      bucket: input.bucket.api,
+      userId,
+    }));
+  }
+
+  if (url.endsWith("/api/internal/hosted-wake/commit")) {
+    return Response.json(await commitTestHostedWakeCursor({
+      body: JSON.parse(String(input.init?.body ?? "{}")),
+      bucket: input.bucket.api,
+      userId,
+    }));
+  }
+
+  if (url.endsWith("/api/internal/hosted-wake/quarantine")) {
+    return Response.json(await quarantineTestHostedWake({
+      body: JSON.parse(String(input.init?.body ?? "{}")),
+      bucket: input.bucket.api,
+      userId,
+    }));
   }
 
   if (url.endsWith("/api/internal/hosted-wake/status")) {
-    const requestBody = JSON.parse(String(input.init?.body ?? "{}")) as { eventId?: unknown };
-
-    return Response.json({
-      cursor: {
-        committedSeq: "0",
-        createdAt: now,
-        nextSeq: "1",
-        snapshotRef: null,
-        updatedAt: now,
-        userId: "member_123",
-        version: "0",
-      },
-      ...(typeof requestBody.eventId === "string" ? { dispatchState: "queued" } : {}),
-      pendingWakeCount: 0,
-    });
+    return Response.json(await readTestHostedWakeStatus({
+      body: JSON.parse(String(input.init?.body ?? "{}")),
+      bucket: input.bucket.api,
+      userId,
+    }));
   }
 
   return null;
