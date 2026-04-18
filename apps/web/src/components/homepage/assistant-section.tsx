@@ -6,12 +6,12 @@ const PRIVACY_ITEMS = [
     title: "No data sales",
   },
   {
-    desc: "End-to-end encryption. Only you access your data.",
+    desc: "Strong encryption. Open source. Only you access your data.",
     title: "Encrypted by default",
   },
   {
-    desc: "Your chats don’t train models.",
-    title: "Private conversations",
+    desc: "Your chats don’t train models. Zero data retention.",
+    title: "Private conversations.",
   },
 ] as const;
 
@@ -69,9 +69,7 @@ export function AssistantSection() {
             <div className="mt-10 grid gap-4">
               {PRIVACY_ITEMS.map((item) => (
                 <div key={item.title} className="flex gap-3">
-                  <span className="mt-0.5 text-[0.5rem] text-[#5a6e32]">
-                    ◆
-                  </span>
+                  <span className="mt-0.5 text-[0.5rem] text-[#5a6e32]">◆</span>
                   <div>
                     <p className="text-sm font-medium text-[#f5f0e8]/70">
                       {item.title}
@@ -88,13 +86,13 @@ export function AssistantSection() {
           <div className="mx-auto w-full max-w-[340px]">
             <div className="overflow-hidden rounded-[2.5rem] border-[6px] border-[#f5f0e8]/10 bg-[#f5f0e8] shadow-2xl">
               <div className="flex items-center justify-between bg-[#f5f0e8] px-7 pb-1 pt-3">
-                <span className="text-[0.6875rem] font-semibold text-[#2d3436]">
+                <span className="text-[0.75rem] font-semibold text-[#2d3436]">
                   9:41
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5">
                   <svg
-                    width="16"
-                    height="12"
+                    width="13"
+                    height="9"
                     viewBox="0 0 16 12"
                     fill="none"
                     aria-hidden="true"
@@ -134,8 +132,9 @@ export function AssistantSection() {
                     />
                   </svg>
                   <svg
-                    width="16"
-                    height="11"
+                    className="translate-y-px"
+                    width="22"
+                    height="12"
                     viewBox="0 0 16 11"
                     fill="none"
                     aria-hidden="true"
@@ -160,7 +159,7 @@ export function AssistantSection() {
                     <rect
                       x="1.5"
                       y="1.5"
-                      width="8"
+                      width="11"
                       height="6"
                       rx="0.5"
                       fill="#2d3436"
