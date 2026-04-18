@@ -157,7 +157,7 @@ export function buildHostedAssistantCronWakeEventId(input: {
 }
 
 function buildHostedWakeDedupeKey(wake: HostedExecutionWake): string {
-  return buildHostedWakeDedupeKeyFromEventId(wake.eventId, wake.kind);
+  return buildHostedWakeDedupeKeyFromEventId(wake.eventId);
 }
 
 function buildHostedWakeCoalescingKey(wake: HostedExecutionWake): string {
@@ -170,10 +170,8 @@ function buildHostedWakeCoalescingKey(wake: HostedExecutionWake): string {
 
 function buildHostedWakeDedupeKeyFromEventId(
   eventId: string,
-  eventKind = "unknown",
 ): string {
-  // Keep the legacy on-disk prefix until the shared contract and Cloudflare callers move.
-  return `dispatch:${eventKind}:${eventId}`;
+  return eventId;
 }
 
 function resolveHostedWakePayloadSchema(wake: HostedExecutionWake): HostedWakePayloadSchema {

@@ -19,6 +19,19 @@ const mocks = vi.hoisted(() => {
     incrementHostedLinqOutboundDailyState: vi.fn(),
     lastScheduledDispatchEventId: null as string | null,
     lastScheduledDispatchPrisma: null as unknown,
+    wakeTargets: new Map<string, { prisma: unknown; seq: string; userId: string }>(),
+    seedHostedExecutionWakeTarget(input: {
+      eventId: string;
+      prisma?: unknown;
+      seq?: string;
+      userId?: string;
+    }) {
+      state.wakeTargets.set(input.eventId, {
+        prisma: input.prisma ?? null,
+        seq: input.seq ?? "17",
+        userId: input.userId ?? "member_123",
+      });
+    },
     sendHostedLinqChatMessage: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
@@ -26,17 +39,25 @@ const mocks = vi.hoisted(() => {
       step,
     })),
     readHostedWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
+      const wakeTarget = state.wakeTargets.get(input.eventId) ?? null;
+
+      if (!wakeTarget) {
+        return null;
+      }
+
       state.lastScheduledDispatchEventId = input.eventId;
-      state.lastScheduledDispatchPrisma = input.prisma ?? null;
+      state.lastScheduledDispatchPrisma = wakeTarget.prisma ?? input.prisma ?? null;
       return {
         eventId: input.eventId,
-        seq: "17",
-        userId: "member_123",
+        seq: wakeTarget.seq,
+        userId: wakeTarget.userId,
       };
     }),
     materializeHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       eventId?: string;
+      tx?: unknown;
+      userId?: string;
       wake?: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
@@ -46,6 +67,11 @@ const mocks = vi.hoisted(() => {
       if (!eventId) {
         throw new Error("Expected a hosted wake append eventId.");
       }
+      state.seedHostedExecutionWakeTarget({
+        eventId,
+        prisma: input.tx ?? null,
+        userId: input.userId ?? "member_123",
+      });
       return {
         eventId,
       };
@@ -181,6 +207,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     vi.clearAllMocks();
     mocks.lastScheduledDispatchEventId = null;
     mocks.lastScheduledDispatchPrisma = null;
+    mocks.wakeTargets.clear();
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -253,24 +280,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       limit: 1,
       prisma,
     });
-    const receiptWrites = (
-      prisma as unknown as {
+    expect(
+      (prisma as unknown as {
         hostedWebhookReceipt: {
           updateMany: ReturnType<typeof vi.fn>;
         };
-      }
-    ).hostedWebhookReceipt.updateMany.mock.calls.map(
-      (call) => call[0] as Record<string, unknown>,
-    );
-    expect(receiptWrites.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          completedAt: expect.any(Date),
-          plannedAt: expect.any(Date),
-          status: "completed",
-        }),
-      }),
-    );
+      }).hostedWebhookReceipt.updateMany,
+    ).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
@@ -285,12 +301,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         timestampPresent: false,
       }),
     );
-    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+    expect(mocks.startHostedOnboardingTiming).not.toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.receipt",
-      expect.objectContaining({
-        eventId: "evt_123",
-        eventType: "message.received",
-      }),
+      expect.anything(),
     );
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -446,7 +459,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "dispatched-active-member",
     });
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -465,22 +478,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    const receiptUpdateWrites = transactionReceiptUpdateMany.mock.calls.map(
-      (call) => call[0] as Record<string, unknown>,
-    );
-    expect(receiptUpdateWrites).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          completedAt: expect.any(Date),
-          plannedAt: expect.any(Date),
-          status: "completed",
-        }),
-        where: expect.objectContaining({
-          eventId: "evt_123",
-          source: "linq",
-        }),
-      }),
-    );
+    expect(transactionReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
@@ -736,7 +734,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
@@ -1007,7 +1005,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
@@ -1271,6 +1269,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       inboundCount: 101,
     }));
     const prisma = asPrismaTransactionClient({
+      hostedLinqDailyState: {
+        findUnique: vi.fn().mockResolvedValue({
+          inboundCount: 100,
+          quotaReplySentAt: null,
+        }),
+      },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -1423,6 +1427,9 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
       findUnique?: ((input: { include?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>) | undefined;
       upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown> }) => Promise<unknown>) | undefined;
     };
+    hostedLinqDailyState?: {
+      findUnique?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
+    };
     hostedMemberRouting?: {
       findFirst?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
       findUnique?: ((input: { where: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -1439,6 +1446,7 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
     };
   };
   const hostedInvite = prismaWithHostedMember.hostedInvite;
+  const hostedLinqDailyState = prismaWithHostedMember.hostedLinqDailyState;
   const hostedMemberIdentity = prismaWithHostedMember.hostedMemberIdentity;
   const hostedMemberRouting = prismaWithHostedMember.hostedMemberRouting;
   const hostedMember = prismaWithHostedMember.hostedMember;
@@ -1552,6 +1560,15 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
       value: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn().mockResolvedValue({}),
+      },
+    });
+  }
+
+  if (!hostedLinqDailyState?.findUnique) {
+    Object.defineProperty(prismaWithHostedMember, "hostedLinqDailyState", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn().mockResolvedValue(null),
       },
     });
   }

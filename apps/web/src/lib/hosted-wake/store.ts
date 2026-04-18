@@ -919,16 +919,11 @@ async function findHostedWakeByEventIdTx(input: {
     return null;
   }
 
-  const rows = await input.tx.hostedWake.findMany({
+  return input.tx.hostedWake.findUnique({
     where: {
-      dedupeKey: {
-        endsWith: `:${input.eventId}`,
-        startsWith: "dispatch:",
-      },
+      dedupeKey: input.eventId,
     },
   });
-
-  return rows.find((row) => resolveHostedWakeEventId(row) === input.eventId) ?? null;
 }
 
 async function findUncommittedWakeByCoalescingKeyTx(input: {
@@ -977,15 +972,5 @@ function assertHostedWakeUserMatch(
 function resolveHostedWakeEventId(
   wake: Pick<HostedWakeRow, "dedupeKey" | "id" | "kind">,
 ): string {
-  if (wake.dedupeKey) {
-    const dispatchPrefix = `dispatch:${wake.kind}:`;
-
-    if (wake.dedupeKey.startsWith(dispatchPrefix)) {
-      return wake.dedupeKey.slice(dispatchPrefix.length);
-    }
-
-    return wake.dedupeKey;
-  }
-
-  return wake.id;
+  return wake.dedupeKey ?? wake.id;
 }
