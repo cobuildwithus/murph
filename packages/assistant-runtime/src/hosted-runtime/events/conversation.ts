@@ -13,19 +13,19 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
-export async function processHostedConversationMessageWake(input: {
+export async function ingestHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
   vaultRoot: string;
 }): Promise<void> {
-  const capture = await resolveHostedConversationCapture(input);
+  const capture = await buildHostedInboxCaptureForConversationWake(input);
 
   await withHostedInboxPipeline(input.vaultRoot, async (pipeline) => {
     await pipeline.processCapture(capture);
   });
 }
 
-async function resolveHostedConversationCapture(input: {
+async function buildHostedInboxCaptureForConversationWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
 }) {
@@ -44,5 +44,5 @@ async function resolveHostedConversationCapture(input: {
     );
   }
 
-  throw new TypeError("Unsupported hosted message wake kind.");
+  throw new TypeError("Unsupported hosted conversation message wake kind.");
 }

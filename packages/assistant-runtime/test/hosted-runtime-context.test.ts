@@ -295,7 +295,7 @@ test("hosted channel state reconciliation preserves unmanaged entries while prun
   }
 });
 
-test("hosted dispatch context still requires member activation bootstrap before follow-up events", async () => {
+test("hosted wake context still requires member activation bootstrap before follow-up events", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
@@ -529,7 +529,7 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
   }
 });
 
-test("hosted Linq inbound dispatch self-heals managed Linq auto-reply when the hosted assistant is configured", async () => {
+test("hosted Linq inbound wake self-heals managed Linq auto-reply when the hosted assistant is configured", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
   const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
@@ -592,7 +592,7 @@ test("hosted Linq inbound dispatch self-heals managed Linq auto-reply when the h
   }
 });
 
-test("hosted Linq inbound dispatch self-heal preserves existing managed channels", async () => {
+test("hosted Linq inbound wake self-heal preserves existing managed channels", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
   const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
@@ -657,7 +657,7 @@ test("hosted Linq inbound dispatch self-heal preserves existing managed channels
   }
 });
 
-test("hosted Linq inbound dispatch self-heal does not enable auto-reply when the hosted assistant is not configured", async () => {
+test("hosted Linq inbound wake self-heal does not enable auto-reply when the hosted assistant is not configured", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
@@ -710,7 +710,7 @@ test("hosted Linq inbound dispatch self-heal does not enable auto-reply when the
   }
 });
 
-test("hosted dispatch context does not change auto-reply state on non-channel follow-up events", async () => {
+test("hosted wake context does not change auto-reply state on non-channel follow-up events", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {

@@ -283,7 +283,7 @@ beforeEach(() => {
 });
 
 describe("executeHostedWakeForCommit", () => {
-  it("runs the dispatch and maintenance loops, snapshots the workspace, and summarizes the commit", async () => {
+  it("runs wake handling and system maintenance, snapshots the workspace, and summarizes the commit", async () => {
     mocks.listHostedBundleArtifacts.mockReturnValue([
       {
         path: "vault/raw/already-materialized.bin",
@@ -525,7 +525,7 @@ describe("executeHostedWakeForCommit", () => {
     );
   });
 
-  it("skips the generic maintenance loop when dispatch handlers do not require it", async () => {
+  it("skips the generic maintenance loop when the conversation lane stays on wake follow-up", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
       followupExecution: "conversation-message",
@@ -705,7 +705,7 @@ describe("executeHostedWakeForCommit", () => {
     );
   });
 
-  it("preserves a pending assistant wake when dispatch handlers skip generic maintenance", async () => {
+  it("preserves a pending assistant wake when the conversation lane skips generic maintenance", async () => {
     vi.useFakeTimers();
 
     try {
@@ -1096,14 +1096,14 @@ describe("executeHostedWakeForCommit", () => {
       expect.objectContaining({
         level: "warn",
         message:
-          "Hosted runtime could not resolve the preserved assistant wake while skipping maintenance; continuing without it.",
+          "Hosted runtime could not resolve the preserved assistant wake after conversation follow-up; continuing without it.",
       }),
     );
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
         message:
-          "Hosted runtime could not resolve the preserved device-sync wake while skipping maintenance; continuing without it.",
+          "Hosted runtime could not resolve the preserved device-sync wake after conversation follow-up; continuing without it.",
       }),
     );
   });

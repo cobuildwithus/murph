@@ -43,11 +43,11 @@ vi.mock("@murphai/operator-config/telegram-runtime", () => ({
 }));
 
 import {
-  startHostedDispatchTypingIndicator,
-  stopHostedDispatchTypingIndicator,
+  startHostedWakeTypingIndicator,
+  stopHostedWakeTypingIndicator,
 } from "../src/hosted-runtime/typing.ts";
 
-function createLinqDispatch() {
+function createLinqWake() {
   return buildHostedExecutionLinqConversationMessageWake({
     eventId: "evt_linq_typing",
     linqEvent: {
@@ -60,7 +60,7 @@ function createLinqDispatch() {
   });
 }
 
-function createTelegramDispatch() {
+function createTelegramWake() {
   return buildHostedExecutionTelegramConversationMessageWake({
     eventId: "evt_telegram_typing",
     occurredAt: "2026-04-08T00:00:00.000Z",
@@ -73,7 +73,7 @@ function createTelegramDispatch() {
   });
 }
 
-function createTelegramDispatchWithTarget(threadId: string) {
+function createTelegramWakeWithTarget(threadId: string) {
   return buildHostedExecutionTelegramConversationMessageWake({
     eventId: "evt_telegram_typing",
     occurredAt: "2026-04-08T00:00:00.000Z",
@@ -104,8 +104,8 @@ beforeEach(() => {
 });
 
 describe("hosted runtime typing helpers", () => {
-  it("returns null for dispatches that do not support typing indicators", () => {
-    const indicator = startHostedDispatchTypingIndicator({
+  it("returns null for wakes that do not support typing indicators", () => {
+    const indicator = startHostedWakeTypingIndicator({
       wake: buildHostedExecutionAssistantCronTickWake({
         eventId: "evt_cron",
         occurredAt: "2026-04-08T00:00:00.000Z",
@@ -123,8 +123,8 @@ describe("hosted runtime typing helpers", () => {
 
   it("treats a missing typing indicator as a no-op when stopping", async () => {
     await expect(
-      stopHostedDispatchTypingIndicator({
-        wake: createTelegramDispatch(),
+      stopHostedWakeTypingIndicator({
+        wake: createTelegramWake(),
         run: null,
         typingIndicator: null,
       }),
@@ -138,8 +138,8 @@ describe("hosted runtime typing helpers", () => {
       throw new Error("invalid linq payload");
     });
 
-    const indicator = startHostedDispatchTypingIndicator({
-      wake: createLinqDispatch(),
+    const indicator = startHostedWakeTypingIndicator({
+      wake: createLinqWake(),
       run: null,
       runtimeEnv: {
         LINQ_API_TOKEN: "linq-token",
@@ -162,8 +162,8 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("starts and stops Linq typing with the parsed chat id and runtime env", async () => {
-    const indicator = startHostedDispatchTypingIndicator({
-      wake: createLinqDispatch(),
+    const indicator = startHostedWakeTypingIndicator({
+      wake: createLinqWake(),
       run: {
         attempt: 1,
         runId: "run_123",
@@ -221,8 +221,8 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("logs a null elapsed time when the hosted run startedAt is invalid", async () => {
-    const indicator = startHostedDispatchTypingIndicator({
-      wake: createLinqDispatch(),
+    const indicator = startHostedWakeTypingIndicator({
+      wake: createLinqWake(),
       run: {
         attempt: 1,
         runId: "run_invalid_started_at",
@@ -265,8 +265,8 @@ describe("hosted runtime typing helpers", () => {
       }),
     );
 
-    const indicator = startHostedDispatchTypingIndicator({
-      wake: createTelegramDispatch(),
+    const indicator = startHostedWakeTypingIndicator({
+      wake: createTelegramWake(),
       run: null,
       runtimeEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -311,13 +311,13 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("logs fallback target details when the Telegram thread target is not parseable", async () => {
-    const wake = createTelegramDispatch();
+    const wake = createTelegramWake();
     if (wake.kind !== "conversation.message" || wake.message.channel !== "telegram") {
       throw new Error("Expected a Telegram message wake.");
     }
     wake.message.telegramMessage.threadId = "123:business::dm-topic:9";
 
-    const indicator = startHostedDispatchTypingIndicator({
+    const indicator = startHostedWakeTypingIndicator({
       wake,
       run: null,
       runtimeEnv: {
@@ -362,8 +362,8 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("logs canonical Telegram target details for business direct-message topics", async () => {
-    const indicator = startHostedDispatchTypingIndicator({
-      wake: createTelegramDispatchWithTarget("-1001234567890:business:biz-42:dm-topic:9"),
+    const indicator = startHostedWakeTypingIndicator({
+      wake: createTelegramWakeWithTarget("-1001234567890:business:biz-42:dm-topic:9"),
       run: null,
       runtimeEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -397,8 +397,8 @@ describe("hosted runtime typing helpers", () => {
     const startError = new Error("telegram typing rejected");
     mocks.startTelegramTypingSession.mockRejectedValue(startError);
 
-    const indicator = startHostedDispatchTypingIndicator({
-      wake: createTelegramDispatchWithTarget("123:topic:abc"),
+    const indicator = startHostedWakeTypingIndicator({
+      wake: createTelegramWakeWithTarget("123:topic:abc"),
       run: null,
       runtimeEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -436,8 +436,8 @@ describe("hosted runtime typing helpers", () => {
       }),
     });
 
-    const indicator = startHostedDispatchTypingIndicator({
-      wake: createTelegramDispatch(),
+    const indicator = startHostedWakeTypingIndicator({
+      wake: createTelegramWake(),
       run: null,
       runtimeEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -462,8 +462,8 @@ describe("hosted runtime typing helpers", () => {
     const stopError = new Error("wrapper stop failed");
 
     await expect(
-      stopHostedDispatchTypingIndicator({
-        wake: createLinqDispatch(),
+      stopHostedWakeTypingIndicator({
+        wake: createLinqWake(),
         run: null,
         typingIndicator: {
           channelLabel: "Linq",

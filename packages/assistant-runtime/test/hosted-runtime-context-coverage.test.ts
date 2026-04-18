@@ -196,7 +196,7 @@ async function writeAutomationState(
 }
 
 describe("hosted runtime context coverage", () => {
-  it("returns null for non-activation dispatches after bootstrap and skips channel reconciliation", async () => {
+  it("returns null for non-activation wakes after bootstrap and skips channel reconciliation", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {

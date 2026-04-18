@@ -13,7 +13,7 @@ import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedWakeContext,
 } from "./context.ts";
-import { processHostedConversationMessageWake } from "./events/conversation.ts";
+import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
 import { handleHostedShareAcceptedWake } from "./events/share.ts";
 import type {
   HostedWakeEffect,
@@ -98,7 +98,7 @@ async function executeHostedConversationWake(input: {
   >;
   vaultRoot: string;
 }): Promise<HostedWakeOutcome> {
-  await processHostedConversationMessageWake(input);
+  await ingestHostedConversationMessageWake(input);
 
   return createNoopWakeEffect({
     followupExecution: "conversation-message",

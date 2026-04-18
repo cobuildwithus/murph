@@ -164,7 +164,7 @@ async function bootstrapHostedAssistantRuntimeState(
       linqWebhookSecretConfigured: typeof runtimeEnv.LINQ_WEBHOOK_SECRET === "string"
         && runtimeEnv.LINQ_WEBHOOK_SECRET.length > 0,
     },
-    dispatch: wake,
+    wake,
     message: "Hosted assistant bootstrap evaluated.",
     phase: "dispatch.running",
   });
@@ -222,7 +222,7 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
         channel: target.channel,
         reason: !assistantConfigured ? "assistant_unconfigured" : "channel_unavailable",
       },
-      dispatch: wake,
+      wake,
       message: "Hosted assistant auto-reply self-heal skipped.",
       phase: "dispatch.running",
     });
@@ -257,7 +257,7 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
       previouslyEnabled: beforeEnabled,
       selfHealEnabled: afterEnabled,
     },
-    dispatch: wake,
+    wake,
     message: "Hosted assistant auto-reply self-heal evaluated.",
     phase: "dispatch.running",
   });
@@ -375,7 +375,7 @@ export async function reconcileHostedAssistantChannelState(
         ).join(","),
         desiredAutoReplyChannels: desiredChannels.join(","),
       },
-      dispatch: options.wake,
+      wake: options.wake,
       message: "Hosted assistant auto-reply channels reconciled.",
       phase: "dispatch.running",
     });
