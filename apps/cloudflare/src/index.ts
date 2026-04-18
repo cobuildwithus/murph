@@ -12,8 +12,6 @@ import {
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionDispatchRequest,
-  type HostedExecutionDispatchResult,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 
@@ -192,16 +190,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
-  }
-
-  async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
-    return this.runner.dispatch(input);
-  }
-
-  async dispatchWithOutcome(
-    input: HostedExecutionDispatchRequest,
-  ): Promise<HostedExecutionDispatchResult> {
-    return this.runner.dispatchWithOutcome(input);
   }
 
   async wakeHostedWakes(input?: {

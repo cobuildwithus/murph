@@ -14,7 +14,6 @@ import {
   buildHostedStorageAad,
 } from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
-import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
@@ -140,14 +139,7 @@ describe("RunnerBundleSync", () => {
         sql,
       },
     };
-    const queueStore = new RunnerQueueStore(
-      state as never,
-      createHostedDispatchPayloadStore({
-        bucket: new MemoryEncryptedR2Bucket(),
-        key: createTestRootKey(51),
-        keyId: "k-test",
-      }),
-    );
+    const queueStore = new RunnerQueueStore(state as never);
     await queueStore.bootstrapUser("member_123");
 
     const missingRef = {

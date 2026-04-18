@@ -3,28 +3,26 @@ import type {
   HostedExecutionDispatchResult,
   HostedExecutionDispatchStatus,
   HostedExecutionDispatchRequest,
+  HostedExecutionWake,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
   buildHostedExecutionAssistantCronTickDispatch,
+  buildHostedExecutionDispatchFromWake,
+  buildHostedExecutionWakeFromDispatch,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import { isHostedMessageWakeDispatch } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionBundleRef,
-  parseHostedWakeDispatchPayload,
+  parseHostedWakeExecutionPayload,
 } from "@murphai/hosted-execution/parsers";
 import {
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.js";
-import {
-  createHostedDispatchPayloadStore,
-  type HostedDispatchPayloadStore,
-} from "./dispatch-payload-store.js";
-import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
+import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
   type HostedExecutionCommitPayload,
@@ -41,7 +39,7 @@ import {
   createRunnerCommitRecovery,
 } from "./user-runner/runner-commit-recovery.js";
 import {
-  appendHostedWakeDispatchInWeb,
+  appendHostedWakeInWeb,
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
   quarantineHostedWakeInWeb,
@@ -71,13 +69,12 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
 const HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS = 5_000;
-const HOSTED_WAKE_BACKPRESSURE_RETRY_DELAY_MS = 250;
 const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
 const HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH = "invalid-dispatch-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "dispatch-user-mismatch";
 
 interface HostedWakeDrainOutcome {
-  dispatch: HostedExecutionDispatchRequest | null;
+  wake: HostedExecutionWake | null;
   seq: bigint;
   state: HostedWakeDrainState;
 }
@@ -131,34 +128,7 @@ export class HostedUserRunner {
       teeAutomationRecipientPublicKey: env.teeAutomationRecipientPublicKey,
     });
     this.userKeyStore = userKeyStore;
-    const runner = this;
-    const dispatchPayloadStore: HostedDispatchPayloadStore = {
-      deleteDispatchPayload: async (ref) => {
-        if (!bucket.delete) {
-          return;
-        }
-
-        await bucket.delete(ref.stagedPayloadId);
-      },
-
-      readDispatchPayload: async (ref) => {
-        const userId = await runner.tryReadBoundUserId();
-        if (!userId) {
-          throw new Error("Hosted runner user is not initialized.");
-        }
-
-        return (await runner.resolveUserDispatchPayloadStore(userId)).readDispatchPayload(ref);
-      },
-
-      writeDispatchPayload: async (dispatch) => {
-        return (await runner.resolveUserDispatchPayloadStore(dispatch.event.userId))
-          .writeDispatchPayload(dispatch);
-      },
-    };
-    this.queueStore = new RunnerQueueStore(
-      state,
-      dispatchPayloadStore,
-    );
+    this.queueStore = new RunnerQueueStore(state);
     this.scheduler = new RunnerScheduler(this.queueStore, state);
     this.dispatchProcessor = new RunnerDispatchProcessor({
       applyHostedTransition: <T>(input: {
@@ -238,21 +208,6 @@ export class HostedUserRunner {
     return stores;
   }
 
-  private async resolveUserDispatchPayloadStore(userId: string): Promise<HostedDispatchPayloadStore> {
-    const crypto = this.runnerStores?.userId === userId
-      ? this.runnerStores.crypto
-      : await this.userKeyStore.requireUserCryptoContext(userId, {
-        reason: "dispatch-payload-access",
-      });
-
-    return createHostedDispatchPayloadStore({
-      bucket: this.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    });
-  }
-
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     await this.queueStore.bootstrapUser(userId);
     return { userId };
@@ -302,11 +257,11 @@ export class HostedUserRunner {
         reason: "alarm",
         userId: record.userId,
       });
-      const append = await appendHostedWakeDispatchInWeb({
+      const append = await appendHostedWakeInWeb({
         baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: record.userId,
         callbackSigning: this.env.webCallbackSigning,
-        dispatch,
+        wake: buildHostedExecutionWakeFromDispatch(dispatch),
         timeoutMs: this.env.runnerTimeoutMs,
       });
       await this.wakeHostedWakes({
@@ -336,11 +291,11 @@ export class HostedUserRunner {
   ): Promise<HostedExecutionUserStatus> {
     await this.ensureManagedUserCryptoForActivationIfNeeded(input);
     await this.queueStore.bootstrapUser(input.event.userId);
-    const append = await appendHostedWakeDispatchInWeb({
+    const append = await appendHostedWakeInWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: input.event.userId,
       callbackSigning: this.env.webCallbackSigning,
-      dispatch: input,
+      wake: buildHostedExecutionWakeFromDispatch(input),
       timeoutMs: this.env.runnerTimeoutMs,
     });
 
@@ -353,8 +308,12 @@ export class HostedUserRunner {
     input: HostedExecutionDispatchRequest,
   ): Promise<HostedExecutionDispatchResult> {
     const status = await this.dispatch(input);
-    const event = await this.readHostedDispatchStatus(input)
-      ?? buildShimDispatchStatusFallback(input, status);
+    const event = await this.readHostedDispatchStatus(input) ?? {
+      eventId: input.eventId,
+      lastError: null,
+      state: "queued" as const,
+      userId: input.event.userId,
+    };
 
     return {
       event,
@@ -425,11 +384,6 @@ export class HostedUserRunner {
       }
 
       if (!highestCommittedWakeSeq || !expectedVersion) {
-        if (stoppingState === "backpressured") {
-          await sleep(HOSTED_WAKE_BACKPRESSURE_RETRY_DELAY_MS);
-          continue;
-        }
-
         break;
       }
 
@@ -467,10 +421,7 @@ export class HostedUserRunner {
       }
 
       if (advancedWakeCount < batch.wakes.length) {
-        if (
-          stoppingState === "poisoned"
-          || (stoppingState === "backpressured" && advancedWakeCount > 0)
-        ) {
+        if (stoppingState === "poisoned") {
           continue;
         }
 
@@ -513,16 +464,16 @@ export class HostedUserRunner {
         userId,
       });
       return {
-        dispatch: null,
+        wake: null,
         seq,
         state: "quarantined",
       };
     }
 
-    let dispatch: HostedExecutionDispatchRequest;
+    let hostedWake: HostedExecutionWake;
 
     try {
-      dispatch = parseHostedWakeDispatchPayload({
+      hostedWake = parseHostedWakeExecutionPayload({
         kind: wake.kind,
         occurredAt: wake.occurredAt,
         payloadJson: wake.payloadJson,
@@ -542,15 +493,15 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH,
       )
-        ? { dispatch: null, seq, state: "quarantined" }
-        : { dispatch: null, seq, state: "backpressured" };
+        ? { wake: null, seq, state: "quarantined" }
+        : { wake: null, seq, state: "backpressured" };
     }
 
-    if (dispatch.event.userId !== userId) {
+    if (hostedWake.userId !== userId) {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
         level: "warn",
-        message: `Hosted wake seq ${wake.seq} is bound to ${dispatch.event.userId}, not ${userId}.`,
+        message: `Hosted wake seq ${wake.seq} is bound to ${hostedWake.userId}, not ${userId}.`,
         phase: "dispatch.running",
         userId,
       });
@@ -559,17 +510,19 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
       )
-        ? { dispatch: null, seq, state: "quarantined" }
-        : { dispatch: null, seq, state: "backpressured" };
+        ? { wake: null, seq, state: "quarantined" }
+        : { wake: null, seq, state: "backpressured" };
     }
 
-    await this.ensureManagedUserCryptoForActivationIfNeeded(dispatch);
-    const state = isHostedMessageWakeDispatch(dispatch)
-      ? await this.dispatchHostedMessageWake(dispatch)
-      : await this.dispatchHostedSystemWake(dispatch);
+    await this.ensureManagedUserCryptoForActivationIfNeeded(
+      buildHostedExecutionDispatchFromWake(hostedWake),
+    );
+    const state = hostedWake.kind === "conversation.message"
+      ? await this.dispatchHostedMessageWake(hostedWake)
+      : await this.dispatchHostedSystemWake(hostedWake);
 
     return {
-      dispatch,
+      wake: hostedWake,
       seq,
       state,
     };
@@ -605,17 +558,17 @@ export class HostedUserRunner {
   }
 
   private async dispatchHostedMessageWake(
-    dispatch: HostedExecutionDispatchRequest,
+    wake: HostedExecutionWake,
   ): Promise<HostedWakeDrainState> {
-    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch, {
+    return this.dispatchProcessor.executeNativeWakeDispatch(wake, {
       holdLeaseUntilCleanup: true,
     });
   }
 
   private async dispatchHostedSystemWake(
-    dispatch: HostedExecutionDispatchRequest,
+    wake: HostedExecutionWake,
   ): Promise<HostedWakeDrainState> {
-    return this.dispatchProcessor.executeNativeWakeDispatch(dispatch, {
+    return this.dispatchProcessor.executeNativeWakeDispatch(wake, {
       holdLeaseUntilCleanup: true,
     });
   }
@@ -626,7 +579,7 @@ export class HostedUserRunner {
   }): Promise<void> {
     const committedThroughSeq = BigInt(input.committedCursor.committedSeq);
     const committedOutcomes = input.dispatches.filter((outcome) =>
-      outcome.dispatch && outcome.seq <= committedThroughSeq
+      outcome.wake && outcome.seq <= committedThroughSeq
     );
 
     if (committedOutcomes.length === 0) {
@@ -641,7 +594,7 @@ export class HostedUserRunner {
     for (const outcome of committedOutcomes) {
       try {
         const finalizedCommit = await this.dispatchProcessor.finalizeNativeWakeDispatchAfterCursorCommit({
-          dispatch: outcome.dispatch!,
+          wake: outcome.wake!,
         });
 
         if (outcome === finalOutcome) {
@@ -650,17 +603,17 @@ export class HostedUserRunner {
         }
 
         await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
-          dispatch: outcome.dispatch!,
+          wake: outcome.wake!,
         });
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "hosted.user-runner",
-          dispatch: outcome.dispatch!,
+          dispatch: outcome.wake!,
           error,
           level: "warn",
           message: "Hosted wake finalization failed after the cursor had already advanced.",
           phase: "completed",
-          userId: outcome.dispatch!.event.userId,
+          userId: outcome.wake!.userId,
         });
       }
     }
@@ -668,7 +621,7 @@ export class HostedUserRunner {
     try {
       if (!finalCommittedResult) {
         await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
-          dispatch: finalOutcome.dispatch!,
+          wake: finalOutcome.wake!,
         });
         return;
       }
@@ -686,7 +639,7 @@ export class HostedUserRunner {
             expectedVersion: input.committedCursor.version,
             snapshotRef: finalCommittedResult.bundleRef ?? null,
           },
-          boundUserId: finalOutcome.dispatch!.event.userId,
+          boundUserId: finalOutcome.wake!.userId,
           callbackSigning: this.env.webCallbackSigning,
           timeoutMs: this.env.runnerTimeoutMs,
         });
@@ -708,17 +661,17 @@ export class HostedUserRunner {
       }
 
       await this.dispatchProcessor.cleanupNativeWakeDispatchAfterCursorCommit({
-        dispatch: finalOutcome.dispatch!,
+        wake: finalOutcome.wake!,
       });
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
-        dispatch: finalOutcome.dispatch!,
+        dispatch: finalOutcome.wake!,
         error,
         level: "warn",
         message: "Hosted wake finalization failed after the cursor had already advanced.",
         phase: "completed",
-        userId: finalOutcome.dispatch!.event.userId,
+        userId: finalOutcome.wake!.userId,
       });
     }
   }
@@ -747,7 +700,9 @@ export class HostedUserRunner {
       return {
         ...baseStatus,
         backpressuredEventIds: [],
-        pendingEventCount: wakeStatus.pendingWakeCount,
+        pendingEventCount: wakeStatus.pendingWakeCount > 0
+          ? wakeStatus.pendingWakeCount
+          : baseStatus.pendingEventCount,
         poisonedEventIds: [],
         retryingEventId: wakeStatus.pendingWakeCount > 0 && baseStatus.inFlight
           ? (baseStatus.run?.eventId ?? baseStatus.lastEventId)
@@ -758,7 +713,7 @@ export class HostedUserRunner {
         component: "hosted.user-runner",
         error,
         level: "warn",
-        message: "Hosted wake status read failed; returning local shim status only.",
+        message: "Hosted wake status read failed; returning local runner status only.",
         phase: "dispatch.running",
         userId: record.userId,
       });
@@ -779,11 +734,16 @@ export class HostedUserRunner {
         callbackSigning: this.env.webCallbackSigning,
         timeoutMs: this.env.runnerTimeoutMs,
       });
+      const dispatchState = wakeStatus.dispatchState;
+
+      if (!dispatchState) {
+        return null;
+      }
 
       return {
         eventId: dispatch.eventId,
         lastError: null,
-        state: wakeStatus.dispatchState ?? "queued",
+        state: dispatchState,
         userId: dispatch.event.userId,
       };
     } catch (error) {
@@ -792,7 +752,7 @@ export class HostedUserRunner {
         dispatch,
         error,
         level: "warn",
-        message: "Hosted wake dispatch status read failed; falling back to local shim status.",
+        message: "Hosted wake dispatch status read failed; returning a conservative queued result.",
         phase: "dispatch.running",
         userId: dispatch.event.userId,
       });
@@ -977,33 +937,4 @@ function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | 
   } catch {
     return null;
   }
-}
-
-function buildShimDispatchStatusFallback(
-  input: HostedExecutionDispatchRequest,
-  status: HostedExecutionUserStatus,
-): HostedExecutionDispatchStatus {
-  const activeEventId = status.run?.eventId ?? status.lastEventId;
-
-  if (status.inFlight && activeEventId === input.eventId) {
-    return {
-      eventId: input.eventId,
-      lastError: status.lastError,
-      state: "backpressured",
-      userId: input.event.userId,
-    };
-  }
-
-  return {
-    eventId: input.eventId,
-    lastError: null,
-    state: "queued",
-    userId: input.event.userId,
-  };
-}
-
-function sleep(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
 }
