@@ -1,5 +1,5 @@
 import { type Prisma } from "@prisma/client";
-import { buildHostedWakeTelegramMessageReceivedPayload } from "@murphai/hosted-execution";
+import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 
 import { appendHostedExecutionWakeTx } from "../hosted-execution/dispatch-lifecycle";
 import {
@@ -71,17 +71,15 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   await appendHostedExecutionWakeTx({
-    eventId: buildHostedTelegramWebhookEventId(input.update),
-    kind: "telegram.message.received",
-    occurredAt: summary.occurredAt,
-    payload: buildHostedWakeTelegramMessageReceivedPayload({
+    wake: buildHostedExecutionTelegramConversationMessageWake({
       eventId: buildHostedTelegramWebhookEventId(input.update),
+      occurredAt: summary.occurredAt,
       telegramMessage,
+      userId: existingMember.id,
     }),
     sourceId: `telegram:${buildHostedTelegramWebhookEventId(input.update)}`,
     sourceType: "hosted_webhook_receipt",
     tx: input.prisma,
-    userId: existingMember.id,
   });
 
   return {

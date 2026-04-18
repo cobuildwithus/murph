@@ -43,7 +43,7 @@ import {
   createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookPlan,
 } from "./webhook-receipts";
-import { buildHostedWakeLinqMessageReceivedPayload } from "@murphai/hosted-execution";
+import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 
 export type HostedOnboardingLinqWebhookResponse = {
   duplicate?: boolean;
@@ -163,10 +163,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
 
     await appendHostedExecutionWakeTx({
-      eventId: input.event.event_id,
-      kind: "linq.message.received",
-      occurredAt,
-      payload: buildHostedWakeLinqMessageReceivedPayload({
+      wake: buildHostedExecutionLinqConversationMessageWake({
         eventId: input.event.event_id,
         linqEvent: sanitizeHostedLinqEventForStorage(
           minimizeLinqMessageReceivedEvent(messageEvent),
@@ -176,12 +173,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
           },
         ),
         linqMessageId: summary.messageId,
+        occurredAt,
         phoneLookupKey,
+        userId: existingMember.id,
       }),
       sourceId: `linq:${input.event.event_id}`,
       sourceType: "hosted_webhook_receipt",
       tx: input.prisma,
-      userId: existingMember.id,
     });
 
     return {

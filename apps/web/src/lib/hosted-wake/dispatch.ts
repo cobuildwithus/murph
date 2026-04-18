@@ -2,15 +2,14 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionDispatchLifecycleState,
   HostedExecutionDispatchRequest,
-  HostedWakeMessagePayload,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-  buildHostedWakeEmailMessageReceivedPayload,
-  buildHostedWakeLinqMessageReceivedPayload,
-  buildHostedWakeTelegramMessageReceivedPayload,
-  isHostedMessageWakeDispatch,
+  buildHostedExecutionDispatchFromWake,
+  buildHostedExecutionWakeFromDispatch,
+  isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -23,55 +22,72 @@ import {
   type AppendHostedWakeResult,
 } from "./store";
 
+type CanonicalHostedWakeInput =
+  | {
+      dispatch: HostedExecutionDispatchRequest;
+      tx: Prisma.TransactionClient;
+    }
+  | {
+      tx: Prisma.TransactionClient;
+      wake: HostedExecutionWake;
+    };
+
+export async function appendHostedOrderedExecutionWakeTx(input: CanonicalHostedWakeInput): Promise<AppendHostedWakeResult> {
+  const wake = normalizeHostedExecutionWakeInput(input);
+  return appendHostedOrderedWakeTx({
+    dedupeKey: buildHostedExecutionWakeDedupeKey(wake),
+    kind: wake.kind,
+    occurredAt: wake.occurredAt,
+    payload: buildHostedWakePayloadValue(wake),
+    payloadSchema: resolveHostedWakePayloadSchema(wake),
+    tx: input.tx,
+    userId: wake.userId,
+  });
+}
+
 export async function appendHostedOrderedWakePayloadTx(input: {
   dispatch: HostedExecutionDispatchRequest;
   tx: Prisma.TransactionClient;
 }): Promise<AppendHostedWakeResult> {
-  return appendHostedOrderedWakeTx({
-    dedupeKey: buildHostedWakeDispatchDedupeKey(input.dispatch),
-    kind: input.dispatch.event.kind,
-    occurredAt: input.dispatch.occurredAt,
-    payload: buildHostedWakePayloadValue(input.dispatch),
-    payloadSchema: resolveHostedWakePayloadSchema(input.dispatch),
-    tx: input.tx,
-    userId: input.dispatch.event.userId,
-  });
+  return appendHostedOrderedExecutionWakeTx(input);
 }
 
-export async function appendHostedExecutionWakePayloadTx(input: {
-  dispatch: HostedExecutionDispatchRequest;
-  tx: Prisma.TransactionClient;
-} | {
-  eventId: string;
-  kind: "linq.message.received" | "telegram.message.received";
-  occurredAt: string;
-  payload: HostedWakeMessagePayload;
-  tx: Prisma.TransactionClient;
-  userId: string;
-}): Promise<AppendHostedWakeResult> {
-  if (!("dispatch" in input)) {
-    return appendHostedOrderedWakeTx({
-      dedupeKey: buildHostedWakeDispatchDedupeKeyFromEventId(input.eventId, input.kind),
-      kind: input.kind,
-      occurredAt: input.occurredAt,
-      payload: input.payload,
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-      tx: input.tx,
-      userId: input.userId,
-    });
-  }
+export async function appendHostedExecutionWakePayloadTx(
+  input: CanonicalHostedWakeInput,
+): Promise<AppendHostedWakeResult> {
+  const wake = normalizeHostedExecutionWakeInput(input);
 
-  switch (input.dispatch.event.kind) {
+  switch (wake.kind) {
     case "device-sync.wake":
     case "member.channels.updated":
-      return appendHostedCoalescingWakePayloadTx({
-        coalescingKey: buildHostedWakeDispatchCoalescingKey(input.dispatch),
-        dispatch: input.dispatch,
+      return appendHostedCoalescingExecutionWakeTx({
+        coalescingKey: buildHostedExecutionWakeCoalescingKey(wake),
         tx: input.tx,
+        wake,
       });
     default:
-      return appendHostedOrderedWakePayloadTx(input);
+      return appendHostedOrderedExecutionWakeTx({
+        tx: input.tx,
+        wake,
+      });
   }
+}
+
+export async function appendHostedCoalescingExecutionWakeTx(input: {
+  coalescingKey: string;
+  tx: Prisma.TransactionClient;
+  wake: HostedExecutionWake;
+}): Promise<AppendHostedWakeResult> {
+  return appendHostedCoalescingWakeTx({
+    coalescingKey: input.coalescingKey,
+    dedupeKey: buildHostedExecutionWakeDedupeKey(input.wake),
+    kind: input.wake.kind,
+    occurredAt: input.wake.occurredAt,
+    payload: buildHostedWakePayloadValue(input.wake),
+    payloadSchema: resolveHostedWakePayloadSchema(input.wake),
+    tx: input.tx,
+    userId: input.wake.userId,
+  });
 }
 
 export async function appendHostedCoalescingWakePayloadTx(input: {
@@ -79,15 +95,27 @@ export async function appendHostedCoalescingWakePayloadTx(input: {
   dispatch: HostedExecutionDispatchRequest;
   tx: Prisma.TransactionClient;
 }): Promise<AppendHostedWakeResult> {
-  return appendHostedCoalescingWakeTx({
+  return appendHostedCoalescingExecutionWakeTx({
     coalescingKey: input.coalescingKey,
-    dedupeKey: buildHostedWakeDispatchDedupeKey(input.dispatch),
-    kind: input.dispatch.event.kind,
-    occurredAt: input.dispatch.occurredAt,
-    payload: buildHostedWakePayloadValue(input.dispatch),
-    payloadSchema: resolveHostedWakePayloadSchema(input.dispatch),
     tx: input.tx,
-    userId: input.dispatch.event.userId,
+    wake: buildHostedExecutionWakeFromDispatch(input.dispatch),
+  });
+}
+
+export async function appendHostedEdgeTriggeredExecutionWakeTx(input: {
+  coalescingKey: string;
+  tx: Prisma.TransactionClient;
+  wake: HostedExecutionWake;
+}): Promise<AppendHostedWakeResult> {
+  return appendHostedEdgeTriggeredWakeTx({
+    coalescingKey: input.coalescingKey,
+    dedupeKey: buildHostedExecutionWakeDedupeKey(input.wake),
+    kind: input.wake.kind,
+    occurredAt: input.wake.occurredAt,
+    payload: buildHostedWakePayloadValue(input.wake),
+    payloadSchema: resolveHostedWakePayloadSchema(input.wake),
+    tx: input.tx,
+    userId: input.wake.userId,
   });
 }
 
@@ -96,15 +124,10 @@ export async function appendHostedEdgeTriggeredWakePayloadTx(input: {
   dispatch: HostedExecutionDispatchRequest;
   tx: Prisma.TransactionClient;
 }): Promise<AppendHostedWakeResult> {
-  return appendHostedEdgeTriggeredWakeTx({
+  return appendHostedEdgeTriggeredExecutionWakeTx({
     coalescingKey: input.coalescingKey,
-    dedupeKey: buildHostedWakeDispatchDedupeKey(input.dispatch),
-    kind: input.dispatch.event.kind,
-    occurredAt: input.dispatch.occurredAt,
-    payload: buildHostedWakePayloadValue(input.dispatch),
-    payloadSchema: resolveHostedWakePayloadSchema(input.dispatch),
     tx: input.tx,
-    userId: input.dispatch.event.userId,
+    wake: buildHostedExecutionWakeFromDispatch(input.dispatch),
   });
 }
 
@@ -144,20 +167,28 @@ export async function readHostedExecutionWakeLifecycleStateTx(input: {
   return lifecycle?.state ?? null;
 }
 
+export function buildHostedExecutionWakeDedupeKey(wake: HostedExecutionWake): string {
+  return buildHostedWakeDispatchDedupeKeyFromEventId(wake.eventId, wake.kind);
+}
+
 export function buildHostedWakeDispatchDedupeKey(
   dispatch: HostedExecutionDispatchRequest,
 ): string {
-  return buildHostedWakeDispatchDedupeKeyFromEventId(dispatch.eventId, dispatch.event.kind);
+  return buildHostedExecutionWakeDedupeKey(buildHostedExecutionWakeFromDispatch(dispatch));
+}
+
+export function buildHostedExecutionWakeCoalescingKey(wake: HostedExecutionWake): string {
+  if (wake.kind === "device-sync.wake") {
+    return `${wake.kind}:${wake.userId}:${wake.connectionId ?? wake.provider ?? "global"}`;
+  }
+
+  return `${wake.kind}:${wake.userId}`;
 }
 
 export function buildHostedWakeDispatchCoalescingKey(
   dispatch: HostedExecutionDispatchRequest,
 ): string {
-  if (dispatch.event.kind === "device-sync.wake") {
-    return `${dispatch.event.kind}:${dispatch.event.userId}:${dispatch.event.connectionId ?? dispatch.event.provider ?? "global"}`;
-  }
-
-  return `${dispatch.event.kind}:${dispatch.event.userId}`;
+  return buildHostedExecutionWakeCoalescingKey(buildHostedExecutionWakeFromDispatch(dispatch));
 }
 
 function buildHostedWakeDispatchDedupeKeyFromEventId(
@@ -167,44 +198,29 @@ function buildHostedWakeDispatchDedupeKeyFromEventId(
   return `dispatch:${eventKind}:${eventId}`;
 }
 
-function resolveHostedWakePayloadSchema(
-  dispatch: HostedExecutionDispatchRequest,
-): string {
-  return isHostedMessageWakeDispatch(dispatch)
-    ? HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA
+function resolveHostedWakePayloadSchema(wake: HostedExecutionWake): string {
+  return isHostedConversationMessageWake(wake)
+    ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
     : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA;
 }
 
-function buildHostedWakePayloadValue(
-  dispatch: HostedExecutionDispatchRequest,
-): unknown {
-  if (!isHostedMessageWakeDispatch(dispatch)) {
-    return dispatch;
+function buildHostedWakePayloadValue(wake: HostedExecutionWake): unknown {
+  if (!isHostedConversationMessageWake(wake)) {
+    return wake;
   }
 
-  switch (dispatch.event.kind) {
-    case "linq.message.received":
-      return buildHostedWakeLinqMessageReceivedPayload({
-        eventId: dispatch.eventId,
-        linqEvent: dispatch.event.linqEvent,
-        ...(dispatch.event.linqMessageId === undefined
-          ? {}
-          : { linqMessageId: dispatch.event.linqMessageId }),
-        phoneLookupKey: dispatch.event.phoneLookupKey,
-      });
-    case "telegram.message.received":
-      return buildHostedWakeTelegramMessageReceivedPayload({
-        eventId: dispatch.eventId,
-        telegramMessage: dispatch.event.telegramMessage,
-      });
-    case "email.message.received":
-      return buildHostedWakeEmailMessageReceivedPayload({
-        eventId: dispatch.eventId,
-        identityId: dispatch.event.identityId,
-        rawMessageKey: dispatch.event.rawMessageKey,
-        ...(dispatch.event.selfAddress === undefined
-          ? {}
-          : { selfAddress: dispatch.event.selfAddress }),
-      });
-  }
+  return {
+    eventId: wake.eventId,
+    ...wake.message,
+  };
+}
+
+function normalizeHostedExecutionWakeInput(input: CanonicalHostedWakeInput): HostedExecutionWake {
+  return "wake" in input
+    ? input.wake
+    : buildHostedExecutionWakeFromDispatch(input.dispatch);
+}
+
+export function buildHostedExecutionDispatchFromStoredWake(wake: HostedExecutionWake): HostedExecutionDispatchRequest {
+  return buildHostedExecutionDispatchFromWake(wake);
 }

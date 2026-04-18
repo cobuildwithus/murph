@@ -43,9 +43,12 @@ const mocks = vi.hoisted(() => {
     appendHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       eventId?: string;
+      wake?: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
-      const eventId = typeof input.eventId === "string" ? input.eventId : input.dispatch?.eventId;
+      const eventId = typeof input.eventId === "string"
+        ? input.eventId
+        : input.dispatch?.eventId ?? input.wake?.eventId;
       if (!eventId) {
         throw new Error("Expected a hosted wake append eventId.");
       }
@@ -186,14 +189,16 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventId: "telegram:update:321",
-        kind: "telegram.message.received",
-        payload: expect.objectContaining({
-          eventId: "telegram:update:321",
-        }),
         sourceId: "telegram:telegram:update:321",
         sourceType: "hosted_webhook_receipt",
-        userId: "member_telegram_123",
+        wake: expect.objectContaining({
+          eventId: "telegram:update:321",
+          kind: "conversation.message",
+          message: expect.objectContaining({
+            channel: "telegram",
+          }),
+          userId: "member_telegram_123",
+        }),
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
@@ -717,18 +722,20 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventId: "telegram:update:777",
-        kind: "telegram.message.received",
-        payload: expect.objectContaining({
+        wake: expect.objectContaining({
           eventId: "telegram:update:777",
-          telegramMessage: expect.objectContaining({
-            messageId: "4",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "hello from the DM topic",
-            threadId: "-100555:dm-topic:9",
+          kind: "conversation.message",
+          message: expect.objectContaining({
+            channel: "telegram",
+            telegramMessage: expect.objectContaining({
+              messageId: "4",
+              schema: "murph.hosted-telegram-message.v1",
+              text: "hello from the DM topic",
+              threadId: "-100555:dm-topic:9",
+            }),
           }),
+          userId: "member_telegram_456",
         }),
-        userId: "member_telegram_456",
       }),
     );
   });
@@ -879,17 +886,19 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       });
 
       const enqueueCall = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0] as {
-        kind?: string;
-        payload?: {
-          telegramMessage?: unknown;
+        wake?: {
+          kind?: string;
+          message?: {
+            telegramMessage?: unknown;
+          };
         };
       } | undefined;
-      expect(enqueueCall?.kind).toBe("telegram.message.received");
-      if (!enqueueCall?.payload || typeof enqueueCall.payload !== "object") {
-        throw new Error("Expected a hosted Telegram wake payload.");
+      expect(enqueueCall?.wake?.kind).toBe("conversation.message");
+      if (!enqueueCall?.wake?.message || typeof enqueueCall.wake.message !== "object") {
+        throw new Error("Expected a hosted Telegram wake message.");
       }
 
-      expect(enqueueCall.payload.telegramMessage).toEqual({
+      expect(enqueueCall.wake.message.telegramMessage).toEqual({
         messageId: String(testCase.message.message_id),
         schema: "murph.hosted-telegram-message.v1",
         text: testCase.expectedText,

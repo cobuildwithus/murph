@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
-  buildHostedWakeLinqMessageReceivedPayload,
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+  buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
@@ -32,9 +32,9 @@ describe("appendHostedExecutionWakeTx", () => {
         behavior: "ordered",
         createdAt: "2026-04-18T00:00:00.000Z",
         id: "wake_1",
-        kind: "linq.message.received",
+        kind: "conversation.message",
         occurredAt: "2026-04-18T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
         seq: "1",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
@@ -42,32 +42,33 @@ describe("appendHostedExecutionWakeTx", () => {
     });
   });
 
-  it("persists direct Linq message wake payloads without a nested dispatch envelope", async () => {
-    const payload = buildHostedWakeLinqMessageReceivedPayload({
+  it("persists canonical Linq conversation wakes without a nested dispatch envelope", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_message",
       linqEvent: {
         id: "msg_123",
       },
       linqMessageId: "msg_123",
-      phoneLookupKey: "lookup_123",
-    });
-
-    await appendHostedExecutionWakeTx({
-      eventId: "evt_linq_message",
-      kind: "linq.message.received",
       occurredAt: "2026-04-18T00:00:00.000Z",
-      payload,
-      sourceType: "hosted_webhook_receipt",
-      tx: {} as never,
+      phoneLookupKey: "lookup_123",
       userId: "member_123",
     });
 
+    await appendHostedExecutionWakeTx({
+      wake,
+      sourceType: "hosted_webhook_receipt",
+      tx: {} as never,
+    });
+
     expect(mocks.appendHostedOrderedWakeTx).toHaveBeenCalledWith(expect.objectContaining({
-      dedupeKey: "dispatch:linq.message.received:evt_linq_message",
-      kind: "linq.message.received",
+      dedupeKey: "dispatch:conversation.message:evt_linq_message",
+      kind: "conversation.message",
       occurredAt: "2026-04-18T00:00:00.000Z",
-      payload,
-      payloadSchema: HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+      payload: {
+        eventId: "evt_linq_message",
+        ...wake.message,
+      },
+      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
       userId: "member_123",
     }));
     expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
