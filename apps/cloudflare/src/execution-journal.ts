@@ -1,7 +1,4 @@
-import {
-  gatewayProjectionSnapshotSchema,
-  type GatewayProjectionSnapshot,
-} from "@murphai/gateway-core";
+import { type GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   HostedExecutionBundleRef,
@@ -185,7 +182,7 @@ export async function persistHostedExecutionCommit(input: {
     committedAt,
     eventId: input.eventId,
     finalizedAt: null,
-    gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
+    gatewayProjectionSnapshot: null,
     result: input.payload.result,
     userId: input.userId,
   };
@@ -222,14 +219,11 @@ export async function persistHostedExecutionFinalBundles(input: {
     existing.bundleRef,
     input.payload.bundle,
   );
-  const expectedGatewayProjectionSnapshot =
-    input.payload.gatewayProjectionSnapshot ?? existing.gatewayProjectionSnapshot ?? null;
 
   if (existing.finalizedAt !== null) {
     assertEquivalentDuplicateFinalize(existing, {
       eventId: input.eventId,
       expectedBundleRef,
-      expectedGatewayProjectionSnapshot,
     });
     return existing;
   }
@@ -252,7 +246,7 @@ export async function persistHostedExecutionFinalBundles(input: {
     ...existing,
     bundleRef: nextBundleRef,
     finalizedAt: new Date().toISOString(),
-    gatewayProjectionSnapshot: expectedGatewayProjectionSnapshot,
+    gatewayProjectionSnapshot: null,
   };
   await journalStore.writeCommittedResult(input.userId, input.eventId, finalizedResult);
   return finalizedResult;
@@ -275,20 +269,25 @@ function normalizeHostedExecutionCommittedResult(
     "Hosted execution committed result.assistantDeliveryEffects",
   );
   return {
-    ...value,
     assistantDeliveryEffects,
     bundleRef: parseHostedExecutionBundleRef(
       (value as { bundleRef?: unknown }).bundleRef,
       "Hosted execution committed result bundleRef",
     ),
+    committedAt: requireCommittedResultString(
+      (value as { committedAt?: unknown }).committedAt,
+      "Hosted execution committed result committedAt",
+    ),
+    eventId: requireCommittedResultString(
+      (value as { eventId?: unknown }).eventId,
+      "Hosted execution committed result eventId",
+    ),
     finalizedAt: value.finalizedAt ?? null,
-    gatewayProjectionSnapshot:
-      (value as { gatewayProjectionSnapshot?: unknown }).gatewayProjectionSnapshot === undefined
-      || (value as { gatewayProjectionSnapshot?: unknown }).gatewayProjectionSnapshot === null
-        ? null
-        : gatewayProjectionSnapshotSchema.parse(
-            (value as { gatewayProjectionSnapshot: unknown }).gatewayProjectionSnapshot,
-          ),
+    gatewayProjectionSnapshot: null,
+    result: requireCommittedResultObject(
+      (value as { result?: unknown }).result,
+      "Hosted execution committed result result",
+    ) as HostedExecutionCommittedResult["result"],
     userId: requireCommittedResultString(
       (value as { userId?: unknown }).userId,
       "Hosted execution committed result userId",
@@ -304,28 +303,24 @@ function requireCommittedResultString(value: unknown, label: string): string {
   return value;
 }
 
+function requireCommittedResultObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
 function assertEquivalentDuplicateFinalize(
   existing: HostedExecutionCommittedResult,
   input: {
     eventId: string;
     expectedBundleRef: HostedExecutionBundleRefIdentity | null;
-    expectedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   },
 ): void {
   if (!sameHostedBundlePayloadRef(existing.bundleRef, input.expectedBundleRef)) {
     throw new Error(
       `Hosted execution finalize ${input.eventId} vault bundle ref does not match the existing durable finalize.`,
-    );
-  }
-
-  if (
-    !sameStructuredJsonValue(
-      existing.gatewayProjectionSnapshot ?? null,
-      input.expectedGatewayProjectionSnapshot,
-    )
-  ) {
-    throw new Error(
-      `Hosted execution finalize ${input.eventId} gateway projection snapshot does not match the existing durable finalize.`,
     );
   }
 }
@@ -373,18 +368,6 @@ function assertEquivalentDuplicateCommit(
     });
     throw new Error(
       `Hosted execution commit ${input.eventId} assistant deliveries do not match the existing durable commit.`,
-    );
-  }
-
-  const expectedGatewayProjectionSnapshot = input.payload.gatewayProjectionSnapshot ?? null;
-  if (
-    !sameStructuredJsonValue(
-      existing.gatewayProjectionSnapshot ?? null,
-      expectedGatewayProjectionSnapshot,
-    )
-  ) {
-    throw new Error(
-      `Hosted execution commit ${input.eventId} gateway projection snapshot does not match the existing durable commit.`,
     );
   }
 
