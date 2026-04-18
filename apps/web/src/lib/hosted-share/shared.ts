@@ -11,13 +11,12 @@ import {
   type SharePack,
 } from "@murphai/contracts";
 import {
-  buildHostedExecutionVaultShareAcceptedDispatch,
+  buildHostedExecutionVaultShareAcceptedWake,
   type HostedExecutionDispatchLifecycleState,
-  type HostedExecutionDispatchRequest,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import {
-  isExecutionLifecycleTerminal,
   readHostedExecutionWakeLifecycleState,
 } from "../hosted-execution/dispatch-lifecycle";
 import {
@@ -348,14 +347,14 @@ export function buildHostedShareAcceptanceEventId(input: {
   return `vault.share.accepted:${input.shareId}:${input.memberId}:${input.acceptedAt.getTime()}`;
 }
 
-export function buildHostedShareAcceptanceDispatch(input: {
+export function buildHostedShareAcceptanceWake(input: {
   acceptedAt: string;
   eventId: string;
   memberId: string;
   ownerUserId: string;
   shareId: string;
-}): HostedExecutionDispatchRequest {
-  return buildHostedExecutionVaultShareAcceptedDispatch({
+}): HostedExecutionWake {
+  return buildHostedExecutionVaultShareAcceptedWake({
     eventId: input.eventId,
     memberId: input.memberId,
     occurredAt: input.acceptedAt,

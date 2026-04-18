@@ -44,13 +44,10 @@ async function performHostedWebhookSideEffect(
     signal?: AbortSignal;
   },
 ): Promise<
-  | { dispatched: true }
   | { delivered: true }
   | { handled: true }
 > {
   switch (effect.kind) {
-    case "hosted_execution_dispatch":
-      throw new Error("Hosted execution dispatch effects must be enqueued as canonical hosted wakes.");
     case "linq_message_send": {
       const startedAtMs = Date.now();
       try {

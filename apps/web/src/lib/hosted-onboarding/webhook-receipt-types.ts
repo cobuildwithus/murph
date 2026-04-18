@@ -1,16 +1,5 @@
-import type {
-  HostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution";
 import type { PrismaClient } from "@prisma/client";
 import { type Prisma } from "@prisma/client";
-
-import {
-  createHostedWebhookDispatchSideEffectPayload,
-  createHostedWebhookLinqMessageWakeAppendPayload,
-  createHostedWebhookTelegramMessageWakeAppendPayload,
-  type HostedWebhookDispatchSideEffectPayload as HostedWebhookDispatchPayload,
-  type HostedWebhookStoredDispatchSideEffectPayload as HostedWebhookStoredDispatchPayload,
-} from "./webhook-dispatch-payload";
 
 export type HostedWebhookEventPayload = Prisma.InputJsonObject;
 export type HostedWebhookResponsePayload = Prisma.InputJsonObject;
@@ -57,23 +46,6 @@ export type HostedWebhookLinqMessagePayload =
   | HostedWebhookLinqDailyQuotaPayload
   | HostedWebhookLinqInviteMessagePayload;
 
-export type HostedWebhookDispatchSideEffectPayload = HostedWebhookDispatchPayload;
-export type HostedWebhookStoredDispatchSideEffectPayload = HostedWebhookStoredDispatchPayload;
-
-export type HostedWebhookDispatchSideEffect = {
-  attemptCount: number;
-  effectId: string;
-  kind: "hosted_execution_dispatch";
-  lastAttemptAt: string | null;
-  lastError: HostedWebhookSideEffectErrorState | null;
-  payload: HostedWebhookDispatchSideEffectPayload;
-  result: {
-    dispatched: true;
-  } | null;
-  sentAt: string | null;
-  status: HostedWebhookSideEffectStatus;
-};
-
 export type HostedWebhookLinqMessageSideEffect = {
   attemptCount: number;
   effectId: string;
@@ -110,14 +82,9 @@ export type HostedWebhookRevnetIssuanceSideEffect = {
 };
 
 export type HostedWebhookSideEffect =
-  | HostedWebhookDispatchSideEffect
   | HostedWebhookLinqMessageSideEffect
   | HostedWebhookRevnetIssuanceSideEffect;
-
-export type HostedWebhookReceiptLocalSideEffect = Exclude<
-  HostedWebhookSideEffect,
-  HostedWebhookDispatchSideEffect
->;
+export type HostedWebhookReceiptLocalSideEffect = HostedWebhookSideEffect;
 
 export type HostedWebhookReceiptStatus = "completed" | "failed" | "processing";
 
@@ -140,7 +107,6 @@ export type HostedWebhookReceiptClaim = {
 };
 
 export type HostedWebhookSideEffectResult =
-  | NonNullable<HostedWebhookDispatchSideEffect["result"]>
   | NonNullable<HostedWebhookLinqMessageSideEffect["result"]>
   | NonNullable<HostedWebhookRevnetIssuanceSideEffect["result"]>;
 
@@ -198,62 +164,6 @@ export class HostedWebhookReceiptSideEffectDrainError extends Error {
     this.claimedReceipt = claimedReceipt;
     this.cause = cause;
   }
-}
-
-export function createHostedWebhookDispatchSideEffect(input: {
-  dispatch: HostedExecutionDispatchRequest;
-}): HostedWebhookDispatchSideEffect {
-  return {
-    attemptCount: 0,
-    effectId: `dispatch:${input.dispatch.eventId}`,
-    kind: "hosted_execution_dispatch",
-    lastAttemptAt: null,
-    lastError: null,
-    payload: createHostedWebhookDispatchSideEffectPayload(input.dispatch),
-    result: null,
-    sentAt: null,
-    status: "pending",
-  };
-}
-
-export function createHostedWebhookLinqMessageReceivedWakeSideEffect(input: {
-  eventId: string;
-  linqEvent: Record<string, unknown>;
-  linqMessageId?: string | null;
-  occurredAt: string;
-  phoneLookupKey: string;
-  userId: string;
-}): HostedWebhookDispatchSideEffect {
-  return {
-    attemptCount: 0,
-    effectId: `dispatch:${input.eventId}`,
-    kind: "hosted_execution_dispatch",
-    lastAttemptAt: null,
-    lastError: null,
-    payload: createHostedWebhookLinqMessageWakeAppendPayload(input),
-    result: null,
-    sentAt: null,
-    status: "pending",
-  };
-}
-
-export function createHostedWebhookTelegramMessageReceivedWakeSideEffect(input: {
-  eventId: string;
-  occurredAt: string;
-  telegramMessage: Parameters<typeof createHostedWebhookTelegramMessageWakeAppendPayload>[0]["telegramMessage"];
-  userId: string;
-}): HostedWebhookDispatchSideEffect {
-  return {
-    attemptCount: 0,
-    effectId: `dispatch:${input.eventId}`,
-    kind: "hosted_execution_dispatch",
-    lastAttemptAt: null,
-    lastError: null,
-    payload: createHostedWebhookTelegramMessageWakeAppendPayload(input),
-    result: null,
-    sentAt: null,
-    status: "pending",
-  };
 }
 
 export function createHostedWebhookLinqMessageSideEffect(

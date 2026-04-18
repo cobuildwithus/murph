@@ -14,7 +14,7 @@ import {
   type HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionDispatchRequest,
+  HostedExecutionWake,
   HostedExecutionDeviceSyncWakeEvent,
 } from "@murphai/hosted-execution";
 
@@ -24,7 +24,7 @@ import {
 } from "../hosted-execution/dispatch-lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import {
-  buildHostedDeviceSyncWakeDispatch,
+  buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
 } from "./hosted-dispatch";
 import {
@@ -130,7 +130,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     reason: "user_disconnect",
     ...(warning ? { revokeWarning: warning } : {}),
   } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
-  const dispatch = buildHostedDeviceSyncWakeDispatch({
+  const wake = buildHostedDeviceSyncWake({
     connectionId: input.connectionId,
     hint,
     occurredAt: now,
@@ -139,7 +139,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     userId: input.userId,
   });
   await persistHostedDeviceSyncWake({
-    dispatch,
+    wake,
     store: input.store,
     persist: async (tx) => {
       await input.store.createSignal({
@@ -189,7 +189,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     occurredAt: input.now,
     scopes: input.account.scopes,
   } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
-  const dispatch = buildHostedDeviceSyncWakeDispatch({
+  const wake = buildHostedDeviceSyncWake({
     connectionId: input.account.id,
     hint,
     occurredAt: input.now,
@@ -198,7 +198,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     userId: ownerId,
   });
   await persistHostedDeviceSyncWake({
-    dispatch,
+    wake,
     store: input.store,
     persist: async (tx) => {
       await input.store.createSignal({
@@ -252,7 +252,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     resourceCategory: input.webhook.resourceCategory ?? null,
     traceId,
   });
-  const dispatch = buildHostedDeviceSyncWakeDispatch({
+  const wake = buildHostedDeviceSyncWake({
     connectionId: input.account.id,
     hint,
     occurredAt: input.now,
@@ -263,7 +263,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   });
 
   await persistHostedDeviceSyncWake({
-    dispatch,
+    wake,
     store: input.store,
     persist: async (tx) => {
       await input.store.createSignal({
@@ -301,13 +301,13 @@ export async function dispatchHostedDeviceSyncWake(input: {
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma,
   });
-  const dispatch = buildHostedDeviceSyncWakeDispatch({
+  const wake = buildHostedDeviceSyncWake({
     ...input,
     hint,
   });
 
   await persistHostedDeviceSyncWake({
-    dispatch,
+    wake,
     store,
     persist: async (tx) => {
       await store.createSignal({
@@ -334,7 +334,7 @@ export async function dispatchHostedDeviceSyncWake(input: {
 }
 
 async function persistHostedDeviceSyncWake(input: {
-  dispatch: HostedExecutionDispatchRequest;
+  wake: HostedExecutionWake;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
   complete?(tx: HostedPrismaTransactionClient): Promise<void>;
@@ -344,8 +344,8 @@ async function persistHostedDeviceSyncWake(input: {
   await input.store.prisma.$transaction(async (tx) => {
     await input.persist(tx);
     await appendHostedExecutionWakeTx({
-      dispatch: input.dispatch,
-      sourceId: input.dispatch.eventId,
+      wake: input.wake,
+      sourceId: input.wake.eventId,
       sourceType: "device_sync_signal",
       tx,
     });
@@ -354,7 +354,7 @@ async function persistHostedDeviceSyncWake(input: {
 
   void handoffHostedExecutionWakeBestEffort({
     context: "device-sync.wake",
-    eventId: input.dispatch.eventId,
+    eventId: input.wake.eventId,
     prisma: input.store.prisma,
   });
 }

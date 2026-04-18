@@ -124,7 +124,6 @@ describe("cloudflare worker runtime suite", () => {
         }),
         lastEventId: "evt_signed_runtime",
         nextWakeAt: "2026-03-26T12:01:00.000Z",
-        pendingEventCount: 1,
         retryingEventId: null,
         userId: dispatch.event.userId,
       },
@@ -185,7 +184,6 @@ describe("cloudflare worker runtime suite", () => {
     await resolveHostedUserCryptoContext(userId);
     await expect(getUserRunnerStub(userId).dispatch(createDispatch(eventId, userId))).resolves.toMatchObject({
       lastEventId: eventId,
-      pendingEventCount: 0,
       userId,
     });
 

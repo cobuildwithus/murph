@@ -4,9 +4,9 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
-  buildHostedExecutionMemberActivatedDispatch,
-  type HostedExecutionDispatchRequest,
+  buildHostedExecutionMemberActivatedWake,
   type HostedExecutionMemberActivatedEvent,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -83,7 +83,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       member: input.member,
       prisma: input.prisma,
     });
-    const dispatch = buildHostedMemberActivationDispatchForMember({
+    const wake = buildHostedMemberActivationWakeForMember({
       emailLinked: input.emailLinked ?? false,
       firstContact: linqRoute.firstContact,
       member: input.member,
@@ -92,7 +92,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       sourceType: input.sourceType,
     });
     const appendedWake = await appendHostedExecutionWakeTx({
-      dispatch,
+      wake,
       sourceId: input.sourceEventId,
       sourceType: "hosted_revnet_issuance",
       tx: input.prisma,
@@ -209,7 +209,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     member: currentMember,
     prisma: input.prisma,
   });
-  const dispatch = buildHostedMemberActivationDispatchForMember({
+  const wake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? false,
     firstContact: linqRoute.firstContact,
     member: currentMember,
@@ -218,7 +218,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceType: input.dispatchContext.sourceType,
   });
   const appendedWake = await appendHostedExecutionWakeTx({
-    dispatch,
+    wake,
     sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
     sourceType: "hosted_stripe_event",
     tx: input.prisma,
@@ -229,42 +229,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     hostedExecutionEventId: appendedWake.eventId,
     memberId: currentMember.core.id,
   };
-}
-
-export function buildHostedMemberActivationDispatch(input: {
-  emailLinked?: boolean;
-  firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
-  linqChatId?: string | null;
-  linqRecipientPhone?: string | null;
-  memberId: string;
-  memberPhoneNumber?: string | null;
-  phoneLookupKey?: string | null;
-  telegramUserId?: string | null;
-  occurredAt: string;
-  sourceEventId: string;
-  sourceType: string;
-}): HostedExecutionDispatchRequest {
-  return buildHostedExecutionMemberActivatedDispatch({
-    eventId: buildHostedMemberActivationEventId(input),
-    firstContact: (input.firstContact ?? buildHostedMemberActivationFirstContact({
-      linqChatId: input.linqChatId ?? null,
-      linqRecipientPhone: input.linqRecipientPhone ?? null,
-      memberPhoneNumber: input.memberPhoneNumber ?? null,
-      phoneLookupKey: input.phoneLookupKey ?? null,
-      telegramUserId: input.telegramUserId ?? null,
-    })),
-    memberId: input.memberId,
-    memberChannels: resolveHostedMemberChannels({
-      emailLinked: input.emailLinked ?? false,
-      identity: {
-        phoneLookupKey: input.phoneLookupKey ?? null,
-      },
-      routing: {
-        telegramUserId: input.telegramUserId ?? null,
-      },
-    }),
-    occurredAt: input.occurredAt,
-  });
 }
 
 export function buildHostedMemberActivationFirstContact(input: {
@@ -355,15 +319,15 @@ function buildHostedInactiveMemberActivationResult(
   };
 }
 
-function buildHostedMemberActivationDispatchForMember(input: {
+function buildHostedMemberActivationWakeForMember(input: {
   emailLinked: boolean;
   firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
   member: HostedMemberSnapshot;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
-}): HostedExecutionDispatchRequest {
-  return buildHostedMemberActivationDispatch({
+}): HostedExecutionWake {
+  return buildHostedMemberActivationWake({
     emailLinked: input.emailLinked,
     firstContact: input.firstContact,
     memberId: input.member.core.id,
@@ -373,6 +337,42 @@ function buildHostedMemberActivationDispatchForMember(input: {
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,
+  });
+}
+
+function buildHostedMemberActivationWake(input: {
+  emailLinked?: boolean;
+  firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
+  linqChatId?: string | null;
+  linqRecipientPhone?: string | null;
+  memberId: string;
+  memberPhoneNumber?: string | null;
+  phoneLookupKey?: string | null;
+  telegramUserId?: string | null;
+  occurredAt: string;
+  sourceEventId: string;
+  sourceType: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: buildHostedMemberActivationEventId(input),
+    firstContact: (input.firstContact ?? buildHostedMemberActivationFirstContact({
+      linqChatId: input.linqChatId ?? null,
+      linqRecipientPhone: input.linqRecipientPhone ?? null,
+      memberPhoneNumber: input.memberPhoneNumber ?? null,
+      phoneLookupKey: input.phoneLookupKey ?? null,
+      telegramUserId: input.telegramUserId ?? null,
+    })),
+    memberChannels: resolveHostedMemberChannels({
+      emailLinked: input.emailLinked ?? false,
+      identity: {
+        phoneLookupKey: input.phoneLookupKey ?? null,
+      },
+      routing: {
+        telegramUserId: input.telegramUserId ?? null,
+      },
+    }),
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
   });
 }
 

@@ -1,8 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import {
-  buildHostedExecutionMemberChannelsUpdatedDispatch,
-  type HostedExecutionDispatchRequest,
+  buildHostedExecutionMemberChannelsUpdatedWake,
   type HostedExecutionMemberChannels,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
@@ -41,7 +41,7 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   sourceType: string;
-}): Promise<HostedExecutionDispatchRequest> {
+}): Promise<HostedExecutionWake> {
   await lockHostedMemberRow(input.prisma, input.memberId);
 
   const member = await readHostedMemberSnapshot({
@@ -61,7 +61,7 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
     emailLinked: input.emailLinked,
     member,
   });
-  const dispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+  const wake = buildHostedExecutionMemberChannelsUpdatedWake({
     eventId: buildHostedMemberChannelsUpdatedEventId({
       memberId: input.memberId,
       occurredAt: input.occurredAt,
@@ -73,13 +73,13 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
   });
 
   await appendHostedExecutionWakeTx({
-    dispatch,
-    sourceId: dispatch.eventId,
+    wake,
+    sourceId: wake.eventId,
     sourceType: input.sourceType,
     tx: input.prisma,
   });
 
-  return dispatch;
+  return wake;
 }
 
 export async function resolveHostedMemberEmailLinked(input: {

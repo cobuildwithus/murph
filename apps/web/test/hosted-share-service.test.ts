@@ -17,19 +17,19 @@ const shareHarness = vi.hoisted(() => {
     }) =>
       input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.dispatchState ?? "queued"),
     appendHostedExecutionWakeTx: vi.fn(async (input: {
-      dispatch: { eventId: string };
+      wake: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
       const outboxRows = input.tx?.outboxRows;
-      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.dispatch.eventId)) {
+      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.wake.eventId)) {
         outboxRows.push({
           dispatchState: "queued",
-          eventId: input.dispatch.eventId,
+          eventId: input.wake.eventId,
         });
       }
 
       return {
-        eventId: input.dispatch.eventId,
+        eventId: input.wake.eventId,
       };
     }),
     handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
@@ -146,19 +146,19 @@ describe("hosted share service", () => {
       input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.dispatchState ?? "queued");
     shareHarness.appendHostedExecutionWakeTx.mockReset();
     shareHarness.appendHostedExecutionWakeTx.mockImplementation(async (input: {
-      dispatch: { eventId: string };
+      wake: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
       const outboxRows = input.tx?.outboxRows;
-      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.dispatch.eventId)) {
+      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.wake.eventId)) {
         outboxRows.push({
           dispatchState: "queued",
-          eventId: input.dispatch.eventId,
+          eventId: input.wake.eventId,
         });
       }
 
       return {
-        eventId: input.dispatch.eventId,
+        eventId: input.wake.eventId,
       };
     });
     originalHostedOnboardingPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;

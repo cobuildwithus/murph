@@ -1,7 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  HostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
 
 const {
@@ -94,16 +91,11 @@ import {
   sanitizeHostedOnboardingLogString,
 } from "../../src/lib/hosted-onboarding/http";
 import {
-  buildHostedWebhookDispatchFromPayload,
-  readHostedWebhookReceiptDispatchByEventId,
-} from "../../src/lib/hosted-onboarding/webhook-receipt-dispatch";
-import {
   readHostedWebhookReceiptState,
   serializeHostedWebhookReceiptErrorState,
   serializeHostedWebhookReceiptSideEffect,
 } from "../../src/lib/hosted-onboarding/webhook-receipt-codec";
 import {
-  createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookReceiptState,
   type HostedWebhookSideEffect,
@@ -115,103 +107,6 @@ import {
 describe("hosted webhook receipt privacy baseline", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-  });
-
-  it("creates inline canonical outbox payloads immediately for dispatch side effects", () => {
-    const dispatch = createSensitiveDispatch();
-    const inlineEffect = createHostedWebhookDispatchSideEffect({ dispatch });
-
-    expect(inlineEffect.payload).toEqual({
-      dispatch,
-      storage: "inline",
-    });
-    expect(buildHostedWebhookDispatchFromPayload(inlineEffect.payload)).toEqual(dispatch);
-  });
-
-  it("serializes freshly created dispatch side effects without a staging pass", () => {
-    const dispatch = createSensitiveDispatch();
-    const inlineEffect = createHostedWebhookDispatchSideEffect({ dispatch });
-
-    expect(serializeHostedWebhookReceiptSideEffect(inlineEffect)).toMatchObject({
-      payloadJson: {
-        dispatch,
-        storage: "inline",
-      },
-    });
-  });
-
-  it("fails closed when receipt hydration sees a legacy dispatch snapshot shape", () => {
-    expect(() =>
-      readHostedWebhookReceiptState({
-        receipt: {
-          attemptCount: 1,
-          attemptId: "attempt_legacy",
-          completedAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastErrorName: null,
-          lastErrorRetryable: null,
-          lastReceivedAt: new Date("2026-04-06T09:00:00.000Z"),
-          plannedAt: new Date("2026-04-06T09:00:00.000Z"),
-          status: "processing",
-        },
-        sideEffects: [{
-          attemptCount: 0,
-          payloadJson: {
-            dispatchRef: {
-              eventId: "legacy",
-              eventKind: "telegram.message.received",
-              occurredAt: "2026-04-06T09:00:00.000Z",
-              userId: "member_123",
-            },
-            storage: "reference",
-            telegramUpdate: {
-              message: {
-                text: "legacy plaintext",
-              },
-            },
-          },
-          resultJson: null,
-          effectId: "dispatch:legacy",
-          kind: "hosted_execution_dispatch",
-          lastAttemptAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastErrorName: null,
-          lastErrorRetryable: null,
-          sentAt: null,
-          status: "pending",
-        }],
-      }),
-    ).toThrowError(/invalid or legacy payload shape/i);
-  });
-
-  it("round-trips inline dispatch payloads when legacy receipt storage still contains them", () => {
-    const dispatch = createSensitiveDispatch();
-    const payload = createHostedWebhookDispatchSideEffect({ dispatch }).payload;
-    const stagedEffect = {
-      ...createHostedWebhookDispatchSideEffect({ dispatch }),
-      payload,
-    };
-
-    const serialized = serializeHostedWebhookReceiptStateRecords(
-      createReceiptState({
-        sideEffects: [stagedEffect],
-      }),
-    );
-    const serializedText = JSON.stringify(serialized);
-    const roundTripped = readHostedWebhookReceiptState(serialized);
-
-    expect(serializedText).toContain("\"storage\":\"inline\"");
-    expect(readHostedWebhookReceiptDispatchByEventId(roundTripped, dispatch.eventId)).toEqual(dispatch);
-    expect(buildHostedWebhookDispatchFromPayload(stagedEffect.payload)).toEqual(dispatch);
-    expect(roundTripped.sideEffects).toEqual([
-      expect.objectContaining({
-        effectId: stagedEffect.effectId,
-        kind: "hosted_execution_dispatch",
-        payload: stagedEffect.payload,
-      }),
-    ]);
   });
 
   it("serializes receipt-local side effects without introducing dispatch payload storage", () => {
@@ -232,10 +127,12 @@ describe("hosted webhook receipt privacy baseline", () => {
 
     expect(serializedText).toContain("\"kind\":\"linq_message_send\"");
     expect(serializedText).not.toContain("\"kind\":\"hosted_execution_dispatch\"");
-    expect(readHostedWebhookReceiptDispatchByEventId(
-      readHostedWebhookReceiptState(serialized),
-      "evt_local",
-    )).toBeNull();
+    expect(readHostedWebhookReceiptState(serialized).sideEffects).toEqual([
+      expect.objectContaining({
+        effectId: "linq-message:evt_local",
+        kind: "linq_message_send",
+      }),
+    ]);
   });
 
   it("redacts persisted receipt error messages while keeping sanitized codes and names", () => {
@@ -297,32 +194,6 @@ describe("hosted webhook receipt privacy baseline", () => {
     errorSpy.mockRestore();
   });
 });
-
-function createSensitiveDispatch(): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "linq.message.received" as const,
-      linqEvent: {
-        data: {
-          from: "+15555550123",
-          message: {
-            id: "linq-message-1",
-            parts: [
-              {
-                text: "super secret hello from linq",
-                type: "text",
-              },
-            ],
-          },
-        },
-      },
-      phoneLookupKey: "hbidx:phone:v1:sensitive-phone-key",
-      userId: "member_123",
-    },
-    eventId: "linq-event-123",
-    occurredAt: "2026-04-06T09:00:00.000Z",
-  };
-}
 
 function createReceiptState(input: {
   sideEffects: HostedWebhookSideEffect[];

@@ -3,20 +3,20 @@ import {
   type TelegramAttachmentDownloadDriver,
 } from "@murphai/inboxd/connectors/telegram/normalize";
 import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution";
 
 export async function buildHostedTelegramCapture(
-  dispatch: HostedExecutionDispatchRequest & {
-    event: Extract<HostedExecutionDispatchRequest["event"], { kind: "telegram.message.received" }>;
+  wake: HostedExecutionConversationMessageWake & {
+    message: Extract<HostedExecutionConversationMessageWake["message"], { channel: "telegram" }>;
   },
 ) {
   return normalizeHostedTelegramMessage({
     accountId: "bot",
     downloadDriver: createHostedTelegramAttachmentDownloadDriver(),
-    externalId: dispatch.eventId,
-    message: dispatch.event.telegramMessage,
-    occurredAt: dispatch.occurredAt,
-    receivedAt: dispatch.occurredAt,
+    externalId: wake.eventId,
+    message: wake.message.telegramMessage,
+    occurredAt: wake.occurredAt,
+    receivedAt: wake.occurredAt,
   });
 }
 

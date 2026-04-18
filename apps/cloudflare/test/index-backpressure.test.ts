@@ -10,7 +10,6 @@ import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   createHostedUserKeyStore,
 } from "../src/user-key-store.ts";
-import { MAX_PENDING_EVENTS } from "../src/user-runner/types.js";
 import {
   asWorkerStringEnvironment,
 } from "../src/worker-contracts.ts";
@@ -37,9 +36,9 @@ describe("cloudflare worker queue backpressure routes", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps the removed dispatch route unavailable even when a user queue is already full", async () => {
+  it("keeps the removed dispatch route unavailable without relying on legacy local queue state", async () => {
     const harness = createUserRunnerDurableObject();
-    await seedFullRunnerQueue(harness, "member_123");
+    await harness.durableObject.bootstrapUser("member_123");
     await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
 
     const overflowResponse = await worker.fetch(
@@ -53,11 +52,11 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("keeps the removed manual-run route unavailable even when the queue is already full", async () => {
+  it("keeps the removed manual-run route unavailable without relying on legacy local queue state", async () => {
     const harness = createUserRunnerDurableObject({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
-    await seedFullRunnerQueue(harness, "member_123");
+    await harness.durableObject.bootstrapUser("member_123");
     await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
 
     const runResponse = await worker.fetch(
@@ -124,36 +123,6 @@ async function provisionManagedUserCryptoAtActivationForTest(
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
   });
   await store.provisionManagedUserCryptoAtActivation(userId);
-}
-
-async function seedFullRunnerQueue(
-  harness: ReturnType<typeof createUserRunnerDurableObject>,
-  userId: string,
-): Promise<void> {
-  await harness.durableObject.bootstrapUser(userId);
-  const sql = harness.storage.state.storage.sql;
-  if (!sql) {
-    throw new Error("Test storage.sql is required.");
-  }
-  for (let index = 0; index < MAX_PENDING_EVENTS; index += 1) {
-    const timestamp = new Date(Date.UTC(2026, 2, 26, 12, 0, index)).toISOString();
-    sql.exec(
-      `INSERT INTO pending_events (
-        event_id,
-        payload_key,
-        attempts,
-        available_at,
-        enqueued_at,
-        last_error_code
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      `evt_seed_${index.toString().padStart(3, "0")}`,
-      `seeded/payload/${index.toString().padStart(3, "0")}`,
-      0,
-      timestamp,
-      timestamp,
-      null,
-    );
-  }
 }
 
 function createBucketStore() {

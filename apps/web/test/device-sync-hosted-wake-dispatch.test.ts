@@ -39,11 +39,11 @@ const mocks = vi.hoisted(() => {
       return "outbox";
     }),
     appendHostedExecutionWakeTx: vi.fn(async (input: {
-      dispatch: { eventId: string };
+      wake: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
       return {
-        eventId: input.dispatch.eventId,
+        eventId: input.wake.eventId,
       };
     }),
   };
@@ -409,19 +409,17 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            connectionId: "dsc_123",
-            hint: {
-              occurredAt: "2026-03-26T12:00:00.000Z",
-            },
-            kind: "device-sync.wake",
-            provider: "oura",
-            reason: "connected",
-            userId: "user-123",
-          }),
+        wake: expect.objectContaining({
+          connectionId: "dsc_123",
+          hint: {
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
           eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+          kind: "device-sync.wake",
           occurredAt: "2026-03-26T12:00:00.000Z",
+          provider: "oura",
+          reason: "connected",
+          userId: "user-123",
         }),
         sourceId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
@@ -464,20 +462,18 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            connectionId: "dsc_123",
-            hint: {
-              occurredAt: "2026-03-26T12:00:00.000Z",
-              traceId: "trace_123",
-            },
-            kind: "device-sync.wake",
-            provider: "oura",
-            reason: "webhook_hint",
-            userId: "user-123",
-          }),
+        wake: expect.objectContaining({
+          connectionId: "dsc_123",
+          hint: {
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            traceId: "trace_123",
+          },
           eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
+          kind: "device-sync.wake",
           occurredAt: "2026-03-26T12:00:00.000Z",
+          provider: "oura",
+          reason: "webhook_hint",
+          userId: "user-123",
         }),
         sourceId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
         sourceType: "device_sync_signal",
@@ -528,19 +524,17 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            connectionId: "dsc_123",
-            hint: {
-              occurredAt: "2026-03-26T12:00:00.000Z",
-            },
-            kind: "device-sync.wake",
-            provider: "oura",
-            reason: "disconnected",
-            userId: "user-123",
-          }),
+        wake: expect.objectContaining({
+          connectionId: "dsc_123",
+          hint: {
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
           eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+          kind: "device-sync.wake",
           occurredAt: "2026-03-26T12:00:00.000Z",
+          provider: "oura",
+          reason: "disconnected",
+          userId: "user-123",
         }),
         sourceId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
@@ -595,7 +589,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
+        wake: expect.objectContaining({
           eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         }),
         sourceId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
@@ -649,14 +643,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            hint: expect.objectContaining({
-              revokeWarning: {
-                code: "PROVIDER_REVOKE_FAILED",
-                message: "authorization=[redacted] refresh_token=[redacted]",
-              },
-            }),
+        wake: expect.objectContaining({
+          hint: expect.objectContaining({
+            revokeWarning: {
+              code: "PROVIDER_REVOKE_FAILED",
+              message: "authorization=[redacted] refresh_token=[redacted]",
+            },
           }),
         }),
       }),
@@ -776,22 +768,20 @@ describe("dispatchHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            connectionId: "dsc_123",
-            hint: {
-              jobs: [],
-              nextReconcileAt: null,
-              occurredAt: "2026-03-26T12:00:00.000Z",
-              scopes: ["heartrate"],
-            },
-            kind: "device-sync.wake",
-            provider: "oura",
-            reason: "connected",
-            userId: "user-123",
-          }),
+        wake: expect.objectContaining({
+          connectionId: "dsc_123",
+          hint: {
+            jobs: [],
+            nextReconcileAt: null,
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            scopes: ["heartrate"],
+          },
           eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+          kind: "device-sync.wake",
           occurredAt: "2026-03-26T12:00:00.000Z",
+          provider: "oura",
+          reason: "connected",
+          userId: "user-123",
         }),
         sourceId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
@@ -845,7 +835,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     await controlPlane.handleWebhook("oura");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
 
     expect(mocks.createSignal).toHaveBeenCalledWith(
       {
@@ -888,31 +878,29 @@ describe("dispatchHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            connectionId: "dsc_123",
-            hint: {
-              eventType: "sleep.updated",
-              jobs: [
-                {
-                  dedupeKey: expect.any(String),
-                  kind: "reconcile",
-                  payload: {
-                    windowStart: "2026-03-19T00:00:00.000Z",
-                  },
+        wake: expect.objectContaining({
+          connectionId: "dsc_123",
+          hint: {
+            eventType: "sleep.updated",
+            jobs: [
+              {
+                dedupeKey: expect.any(String),
+                kind: "reconcile",
+                payload: {
+                  windowStart: "2026-03-19T00:00:00.000Z",
                 },
-              ],
-              occurredAt: "2026-03-26T11:59:00.000Z",
-              resourceCategory: "daily_sleep",
-              traceId: "trace_123",
-            },
-            kind: "device-sync.wake",
-            provider: "oura",
-            reason: "webhook_hint",
-            userId: "user-123",
-          }),
+              },
+            ],
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            resourceCategory: "daily_sleep",
+            traceId: "trace_123",
+          },
           eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
+          kind: "device-sync.wake",
           occurredAt: "2026-03-26T12:00:00.000Z",
+          provider: "oura",
+          reason: "webhook_hint",
+          userId: "user-123",
         }),
         sourceId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
         sourceType: "device_sync_signal",
@@ -1040,7 +1028,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     const signalJson = JSON.stringify(signalInput ?? {});
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
 
     expect(signalJson).not.toContain("provider-secret-token");
     expect(signalJson).not.toContain("job-auth-secret");
@@ -1145,7 +1133,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     const signalJson = JSON.stringify(signalInput ?? {});
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
 
     expect(signalJson).not.toContain("whoop-session-secret");
     expect(signalJson).not.toContain("drop-me");
@@ -1288,7 +1276,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
     await controlPlane.handleWebhook("oura");
 
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.dispatch?.event?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
     const hintJob = Array.isArray(dispatchedHint?.jobs) ? dispatchedHint.jobs[0] : null;
     const hintPayload =
       hintJob && typeof hintJob === "object" && "payload" in hintJob

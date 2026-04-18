@@ -4,12 +4,19 @@ import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
 
 import {
   buildHostedExecutionAssistantCronTickDispatch,
+  buildHostedExecutionConversationMessageWake,
   buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionDispatchFromWake,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionDeviceSyncWakeDispatch,
+  buildHostedExecutionVaultShareAcceptedDispatch,
+  buildHostedExecutionWakeFromDispatch,
+  buildHostedWakeEmailMessageReceivedPayload,
+  buildHostedWakeLinqMessageReceivedPayload,
+  buildHostedWakeTelegramMessageReceivedPayload,
 } from "../src/builders.ts";
 import {
   readHostedEmailCapabilities,
@@ -49,6 +56,26 @@ describe("hosted execution builders", () => {
       kind: "member.activated",
       userId: "user_123",
     });
+  });
+
+  it("omits optional member activation first-contact data when absent", () => {
+    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+      eventId: "member-activated-2",
+      memberId: "user_456",
+      memberChannels: defaultMemberChannels,
+      occurredAt,
+    });
+
+    expect(dispatch).toEqual({
+      event: {
+        kind: "member.activated",
+        memberChannels: defaultMemberChannels,
+        userId: "user_456",
+      },
+      eventId: "member-activated-2",
+      occurredAt,
+    });
+    expect("firstContact" in dispatch.event).toBe(false);
   });
 
   it("preserves Linq home-thread materialization first-contact data when present", () => {
@@ -268,6 +295,415 @@ describe("hosted execution builders", () => {
       reason: "connected",
       userId: "user_123",
     });
+  });
+
+  it("builds hosted wake payload helpers without mutating caller-owned message data", () => {
+    const linqEvent = {
+      delivery: "incoming",
+    };
+    const linqPayload = buildHostedWakeLinqMessageReceivedPayload({
+      eventId: "linq-payload-1",
+      linqEvent,
+      phoneLookupKey: "phone_lookup_789",
+    });
+
+    linqEvent.delivery = "mutated";
+
+    expect(linqPayload).toEqual({
+      channel: "linq",
+      eventId: "linq-payload-1",
+      linqEvent: {
+        delivery: "incoming",
+      },
+      phoneLookupKey: "phone_lookup_789",
+    });
+    expect("linqMessageId" in linqPayload).toBe(false);
+
+    const attachments: HostedExecutionTelegramAttachment[] = [
+      {
+        fileId: "file_payload_1",
+        fileName: "receipt.jpg",
+        kind: "photo",
+      },
+    ];
+    const telegramPayload = buildHostedWakeTelegramMessageReceivedPayload({
+      eventId: "telegram-payload-1",
+      telegramMessage: {
+        attachments,
+        messageId: "message_payload_1",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello payload",
+        threadId: "thread_payload_1",
+      },
+    });
+
+    attachments[0]!.fileName = "mutated.jpg";
+    attachments.push({
+      fileId: "file_payload_2",
+      kind: "document",
+    });
+
+    expect(telegramPayload).toEqual({
+      channel: "telegram",
+      eventId: "telegram-payload-1",
+      telegramMessage: {
+        attachments: [
+          {
+            fileId: "file_payload_1",
+            fileName: "receipt.jpg",
+            kind: "photo",
+          },
+        ],
+        messageId: "message_payload_1",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello payload",
+        threadId: "thread_payload_1",
+      },
+    });
+
+    const emailPayload = buildHostedWakeEmailMessageReceivedPayload({
+      eventId: "email-payload-1",
+      identityId: "identity_payload_1",
+      rawMessageKey: "raw_payload_1",
+    });
+    const emailPayloadWithNull = buildHostedWakeEmailMessageReceivedPayload({
+      eventId: "email-payload-2",
+      identityId: null,
+      rawMessageKey: "raw_payload_2",
+      selfAddress: null,
+    });
+
+    expect(emailPayload).toEqual({
+      channel: "email",
+      eventId: "email-payload-1",
+      identityId: "identity_payload_1",
+      rawMessageKey: "raw_payload_1",
+    });
+    expect("selfAddress" in emailPayload).toBe(false);
+    expect(emailPayloadWithNull).toEqual({
+      channel: "email",
+      eventId: "email-payload-2",
+      identityId: null,
+      rawMessageKey: "raw_payload_2",
+      selfAddress: null,
+    });
+  });
+
+  it("builds vault-share accepted dispatches directly", () => {
+    expect(
+      buildHostedExecutionVaultShareAcceptedDispatch({
+        eventId: "share-accepted-1",
+        memberId: "user_123",
+        occurredAt,
+        share: {
+          ownerUserId: "owner_123",
+          shareId: "share_123",
+        },
+      }),
+    ).toEqual({
+      event: {
+        kind: "vault.share.accepted",
+        share: {
+          ownerUserId: "owner_123",
+          shareId: "share_123",
+        },
+        userId: "user_123",
+      },
+      eventId: "share-accepted-1",
+      occurredAt,
+    });
+  });
+
+  it("roundtrips hosted conversation wakes through dispatch conversion", () => {
+    const linqEvent = {
+      delivery: "incoming",
+      nested: {
+        traceId: "trace_123",
+      },
+    };
+    const telegramAttachments: HostedExecutionTelegramAttachment[] = [
+      {
+        fileId: "file_roundtrip_1",
+        kind: "photo",
+      },
+    ];
+    const emailWake = buildHostedExecutionConversationMessageWake({
+      eventId: "conversation-email-1",
+      message: {
+        channel: "email",
+        identityId: "identity_123",
+        rawMessageKey: "raw_123",
+        selfAddress: null,
+      },
+      occurredAt,
+      userId: "user_123",
+    });
+    const linqWake = buildHostedExecutionConversationMessageWake({
+      eventId: "conversation-linq-1",
+      message: {
+        channel: "linq",
+        linqEvent,
+        linqMessageId: null,
+        phoneLookupKey: "phone_lookup_123",
+      },
+      occurredAt,
+      userId: "user_123",
+    });
+    const telegramWake = buildHostedExecutionConversationMessageWake({
+      eventId: "conversation-telegram-1",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: telegramAttachments,
+          messageId: "message_123",
+          schema: "murph.hosted-telegram-message.v1",
+          threadId: "thread_123",
+        },
+      },
+      occurredAt,
+      userId: "user_123",
+    });
+
+    linqEvent.delivery = "mutated";
+    telegramAttachments[0]!.fileId = "mutated";
+
+    expect(buildHostedExecutionDispatchFromWake(emailWake)).toEqual({
+      event: {
+        identityId: "identity_123",
+        kind: "email.message.received",
+        rawMessageKey: "raw_123",
+        selfAddress: null,
+        userId: "user_123",
+      },
+      eventId: "conversation-email-1",
+      occurredAt,
+    });
+    expect(buildHostedExecutionDispatchFromWake(linqWake)).toEqual({
+      event: {
+        kind: "linq.message.received",
+        linqEvent: {
+          delivery: "incoming",
+          nested: {
+            traceId: "trace_123",
+          },
+        },
+        linqMessageId: null,
+        phoneLookupKey: "phone_lookup_123",
+        userId: "user_123",
+      },
+      eventId: "conversation-linq-1",
+      occurredAt,
+    });
+    expect(buildHostedExecutionDispatchFromWake(telegramWake)).toEqual({
+      event: {
+        kind: "telegram.message.received",
+        telegramMessage: {
+          attachments: [
+            {
+              fileId: "file_roundtrip_1",
+              kind: "photo",
+            },
+          ],
+          messageId: "message_123",
+          schema: "murph.hosted-telegram-message.v1",
+          threadId: "thread_123",
+        },
+        userId: "user_123",
+      },
+      eventId: "conversation-telegram-1",
+      occurredAt,
+    });
+  });
+
+  it("roundtrips hosted wake dispatch variants back into wakes and fails closed on unsupported payloads", () => {
+    const linqDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+      eventId: "linq-roundtrip-1",
+      linqEvent: {
+        delivery: "incoming",
+      },
+      linqMessageId: null,
+      occurredAt,
+      phoneLookupKey: "phone_lookup_456",
+      userId: "user_123",
+    });
+    const telegramDispatch = buildHostedExecutionTelegramMessageReceivedDispatch({
+      eventId: "telegram-roundtrip-1",
+      occurredAt,
+      telegramMessage: {
+        messageId: "message_roundtrip_1",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello",
+        threadId: "thread_roundtrip_1",
+      },
+      userId: "user_123",
+    });
+    const emailDispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+      eventId: "email-roundtrip-1",
+      identityId: "assistant@example.com",
+      occurredAt,
+      rawMessageKey: "raw_roundtrip_1",
+      selfAddress: null,
+      userId: "user_123",
+    });
+    const memberDispatch = buildHostedExecutionMemberActivatedDispatch({
+      eventId: "member-activated-roundtrip-1",
+      firstContact: {
+        channel: "email",
+        identityId: "assistant@example.com",
+        threadId: "thread_roundtrip_1",
+        threadIsDirect: true,
+      },
+      memberChannels: defaultMemberChannels,
+      memberId: "user_123",
+      occurredAt,
+    });
+    const memberChannelsDispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+      eventId: "member-channels-roundtrip-1",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "user_123",
+      occurredAt,
+    });
+    const assistantCronDispatch = buildHostedExecutionAssistantCronTickDispatch({
+      eventId: "assistant-cron-roundtrip-1",
+      occurredAt,
+      reason: "device-sync",
+      userId: "user_123",
+    });
+    const deviceSyncDispatch = buildHostedExecutionDeviceSyncWakeDispatch({
+      connectionId: "connection_roundtrip_1",
+      eventId: "device-sync-roundtrip-1",
+      hint: null,
+      occurredAt,
+      provider: null,
+      reason: "webhook_hint",
+      userId: "user_123",
+    });
+    const shareDispatch = buildHostedExecutionVaultShareAcceptedDispatch({
+      eventId: "share-roundtrip-1",
+      memberId: "user_123",
+      occurredAt,
+      share: {
+        ownerUserId: "owner_123",
+        shareId: "share_123",
+      },
+    });
+
+    expect(buildHostedExecutionWakeFromDispatch(linqDispatch)).toEqual({
+      eventId: "linq-roundtrip-1",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        linqEvent: {
+          delivery: "incoming",
+        },
+        linqMessageId: null,
+        phoneLookupKey: "phone_lookup_456",
+      },
+      occurredAt,
+      userId: "user_123",
+    });
+    expect(buildHostedExecutionWakeFromDispatch(telegramDispatch)).toEqual({
+      eventId: "telegram-roundtrip-1",
+      kind: "conversation.message",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          messageId: "message_roundtrip_1",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "hello",
+          threadId: "thread_roundtrip_1",
+        },
+      },
+      occurredAt,
+      userId: "user_123",
+    });
+    expect(buildHostedExecutionWakeFromDispatch(emailDispatch)).toEqual({
+      eventId: "email-roundtrip-1",
+      kind: "conversation.message",
+      message: {
+        channel: "email",
+        identityId: "assistant@example.com",
+        rawMessageKey: "raw_roundtrip_1",
+        selfAddress: null,
+      },
+      occurredAt,
+      userId: "user_123",
+    });
+    expect(buildHostedExecutionWakeFromDispatch(memberDispatch)).toEqual({
+      eventId: "member-activated-roundtrip-1",
+      firstContact: {
+        channel: "email",
+        identityId: "assistant@example.com",
+        threadId: "thread_roundtrip_1",
+        threadIsDirect: true,
+      },
+      kind: "member.activated",
+      memberChannels: defaultMemberChannels,
+      occurredAt,
+      userId: "user_123",
+    });
+    expect(buildHostedExecutionWakeFromDispatch(memberChannelsDispatch)).toEqual({
+      eventId: "member-channels-roundtrip-1",
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: true,
+      },
+      occurredAt,
+      userId: "user_123",
+    });
+    expect(buildHostedExecutionWakeFromDispatch(assistantCronDispatch)).toEqual({
+      eventId: "assistant-cron-roundtrip-1",
+      kind: "assistant.cron.tick",
+      occurredAt,
+      reason: "device-sync",
+      userId: "user_123",
+    });
+    expect(buildHostedExecutionWakeFromDispatch(deviceSyncDispatch)).toEqual({
+      connectionId: "connection_roundtrip_1",
+      eventId: "device-sync-roundtrip-1",
+      hint: null,
+      kind: "device-sync.wake",
+      occurredAt,
+      provider: null,
+      reason: "webhook_hint",
+      userId: "user_123",
+    });
+    expect(buildHostedExecutionWakeFromDispatch(shareDispatch)).toEqual({
+      eventId: "share-roundtrip-1",
+      kind: "vault.share.accepted",
+      occurredAt,
+      share: {
+        ownerUserId: "owner_123",
+        shareId: "share_123",
+      },
+      userId: "user_123",
+    });
+
+    expect(() =>
+      buildHostedExecutionWakeFromDispatch({
+        event: {
+          kind: "unexpected.event",
+          userId: "user_123",
+        },
+        eventId: "unexpected-roundtrip",
+        occurredAt,
+      } as never),
+    ).toThrow(/Unexpected hosted execution event kind/i);
+
+    expect(() =>
+      buildHostedExecutionDispatchFromWake({
+        eventId: "unexpected-wake",
+        kind: "unexpected.wake",
+        occurredAt,
+        userId: "user_123",
+      } as never),
+    ).toThrow(/Unsupported hosted execution wake/u);
   });
 
 });

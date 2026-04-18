@@ -1,15 +1,14 @@
 import { parseHostedExecutionDeviceSyncWakeHint } from "@murphai/device-syncd/hosted-runtime";
 import {
-  buildHostedExecutionDeviceSyncWakeDispatch,
   type HostedExecutionDeviceSyncWakeEvent,
-  type HostedExecutionDispatchRequest,
+  buildHostedExecutionDeviceSyncWake as buildCanonicalHostedExecutionDeviceSyncWake,
 } from "@murphai/hosted-execution";
 
 import { toJsonRecord } from "./shared";
 
 export type HostedDeviceSyncWakeSource = "connection-established" | "disconnect" | "webhook-accepted";
 
-export function buildHostedDeviceSyncWakeDispatch(input: {
+export function buildHostedDeviceSyncWake(input: {
   connectionId: string;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
@@ -17,8 +16,8 @@ export function buildHostedDeviceSyncWakeDispatch(input: {
   source: HostedDeviceSyncWakeSource;
   traceId?: string | null;
   userId: string;
-}): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDeviceSyncWakeDispatch({
+}) {
+  return buildCanonicalHostedExecutionDeviceSyncWake({
     connectionId: input.connectionId,
     eventId: buildHostedDeviceSyncWakeEventId(input),
     hint: input.hint,
@@ -29,7 +28,7 @@ export function buildHostedDeviceSyncWakeDispatch(input: {
   });
 }
 
-export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
+export function buildHostedDeviceSyncWakeFromSignal(input: {
   connectionId: string | null;
   eventId: string;
   occurredAt: string;
@@ -37,8 +36,8 @@ export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
   signalKind: string;
   signalPayload?: Record<string, unknown> | null;
   userId: string;
-}): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDeviceSyncWakeDispatch({
+}) {
+  return buildCanonicalHostedExecutionDeviceSyncWake({
     connectionId: input.connectionId,
     eventId: input.eventId,
     hint: input.signalPayload
@@ -71,7 +70,7 @@ export function buildHostedDeviceSyncWakeEventId(input: {
 
 export function mapHostedDeviceSyncWakeReason(
   source: HostedDeviceSyncWakeSource,
-): Extract<HostedExecutionDispatchRequest["event"], { kind: "device-sync.wake" }>["reason"] {
+): HostedExecutionDeviceSyncWakeEvent["reason"] {
   switch (source) {
     case "connection-established":
       return "connected";
@@ -86,7 +85,7 @@ export function mapHostedDeviceSyncWakeReason(
 
 export function mapHostedDeviceSyncWakeReasonFromSignalKind(
   signalKind: string,
-): Extract<HostedExecutionDispatchRequest["event"], { kind: "device-sync.wake" }>["reason"] {
+): HostedExecutionDeviceSyncWakeEvent["reason"] {
   switch (signalKind) {
     case "connected":
       return "connected";

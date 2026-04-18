@@ -5,7 +5,6 @@ import type {
 import {
   HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
   type HostedExecutionDispatchLifecycleState,
-  type HostedExecutionDispatchRequest,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 
@@ -55,29 +54,12 @@ export function isExecutionLifecycleTerminal(
 }
 
 export async function appendHostedExecutionWakeTx(input: {
-  dispatch: HostedExecutionDispatchRequest;
-  now?: string;
-  sourceId?: string | null;
-  sourceType: string;
-  tx: Prisma.TransactionClient;
-} | {
   wake: HostedExecutionWake;
   now?: string;
   sourceId?: string | null;
   sourceType: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedExecutionWakeAppendResult> {
-  if ("dispatch" in input) {
-    await appendHostedExecutionWakePayloadTx({
-      dispatch: input.dispatch,
-      tx: input.tx,
-    });
-
-    return {
-      eventId: input.dispatch.eventId,
-    };
-  }
-
   await appendHostedExecutionWakePayloadTx({
     wake: input.wake,
     tx: input.tx,

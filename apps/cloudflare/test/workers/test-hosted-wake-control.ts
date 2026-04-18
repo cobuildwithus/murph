@@ -1,5 +1,6 @@
 import type {
   HostedExecutionCursorState,
+  HostedExecutionWake,
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchLifecycleState,
   HostedWakeAppendResponse,
@@ -14,8 +15,10 @@ import type {
   HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
 import {
+  buildHostedExecutionWakeFromDispatch,
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-  isHostedMessageWakeDispatch,
+  isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "../../src/bundle-store.js";
@@ -37,13 +40,16 @@ const textDecoder = new TextDecoder();
 export async function appendTestHostedWake(input: {
   bucket: R2BucketLike;
   dispatch: HostedExecutionDispatchRequest;
+} | {
+  bucket: R2BucketLike;
+  wake: HostedExecutionWake;
 }): Promise<HostedWakeAppendResponse> {
-  if (isHostedMessageWakeDispatch(input.dispatch)) {
-    throw new TypeError("Test hosted-wake control only supports system wake dispatches.");
-  }
+  const wake = "wake" in input
+    ? input.wake
+    : buildHostedExecutionWakeFromDispatch(input.dispatch);
 
-  const state = await readStoredHostedWakeControlState(input.bucket, input.dispatch.event.userId);
-  const existing = state.wakes.find((wake) => wake.eventId === input.dispatch.eventId);
+  const state = await readStoredHostedWakeControlState(input.bucket, wake.userId);
+  const existing = state.wakes.find((storedWake) => storedWake.eventId === wake.eventId);
 
   if (existing) {
     return {
@@ -56,20 +62,27 @@ export async function appendTestHostedWake(input: {
 
   const seq = String(state.nextSeq + 1);
   const now = new Date().toISOString();
-  const wake: StoredHostedWakeRecord = {
+  const storedWake: StoredHostedWakeRecord = {
     behavior: "ordered",
     createdAt: now,
-    dedupeKey: input.dispatch.eventId,
+    dedupeKey: `dispatch:${wake.kind}:${wake.eventId}`,
     dispatchState: "queued",
-    eventId: input.dispatch.eventId,
+    eventId: wake.eventId,
     id: `wake_${seq}`,
-    kind: input.dispatch.event.kind,
-    occurredAt: input.dispatch.occurredAt,
-    payloadJson: input.dispatch,
-    payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+    kind: wake.kind,
+    occurredAt: wake.occurredAt,
+    payloadJson: isHostedConversationMessageWake(wake)
+      ? {
+          eventId: wake.eventId,
+          ...wake.message,
+        }
+      : wake,
+    payloadSchema: isHostedConversationMessageWake(wake)
+      ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
+      : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
     seq,
     updatedAt: now,
-    userId: input.dispatch.event.userId,
+    userId: wake.userId,
   };
 
   state.nextSeq += 1;
@@ -78,14 +91,14 @@ export async function appendTestHostedWake(input: {
     nextSeq: String(state.nextSeq + 1),
     updatedAt: now,
   };
-  state.wakes.push(wake);
-  await writeStoredHostedWakeControlState(input.bucket, input.dispatch.event.userId, state);
+  state.wakes.push(storedWake);
+  await writeStoredHostedWakeControlState(input.bucket, wake.userId, state);
 
   return {
     duplicate: false,
     inserted: true,
     updatedExisting: false,
-    wake: toHostedWakeRecord(wake),
+    wake: toHostedWakeRecord(storedWake),
   };
 }
 

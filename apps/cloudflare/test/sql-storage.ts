@@ -59,10 +59,6 @@ export function createTestSqlStorage(): TestSqlStorageLike {
       database.exec(`
         DROP TABLE IF EXISTS runner_meta;
         DROP TABLE IF EXISTS runner_bundle_slots;
-        DROP TABLE IF EXISTS pending_events;
-        DROP TABLE IF EXISTS consumed_events;
-        DROP TABLE IF EXISTS backpressured_events;
-        DROP TABLE IF EXISTS poisoned_events;
       `);
       initializeSchema(database);
     },
@@ -91,28 +87,6 @@ function initializeSchema(database: DatabaseSync): void {
       slot TEXT PRIMARY KEY,
       bundle_ref_json TEXT,
       bundle_version INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS pending_events (
-      event_id TEXT PRIMARY KEY,
-      payload_key TEXT NOT NULL,
-      attempts INTEGER NOT NULL,
-      available_at TEXT NOT NULL,
-      enqueued_at TEXT NOT NULL,
-      last_error_code TEXT
-    );
-    CREATE TABLE IF NOT EXISTS consumed_events (
-      event_id TEXT PRIMARY KEY,
-      recorded_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS backpressured_events (
-      event_id TEXT PRIMARY KEY,
-      rejected_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS poisoned_events (
-      event_id TEXT PRIMARY KEY,
-      poisoned_at TEXT NOT NULL,
-      last_error_code TEXT NOT NULL
     );
   `);
 }

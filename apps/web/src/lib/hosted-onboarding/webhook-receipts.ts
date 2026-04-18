@@ -1,9 +1,7 @@
 export {
   continueHostedWebhookReceipt,
-  runHostedWebhookWithReceipt,
 } from "./webhook-receipt-engine";
 export type {
-  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookPlan,
@@ -15,7 +13,6 @@ export type {
   HostedWebhookSideEffectResult,
 } from "./webhook-receipt-types";
 export {
-  createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   createHostedWebhookRevnetIssuanceSideEffect,
   HostedWebhookReceiptSideEffectDrainError,

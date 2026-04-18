@@ -121,32 +121,28 @@ describe("hosted onboarding member channel sync", () => {
         sourceType: "settings.phone.sync",
       }),
     ).resolves.toEqual({
-      event: {
+      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
+      occurredAt: "2026-04-15T00:00:00.000Z",
+      userId: "member_123",
+    });
+
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
+      wake: {
+        eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         kind: "member.channels.updated",
         memberChannels: {
           email: true,
           linq: true,
           telegram: true,
         },
-        userId: "member_123",
-      },
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      occurredAt: "2026-04-15T00:00:00.000Z",
-    });
-
-    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
-      dispatch: {
-        event: {
-          kind: "member.channels.updated",
-          memberChannels: {
-            email: true,
-            linq: true,
-            telegram: true,
-          },
-          userId: "member_123",
-        },
-        eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         occurredAt: "2026-04-15T00:00:00.000Z",
+        userId: "member_123",
       },
       sourceId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
       sourceType: "settings.phone.sync",
@@ -172,30 +168,26 @@ describe("hosted onboarding member channel sync", () => {
         sourceType: "settings.phone.sync",
       }),
     ).resolves.toEqual({
-      event: {
+      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
+      occurredAt: "2026-04-15T00:00:00.000Z",
+      userId: "member_123",
+    });
+
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
+      wake: expect.objectContaining({
+        eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         kind: "member.channels.updated",
         memberChannels: {
           email: true,
           linq: true,
           telegram: true,
         },
-        userId: "member_123",
-      },
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-      occurredAt: "2026-04-15T00:00:00.000Z",
-    });
-
-    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
-      dispatch: expect.objectContaining({
-        eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
-        event: expect.objectContaining({
-          kind: "member.channels.updated",
-          memberChannels: {
-            email: true,
-            linq: true,
-            telegram: true,
-          },
-        }),
       }),
       sourceId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
       sourceType: "settings.phone.sync",

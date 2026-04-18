@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionTelegramMessageReceivedDispatch,
-  type HostedExecutionDispatchRequest,
+  buildHostedExecutionWakeFromDispatch,
+  isHostedTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
@@ -19,10 +20,6 @@ import {
   buildHostedTelegramCapture,
   createHostedTelegramAttachmentDownloadDriver,
 } from "../src/hosted-runtime/events/telegram.ts";
-
-type HostedTelegramDispatch = HostedExecutionDispatchRequest & {
-  event: Extract<HostedExecutionDispatchRequest["event"], { kind: "telegram.message.received" }>;
-}
 
 const originalFetch = globalThis.fetch;
 const originalTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -89,25 +86,23 @@ describe("buildHostedTelegramCapture", () => {
         threadId: "chat_123",
       },
       userId: "member_123",
-    }) as HostedTelegramDispatch;
-    if (dispatch.event.kind !== "telegram.message.received") {
-      throw new Error("Expected Telegram message dispatch.");
+    });
+    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
+    if (!isHostedTelegramConversationMessageWake(wake)) {
+      throw new Error("Expected Telegram conversation wake.");
     }
     const capture = {
       source: "telegram",
     };
     mocks.normalizeHostedTelegramMessage.mockResolvedValue(capture);
 
-    await expect(buildHostedTelegramCapture({
-      ...dispatch,
-      event: dispatch.event,
-    })).resolves.toEqual(capture);
+    await expect(buildHostedTelegramCapture(wake)).resolves.toEqual(capture);
 
     expect(mocks.normalizeHostedTelegramMessage).toHaveBeenCalledWith({
       accountId: "bot",
       downloadDriver: null,
       externalId: "evt_telegram",
-      message: dispatch.event.telegramMessage,
+      message: wake.message.telegramMessage,
       occurredAt: "2026-04-08T00:00:00.000Z",
       receivedAt: "2026-04-08T00:00:00.000Z",
     });

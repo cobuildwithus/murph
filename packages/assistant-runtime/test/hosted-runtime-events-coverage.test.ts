@@ -7,6 +7,7 @@ import {
   buildHostedExecutionDeviceSyncWakeDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
+  buildHostedExecutionWakeFromDispatch,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
@@ -213,7 +214,7 @@ describe("hosted runtime event coverage", () => {
     });
 
     expect(mocks.handleHostedShareAcceptedDispatch).toHaveBeenCalledWith({
-      dispatch,
+      dispatch: buildHostedExecutionWakeFromDispatch(dispatch),
       sharePack,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
     });

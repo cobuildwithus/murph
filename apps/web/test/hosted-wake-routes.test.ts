@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+} from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   appendHostedExecutionWakePayloadTx: vi.fn(),
@@ -82,15 +85,13 @@ describe("hosted wake internal routes", () => {
         kind: "assistant.cron.tick",
         occurredAt: "2026-04-17T00:00:00.000Z",
         payloadJson: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_123",
-          },
           eventId: "evt_tick",
+          kind: "assistant.cron.tick",
           occurredAt: "2026-04-17T00:00:00.000Z",
+          reason: "manual",
+          userId: "member_123",
         },
-        payloadSchema: "murph.hosted-wake-dispatch.v1",
+        payloadSchema: "murph.hosted-wake-system.v1",
         quarantineCode: null,
         quarantinedAt: null,
         seq: "24",
@@ -145,16 +146,14 @@ describe("hosted wake internal routes", () => {
   });
 
   it("parses and forwards wake append requests", async () => {
+    const wake = buildHostedExecutionAssistantCronTickWake({
+      eventId: "evt_tick",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      reason: "manual",
+      userId: "member_123",
+    });
     mocks.readOptionalJsonObject.mockResolvedValue({
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_tick",
-        occurredAt: "2026-04-17T00:00:00.000Z",
-      },
+      wake,
     });
 
     const { POST } = await import("../app/api/internal/hosted-wake/append/route");
@@ -171,19 +170,34 @@ describe("hosted wake internal routes", () => {
       }),
     });
     expect(mocks.appendHostedExecutionWakePayloadTx).toHaveBeenCalledWith({
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_tick",
-        occurredAt: "2026-04-17T00:00:00.000Z",
-      },
+      wake,
       tx: expect.objectContaining({
         label: "wake-route-tx",
       }),
     });
+  });
+
+  it("rejects wake append requests whose wake userId does not match the bound user", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      wake: buildHostedExecutionAssistantCronTickWake({
+        eventId: "evt_tick",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+        reason: "manual",
+        userId: "member_other",
+      }),
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/append/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.appendHostedExecutionWakePayloadTx).not.toHaveBeenCalled();
   });
 
   it("parses and forwards unseen wake fetch requests", async () => {

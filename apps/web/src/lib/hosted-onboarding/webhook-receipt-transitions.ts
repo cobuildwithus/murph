@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 
 import { isHostedOnboardingError } from "./errors";
 import type {
-  HostedWebhookDispatchSideEffect,
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookReceiptErrorState,
   HostedWebhookReceiptLocalSideEffect,
@@ -89,14 +88,6 @@ export function markHostedWebhookReceiptSideEffectSentUnconfirmed(
     const lastError = serializeHostedWebhookSideEffectError(input.error);
 
     switch (effect.kind) {
-      case "hosted_execution_dispatch":
-        return {
-          ...effect,
-          lastError,
-          result: readHostedWebhookDispatchSideEffectResult(input.result),
-          sentAt: input.sentAt,
-          status: "sent_unconfirmed",
-        } satisfies HostedWebhookDispatchSideEffect;
       case "linq_message_send":
         return {
           ...effect,
@@ -262,16 +253,6 @@ function mergeHostedWebhookSideEffects(
   return mergedEffects;
 }
 
-function readHostedWebhookDispatchSideEffectResult(
-  value: HostedWebhookSideEffectResult,
-): NonNullable<HostedWebhookDispatchSideEffect["result"]> {
-  if ("dispatched" in value && value.dispatched === true) {
-    return value;
-  }
-
-  throw new Error("Hosted webhook dispatch side effect received an invalid terminal result.");
-}
-
 function readHostedWebhookLinqMessageSideEffectResult(
   value: HostedWebhookSideEffectResult,
 ): NonNullable<HostedWebhookLinqMessageSideEffect["result"]> {
@@ -312,19 +293,6 @@ function mergeHostedWebhookSideEffect(
   }
 
   switch (desiredEffect.kind) {
-    case "hosted_execution_dispatch": {
-      const currentDispatchEffect = currentEffect as HostedWebhookDispatchSideEffect;
-      return {
-        ...desiredEffect,
-        attemptCount: currentDispatchEffect.attemptCount,
-        lastAttemptAt: currentDispatchEffect.lastAttemptAt,
-        lastError: currentDispatchEffect.lastError,
-        payload: currentDispatchEffect.payload,
-        result: currentDispatchEffect.result,
-        sentAt: currentDispatchEffect.sentAt,
-        status: "sent_unconfirmed",
-      };
-    }
     case "linq_message_send": {
       const currentLinqEffect = currentEffect as HostedWebhookLinqMessageSideEffect;
       return {

@@ -9,6 +9,7 @@ import {
   buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
+  buildHostedExecutionWakeFromDispatch,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -324,10 +325,14 @@ describe("executeHostedDispatchEvent", () => {
       vaultRoot,
     });
 
-    expect(mocks.buildHostedLinqCapture).toHaveBeenCalledWith(linqDispatch);
-    expect(mocks.buildHostedTelegramCapture).toHaveBeenCalledWith(telegramDispatch);
+    expect(mocks.buildHostedLinqCapture).toHaveBeenCalledWith(
+      buildHostedExecutionWakeFromDispatch(linqDispatch),
+    );
+    expect(mocks.buildHostedTelegramCapture).toHaveBeenCalledWith(
+      buildHostedExecutionWakeFromDispatch(telegramDispatch),
+    );
     expect(mocks.buildHostedEmailCapture).toHaveBeenCalledWith(
-      emailDispatch,
+      buildHostedExecutionWakeFromDispatch(emailDispatch),
       runtime.platform.effectsPort,
     );
     expect(processCapture).toHaveBeenCalledTimes(3);

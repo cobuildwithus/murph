@@ -59,6 +59,13 @@ describe("hosted execution parsers coverage", () => {
           runId: "run_123",
           startedAt: "2026-04-08T00:00:01.000Z",
         },
+        wake: {
+          eventId: "evt_123",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "manual",
+          userId: "user_123",
+        },
       });
     });
 

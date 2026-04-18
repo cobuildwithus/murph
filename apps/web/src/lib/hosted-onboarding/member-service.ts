@@ -16,6 +16,3 @@ export {
 export {
   completeHostedPrivyVerification,
 } from "./authentication-service";
-export {
-  buildHostedMemberActivationDispatch,
-} from "./member-activation";

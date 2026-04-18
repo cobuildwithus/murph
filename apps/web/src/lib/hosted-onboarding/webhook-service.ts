@@ -31,13 +31,10 @@ import {
   continueHostedWebhookReceipt,
   listHostedWebhookReceiptContinuationCandidates,
   HostedWebhookReceiptSideEffectDrainError,
-  type HostedWebhookDispatchSideEffect,
   type HostedWebhookPlan,
   type HostedWebhookReceiptClaim,
 } from "./webhook-receipts";
-import type { HostedWebhookReceiptLocalSideEffect } from "./webhook-receipt-types";
 import {
-  enqueueHostedWebhookDispatchSideEffects,
   markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,
@@ -354,43 +351,6 @@ export async function handleHostedStripeWebhook(input: {
     ok: true,
     type: recorded.type,
   };
-}
-
-export async function continueHostedOnboardingWebhookReceiptBestEffort(input: {
-  eventId: string;
-  prisma?: PrismaClient;
-  signal?: AbortSignal;
-  source: "linq" | "telegram";
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  try {
-    const claimedReceipt = await claimHostedWebhookReceiptForContinuation({
-      eventId: input.eventId,
-      prisma,
-      source: input.source,
-    });
-
-    if (!claimedReceipt) {
-      return;
-    }
-
-    await continueHostedWebhookReceipt({
-      claimedReceipt,
-      eventId: input.eventId,
-      handlers: createHostedWebhookReceiptHandlers(),
-      prisma,
-      signal: input.signal,
-      source: input.source,
-    });
-  } catch (error) {
-    console.error(
-      "Hosted webhook receipt continuation failed.",
-      sanitizeHostedOnboardingLogString(
-        error instanceof Error ? error.message : String(error),
-      ) ?? "Unknown error.",
-    );
-  }
 }
 
 export async function drainHostedOnboardingWebhookReceipts(input: {
@@ -722,20 +682,9 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
           };
         }
 
-        const { dispatchSideEffects, receiptSideEffects } = partitionHostedWebhookPlanSideEffects(
-          plan.desiredSideEffects,
-        );
-
-        await enqueueHostedWebhookDispatchSideEffects({
-          dispatchSideEffects,
-          eventId: input.eventId,
-          prisma: transaction,
-          source: input.source,
-        });
-
         const nextClaim = await queueHostedWebhookReceiptSideEffects({
           claimedReceipt: activeClaim,
-          desiredSideEffects: receiptSideEffects,
+          desiredSideEffects: plan.desiredSideEffects,
           eventId: input.eventId,
           prisma: transaction,
           source: input.source,
@@ -851,25 +800,4 @@ function hasDeferredHostedWebhookSideEffects(
   claimedReceipt: HostedWebhookReceiptClaim,
 ): boolean {
   return claimedReceipt.state.sideEffects.length > 0;
-}
-
-function partitionHostedWebhookPlanSideEffects(
-  sideEffects: HostedWebhookPlan<HostedWebhookServiceResponse>["desiredSideEffects"],
-) {
-  const dispatchSideEffects: HostedWebhookDispatchSideEffect[] = [];
-  const receiptSideEffects: HostedWebhookReceiptLocalSideEffect[] = [];
-
-  for (const sideEffect of sideEffects) {
-    if (sideEffect.kind === "hosted_execution_dispatch") {
-      dispatchSideEffects.push(sideEffect);
-      continue;
-    }
-
-    receiptSideEffects.push(sideEffect);
-  }
-
-  return {
-    dispatchSideEffects,
-    receiptSideEffects,
-  };
 }

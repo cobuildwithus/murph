@@ -1,20 +1,16 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionDispatchLifecycleState,
-  HostedExecutionDispatchRequest,
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-  buildHostedExecutionDispatchFromWake,
-  buildHostedExecutionWakeFromDispatch,
   isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 import {
   appendHostedCoalescingWakeTx,
-  appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx,
   findHostedWakeEventIdByEventIdTx,
   readHostedWakeLifecycleByDedupeKeyTx,
@@ -22,18 +18,11 @@ import {
   type AppendHostedWakeResult,
 } from "./store";
 
-type CanonicalHostedWakeInput =
-  | {
-      dispatch: HostedExecutionDispatchRequest;
-      tx: Prisma.TransactionClient;
-    }
-  | {
-      tx: Prisma.TransactionClient;
-      wake: HostedExecutionWake;
-    };
-
-export async function appendHostedOrderedExecutionWakeTx(input: CanonicalHostedWakeInput): Promise<AppendHostedWakeResult> {
-  const wake = normalizeHostedExecutionWakeInput(input);
+export async function appendHostedOrderedExecutionWakeTx(input: {
+  tx: Prisma.TransactionClient;
+  wake: HostedExecutionWake;
+}): Promise<AppendHostedWakeResult> {
+  const { wake } = input;
   return appendHostedOrderedWakeTx({
     dedupeKey: buildHostedExecutionWakeDedupeKey(wake),
     kind: wake.kind,
@@ -45,17 +34,11 @@ export async function appendHostedOrderedExecutionWakeTx(input: CanonicalHostedW
   });
 }
 
-export async function appendHostedOrderedWakePayloadTx(input: {
-  dispatch: HostedExecutionDispatchRequest;
+export async function appendHostedExecutionWakePayloadTx(input: {
   tx: Prisma.TransactionClient;
+  wake: HostedExecutionWake;
 }): Promise<AppendHostedWakeResult> {
-  return appendHostedOrderedExecutionWakeTx(input);
-}
-
-export async function appendHostedExecutionWakePayloadTx(
-  input: CanonicalHostedWakeInput,
-): Promise<AppendHostedWakeResult> {
-  const wake = normalizeHostedExecutionWakeInput(input);
+  const { wake } = input;
 
   switch (wake.kind) {
     case "device-sync.wake":
@@ -73,7 +56,7 @@ export async function appendHostedExecutionWakePayloadTx(
   }
 }
 
-export async function appendHostedCoalescingExecutionWakeTx(input: {
+async function appendHostedCoalescingExecutionWakeTx(input: {
   coalescingKey: string;
   tx: Prisma.TransactionClient;
   wake: HostedExecutionWake;
@@ -87,47 +70,6 @@ export async function appendHostedCoalescingExecutionWakeTx(input: {
     payloadSchema: resolveHostedWakePayloadSchema(input.wake),
     tx: input.tx,
     userId: input.wake.userId,
-  });
-}
-
-export async function appendHostedCoalescingWakePayloadTx(input: {
-  coalescingKey: string;
-  dispatch: HostedExecutionDispatchRequest;
-  tx: Prisma.TransactionClient;
-}): Promise<AppendHostedWakeResult> {
-  return appendHostedCoalescingExecutionWakeTx({
-    coalescingKey: input.coalescingKey,
-    tx: input.tx,
-    wake: buildHostedExecutionWakeFromDispatch(input.dispatch),
-  });
-}
-
-export async function appendHostedEdgeTriggeredExecutionWakeTx(input: {
-  coalescingKey: string;
-  tx: Prisma.TransactionClient;
-  wake: HostedExecutionWake;
-}): Promise<AppendHostedWakeResult> {
-  return appendHostedEdgeTriggeredWakeTx({
-    coalescingKey: input.coalescingKey,
-    dedupeKey: buildHostedExecutionWakeDedupeKey(input.wake),
-    kind: input.wake.kind,
-    occurredAt: input.wake.occurredAt,
-    payload: buildHostedWakePayloadValue(input.wake),
-    payloadSchema: resolveHostedWakePayloadSchema(input.wake),
-    tx: input.tx,
-    userId: input.wake.userId,
-  });
-}
-
-export async function appendHostedEdgeTriggeredWakePayloadTx(input: {
-  coalescingKey: string;
-  dispatch: HostedExecutionDispatchRequest;
-  tx: Prisma.TransactionClient;
-}): Promise<AppendHostedWakeResult> {
-  return appendHostedEdgeTriggeredExecutionWakeTx({
-    coalescingKey: input.coalescingKey,
-    tx: input.tx,
-    wake: buildHostedExecutionWakeFromDispatch(input.dispatch),
   });
 }
 
@@ -171,24 +113,12 @@ export function buildHostedExecutionWakeDedupeKey(wake: HostedExecutionWake): st
   return buildHostedWakeDispatchDedupeKeyFromEventId(wake.eventId, wake.kind);
 }
 
-export function buildHostedWakeDispatchDedupeKey(
-  dispatch: HostedExecutionDispatchRequest,
-): string {
-  return buildHostedExecutionWakeDedupeKey(buildHostedExecutionWakeFromDispatch(dispatch));
-}
-
 export function buildHostedExecutionWakeCoalescingKey(wake: HostedExecutionWake): string {
   if (wake.kind === "device-sync.wake") {
     return `${wake.kind}:${wake.userId}:${wake.connectionId ?? wake.provider ?? "global"}`;
   }
 
   return `${wake.kind}:${wake.userId}`;
-}
-
-export function buildHostedWakeDispatchCoalescingKey(
-  dispatch: HostedExecutionDispatchRequest,
-): string {
-  return buildHostedExecutionWakeCoalescingKey(buildHostedExecutionWakeFromDispatch(dispatch));
 }
 
 function buildHostedWakeDispatchDedupeKeyFromEventId(
@@ -213,14 +143,4 @@ function buildHostedWakePayloadValue(wake: HostedExecutionWake): unknown {
     eventId: wake.eventId,
     ...wake.message,
   };
-}
-
-function normalizeHostedExecutionWakeInput(input: CanonicalHostedWakeInput): HostedExecutionWake {
-  return "wake" in input
-    ? input.wake
-    : buildHostedExecutionWakeFromDispatch(input.dispatch);
-}
-
-export function buildHostedExecutionDispatchFromStoredWake(wake: HostedExecutionWake): HostedExecutionDispatchRequest {
-  return buildHostedExecutionDispatchFromWake(wake);
 }

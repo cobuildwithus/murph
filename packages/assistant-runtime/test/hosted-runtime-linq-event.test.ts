@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionLinqMessageReceivedDispatch,
-  type HostedExecutionDispatchRequest,
+  buildHostedExecutionWakeFromDispatch,
+  isHostedLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
@@ -25,10 +26,6 @@ import {
   createHostedLinqAttachmentDownloadDriver,
   normalizeHostedLinqAttachmentUrl,
 } from "../src/hosted-runtime/events/linq.ts";
-
-type HostedLinqDispatch = HostedExecutionDispatchRequest & {
-  event: Extract<HostedExecutionDispatchRequest["event"], { kind: "linq.message.received" }>;
-}
 
 const originalFetch = globalThis.fetch;
 
@@ -64,9 +61,10 @@ describe("buildHostedLinqCapture", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
       phoneLookupKey: "15551234567",
       userId: "member_123",
-    }) as HostedLinqDispatch;
-    if (dispatch.event.kind !== "linq.message.received") {
-      throw new Error("Expected Linq message dispatch.");
+    });
+    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
+    if (!isHostedLinqConversationMessageWake(wake)) {
+      throw new Error("Expected Linq conversation wake.");
     }
     const parsedEvent = {
       parsed: true,
@@ -90,15 +88,12 @@ describe("buildHostedLinqCapture", () => {
     mocks.parseLinqWebhookEvent.mockReturnValue(parsedEvent);
     mocks.normalizeLinqWebhookEvent.mockResolvedValue(capture);
 
-    await expect(buildHostedLinqCapture({
-      ...dispatch,
-      event: dispatch.event,
-    })).resolves.toEqual({
+    await expect(buildHostedLinqCapture(wake)).resolves.toEqual({
       ...capture,
       accountId: "15551234567",
     });
 
-    expect(mocks.parseLinqWebhookEvent).toHaveBeenCalledWith(JSON.stringify(dispatch.event.linqEvent));
+    expect(mocks.parseLinqWebhookEvent).toHaveBeenCalledWith(JSON.stringify(wake.message.linqEvent));
     expect(mocks.normalizeLinqWebhookEvent).toHaveBeenCalledWith({
       attachmentDownloadTimeoutMs: 5_000,
       defaultAccountId: "15551234567",
@@ -122,9 +117,10 @@ describe("buildHostedLinqCapture", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
       phoneLookupKey: "15551234567",
       userId: "member_123",
-    }) as HostedLinqDispatch;
-    if (dispatch.event.kind !== "linq.message.received") {
-      throw new Error("Expected Linq message dispatch.");
+    });
+    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
+    if (!isHostedLinqConversationMessageWake(wake)) {
+      throw new Error("Expected Linq conversation wake.");
     }
 
     const capture = {
@@ -146,10 +142,7 @@ describe("buildHostedLinqCapture", () => {
     mocks.parseLinqWebhookEvent.mockReturnValue({ parsed: true });
     mocks.normalizeLinqWebhookEvent.mockResolvedValue(capture);
 
-    await expect(buildHostedLinqCapture({
-      ...dispatch,
-      event: dispatch.event,
-    })).resolves.toEqual({
+    await expect(buildHostedLinqCapture(wake)).resolves.toEqual({
       ...capture,
       accountId: "15551234567",
       externalId: "linq:msg_real_123",

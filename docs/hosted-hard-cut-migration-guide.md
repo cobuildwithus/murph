@@ -5,9 +5,20 @@ Status snapshot: 2026-04-18
 ## Final verdict
 
 The web-owned hosted-wake substrate is in place and should stay. Most hosted
-producers already append canonical wake rows. The hard cut is still unfinished
-because the shared contract, runtime execution loop, and Cloudflare runner still
-carry dispatch-era semantics and duplicate lifecycle ownership.
+producers append canonical wake rows, including email and the active-member
+webhook hot path. The production hard cut is now effectively landed: Cloudflare
+is on the wake/status/browser-vault control surface, direct dispatch RPCs are
+gone from the production Durable Object boundary, and ordinary message wakes no
+longer force the generic maintenance loop.
+
+What remains is narrower and deletion-oriented:
+
+- internal compatibility helpers still materialize `HostedExecutionDispatchRequest`
+  from wakes inside shared packages
+- some onboarding receipt state still exists for invite/quota/local side-effect
+  flows
+- a small set of test-only dispatch helpers still exists outside the production
+  path
 
 ## What is already landed and should not be reopened
 
@@ -71,9 +82,9 @@ Why this matters:
 
 ## Deduplicated remaining gaps
 
-### 1. Shared hosted contracts are still dispatch-era contracts
+### 1. Shared hosted contracts are wake-first externally, with internal dispatch compatibility still present
 
-Status: not done
+Status: partial, but no longer a production-boundary blocker
 
 Evidence:
 
@@ -85,20 +96,22 @@ Evidence:
 
 Current state:
 
-- The shared surface still revolves around `HostedExecutionDispatchRequest`.
-- Message wakes are still top-level provider kinds:
-  - `linq.message.received`
-  - `telegram.message.received`
-  - `email.message.received`
-- System wakes still store full dispatch envelopes under
+- The append route and Cloudflare control-plane client are wake-first now.
+- assistant-runtime now derives wakes locally when wake-native logic needs them,
+  instead of depending on a populated `request.wake` field.
+- Internal shared runtime contracts still carry `HostedExecutionDispatchRequest`
+  as a compatibility surface behind that append boundary.
+- New message wakes land as `conversation.message`, but dispatch-era provider
+  event kinds still exist inside builders/parsers and runtime-facing helper
+  types.
+- Some system wakes still store full dispatch envelopes under
   `HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA`.
 
 What to fix:
 
-- Replace the dispatch-shaped shared contract with a canonical hosted wake
-  contract.
-- Collapse message ingress onto one canonical message wake shape instead of
-  provider-specific top-level event kinds.
+- Treat the remaining dispatch-shaped builders/parsers as compatibility-only.
+- Delete them once test harnesses and the last internal callers stop needing
+  them.
 
 Recommended end state:
 
@@ -112,9 +125,9 @@ Recommended end state:
 For messages, keep channel-specific payload detail under the message payload, not
 as separate top-level wake kinds.
 
-### 2. Active-member webhooks still flow through the receipt wrapper
+### 2. Active-member webhooks append wakes directly and only keep receipt state for local side effects
 
-Status: partial
+Status: landed in this batch, with receipt-local follow-up still remaining
 
 Evidence:
 
@@ -127,8 +140,7 @@ Current state:
 
 - Linq and Telegram active-member paths append direct wake payloads.
 - `apps/web/src/lib/hosted-onboarding/webhook-service.ts` now routes those
-  active-member responses through a dedicated fast path instead of directly
-  calling `runHostedWebhookWithReceipt(...)` on the hot path.
+  active-member responses through a dedicated fast path.
 - Receipt ownership still exists for duplicate claim/completion and for
   onboarding/quota/local-side-effect flows, but no longer owns the active
   message payload lifecycle.
@@ -142,7 +154,7 @@ What remains:
 
 ### 3. Runtime message wakes no longer force the generic maintenance loop
 
-Status: landed in this batch, with follow-up cleanup still remaining
+Status: landed
 
 Evidence:
 
@@ -161,12 +173,12 @@ Current state:
 What remains:
 
 - Keep provider-specific event helpers constrained to capture normalization.
-- Finish removing dispatch-envelope terminology from the remaining shared
-  runtime contracts.
+- Keep the remaining dispatch-envelope terminology isolated to compatibility
+  helpers rather than re-expanding it through the runtime boundary.
 
-### 4. Cloudflare still carries a second queue architecture
+### 4. Cloudflare is now a thin wake runner instead of a second queue owner
 
-Status: partial
+Status: landed for production; test-only compatibility still exists
 
 Evidence:
 
@@ -178,19 +190,24 @@ Evidence:
 Current state:
 
 - Cloudflare already fetches wake rows from web and commits the cursor back to web.
-- The Durable Object still persists `pending_events`, `consumed_events`,
-  `poisoned_events`, local dispatch status, and bundle-slot metadata through
-  `RunnerQueueStore`.
-- Local fallback status is still exposed when web status reads fail.
+- The Durable Object schema now drops `pending_events`, `consumed_events`,
+  `backpressured_events`, and `poisoned_events`.
+- Production `UserRunnerDurableObject` no longer exposes `dispatch` or
+  `dispatchWithOutcome` RPCs.
+- Local completed-status reuse and the dispatch-payload-store plumbing are gone
+  from the production runner path.
+- `dispatchWithOutcome` degrades conservatively to `queued` when canonical wake
+  status is unavailable instead of reconstructing local lifecycle truth.
 
 What to fix:
 
-- Remove Cloudflare-owned queue truth.
-- Keep only the state Cloudflare actually needs:
+- Keep Cloudflare limited to the state it still legitimately owns:
   - active run lease / epoch
   - in-flight run status
   - next wake time
   - latest cached bundle ref for warm reuse
+- Delete the remaining test-only direct-dispatch helpers once the harnesses stop
+  using them.
 
 Web must remain the only owner of:
 
@@ -200,9 +217,9 @@ Web must remain the only owner of:
 - committed high-water
 - snapshot pointer truth
 
-### 5. Email is on canonical wake append but not on the final message contract
+### 5. Email now uses the same canonical message wake contract
 
-Status: partial
+Status: landed in this batch
 
 Evidence:
 
@@ -212,26 +229,27 @@ Evidence:
 Current state:
 
 - Hosted email ingress appends into web-owned `HostedWake`.
-- It still does so by building `HostedExecutionDispatchRequest` with
-  `email.message.received`.
+- It now appends `conversation.message` wakes directly, matching Linq and
+  Telegram ingress.
 
 What to fix:
 
-- Move email onto the same canonical message wake contract as Linq and Telegram.
-- Keep the runtime email normalization helper, but feed it from the final message
-  payload rather than a provider-specific dispatch envelope.
+- Keep the runtime email normalization helper fed from the canonical message
+  payload instead of reintroducing a provider-specific top-level wake kind.
 
 ## Report deltas to carry forward
 
 These are the key places where the supplied analyses need updating before they
 drive implementation:
 
-- “Active-member Linq/Telegram append canonical wakes directly” is already true.
+- “Active-member Linq/Telegram append canonical wakes directly” is already true,
+  and the hot path no longer routes through receipt dispatch wrappers.
 - “System producers are only partially cut over” is no longer the main gap.
   Activation, channel sync, device-sync, share acceptance, and hosted email all
-  already land in `HostedWake`; the real remaining issue is that they still wrap
-  those wakes in dispatch-era envelopes.
-- “Cloudflare still owns a second queue architecture” remains true.
+  already land in `HostedWake`; the real remaining issue is the leftover
+  dispatch-era contract surface inside shared runtime code.
+- “Cloudflare still owns a second queue architecture” is no longer true for the
+  production path. The remaining direct-dispatch seams are test-only.
 - “Runtime message turns still go through generic dispatch/event layering”
   remains partly true, but the maintenance coupling is no longer the main gap.
   Message wakes now stay on the conversation lane without forcing the generic
@@ -240,7 +258,7 @@ drive implementation:
 
 ## Ordered migration phases
 
-### Phase 1. Hard-cut the shared contract
+### Phase 1. Keep the shared contract deletion-oriented
 
 Primary files:
 
@@ -250,11 +268,10 @@ Primary files:
 
 Tasks:
 
-- Replace `HostedExecutionDispatchRequest` as the canonical wake append surface.
-- Introduce one canonical message wake contract with a `channel` field and
-  channel-specific payload details.
-- Stop storing new system wakes as full dispatch envelopes once the direct wake
-  contract exists.
+- Preserve the wake-first append/control-plane boundary.
+- Keep new work off `HostedExecutionDispatchRequest`.
+- Delete compatibility-only builders/parsers when tests and internal callers no
+  longer need them.
 
 Acceptance:
 
@@ -267,7 +284,8 @@ Primary files:
 
 - `apps/web/src/lib/hosted-onboarding/{webhook-service,webhook-provider-linq,webhook-provider-telegram}.ts`
 
-Status in this repo: partially landed in this batch.
+Status in this repo: landed for the active-message hot path; remaining receipt
+state is local-side-effect-only.
 
 Tasks:
 
@@ -280,18 +298,18 @@ Tasks:
 Acceptance:
 
 - Active-member Linq and Telegram webhook message handling no longer directly
-  calls `runHostedWebhookWithReceipt(...)` on the hot path.
+  routes through receipt-managed dispatch wrappers on the hot path.
 - Receipt-managed continuation only remains where local side effects still need
   it.
 
-### Phase 3. Finish the runtime conversation lane
+### Phase 3. Preserve the runtime conversation lane
 
 Primary files:
 
 - `packages/assistant-runtime/src/hosted-runtime/{execution,events}.ts`
 - `packages/assistant-runtime/src/hosted-runtime/events/**`
 
-Status in this repo: substantially landed in this batch.
+Status in this repo: landed.
 
 Tasks:
 
@@ -304,7 +322,7 @@ Acceptance:
 
 - A normal conversation wake does not trigger the generic maintenance sweep.
 
-### Phase 4. Cut Cloudflare down to the thin shim
+### Phase 4. Keep Cloudflare as the thin shim
 
 Primary files:
 
@@ -313,16 +331,16 @@ Primary files:
 
 Tasks:
 
-- Remove local queue truth for pending, consumed, and poisoned event history.
-- Keep only lease/run/bundle-cache/alarm state.
-- Make user and event status derive from web-owned wake lifecycle by default.
+- Keep only lease/run/bundle-cache/alarm state in production code.
+- Keep user and event status derived from web-owned wake lifecycle by default.
+- Delete the test-only direct-dispatch harness once it is no longer needed.
 
 Acceptance:
 
 - Cloudflare no longer persists queue correctness state that can disagree with
   web-owned wake lifecycle state.
 
-### Phase 5. Move email and any stragglers onto the same final wake contract
+### Phase 5. Keep email and any stragglers on the same final wake contract
 
 Primary files:
 
@@ -331,8 +349,7 @@ Primary files:
 
 Tasks:
 
-- Switch email from `email.message.received` dispatch envelopes to the final
-  message wake contract.
+- Preserve email on the canonical `conversation.message` wake contract.
 - Remove compatibility-only parsing once all producers are moved.
 
 Acceptance:
@@ -340,7 +357,7 @@ Acceptance:
 - Linq, Telegram, and email all enter the runtime through the same top-level
   message wake kind.
 
-### Phase 6. Delete the legacy surfaces and rewrite docs
+### Phase 6. Delete the last compatibility-only surfaces and keep docs honest
 
 Primary files:
 
@@ -351,39 +368,28 @@ Primary files:
 Tasks:
 
 - Delete unused dispatch-only builders, parsers, tests, and status helpers.
-- Update durable docs once the final owner boundaries are real.
+- Keep durable docs aligned with the production owner boundaries instead of the
+  compatibility shims.
 
 Acceptance:
 
 - No canonical hosted runtime doc still describes dispatch envelopes or
   Cloudflare-owned queue truth as the steady-state architecture.
 
-## Current session parallelization plan
+## Remaining delete-only follow-ups
 
-### Batch 1: implement now
+These are the pieces still worth cleaning up if we want to remove every last
+dispatch-era compatibility seam:
 
-These lanes are independent enough to run in parallel in the shared worktree.
+1. Delete shared hosted-execution compatibility builders/parsers once the last
+   internal callers and tests stop needing them.
 
-1. `apps/web` active-member webhook fast path
-   - landed in this batch
-   - keep onboarding/quota side-effect flows intact while shrinking leftover
-     receipt ownership further
+2. Delete Cloudflare test-only direct-dispatch helpers and the remaining
+   dispatch-payload-store coverage once the harnesses move fully onto wake-based
+   helpers.
 
-2. `packages/assistant-runtime` conversation-lane cleanup
-   - landed in this batch
-   - keep message wakes off the generic maintenance loop
-
-3. `apps/cloudflare` thin-shim cleanup
-   - reduce local queue/status ownership further toward lease/run/bundle-cache only
-
-### Batch 2: integrate after Batch 1
-
-This lane overlaps every hosted surface and should wait until the first batch is
-integrated.
-
-4. shared hosted-execution contract hard cut
-   - replace dispatch-shaped wake contracts with the final canonical wake surface
-   - move email and remaining producers onto that final contract
+3. Keep shrinking webhook receipt ownership until only explicitly justified
+   onboarding/quota/local-side-effect flows remain.
 
 ## Exit criteria for the full hard cut
 
@@ -394,5 +400,5 @@ integrated.
 - Active-member message ingress does not depend on the webhook receipt engine.
 - Message wakes do not trigger the generic maintenance loop.
 - Cloudflare Durable Objects no longer persist their own queue truth.
-- The repo has no steady-state docs or tests that still treat dispatch-era
-  envelopes as the canonical hosted execution model.
+- The repo does not treat dispatch-era envelopes as the canonical production
+  hosted execution model.

@@ -1,13 +1,11 @@
 /**
- * Pure runner queue projection helpers extracted from RunnerQueueStore. The store
- * still owns SQL-backed lifecycle transitions; this module owns normalization,
- * bundle-ref versioning, wake scheduling, and malformed-state cleanup.
+ * Pure thin-runner projection helpers extracted from RunnerQueueStore. The
+ * store still owns SQL-backed lease/runtime transitions; this module owns
+ * normalization, bundle-ref versioning, and wake scheduling.
  */
 
 import {
-  deriveHostedExecutionErrorCode,
   summarizeHostedExecutionErrorCode,
-  summarizeHostedExecutionError,
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
@@ -21,7 +19,6 @@ import {
 import {
   CONSUMED_EVENT_EXACT_TTL_MS,
   type DurableObjectSqlValue,
-  type PendingDispatchMetaRecord,
   type RunnerBundleVersion,
   type RunnerStateRecord,
   earliestIsoTimestamp,
@@ -83,24 +80,6 @@ export function assignRunnerBundleRefs(
   bundleState.bundleVersion += 1;
 }
 
-export function classifyMalformedPendingDispatchError(error: unknown): {
-  errorCode: string;
-  message: string;
-} {
-  const errorCode = deriveHostedExecutionErrorCode(error);
-  if (isInvalidRequestFamilyErrorCode(errorCode)) {
-    return {
-      errorCode: "invalid_request",
-      message: "Hosted runner poisoned a malformed pending dispatch.",
-    };
-  }
-
-  return {
-    errorCode,
-    message: `Hosted runner poisoned a malformed pending dispatch. ${summarizeHostedExecutionError(error)}`,
-  };
-}
-
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
     active_run_attempt: null,
@@ -131,39 +110,46 @@ export function nextConsumedEventExactExpiryIso(): string {
 }
 
 export function projectRunnerStateRecord(input: {
-  backpressuredEventIds: readonly string[];
   bundleState: RunnerStoredBundleState;
-  lastEventId: string | null;
   meta: RunnerMetaRow;
-  nextPendingAvailableAt: string | null;
-  pendingDispatches: readonly PendingDispatchMetaRecord[];
-  poisonedEventIds: readonly string[];
-  retryingEventId: string | null;
   run: HostedExecutionRunStatus | null;
   timeline: readonly HostedExecutionTimelineEntry[];
 }): RunnerStateProjection {
   const bundleRefState = sanitizeStoredBundleRef(input.bundleState);
   const nextLastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code) ?? bundleRefState.warning;
+  const hasPersistedRunLease = input.meta.active_run_event_id !== null
+    && input.meta.active_run_id !== null
+    && typeof input.meta.active_run_attempt === "number"
+    && input.meta.active_run_started_at !== null;
+  const lastEventId = input.meta.last_event_id
+    ?? input.meta.retrying_event_id
+    ?? input.meta.active_run_event_id
+    ?? input.run?.eventId
+    ?? null;
+  const retryingEventId = input.meta.retrying_event_id
+    ?? (hasPersistedRunLease
+      ? (input.meta.active_run_event_id ?? input.run?.eventId ?? lastEventId)
+      : null);
 
   return {
     changed: bundleRefState.changed,
     record: {
       runtimeBootstrapped: input.meta.runtime_bootstrapped === 1,
-      backpressuredEventIds: [...input.backpressuredEventIds],
+      backpressuredEventIds: [],
       bundleRef: bundleRefState.bundleRef,
       bundleVersion: bundleRefState.sanitizedBundleState.bundleVersion,
-      inFlight: input.meta.in_flight === 1,
+      inFlight: input.meta.in_flight === 1 || hasPersistedRunLease,
       lastError: nextLastError,
       lastErrorAt: input.meta.last_error_at,
       lastErrorCode: input.meta.last_error_code,
-      lastEventId: input.meta.last_event_id ?? input.lastEventId,
+      lastEventId,
       lastRunAt: input.meta.last_run_at,
-      nextPendingAvailableAt: input.nextPendingAvailableAt,
+      nextPendingAvailableAt: null,
       nextWakeAt: input.meta.next_wake_at,
-      pendingEventCount: input.pendingDispatches.length,
-      poisonedEventIds: [...input.poisonedEventIds],
+      pendingEventCount: 0,
+      poisonedEventIds: [],
       run: input.run,
-      retryingEventId: input.meta.retrying_event_id ?? input.retryingEventId,
+      retryingEventId,
       timeline: [...input.timeline],
       userId: input.meta.user_id,
     },
@@ -172,22 +158,13 @@ export function projectRunnerStateRecord(input: {
 }
 
 export function resolveRunnerNextWakeAt(input: {
-  nextPendingAvailableAt: string | null;
+  nextPendingAvailableAt?: string | null;
   preferredWakeAt?: string | null;
 }): string | null {
   return earliestIsoTimestamp(
-    input.nextPendingAvailableAt,
+    input.nextPendingAvailableAt ?? null,
     normalizePreferredWakeAt(input.preferredWakeAt ?? null),
   );
-}
-
-function isInvalidRequestFamilyErrorCode(errorCode: string): boolean {
-  return errorCode === "invalid_request"
-    || errorCode === "range_error"
-    || errorCode === "reference_error"
-    || errorCode === "syntax_error"
-    || errorCode === "type_error"
-    || errorCode === "uri_error";
 }
 
 function normalizePreferredWakeAt(value: string | null): string | null {

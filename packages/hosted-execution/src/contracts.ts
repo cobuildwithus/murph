@@ -51,6 +51,27 @@ export const HOSTED_MESSAGE_WAKE_EVENT_KINDS = [
 export type HostedMessageWakeEventKind =
   (typeof HOSTED_MESSAGE_WAKE_EVENT_KINDS)[number];
 
+export const HOSTED_EXECUTION_WAKE_KINDS = [
+  "conversation.message",
+  "member.activated",
+  "member.channels.updated",
+  "assistant.cron.tick",
+  "device-sync.wake",
+  "vault.share.accepted",
+] as const;
+
+export type HostedExecutionWakeKind =
+  (typeof HOSTED_EXECUTION_WAKE_KINDS)[number];
+
+export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
+  "linq",
+  "telegram",
+  "email",
+] as const;
+
+export type HostedExecutionConversationMessageChannel =
+  (typeof HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS)[number];
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -134,6 +155,7 @@ export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutio
   rawMessageKey: string;
   selfAddress?: string | null;
 }
+
 export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
   kind: "assistant.cron.tick";
   reason: "alarm" | "manual" | "device-sync";
@@ -198,24 +220,98 @@ export type HostedWakeDispatchPayload =
   | HostedMessageWakeDispatch
   | HostedSystemWakeDispatch;
 
-export interface HostedWakeLinqMessageReceivedPayload {
+export interface HostedExecutionBaseWake {
   eventId: string;
+  kind: HostedExecutionWakeKind;
+  occurredAt: string;
+  userId: string;
+}
+
+export interface HostedExecutionLinqConversationMessagePayload {
+  channel: "linq";
   linqEvent: Record<string, unknown>;
   linqMessageId?: string | null;
   phoneLookupKey: string;
 }
 
-export interface HostedWakeTelegramMessageReceivedPayload {
-  eventId: string;
+export interface HostedExecutionTelegramConversationMessagePayload {
+  channel: "telegram";
   telegramMessage: HostedExecutionTelegramMessage;
 }
 
-export interface HostedWakeEmailMessageReceivedPayload {
-  eventId: string;
+export interface HostedExecutionEmailConversationMessagePayload {
+  channel: "email";
   identityId: string | null;
   rawMessageKey: string;
   selfAddress?: string | null;
 }
+
+export type HostedExecutionConversationMessagePayload =
+  | HostedExecutionLinqConversationMessagePayload
+  | HostedExecutionTelegramConversationMessagePayload
+  | HostedExecutionEmailConversationMessagePayload;
+
+export interface HostedExecutionConversationMessageWake extends HostedExecutionBaseWake {
+  kind: "conversation.message";
+  message: HostedExecutionConversationMessagePayload;
+}
+
+export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseWake {
+  firstContact?: HostedExecutionFirstContactTarget | null;
+  kind: "member.activated";
+  memberChannels: HostedExecutionMemberChannels;
+}
+
+export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutionBaseWake {
+  kind: "member.channels.updated";
+  memberChannels: HostedExecutionMemberChannels;
+}
+
+export interface HostedExecutionAssistantCronTickWake extends HostedExecutionBaseWake {
+  kind: "assistant.cron.tick";
+  reason: HostedExecutionAssistantCronTickEvent["reason"];
+}
+
+export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
+  connectionId?: string | null;
+  hint?: HostedExecutionDeviceSyncWakeHint | null;
+  kind: "device-sync.wake";
+  provider?: string | null;
+  reason: HostedExecutionDeviceSyncWakeEvent["reason"];
+}
+
+export interface HostedExecutionVaultShareAcceptedWake extends HostedExecutionBaseWake {
+  kind: "vault.share.accepted";
+  share: HostedExecutionShareReference;
+}
+
+export type HostedExecutionWake =
+  | HostedExecutionConversationMessageWake
+  | HostedExecutionMemberActivatedWake
+  | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionAssistantCronTickWake
+  | HostedExecutionDeviceSyncWake
+  | HostedExecutionVaultShareAcceptedWake;
+
+export type HostedExecutionSystemWake = Exclude<
+  HostedExecutionWake,
+  HostedExecutionConversationMessageWake
+>;
+
+export type HostedWakeLinqMessageReceivedPayload =
+  HostedExecutionLinqConversationMessagePayload & {
+    eventId: string;
+  };
+
+export type HostedWakeTelegramMessageReceivedPayload =
+  HostedExecutionTelegramConversationMessagePayload & {
+    eventId: string;
+  };
+
+export type HostedWakeEmailMessageReceivedPayload =
+  HostedExecutionEmailConversationMessagePayload & {
+    eventId: string;
+  };
 
 export type HostedWakeMessagePayload =
   | HostedWakeLinqMessageReceivedPayload
@@ -227,6 +323,7 @@ export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
   dispatch: HostedExecutionDispatchRequest;
+  wake: HostedExecutionWake;
   run?: HostedExecutionRunContext | null;
   sharePack?: HostedExecutionRunnerSharePack | null;
 }
@@ -291,10 +388,13 @@ export const HOSTED_WAKE_BEHAVIORS = [
 export type HostedWakeBehavior =
   (typeof HOSTED_WAKE_BEHAVIORS)[number];
 
+export const HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA =
+  "murph.hosted-wake-conversation-message.v1";
 export const HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA = "murph.hosted-wake-message.v1";
 export const HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA = "murph.hosted-wake-system.v1";
 
 export const HOSTED_WAKE_PAYLOAD_SCHEMAS = [
+  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 ] as const;
@@ -350,9 +450,11 @@ export interface HostedWakeCommitResponse {
   cursor: HostedExecutionCursorState;
 }
 
-export interface HostedWakeAppendRequest {
-  dispatch: HostedExecutionDispatchRequest;
+export interface HostedExecutionWakeAppendRequest {
+  wake: HostedExecutionWake;
 }
+
+export type HostedWakeAppendRequest = HostedExecutionWakeAppendRequest;
 
 export interface HostedWakeAppendResponse {
   duplicate: boolean;
@@ -407,6 +509,56 @@ export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
 
 export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
   "Hosted execution dispatch is not configured.";
+
+export function isHostedExecutionWakeKind(
+  kind: string,
+): kind is HostedExecutionWakeKind {
+  return HOSTED_EXECUTION_WAKE_KINDS.includes(kind as HostedExecutionWakeKind);
+}
+
+export function isHostedConversationMessageChannel(
+  channel: string,
+): channel is HostedExecutionConversationMessageChannel {
+  return HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS.includes(
+    channel as HostedExecutionConversationMessageChannel,
+  );
+}
+
+export function isHostedConversationMessageWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationMessageWake {
+  return wake.kind === "conversation.message";
+}
+
+export function isHostedSystemWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionSystemWake {
+  return wake.kind !== "conversation.message";
+}
+
+export function isHostedLinqConversationMessageWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationMessageWake & {
+  message: HostedExecutionLinqConversationMessagePayload;
+} {
+  return wake.kind === "conversation.message" && wake.message.channel === "linq";
+}
+
+export function isHostedTelegramConversationMessageWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationMessageWake & {
+  message: HostedExecutionTelegramConversationMessagePayload;
+} {
+  return wake.kind === "conversation.message" && wake.message.channel === "telegram";
+}
+
+export function isHostedEmailConversationMessageWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionConversationMessageWake & {
+  message: HostedExecutionEmailConversationMessagePayload;
+} {
+  return wake.kind === "conversation.message" && wake.message.channel === "email";
+}
 
 export function isHostedMessageWakeEventKind(
   kind: HostedExecutionEventKind,
