@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 
 import * as React from "react";
+import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   createWallet: vi.fn(),
@@ -107,6 +110,113 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, />\+44</);
     assert.match(markup, /placeholder="07400 123456"/);
+  });
+
+  it("resets the selected phone country back to the geo-derived default after logout", async () => {
+    vi.resetModules();
+
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: {
+        onPhoneCountryChange: (code: string) => void;
+        selectedPhoneCountry: { code: string };
+      }) {
+        return React.createElement(
+          "div",
+          {
+            "data-selected-country": props.selectedPhoneCountry.code,
+          },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-change-country": "true",
+              onClick: () => props.onPhoneCountryChange("FR"),
+            },
+            "Change country",
+          ),
+        );
+      },
+      HostedPhoneAuthScaffold(props: {
+        children: React.ReactNode;
+        onUseDifferentNumber: () => void;
+      }) {
+        return React.createElement(
+          "div",
+          null,
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-sign-out": "true",
+              onClick: props.onUseDifferentNumber,
+            },
+            "Use a different number",
+          ),
+          props.children,
+        );
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return React.createElement("div", { "data-privy-captcha": "mounted" });
+      },
+    }));
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { HostedPhoneCountryCodeProvider } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-country-code-provider"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(
+        HostedPhoneCountryCodeProvider,
+        {
+          countryCode: "GB",
+        },
+        React.createElement(HostedPhoneAuth, null),
+      ),
+    );
+
+    try {
+      assert.equal(
+        container.querySelector("[data-selected-country]")?.getAttribute("data-selected-country"),
+        "GB",
+      );
+
+      const changeCountryButton = container.querySelector(
+        "[data-change-country]",
+      ) as HTMLButtonElement | null;
+      const signOutButton = container.querySelector(
+        "[data-sign-out]",
+      ) as HTMLButtonElement | null;
+
+      assert.ok(changeCountryButton);
+      assert.ok(signOutButton);
+
+      await act(async () => {
+        changeCountryButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      assert.equal(
+        container.querySelector("[data-selected-country]")?.getAttribute("data-selected-country"),
+        "FR",
+      );
+
+      await act(async () => {
+        signOutButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      assert.equal(
+        container.querySelector("[data-selected-country]")?.getAttribute("data-selected-country"),
+        "GB",
+      );
+      expect(mocks.logout).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
   });
 
   it("can hide the passive consent notice for homepage layouts that render their own copy", async () => {

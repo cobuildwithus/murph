@@ -42,6 +42,18 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
+  HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
+    return createElement(
+      "div",
+      {
+        "data-phone-country-code": "GB",
+      },
+      input.children,
+    );
+  },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -134,6 +146,7 @@ test("JoinInvitePage passes invite status and share data into the client tree", 
     inviteCode: "invite-code",
     shareCode: "share-code",
   });
+  assert.match(markup, /data-phone-country-code="GB"/);
   assert.match(markup, /data-invite-code="invite-code"/);
   assert.match(markup, /data-share-code="share-code"/);
 });

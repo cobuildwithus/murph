@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { HostedPhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/hosted-phone-country-code-provider";
+import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { readHostedPhoneCountryCodeHint } from "@/src/lib/hosted-onboarding/phone-country-hint-server";
 
 export const metadata: Metadata = {
   title: "Settings — Murph",
@@ -17,14 +16,13 @@ export const metadata: Metadata = {
 
 export default async function SettingsPage() {
   const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
-  const phoneCountryCodeHint = await readHostedPhoneCountryCodeHint();
 
   if (!authenticated) {
     redirect("/");
   }
 
   return (
-    <HostedPhoneCountryCodeProvider countryCode={phoneCountryCodeHint}>
+    <HostedPhoneCountryCodeBoundary>
       <div className="flex flex-col gap-8">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -66,6 +64,6 @@ export default async function SettingsPage() {
           />
         </section>
       </div>
-    </HostedPhoneCountryCodeProvider>
+    </HostedPhoneCountryCodeBoundary>
   );
 }

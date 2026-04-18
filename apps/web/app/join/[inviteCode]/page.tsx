@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { HostedPhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/hosted-phone-country-code-provider";
+import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
 import {
   buildJoinInvitePreviewStatus,
@@ -10,7 +10,6 @@ import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { readHostedPhoneCountryCodeHint } from "@/src/lib/hosted-onboarding/phone-country-hint-server";
 
 export const metadata: Metadata = {
   title: "Murph hosted invite",
@@ -33,7 +32,6 @@ export default async function JoinInvitePage(input: {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
-  const phoneCountryCodeHint = await readHostedPhoneCountryCodeHint();
   const previewStage =
     process.env.NODE_ENV !== "production"
       ? parseJoinInvitePreviewStage(searchParams.preview)
@@ -41,7 +39,7 @@ export default async function JoinInvitePage(input: {
 
   if (previewStage) {
     return (
-      <HostedPhoneCountryCodeProvider countryCode={phoneCountryCodeHint}>
+      <HostedPhoneCountryCodeBoundary>
         <JoinInviteShell>
           <JoinInviteClient
             authenticated
@@ -53,7 +51,7 @@ export default async function JoinInvitePage(input: {
             preview
           />
         </JoinInviteShell>
-      </HostedPhoneCountryCodeProvider>
+      </HostedPhoneCountryCodeBoundary>
     );
   }
 
@@ -72,7 +70,7 @@ export default async function JoinInvitePage(input: {
     : null;
 
   return (
-    <HostedPhoneCountryCodeProvider countryCode={phoneCountryCodeHint}>
+    <HostedPhoneCountryCodeBoundary>
       <JoinInviteShell>
         <JoinInviteClient
           authenticated={authenticated}
@@ -83,6 +81,6 @@ export default async function JoinInvitePage(input: {
           sharePreview={shareData?.share?.preview ?? null}
         />
       </JoinInviteShell>
-    </HostedPhoneCountryCodeProvider>
+    </HostedPhoneCountryCodeBoundary>
   );
 }

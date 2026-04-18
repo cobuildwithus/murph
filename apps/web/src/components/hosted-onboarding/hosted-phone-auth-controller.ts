@@ -82,8 +82,11 @@ export function useHostedPhoneAuthController({
   const [pendingAction, setPendingAction] =
     useState<HostedPrivyClientPendingAction>(null);
   const phoneCountryCodeHint = useHostedPhoneCountryCodeHint();
+  const initialPhoneCountryCode = resolveInitialHostedPhoneCountryCode(
+    phoneCountryCodeHint,
+  );
   const [phoneCountryCode, setPhoneCountryCode] = useState<string>(() =>
-    resolveInitialHostedPhoneCountryCode(phoneCountryCodeHint),
+    initialPhoneCountryCode,
   );
   const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneVerificationAttempt, setPhoneVerificationAttempt] =
@@ -349,7 +352,7 @@ export function useHostedPhoneAuthController({
       await logout();
       await onSignOut?.();
       resetPhoneAuthFlow();
-      setPhoneCountryCode(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
+      setPhoneCountryCode(initialPhoneCountryCode);
       setPhoneNumber("");
     } catch (error) {
       setErrorMessage(

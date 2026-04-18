@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  cookies: vi.fn(),
   headers: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 
 vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
   headers: mocks.headers,
 }));
 
@@ -17,9 +15,6 @@ describe("hosted phone country hint", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.headers.mockResolvedValue(new Headers());
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockReturnValue(undefined),
-    });
   });
 
   it("normalizes and validates two-letter phone country codes", async () => {
@@ -33,58 +28,42 @@ describe("hosted phone country hint", () => {
     expect(normalizeHostedPhoneCountryCode(null)).toBeNull();
   });
 
-  it("parses the Vercel geo header snapshot", async () => {
-    const {
-      resolveHostedPhoneCountryCodeFromVercelHeaders,
-      resolveHostedVercelGeoSnapshot,
-    } = await import("@/src/lib/hosted-onboarding/phone-country-hint");
-
-    const snapshot = resolveHostedVercelGeoSnapshot(
-      new Headers({
-        "x-vercel-ip-city": "Kuala%20Lumpur",
-        "x-vercel-ip-country": "my",
-        "x-vercel-ip-country-region": "14",
-      }),
+  it("reads the hosted phone country code directly from the Vercel country header", async () => {
+    const { readHostedPhoneCountryCodeFromHeaders } = await import(
+      "@/src/lib/hosted-onboarding/phone-country-hint"
     );
 
-    expect(snapshot).toEqual({
-      city: "Kuala Lumpur",
-      countryCode: "MY",
-      countryRegion: "14",
-    });
     expect(
-      resolveHostedPhoneCountryCodeFromVercelHeaders(
+      readHostedPhoneCountryCodeFromHeaders(
         new Headers({ "x-vercel-ip-country": "gb" }),
       ),
     ).toBe("GB");
+    expect(
+      readHostedPhoneCountryCodeFromHeaders(
+        new Headers({ "x-vercel-ip-country": "usa" }),
+      ),
+    ).toBeNull();
   });
 
-  it("falls back to the persisted cookie hint when the forwarded header is absent", async () => {
-    const { readHostedPhoneCountryCodeHint } = await import(
-      "@/src/lib/hosted-onboarding/phone-country-hint-server"
-    );
-
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockReturnValue({ value: "ca" }),
-    });
-
-    await expect(readHostedPhoneCountryCodeHint()).resolves.toBe("CA");
-  });
-
-  it("prefers the forwarded same-request header over the cookie hint", async () => {
+  it("reads the server-side country hint from the current request headers", async () => {
     const { readHostedPhoneCountryCodeHint } = await import(
       "@/src/lib/hosted-onboarding/phone-country-hint-server"
     );
 
     mocks.headers.mockResolvedValue(
       new Headers({
-        "x-murph-phone-country-hint": "GB",
+        "x-vercel-ip-country": "ca",
       }),
     );
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockReturnValue({ value: "us" }),
-    });
 
-    await expect(readHostedPhoneCountryCodeHint()).resolves.toBe("GB");
+    await expect(readHostedPhoneCountryCodeHint()).resolves.toBe("CA");
+  });
+
+  it("returns null when the Vercel country header is absent", async () => {
+    const { readHostedPhoneCountryCodeHint } = await import(
+      "@/src/lib/hosted-onboarding/phone-country-hint-server"
+    );
+
+    await expect(readHostedPhoneCountryCodeHint()).resolves.toBeNull();
   });
 });

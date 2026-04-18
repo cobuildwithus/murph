@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroSection } from "@/src/components/homepage/hero-section";
@@ -60,7 +61,7 @@ export default async function HomePage() {
       };
 
   return (
-    <>
+    <HostedPhoneCountryCodeBoundary>
       <style>{`#global-footer { display: none; }`}</style>
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
         <StickyNav authenticated={authenticated} />
@@ -72,6 +73,6 @@ export default async function HomePage() {
         <LocalRunSection installCommandUrl={installCommandUrl} />
         <SiteFooter authenticated={authenticated} />
       </main>
-    </>
+    </HostedPhoneCountryCodeBoundary>
   );
 }
