@@ -56,6 +56,7 @@ Always read these before repo code/docs/test/config work:
 - Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors; prove the type with control flow or helpers, or isolate the boundary with a narrow documented assertion.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
 - Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
+- Do not weaken production runtime, auth, or env invariants to satisfy test, smoke, or build harnesses. Fix the harness with test-only config or wrapper scripts instead of adding bypass branches to app code.
 - Follow the persisted-state placement gate in the workflow docs and `ARCHITECTURE.md`; do not put user-facing or queryable product truth in assistant runtime first.
 
 ## Workflow Defaults
