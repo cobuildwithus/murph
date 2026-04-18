@@ -62,7 +62,6 @@ export interface RunnerStateRecord {
 }
 
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;
-export const CONSUMED_EVENT_EXACT_TTL_MS = 24 * 60 * 60_000;
 export const MAX_RUN_TIMELINE_ENTRIES = 24;
 export const RETRY_MAX_DELAY_MS = 5 * 60_000;
 

@@ -16,11 +16,10 @@ import {
   type HostedExecutionBundleRef,
 } from "@murphai/runtime-state";
 
-import {
-  CONSUMED_EVENT_EXACT_TTL_MS,
-  type DurableObjectSqlValue,
-  type RunnerBundleVersion,
-  type RunnerStateRecord,
+import type {
+  DurableObjectSqlValue,
+  RunnerBundleVersion,
+  RunnerStateRecord,
 } from "./types.js";
 
 export interface RunnerMetaRow {
@@ -102,10 +101,6 @@ export function createDefaultRunnerBundleState(): RunnerStoredBundleState {
     bundleRefJson: null,
     bundleVersion: 0,
   };
-}
-
-export function nextConsumedEventExactExpiryIso(): string {
-  return new Date(Date.now() + CONSUMED_EVENT_EXACT_TTL_MS).toISOString();
 }
 
 export function projectRunnerStateRecord(input: {

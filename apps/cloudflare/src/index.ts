@@ -668,10 +668,3 @@ function classifyPublicRouteError(error: unknown): { error: string; status: numb
   }
   return { error: "Internal error.", status: 500 };
 }
-
-function isBackpressuredStatus(
-  status: HostedExecutionUserStatus,
-  eventId: string,
-): boolean {
-  return (status.backpressuredEventIds ?? []).includes(eventId);
-}
