@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { HostedExecutionCommittedResult } from "../src/execution-journal.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
@@ -125,64 +125,70 @@ describe("RunnerQueueStore", () => {
   });
 
   it("tracks active-run lease, retry metadata, and next-wake scheduling without local queue rows", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-18T10:00:00.000Z"));
     const state = createState();
     const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
+    try {
+      await store.bootstrapUser("member_123");
 
-    const claimed = await store.beginWakeRun({
-      eventId: "evt_active",
-      run: {
-        attempt: 2,
-        runId: "run_active",
-        startedAt: "2026-04-18T10:00:00.000Z",
-      },
-      userId: "member_123",
-    });
-
-    expect(claimed.inFlight).toBe(true);
-    expect(claimed.run).toMatchObject({
-      attempt: 2,
-      eventId: "evt_active",
-      runId: "run_active",
-    });
-    expect(claimed.retryingEventId).toBe("evt_active");
-    expect(await store.hasActiveRunLease({
-      eventId: "evt_active",
-      run: {
-        attempt: 2,
-        runId: "run_active",
-        startedAt: "2026-04-18T10:00:00.000Z",
-      },
-    })).toBe(true);
-
-    const retried = await store.failWakeRun({
-      error: new Error("runner_http_error"),
-      eventId: "evt_active",
-      leaseOwner: {
+      const claimed = await store.beginWakeRun({
         eventId: "evt_active",
         run: {
           attempt: 2,
           runId: "run_active",
           startedAt: "2026-04-18T10:00:00.000Z",
         },
-      },
-    });
-    expect(retried.inFlight).toBe(false);
-    expect(retried.retryingEventId).toBe("evt_active");
-    expect(retried.lastEventId).toBe("evt_active");
-    expect(retried.lastErrorCode).toBe("runtime_error");
-    expect(retried.pendingEventCount).toBe(0);
+        userId: "member_123",
+      });
 
-    const scheduled = await store.syncNextWake({
-      preferredWakeAt: "2026-04-18T10:05:00.000Z",
-    });
-    expect(scheduled.nextWakeAt).toBe("2026-04-18T10:05:00.000Z");
+      expect(claimed.inFlight).toBe(true);
+      expect(claimed.run).toMatchObject({
+        attempt: 2,
+        eventId: "evt_active",
+        runId: "run_active",
+      });
+      expect(claimed.retryingEventId).toBe("evt_active");
+      expect(await store.hasActiveRunLease({
+        eventId: "evt_active",
+        run: {
+          attempt: 2,
+          runId: "run_active",
+          startedAt: "2026-04-18T10:00:00.000Z",
+        },
+      })).toBe(true);
 
-    const cleared = await store.clearNextWakeIfDue(Date.parse("2026-04-18T10:05:01.000Z"));
-    expect(cleared.nextWakeAt).toBeNull();
+      const retried = await store.failWakeRun({
+        error: new Error("runner_http_error"),
+        eventId: "evt_active",
+        leaseOwner: {
+          eventId: "evt_active",
+          run: {
+            attempt: 2,
+            runId: "run_active",
+            startedAt: "2026-04-18T10:00:00.000Z",
+          },
+        },
+      });
+      expect(retried.inFlight).toBe(false);
+      expect(retried.retryingEventId).toBe("evt_active");
+      expect(retried.lastEventId).toBe("evt_active");
+      expect(retried.lastErrorCode).toBe("runtime_error");
+      expect(retried.pendingEventCount).toBe(0);
+
+      const scheduled = await store.syncNextWake({
+        preferredWakeAt: "2026-04-18T10:05:00.000Z",
+      });
+      expect(scheduled.nextWakeAt).toBe("2026-04-18T10:05:00.000Z");
+
+      const cleared = await store.clearNextWakeIfDue(Date.parse("2026-04-18T10:05:01.000Z"));
+      expect(cleared.nextWakeAt).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("clears retry metadata and releases the lease after a committed wake is finalized", async () => {
+  it("clears retry metadata and releases the lease after committed wake cleanup completes", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
     await store.bootstrapUser("member_123");
@@ -205,7 +211,7 @@ describe("RunnerQueueStore", () => {
     expect(afterCommit.retryingEventId).toBeNull();
     expect(afterCommit.lastRunAt).toBe("2026-04-18T12:00:00.000Z");
 
-    const finalized = await store.finalizeCommittedWake({
+    const finalized = await store.completeWakeRun({
       eventId: "evt_committed",
       finishedAt: "2026-04-18T12:00:01.000Z",
       leaseOwner: {
