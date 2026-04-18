@@ -13,10 +13,9 @@ import type {
   HostedWakeStatusRequest,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedExecutionDispatchFromWake,
   parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution";
-import { parseHostedExecutionDispatchRequest } from "@murphai/hosted-execution/parsers";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import { repoRoot } from "../../vitest.shared.js";
 import type { R2BucketLike } from "../../src/bundle-store.js";
@@ -392,12 +391,9 @@ async function handleHostedWakeControlRequest(
 
   if (method === "POST" && url.pathname === "/api/internal/hosted-wake/append") {
     const body = parseHostedWakeAppendRequest(await readJsonBody<HostedWakeAppendRequest>(request));
-    const dispatch = "dispatch" in body
-      ? parseHostedExecutionDispatchRequest(body.dispatch)
-      : buildHostedExecutionDispatchFromWake(body.wake);
     response.end(JSON.stringify(await appendTestHostedWake({
       bucket,
-      dispatch,
+      wake: parseHostedExecutionWake(body.wake),
     })));
     return;
   }

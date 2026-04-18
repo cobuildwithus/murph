@@ -9,6 +9,7 @@ import {
 const DEFAULT_PROJECT_NAME = "murph-web";
 const DEFAULT_TEAM_SLUG = "murph-local-dev";
 const DEVELOPMENT_ENVIRONMENT = "development";
+const HOSTED_LOCAL_OIDC_TOKEN_TTL_SECONDS = 3_600;
 
 export interface HostedLocalOidcFixture {
   jwksUrl: string;
@@ -87,7 +88,7 @@ function createDevelopmentOidcToken(input: {
   const payload = {
     aud: input.audience,
     environment: DEVELOPMENT_ENVIRONMENT,
-    exp: now + 300,
+    exp: now + HOSTED_LOCAL_OIDC_TOKEN_TTL_SECONDS,
     iat: now,
     iss: input.issuer,
     owner: input.teamSlug,

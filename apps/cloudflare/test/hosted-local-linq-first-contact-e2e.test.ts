@@ -1,20 +1,20 @@
+import { execFileSync } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import {
-  buildHostedExecutionLinqMessageReceivedDispatch,
-  buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import {
-  parseHostedExecutionDispatchResult,
-} from "@murphai/hosted-execution/parsers";
 import {
   startHostedLocalDevHarness,
   type HostedLocalDevHarness,
 } from "./helpers/hosted-local-dev-harness.js";
+import { appendHostedWakeAndWakeWorker } from "./helpers/hosted-local-dispatch.js";
 import {
   startHostedLocalOidcFixture,
   type HostedLocalOidcFixture,
@@ -24,12 +24,20 @@ import {
   readRequestBody,
   reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv,
+  resolveHostedLocalSmokeWebEnv,
   shouldUseAssistantProviderStub,
   startAssistantProviderStubServer,
   stopHttpStubServer,
   writeJsonResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import { createHostedPhoneLookupKey } from "./helpers/hosted-contact-privacy.js";
+import {
+  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+  TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
+} from "./hosted-execution-fixtures.js";
+import {
+  DEFAULT_DATABASE_URL,
+} from "../../../scripts/dev-hosted-local/constants.ts";
 
 interface ObservedLinqRequest {
   body: string;
@@ -50,6 +58,7 @@ const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const debugE2E = process.env.MURPH_E2E_DEBUG_PROGRESS === "1";
 const useAssistantProviderStub = shouldUseAssistantProviderStub(process.env);
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
+const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
 const expectedLinqCreateChatPath = "/chats";
 
 let linqServer: ReturnType<typeof createServer> | null = null;
@@ -100,16 +109,19 @@ describe("hosted local Linq first-contact e2e", () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...hostedAssistantDevEnv,
+      ...resolveHostedLocalSmokeWebEnv(process.env),
+      DATABASE_URL: localDatabaseUrl,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRunnerEnvProfiles(
         process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
         "linq",
       ),
       HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: requireOidcFixture().jwksUrl,
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
       LINQ_API_BASE_URL: linqServerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
-      MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
-      MURPH_DEV_SKIP_WEB: "1",
+      MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
       MURPH_DEV_WEB_PORT: String(webPort),
       MURPH_DEV_WORKER_PORT: String(workerPort),
       NEXT_DIST_DIR_MODE: "smoke",
@@ -145,14 +157,9 @@ describe("hosted local Linq first-contact e2e", () => {
   });
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
+    await seedActiveHostedLinqMember(userId);
     logDebug("dispatching activation", { userId });
-    const dispatchResult = await dispatchHostedEvent(buildActivationDispatch(userId), userId);
-    expect(dispatchResult.event).toMatchObject({
-      eventId: `member.activated:local:${userId}:evt_linq_first_contact`,
-      lastError: null,
-      state: "completed",
-      userId,
-    });
+    await dispatchHostedEvent(buildActivationDispatch(userId), userId);
 
     const finalStatus = await requireHarness().waitForHostedCompletion(userId);
     logDebug("activation completed", { userId, finalStatus });
@@ -184,17 +191,9 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends a Linq reply after a later inbound Linq message", async () => {
+    await seedActiveHostedLinqMember(directReplyUserId);
     logDebug("dispatching direct-reply activation", { userId: directReplyUserId });
-    const activationResult = await dispatchHostedEvent(
-      buildActivationDispatch(directReplyUserId),
-      directReplyUserId,
-    );
-    expect(activationResult.event).toMatchObject({
-      eventId: `member.activated:local:${directReplyUserId}:evt_linq_first_contact`,
-      lastError: null,
-      state: "completed",
-      userId: directReplyUserId,
-    });
+    await dispatchHostedEvent(buildActivationDispatch(directReplyUserId), directReplyUserId);
 
     await requireHarness().waitForHostedCompletion(directReplyUserId);
     logDebug("direct-reply activation completed", { userId: directReplyUserId });
@@ -212,7 +211,7 @@ describe("hosted local Linq first-contact e2e", () => {
       baselineSendCount: outboundCountBeforeReply,
       userId: directReplyUserId,
     });
-    const inboundDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+    const inboundWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: `linq.message.received:local:${directReplyUserId}:evt_direct_reply`,
       linqEvent: buildInboundLinqEvent(directReplyUserId, materializedChatId),
       linqMessageId: `msg_local_${directReplyUserId}`,
@@ -220,13 +219,7 @@ describe("hosted local Linq first-contact e2e", () => {
       phoneLookupKey: requireLinqPhoneLookupKey(directReplyUserId),
       userId: directReplyUserId,
     });
-    const inboundResult = await dispatchHostedEvent(inboundDispatch, directReplyUserId);
-    expect(inboundResult.event).toMatchObject({
-      eventId: `linq.message.received:local:${directReplyUserId}:evt_direct_reply`,
-      lastError: null,
-      state: "completed",
-      userId: directReplyUserId,
-    });
+    await dispatchHostedEvent(inboundWake, directReplyUserId);
 
     await requireHarness().waitForHostedCompletion(directReplyUserId);
     logDebug("later inbound Linq message completed", { userId: directReplyUserId });
@@ -239,17 +232,9 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("keeps Linq context when two replies arrive before hosted completion catches up", async () => {
+    await seedActiveHostedLinqMember(fastReplyUserId);
     logDebug("dispatching fast-reply activation", { userId: fastReplyUserId });
-    const activationResult = await dispatchHostedEvent(
-      buildActivationDispatch(fastReplyUserId),
-      fastReplyUserId,
-    );
-    expect(activationResult.event).toMatchObject({
-      eventId: `member.activated:local:${fastReplyUserId}:evt_linq_first_contact`,
-      lastError: null,
-      state: "completed",
-      userId: fastReplyUserId,
-    });
+    await dispatchHostedEvent(buildActivationDispatch(fastReplyUserId), fastReplyUserId);
 
     const createChatRequest = await waitForLinqSend({
       expectedPath: expectedLinqCreateChatPath,
@@ -267,7 +252,7 @@ describe("hosted local Linq first-contact e2e", () => {
       chatId: materializedChatId,
       userId: fastReplyUserId,
     });
-    const firstInboundDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+    const firstInboundWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_name`,
       linqEvent: buildInboundLinqEvent(fastReplyUserId, materializedChatId, {
         messageId: `msg_fast_name_${fastReplyUserId}`,
@@ -278,15 +263,9 @@ describe("hosted local Linq first-contact e2e", () => {
       phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
     });
-    const firstInboundResult = await dispatchHostedEvent(firstInboundDispatch, fastReplyUserId);
-    expect(firstInboundResult.event).toMatchObject({
-      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_name`,
-      lastError: null,
-      state: "completed",
-      userId: fastReplyUserId,
-    });
+    await dispatchHostedEvent(firstInboundWake, fastReplyUserId);
 
-    const secondInboundDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+    const secondInboundWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_goals`,
       linqEvent: buildInboundLinqEvent(fastReplyUserId, materializedChatId, {
         messageId: `msg_fast_goals_${fastReplyUserId}`,
@@ -297,13 +276,7 @@ describe("hosted local Linq first-contact e2e", () => {
       phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
     });
-    const secondInboundResult = await dispatchHostedEvent(secondInboundDispatch, fastReplyUserId);
-    expect(secondInboundResult.event).toMatchObject({
-      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_goals`,
-      lastError: null,
-      state: "completed",
-      userId: fastReplyUserId,
-    });
+    await dispatchHostedEvent(secondInboundWake, fastReplyUserId);
 
     const statusBeforeWait = await requireHarness().readUserStatus(fastReplyUserId);
     await requireHarness().waitForHostedCompletion(fastReplyUserId);
@@ -363,30 +336,24 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(observedAssistantProviderBodies.at(-1)).toContain("build more strength");
   }, 300_000);
 
-  async function dispatchHostedEvent(dispatch: object, nextUserId: string) {
-    logDebug("POST /internal/dispatch", {
+  async function dispatchHostedEvent(wake: HostedExecutionWake, nextUserId: string) {
+    logDebug("append hosted wake and wake worker", {
       eventId:
-        typeof dispatch === "object" && dispatch !== null && "eventId" in dispatch
-          ? (dispatch as { eventId?: unknown }).eventId
+        typeof wake === "object" && wake !== null && "eventId" in wake
+          ? (wake as { eventId?: unknown }).eventId
           : null,
       userId: nextUserId,
     });
-    const response = await requireHarness().requestJson("/internal/dispatch", {
-      body: JSON.stringify(dispatch),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        [HOSTED_EXECUTION_USER_ID_HEADER]: nextUserId,
-      },
-      method: "POST",
-    });
-
-    const parsed = parseHostedExecutionDispatchResult(response);
-    logDebug("dispatch completed", {
-      eventId: parsed.event.eventId,
-      state: parsed.event.state,
+    const { append, wakeStatus } = await appendHostedWakeAndWakeWorker({
+      wake,
+      harness: requireHarness(),
       userId: nextUserId,
     });
-    return parsed;
+    logDebug("hosted wake enqueued", {
+      duplicate: append.duplicate,
+      pendingEventCount: wakeStatus.pendingEventCount,
+      userId: nextUserId,
+    });
   }
 
 async function waitForLinqSend(input: {
@@ -482,6 +449,7 @@ async function waitForAdditionalLinqSend(input: {
     throw new Error([
       `Timed out waiting for an additional Linq send for ${input.userId}.`,
       `observed requests: ${JSON.stringify(observedLinqRequests)}`,
+      `assistant provider bodies: ${JSON.stringify(observedAssistantProviderBodies)}`,
       `hosted status: ${JSON.stringify(status)}`,
       `stdout tail: ${requireHarness().stdoutTail()}`,
       `stderr tail: ${requireHarness().stderrTail()}`,
@@ -530,6 +498,7 @@ async function waitForMatchingLinqSendCount(input: {
     throw new Error([
       `Timed out waiting for ${input.expectedCount} Linq sends for ${input.userId}.`,
       `observed requests: ${JSON.stringify(observedLinqRequests)}`,
+      `assistant provider bodies: ${JSON.stringify(observedAssistantProviderBodies)}`,
       `hosted status: ${JSON.stringify(status)}`,
       `stdout tail: ${requireHarness().stdoutTail()}`,
       `stderr tail: ${requireHarness().stderrTail()}`,
@@ -568,8 +537,34 @@ function logDebug(message: string, details?: Record<string, unknown>): void {
   console.error(`[hosted-local-linq-e2e] ${message}${payload}`);
 }
 
+async function seedActiveHostedLinqMember(nextUserId: string): Promise<void> {
+  execFileSync(
+    "pnpm",
+    [
+      "exec",
+      "tsx",
+      "--tsconfig",
+      "tsconfig.base.json",
+      "apps/web/scripts/seed-hosted-active-linq-member.ts",
+    ],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        DATABASE_URL: localDatabaseUrl,
+        MURPH_E2E_HOME_PHONE: buildLinqHomePhoneNumber(nextUserId),
+        MURPH_E2E_MEMBER_ID: nextUserId,
+        MURPH_E2E_MEMBER_PHONE: buildLinqRecipientPhoneNumber(nextUserId),
+        NODE_ENV: "test",
+        VITEST: "1",
+      },
+      stdio: "pipe",
+    },
+  );
+}
+
 function buildActivationDispatch(nextUserId: string) {
-  return buildHostedExecutionMemberActivatedDispatch({
+  return buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:local:${nextUserId}:evt_linq_first_contact`,
     firstContact: {
       channel: "linq",

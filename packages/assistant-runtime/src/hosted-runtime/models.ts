@@ -4,7 +4,6 @@ import type {
   ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
 import type {
-  HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
   HostedExecutionWake,
@@ -39,9 +38,8 @@ export interface HostedAssistantRuntimeConfig {
 }
 
 export interface HostedAssistantRuntimeJobRequest
-  extends Omit<HostedExecutionRunnerRequest, "wake"> {
+  extends HostedExecutionRunnerRequest {
   currentBundleRef?: HostedExecutionBundleRefState;
-  wake?: HostedExecutionWake;
   resume?: {
     committedResult: {
       assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
@@ -136,12 +134,12 @@ export type HostedAssistantRuntimeJobResult =
 
 export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
 
-export interface HostedDispatchEffect {
+export interface HostedWakeEffect {
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
 }
 
-export interface HostedDispatchExecutionMetrics extends HostedDispatchEffect {
+export interface HostedWakeExecutionMetrics extends HostedWakeEffect {
   bootstrapResult: HostedBootstrapResult | null;
   maintenanceRequired: boolean;
 }
@@ -157,7 +155,6 @@ export type HostedWorkspaceArtifactMaterializer = (
   relativePaths: readonly string[],
 ) => Promise<void>;
 
-export type HostedDispatchEvent = HostedExecutionDispatchRequest["event"];
 export type HostedWakeEvent = HostedExecutionWake;
 export interface HostedRestoredExecutionContext {
   assistantStateRoot: string;

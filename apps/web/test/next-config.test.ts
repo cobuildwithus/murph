@@ -82,6 +82,19 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
   );
 });
 
+test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", () => {
+  assert.equal(
+    resolveHostedWebDistDir(
+      PHASE_DEVELOPMENT_SERVER,
+      createHostedWebSmokeEnvironment({
+        NEXT_DIST_DIR_SUFFIX: "e2e-run",
+        NODE_ENV: "test",
+      } as NodeJS.ProcessEnv),
+    ),
+    `${HOSTED_WEB_SMOKE_DIST_DIR}-e2e-run`,
+  );
+});
+
 test("hosted web dev filesystem cache stays opt-in", () => {
   assert.equal(isHostedWebDevFileSystemCacheEnabled(), false);
   assert.equal(

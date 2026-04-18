@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -58,6 +58,7 @@ export async function startHostedLocalDevHarness(input: {
   const persistDir = createdTempPersistDir
     ?? path.resolve(repoRoot, persistDirOverride ?? "");
   const readyToken = randomUUID();
+  const nextDistDirSuffix = `e2e-${readyToken}`.toLowerCase();
   let child: ChildProcess | null = null;
   let oidcToken = "";
   let stdout = "";
@@ -86,6 +87,7 @@ export async function startHostedLocalDevHarness(input: {
       ...input.env,
       MURPH_DEV_CF_PERSIST_DIR: persistDir,
       MURPH_DEV_READY_TOKEN: readyToken,
+      NEXT_DIST_DIR_SUFFIX: input.env.NEXT_DIST_DIR_SUFFIX?.trim() || nextDistDirSuffix,
     };
 
     child = spawn("pnpm", ["dev"], {
@@ -119,6 +121,7 @@ export async function startHostedLocalDevHarness(input: {
         stderr: () => stderr,
         stdout: () => stdout,
       });
+      ensurePreparedRunnerContainerImageAlias(`${stdout}\n${stderr}`);
     } catch (error) {
       await stop().catch(() => {});
       throw error instanceof Error
@@ -328,4 +331,85 @@ function tail(value: string, maxChars: number = 2_000): string {
   }
 
   return value.slice(value.length - maxChars);
+}
+
+function ensurePreparedRunnerContainerImageAlias(stdout: string): void {
+  const expectedRef = readLatestPreparedRunnerContainerImageRef(stdout);
+  if (!expectedRef) {
+    return;
+  }
+
+  if (hasDockerImageRef(expectedRef)) {
+    return;
+  }
+
+  const expectedIdPrefix = readLatestPreparedRunnerContainerImageIdPrefix(stdout);
+  if (!expectedIdPrefix) {
+    throw new Error(
+      `Prepared runner container image ${expectedRef} is missing and no local image id was found in dev output.`,
+    );
+  }
+
+  const existingRef = findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix);
+  if (!existingRef) {
+    throw new Error(
+      `Prepared runner container image ${expectedRef} is missing and no local image matches id prefix ${expectedIdPrefix}.`,
+    );
+  }
+
+  execFileSync("docker", ["tag", existingRef, expectedRef], {
+    stdio: "pipe",
+  });
+}
+
+function readLatestPreparedRunnerContainerImageRef(stdout: string): string | null {
+  const matches = Array.from(
+    stdout.matchAll(/naming to docker\.io\/(cloudflare-dev\/runnercontainer:[a-f0-9]+)\s+done/g),
+  );
+  return matches.at(-1)?.[1] ?? null;
+}
+
+function readLatestPreparedRunnerContainerImageIdPrefix(stdout: string): string | null {
+  const matches = Array.from(stdout.matchAll(/exporting manifest sha256:([a-f0-9]{12,64})/g));
+  const manifestHash = matches.at(-1)?.[1] ?? null;
+  return manifestHash ? manifestHash.slice(0, 12) : null;
+}
+
+function hasDockerImageRef(imageRef: string): boolean {
+  try {
+    execFileSync("docker", ["image", "inspect", imageRef], {
+      stdio: "pipe",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function findPreparedRunnerContainerImageRefByIdPrefix(expectedIdPrefix: string): string | null {
+  const rawOutput = execFileSync(
+    "docker",
+    ["images", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}"],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const lines = rawOutput
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const [imageRef, imageId] = line.split(/\s+/, 2);
+    if (!imageRef?.startsWith("cloudflare-dev/runnercontainer:")) {
+      continue;
+    }
+
+    if (imageId?.startsWith(expectedIdPrefix)) {
+      return imageRef;
+    }
+  }
+
+  return null;
 }

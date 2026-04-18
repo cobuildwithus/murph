@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -338,6 +338,10 @@ export function terminateChildProcess(
     return;
   }
 
+  const descendantPids = process.platform === "win32"
+    ? []
+    : listDescendantProcessIds(child.pid);
+
   try {
     if (process.platform !== "win32") {
       process.kill(-child.pid, signal);
@@ -346,10 +350,33 @@ export function terminateChildProcess(
     // Ignore process-group errors and fall through to the direct signal.
   }
 
+  for (const pid of descendantPids.reverse()) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Ignore already-dead descendants.
+    }
+  }
+
   try {
     child.kill(signal);
   } catch {
     // Ignore already-dead children.
+  }
+}
+
+function terminateProcessGroup(
+  pid: number,
+  signal: NodeJS.Signals,
+): void {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // Ignore missing/already-dead process groups.
   }
 }
 
@@ -362,6 +389,7 @@ export async function terminateChildProcessAndWait(
 ): Promise<void> {
   const signal = input.signal ?? "SIGTERM";
   const graceMs = input.graceMs ?? 15_000;
+  const processGroupId = process.platform === "win32" ? null : child.pid;
 
   if (child.exitCode !== null || child.pid === undefined) {
     return;
@@ -371,7 +399,21 @@ export async function terminateChildProcessAndWait(
     terminateChildProcess(child, signal);
   });
   if (exited) {
-    return;
+    if (processGroupId === null) {
+      return;
+    }
+
+    const processGroupExited = await waitForProcessGroupExit(processGroupId, graceMs, signal);
+    if (processGroupExited) {
+      return;
+    }
+  }
+
+  if (processGroupId !== null) {
+    const processGroupExited = await waitForProcessGroupExit(processGroupId, 5_000, "SIGKILL");
+    if (processGroupExited) {
+      return;
+    }
   }
 
   await waitForChildExit(child, 5_000, () => {
@@ -398,6 +440,25 @@ async function waitForChildExit(
 
   terminate();
   return await Promise.race([exited, timedOut]);
+}
+
+async function waitForProcessGroupExit(
+  processGroupId: number,
+  timeoutMs: number,
+  signal: NodeJS.Signals,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (!isProcessGroupRunning(processGroupId)) {
+      return true;
+    }
+
+    terminateProcessGroup(processGroupId, signal);
+    await sleep(250);
+  }
+
+  return !isProcessGroupRunning(processGroupId);
 }
 
 export function sleep(delayMs: number): Promise<void> {
@@ -495,15 +556,31 @@ function resolveHostedWebDevLockPaths(env: NodeJS.ProcessEnv): {
   lockPath: string;
   metadataPath: string;
 } {
-  const distDirName = env.NEXT_DIST_DIR_MODE === "smoke"
-    ? HOSTED_WEB_SMOKE_DIST_DIR
-    : HOSTED_WEB_DEV_DIST_DIR;
+  const distDirName = resolveHostedWebDevDistDir(env);
   const lockPath = path.join(webDir, distDirName, ".dev-server.lock");
 
   return {
     lockPath,
     metadataPath: path.join(lockPath, "owner.json"),
   };
+}
+
+function resolveHostedWebDevDistDir(env: NodeJS.ProcessEnv): string {
+  const baseDistDir = env.NEXT_DIST_DIR_MODE === "smoke"
+    ? HOSTED_WEB_SMOKE_DIST_DIR
+    : HOSTED_WEB_DEV_DIST_DIR;
+  const configuredSuffix = env.NEXT_DIST_DIR_SUFFIX?.trim();
+
+  if (!configuredSuffix) {
+    return baseDistDir;
+  }
+
+  const normalizedSuffix = configuredSuffix.toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalizedSuffix)) {
+    throw new Error("NEXT_DIST_DIR_SUFFIX must use lowercase letters, digits, and hyphens only.");
+  }
+
+  return `${baseDistDir}-${normalizedSuffix}`;
 }
 
 async function tryReadTextFile(filePath: string): Promise<string | null> {
@@ -555,6 +632,74 @@ function isProcessRunning(pid: number): boolean {
     }
 
     return true;
+  }
+}
+
+function isProcessGroupRunning(processGroupId: number): boolean {
+  if (process.platform === "win32") {
+    return false;
+  }
+
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (
+      error
+      && typeof error === "object"
+      && "code" in error
+      && error.code === "ESRCH"
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+}
+
+function listDescendantProcessIds(rootPid: number): number[] {
+  try {
+    const output = execFileSync("ps", ["-axo", "pid=,ppid="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const childrenByParent = new Map<number, number[]>();
+
+    for (const line of output.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      const [pidText, parentPidText] = trimmed.split(/\s+/, 2);
+      const pid = Number.parseInt(pidText ?? "", 10);
+      const parentPid = Number.parseInt(parentPidText ?? "", 10);
+
+      if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) {
+        continue;
+      }
+
+      const siblings = childrenByParent.get(parentPid) ?? [];
+      siblings.push(pid);
+      childrenByParent.set(parentPid, siblings);
+    }
+
+    const descendants: number[] = [];
+    const queue = [...(childrenByParent.get(rootPid) ?? [])];
+
+    while (queue.length > 0) {
+      const pid = queue.shift();
+      if (pid === undefined) {
+        continue;
+      }
+
+      descendants.push(pid);
+      queue.push(...(childrenByParent.get(pid) ?? []));
+    }
+
+    return descendants;
+  } catch {
+    return [];
   }
 }
 

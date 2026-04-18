@@ -400,7 +400,6 @@ export class RunnerDispatchProcessor {
       request: {
         bundle: await bundleSync.readBundlesForRunner(),
         currentBundleRef: bundleState.bundleRef,
-        dispatch: buildHostedExecutionDispatchFromWake(wake),
         wake,
         ...(sharePack ? { sharePack } : {}),
         run,

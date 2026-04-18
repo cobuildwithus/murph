@@ -18,7 +18,7 @@ async function main(): Promise<void> {
       input.job,
       {
         platform: buildHostedExecutionRuntimePlatform({
-          boundUserId: input.job.request.dispatch.event.userId,
+          boundUserId: input.job.request.wake.userId,
           commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
           internalWorkerProxyToken: input.internalWorkerProxyToken,
           localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,

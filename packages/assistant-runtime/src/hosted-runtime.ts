@@ -34,7 +34,7 @@ import {
 } from "./hosted-runtime/environment.ts";
 import {
   completeHostedExecutionAfterCommit,
-  executeHostedDispatchForCommit,
+  executeHostedWakeForCommit,
 } from "./hosted-runtime/execution.ts";
 import {
   startHostedDispatchTypingIndicator,
@@ -48,7 +48,6 @@ import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
 import {
-  resolveHostedDispatch,
   resolveHostedWake,
 } from "./hosted-runtime/utils.ts";
 export {
@@ -111,13 +110,12 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
   let workspaceRoot: string | null = null;
 
   try {
-    const dispatch = resolveHostedDispatch(input.request);
     const wake = resolveHostedWake(input.request);
     const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: buildHostedRuntimeStartDetails(input, runtime),
-      dispatch,
+      dispatch: wake,
       message: "Hosted runtime starting.",
       phase: "runtime.starting",
       run: input.request.run ?? null,
@@ -152,12 +150,12 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     };
     emitHostedExecutionStructuredLog({
       component: "runtime",
+      dispatch: wake,
       details: {
         bundlePresent: incomingBundle !== null,
         restoreLatencyMs: Date.now() - restoreStartedAtMs,
         runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
       },
-      dispatch,
       message: "Hosted runtime restored execution context.",
       phase: "runtime.starting",
       run: input.request.run ?? null,
@@ -171,14 +169,14 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       },
       async () => {
         const typingIndicator = startHostedDispatchTypingIndicator({
-          dispatch,
+          wake,
           runtimeEnv,
           run: input.request.run ?? null,
         });
 
         try {
           if (!input.request.resume?.committedResult) {
-            const committedExecution = await executeHostedDispatchForCommit({
+            const committedExecution = await executeHostedWakeForCommit({
               artifactMaterializer: incomingBundle
                 ? createHostedArtifactMaterializer({
                     artifactResolver,
@@ -197,7 +195,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
             emitHostedExecutionStructuredLog({
               component: "runtime",
-              dispatch,
+              dispatch: wake,
               details: {
                 assistantDeliveryEffectCount:
                   committedExecution.committedAssistantDeliveryEffects.length,
@@ -219,17 +217,17 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
           }
 
           const finalResult = await completeHostedExecutionAfterCommit({
-            dispatch,
             materializedArtifactPaths,
             run: input.request.run ?? null,
             runtime,
             restored,
             committedExecution: resumeHostedCommittedExecution(input.request),
+            wake,
           });
 
           emitHostedExecutionStructuredLog({
             component: "runtime",
-            dispatch,
+            dispatch: wake,
             details: {
               runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
             },
@@ -241,7 +239,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
           return finalResult;
         } finally {
           await stopHostedDispatchTypingIndicator({
-            dispatch,
+            wake,
             typingIndicator,
             run: input.request.run ?? null,
           });
@@ -249,10 +247,10 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       },
     );
   } catch (error) {
-    const dispatch = resolveHostedDispatch(input.request);
+    const wake = resolveHostedWake(input.request);
     emitHostedExecutionStructuredLog({
       component: "runtime",
-      dispatch,
+      dispatch: wake,
       error,
       message: "Hosted runtime failed.",
       phase: "failed",

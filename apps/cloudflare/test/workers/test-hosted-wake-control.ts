@@ -1,7 +1,6 @@
 import type {
   HostedExecutionCursorState,
   HostedExecutionWake,
-  HostedExecutionDispatchRequest,
   HostedExecutionDispatchLifecycleState,
   HostedWakeAppendResponse,
   HostedWakeCommitRequest,
@@ -15,7 +14,6 @@ import type {
   HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
 import {
-  buildHostedExecutionWakeFromDispatch,
   HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
   isHostedConversationMessageWake,
@@ -39,14 +37,9 @@ const textDecoder = new TextDecoder();
 
 export async function appendTestHostedWake(input: {
   bucket: R2BucketLike;
-  dispatch: HostedExecutionDispatchRequest;
-} | {
-  bucket: R2BucketLike;
   wake: HostedExecutionWake;
 }): Promise<HostedWakeAppendResponse> {
-  const wake = "wake" in input
-    ? input.wake
-    : buildHostedExecutionWakeFromDispatch(input.dispatch);
+  const wake = input.wake;
 
   const state = await readStoredHostedWakeControlState(input.bucket, wake.userId);
   const existing = state.wakes.find((storedWake) => storedWake.eventId === wake.eventId);

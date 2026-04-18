@@ -26,7 +26,7 @@ export class RunnerContainerTestDouble extends DurableObject {
 
     await recordRunnerInvocation({
       bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
-      eventId: payload.job.request.dispatch.eventId,
+      eventId: payload.job.request.wake.eventId,
       userId: payload.userId,
     });
 

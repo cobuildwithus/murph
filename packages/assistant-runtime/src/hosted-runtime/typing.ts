@@ -23,7 +23,7 @@ import {
 import type {
   HostedAssistantRuntimeJobInput,
 } from "./models.ts";
-import { resolveHostedDispatch, resolveHostedWake } from "./utils.ts";
+import { resolveHostedWake } from "./utils.ts";
 
 type HostedTypingHandle = {
   stop(): Promise<void>;
@@ -39,8 +39,7 @@ type HostedDispatchTypingIndicator = {
 };
 
 export function startHostedDispatchTypingIndicator(input: {
-  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
-  wake?: HostedAssistantRuntimeJobInput["request"]["wake"];
+  wake: HostedAssistantRuntimeJobInput["request"]["wake"];
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): HostedDispatchTypingIndicator | null {
@@ -64,8 +63,7 @@ export function startHostedDispatchTypingIndicator(input: {
 }
 
 export async function stopHostedDispatchTypingIndicator(input: {
-  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
-  wake?: HostedAssistantRuntimeJobInput["request"]["wake"];
+  wake: HostedAssistantRuntimeJobInput["request"]["wake"];
   typingIndicator: HostedDispatchTypingIndicator | null;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): Promise<void> {
@@ -73,7 +71,7 @@ export async function stopHostedDispatchTypingIndicator(input: {
     return;
   }
 
-  const dispatch = resolveHostedDispatch(input);
+  const wake = resolveHostedWake(input);
 
   try {
     await input.typingIndicator.stop();
@@ -81,7 +79,7 @@ export async function stopHostedDispatchTypingIndicator(input: {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: input.typingIndicator.stopLogDetails,
-      dispatch,
+      dispatch: wake,
       error,
       level: "warn",
       message: `Hosted ${input.typingIndicator.channelLabel} typing indicator could not be stopped.`,
@@ -92,7 +90,6 @@ export async function stopHostedDispatchTypingIndicator(input: {
 }
 
 function startHostedLinqDispatchTypingIndicator(input: {
-  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   wake: HostedExecutionConversationMessageWake & {
@@ -154,7 +151,6 @@ function startHostedLinqDispatchTypingIndicator(input: {
 }
 
 function startHostedTelegramDispatchTypingIndicator(input: {
-  dispatch: NonNullable<HostedAssistantRuntimeJobInput["request"]["dispatch"]>;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   wake: HostedExecutionConversationMessageWake & {

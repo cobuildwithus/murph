@@ -7,13 +7,13 @@ import {
   type HostedBundleArtifactLocation,
 } from "@murphai/runtime-state/node";
 import type {
-  HostedExecutionDispatchRequest,
   HostedExecutionRunContext,
   HostedExecutionRunnerResult,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
+  isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
   getAssistantCronStatus,
@@ -35,8 +35,11 @@ import {
 import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
-import { executeHostedDispatchEvent } from "./events.ts";
-import { runHostedMaintenanceLoop } from "./maintenance.ts";
+import { executeHostedWakeEvent } from "./events.ts";
+import {
+  runHostedConversationAssistantAutomation,
+  runHostedMaintenanceLoop,
+} from "./maintenance.ts";
 import type {
   HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobRequest,
@@ -46,10 +49,10 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
-import { summarizeDispatch } from "./summary.ts";
+import { summarizeWake } from "./summary.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
-import { resolveHostedDispatch, resolveHostedWake } from "./utils.ts";
+import { resolveHostedWake } from "./utils.ts";
 
 const HOSTED_ASSISTANT_RECOVERY_RECEIPT_LIMIT = 200;
 const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = "autoReplyCaptureId";
@@ -63,7 +66,7 @@ const HOSTED_UNSAFE_ASSISTANT_DELIVERY_TIMELINE_KINDS: ReadonlySet<string> = new
   "delivery.sent",
 ]);
 
-export async function executeHostedDispatchForCommit(input: {
+export async function executeHostedWakeForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   executionContext: AssistantExecutionContext;
   materializedArtifactPaths?: ReadonlySet<string>;
@@ -75,11 +78,10 @@ export async function executeHostedDispatchForCommit(input: {
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
-  const dispatch = resolveHostedDispatch(input.request);
   const wake = resolveHostedWake(input.request);
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch,
+    dispatch: wake,
     details: {
       runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
     },
@@ -91,8 +93,8 @@ export async function executeHostedDispatchForCommit(input: {
   const dispatchExecutionContext = await resolveHostedMaintenanceExecutionContext(
     input.executionContext,
   );
-  const dispatchMetrics = await executeHostedDispatchEvent({
-    dispatch,
+  const dispatchMetrics = await executeHostedWakeEvent({
+    wake,
     executionContext: dispatchExecutionContext,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
@@ -101,7 +103,7 @@ export async function executeHostedDispatchForCommit(input: {
   });
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch,
+    dispatch: wake,
     details: {
       dispatchHandlerLatencyMs: Date.now() - dispatchHandlersStartedAtMs,
       runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
@@ -111,19 +113,26 @@ export async function executeHostedDispatchForCommit(input: {
     run: input.request.run ?? null,
   });
   const maintenanceMetrics = dispatchMetrics.maintenanceRequired
-    ? await runHostedMaintenanceAfterDispatch({
+      ? await runHostedMaintenanceAfterDispatch({
         artifactMaterializer: input.artifactMaterializer ?? null,
         bootstrapResult: dispatchMetrics.bootstrapResult,
-        dispatch,
         wake,
         executionContext: dispatchExecutionContext,
-        requestId: dispatch.eventId,
+        requestId: wake.eventId,
         run: input.request.run ?? null,
         runtime: input.runtime,
         vaultRoot: input.restored.vaultRoot,
       })
+    : isHostedConversationMessageWake(wake)
+      ? await runHostedConversationAssistantAutomationAfterDispatch({
+          executionContext: dispatchExecutionContext,
+          requestId: wake.eventId,
+          run: input.request.run ?? null,
+          runtime: input.runtime,
+          vaultRoot: input.restored.vaultRoot,
+          wake,
+        })
     : await resolveSkippedHostedMaintenanceMetrics({
-        dispatch,
         wake,
         run: input.request.run ?? null,
         runtime: input.runtime,
@@ -146,7 +155,7 @@ export async function executeHostedDispatchForCommit(input: {
   });
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch,
+    dispatch: wake,
     details: {
       runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
       snapshotLatencyMs: Date.now() - snapshotStartedAtMs,
@@ -160,7 +169,7 @@ export async function executeHostedDispatchForCommit(input: {
   );
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch,
+    dispatch: wake,
     details: {
       committedAssistantDeliveryEffectCount: String(committedAssistantDeliveryEffects.length),
       runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
@@ -183,7 +192,7 @@ export async function executeHostedDispatchForCommit(input: {
       result: {
         eventsHandled: 1,
         nextWakeAt: maintenanceMetrics.nextWakeAt,
-        summary: summarizeDispatch(dispatch, {
+        summary: summarizeWake(wake, {
           ...dispatchMetrics,
           ...maintenanceMetrics,
         }),
@@ -201,8 +210,7 @@ async function resolveHostedMaintenanceExecutionContext(
 
 async function runHostedMaintenanceAfterDispatch(input: {
   artifactMaterializer: HostedWorkspaceArtifactMaterializer | null;
-  bootstrapResult: Awaited<ReturnType<typeof executeHostedDispatchEvent>>["bootstrapResult"];
-  dispatch: HostedExecutionDispatchRequest;
+  bootstrapResult: Awaited<ReturnType<typeof executeHostedWakeEvent>>["bootstrapResult"];
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   requestId: string;
@@ -216,7 +224,6 @@ async function runHostedMaintenanceAfterDispatch(input: {
   const maintenanceStartedAtMs = Date.now();
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer,
-    dispatch: input.dispatch,
     deviceSyncPort: input.runtime.platform.deviceSyncPort,
     wake: input.wake,
     executionContext: await resolveHostedMaintenanceExecutionContext(
@@ -231,7 +238,7 @@ async function runHostedMaintenanceAfterDispatch(input: {
   });
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch: input.dispatch,
+    dispatch: input.wake,
     details: {
       maintenanceLatencyMs: Date.now() - maintenanceStartedAtMs,
       nextWakeAt: maintenanceMetrics.nextWakeAt,
@@ -245,7 +252,6 @@ async function runHostedMaintenanceAfterDispatch(input: {
 }
 
 async function resolveSkippedHostedMaintenanceMetrics(input: {
-  dispatch: HostedExecutionDispatchRequest;
   wake: HostedExecutionWake;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">;
@@ -271,7 +277,7 @@ async function resolveSkippedHostedMaintenanceMetrics(input: {
 
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch: input.dispatch,
+    dispatch: input.wake,
     details: {
       nextWakeAt,
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
@@ -286,6 +292,39 @@ async function resolveSkippedHostedMaintenanceMetrics(input: {
     deviceSyncSkipped: false,
     nextWakeAt,
     parserProcessed: 0,
+  };
+}
+
+async function runHostedConversationAssistantAutomationAfterDispatch(input: {
+  executionContext: AssistantExecutionContext;
+  requestId: string;
+  run?: HostedExecutionRunContext | null;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "resolvedConfig"
+  >;
+  vaultRoot: string;
+  wake: HostedExecutionWake;
+}): Promise<HostedMaintenanceMetrics> {
+  const assistantAutomation = await runHostedConversationAssistantAutomation({
+    executionContext: input.executionContext,
+    requestId: input.requestId,
+    vaultRoot: input.vaultRoot,
+    wake: input.wake,
+  });
+  const preservedMetrics = await resolveSkippedHostedMaintenanceMetrics({
+    wake: input.wake,
+    run: input.run ?? null,
+    runtime: input.runtime,
+    vaultRoot: input.vaultRoot,
+  });
+
+  return {
+    ...preservedMetrics,
+    nextWakeAt: earliestHostedWakeAt(
+      assistantAutomation.nextWakeAt,
+      preservedMetrics.nextWakeAt,
+    ),
   };
 }
 
@@ -481,8 +520,6 @@ function normalizeHostedWakeAt(
 }
 
 export async function completeHostedExecutionAfterCommit(input: {
-  dispatch: HostedExecutionDispatchRequest;
-  wake?: HostedExecutionWake;
   materializedArtifactPaths?: ReadonlySet<string>;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
@@ -491,11 +528,11 @@ export async function completeHostedExecutionAfterCommit(input: {
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
+  wake: HostedExecutionWake;
 }): Promise<HostedAssistantRuntimeCompletedJobResult> {
-  const wake = resolveHostedWake(input);
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch: input.dispatch,
+    dispatch: input.wake,
     details: {
       assistantDeliveryEffectCount: String(
         input.committedExecution.committedAssistantDeliveryEffects.length,
@@ -508,10 +545,10 @@ export async function completeHostedExecutionAfterCommit(input: {
   });
   const sideEffectsStartedAtMs = Date.now();
   const assistantDeliveryOutcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
-    dispatch: input.dispatch,
     effectsPort: input.runtime.platform.effectsPort,
     assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
     vaultRoot: input.restored.vaultRoot,
+    wake: input.wake,
   });
   await exportHostedPendingAssistantUsage({
     usageExportPort: input.runtime.platform.usageExportPort,
@@ -520,7 +557,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   await refreshAssistantStatusSnapshot(input.restored.vaultRoot);
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch: input.dispatch,
+    dispatch: input.wake,
     details: {
       assistantDeliveryOutcomeSummary: summarizeHostedAssistantDeliveryOutcomes(
         assistantDeliveryOutcomes,
@@ -550,7 +587,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   });
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    dispatch: input.dispatch,
+    dispatch: input.wake,
     details: {
       finalSnapshotLatencyMs: Date.now() - finalSnapshotStartedAtMs,
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
