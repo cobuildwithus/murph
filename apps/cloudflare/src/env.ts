@@ -33,6 +33,7 @@ export type HostedExecutionEnvironment = Omit<
 > & {
   automationRecipientPrivateKey: HostedUserRecipientPrivateKeyJwk;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
+  hostedWebBaseUrl: string;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   platformEnvelopeKey: Uint8Array;
   platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;

@@ -1,25 +1,27 @@
 ## Goal
 
-Land the returned HostedWake follow-up cleanup patch on top of the current hard-cut tree without widening scope beyond the artifact's intended fixes.
+Land the supplied hosted-wake follow-up cleanup patch without reintroducing stale pre-cutover behavior, keeping only the hunks that are still needed on top of the current tree.
 
 ## Scope
 
-- `apps/cloudflare/src/user-runner/**`
-- `apps/web/src/lib/hosted-wake/control.ts`
-- `apps/web/src/lib/device-sync/wake-service.ts`
-- `apps/web/src/lib/hosted-onboarding/webhook-{receipt-store,transport}.ts`
-- focused hosted-web and hosted-runner tests required by the patch
+- `apps/cloudflare/src/**`
+- `apps/cloudflare/test/**`
+- `apps/web/src/lib/hosted-wake/**`
+- `apps/web/test/**`
+- hosted wake durability docs only if the final implementation changes the current architecture contract
 
 ## Constraints
 
-- Preserve the current HostedWake hard-cut direction and avoid reintroducing legacy outbox or pending-dispatch behavior.
-- Keep the change scoped to follow-up bug fixes, stale cleanup, and directly related coverage.
-- Preserve any already-landed renamed dispatch-payload surfaces and current test organization where files have moved since the patch was generated.
+- Treat the supplied patch as behavioral intent, not overwrite authority.
+- Preserve the current thin-shim cutover direction where web owns wake ordering, lifecycle, and cursor correctness.
+- Do not revert or overwrite unrelated hosted wake work already present in the tree.
+- Keep the patch narrow: only land hunks that still fix live correctness or remove still-dead compatibility surface.
 
 ## Verification
 
-- Repo-required typecheck plus truthful scoped coverage-bearing verification for the touched `apps/web` and `apps/cloudflare` surfaces
-- Required completion-workflow audit passes for a standard repo change
+- `pnpm typecheck`
+- truthful scoped coverage or diff-aware verification for touched `apps/cloudflare`, `apps/web`, and any touched shared owners
+- required completion audits per repo workflow before commit
 Status: completed
 Updated: 2026-04-18
 Completed: 2026-04-18

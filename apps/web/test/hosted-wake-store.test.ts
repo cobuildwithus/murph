@@ -2,7 +2,6 @@ import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
-  decodeHostedWakeStoredPayload,
   encodeHostedWakeStoredPayload,
 } from "@/src/lib/hosted-wake/payload";
 import {
@@ -238,12 +237,7 @@ describe("hosted wake store", () => {
     expect(result.updatedExisting).toBe(true);
     expect(result.wake.seq).toBe("1");
     expect(result.wake.dedupeKey).toBe("dispatch:member.channels.updated:second");
-    expect(
-      decodeHostedWakeStoredPayload({
-        payloadInlineCiphertext: result.wake.payloadInlineCiphertext,
-        userId: "member_123",
-      }),
-    ).toEqual({
+    expect(result.wake.payloadJson).toEqual({
       revision: 2,
     });
 
@@ -384,6 +378,64 @@ describe("hosted wake store", () => {
     expect(listed.wakes[0]?.seq).toBe("4");
   });
 
+  it("keeps quarantined wakes visible for cursor advancement without hydrating payloads", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 3n,
+        userId: "member_123",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "dispatch:assistant.cron.tick:evt_quarantined",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload: {
+            revision: 1,
+          },
+          quarantinedAt: "2026-04-17T00:00:30.000Z",
+          seq: 1n,
+          userId: "member_123",
+        },
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "dispatch:assistant.cron.tick:evt_active",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:01:00.000Z",
+          payload: {
+            revision: 2,
+          },
+          seq: 2n,
+          userId: "member_123",
+        },
+      ],
+    });
+
+    const listed = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+
+    expect(listed.wakes).toEqual([
+      expect.objectContaining({
+        quarantineCode: "invalid-dispatch-payload",
+        quarantinedAt: "2026-04-17T00:00:30.000Z",
+        seq: "1",
+      }),
+      expect.objectContaining({
+        payloadJson: {
+          revision: 2,
+        },
+        quarantinedAt: null,
+        seq: "2",
+      }),
+    ]);
+    expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
+  });
+
   it("resolves wake schedule and lifecycle lookups by the original dispatch event id", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
@@ -441,6 +493,7 @@ function createHostedWakeStoreHarness(input?: {
     kind: string;
     occurredAt: string;
     payload: unknown;
+    quarantinedAt?: string | null;
     seq: bigint;
     userId: string;
   }>;
@@ -490,8 +543,8 @@ function createHostedWakeStoreHarness(input?: {
         payloadInlineCiphertext: encoded.payloadInlineCiphertext,
         payloadRef: encoded.storage === "ref" ? id : null,
         payloadSchema: "murph.hosted-wake-dispatch.v1",
-        quarantineCode: null,
-        quarantinedAt: null,
+        quarantineCode: wake.quarantinedAt ? "invalid-dispatch-payload" : null,
+        quarantinedAt: wake.quarantinedAt ? new Date(wake.quarantinedAt) : null,
         seq: wake.seq,
         updatedAt: createdAt,
         userId: wake.userId,
@@ -661,7 +714,6 @@ function createHostedWakeStoreHarness(input?: {
           }
           | {
             kind: string;
-            quarantinedAt: null;
             userId: string;
           };
       }): TestWakeState | null {
@@ -671,8 +723,7 @@ function createHostedWakeStoreHarness(input?: {
           const candidate = state.wakes
             .filter((wake) =>
               wake.kind === where.kind
-              && wake.userId === where.userId
-              && wake.quarantinedAt === null)
+              && wake.userId === where.userId)
             .sort((left, right) => Number(right.seq - left.seq))[0];
 
           return candidate ? cloneWake(candidate) : null;
@@ -693,7 +744,6 @@ function createHostedWakeStoreHarness(input?: {
         take?: number;
         where:
           | {
-            quarantinedAt: null;
             seq: { gt: bigint };
             userId: string;
           }
@@ -718,7 +768,6 @@ function createHostedWakeStoreHarness(input?: {
         return state.wakes
           .filter((wake) =>
             wake.userId === where.userId
-            && wake.quarantinedAt === null
             && wake.seq > where.seq.gt)
           .sort((left, right) => Number(left.seq - right.seq))
           .slice(0, args.take)

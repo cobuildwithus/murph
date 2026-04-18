@@ -300,7 +300,6 @@ export async function listHostedWakesAfterSeq(
     : cursor.committedSeq;
   const wakes = await prisma.hostedWake.findMany({
     where: {
-      quarantinedAt: null,
       seq: {
         gt: afterSeq,
       },
@@ -334,10 +333,12 @@ export async function commitHostedExecutionCursorTx(input: {
   });
 
   if (input.committedSeq <= cursor.committedSeq) {
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
+    if (input.committedSeq < cursor.committedSeq) {
+      return {
+        committed: false,
+        cursor: projectHostedExecutionCursorRecord(cursor),
+      };
+    }
   }
 
   const nextSnapshotRef: Prisma.InputJsonValue | typeof Prisma.DbNull = input.snapshotRef === undefined
@@ -345,17 +346,35 @@ export async function commitHostedExecutionCursorTx(input: {
       ? Prisma.DbNull
       : cursor.snapshotRef as Prisma.InputJsonValue
     : input.snapshotRef ?? Prisma.DbNull;
+  const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
+  const snapshotRefChanged = input.snapshotRef !== undefined
+    && JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotJson);
+  const shouldAdvanceCommittedSeq = input.committedSeq > cursor.committedSeq;
+
+  if (!shouldAdvanceCommittedSeq && !snapshotRefChanged) {
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
+  }
+
   const updated = await input.tx.hostedExecutionCursor.updateMany({
     where: {
-      committedSeq: cursor.committedSeq,
-      nextSeq: {
-        gt: input.committedSeq,
-      },
       userId: input.userId,
       version: input.expectedVersion,
+      ...(shouldAdvanceCommittedSeq
+        ? {
+            committedSeq: cursor.committedSeq,
+            nextSeq: {
+              gt: input.committedSeq,
+            },
+          }
+        : {
+            committedSeq: cursor.committedSeq,
+          }),
     },
     data: {
-      committedSeq: input.committedSeq,
+      committedSeq: shouldAdvanceCommittedSeq ? input.committedSeq : cursor.committedSeq,
       snapshotRef: nextSnapshotRef,
       version: {
         increment: 1,
@@ -575,9 +594,6 @@ export function projectHostedWakeRecord(
     kind: record.kind,
     occurredAt: record.occurredAt.toISOString(),
     ...(payloadJson === null ? {} : { payloadJson }),
-    payloadBytes: record.payloadBytes,
-    payloadInlineCiphertext: record.payloadInlineCiphertext,
-    payloadRef: record.payloadRef,
     payloadSchema: record.payloadSchema,
     quarantineCode: record.quarantineCode,
     quarantinedAt: record.quarantinedAt?.toISOString() ?? null,
@@ -591,6 +607,10 @@ async function hydrateHostedWakeRecordTx(input: {
   record: HostedWakeRow;
   tx: HostedWakeStoreClient;
 }): Promise<HostedWakeRecord> {
+  if (input.record.quarantinedAt) {
+    return projectHostedWakeRecord(input.record);
+  }
+
   const payloadJson = await resolveHostedWakePayloadJson(input.record, input.tx);
   return projectHostedWakeRecord(input.record, payloadJson);
 }
@@ -607,11 +627,16 @@ async function hydrateHostedWakeRecordsTx(input: {
     tx: input.tx,
     userId: input.records[0].userId,
     wakeIds: input.records
+      .filter((record) => record.quarantinedAt === null)
       .map((record) => record.payloadRef)
       .filter((value): value is string => typeof value === "string" && value.length > 0),
   });
 
   return input.records.map((record) => {
+    if (record.quarantinedAt) {
+      return projectHostedWakeRecord(record);
+    }
+
     const payloadJson = resolveHostedWakePayloadJsonSync(
       record,
       payloadRowsByWakeId.get(record.payloadRef ?? "") ?? null,

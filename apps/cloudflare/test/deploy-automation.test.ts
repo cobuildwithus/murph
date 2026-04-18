@@ -59,6 +59,7 @@ describe("hosted deploy automation helpers", () => {
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
       CF_WORKER_NAME: "hosted-worker",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
@@ -180,7 +181,7 @@ describe("hosted deploy automation helpers", () => {
         name: "HOSTED_EMAIL",
       },
     ]);
-    expect(config.vars.HOSTED_WEB_BASE_URL).toBeUndefined();
+    expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
     expect(config.vars.MURPH_WEB_SEARCH_PROVIDER).toBe("brave");

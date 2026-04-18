@@ -5,6 +5,7 @@ import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contr
 import {
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
+  readHostedWakeStatusFromWeb,
 } from "../src/web-control-plane.ts";
 
 type ObservedRequest = { init?: RequestInit; url: string };
@@ -137,6 +138,66 @@ describe("cloudflare web control plane wake helpers", () => {
       snapshotRef: {
         checkpoint: "wake_24",
       },
+    });
+  });
+
+  it("reads canonical hosted wake status from the web control plane", async () => {
+    let observedRequest: ObservedRequest | null = null;
+
+    await expect(
+      readHostedWakeStatusFromWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          eventId: "evt_tick",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              cursor: {
+                committedSeq: "24",
+                createdAt: "2026-04-17T00:00:00.000Z",
+                nextSeq: "26",
+                snapshotRef: null,
+                updatedAt: "2026-04-17T00:00:00.000Z",
+                userId: "user_123",
+                version: "4",
+              },
+              dispatchState: "queued",
+              pendingWakeCount: 1,
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toEqual({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "user_123",
+        version: "4",
+      },
+      dispatchState: "queued",
+      pendingWakeCount: 1,
+    });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/api/internal/hosted-wake/status",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("content-type")).toBe("application/json");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(JSON.parse(String(request.init?.body))).toEqual({
+      eventId: "evt_tick",
     });
   });
 });

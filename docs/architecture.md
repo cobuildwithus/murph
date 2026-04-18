@@ -121,11 +121,11 @@ repo/
 - `apps/web` and hosted Postgres own hosted control-plane truth: hosted member
   identity, routing, billing, email authorization, hosted share payloads,
   device-sync authority, hosted AI usage reconciliation, and the canonical
-  dispatch lifecycle around `execution_outbox`.
+  `HostedWake` / `HostedExecutionCursor` wake and cursor lifecycle.
 - `apps/cloudflare` owns execution coordination only: authenticated dispatch,
-  per-user queueing, encrypted hosted workspace snapshots, encrypted artifact
-  blobs, encrypted runner-secret blobs, execution journals, and other opaque
-  runtime blobs needed to execute one hosted job safely.
+  per-user lease and stale-result fencing, encrypted hosted workspace snapshots,
+  encrypted artifact blobs, encrypted runner-secret blobs, execution journals,
+  and other opaque runtime blobs needed to execute one hosted job safely.
 - Cloudflare is not the canonical owner of hosted share payloads, device-sync
   control-plane state, pending usage, or gateway product truth.
 - The broad Cloudflare control seam is intentionally gone. There is no generic

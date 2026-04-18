@@ -94,7 +94,9 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
 
   if (url.pathname === "/__test/dispatch-with-outcome" && request.method === "POST") {
     const dispatch = parseHostedExecutionDispatchRequest(await request.json() as unknown);
-    return Response.json(await getUserRunnerStub(dispatch.event.userId).dispatchWithOutcome(dispatch));
+    const runner = getUserRunnerStub(dispatch.event.userId);
+    await runner.bootstrapUser(dispatch.event.userId);
+    return Response.json(await runner.dispatchWithOutcome(dispatch));
   }
 
   if (url.pathname === "/__test/status" && request.method === "GET") {

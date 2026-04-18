@@ -26,6 +26,7 @@ const TEST_VERCEL_OIDC_AUDIENCE = `https://vercel.com/${TEST_VERCEL_OIDC_TEAM_SL
 const TEST_VERCEL_OIDC_SUBJECT =
   `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:${TEST_VERCEL_OIDC_PROJECT_NAME}:environment:production`;
 const TEST_VERCEL_OIDC_JWKS_URL = `${TEST_VERCEL_OIDC_ISSUER}/.well-known/jwks`;
+const TEST_HOSTED_WAKE_CONTROL_ORIGIN = "http://127.0.0.1:8913";
 const TEST_VERCEL_OIDC_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
 const TEST_VERCEL_OIDC_PUBLIC_JWK = {
   ...(createPublicKey(TEST_VERCEL_OIDC_PRIVATE_KEY).export({ format: "jwk" }) as JsonWebKey),
@@ -42,7 +43,20 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedWakeAppendRequest,
+  type HostedWakeCommitRequest,
+  type HostedWakeFetchRequest,
+  type HostedWakeQuarantineRequest,
+  type HostedWakeStatusRequest,
 } from "@murphai/hosted-execution/contracts";
+import { parseHostedExecutionDispatchRequest } from "@murphai/hosted-execution/parsers";
+import {
+  appendTestHostedWake,
+  commitTestHostedWakeCursor,
+  fetchTestHostedWakeBatch,
+  quarantineTestHostedWake,
+  readTestHostedWakeStatus,
+} from "./test-hosted-wake-control.ts";
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
@@ -104,8 +118,8 @@ describe("cloudflare worker runtime suite", () => {
         }),
         lastEventId: "evt_signed_runtime",
         nextWakeAt: "2026-03-26T12:01:00.000Z",
-        pendingEventCount: 0,
-        retryingEventId: null,
+        pendingEventCount: 1,
+        retryingEventId: "evt_signed_runtime",
         userId: dispatch.event.userId,
       },
     });
@@ -149,12 +163,13 @@ describe("cloudflare worker runtime suite", () => {
     vi.setSystemTime(new Date("2026-05-26T12:01:10.000Z"));
     await expect(runDurableObjectAlarm(stub as never)).resolves.toBe(true);
     await vi.waitFor(async () => {
-      await expect(stub.status()).resolves.toMatchObject({
-        lastEventId: "evt_alarm_seed",
+      const status = await stub.status();
+      expect(status).toEqual(expect.objectContaining({
+        lastEventId: expect.stringMatching(/^alarm:/u),
         pendingEventCount: 0,
         retryingEventId: null,
         userId,
-      });
+      }));
     });
   });
 
@@ -164,7 +179,7 @@ describe("cloudflare worker runtime suite", () => {
     await resolveHostedUserCryptoContext(userId);
     await expect(getUserRunnerStub(userId).dispatch(createDispatch(eventId, userId))).resolves.toMatchObject({
       lastEventId: eventId,
-      pendingEventCount: 0,
+      pendingEventCount: 1,
       userId,
     });
 
@@ -244,7 +259,9 @@ async function createSignedDispatchRequest(
 
 function installOidcJwksFetch(delegate?: typeof fetch): void {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input) === TEST_VERCEL_OIDC_JWKS_URL) {
+    const request = input instanceof Request ? input : new Request(input, init);
+
+    if (request.url === TEST_VERCEL_OIDC_JWKS_URL) {
       return new Response(JSON.stringify({ keys: [TEST_VERCEL_OIDC_PUBLIC_JWK] }), {
         headers: {
           "content-type": "application/json",
@@ -253,12 +270,77 @@ function installOidcJwksFetch(delegate?: typeof fetch): void {
       });
     }
 
+    const hostedWakeResponse = await handleHostedWakeControlFetch(request);
+    if (hostedWakeResponse) {
+      return hostedWakeResponse;
+    }
+
     if (delegate) {
       return delegate(input, init);
     }
 
-    throw new Error(`Unexpected fetch during Cloudflare OIDC test: ${String(input)}`);
+    throw new Error(`Unexpected fetch during Cloudflare OIDC test: ${request.url}`);
   }));
+}
+
+async function handleHostedWakeControlFetch(request: Request): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.origin !== TEST_HOSTED_WAKE_CONTROL_ORIGIN) {
+    return null;
+  }
+
+  const userId = request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER);
+  if (!userId) {
+    return Response.json({ error: "x-hosted-execution-user-id is required." }, { status: 400 });
+  }
+
+  const bucket = (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES;
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/append") {
+    const body = await request.clone().json() as HostedWakeAppendRequest;
+    return Response.json(await appendTestHostedWake({
+      bucket,
+      dispatch: parseHostedExecutionDispatchRequest(body.dispatch),
+    }));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/unseen") {
+    const body = await request.clone().json() as HostedWakeFetchRequest;
+    return Response.json(await fetchTestHostedWakeBatch({
+      body,
+      bucket,
+      userId,
+    }));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/commit") {
+    const body = await request.clone().json() as HostedWakeCommitRequest;
+    return Response.json(await commitTestHostedWakeCursor({
+      body,
+      bucket,
+      userId,
+    }));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/quarantine") {
+    const body = await request.clone().json() as HostedWakeQuarantineRequest;
+    return Response.json(await quarantineTestHostedWake({
+      body,
+      bucket,
+      userId,
+    }));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/status") {
+    const body = await request.clone().json() as HostedWakeStatusRequest;
+    return Response.json(await readTestHostedWakeStatus({
+      body,
+      bucket,
+      userId,
+    }));
+  }
+
+  return null;
 }
 
 function createTestVercelOidcToken(

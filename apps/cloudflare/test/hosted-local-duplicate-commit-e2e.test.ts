@@ -86,11 +86,11 @@ describe("hosted local duplicate commit e2e", () => {
     expect(dispatchResult).toMatchObject({
       event: {
         eventId: activationDispatch.eventId,
-        state: "queued",
+        state: "completed",
       },
       status: {
-        pendingEventCount: 1,
-        retryingEventId: activationDispatch.eventId,
+        pendingEventCount: 0,
+        retryingEventId: null,
         userId,
       },
     });
@@ -141,11 +141,11 @@ describe("hosted local duplicate commit e2e", () => {
     expect(dispatchResult).toMatchObject({
       event: {
         eventId: stabilityActivationDispatch.eventId,
-        state: "queued",
+        state: "completed",
       },
       status: {
-        pendingEventCount: 1,
-        retryingEventId: stabilityActivationDispatch.eventId,
+        pendingEventCount: 0,
+        retryingEventId: null,
         userId: stabilityUserId,
       },
     });
@@ -209,12 +209,12 @@ describe("hosted local duplicate commit e2e", () => {
     await worker.client.postJson("/__test/runner/invocations/clear", {
       userId: overlapUserId,
     });
-    await worker.client.postJson("/__test/runner/payload-read-pause", {
-      dispatch,
+    await worker.client.postJson("/__test/runner/pause", {
+      eventId: overlapEventId,
     });
 
     const dispatchPromise = worker.client.postJson("/__test/dispatch-with-outcome", dispatch);
-    await worker.waitForRunnerPayloadReadPauseEntry(overlapEventId);
+    await worker.waitForRunnerPauseEntry(overlapEventId);
 
     const alarmResult = await worker.client.postJson("/__test/alarm", {
       userId: overlapUserId,
@@ -228,11 +228,11 @@ describe("hosted local duplicate commit e2e", () => {
       `/__test/runner/invocations?userId=${encodeURIComponent(overlapUserId)}`,
     );
     expect(invocationsWhilePaused).toMatchObject({
-      count: 0,
-      eventIds: [],
+      count: 1,
+      eventIds: [overlapEventId],
     });
 
-    await worker.client.postJson("/__test/runner/payload-read-release", {
+    await worker.client.postJson("/__test/runner/release", {
       eventId: overlapEventId,
     });
 

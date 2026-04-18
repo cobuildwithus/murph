@@ -1,4 +1,5 @@
 import {
+  normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 
@@ -15,6 +16,7 @@ export interface HostedExecutionWorkerEnvironment {
   platformEnvelopeKeyBase64: string;
   platformEnvelopeKeyId: string;
   platformEnvelopeKeyringJson: string | null;
+  hostedWebBaseUrl: string;
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerReadyTimeoutMs: number;
@@ -65,6 +67,10 @@ export function readHostedExecutionWorkerEnvironment(
     platformEnvelopeKeyringJson: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON,
     ),
+    hostedWebBaseUrl: requireHostedExecutionBaseUrl(
+      source.HOSTED_WEB_BASE_URL,
+      "HOSTED_WEB_BASE_URL",
+    ),
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
       3,
@@ -114,6 +120,21 @@ function requireHostedExecutionString(
 
   if (!normalized) {
     throw new TypeError(`${label} is required.`);
+  }
+
+  return normalized;
+}
+
+function requireHostedExecutionBaseUrl(
+  value: string | null | undefined,
+  label: string,
+): string {
+  const normalized = normalizeHostedExecutionBaseUrl(value, {
+    allowHttpLocalhost: true,
+  });
+
+  if (!normalized) {
+    throw new TypeError(`${label} must be a valid absolute URL.`);
   }
 
   return normalized;

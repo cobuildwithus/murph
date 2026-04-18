@@ -37,8 +37,10 @@ export interface RunnerMetaRow {
   in_flight: number;
   last_error_at: string | null;
   last_error_code: string | null;
+  last_event_id: string | null;
   last_run_at: string | null;
   next_wake_at: string | null;
+  retrying_event_id: string | null;
   user_id: string;
 }
 
@@ -109,8 +111,10 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     in_flight: 0,
     last_error_at: null,
     last_error_code: null,
+    last_event_id: null,
     last_run_at: null,
     next_wake_at: null,
+    retrying_event_id: null,
     user_id: userId,
   };
 }
@@ -152,14 +156,14 @@ export function projectRunnerStateRecord(input: {
       lastError: nextLastError,
       lastErrorAt: input.meta.last_error_at,
       lastErrorCode: input.meta.last_error_code,
-      lastEventId: input.lastEventId,
+      lastEventId: input.meta.last_event_id ?? input.lastEventId,
       lastRunAt: input.meta.last_run_at,
       nextPendingAvailableAt: input.nextPendingAvailableAt,
       nextWakeAt: input.meta.next_wake_at,
       pendingEventCount: input.pendingDispatches.length,
       poisonedEventIds: [...input.poisonedEventIds],
       run: input.run,
-      retryingEventId: input.retryingEventId,
+      retryingEventId: input.meta.retrying_event_id ?? input.retryingEventId,
       timeline: [...input.timeline],
       userId: input.meta.user_id,
     },

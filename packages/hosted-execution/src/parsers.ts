@@ -667,14 +667,6 @@ export function parseHostedWakeRecord(
     kind: requireString(record.kind, "Hosted wake record kind"),
     occurredAt: requireString(record.occurredAt, "Hosted wake record occurredAt"),
     ...(record.payloadJson === undefined ? {} : { payloadJson: record.payloadJson }),
-    payloadBytes: record.payloadBytes === undefined || record.payloadBytes === null
-      ? null
-      : requireNumber(record.payloadBytes, "Hosted wake record payloadBytes"),
-    payloadInlineCiphertext: readOptionalNullableString(
-      record.payloadInlineCiphertext,
-      "Hosted wake record payloadInlineCiphertext",
-    ),
-    payloadRef: readOptionalNullableString(record.payloadRef, "Hosted wake record payloadRef"),
     payloadSchema: requireString(record.payloadSchema, "Hosted wake record payloadSchema"),
     quarantineCode: readOptionalNullableString(
       record.quarantineCode,

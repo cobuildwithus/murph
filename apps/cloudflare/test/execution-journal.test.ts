@@ -277,7 +277,7 @@ describe("persistHostedExecutionCommit", () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
-  it("accepts duplicate commits when assistant delivery fingerprints match but effect ids rotate", async () => {
+  it("accepts duplicate commits when assistant delivery fingerprints match but effect ids and idempotency keys rotate", async () => {
     process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -311,7 +311,6 @@ describe("persistHostedExecutionCommit", () => {
               effectId: "outbox_regenerated",
               fingerprint: "fingerprint-stable",
               payload: {
-                idempotencyKey: "assistant-outbox:outbox_original",
                 sessionId: "session_outbox_original",
                 turnId: "turn_outbox_original",
               },

@@ -44,6 +44,7 @@ const environment: HostedExecutionEnvironment = {
   retryDelayMs: 10_000,
   runnerReadyTimeoutMs: 20_000,
   runnerTimeoutMs: 60_000,
+  hostedWebBaseUrl: "https://web.example.test/",
   teeAutomationRecipientKeyId: TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
   teeAutomationRecipientPublicKey: TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
   vercelOidcValidation: createHostedExecutionVercelOidcValidationEnvironment({
@@ -143,6 +144,79 @@ describe("HostedUserRunner hosted wake drain", () => {
     }));
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["2"]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_poison"]);
+  });
+
+  it("advances past already-quarantined wakes before dispatching later rows", async () => {
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "0",
+          nextSeq: "3",
+          version: "cursor_v1",
+        }),
+        wakes: [
+          createHostedWakeRecord({
+            quarantineCode: "invalid-dispatch-payload",
+            quarantinedAt: "2026-03-26T12:00:00.500Z",
+            seq: "1",
+          }),
+          createHostedWakeRecord({
+            payloadJson: createDispatch("evt_after_quarantine"),
+            seq: "2",
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "2",
+          nextSeq: "3",
+          updatedAt: "2026-03-26T12:00:02.000Z",
+          version: "cursor_v2",
+        }),
+        wakes: [],
+      });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: "2",
+        nextSeq: "3",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+    });
+    const quarantineHostedWakeInWeb = vi.spyOn(webControlPlane, "quarantineHostedWakeInWeb");
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockResolvedValue({
+      cursor: createCursorState({
+        committedSeq: "2",
+        nextSeq: "3",
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+      pendingWakeCount: 0,
+    });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    await runner.wakeHostedWakes();
+
+    expect(quarantineHostedWakeInWeb).not.toHaveBeenCalled();
+    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["2"]);
+    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_quarantine"]);
   });
 
   it("skips local post-commit cleanup after losing the cursor compare-and-swap race", async () => {
@@ -418,8 +492,10 @@ function createCursorState(overrides: Partial<{
 function createHostedWakeRecord(input: {
   kind?: string;
   occurredAt?: string;
-  payloadJson: unknown;
+  payloadJson?: unknown;
   payloadSchema?: string;
+  quarantineCode?: string | null;
+  quarantinedAt?: string | null;
   seq: string;
 }) {
   return {
@@ -428,8 +504,10 @@ function createHostedWakeRecord(input: {
     id: `wake_${input.seq}`,
     kind: input.kind ?? "assistant.cron.tick",
     occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
-    payloadJson: input.payloadJson,
+    ...(input.payloadJson === undefined ? {} : { payloadJson: input.payloadJson }),
     payloadSchema: input.payloadSchema ?? HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+    ...(input.quarantineCode === undefined ? {} : { quarantineCode: input.quarantineCode }),
+    ...(input.quarantinedAt === undefined ? {} : { quarantinedAt: input.quarantinedAt }),
     seq: input.seq,
     updatedAt: "2026-03-26T12:00:00.000Z",
     userId: "member_123",

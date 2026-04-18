@@ -40,7 +40,6 @@ export async function handleHostedEmailIngress(
 ): Promise<void> {
   const stringEnv = asWorkerStringEnvironment(env);
   const environment = readHostedExecutionEnvironment(stringEnv);
-  const webControlBaseUrl = stringEnv.HOSTED_WEB_BASE_URL ?? null;
   const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady) {
     message.setReject?.("Hosted email ingress is not configured.");
@@ -88,7 +87,7 @@ export async function handleHostedEmailIngress(
     keysById: environment.platformEnvelopeKeysById,
     to: message.to,
     webCallbackSigning: environment.webCallbackSigning,
-    webControlBaseUrl,
+    webControlBaseUrl: environment.hostedWebBaseUrl,
   });
 
   if (!route) {
@@ -104,15 +103,10 @@ export async function handleHostedEmailIngress(
       hasRepeatedHeaderFrom: headerFrom.repeated,
       headerFrom: resolvedHeaderFrom,
       routeUserId: route.userId,
-      webControlBaseUrl,
+      webControlBaseUrl: environment.hostedWebBaseUrl,
     })
   ) {
     rejectIngressFailure();
-    return;
-  }
-
-  if (!webControlBaseUrl || !environment.webCallbackSigning) {
-    message.setReject?.("Hosted email canonical wake routing is not configured.");
     return;
   }
 
@@ -140,7 +134,7 @@ export async function handleHostedEmailIngress(
   });
 
   const append = await appendHostedWakeDispatchInWeb({
-    baseUrl: webControlBaseUrl,
+    baseUrl: environment.hostedWebBaseUrl,
     boundUserId: route.userId,
     callbackSigning: environment.webCallbackSigning,
     dispatch,
@@ -169,9 +163,9 @@ async function authorizeHostedEmailIngress(input: {
   hasRepeatedHeaderFrom: boolean;
   headerFrom: string | null | undefined;
   routeUserId: string;
-  webControlBaseUrl: string | null;
+  webControlBaseUrl: string;
 }): Promise<boolean> {
-  if (!input.callbackSigning || !input.webControlBaseUrl || input.routeUserId === HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID) {
+  if (input.routeUserId === HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID) {
     return false;
   }
 

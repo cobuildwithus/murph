@@ -78,7 +78,7 @@ export async function runHostedExecutionJob(
     localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
     localLoopbackProxyToken: options?.localLoopbackProxyToken ?? null,
     webCallbackSigning: environment.webCallbackSigning,
-    webControlBaseUrl: process.env.HOSTED_WEB_BASE_URL ?? null,
+    webControlBaseUrl: environment.hostedWebBaseUrl,
   });
 
   if (hostedExecutionRunModeForTests === "in-process") {

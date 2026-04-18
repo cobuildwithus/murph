@@ -24,7 +24,7 @@ async function main(): Promise<void> {
           localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
           localLoopbackProxyToken: input.localLoopbackProxyToken,
           webCallbackSigning: environment.webCallbackSigning,
-          webControlBaseUrl: process.env.HOSTED_WEB_BASE_URL ?? null,
+          webControlBaseUrl: environment.hostedWebBaseUrl,
         }),
       },
     );

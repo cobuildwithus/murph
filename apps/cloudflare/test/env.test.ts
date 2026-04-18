@@ -26,6 +26,7 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
     expect(environment.runnerTimeoutMs).toBe(60_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
+    expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
     expect(environment.webCallbackSigning.keyId).toBe("v1");
     expect(environment.webCallbackSigning.privateKeyJwkJson).toContain("\"kty\":\"EC\"");
   });
@@ -100,6 +101,14 @@ describe("readHostedExecutionEnvironment", () => {
         }),
       })),
     ).toThrow(/must match the current platform envelope key/u);
+  });
+
+  it("rejects a missing hosted web base url", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_WEB_BASE_URL: undefined,
+      })),
+    ).toThrow(/HOSTED_WEB_BASE_URL must be a valid absolute URL/u);
   });
 
   it("does not accept the removed bundle-key alias", () => {

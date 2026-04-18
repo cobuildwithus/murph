@@ -81,8 +81,6 @@ describe("hosted wake internal routes", () => {
         id: "wake_24",
         kind: "assistant.cron.tick",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadBytes: 1,
-        payloadInlineCiphertext: "ciphertext",
         payloadJson: {
           event: {
             kind: "assistant.cron.tick",
@@ -92,7 +90,6 @@ describe("hosted wake internal routes", () => {
           eventId: "evt_tick",
           occurredAt: "2026-04-17T00:00:00.000Z",
         },
-        payloadRef: null,
         payloadSchema: "murph.hosted-wake-dispatch.v1",
         quarantineCode: null,
         quarantinedAt: null,

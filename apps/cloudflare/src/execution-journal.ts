@@ -497,11 +497,11 @@ function summarizeHostedAssistantDeliveryCommitEquivalence(
   effects: readonly HostedAssistantDeliveryEffect[],
 ): {
   fingerprint: string;
-  payload: HostedAssistantDeliveryPayloadSummary;
+  payload: HostedAssistantDeliveryCommitEquivalencePayloadSummary;
 }[] {
   return effects.map((effect) => ({
     fingerprint: effect.fingerprint,
-    payload: summarizeHostedAssistantDeliveryPayload(effect.payload),
+    payload: summarizeHostedAssistantDeliveryCommitEquivalencePayload(effect.payload),
   }));
 }
 
@@ -543,10 +543,10 @@ function sortHostedAssistantDeliveryReplayIdentitySummary(input: readonly {
 
 function sortHostedAssistantDeliveryCommitEquivalenceSummary(input: readonly {
   fingerprint: string;
-  payload: HostedAssistantDeliveryPayloadSummary;
+  payload: HostedAssistantDeliveryCommitEquivalencePayloadSummary;
 }[]): {
   fingerprint: string;
-  payload: HostedAssistantDeliveryPayloadSummary;
+  payload: HostedAssistantDeliveryCommitEquivalencePayloadSummary;
 }[] {
   return [...input].sort((left, right) => {
     const fingerprintOrder = left.fingerprint.localeCompare(right.fingerprint);
@@ -576,6 +576,11 @@ type HostedAssistantDeliveryPayloadSummary = {
   turnId: string;
 };
 
+type HostedAssistantDeliveryCommitEquivalencePayloadSummary = Omit<
+  HostedAssistantDeliveryPayloadSummary,
+  "idempotencyKey"
+>;
+
 function summarizeHostedAssistantDeliveryPayload(
   payload: HostedAssistantDeliveryEffect["payload"],
 ): HostedAssistantDeliveryPayloadSummary {
@@ -596,6 +601,14 @@ function summarizeHostedAssistantDeliveryPayload(
     transportIdempotent: payload.transportIdempotent,
     turnId: payload.turnId,
   };
+}
+
+function summarizeHostedAssistantDeliveryCommitEquivalencePayload(
+  payload: HostedAssistantDeliveryEffect["payload"],
+): HostedAssistantDeliveryCommitEquivalencePayloadSummary {
+  const { idempotencyKey: _idempotencyKey, ...summary } =
+    summarizeHostedAssistantDeliveryPayload(payload);
+  return summary;
 }
 
 function resolveExpectedCommittedBundleRef(
