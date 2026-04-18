@@ -15,7 +15,7 @@ const shareHarness = vi.hoisted(() => {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
     }) =>
-      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? "queued"),
+      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? null),
     materializeHostedExecutionWakeTx: vi.fn(async (input: {
       wake: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
@@ -143,7 +143,7 @@ describe("hosted share service", () => {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
     }) =>
-      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? "queued");
+      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? null);
     shareHarness.materializeHostedExecutionWakeTx.mockReset();
     shareHarness.materializeHostedExecutionWakeTx.mockImplementation(async (input: {
       wake: { eventId: string };
@@ -580,6 +580,49 @@ describe("hosted share service", () => {
 
     prisma.outboxRows[0]!.wakeState = "queued";
     prisma.outboxRows[0]!.wakeState = "poisoned";
+
+    await expect(buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      share: {
+        acceptedByCurrentMember: false,
+      },
+      stage: "ready",
+    });
+    expect(prisma.rows[0]).toMatchObject({
+      acceptedAt: null,
+      acceptedByMemberId: null,
+      consumedAt: null,
+      consumedByMemberId: null,
+      lastEventId: null,
+    });
+  });
+
+  it("releases a processing share when the canonical wake row is absent", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    });
+
+    prisma.outboxRows.length = 0;
 
     await expect(buildHostedSharePageData({
       authenticatedMember: {

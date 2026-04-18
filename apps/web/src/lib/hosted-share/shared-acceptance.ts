@@ -109,7 +109,7 @@ export async function readHostedShareWakeLifecycleState(input: {
   eventId: string;
   memberId: string;
   prisma: HostedSharePrismaClient;
-}): Promise<HostedWakeLifecycleState> {
+}): Promise<HostedWakeLifecycleState | null> {
   return readHostedWakeLifecycleState({
     eventId: input.eventId,
     prisma: input.prisma,
@@ -135,7 +135,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
       prisma: input.prisma,
       shareId: input.shareId,
     });
-  } else if (state === "poisoned") {
+  } else if (state === "poisoned" || state === null) {
     await releaseHostedShareAcceptance({
       eventId: input.eventId,
       memberId: input.memberId,
@@ -144,7 +144,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
     });
   }
 
-  return state;
+  return state ?? "poisoned";
 }
 
 async function updateHostedShareAcceptanceClaim(input: {

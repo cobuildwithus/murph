@@ -16,7 +16,6 @@ import {
   readHostedExecutionWakeTargetTx,
 } from "../hosted-wake/queue";
 
-const DEFAULT_HOSTED_WAKE_LIFECYCLE_STATE: HostedWakeLifecycleState = "queued";
 const HOSTED_WAKE_LIFECYCLE_STATE_SET = new Set<HostedWakeLifecycleState>(
   HOSTED_WAKE_LIFECYCLE_STATES,
 );
@@ -37,12 +36,12 @@ export interface HostedWakeTarget {
 
 export function normalizeHostedWakeLifecycleState(
   value: string | null | undefined,
-): HostedWakeLifecycleState {
+): HostedWakeLifecycleState | null {
   if (value && HOSTED_WAKE_LIFECYCLE_STATE_SET.has(value as HostedWakeLifecycleState)) {
     return value as HostedWakeLifecycleState;
   }
 
-  return DEFAULT_HOSTED_WAKE_LIFECYCLE_STATE;
+  return null;
 }
 
 export function isHostedWakeLifecycleTerminal(
@@ -99,12 +98,12 @@ export async function findHostedWakeByEventIdTx(input: {
 export async function readHostedWakeLifecycleState(input: {
   eventId: string;
   prisma?: HostedWakeClient;
-}): Promise<HostedWakeLifecycleState> {
+}): Promise<HostedWakeLifecycleState | null> {
   const prisma = input.prisma ?? getPrisma();
   const state = await readHostedExecutionWakeLifecycleStateTx({
     eventId: input.eventId,
     tx: prisma,
   });
 
-  return state ?? DEFAULT_HOSTED_WAKE_LIFECYCLE_STATE;
+  return state ?? null;
 }
