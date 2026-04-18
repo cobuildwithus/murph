@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   markAssistantOutboxIntentSentById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
+  readAssistantOutboxIntentMirrorState: vi.fn(),
   saveAssistantSession: vi.fn(),
   sendAssistantOutboxPayload: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
@@ -55,6 +56,8 @@ vi.mock("@murphai/assistant-engine", () => ({
     mocks.markAssistantOutboxIntentMirrorTerminalById,
   markAssistantOutboxIntentSentById: mocks.markAssistantOutboxIntentSentById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+  readAssistantOutboxIntentMirrorState:
+    mocks.readAssistantOutboxIntentMirrorState,
   saveAssistantSession: mocks.saveAssistantSession,
   sendAssistantOutboxPayload: mocks.sendAssistantOutboxPayload,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
@@ -126,6 +129,20 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createMirrorState(
+  intentOverrides: Record<string, unknown> | null,
+  overrides: {
+    sendingPastGraceWindow?: boolean;
+    sendingStartedAt?: string | null;
+  } = {},
+) {
+  return {
+    intent: intentOverrides,
+    sendingPastGraceWindow: overrides.sendingPastGraceWindow ?? false,
+    sendingStartedAt: overrides.sendingStartedAt ?? null,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createAssistantDeliveryAmbiguousError.mockImplementation((cause?: { message?: string }) => ({
@@ -139,6 +156,9 @@ beforeEach(() => {
     code: error.code ?? null,
     message: error.message,
   }));
+  mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+    createMirrorState(null),
+  );
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
 });
 
@@ -270,6 +290,41 @@ describe("hosted runtime callbacks", () => {
     ]);
     expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
     expect(mocks.markAssistantOutboxIntentSentById).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns sent from the portable outbox mirror without consulting the hosted journal", async () => {
+    const effect = createEffect();
+    const readAssistantDeliveryRecord = vi.fn(async () => {
+      throw new Error("journal read should not run");
+    });
+    const effectsPort = createHostedRuntimeEffectsPortStub({
+      readAssistantDeliveryRecord,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: createDelivery(),
+        intentId: effect.effectId,
+        lastError: null,
+        status: "sent",
+      }),
+    );
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        journalMethod: null,
+        retryable: false,
+      }),
+    ]);
+    expect(readAssistantDeliveryRecord).not.toHaveBeenCalled();
+    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
   });
 
   it("waits on an in-flight sending journal record instead of sending again", async () => {
@@ -413,6 +468,43 @@ describe("hosted runtime callbacks", () => {
       }),
     );
     vi.useRealTimers();
+  });
+
+  it("returns failed_ambiguous from an abandoned portable outbox mirror without consulting the hosted journal", async () => {
+    const effect = createEffect({ transportIdempotent: false });
+    const readAssistantDeliveryRecord = vi.fn(async () => {
+      throw new Error("journal read should not run");
+    });
+    const effectsPort = createHostedRuntimeEffectsPortStub({
+      readAssistantDeliveryRecord,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        intentId: effect.effectId,
+        lastError: {
+          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+          message: "mirror abandoned the delivery",
+        },
+        status: "abandoned",
+      }),
+    );
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
+        journalMethod: null,
+        retryable: false,
+      }),
+    ]);
+    expect(readAssistantDeliveryRecord).not.toHaveBeenCalled();
+    expect(mocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
   });
 
   it("sends fresh effects directly from the committed payload and journals the sent receipt", async () => {
