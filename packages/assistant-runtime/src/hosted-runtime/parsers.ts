@@ -10,7 +10,7 @@ import {
 import {
   parseHostedExecutionBundleRef,
   parseHostedExecutionRunnerRequest,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 
 import type {
   HostedAssistantRuntimeDeviceSyncConfig,

@@ -10,7 +10,7 @@ import type { SharePack } from "@murphai/contracts";
 import { buildHostedExecutionVaultShareAcceptedWake } from "@murphai/hosted-execution";
 
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
-import { handleHostedShareAcceptedDispatch } from "../src/hosted-runtime/events/share.ts";
+import { handleHostedShareAcceptedWake } from "../src/hosted-runtime/events/share.ts";
 
 function buildSharePack(): SharePack {
   return {
@@ -31,7 +31,7 @@ function buildSharePack(): SharePack {
   };
 }
 
-describe("handleHostedShareAcceptedDispatch", () => {
+describe("handleHostedShareAcceptedWake", () => {
   test("imports the inline share pack into a real vault", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "murph-hosted-share-import-",
@@ -44,8 +44,8 @@ describe("handleHostedShareAcceptedDispatch", () => {
       });
 
       const pack = buildSharePack();
-      const result = await handleHostedShareAcceptedDispatch({
-        dispatch: buildHostedExecutionVaultShareAcceptedWake({
+      const result = await handleHostedShareAcceptedWake({
+        wake: buildHostedExecutionVaultShareAcceptedWake({
           eventId: "evt_share_accepted",
           memberId: "member_123",
           occurredAt: "2026-04-06T00:00:00.000Z",
@@ -90,8 +90,8 @@ describe("handleHostedShareAcceptedDispatch", () => {
     const pack = buildSharePack();
 
     await assert.rejects(
-      handleHostedShareAcceptedDispatch({
-        dispatch: buildHostedExecutionVaultShareAcceptedWake({
+      handleHostedShareAcceptedWake({
+        wake: buildHostedExecutionVaultShareAcceptedWake({
           eventId: "evt_share_owner_mismatch",
           memberId: "member_123",
           occurredAt: "2026-04-06T00:00:00.000Z",
@@ -115,8 +115,8 @@ describe("handleHostedShareAcceptedDispatch", () => {
     const pack = buildSharePack();
 
     await assert.rejects(
-      handleHostedShareAcceptedDispatch({
-        dispatch: buildHostedExecutionVaultShareAcceptedWake({
+      handleHostedShareAcceptedWake({
+        wake: buildHostedExecutionVaultShareAcceptedWake({
           eventId: "evt_share_id_mismatch",
           memberId: "member_123",
           occurredAt: "2026-04-06T00:00:00.000Z",

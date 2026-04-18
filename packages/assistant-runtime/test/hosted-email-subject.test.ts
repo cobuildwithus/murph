@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildHostedExecutionMemberChannelsUpdatedDispatch,
+  buildHostedExecutionMemberChannelsUpdatedWake,
 } from '@murphai/hosted-execution'
 import { buildHostedAssistantDeliveryEffect } from '@murphai/hosted-execution/side-effects'
 
@@ -61,7 +61,7 @@ describe('hosted runtime email subject support', () => {
             },
           }),
         ],
-        dispatch: buildHostedExecutionMemberChannelsUpdatedDispatch({
+        wake: buildHostedExecutionMemberChannelsUpdatedWake({
           eventId: 'dispatch_123',
           memberChannels: {
             email: true,

@@ -12,20 +12,22 @@ const defaultMemberChannels = {
   telegram: false,
 } as const;
 
+function buildMemberActivatedWake(eventId: string) {
+  return {
+    eventId,
+    kind: "member.activated" as const,
+    memberChannels: defaultMemberChannels,
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    userId: "member_123",
+  };
+}
+
 describe("hosted runtime parser coverage", () => {
   it("parses nullable commit and resume branches without injecting optional runtime state", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
-          eventId: "evt_123",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
+        wake: buildMemberActivatedWake("evt_123"),
         resume: null,
       },
     });
@@ -33,15 +35,7 @@ describe("hosted runtime parser coverage", () => {
     expect(parsed).toEqual({
       request: {
         bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
-          eventId: "evt_123",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
+        wake: buildMemberActivatedWake("evt_123"),
         resume: null,
       },
     });
@@ -115,15 +109,7 @@ describe("hosted runtime parser coverage", () => {
   it("rejects invalid runner summaries and runtime numeric fields", () => {
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
-        eventId: "evt_invalid_summary",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      },
+      wake: buildMemberActivatedWake("evt_invalid_summary"),
       resume: {
         committedResult: {
           result: {
@@ -152,15 +138,7 @@ describe("hosted runtime parser coverage", () => {
   it("rejects invalid non-null next wake timestamps and empty summaries", () => {
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: defaultMemberChannels,
-            userId: "member_123",
-          },
-        eventId: "evt_invalid_next_wake",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      },
+      wake: buildMemberActivatedWake("evt_invalid_next_wake"),
       resume: {
         committedResult: {
           result: {
@@ -175,15 +153,7 @@ describe("hosted runtime parser coverage", () => {
 
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: defaultMemberChannels,
-          userId: "member_123",
-        },
-        eventId: "evt_empty_summary",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      },
+      wake: buildMemberActivatedWake("evt_empty_summary"),
       resume: {
         committedResult: {
           result: {
@@ -200,19 +170,7 @@ describe("hosted runtime parser coverage", () => {
   it("rejects removed resume sideEffects aliases", () => {
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: {
-            email: false,
-            linq: false,
-            telegram: false,
-          },
-          userId: "member_123",
-        },
-        eventId: "evt_removed_side_effects",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      },
+      wake: buildMemberActivatedWake("evt_removed_side_effects"),
       resume: {
         committedResult: {
           result: {

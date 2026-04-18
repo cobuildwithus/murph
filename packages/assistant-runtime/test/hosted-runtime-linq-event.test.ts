@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionLinqMessageReceivedDispatch,
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionLinqConversationMessageWake,
   isHostedLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 
@@ -52,7 +51,7 @@ afterEach(() => {
 
 describe("buildHostedLinqCapture", () => {
   it("normalizes the webhook event into a hosted capture", async () => {
-    const dispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+    const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
       linqEvent: {
         event_type: "message.received",
@@ -62,7 +61,6 @@ describe("buildHostedLinqCapture", () => {
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
     if (!isHostedLinqConversationMessageWake(wake)) {
       throw new Error("Expected Linq conversation wake.");
     }
@@ -105,7 +103,7 @@ describe("buildHostedLinqCapture", () => {
   });
 
   it("preserves the raw Linq message id for hosted reply threading", async () => {
-    const dispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+    const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_raw_reply_id",
       linqEvent: {
         event_type: "message.received",
@@ -118,7 +116,6 @@ describe("buildHostedLinqCapture", () => {
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
     if (!isHostedLinqConversationMessageWake(wake)) {
       throw new Error("Expected Linq conversation wake.");
     }

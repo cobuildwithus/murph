@@ -4,18 +4,18 @@ import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
-import type { HostedDispatchEffect } from "../models.ts";
+import type { HostedWakeEffect } from "../models.ts";
 
-export async function handleHostedShareAcceptedDispatch(input: {
-  dispatch: Extract<HostedExecutionWake, { kind: "vault.share.accepted" }>;
+export async function handleHostedShareAcceptedWake(input: {
+  wake: Extract<HostedExecutionWake, { kind: "vault.share.accepted" }>;
   sharePack: HostedExecutionRunnerSharePack;
   vaultRoot: string;
-}): Promise<HostedDispatchEffect> {
-  if (input.sharePack.ownerUserId !== input.dispatch.share.ownerUserId) {
+}): Promise<HostedWakeEffect> {
+  if (input.sharePack.ownerUserId !== input.wake.share.ownerUserId) {
     throw new TypeError("Hosted share pack ownerUserId must match the canonical share reference.");
   }
 
-  if (input.sharePack.shareId !== input.dispatch.share.shareId) {
+  if (input.sharePack.shareId !== input.wake.share.shareId) {
     throw new TypeError("Hosted share pack shareId must match the canonical share reference.");
   }
 

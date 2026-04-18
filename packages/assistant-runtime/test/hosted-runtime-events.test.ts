@@ -3,13 +3,12 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionEmailMessageReceivedDispatch,
-  buildHostedExecutionLinqMessageReceivedDispatch,
-  buildHostedExecutionMemberActivatedDispatch,
-  buildHostedExecutionMemberChannelsUpdatedDispatch,
-  buildHostedExecutionTelegramMessageReceivedDispatch,
-  buildHostedExecutionVaultShareAcceptedDispatch,
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
+  buildHostedExecutionVaultShareAcceptedWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -20,16 +19,16 @@ const mocks = vi.hoisted(() => ({
   buildHostedEmailCapture: vi.fn(),
   buildHostedLinqCapture: vi.fn(),
   buildHostedTelegramCapture: vi.fn(),
-  handleHostedShareAcceptedDispatch: vi.fn(),
+  handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
-  prepareHostedDispatchContext: vi.fn(),
+  prepareHostedWakeContext: vi.fn(),
   queueAssistantFirstContactWelcome: vi.fn(),
   withHostedInboxPipeline: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
   hydrateHostedExecutionDefaultTarget: mocks.hydrateHostedExecutionDefaultTarget,
-  prepareHostedDispatchContext: mocks.prepareHostedDispatchContext,
+  prepareHostedWakeContext: mocks.prepareHostedWakeContext,
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -45,7 +44,7 @@ vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events/share.ts", () => ({
-  handleHostedShareAcceptedDispatch: mocks.handleHostedShareAcceptedDispatch,
+  handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
 vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
@@ -56,7 +55,7 @@ vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
   withHostedInboxPipeline: mocks.withHostedInboxPipeline,
 }));
 
-import { executeHostedDispatchEvent } from "../src/hosted-runtime/events.ts";
+import { executeHostedWakeEvent } from "../src/hosted-runtime/events.ts";
 
 const executionContext = {
   hosted: {
@@ -86,9 +85,9 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
 
 afterEach(() => {
   vi.clearAllMocks();
-  mocks.prepareHostedDispatchContext.mockResolvedValue(null);
+  mocks.prepareHostedWakeContext.mockResolvedValue(null);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
-  mocks.handleHostedShareAcceptedDispatch.mockResolvedValue({
+  mocks.handleHostedShareAcceptedWake.mockResolvedValue({
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -97,7 +96,7 @@ afterEach(() => {
   }));
 });
 
-describe("executeHostedDispatchEvent", () => {
+describe("executeHostedWakeEvent", () => {
   it("queues the welcome message for activation first contact and returns noop dispatch metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
@@ -109,9 +108,9 @@ describe("executeHostedDispatchEvent", () => {
       telegramAutoReplyEnabled: true,
       vaultCreated: false,
     };
-    mocks.prepareHostedDispatchContext.mockResolvedValue(bootstrapResult);
+    mocks.prepareHostedWakeContext.mockResolvedValue(bootstrapResult);
 
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_member_activated",
       firstContact: {
         channel: "linq",
@@ -129,8 +128,8 @@ describe("executeHostedDispatchEvent", () => {
     });
 
     const runtime = createRuntime();
-    const result = await executeHostedDispatchEvent({
-      dispatch,
+    const result = await executeHostedWakeEvent({
+      wake,
       executionContext,
       runtime,
       runtimeEnv: {
@@ -139,9 +138,9 @@ describe("executeHostedDispatchEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
-    expect(mocks.prepareHostedDispatchContext).toHaveBeenCalledWith(
+    expect(mocks.prepareHostedWakeContext).toHaveBeenCalledWith(
       "/tmp/assistant-runtime-events",
-      dispatch,
+      wake,
       {
         OPENAI_API_KEY: "secret",
       },
@@ -184,7 +183,7 @@ describe("executeHostedDispatchEvent", () => {
     };
     mocks.hydrateHostedExecutionDefaultTarget.mockResolvedValue(hydratedExecutionContext);
 
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_member_activated_rehydrate",
       firstContact: {
         channel: "linq",
@@ -201,8 +200,8 @@ describe("executeHostedDispatchEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedDispatchEvent({
-      dispatch,
+    await executeHostedWakeEvent({
+      wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
@@ -224,7 +223,7 @@ describe("executeHostedDispatchEvent", () => {
   });
 
   it("passes Linq home-thread materialization first-contact data through unchanged", async () => {
-    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_member_activated_materialize_linq_home",
       firstContact: {
         channel: "linq",
@@ -242,8 +241,8 @@ describe("executeHostedDispatchEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedDispatchEvent({
-      dispatch,
+    await executeHostedWakeEvent({
+      wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
@@ -271,7 +270,7 @@ describe("executeHostedDispatchEvent", () => {
       processCapture,
     }));
 
-    const linqDispatch = buildHostedExecutionLinqMessageReceivedDispatch({
+    const linqWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
       linqEvent: {
         event_type: "message.received",
@@ -280,15 +279,15 @@ describe("executeHostedDispatchEvent", () => {
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    const linqResult = await executeHostedDispatchEvent({
-      dispatch: linqDispatch,
+    const linqResult = await executeHostedWakeEvent({
+      wake: linqWake,
       executionContext,
       runtime,
       runtimeEnv: {},
       vaultRoot,
     });
 
-    const telegramDispatch = buildHostedExecutionTelegramMessageReceivedDispatch({
+    const telegramWake = buildHostedExecutionTelegramConversationMessageWake({
       eventId: "evt_telegram",
       occurredAt: "2026-04-08T00:01:00.000Z",
       telegramMessage: {
@@ -299,15 +298,15 @@ describe("executeHostedDispatchEvent", () => {
       },
       userId: "member_123",
     });
-    await executeHostedDispatchEvent({
-      dispatch: telegramDispatch,
+    await executeHostedWakeEvent({
+      wake: telegramWake,
       executionContext,
       runtime,
       runtimeEnv: {},
       vaultRoot,
     });
 
-    const emailDispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+    const emailWake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_email",
       identityId: "assistant@mail.example.test",
       occurredAt: "2026-04-08T00:02:00.000Z",
@@ -315,8 +314,8 @@ describe("executeHostedDispatchEvent", () => {
       selfAddress: "user@example.com",
       userId: "member_123",
     });
-    await executeHostedDispatchEvent({
-      dispatch: emailDispatch,
+    await executeHostedWakeEvent({
+      wake: emailWake,
       executionContext,
       runtime,
       runtimeEnv: {
@@ -326,13 +325,13 @@ describe("executeHostedDispatchEvent", () => {
     });
 
     expect(mocks.buildHostedLinqCapture).toHaveBeenCalledWith(
-      buildHostedExecutionWakeFromDispatch(linqDispatch),
+      linqWake,
     );
     expect(mocks.buildHostedTelegramCapture).toHaveBeenCalledWith(
-      buildHostedExecutionWakeFromDispatch(telegramDispatch),
+      telegramWake,
     );
     expect(mocks.buildHostedEmailCapture).toHaveBeenCalledWith(
-      buildHostedExecutionWakeFromDispatch(emailDispatch),
+      emailWake,
       runtime.platform.effectsPort,
     );
     expect(processCapture).toHaveBeenCalledTimes(3);
@@ -345,7 +344,7 @@ describe("executeHostedDispatchEvent", () => {
   });
 
   it("treats explicit member channel sync events as no-op dispatch handlers", async () => {
-    const dispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+    const wake = buildHostedExecutionMemberChannelsUpdatedWake({
       eventId: "evt_member_channels_updated",
       memberChannels: {
         email: true,
@@ -356,8 +355,8 @@ describe("executeHostedDispatchEvent", () => {
       occurredAt: "2026-04-08T00:03:00.000Z",
     });
 
-    const result = await executeHostedDispatchEvent({
-      dispatch,
+    const result = await executeHostedWakeEvent({
+      wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
@@ -374,7 +373,7 @@ describe("executeHostedDispatchEvent", () => {
   });
 
   it("requires a hydrated share pack for hosted share acceptance", async () => {
-    const dispatch = buildHostedExecutionVaultShareAcceptedDispatch({
+    const wake = buildHostedExecutionVaultShareAcceptedWake({
       eventId: "evt_share",
       memberId: "member_123",
       occurredAt: "2026-04-08T00:00:00.000Z",
@@ -385,17 +384,17 @@ describe("executeHostedDispatchEvent", () => {
     });
 
     await expect(
-      executeHostedDispatchEvent({
-        dispatch,
+      executeHostedWakeEvent({
+        wake,
         executionContext,
         runtime: createRuntime(),
         runtimeEnv: {},
         vaultRoot: "/tmp/assistant-runtime-events",
       }),
     ).rejects.toThrow(
-      "Hosted share accepted dispatch requires a hydrated runner sharePack.",
+      "Hosted share accepted wake requires a hydrated runner sharePack.",
     );
-    expect(mocks.handleHostedShareAcceptedDispatch).not.toHaveBeenCalled();
+    expect(mocks.handleHostedShareAcceptedWake).not.toHaveBeenCalled();
   });
 
 });

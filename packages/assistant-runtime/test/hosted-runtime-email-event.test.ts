@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionEmailMessageReceivedDispatch,
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionEmailConversationMessageWake,
   isHostedEmailConversationMessageWake,
 } from "@murphai/hosted-execution";
 
@@ -40,14 +39,13 @@ afterEach(() => {
 
 describe("buildHostedEmailCapture", () => {
   it("fails closed when the raw email payload is unavailable", async () => {
-    const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+    const wake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_email",
       identityId: "assistant@mail.example.test",
       occurredAt: "2026-04-08T00:00:00.000Z",
       rawMessageKey: "raw_123",
       userId: "member_123",
     });
-    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
     if (!isHostedEmailConversationMessageWake(wake)) {
       throw new Error("Expected email conversation wake.");
     }
@@ -76,7 +74,7 @@ describe("buildHostedEmailCapture", () => {
   });
 
   it("normalizes the parsed email into a capture", async () => {
-    const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+    const wake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_email",
       identityId: "assistant@mail.example.test",
       occurredAt: "2026-04-08T00:00:00.000Z",
@@ -84,7 +82,6 @@ describe("buildHostedEmailCapture", () => {
       selfAddress: "user@example.com",
       userId: "member_123",
     });
-    const wake = buildHostedExecutionWakeFromDispatch(dispatch);
     if (!isHostedEmailConversationMessageWake(wake)) {
       throw new Error("Expected email conversation wake.");
     }
