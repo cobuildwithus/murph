@@ -144,7 +144,7 @@ describe("executeHostedWakeEvent", () => {
     assert.deepEqual(result, {
       bootstrapResult,
       conversationMetrics: null,
-      followupExecution: "system-maintenance",
+      followupExecution: "member-activated",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -358,7 +358,7 @@ describe("executeHostedWakeEvent", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "system-maintenance",
+      followupExecution: "member-channels-updated",
       shareImportResult: null,
       shareImportTitle: null,
     });

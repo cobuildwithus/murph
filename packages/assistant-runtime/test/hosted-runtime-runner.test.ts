@@ -223,6 +223,12 @@ const finalResult: HostedAssistantRuntimeJobResult = {
     },
   },
 };
+const committedFirstPassResult: HostedAssistantRuntimeJobResult = {
+  committedAssistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
+  committedGatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
+  phase: "committed",
+  result: committedExecution.committedResult,
+};
 
 function restoreFetch() {
   Object.defineProperty(globalThis, "fetch", {
@@ -302,7 +308,7 @@ describe("hosted runtime child payload helpers", () => {
 });
 
 describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
-  it("runs the wake to completion on the first pass, materializes requested artifacts once, and returns the final result", async () => {
+  it("returns the committed first-pass result, materializes requested artifacts once, and defers resume-only finalization", async () => {
     const deviceSyncPort = {
       applyUpdates: vi.fn(),
       createConnectLink: vi.fn(async ({ provider }: { provider: string }) => ({
@@ -361,19 +367,13 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       },
     );
 
-    assert.deepEqual(result, finalResult);
+    assert.deepEqual(result, committedFirstPassResult);
     expect(deviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       provider: "oura",
     });
     expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHostedCommittedExecution).not.toHaveBeenCalled();
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        committedExecution,
-        includeCommittedCompatibility: true,
-      }),
-    );
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
       {
         envOverrides: {
@@ -528,10 +528,10 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
 
     expect(mocks.materializeHostedExecutionArtifacts).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
   });
 
-  it("does not block hosted execution while Linq typing startup is in flight and stops after the single-pass completion", async () => {
+  it("does not block hosted execution while Linq typing startup is in flight and stops after the committed first pass", async () => {
     const steps: string[] = [];
     let resolveTypingStart!: () => void;
     mocks.startLinqChatTypingIndicator.mockImplementation(() => {
@@ -579,7 +579,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
     await vi.waitFor(() => {
       expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
-      expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
     });
     expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
 
@@ -606,7 +605,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         },
       },
     );
-    expect(steps).toEqual(["start", "execute", "complete", "stop"]);
+    expect(steps).toEqual(["start", "execute", "stop"]);
   });
 
   it("passes a null artifact materializer when the decoded bundle is absent", async () => {
@@ -643,7 +642,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       }),
     );
     expect(mocks.materializeHostedExecutionArtifacts).not.toHaveBeenCalled();
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
   });
 
   it("uses the committed resume payload without re-running dispatch or commit callbacks", async () => {
@@ -710,9 +709,9 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       },
     );
 
-    assert.deepEqual(result, finalResult);
+    assert.deepEqual(result, committedFirstPassResult);
     expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -723,7 +722,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
   });
 
-  it("does not block hosted execution while Telegram typing startup is in flight and stops after the single-pass completion", async () => {
+  it("does not block hosted execution while Telegram typing startup is in flight and stops after the committed first pass", async () => {
     const steps: string[] = [];
     let resolveTypingStart!: () => void;
     let typingSignal!: AbortSignal;
@@ -795,7 +794,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
     await vi.waitFor(() => {
       expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
-      expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
     });
     expect(typingSignal.aborted).toBe(false);
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
@@ -804,7 +802,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     await runPromise;
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    expect(steps).toEqual(["start", "execute", "complete"]);
+    expect(steps).toEqual(["start", "execute"]);
   });
 
   it("swallows Telegram typing startup failures and still completes the hosted run", async () => {
@@ -856,9 +854,9 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       },
     );
 
-    assert.deepEqual(result, finalResult);
+    assert.deepEqual(result, committedFirstPassResult);
     expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
@@ -868,45 +866,47 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
   });
 
-  it("falls back to the committed compatibility result when post-commit completion fails", async () => {
+  it("fails closed when resume-only post-commit completion fails", async () => {
     mocks.completeHostedExecutionAfterCommit.mockRejectedValueOnce(
       new Error("completion failed"),
     );
 
-    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
-      {
-        request: {
-          bundle: "incoming-bundle",
-          wake: buildCronWake("evt_completion_fallback"),
-        },
-      },
-      {
-        platform: {
-          artifactStore: {
-            async get() {
-              return null;
+    await expect(
+      runHostedAssistantRuntimeJobInProcessDetailed(
+        {
+          request: {
+            bundle: "incoming-bundle",
+            wake: buildCronWake("evt_completion_failure"),
+            resume: {
+              committedResult: {
+                assistantDeliveryEffects:
+                  committedExecution.committedAssistantDeliveryEffects,
+                result: committedExecution.committedResult.result,
+              },
             },
-            async put() {},
           },
-          effectsPort: createHostedRuntimeEffectsPortStub(),
         },
-      },
-    );
+        {
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            effectsPort: createHostedRuntimeEffectsPortStub(),
+          },
+        },
+      ),
+    ).rejects.toThrow(/completion failed/u);
 
-    assert.deepEqual(result, {
-      committedAssistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
-      committedGatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
-      phase: "committed",
-      result: committedExecution.committedResult,
-    });
-    expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.resumeHostedCommittedExecution).toHaveBeenCalledTimes(1);
+    expect(mocks.executeHostedWakeForCommit).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
-        level: "warn",
-        message:
-          "Hosted runtime could not complete the critical post-commit finalization path; returning the committed compatibility result.",
-        phase: "commit.recorded",
+        message: "Hosted runtime failed.",
+        phase: "failed",
       }),
     );
   });
