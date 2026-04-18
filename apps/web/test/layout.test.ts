@@ -29,6 +29,21 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedPrivyClientId: () => "client_123",
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
+  HostedPhoneCountryCodeProvider(input: {
+    children: React.ReactNode;
+    countryCode: string | null;
+  }) {
+    return createElement(
+      "div",
+      {
+        "data-phone-country-code": input.countryCode ?? "",
+      },
+      input.children,
+    );
+  },
+}));
+
 vi.mock("../app/providers", () => ({
   Providers(input: { children: React.ReactNode; privyAppId: string; privyClientId?: string | null }) {
     return createElement(
@@ -53,6 +68,7 @@ test("RootLayout renders the Apache footer with support and GitHub links", () =>
   );
 
   assert.match(markup, /hosted-shell/);
+  assert.match(markup, /data-phone-country-code=""/);
   assert.match(markup, /data-providers="true"/);
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
   assert.match(markup, /data-privy-client-id="client_123"/);

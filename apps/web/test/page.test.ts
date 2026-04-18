@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 
-import { createElement, type ReactNode } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
-  readHostedPhoneCountryCodeHint: vi.fn(),
   LandingAuthActions: vi.fn(
     (props: {
       authenticated: boolean;
@@ -34,19 +33,12 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/phone-country-hint-server", () => ({
-  readHostedPhoneCountryCodeHint: mocks.readHostedPhoneCountryCodeHint,
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
-  HostedPhoneCountryCodeProvider(input: {
-    children: ReactNode;
-    countryCode: string | null;
-  }) {
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
+  HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
     return createElement(
       "div",
       {
-        "data-phone-country-code": input.countryCode ?? "",
+        "data-phone-country-code": "GB",
       },
       input.children,
     );
@@ -66,14 +58,12 @@ test("HomePage renders the canonical landing page at the root route", async () =
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
-  mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("GB");
 
   const { default: HomePage } = await import("../app/page");
 
   const markup = renderToStaticMarkup(await HomePage());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.readHostedPhoneCountryCodeHint).toHaveBeenCalledTimes(1);
   expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     1,
@@ -151,7 +141,6 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
   });
-  mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("US");
 
   const { default: HomePage } = await import("../app/page");
 

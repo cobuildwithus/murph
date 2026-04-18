@@ -6,7 +6,6 @@ import { expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
-  readHostedPhoneCountryCodeHint: vi.fn(),
   HostedBillingSettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted billing settings ${String(props.authenticated)}`)),
   HostedDeviceSyncSettings: vi.fn((props: {
@@ -48,19 +47,12 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/phone-country-hint-server", () => ({
-  readHostedPhoneCountryCodeHint: mocks.readHostedPhoneCountryCodeHint,
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-provider", () => ({
-  HostedPhoneCountryCodeProvider(input: {
-    children: React.ReactNode;
-    countryCode: string | null;
-  }) {
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
+  HostedPhoneCountryCodeBoundary(input: { children: React.ReactNode }) {
     return React.createElement(
       "div",
       {
-        "data-phone-country-code": input.countryCode ?? "",
+        "data-phone-country-code": "CA",
       },
       input.children,
     );
@@ -105,7 +97,6 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
     memberLookup: null,
     session: null,
   });
-  mocks.readHostedPhoneCountryCodeHint.mockResolvedValue("CA");
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -120,7 +111,6 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
   assert.match(markup, /Subscription, connected accounts, and wearables\./);
   assert.match(markup, /data-phone-country-code="CA"/);
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.readHostedPhoneCountryCodeHint).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
   }), undefined);
