@@ -6,7 +6,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { scheduleHostedExecutionDispatchTx } from "../hosted-execution/dispatch-lifecycle";
+import { appendHostedExecutionWakeTx } from "../hosted-execution/dispatch-lifecycle";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberEmailAuthorization,
@@ -72,7 +72,7 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
     occurredAt: input.occurredAt,
   });
 
-  await scheduleHostedExecutionDispatchTx({
+  await appendHostedExecutionWakeTx({
     dispatch,
     sourceId: dispatch.eventId,
     sourceType: input.sourceType,

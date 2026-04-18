@@ -6,14 +6,15 @@ import {
   HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
   type HostedExecutionDispatchLifecycleState,
   type HostedExecutionDispatchRequest,
+  type HostedWakeMessagePayload,
 } from "@murphai/hosted-execution/contracts";
 
 import { getPrisma } from "../prisma";
 import {
-  appendHostedExecutionDispatchWakeTx,
+  appendHostedExecutionWakePayloadTx,
   findHostedExecutionWakeEventIdTx,
   readHostedExecutionWakeLifecycleStateTx,
-  readHostedExecutionWakeScheduleTx,
+  readHostedExecutionWakeTargetTx,
 } from "../hosted-wake/dispatch";
 
 const DEFAULT_EXECUTION_LIFECYCLE_STATE: HostedExecutionDispatchLifecycleState = "queued";
@@ -21,18 +22,14 @@ const EXECUTION_LIFECYCLE_STATE_SET = new Set<HostedExecutionDispatchLifecycleSt
   HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
 );
 
-type HostedExecutionScheduleClient = PrismaClient | Prisma.TransactionClient;
+type HostedExecutionWakeClient = PrismaClient | Prisma.TransactionClient;
 
-export type HostedExecutionDispatchRoute = "wake";
-
-export interface HostedExecutionDispatchScheduleResult {
+export interface HostedExecutionWakeAppendResult {
   eventId: string;
-  route: HostedExecutionDispatchRoute;
 }
 
-export interface HostedExecutionScheduledDispatchTarget {
+export interface HostedExecutionWakeTarget {
   eventId: string;
-  route: HostedExecutionDispatchRoute;
   seq: string;
   userId: string;
 }
@@ -57,30 +54,54 @@ export function isExecutionLifecycleTerminal(
     || state === "poisoned";
 }
 
-export async function scheduleHostedExecutionDispatchTx(input: {
+export async function appendHostedExecutionWakeTx(input: {
   dispatch: HostedExecutionDispatchRequest;
   now?: string;
   sourceId?: string | null;
   sourceType: string;
   tx: Prisma.TransactionClient;
-}): Promise<HostedExecutionDispatchScheduleResult> {
-  await appendHostedExecutionDispatchWakeTx({
-    dispatch: input.dispatch,
+} | {
+  eventId: string;
+  kind: "linq.message.received" | "telegram.message.received";
+  now?: string;
+  occurredAt: string;
+  payload: HostedWakeMessagePayload;
+  sourceId?: string | null;
+  sourceType: string;
+  tx: Prisma.TransactionClient;
+  userId: string;
+}): Promise<HostedExecutionWakeAppendResult> {
+  if ("dispatch" in input) {
+    await appendHostedExecutionWakePayloadTx({
+      dispatch: input.dispatch,
+      tx: input.tx,
+    });
+
+    return {
+      eventId: input.dispatch.eventId,
+    };
+  }
+
+  await appendHostedExecutionWakePayloadTx({
+    eventId: input.eventId,
+    kind: input.kind,
+    occurredAt: input.occurredAt,
+    payload: input.payload,
     tx: input.tx,
+    userId: input.userId,
   });
 
   return {
-    eventId: input.dispatch.eventId,
-    route: "wake",
+    eventId: input.eventId,
   };
 }
 
-export async function readHostedExecutionScheduledDispatchTarget(input: {
+export async function readHostedExecutionWakeTarget(input: {
   eventId: string;
-  prisma?: HostedExecutionScheduleClient;
-}): Promise<HostedExecutionScheduledDispatchTarget | null> {
+  prisma?: HostedExecutionWakeClient;
+}): Promise<HostedExecutionWakeTarget | null> {
   const prisma = input.prisma ?? getPrisma();
-  const wakeRecord = await readHostedExecutionWakeScheduleTx({
+  const wakeRecord = await readHostedExecutionWakeTargetTx({
     eventId: input.eventId,
     tx: prisma,
   });
@@ -91,15 +112,14 @@ export async function readHostedExecutionScheduledDispatchTarget(input: {
 
   return {
     eventId: wakeRecord.eventId,
-    route: "wake",
     seq: wakeRecord.seq,
     userId: wakeRecord.userId,
   };
 }
 
-export async function findHostedExecutionScheduledEventIdTx(input: {
+export async function findHostedExecutionWakeByEventIdTx(input: {
   eventId: string;
-  tx: HostedExecutionScheduleClient;
+  tx: HostedExecutionWakeClient;
 }): Promise<string | null> {
   return findHostedExecutionWakeEventIdTx({
     eventId: input.eventId,
@@ -107,9 +127,9 @@ export async function findHostedExecutionScheduledEventIdTx(input: {
   });
 }
 
-export async function readHostedExecutionLifecycleStateFromWake(input: {
+export async function readHostedExecutionWakeLifecycleState(input: {
   eventId: string;
-  prisma?: HostedExecutionScheduleClient;
+  prisma?: HostedExecutionWakeClient;
 }): Promise<HostedExecutionDispatchLifecycleState> {
   const prisma = input.prisma ?? getPrisma();
   const state = await readHostedExecutionWakeLifecycleStateTx({

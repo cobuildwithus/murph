@@ -5,7 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
-  handoffHostedExecutionScheduledEventBestEffort: vi.fn(),
+  handoffHostedExecutionWakeBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionScheduledEventBestEffort: mocks.handoffHostedExecutionScheduledEventBestEffort,
+  handoffHostedExecutionWakeBestEffort: mocks.handoffHostedExecutionWakeBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
@@ -80,7 +80,7 @@ describe("settings email sync route", () => {
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
     });
-    mocks.handoffHostedExecutionScheduledEventBestEffort.mockResolvedValue("wake");
+    mocks.handoffHostedExecutionWakeBestEffort.mockResolvedValue("wake");
   });
 
   it("verifies the server-side Privy cookie-backed session and writes canonical verified-email facts", async () => {
@@ -116,7 +116,7 @@ describe("settings email sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.email.sync",
     });
-    expect(mocks.handoffHostedExecutionScheduledEventBestEffort).toHaveBeenCalledWith({
+    expect(mocks.handoffHostedExecutionWakeBestEffort).toHaveBeenCalledWith({
       context: "settings.email.sync",
       eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
     });

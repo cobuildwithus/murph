@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedExecutionDispatchWakeTx: vi.fn(),
+  appendHostedExecutionWakePayloadTx: vi.fn(),
   commitHostedExecutionCursorTx: vi.fn(),
   getPrisma: vi.fn(),
   listHostedWakeRepairCandidates: vi.fn(),
   listHostedWakesAfterSeq: vi.fn(),
+  readHostedExecutionCursor: vi.fn(),
+  readHostedExecutionWakeLifecycleState: vi.fn(),
   readOptionalJsonObject: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -37,12 +39,17 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
   requireVercelCronRequest: mocks.requireVercelCronRequest,
 }));
 
+vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
+  readHostedExecutionWakeLifecycleState:
+    mocks.readHostedExecutionWakeLifecycleState,
+}));
+
 vi.mock("@/src/lib/hosted-wake/control", () => ({
   triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-wake/dispatch", () => ({
-  appendHostedExecutionDispatchWakeTx: mocks.appendHostedExecutionDispatchWakeTx,
+  appendHostedExecutionWakePayloadTx: mocks.appendHostedExecutionWakePayloadTx,
 }));
 
 vi.mock("@/src/lib/hosted-wake/store", () => ({
@@ -50,6 +57,7 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
   listHostedWakeRepairCandidates: mocks.listHostedWakeRepairCandidates,
   listHostedWakesAfterSeq: mocks.listHostedWakesAfterSeq,
   quarantineHostedWakeTx: mocks.quarantineHostedWakeTx,
+  readHostedExecutionCursor: mocks.readHostedExecutionCursor,
 }));
 
 describe("hosted wake internal routes", () => {
@@ -62,7 +70,7 @@ describe("hosted wake internal routes", () => {
       $transaction: vi.fn(async (callback: (tx: { label: string }) => Promise<unknown>) =>
         callback({ label: "wake-route-tx" })),
     });
-    mocks.appendHostedExecutionDispatchWakeTx.mockResolvedValue({
+    mocks.appendHostedExecutionWakePayloadTx.mockResolvedValue({
       duplicate: false,
       inserted: true,
       updatedExisting: false,
@@ -105,6 +113,16 @@ describe("hosted wake internal routes", () => {
       },
       wakes: [],
     });
+    mocks.readHostedExecutionCursor.mockResolvedValue({
+      committedSeq: "24",
+      createdAt: "2026-04-17T00:00:00.000Z",
+      nextSeq: "26",
+      snapshotRef: null,
+      updatedAt: "2026-04-17T00:00:00.000Z",
+      userId: "member_123",
+      version: "3",
+    });
+    mocks.readHostedExecutionWakeLifecycleState.mockResolvedValue("queued");
     mocks.commitHostedExecutionCursorTx.mockResolvedValue({
       committed: true,
       cursor: {
@@ -155,7 +173,7 @@ describe("hosted wake internal routes", () => {
         seq: "24",
       }),
     });
-    expect(mocks.appendHostedExecutionDispatchWakeTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakePayloadTx).toHaveBeenCalledWith({
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -264,6 +282,38 @@ describe("hosted wake internal routes", () => {
       }),
       userId: "member_123",
       wakeId: "wake_24",
+    });
+  });
+
+  it("reads hosted wake status from the canonical cursor and optional dispatch lifecycle", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      eventId: "evt_tick",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/status/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "3",
+      },
+      dispatchState: "queued",
+      pendingWakeCount: 1,
+    });
+    expect(mocks.readHostedExecutionCursor).toHaveBeenCalledWith({
+      prisma: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.readHostedExecutionWakeLifecycleState).toHaveBeenCalledWith({
+      eventId: "evt_tick",
+      prisma: expect.anything(),
     });
   });
 

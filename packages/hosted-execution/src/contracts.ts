@@ -42,6 +42,15 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
 export type HostedExecutionEventKind =
   (typeof HOSTED_EXECUTION_EVENT_KINDS)[number];
 
+export const HOSTED_MESSAGE_WAKE_EVENT_KINDS = [
+  "linq.message.received",
+  "telegram.message.received",
+  "email.message.received",
+] as const;
+
+export type HostedMessageWakeEventKind =
+  (typeof HOSTED_MESSAGE_WAKE_EVENT_KINDS)[number];
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -164,11 +173,54 @@ export type HostedExecutionEvent =
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionVaultShareAcceptedEvent;
 
+export type HostedMessageWakeEvent = Extract<
+  HostedExecutionEvent,
+  { kind: HostedMessageWakeEventKind }
+>;
+
+export type HostedSystemWakeEvent = Exclude<HostedExecutionEvent, HostedMessageWakeEvent>;
+
 export interface HostedExecutionDispatchRequest {
   event: HostedExecutionEvent;
   eventId: string;
   occurredAt: string;
 }
+
+export type HostedMessageWakeDispatch = HostedExecutionDispatchRequest & {
+  event: HostedMessageWakeEvent;
+};
+
+export type HostedSystemWakeDispatch = HostedExecutionDispatchRequest & {
+  event: HostedSystemWakeEvent;
+};
+
+export type HostedWakeDispatchPayload =
+  | HostedMessageWakeDispatch
+  | HostedSystemWakeDispatch;
+
+export interface HostedWakeLinqMessageReceivedPayload {
+  eventId: string;
+  linqEvent: Record<string, unknown>;
+  linqMessageId?: string | null;
+  phoneLookupKey: string;
+}
+
+export interface HostedWakeTelegramMessageReceivedPayload {
+  eventId: string;
+  telegramMessage: HostedExecutionTelegramMessage;
+}
+
+export interface HostedWakeEmailMessageReceivedPayload {
+  eventId: string;
+  identityId: string | null;
+  rawMessageKey: string;
+  selfAddress?: string | null;
+}
+
+export type HostedWakeMessagePayload =
+  | HostedWakeLinqMessageReceivedPayload
+  | HostedWakeTelegramMessageReceivedPayload
+  | HostedWakeEmailMessageReceivedPayload;
 
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 
@@ -238,6 +290,19 @@ export const HOSTED_WAKE_BEHAVIORS = [
 
 export type HostedWakeBehavior =
   (typeof HOSTED_WAKE_BEHAVIORS)[number];
+
+export const HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA = "murph.hosted-wake-dispatch.v1";
+export const HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA = "murph.hosted-wake-message.v1";
+export const HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA = "murph.hosted-wake-system.v1";
+
+export const HOSTED_WAKE_PAYLOAD_SCHEMAS = [
+  HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+] as const;
+
+export type HostedWakePayloadSchema =
+  (typeof HOSTED_WAKE_PAYLOAD_SCHEMAS)[number];
 
 export interface HostedExecutionCursorState {
   committedSeq: string;
@@ -310,6 +375,16 @@ export interface HostedWakeQuarantineResponse {
   quarantined: boolean;
 }
 
+export interface HostedWakeStatusRequest {
+  eventId?: string | null;
+}
+
+export interface HostedWakeStatusResponse {
+  cursor: HostedExecutionCursorState;
+  dispatchState?: HostedExecutionDispatchLifecycleState | null;
+  pendingWakeCount: number;
+}
+
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
@@ -337,3 +412,45 @@ export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
 
 export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
   "Hosted execution dispatch is not configured.";
+
+export function isHostedMessageWakeEventKind(
+  kind: HostedExecutionEventKind,
+): kind is HostedMessageWakeEventKind {
+  return HOSTED_MESSAGE_WAKE_EVENT_KINDS.includes(kind as HostedMessageWakeEventKind);
+}
+
+export function isHostedMessageWakeDispatch(
+  dispatch: HostedExecutionDispatchRequest,
+): dispatch is HostedMessageWakeDispatch {
+  return isHostedMessageWakeEventKind(dispatch.event.kind);
+}
+
+export function isHostedSystemWakeDispatch(
+  dispatch: HostedExecutionDispatchRequest,
+): dispatch is HostedSystemWakeDispatch {
+  return !isHostedMessageWakeDispatch(dispatch);
+}
+
+export function isHostedLinqMessageWakeDispatch(
+  dispatch: HostedExecutionDispatchRequest,
+): dispatch is HostedMessageWakeDispatch & {
+  event: HostedExecutionLinqMessageReceivedEvent;
+} {
+  return dispatch.event.kind === "linq.message.received";
+}
+
+export function isHostedTelegramMessageWakeDispatch(
+  dispatch: HostedExecutionDispatchRequest,
+): dispatch is HostedMessageWakeDispatch & {
+  event: HostedExecutionTelegramMessageReceivedEvent;
+} {
+  return dispatch.event.kind === "telegram.message.received";
+}
+
+export function isHostedEmailMessageWakeDispatch(
+  dispatch: HostedExecutionDispatchRequest,
+): dispatch is HostedMessageWakeDispatch & {
+  event: HostedExecutionEmailMessageReceivedEvent;
+} {
+  return dispatch.event.kind === "email.message.received";
+}

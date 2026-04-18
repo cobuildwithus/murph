@@ -3,12 +3,16 @@ import type {
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
-  HostedExecutionDispatchRequest,
   HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionLinqMessageReceivedEvent,
   HostedExecutionMemberActivatedEvent,
+  HostedMessageWakeDispatch,
   HostedExecutionTelegramMessageReceivedEvent,
+  HostedSystemWakeDispatch,
   HostedExecutionVaultShareAcceptedEvent,
+  HostedWakeEmailMessageReceivedPayload,
+  HostedWakeLinqMessageReceivedPayload,
+  HostedWakeTelegramMessageReceivedPayload,
 } from "./contracts.ts";
 
 export function buildHostedExecutionMemberActivatedDispatch(input: {
@@ -17,7 +21,7 @@ export function buildHostedExecutionMemberActivatedDispatch(input: {
   memberId: string;
   memberChannels: HostedExecutionMemberChannels;
   occurredAt: string;
-}): HostedExecutionDispatchRequest {
+}): HostedSystemWakeDispatch {
   return {
     event: {
       ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
@@ -35,7 +39,7 @@ export function buildHostedExecutionMemberChannelsUpdatedDispatch(input: {
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
   occurredAt: string;
-}): HostedExecutionDispatchRequest {
+}): HostedSystemWakeDispatch {
   return {
     event: {
       kind: "member.channels.updated",
@@ -54,7 +58,7 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
   occurredAt: string;
   phoneLookupKey: string;
   userId: string;
-}): HostedExecutionDispatchRequest {
+}): HostedMessageWakeDispatch & { event: HostedExecutionLinqMessageReceivedEvent } {
   return {
     event: {
       kind: "linq.message.received",
@@ -68,12 +72,26 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
   };
 }
 
+export function buildHostedWakeLinqMessageReceivedPayload(input: {
+  eventId: string;
+  linqEvent: Record<string, unknown>;
+  linqMessageId?: string | null;
+  phoneLookupKey: string;
+}): HostedWakeLinqMessageReceivedPayload {
+  return {
+    eventId: input.eventId,
+    linqEvent: { ...input.linqEvent },
+    ...(input.linqMessageId === undefined ? {} : { linqMessageId: input.linqMessageId }),
+    phoneLookupKey: input.phoneLookupKey,
+  };
+}
+
 export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
   eventId: string;
   occurredAt: string;
   telegramMessage: HostedExecutionTelegramMessageReceivedEvent["telegramMessage"];
   userId: string;
-}): HostedExecutionDispatchRequest {
+}): HostedMessageWakeDispatch & { event: HostedExecutionTelegramMessageReceivedEvent } {
   return {
     event: {
       kind: "telegram.message.received",
@@ -92,6 +110,23 @@ export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
   };
 }
 
+export function buildHostedWakeTelegramMessageReceivedPayload(input: {
+  eventId: string;
+  telegramMessage: HostedExecutionTelegramMessageReceivedEvent["telegramMessage"];
+}): HostedWakeTelegramMessageReceivedPayload {
+  return {
+    eventId: input.eventId,
+    telegramMessage: {
+      ...input.telegramMessage,
+      ...(input.telegramMessage.attachments
+        ? {
+            attachments: input.telegramMessage.attachments.map((attachment) => ({ ...attachment })),
+          }
+        : {}),
+    },
+  };
+}
+
 export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
   eventId: string;
   identityId: string | null;
@@ -99,7 +134,7 @@ export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
   rawMessageKey: string;
   selfAddress?: string | null;
   userId: string;
-}): HostedExecutionDispatchRequest {
+}): HostedMessageWakeDispatch & { event: HostedExecutionEmailMessageReceivedEvent } {
   return {
     event: {
       identityId: input.identityId,
@@ -113,12 +148,26 @@ export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
   };
 }
 
+export function buildHostedWakeEmailMessageReceivedPayload(input: {
+  eventId: string;
+  identityId: string | null;
+  rawMessageKey: string;
+  selfAddress?: string | null;
+}): HostedWakeEmailMessageReceivedPayload {
+  return {
+    eventId: input.eventId,
+    identityId: input.identityId,
+    rawMessageKey: input.rawMessageKey,
+    ...(input.selfAddress === undefined ? {} : { selfAddress: input.selfAddress }),
+  };
+}
+
 export function buildHostedExecutionAssistantCronTickDispatch(input: {
   eventId: string;
   occurredAt: string;
   reason: HostedExecutionAssistantCronTickEvent["reason"];
   userId: string;
-}): HostedExecutionDispatchRequest {
+}): HostedSystemWakeDispatch {
   return {
     event: {
       kind: "assistant.cron.tick",
@@ -138,7 +187,7 @@ export function buildHostedExecutionDeviceSyncWakeDispatch(input: {
   provider?: string | null;
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
   userId: string;
-}): HostedExecutionDispatchRequest {
+}): HostedSystemWakeDispatch {
   return {
     event: {
       ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
@@ -158,7 +207,7 @@ export function buildHostedExecutionVaultShareAcceptedDispatch(input: {
   memberId: string;
   occurredAt: string;
   share: HostedExecutionVaultShareAcceptedEvent["share"];
-}): HostedExecutionDispatchRequest {
+}): HostedSystemWakeDispatch {
   return {
     event: {
       kind: "vault.share.accepted",

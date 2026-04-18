@@ -18,7 +18,7 @@ import {
 
 import {
   isExecutionLifecycleTerminal,
-  readHostedExecutionLifecycleStateFromWake,
+  readHostedExecutionWakeLifecycleState,
 } from "../hosted-execution/dispatch-lifecycle";
 import {
   requireHostedOnboardingPublicBaseUrl,
@@ -281,7 +281,7 @@ export async function readHostedShareExecutionLifecycleState(input: {
   memberId: string;
   prisma: HostedSharePrismaClient;
 }): Promise<HostedExecutionDispatchLifecycleState> {
-  return readHostedExecutionLifecycleStateFromWake({
+  return readHostedExecutionWakeLifecycleState({
     eventId: input.eventId,
     prisma: input.prisma,
   });

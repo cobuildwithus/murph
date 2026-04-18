@@ -1,4 +1,3 @@
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,7 +12,6 @@ const mocks = vi.hoisted(() => {
       state.lastScheduledDispatchPrisma = input.prisma ?? null;
       return {
         eventId: input.eventId,
-        route: "wake" as const,
         seq: "23",
         userId: "member_telegram_123",
       };
@@ -43,11 +41,16 @@ const mocks = vi.hoisted(() => {
       telegramWebhookSecret: null as string | null,
     },
     appendHostedExecutionWakeTx: vi.fn(async (input: {
-      dispatch: { eventId: string };
+      dispatch?: { eventId: string };
+      eventId?: string;
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
+      const eventId = typeof input.eventId === "string" ? input.eventId : input.dispatch?.eventId;
+      if (!eventId) {
+        throw new Error("Expected a hosted wake append eventId.");
+      }
       return {
-        eventId: input.dispatch.eventId,
+        eventId,
       };
     }),
     triggerHostedWakeUserBestEffort: vi.fn(async (input?: { timeoutMs?: number }) => {
@@ -183,15 +186,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            kind: "telegram.message.received",
-            userId: "member_telegram_123",
-          }),
+        eventId: "telegram:update:321",
+        kind: "telegram.message.received",
+        payload: expect.objectContaining({
           eventId: "telegram:update:321",
         }),
         sourceId: "telegram:telegram:update:321",
         sourceType: "hosted_webhook_receipt",
+        userId: "member_telegram_123",
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
@@ -715,19 +717,18 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        dispatch: expect.objectContaining({
-          event: expect.objectContaining({
-            kind: "telegram.message.received",
-            telegramMessage: expect.objectContaining({
-              messageId: "4",
-              schema: "murph.hosted-telegram-message.v1",
-              text: "hello from the DM topic",
-              threadId: "-100555:dm-topic:9",
-            }),
-            userId: "member_telegram_456",
-          }),
+        eventId: "telegram:update:777",
+        kind: "telegram.message.received",
+        payload: expect.objectContaining({
           eventId: "telegram:update:777",
+          telegramMessage: expect.objectContaining({
+            messageId: "4",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "hello from the DM topic",
+            threadId: "-100555:dm-topic:9",
+          }),
         }),
+        userId: "member_telegram_456",
       }),
     );
   });
@@ -878,14 +879,17 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       });
 
       const enqueueCall = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0] as {
-        dispatch: HostedExecutionDispatchRequest;
+        kind?: string;
+        payload?: {
+          telegramMessage?: unknown;
+        };
       } | undefined;
-      expect(enqueueCall?.dispatch.event.kind).toBe("telegram.message.received");
-      if (enqueueCall?.dispatch.event.kind !== "telegram.message.received") {
-        throw new Error("Expected a hosted Telegram dispatch.");
+      expect(enqueueCall?.kind).toBe("telegram.message.received");
+      if (!enqueueCall?.payload || typeof enqueueCall.payload !== "object") {
+        throw new Error("Expected a hosted Telegram wake payload.");
       }
 
-      expect(enqueueCall.dispatch.event.telegramMessage).toEqual({
+      expect(enqueueCall.payload.telegramMessage).toEqual({
         messageId: String(testCase.message.message_id),
         schema: "murph.hosted-telegram-message.v1",
         text: testCase.expectedText,

@@ -5,17 +5,17 @@ import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-me
 import type { HostedStripeDispatchContext } from "@/src/lib/hosted-onboarding/stripe-dispatch";
 
 const mocks = vi.hoisted(() => ({
-  findHostedExecutionScheduledEventIdTx: vi.fn(),
+  findHostedExecutionWakeByEventIdTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
-  scheduleHostedExecutionDispatchTx: vi.fn(),
+  appendHostedExecutionWakeTx: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/dispatch-lifecycle", () => ({
-  findHostedExecutionScheduledEventIdTx: mocks.findHostedExecutionScheduledEventIdTx,
-  scheduleHostedExecutionDispatchTx: mocks.scheduleHostedExecutionDispatchTx,
+  appendHostedExecutionWakeTx: mocks.appendHostedExecutionWakeTx,
+  findHostedExecutionWakeByEventIdTx: mocks.findHostedExecutionWakeByEventIdTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -56,7 +56,7 @@ describe("hosted onboarding member activation", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
 
-    mocks.findHostedExecutionScheduledEventIdTx.mockResolvedValue(null);
+    mocks.findHostedExecutionWakeByEventIdTx.mockResolvedValue(null);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
@@ -67,9 +67,8 @@ describe("hosted onboarding member activation", () => {
         threadIsDirect: true,
       },
     });
-    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+    mocks.appendHostedExecutionWakeTx.mockResolvedValue({
       eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-      route: "outbox",
     });
     mocks.updateHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -106,7 +105,7 @@ describe("hosted onboarding member activation", () => {
       member,
       prisma: expect.anything(),
     });
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
         event: expect.objectContaining({
@@ -151,7 +150,7 @@ describe("hosted onboarding member activation", () => {
       member,
       prisma: expect.anything(),
     });
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith(
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceId: "revnet_evt_123",
         sourceType: "hosted_revnet_issuance",
@@ -188,7 +187,7 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         event: expect.objectContaining({
           firstContact: {
@@ -242,7 +241,7 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         event: expect.objectContaining({
           firstContact: {
@@ -324,7 +323,7 @@ describe("hosted onboarding member activation", () => {
       prisma: makeTransactionHarness() as never,
     });
 
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         event: expect.objectContaining({
           kind: "member.activated",
@@ -341,7 +340,7 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
-  it("returns the scheduled wake event id when routing chooses HostedWake", async () => {
+  it("returns the appended wake event id when activation writes a canonical wake", async () => {
     const member = makeMemberSnapshot({
       identity: {
         phoneLookupKey: null,
@@ -358,9 +357,8 @@ describe("hosted onboarding member activation", () => {
       },
     });
     mocks.readHostedMemberSnapshot.mockResolvedValue(member);
-    mocks.scheduleHostedExecutionDispatchTx.mockResolvedValue({
+    mocks.appendHostedExecutionWakeTx.mockResolvedValue({
       eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
-      route: "wake",
     });
 
     await expect(activateHostedMemberForPositiveSourceTx({
@@ -378,7 +376,7 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.scheduleHostedExecutionDispatchTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedExecutionWakeTx).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
         event: expect.objectContaining({
@@ -403,7 +401,7 @@ describe("hosted onboarding member activation", () => {
       },
     });
     mocks.readHostedMemberSnapshot.mockResolvedValue(member);
-    mocks.findHostedExecutionScheduledEventIdTx.mockResolvedValue(
+    mocks.findHostedExecutionWakeByEventIdTx.mockResolvedValue(
       "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
     );
 
@@ -427,7 +425,7 @@ describe("hosted onboarding member activation", () => {
 
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.scheduleHostedExecutionDispatchTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedExecutionWakeTx).not.toHaveBeenCalled();
   });
 });
 

@@ -9,7 +9,13 @@ import {
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import {
+  HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
   HOSTED_WAKE_BEHAVIORS,
+  isHostedMessageWakeDispatch,
+  isHostedMessageWakeEventKind,
+  isHostedSystemWakeDispatch,
 } from "./contracts.ts";
 
 import type {
@@ -33,12 +39,17 @@ import type {
   HostedExecutionShareReference,
   HostedExecutionUserStatus,
   HostedExecutionVaultShareAcceptedEvent,
+  HostedWakeDispatchPayload,
   HostedWakeBehavior,
   HostedWakeAppendResponse,
   HostedWakeCommitResponse,
+  HostedWakeEmailMessageReceivedPayload,
   HostedWakeFetchResponse,
+  HostedWakeLinqMessageReceivedPayload,
   HostedWakeQuarantineResponse,
   HostedWakeRecord,
+  HostedWakeStatusResponse,
+  HostedWakeTelegramMessageReceivedPayload,
 } from "./contracts.ts";
 import {
   type HostedExecutionBundlePayload,
@@ -53,6 +64,11 @@ import {
   isHostedExecutionRunLevel,
   isHostedExecutionRunPhase,
 } from "./observability.ts";
+import {
+  buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  buildHostedExecutionTelegramMessageReceivedDispatch,
+} from "./builders.ts";
 import {
   requireArray,
   requireBoolean,
@@ -79,6 +95,66 @@ export function parseHostedExecutionDispatchRequest(value: unknown): HostedExecu
     event: parseHostedExecutionEvent(record.event),
     eventId: requireString(record.eventId, "Hosted execution dispatch request eventId"),
     occurredAt: requireString(record.occurredAt, "Hosted execution dispatch request occurredAt"),
+  };
+}
+
+export function parseHostedWakeLinqMessageReceivedPayload(
+  value: unknown,
+): HostedWakeLinqMessageReceivedPayload {
+  const record = requireObject(value, "Hosted wake Linq message payload");
+
+  return {
+    eventId: requireString(record.eventId, "Hosted wake Linq message payload eventId"),
+    linqEvent: requireObject(record.linqEvent, "Hosted wake Linq message payload linqEvent"),
+    ...(record.linqMessageId === undefined
+      ? {}
+      : {
+          linqMessageId: readOptionalNullableString(
+            record.linqMessageId,
+            "Hosted wake Linq message payload linqMessageId",
+          ),
+        }),
+    phoneLookupKey: requireString(
+      record.phoneLookupKey,
+      "Hosted wake Linq message payload phoneLookupKey",
+    ),
+  };
+}
+
+export function parseHostedWakeTelegramMessageReceivedPayload(
+  value: unknown,
+): HostedWakeTelegramMessageReceivedPayload {
+  const record = requireObject(value, "Hosted wake Telegram message payload");
+
+  return {
+    eventId: requireString(record.eventId, "Hosted wake Telegram message payload eventId"),
+    telegramMessage: parseHostedExecutionTelegramMessage(record.telegramMessage),
+  };
+}
+
+export function parseHostedWakeEmailMessageReceivedPayload(
+  value: unknown,
+): HostedWakeEmailMessageReceivedPayload {
+  const record = requireObject(value, "Hosted wake email message payload");
+
+  return {
+    eventId: requireString(record.eventId, "Hosted wake email message payload eventId"),
+    identityId: readNullableStringValue(
+      record.identityId,
+      "Hosted wake email message payload identityId",
+    ),
+    rawMessageKey: requireString(
+      record.rawMessageKey,
+      "Hosted wake email message payload rawMessageKey",
+    ),
+    ...(record.selfAddress === undefined
+      ? {}
+      : {
+          selfAddress: readOptionalNullableString(
+            record.selfAddress,
+            "Hosted wake email message payload selfAddress",
+          ),
+        }),
   };
 }
 
@@ -246,6 +322,20 @@ export function parseHostedExecutionRunStatus(value: unknown): HostedExecutionRu
     runId: requireString(record.runId, "Hosted execution run status runId"),
     startedAt: requireString(record.startedAt, "Hosted execution run status startedAt"),
     updatedAt: requireString(record.updatedAt, "Hosted execution run status updatedAt"),
+  };
+}
+
+export function parseHostedWakeStatusResponse(value: unknown): HostedWakeStatusResponse {
+  const record = requireObject(value, "Hosted wake status response");
+
+  return {
+    cursor: parseHostedExecutionCursorState(record.cursor),
+    ...(record.dispatchState === undefined ? {} : {
+      dispatchState: record.dispatchState === null
+        ? null
+        : parseHostedExecutionDispatchLifecycleState(record.dispatchState),
+    }),
+    pendingWakeCount: requireNumber(record.pendingWakeCount, "Hosted wake status response pendingWakeCount"),
   };
 }
 
@@ -600,6 +690,91 @@ export function parseHostedWakeRecord(
     updatedAt: requireString(record.updatedAt, "Hosted wake record updatedAt"),
     userId: requireString(record.userId, "Hosted wake record userId"),
   };
+}
+
+export function parseHostedWakeDispatchPayload(input: {
+  kind: string;
+  occurredAt: string;
+  payloadJson?: unknown;
+  payloadSchema: string;
+  userId: string;
+}): HostedWakeDispatchPayload {
+  switch (input.payloadSchema) {
+    case HOSTED_WAKE_MESSAGE_PAYLOAD_SCHEMA:
+      if (!isHostedMessageWakeEventKind(input.kind as HostedExecutionEvent["kind"])) {
+        throw new TypeError(
+          "Hosted wake message payload schema requires a conversation wake event kind.",
+        );
+      }
+      switch (input.kind) {
+        case "linq.message.received": {
+          const payload = parseHostedWakeLinqMessageReceivedPayload(input.payloadJson);
+          return buildHostedExecutionLinqMessageReceivedDispatch({
+            eventId: payload.eventId,
+            linqEvent: payload.linqEvent,
+            ...(payload.linqMessageId === undefined ? {} : { linqMessageId: payload.linqMessageId }),
+            occurredAt: input.occurredAt,
+            phoneLookupKey: payload.phoneLookupKey,
+            userId: input.userId,
+          });
+        }
+        case "telegram.message.received": {
+          const payload = parseHostedWakeTelegramMessageReceivedPayload(input.payloadJson);
+          return buildHostedExecutionTelegramMessageReceivedDispatch({
+            eventId: payload.eventId,
+            occurredAt: input.occurredAt,
+            telegramMessage: payload.telegramMessage,
+            userId: input.userId,
+          });
+        }
+        case "email.message.received": {
+          const payload = parseHostedWakeEmailMessageReceivedPayload(input.payloadJson);
+          return buildHostedExecutionEmailMessageReceivedDispatch({
+            eventId: payload.eventId,
+            identityId: payload.identityId,
+            occurredAt: input.occurredAt,
+            rawMessageKey: payload.rawMessageKey,
+            ...(payload.selfAddress === undefined ? {} : { selfAddress: payload.selfAddress }),
+            userId: input.userId,
+          });
+        }
+      }
+      throw new TypeError(
+        `Unsupported hosted wake message payload kind: ${input.kind}`,
+      );
+    case HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA:
+    case HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA: {
+      const dispatch = parseHostedExecutionDispatchRequest(input.payloadJson);
+
+      if (dispatch.event.userId !== input.userId) {
+        throw new TypeError("Hosted wake dispatch payload userId must match the wake record.");
+      }
+
+      if (dispatch.event.kind !== input.kind) {
+        throw new TypeError("Hosted wake dispatch payload kind must match the wake record.");
+      }
+
+      if (dispatch.occurredAt !== input.occurredAt) {
+        throw new TypeError("Hosted wake dispatch payload occurredAt must match the wake record.");
+      }
+
+      if (input.payloadSchema === HOSTED_WAKE_DISPATCH_PAYLOAD_SCHEMA) {
+        if (isHostedMessageWakeDispatch(dispatch) || isHostedSystemWakeDispatch(dispatch)) {
+          return dispatch;
+        }
+        throw new TypeError("Hosted wake dispatch payload must carry a supported hosted wake event kind.");
+      }
+
+      if (!isHostedSystemWakeDispatch(dispatch)) {
+        throw new TypeError(
+          "Hosted wake system payload schema cannot carry a conversation wake event kind.",
+        );
+      }
+      return dispatch;
+    }
+    default:
+      throw new TypeError(`Unsupported hosted wake payload schema: ${input.payloadSchema}`);
+  }
 }
 
 export function parseHostedWakeFetchResponse(

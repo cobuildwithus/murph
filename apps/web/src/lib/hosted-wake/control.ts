@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
 import {
-  readHostedExecutionScheduledDispatchTarget,
+  readHostedExecutionWakeTarget,
 } from "../hosted-execution/dispatch-lifecycle";
 import { getPrisma } from "../prisma";
 
@@ -44,7 +44,7 @@ export async function triggerHostedWakeUserBestEffort(input: {
   }
 }
 
-export async function handoffHostedExecutionScheduledEventBestEffort(input: {
+export async function handoffHostedExecutionWakeBestEffort(input: {
   context?: string;
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
@@ -54,7 +54,7 @@ export async function handoffHostedExecutionScheduledEventBestEffort(input: {
 }): Promise<void> {
   try {
     const prisma = input.prisma ?? getPrisma();
-    const target = await readHostedExecutionScheduledDispatchTarget({
+    const target = await readHostedExecutionWakeTarget({
       eventId: input.eventId,
       prisma,
     });

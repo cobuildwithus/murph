@@ -238,6 +238,11 @@ describe("hosted webhook receipt transitions", () => {
         userId: "member_123",
       }),
     });
+
+    if (!("storage" in dispatchEffect.payload)) {
+      throw new Error("Expected a legacy inline dispatch payload.");
+    }
+
     const stagedEffect = {
       ...dispatchEffect,
       payload: {
@@ -254,6 +259,9 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(persistedEffect.kind, "hosted_execution_dispatch");
     if (persistedEffect.kind !== "hosted_execution_dispatch") {
       throw new Error("Expected a hosted execution dispatch side effect.");
+    }
+    if (!("storage" in persistedEffect.payload)) {
+      throw new Error("Expected a legacy inline dispatch payload.");
     }
 
     assert.equal(persistedEffect.payload.storage, "inline");
