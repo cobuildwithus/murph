@@ -6,7 +6,7 @@
 
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void {
+export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   // Hard cut: web owns wake lifecycle truth, so the runner drops the old local
   // queue lifecycle tables instead of migrating them forward.
   sql.exec("DROP TABLE IF EXISTS pending_events");
@@ -39,7 +39,7 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     )
   `);
   ensureRunnerMetaColumns(sql);
-  assertRunnerQueueTableColumns(sql, "runner_meta", {
+  assertRunnerStateTableColumns(sql, "runner_meta", {
     forbiddenColumns: [
       "activated",
     ],
@@ -60,7 +60,7 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       "retrying_event_id",
     ],
   });
-  assertRunnerQueueTableColumns(sql, "runner_bundle_slots", {
+  assertRunnerStateTableColumns(sql, "runner_bundle_slots", {
     requiredColumns: [
       "slot",
       "bundle_ref_json",
@@ -70,7 +70,7 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
 }
 
 function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
-  const columns = new Set(readRunnerQueueTableColumns(sql, "runner_meta"));
+  const columns = new Set(readRunnerStateTableColumns(sql, "runner_meta"));
   const additions = [
     {
       columnName: "active_run_event_id",
@@ -107,7 +107,7 @@ function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
   }
 }
 
-function readRunnerQueueTableColumns(
+function readRunnerStateTableColumns(
   sql: DurableObjectSqlStorageLike,
   tableName: string,
 ): string[] {
@@ -116,7 +116,7 @@ function readRunnerQueueTableColumns(
   ).toArray().map((row) => row.name).filter((name): name is string => typeof name === "string");
 }
 
-function assertRunnerQueueTableColumns(
+function assertRunnerStateTableColumns(
   sql: DurableObjectSqlStorageLike,
   tableName: string,
   input: {
@@ -124,7 +124,7 @@ function assertRunnerQueueTableColumns(
     requiredColumns: readonly string[];
   },
 ): void {
-  const actualColumns = readRunnerQueueTableColumns(sql, tableName);
+  const actualColumns = readRunnerStateTableColumns(sql, tableName);
   const forbiddenColumns = (input.forbiddenColumns ?? [])
     .filter((columnName) => actualColumns.includes(columnName));
   const missingColumns = input.requiredColumns

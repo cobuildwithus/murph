@@ -7,8 +7,8 @@ import type {
   HostedExecutionJournalStore,
 } from "../src/execution-journal.js";
 import { RunnerCommitRecovery } from "../src/user-runner/runner-commit-recovery.js";
-import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
-import { RunnerScheduler } from "../src/user-runner/runner-scheduler.js";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
+import { RunnerWakeScheduler } from "../src/user-runner/runner-wake-scheduler.js";
 import type { RunnerStateRecord } from "../src/user-runner/types.js";
 
 function createCommittedResult(): HostedExecutionCommittedResult {
@@ -63,12 +63,12 @@ function createCommitRecoveryHarness() {
   const syncNextWake = vi.fn().mockResolvedValue(syncedRecord);
   const cleanupBundleTransition = vi.fn().mockResolvedValue(undefined);
 
-  const queueStore: RunnerQueueStore = Object.create(RunnerQueueStore.prototype);
-  queueStore.readBundleMetaState = readBundleMetaState;
-  queueStore.syncCommittedBundles = syncCommittedBundles;
+  const stateStore: RunnerStateStore = Object.create(RunnerStateStore.prototype);
+  stateStore.readBundleMetaState = readBundleMetaState;
+  stateStore.syncCommittedBundles = syncCommittedBundles;
 
-  const scheduler: RunnerScheduler = Object.create(RunnerScheduler.prototype);
-  scheduler.syncNextWake = syncNextWake;
+  const wakeScheduler: RunnerWakeScheduler = Object.create(RunnerWakeScheduler.prototype);
+  wakeScheduler.syncNextWake = syncNextWake;
 
   const journalStore: HostedExecutionJournalStore = {
     deleteCommittedResult: vi.fn().mockResolvedValue(undefined),
@@ -84,11 +84,11 @@ function createCommitRecoveryHarness() {
   return {
     cleanupBundleTransition,
     journalStore,
-    queueStore,
+    stateStore,
     readBundleMetaState,
     recovery: new RunnerCommitRecovery(
-      queueStore,
-      scheduler,
+      stateStore,
+      wakeScheduler,
       journalStore,
       garbageCollector,
     ),
@@ -103,7 +103,7 @@ describe("RunnerCommitRecovery", () => {
     const committed = createCommittedResult();
     const harness = createCommitRecoveryHarness();
 
-    const result = await harness.recovery.syncCommittedBundlesWithoutConsuming(
+    const result = await harness.recovery.syncCommittedWakeBundlesWithoutConsuming(
       committed.userId,
       committed,
     );
@@ -124,7 +124,7 @@ describe("RunnerCommitRecovery", () => {
     const committed = createCommittedResult();
     const harness = createCommitRecoveryHarness();
 
-    await harness.recovery.syncCommittedBundlesWithoutConsuming(
+    await harness.recovery.syncCommittedWakeBundlesWithoutConsuming(
       committed.userId,
       committed,
       { run: null },
@@ -149,7 +149,7 @@ describe("RunnerCommitRecovery", () => {
       startedAt: "2026-04-14T12:00:01.000Z",
     };
 
-    await harness.recovery.syncCommittedBundlesWithoutConsuming(
+    await harness.recovery.syncCommittedWakeBundlesWithoutConsuming(
       committed.userId,
       committed,
       { run },

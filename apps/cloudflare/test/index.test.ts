@@ -1070,15 +1070,15 @@ describe("cloudflare worker routes", () => {
   });
 
   it("preserves hidden not-found responses for wrong methods on worker routes that were never public", async () => {
-    const dispatchResponse = await worker.fetch(
+    const removedRouteResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/dispatch", {
         method: "GET",
       }),
       createWorkerEnv(),
     );
 
-    expect(dispatchResponse.status).toBe(404);
-    await expect(dispatchResponse.json()).resolves.toEqual({
+    expect(removedRouteResponse.status).toBe(404);
+    await expect(removedRouteResponse.json()).resolves.toEqual({
       error: "Not found",
     });
   });

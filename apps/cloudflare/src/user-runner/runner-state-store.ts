@@ -8,7 +8,7 @@ import {
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
-import { ensureRunnerQueueSchema } from "./runner-queue-schema.js";
+import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   appendBoundedRunnerTimelineEntry,
   assignRunnerBundleRefs,
@@ -19,7 +19,7 @@ import {
   type RunnerBundleSlotRow,
   type RunnerMetaRow,
   type RunnerStoredBundleState,
-} from "./runner-queue-state.js";
+} from "./runner-state-helpers.js";
 import {
   MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectStateLike,
@@ -38,7 +38,7 @@ export interface RunnerLeaseOwnerInput {
   run: HostedExecutionRunContext | null;
 }
 
-export class RunnerQueueStore {
+export class RunnerStateStore {
   private readonly ready: Promise<void>;
   private volatileRun: HostedExecutionRunStatus | null = null;
   private volatileTimeline: HostedExecutionTimelineEntry[] = [];
@@ -47,7 +47,7 @@ export class RunnerQueueStore {
   constructor(
     private readonly state: DurableObjectStateLike,
   ) {
-    ensureRunnerQueueSchema(this.sql);
+    ensureRunnerStateSchema(this.sql);
     this.ensureCanonicalBundleSlotRowsSync();
     this.ready = Promise.resolve();
   }

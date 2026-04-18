@@ -2,10 +2,13 @@ import type { HostedExecutionRunContext } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
-import { createHostedExecutionJournalStore, type HostedExecutionJournalStore } from "../execution-journal.js";
+import {
+  createHostedExecutionJournalStore,
+  type HostedExecutionJournalStore,
+} from "../execution-journal.js";
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
-import { RunnerQueueStore } from "./runner-queue-store.js";
-import { RunnerScheduler } from "./runner-scheduler.js";
+import { RunnerStateStore } from "./runner-state-store.js";
+import { RunnerWakeScheduler } from "./runner-wake-scheduler.js";
 import type { RunnerStateRecord } from "./types.js";
 
 interface CommitLeaseOwner {
@@ -14,8 +17,8 @@ interface CommitLeaseOwner {
 }
 
 // Recovered durable commits may outlive the original run context, but they
-// still own the event-specific lease that must be cleared before the queue can
-// resume work.
+// still own the event-specific lease that must be cleared before wake draining
+// can resume work for the user.
 function resolveCommitLeaseOwner(
   eventId: string,
   leaseOwner: CommitLeaseOwner | null,
@@ -41,51 +44,51 @@ function resolveCommitLeaseOwner(
 
 export class RunnerCommitRecovery {
   constructor(
-    private readonly queueStore: RunnerQueueStore,
-    private readonly scheduler: RunnerScheduler,
+    private readonly stateStore: RunnerStateStore,
+    private readonly wakeScheduler: RunnerWakeScheduler,
     private readonly journalStore: HostedExecutionJournalStore,
     private readonly garbageCollector: HostedBundleGarbageCollector,
   ) {}
 
-  async readCommittedDispatch(
+  async readCommittedWakeResult(
     userId: string,
     eventId: string,
   ): Promise<HostedExecutionCommittedResult | null> {
     return this.journalStore.readCommittedResult(userId, eventId);
   }
 
-  async deleteCommittedDispatch(userId: string, eventId: string): Promise<void> {
+  async deleteCommittedWakeResult(userId: string, eventId: string): Promise<void> {
     await this.journalStore.deleteCommittedResult(userId, eventId);
   }
 
-  async syncCommittedBundlesWithoutConsuming(
+  async syncCommittedWakeBundlesWithoutConsuming(
     userId: string,
     committed: HostedExecutionCommittedResult,
     leaseOwner: CommitLeaseOwner | null = null,
   ): Promise<RunnerStateRecord> {
-    return this.applyCommittedQueueTransition(
+    return this.applyCommittedWakeTransition(
       userId,
       committed,
-      () => this.queueStore.syncCommittedBundles(
+      () => this.stateStore.syncCommittedBundles(
         committed,
         resolveCommitLeaseOwner(committed.eventId, leaseOwner),
       ),
     );
   }
 
-  private async applyCommittedQueueTransition(
+  private async applyCommittedWakeTransition(
     userId: string,
     committed: HostedExecutionCommittedResult,
     apply: () => Promise<RunnerStateRecord>,
   ): Promise<RunnerStateRecord> {
-    const previousBundleRef = (await this.queueStore.readBundleMetaState()).bundleRef;
+    const previousBundleRef = (await this.stateStore.readBundleMetaState()).bundleRef;
     await apply();
     await this.cleanupBundleTransitionBestEffort({
       nextBundleRef: committed.bundleRef,
       previousBundleRef,
       userId,
     });
-    return this.scheduler.syncNextWake(committed.result.nextWakeAt ?? null);
+    return this.wakeScheduler.syncNextWake(committed.result.nextWakeAt ?? null);
   }
 
   private async cleanupBundleTransitionBestEffort(input: {
@@ -106,12 +109,12 @@ export function createRunnerCommitRecovery(input: {
   platformEnvelopeKey: Uint8Array;
   platformEnvelopeKeyId: string;
   platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
-  queueStore: RunnerQueueStore;
-  scheduler: RunnerScheduler;
+  stateStore: RunnerStateStore;
+  wakeScheduler: RunnerWakeScheduler;
 }): RunnerCommitRecovery {
   return new RunnerCommitRecovery(
-    input.queueStore,
-    input.scheduler,
+    input.stateStore,
+    input.wakeScheduler,
     createHostedExecutionJournalStore({
       bucket: input.bucket,
       key: input.platformEnvelopeKey,

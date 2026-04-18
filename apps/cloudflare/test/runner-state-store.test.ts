@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedExecutionCommittedResult } from "../src/execution-journal.js";
-import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
 function createQueueHarness(state: { storage: { sql: ReturnType<typeof createTestSqlStorage> } }) {
   return {
-    store: new RunnerQueueStore(state as never),
+    store: new RunnerStateStore(state as never),
   };
 }
 
@@ -27,7 +27,7 @@ function createCommittedResult(): HostedExecutionCommittedResult {
   };
 }
 
-describe("RunnerQueueStore", () => {
+describe("RunnerStateStore", () => {
   it("drops legacy local queue lifecycle tables during schema setup", async () => {
     const state = createState();
     const sql = state.storage.sql!;

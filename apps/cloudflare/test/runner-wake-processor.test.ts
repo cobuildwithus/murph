@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
-import { summarizeHostedAssistantDeliveryOutcomes } from "../src/user-runner/runner-dispatch-processor.ts";
+import { summarizeHostedAssistantDeliveryOutcomes } from "../src/user-runner/runner-wake-processor.ts";
 
 describe("runner wake processor delivery summaries", () => {
   it("includes the first non-sent delivery message in the finalize summary", () => {

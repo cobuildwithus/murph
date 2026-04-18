@@ -285,21 +285,21 @@ describe("HostedUserRunner hosted wake drain", () => {
     if (
       !wakeProcessor
       || typeof wakeProcessor !== "object"
-      || !("finalizeNativeWakeDispatchAfterCursorCommit" in wakeProcessor)
+      || !("finalizeWakeAfterCursorCommit" in wakeProcessor)
     ) {
       throw new Error("Expected HostedUserRunner wake processor test internals to be available.");
     }
 
-    const finalizeNativeWakeDispatchAfterCursorCommit = vi.spyOn(
+    const finalizeWakeAfterCursorCommit = vi.spyOn(
       wakeProcessor,
-      "finalizeNativeWakeDispatchAfterCursorCommit",
+      "finalizeWakeAfterCursorCommit",
     );
 
     await runner.wakeHostedWakes();
 
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1"]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_stale_commit"]);
-    expect(finalizeNativeWakeDispatchAfterCursorCommit).not.toHaveBeenCalled();
+    expect(finalizeWakeAfterCursorCommit).not.toHaveBeenCalled();
   });
 
   it("finalizes every committed wake before local cleanup after the cursor advances", async () => {
@@ -317,21 +317,21 @@ describe("HostedUserRunner hosted wake drain", () => {
     if (
       !wakeProcessor
       || typeof wakeProcessor !== "object"
-      || !("finalizeNativeWakeDispatchAfterCursorCommit" in wakeProcessor)
-      || !("cleanupNativeWakeDispatchAfterCursorCommit" in wakeProcessor)
+      || !("finalizeWakeAfterCursorCommit" in wakeProcessor)
+      || !("cleanupWakeAfterCursorCommit" in wakeProcessor)
     ) {
       throw new Error("Expected HostedUserRunner wake processor test internals to be available.");
     }
 
-    const finalizeNativeWakeDispatchAfterCursorCommit = vi.spyOn(
+    const finalizeWakeAfterCursorCommit = vi.spyOn(
       wakeProcessor,
-      "finalizeNativeWakeDispatchAfterCursorCommit",
+      "finalizeWakeAfterCursorCommit",
     );
-    const cleanupNativeWakeDispatchAfterCursorCommit = vi.spyOn(
+    const cleanupWakeAfterCursorCommit = vi.spyOn(
       wakeProcessor,
-      "cleanupNativeWakeDispatchAfterCursorCommit",
+      "cleanupWakeAfterCursorCommit",
     );
-    finalizeNativeWakeDispatchAfterCursorCommit.mockResolvedValue({
+    finalizeWakeAfterCursorCommit.mockResolvedValue({
       assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-26T12:00:00.000Z",
@@ -371,11 +371,11 @@ describe("HostedUserRunner hosted wake drain", () => {
       ],
     });
 
-    expect(readDispatchEventIdsFromSpy(finalizeNativeWakeDispatchAfterCursorCommit)).toEqual([
+    expect(readDispatchEventIdsFromSpy(finalizeWakeAfterCursorCommit)).toEqual([
       "evt_batch_first",
       "evt_batch_second",
     ]);
-    expect(readDispatchEventIdsFromSpy(cleanupNativeWakeDispatchAfterCursorCommit)).toEqual([
+    expect(readDispatchEventIdsFromSpy(cleanupWakeAfterCursorCommit)).toEqual([
       "evt_batch_first",
       "evt_batch_second",
     ]);

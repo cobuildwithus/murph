@@ -1,14 +1,14 @@
 import type { DurableObjectStateLike, RunnerStateRecord } from "./types.js";
-import { RunnerQueueStore } from "./runner-queue-store.js";
+import { RunnerStateStore } from "./runner-state-store.js";
 
-export class RunnerScheduler {
+export class RunnerWakeScheduler {
   constructor(
-    private readonly queueStore: RunnerQueueStore,
+    private readonly stateStore: RunnerStateStore,
     private readonly state: DurableObjectStateLike,
   ) {}
 
   async syncNextWake(preferredWakeAt: string | null = null): Promise<RunnerStateRecord> {
-    const record = await this.queueStore.syncNextWake({ preferredWakeAt });
+    const record = await this.stateStore.syncNextWake({ preferredWakeAt });
     await this.applyAlarm(record.nextWakeAt);
     return record;
   }

@@ -16,7 +16,7 @@ import {
 import { encryptHostedBundle } from "../src/crypto.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
-import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
@@ -139,8 +139,8 @@ describe("RunnerBundleSync", () => {
         sql,
       },
     };
-    const queueStore = new RunnerQueueStore(state as never);
-    await queueStore.bootstrapUser("member_123");
+    const stateStore = new RunnerStateStore(state as never);
+    await stateStore.bootstrapUser("member_123");
 
     const missingRef = {
       hash: "a".repeat(64),
@@ -164,7 +164,7 @@ describe("RunnerBundleSync", () => {
       {
         v1: bundleKey,
       },
-      queueStore,
+      stateStore,
     );
 
     await expect(bundleSync.readBundlesForRunner()).rejects.toThrow(

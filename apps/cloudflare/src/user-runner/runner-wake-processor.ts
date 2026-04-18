@@ -28,10 +28,7 @@ import {
   type HostedExecutionFinalizePayload,
 } from "../execution-journal.js";
 import { deleteHostedEmailRawMessage } from "../hosted-email.js";
-import {
-  createHostedUserKeyStore,
-  type HostedUserCryptoContext,
-} from "../user-key-store.js";
+import { type HostedUserCryptoContext } from "../user-key-store.js";
 import { HostedGatewayProjectionStore } from "../gateway-store.js";
 import {
   HostedExecutionConfigurationError,
@@ -50,9 +47,9 @@ import {
   isCommittedResultFinalized,
 } from "./runner-commit-recovery.js";
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
-import { RunnerQueueStore } from "./runner-queue-store.js";
-import type { RunnerLeaseOwnerInput } from "./runner-queue-store.js";
-import { RunnerScheduler } from "./runner-scheduler.js";
+import { RunnerStateStore } from "./runner-state-store.js";
+import type { RunnerLeaseOwnerInput } from "./runner-state-store.js";
+import { RunnerWakeScheduler } from "./runner-wake-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 
@@ -81,11 +78,11 @@ interface RunnerWakeProcessorDependencies {
   ensureRunnerStores(userId?: string): Promise<RunnerUserStores>;
   env: HostedExecutionEnvironment;
   hostedWebBaseUrl: string | null;
-  queueStore: RunnerQueueStore;
+  stateStore: RunnerStateStore;
   readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>>;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
-  scheduler: RunnerScheduler;
+  wakeScheduler: RunnerWakeScheduler;
 }
 
 export class RunnerWakeProcessor {
@@ -93,7 +90,7 @@ export class RunnerWakeProcessor {
     private readonly dependencies: RunnerWakeProcessorDependencies,
   ) {}
 
-  async executeNativeWakeDispatch(
+  async executeWake(
     wake: HostedExecutionWake,
     options: {
       holdLeaseUntilCleanup?: boolean;
@@ -102,10 +99,10 @@ export class RunnerWakeProcessor {
     const userId = wake.userId;
     const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
     const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
-    const committed = await commitRecovery.readCommittedDispatch(userId, wake.eventId);
+    const committed = await commitRecovery.readCommittedWakeResult(userId, wake.eventId);
 
     if (committed && isCommittedResultFinalized(committed)) {
-      await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, committed, {
+      await commitRecovery.syncCommittedWakeBundlesWithoutConsuming(userId, committed, {
         policy: "same-event",
         run: null,
       });
@@ -115,10 +112,11 @@ export class RunnerWakeProcessor {
           existingCommittedAt: committed.committedAt,
           existingFinalizedAt: committed.finalizedAt,
         },
-        dispatch: wake,
+        eventId: wake.eventId,
         message: "Hosted wake execution reused an already-finalized durable commit.",
         phase: "completed",
         run: null,
+        userId,
       });
       return "completed";
     }
@@ -131,17 +129,18 @@ export class RunnerWakeProcessor {
           activeRunEventId: activeLease.eventId,
           activeRunId: activeLease.run.runId,
         },
-        dispatch: wake,
+        eventId: wake.eventId,
         level: "info",
         message: "Hosted wake execution deferred because another active run still owns the user lease.",
         phase: "dispatch.running",
         run: null,
+        userId,
       });
       return "backpressured";
     }
 
     const run = this.resolveRunContext(
-      await this.dependencies.queueStore.readState(),
+      await this.dependencies.stateStore.readState(),
       {
         eventId: wake.eventId,
         startedAt: new Date().toISOString(),
@@ -152,14 +151,14 @@ export class RunnerWakeProcessor {
       run,
     };
 
-    await this.dependencies.queueStore.beginWakeRun({
+    await this.dependencies.stateStore.beginWakeRun({
       eventId: wake.eventId,
       run,
       userId,
     });
     await this.advanceRunPhase({
       clearError: true,
-      dispatch: wake,
+      wake,
       message: committed && !isCommittedResultFinalized(committed)
         ? "Resuming direct hosted wake execution from a durable commit."
         : "Invoking direct hosted wake execution.",
@@ -170,7 +169,7 @@ export class RunnerWakeProcessor {
     try {
       await this.advanceRunPhase({
         clearError: true,
-        dispatch: wake,
+        wake,
         message: committed && !isCommittedResultFinalized(committed)
           ? "Resuming hosted wake finalize from a durable commit."
           : "Running hosted wake directly from the canonical wake queue.",
@@ -193,13 +192,13 @@ export class RunnerWakeProcessor {
       const durableCommit = runnerResult.phase === "committed"
         ? await this.persistReturnedRunnerCommit({
           assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
-          currentBundleRef: (await this.dependencies.queueStore.readBundleMetaState()).bundleRef,
+          currentBundleRef: (await this.dependencies.stateStore.readBundleMetaState()).bundleRef,
           wake,
           gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
           result: runnerResult.result,
           run,
         })
-        : await commitRecovery.readCommittedDispatch(userId, wake.eventId);
+        : await commitRecovery.readCommittedWakeResult(userId, wake.eventId);
 
       if (!durableCommit) {
         throw new Error("Hosted wake execution returned before recording a durable commit.");
@@ -207,14 +206,14 @@ export class RunnerWakeProcessor {
 
       await this.advanceRunPhase({
         clearError: true,
-        dispatch: wake,
+        wake,
         message: "Hosted wake execution recorded a durable commit.",
         phase: "commit.recorded",
         run,
       });
-      await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, durableCommit, { run });
+      await commitRecovery.syncCommittedWakeBundlesWithoutConsuming(userId, durableCommit, { run });
       if (!holdLeaseUntilCleanup) {
-        await this.dependencies.queueStore.completeWakeRun({
+        await this.dependencies.stateStore.completeWakeRun({
           eventId: wake.eventId,
           finishedAt: durableCommit.committedAt,
           leaseOwner,
@@ -222,7 +221,7 @@ export class RunnerWakeProcessor {
       }
       await this.advanceRunPhase({
         clearError: true,
-        dispatch: wake,
+        wake,
         message: "Hosted wake execution recorded a durable commit and is awaiting cursor commit.",
         phase: "completed",
         run,
@@ -236,14 +235,15 @@ export class RunnerWakeProcessor {
             obsoleteRunId: error.runId,
             runElapsedMs: computeHostedRunElapsedMs(run),
           },
-          dispatch: wake,
           error,
+          eventId: wake.eventId,
           level: "warn",
           message: "Hosted wake execution returned a stale result for an obsolete run lease.",
           phase: "dispatch.running",
           run,
+          userId,
         });
-        await this.dependencies.queueStore.failWakeRun({
+        await this.dependencies.stateStore.failWakeRun({
           error,
           eventId: wake.eventId,
           leaseOwner,
@@ -251,14 +251,14 @@ export class RunnerWakeProcessor {
         return "backpressured";
       }
 
-      const recoveredCommitted = await commitRecovery.readCommittedDispatch(userId, wake.eventId);
+      const recoveredCommitted = await commitRecovery.readCommittedWakeResult(userId, wake.eventId);
       if (recoveredCommitted && isCommittedResultFinalized(recoveredCommitted)) {
-        await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, recoveredCommitted, {
+        await commitRecovery.syncCommittedWakeBundlesWithoutConsuming(userId, recoveredCommitted, {
           policy: "same-event",
           run: null,
         });
         if (!holdLeaseUntilCleanup) {
-          await this.dependencies.queueStore.completeWakeRun({
+          await this.dependencies.stateStore.completeWakeRun({
             eventId: wake.eventId,
             finishedAt: recoveredCommitted.finalizedAt ?? recoveredCommitted.committedAt,
             leaseOwner,
@@ -266,7 +266,7 @@ export class RunnerWakeProcessor {
         }
         await this.advanceRunPhase({
           clearError: true,
-          dispatch: wake,
+          wake,
           message: "Hosted wake execution recovered a finalized durable commit after a transient failure.",
           phase: "completed",
           run,
@@ -274,14 +274,14 @@ export class RunnerWakeProcessor {
         return "completed";
       }
 
-      await this.dependencies.queueStore.failWakeRun({
+      await this.dependencies.stateStore.failWakeRun({
         error,
             eventId: wake.eventId,
         leaseOwner,
       });
-      await this.dependencies.scheduler.syncNextWake(recoveredCommitted?.result.nextWakeAt ?? null);
+      await this.dependencies.wakeScheduler.syncNextWake(recoveredCommitted?.result.nextWakeAt ?? null);
       await this.advanceRunPhase({
-        dispatch: wake,
+        wake,
         error,
         level: error instanceof HostedExecutionConfigurationError ? "warn" : "error",
         message: recoveredCommitted
@@ -296,20 +296,20 @@ export class RunnerWakeProcessor {
     }
   }
 
-  async finalizeNativeWakeDispatchAfterCursorCommit(input: {
+  async finalizeWakeAfterCursorCommit(input: {
     wake: HostedExecutionWake;
   }): Promise<HostedExecutionCommittedResult | null> {
-    await this.dependencies.queueStore.markRuntimeBootstrapped();
+    await this.dependencies.stateStore.markRuntimeBootstrapped();
     const userId = input.wake.userId;
     const { commitRecovery } = await this.dependencies.ensureRunnerStores(userId);
-    let committed = await commitRecovery.readCommittedDispatch(userId, input.wake.eventId);
+    let committed = await commitRecovery.readCommittedWakeResult(userId, input.wake.eventId);
 
     if (!committed) {
       return null;
     }
 
     if (!isCommittedResultFinalized(committed)) {
-      const record = await this.dependencies.queueStore.readState();
+      const record = await this.dependencies.stateStore.readState();
       const run = this.resolveRunContext(record, {
         eventId: input.wake.eventId,
         startedAt: committed.committedAt,
@@ -340,23 +340,23 @@ export class RunnerWakeProcessor {
         userId,
         finalRunnerResult.browserVaultSnapshot ?? null,
       );
-      committed = await commitRecovery.readCommittedDispatch(userId, input.wake.eventId);
+      committed = await commitRecovery.readCommittedWakeResult(userId, input.wake.eventId);
       if (!committed) {
         throw new Error("Hosted wake execution lost its durable commit before finalize cleanup.");
       }
     }
 
-    await commitRecovery.syncCommittedBundlesWithoutConsuming(userId, committed, {
+    await commitRecovery.syncCommittedWakeBundlesWithoutConsuming(userId, committed, {
       policy: "same-event",
       run: null,
     });
     return committed;
   }
 
-  async cleanupNativeWakeDispatchAfterCursorCommit(input: {
+  async cleanupWakeAfterCursorCommit(input: {
     wake: HostedExecutionWake;
   }): Promise<void> {
-    await this.dependencies.queueStore.markRuntimeBootstrapped();
+    await this.dependencies.stateStore.markRuntimeBootstrapped();
     await this.rememberCommittedEventAndCleanup(
       input.wake.userId,
       input.wake.eventId,
@@ -384,7 +384,7 @@ export class RunnerWakeProcessor {
       userId,
     );
     const [bundleState, runnerSecrets, sharePack] = await Promise.all([
-      this.dependencies.queueStore.readBundleMetaState(),
+      this.dependencies.stateStore.readBundleMetaState(),
       runnerSecretsService.readRunnerSecrets(userId),
       wake.kind === "vault.share.accepted"
         ? this.readRunnerSharePack({
@@ -495,10 +495,11 @@ export class RunnerWakeProcessor {
         },
         runnerSecretKeyCount: Object.keys(runnerSecrets).length,
       },
-      dispatch: wake,
+      eventId: wake.eventId,
       message: "Hosted runner prepared container invocation.",
       phase: "dispatch.running",
       run,
+      userId,
     });
 
     return invokeHostedExecutionContainerRunner({
@@ -672,7 +673,7 @@ export class RunnerWakeProcessor {
     eventId: string;
     run: HostedExecutionRunContext;
   } | null> {
-    const activeLease = await this.dependencies.queueStore.readActiveRunLease();
+    const activeLease = await this.dependencies.stateStore.readActiveRunLease();
     if (!activeLease) {
       return null;
     }
@@ -689,7 +690,7 @@ export class RunnerWakeProcessor {
 
   private async advanceRunPhase(input: {
     clearError?: boolean;
-    dispatch: HostedExecutionWakeProgressRecord;
+    wake: HostedExecutionWakeProgressRecord;
     error?: unknown;
     level?: HostedExecutionRunLevel;
     message: string;
@@ -697,12 +698,12 @@ export class RunnerWakeProcessor {
     run: HostedExecutionRunContext;
   }): Promise<RunnerStateRecord> {
     const message = formatHostedExecutionLogMessage(input.message, input.error);
-    const record = await this.dependencies.queueStore.recordRunPhase({
+    const record = await this.dependencies.stateStore.recordRunPhase({
       attempt: input.run.attempt,
       clearError: input.clearError,
       component: "runner",
       error: input.error,
-      eventId: input.dispatch.eventId,
+      eventId: input.wake.eventId,
       level: input.level,
       message,
       phase: input.phase,
@@ -715,12 +716,13 @@ export class RunnerWakeProcessor {
       details: {
         runElapsedMs: computeHostedRunElapsedMs(input.run),
       },
-      dispatch: input.dispatch,
       error: input.error,
+      eventId: input.wake.eventId,
       level: input.level,
       message,
       phase: input.phase,
       run: input.run,
+      userId: input.wake.userId,
     });
 
     return record;
@@ -731,7 +733,7 @@ export class RunnerWakeProcessor {
     eventId: string,
     wake: HostedExecutionWake | null = null,
   ): Promise<RunnerStateRecord> {
-    const record = await this.dependencies.queueStore.completeWakeRun({
+    const record = await this.dependencies.stateStore.completeWakeRun({
       eventId,
       finishedAt: new Date().toISOString(),
       leaseOwner: {
@@ -740,26 +742,26 @@ export class RunnerWakeProcessor {
         run: null,
       },
     });
-    await this.deleteCommittedDispatchBestEffort(userId, eventId);
+    await this.deleteCommittedWakeResultBestEffort(userId, eventId);
     if (wake) {
-      await this.deleteTransientDispatchDataBestEffort(wake);
+      await this.deleteTransientWakeDataBestEffort(wake);
     }
     return record;
   }
 
-  private async deleteCommittedDispatchBestEffort(
+  private async deleteCommittedWakeResultBestEffort(
     userId: string,
     eventId: string,
   ): Promise<void> {
     try {
       await (await this.dependencies.ensureRunnerStores(userId)).commitRecovery
-        .deleteCommittedDispatch(userId, eventId);
+        .deleteCommittedWakeResult(userId, eventId);
     } catch {
       // Leaving the transient journal behind is preferable to failing a successful hosted run.
     }
   }
 
-  private async deleteTransientDispatchDataBestEffort(
+  private async deleteTransientWakeDataBestEffort(
     wake: HostedExecutionWake,
   ): Promise<void> {
     if (wake.kind !== "conversation.message" || wake.message.channel !== "email") {
