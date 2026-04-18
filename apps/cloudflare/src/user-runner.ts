@@ -2,14 +2,11 @@ import type {
   HostedExecutionCursorState,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchStatus,
-  HostedExecutionDispatchRequest,
   HostedExecutionWake,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedExecutionAssistantCronTickDispatch,
-  buildHostedExecutionDispatchFromWake,
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionAssistantCronTickWake,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -70,8 +67,8 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
 const HOSTED_WAKE_CRON_APPEND_RETRY_DELAY_MS = 5_000;
 const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
-const HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH = "invalid-dispatch-payload";
-const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "dispatch-user-mismatch";
+const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
+const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
 interface HostedWakeDrainOutcome {
   wake: HostedExecutionWake | null;
@@ -213,14 +210,14 @@ export class HostedUserRunner {
     return { userId };
   }
 
-  private async ensureManagedUserCryptoForActivationIfNeeded(
-    input: HostedExecutionDispatchRequest,
+  private async ensureManagedUserCryptoForActivationWakeIfNeeded(
+    wake: HostedExecutionWake,
   ): Promise<void> {
-    if (input.event.kind !== "member.activated") {
+    if (wake.kind !== "member.activated") {
       return;
     }
 
-    await this.provisionManagedUserCryptoAtActivation(input.event.userId, "member-activation-dispatch");
+    await this.provisionManagedUserCryptoAtActivation(wake.userId, "member-activation-wake");
   }
 
   async alarm(): Promise<void> {
@@ -251,7 +248,7 @@ export class HostedUserRunner {
     }
 
     try {
-      const dispatch = buildHostedExecutionAssistantCronTickDispatch({
+      const wake = buildHostedExecutionAssistantCronTickWake({
         eventId: `alarm:${Date.now()}`,
         occurredAt: new Date().toISOString(),
         reason: "alarm",
@@ -261,7 +258,7 @@ export class HostedUserRunner {
         baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: record.userId,
         callbackSigning: this.env.webCallbackSigning,
-        wake: buildHostedExecutionWakeFromDispatch(dispatch),
+        wake,
         timeoutMs: this.env.runnerTimeoutMs,
       });
       await this.wakeHostedWakes({
@@ -286,16 +283,16 @@ export class HostedUserRunner {
     return this.composeUserStatus(await this.queueStore.readState());
   }
 
-  async dispatch(
-    input: HostedExecutionDispatchRequest,
+  async enqueueHostedWake(
+    wake: HostedExecutionWake,
   ): Promise<HostedExecutionUserStatus> {
-    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
-    await this.queueStore.bootstrapUser(input.event.userId);
+    await this.ensureManagedUserCryptoForActivationWakeIfNeeded(wake);
+    await this.queueStore.bootstrapUser(wake.userId);
     const append = await appendHostedWakeInWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
-      boundUserId: input.event.userId,
+      boundUserId: wake.userId,
       callbackSigning: this.env.webCallbackSigning,
-      wake: buildHostedExecutionWakeFromDispatch(input),
+      wake,
       timeoutMs: this.env.runnerTimeoutMs,
     });
 
@@ -304,15 +301,15 @@ export class HostedUserRunner {
     });
   }
 
-  async dispatchWithOutcome(
-    input: HostedExecutionDispatchRequest,
+  async enqueueHostedWakeWithOutcome(
+    wake: HostedExecutionWake,
   ): Promise<HostedExecutionDispatchResult> {
-    const status = await this.dispatch(input);
-    const event = await this.readHostedDispatchStatus(input) ?? {
-      eventId: input.eventId,
+    const status = await this.enqueueHostedWake(wake);
+    const event = await this.readHostedWakeStatus(wake) ?? {
+      eventId: wake.eventId,
       lastError: null,
       state: "queued" as const,
-      userId: input.event.userId,
+      userId: wake.userId,
     };
 
     return {
@@ -406,7 +403,7 @@ export class HostedUserRunner {
       if (commit.committed) {
         await this.finalizeCommittedHostedWakesLocally({
           committedCursor: commit.cursor,
-          dispatches: advancedWakes,
+          wakes: advancedWakes,
         });
       }
 
@@ -484,14 +481,14 @@ export class HostedUserRunner {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
         level: "warn",
-        message: `Hosted wake seq ${wake.seq} has an invalid dispatch payload and cannot be executed.`,
+        message: `Hosted wake seq ${wake.seq} has an invalid wake payload and cannot be executed.`,
         phase: "dispatch.running",
         userId,
       });
       return await this.quarantineHostedWakeRecord(
         userId,
         wake.id,
-        HOSTED_WAKE_QUARANTINE_INVALID_DISPATCH,
+        HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD,
       )
         ? { wake: null, seq, state: "quarantined" }
         : { wake: null, seq, state: "backpressured" };
@@ -514,12 +511,10 @@ export class HostedUserRunner {
         : { wake: null, seq, state: "backpressured" };
     }
 
-    await this.ensureManagedUserCryptoForActivationIfNeeded(
-      buildHostedExecutionDispatchFromWake(hostedWake),
-    );
-    const state = hostedWake.kind === "conversation.message"
-      ? await this.dispatchHostedMessageWake(hostedWake)
-      : await this.dispatchHostedSystemWake(hostedWake);
+    await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
+    const state = await this.dispatchProcessor.executeNativeWakeDispatch(hostedWake, {
+      holdLeaseUntilCleanup: true,
+    });
 
     return {
       wake: hostedWake,
@@ -557,28 +552,12 @@ export class HostedUserRunner {
     }
   }
 
-  private async dispatchHostedMessageWake(
-    wake: HostedExecutionWake,
-  ): Promise<HostedWakeDrainState> {
-    return this.dispatchProcessor.executeNativeWakeDispatch(wake, {
-      holdLeaseUntilCleanup: true,
-    });
-  }
-
-  private async dispatchHostedSystemWake(
-    wake: HostedExecutionWake,
-  ): Promise<HostedWakeDrainState> {
-    return this.dispatchProcessor.executeNativeWakeDispatch(wake, {
-      holdLeaseUntilCleanup: true,
-    });
-  }
-
   private async finalizeCommittedHostedWakesLocally(input: {
     committedCursor: HostedExecutionCursorState;
-    dispatches: readonly HostedWakeDrainOutcome[];
+    wakes: readonly HostedWakeDrainOutcome[];
   }): Promise<void> {
     const committedThroughSeq = BigInt(input.committedCursor.committedSeq);
-    const committedOutcomes = input.dispatches.filter((outcome) =>
+    const committedOutcomes = input.wakes.filter((outcome) =>
       outcome.wake && outcome.seq <= committedThroughSeq
     );
 
@@ -721,16 +700,16 @@ export class HostedUserRunner {
     }
   }
 
-  private async readHostedDispatchStatus(
-    dispatch: HostedExecutionDispatchRequest,
+  private async readHostedWakeStatus(
+    wake: Pick<HostedExecutionWake, "eventId" | "userId">,
   ): Promise<HostedExecutionDispatchStatus | null> {
     try {
       const wakeStatus = await readHostedWakeStatusFromWeb({
         baseUrl: this.readHostedWebControlBaseUrl(),
         body: {
-          eventId: dispatch.eventId,
+          eventId: wake.eventId,
         },
-        boundUserId: dispatch.event.userId,
+        boundUserId: wake.userId,
         callbackSigning: this.env.webCallbackSigning,
         timeoutMs: this.env.runnerTimeoutMs,
       });
@@ -741,20 +720,20 @@ export class HostedUserRunner {
       }
 
       return {
-        eventId: dispatch.eventId,
+        eventId: wake.eventId,
         lastError: null,
         state: dispatchState,
-        userId: dispatch.event.userId,
+        userId: wake.userId,
       };
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.user-runner",
-        dispatch,
+        dispatch: wake,
         error,
         level: "warn",
-        message: "Hosted wake dispatch status read failed; returning a conservative queued result.",
+        message: "Hosted wake status read failed; returning a conservative queued result.",
         phase: "dispatch.running",
-        userId: dispatch.event.userId,
+        userId: wake.userId,
       });
       return null;
     }

@@ -42,9 +42,6 @@ import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedExecutionDispatchFromWake,
-} from "@murphai/hosted-execution";
-import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedWakeAppendRequest,
   type HostedWakeCommitRequest,
@@ -53,7 +50,6 @@ import {
   type HostedWakeStatusRequest,
 } from "@murphai/hosted-execution/contracts";
 import {
-  parseHostedExecutionDispatchRequest,
   parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -302,12 +298,9 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
 
   if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/append") {
     const body = parseHostedWakeAppendRequest(await request.clone().json() as HostedWakeAppendRequest);
-    const dispatch = "dispatch" in body
-      ? parseHostedExecutionDispatchRequest(body.dispatch)
-      : buildHostedExecutionDispatchFromWake(body.wake);
     return Response.json(await appendTestHostedWake({
       bucket,
-      dispatch,
+      wake: body.wake,
     }));
   }
 

@@ -10,13 +10,15 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 import {
-  buildHostedExecutionDispatchFromWake,
-} from "@murphai/hosted-execution/builders";
-import {
+  buildHostedExecutionWakeFromDispatch,
   deriveHostedExecutionErrorCode,
   parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution";
-import { parseHostedExecutionDispatchRequest } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedExecutionDispatchRequest,
+  HostedExecutionDispatchResult,
+  HostedExecutionUserStatus,
+} from "@murphai/hosted-execution/contracts";
 import type {
   HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution/side-effects";
@@ -50,7 +52,7 @@ import {
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
-import { HostedUserRunner } from "../src/user-runner.js";
+import { HostedUserRunner as BaseHostedUserRunner } from "../src/user-runner.js";
 import { encodeHostedRunnerSecretsPayload } from "../src/runner-secrets.js";
 import {
   TEST_AUTOMATION_RECIPIENT_KEY_ID,
@@ -72,6 +74,16 @@ import {
 } from "./workers/test-hosted-wake-control.ts";
 
 const describe = baseDescribe.sequential;
+
+class HostedUserRunner extends BaseHostedUserRunner {
+  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
+    return this.enqueueHostedWake(buildHostedExecutionWakeFromDispatch(input));
+  }
+
+  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
+    return this.enqueueHostedWakeWithOutcome(buildHostedExecutionWakeFromDispatch(input));
+  }
+}
 
 describe("HostedUserRunner", () => {
   const bucket = createBucket();
@@ -1409,7 +1421,7 @@ describe("HostedUserRunner", () => {
           const payload = JSON.parse(await request.text()) as {
             job: {
               request: {
-                dispatch: {
+                wake: {
                   eventId: string;
                 };
               };
@@ -1420,7 +1432,7 @@ describe("HostedUserRunner", () => {
           };
 
           return {
-            eventId: payload.job.request.dispatch.eventId,
+            eventId: payload.job.request.wake.eventId,
             userEnv: payload.job.runtime?.userEnv ?? {},
           };
         }),
@@ -2406,7 +2418,7 @@ describe("HostedUserRunner", () => {
 
       const requestBody = readRunnerJobRequest(JSON.parse(String(init?.body)));
 
-      if (requestBody.dispatch.eventId === "evt_retry_head") {
+      if (requestBody.wake.eventId === "evt_retry_head") {
         return new Response("runner failed", {
           status: 503,
         });
@@ -2616,13 +2628,13 @@ describe("HostedUserRunner", () => {
       storage.runnerContainerFetch,
       "/internal/invoke",
     );
-    const readHostedDispatchStatusSpy = vi.spyOn(
+    const readHostedWakeStatusSpy = vi.spyOn(
       runner as unknown as {
-        readHostedDispatchStatus: (...args: never[]) => Promise<unknown>;
+        readHostedWakeStatus: (...args: never[]) => Promise<unknown>;
       },
-      "readHostedDispatchStatus",
+      "readHostedWakeStatus",
     );
-    readHostedDispatchStatusSpy.mockResolvedValueOnce(null);
+    readHostedWakeStatusSpy.mockResolvedValueOnce(null);
     const second = await runner.dispatchWithOutcome(dispatch);
 
     expect(first.event.state).toBe("completed");
@@ -3099,7 +3111,7 @@ describe("HostedUserRunner", () => {
           const payload = JSON.parse(await request.text()) as {
             job: {
               request: {
-                dispatch: {
+                wake: {
                   eventId: string;
                 };
               };
@@ -3110,7 +3122,7 @@ describe("HostedUserRunner", () => {
           };
 
           return {
-            eventId: payload.job.request.dispatch.eventId,
+            eventId: payload.job.request.wake.eventId,
             userEnv: payload.job.runtime?.userEnv ?? {},
           };
         }),
@@ -3825,13 +3837,9 @@ async function maybeCreateHostedWakeControlResponse(input: {
 
   if (url.endsWith("/api/internal/hosted-wake/append")) {
     const requestBody = parseHostedWakeAppendRequest(JSON.parse(String(input.init?.body ?? "{}")));
-    const dispatch = "dispatch" in requestBody
-      ? parseHostedExecutionDispatchRequest(requestBody.dispatch)
-      : buildHostedExecutionDispatchFromWake(requestBody.wake);
-
     return Response.json(await appendTestHostedWake({
       bucket: input.bucket.api,
-      dispatch,
+      wake: requestBody.wake,
     }));
   }
 
@@ -3940,7 +3948,7 @@ function readDispatchedEventIds(fetchMock: ReturnType<typeof vi.fn>): string[] {
     const body = typeof init?.body === "string" ? init.body : "";
     const request = maybeReadRunnerJobRequest(JSON.parse(body));
 
-    return !request || request.resume ? [] : [request.dispatch.eventId];
+    return !request || request.resume ? [] : [request.wake.eventId];
   });
 }
 
@@ -3954,10 +3962,8 @@ function maybeReadRunnerJobRequest(value: unknown): ReturnType<typeof readRunner
 
 function readRunnerJobRequest(value: unknown): {
   currentBundleRef?: { hash: string; key: string; size: number; updatedAt: string } | null;
-  dispatch: {
-    event: {
-      userId: string;
-    };
+  wake: {
+    userId: string;
     eventId: string;
   };
   resume?: unknown;
@@ -3979,15 +3985,31 @@ function readRunnerJobRequest(value: unknown): {
     throw new TypeError("Expected hosted runner job request payload to be an object.");
   }
 
-  return request as {
+  const requestRecord = request as {
     currentBundleRef?: { hash: string; key: string; size: number; updatedAt: string } | null;
-    dispatch: {
-      event: {
-        userId: string;
-      };
-      eventId: string;
-    };
     resume?: unknown;
+    wake?: {
+      eventId?: string;
+      userId?: string;
+    };
+  };
+  if (
+    !requestRecord.wake
+    || typeof requestRecord.wake.eventId !== "string"
+    || typeof requestRecord.wake.userId !== "string"
+  ) {
+    throw new TypeError("Expected hosted runner job request to carry a wake.");
+  }
+
+  const wake = {
+    eventId: requestRecord.wake.eventId,
+    userId: requestRecord.wake.userId,
+  };
+
+  return {
+    currentBundleRef: requestRecord.currentBundleRef,
+    resume: requestRecord.resume,
+    wake,
   };
 }
 
@@ -3999,15 +4021,12 @@ function maybeReadHostedWakeAppendRequest(value: unknown): {
 } | null {
   try {
     const request = parseHostedWakeAppendRequest(value);
-    const dispatch = "dispatch" in request
-      ? parseHostedExecutionDispatchRequest(request.dispatch)
-      : buildHostedExecutionDispatchFromWake(request.wake);
 
     return {
-      eventId: dispatch.eventId,
-      kind: "dispatch" in request ? dispatch.event.kind : request.wake.kind,
-      occurredAt: dispatch.occurredAt,
-      userId: dispatch.event.userId,
+      eventId: request.wake.eventId,
+      kind: request.wake.kind,
+      occurredAt: request.wake.occurredAt,
+      userId: request.wake.userId,
     };
   } catch {
     return null;
@@ -4025,12 +4044,12 @@ async function commitResultForRunnerRequest(input: {
   const crypto = await resolveHostedUserCryptoContextForTest({
     bucket: input.bucket,
     environment: input.environment,
-    userId: requestBody.dispatch.event.userId,
+    userId: requestBody.wake.userId,
   });
   await persistHostedExecutionCommit({
     bucket: input.bucket.api,
     currentBundleRef: requestBody.currentBundleRef ?? null,
-    eventId: requestBody.dispatch.eventId,
+    eventId: requestBody.wake.eventId,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
@@ -4040,7 +4059,7 @@ async function commitResultForRunnerRequest(input: {
       gatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
       result: payload.result,
     },
-    userId: requestBody.dispatch.event.userId,
+    userId: requestBody.wake.userId,
   });
 }
 
@@ -4055,11 +4074,11 @@ async function finalizeResultForRunnerRequest(input: {
   const crypto = await resolveHostedUserCryptoContextForTest({
     bucket: input.bucket,
     environment: input.environment,
-    userId: requestBody.dispatch.event.userId,
+    userId: requestBody.wake.userId,
   });
   await persistHostedExecutionFinalBundles({
     bucket: input.bucket.api,
-    eventId: requestBody.dispatch.eventId,
+    eventId: requestBody.wake.eventId,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
@@ -4067,7 +4086,7 @@ async function finalizeResultForRunnerRequest(input: {
       bundle: payload.bundles.vault ?? payload.bundles.agentState ?? null,
       gatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
     },
-    userId: requestBody.dispatch.event.userId,
+    userId: requestBody.wake.userId,
   });
 }
 

@@ -1,5 +1,5 @@
 import { DurableObject, env } from "cloudflare:workers";
-import { parseHostedExecutionDispatchRequest } from "@murphai/hosted-execution/parsers";
+import { buildHostedExecutionWakeFromDispatch } from "@murphai/hosted-execution";
 
 import worker from "../../src/index.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";
@@ -55,11 +55,11 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
-    return this.runner.dispatch(input);
+    return this.runner.enqueueHostedWake(buildHostedExecutionWakeFromDispatch(input));
   }
 
   async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
-    return this.runner.dispatchWithOutcome(input);
+    return this.runner.enqueueHostedWakeWithOutcome(buildHostedExecutionWakeFromDispatch(input));
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -93,7 +93,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
 
   if (url.pathname === "/__test/dispatch-with-outcome" && request.method === "POST") {
-    const dispatch = parseHostedExecutionDispatchRequest(await request.json() as unknown);
+    const dispatch = readTestDispatchRequest(await request.json() as unknown);
     const runner = getUserRunnerStub(dispatch.event.userId);
     await runner.bootstrapUser(dispatch.event.userId);
     return Response.json(await runner.dispatchWithOutcome(dispatch));
@@ -245,7 +245,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
       return Response.json({ error: "dispatch is required." }, { status: 400 });
     }
 
-    const dispatch = parseHostedExecutionDispatchRequest(body.dispatch);
+    const dispatch = readTestDispatchRequest(body.dispatch);
     const expectedKey = await resolveDispatchPayloadObjectKey(dispatch);
 
     await armDispatchPayloadReadPause({
@@ -375,23 +375,50 @@ async function resolveHostedUserCryptoContext(userId: string) {
 async function resolveDispatchPayloadObjectKey(
   dispatch: HostedExecutionDispatchRequest,
 ): Promise<string> {
-  const normalizedDispatch = parseHostedExecutionDispatchRequest(dispatch);
-  const crypto = await resolveHostedUserCryptoContext(normalizedDispatch.event.userId);
+  const crypto = await resolveHostedUserCryptoContext(dispatch.event.userId);
 
   return await hostedDispatchPayloadObjectKeyForSignature(
     crypto.rootKey,
-    normalizedDispatch.event.userId,
-    normalizedDispatch.eventId,
-    await createDispatchPayloadSignature(normalizedDispatch),
+    dispatch.event.userId,
+    dispatch.eventId,
+    await createDispatchPayloadSignature(dispatch),
   );
 }
 
 async function createDispatchPayloadSignature(
   dispatch: HostedExecutionDispatchRequest,
 ): Promise<string> {
-  const canonicalJson = stringifyStructuredJson(parseHostedExecutionDispatchRequest(dispatch));
+  const canonicalJson = stringifyStructuredJson(dispatch);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function readTestDispatchRequest(value: unknown): HostedExecutionDispatchRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted test dispatch request must be an object.");
+  }
+
+  const record = value as {
+    event?: {
+      kind?: unknown;
+      userId?: unknown;
+    };
+    eventId?: unknown;
+    occurredAt?: unknown;
+  };
+
+  if (
+    typeof record.eventId !== "string"
+    || typeof record.occurredAt !== "string"
+    || !record.event
+    || typeof record.event !== "object"
+    || typeof record.event.kind !== "string"
+    || typeof record.event.userId !== "string"
+  ) {
+    throw new TypeError("Hosted test dispatch request is invalid.");
+  }
+
+  return value as HostedExecutionDispatchRequest;
 }
 
 function createTestControlledBucket(bucket: R2BucketLike): R2BucketLike {
