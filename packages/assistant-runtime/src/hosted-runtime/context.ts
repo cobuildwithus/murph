@@ -6,6 +6,7 @@ import {
   emitHostedExecutionStructuredLog,
   type HostedExecutionDispatchRequest,
   type HostedExecutionMemberChannels,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
   createAssistantFoodAutoLogHooks,
@@ -36,6 +37,7 @@ import type {
   HostedAssistantRuntimeChannelCapabilities,
   HostedBootstrapResult,
 } from "./models.ts";
+import { resolveHostedWake } from "./utils.ts";
 
 interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
@@ -75,29 +77,30 @@ const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelStat
 
 export async function prepareHostedDispatchContext(
   vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest,
+  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
   runtimeEnv: Readonly<Record<string, string>>,
   resolvedConfig: {
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
   },
 ): Promise<HostedBootstrapResult | null> {
-  const isMemberActivation = dispatch.event.kind === "member.activated";
+  const wake = resolveHostedWake(dispatch);
+  const isMemberActivation = wake.kind === "member.activated";
   const memberBootstrap = isMemberActivation
-    ? await bootstrapHostedMemberContext(vaultRoot, dispatch)
+    ? await bootstrapHostedMemberContext(vaultRoot, wake)
     : null;
 
-  await requireHostedBootstrapForDispatch(vaultRoot, dispatch);
-  await prepareHostedLocalRuntime(vaultRoot, dispatch.eventId);
+  await requireHostedBootstrapForDispatch(vaultRoot, wake);
+  await prepareHostedLocalRuntime(vaultRoot, wake.eventId);
 
   const assistantRuntimeState = await bootstrapHostedAssistantRuntimeState(
     vaultRoot,
-    dispatch,
+    wake,
     runtimeEnv,
     resolvedConfig.channelCapabilities,
     {
       enableAssistantChannelReconciliation:
-        dispatch.event.kind === "member.activated"
-        || dispatch.event.kind === "member.channels.updated",
+        wake.kind === "member.activated"
+        || wake.kind === "member.channels.updated",
     },
   );
 
@@ -111,9 +114,9 @@ export async function prepareHostedDispatchContext(
 
 export async function bootstrapHostedMemberContext(
   vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
 ): Promise<HostedMemberBootstrapResult> {
-  const requestId = dispatch.eventId;
+  const requestId = wake.eventId;
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
@@ -134,7 +137,7 @@ export async function bootstrapHostedMemberContext(
 
 async function bootstrapHostedAssistantRuntimeState(
   vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   runtimeEnv: Readonly<Record<string, string>>,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   options: {
@@ -164,7 +167,7 @@ async function bootstrapHostedAssistantRuntimeState(
       linqWebhookSecretConfigured: typeof runtimeEnv.LINQ_WEBHOOK_SECRET === "string"
         && runtimeEnv.LINQ_WEBHOOK_SECRET.length > 0,
     },
-    dispatch,
+    dispatch: wake,
     message: "Hosted assistant bootstrap evaluated.",
     phase: "dispatch.running",
   });
@@ -172,16 +175,16 @@ async function bootstrapHostedAssistantRuntimeState(
   const reconciledChannelCapabilities = options.enableAssistantChannelReconciliation
     ? await reconcileHostedAssistantChannelState(
         vaultRoot,
-        resolveHostedDispatchMemberChannels(dispatch),
+        resolveHostedDispatchMemberChannels(wake),
         channelCapabilities,
         assistantBootstrap.configured,
         {
-          dispatch,
+          dispatch: wake,
         },
       )
     : await ensureHostedAssistantAutoReplyChannelForDispatch(
         vaultRoot,
-        dispatch,
+        wake,
         channelCapabilities,
         assistantBootstrap.configured,
       );
@@ -202,11 +205,11 @@ async function bootstrapHostedAssistantRuntimeState(
 
 async function ensureHostedAssistantAutoReplyChannelForDispatch(
   vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   assistantConfigured: boolean,
 ): Promise<HostedAssistantAutoReplyChannelState> {
-  const target = resolveHostedAutoReplySelfHealTarget(dispatch, channelCapabilities);
+  const target = resolveHostedAutoReplySelfHealTarget(wake, channelCapabilities);
 
   if (target === null) {
     return EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE;
@@ -222,7 +225,7 @@ async function ensureHostedAssistantAutoReplyChannelForDispatch(
         channel: target.channel,
         reason: !assistantConfigured ? "assistant_unconfigured" : "channel_unavailable",
       },
-      dispatch,
+      dispatch: wake,
       message: "Hosted assistant auto-reply self-heal skipped.",
       phase: "dispatch.running",
     });
@@ -257,7 +260,7 @@ async function ensureHostedAssistantAutoReplyChannelForDispatch(
       previouslyEnabled: beforeEnabled,
       selfHealEnabled: afterEnabled,
     },
-    dispatch,
+    dispatch: wake,
     message: "Hosted assistant auto-reply self-heal evaluated.",
     phase: "dispatch.running",
   });
@@ -338,7 +341,7 @@ export async function reconcileHostedAssistantChannelState(
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   assistantConfigured: boolean,
   options?: {
-    dispatch?: HostedExecutionDispatchRequest;
+    dispatch?: HostedExecutionWake;
   },
 ): Promise<Pick<
   HostedBootstrapResult,
@@ -389,30 +392,32 @@ export async function reconcileHostedAssistantChannelState(
 }
 
 function resolveHostedAutoReplySelfHealTarget(
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
 ): {
   capabilityReady: boolean;
   channel: HostedAutoReplyChannel;
 } | null {
-  switch (dispatch.event.kind) {
-    case "email.message.received":
+  if (wake.kind !== "conversation.message") {
+    return null;
+  }
+
+  switch (wake.message.channel) {
+    case "email":
       return {
         capabilityReady: channelCapabilities.emailSendReady,
         channel: "email",
       };
-    case "linq.message.received":
+    case "linq":
       return {
         capabilityReady: true,
         channel: "linq",
       };
-    case "telegram.message.received":
+    case "telegram":
       return {
         capabilityReady: channelCapabilities.telegramBotConfigured,
         channel: "telegram",
       };
-    default:
-      return null;
   }
 }
 
@@ -455,17 +460,17 @@ function resolveHostedAssistantAutoReplyState(
 }
 
 function resolveHostedDispatchMemberChannels(
-  dispatch: HostedExecutionDispatchRequest,
+  wake: HostedExecutionWake,
 ): HostedExecutionMemberChannels {
   if (
-    dispatch.event.kind === "member.activated"
-    || dispatch.event.kind === "member.channels.updated"
+    wake.kind === "member.activated"
+    || wake.kind === "member.channels.updated"
   ) {
-    return dispatch.event.memberChannels;
+    return wake.memberChannels;
   }
 
   throw new TypeError(
-    `Hosted execution ${dispatch.event.kind} does not carry member channel state.`,
+    `Hosted execution ${wake.kind} does not carry member channel state.`,
   );
 }
 
@@ -485,18 +490,19 @@ function normalizeHostedAssistantBootstrapStatus(
 
 export async function requireHostedBootstrapForDispatch(
   vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest,
+  dispatch: HostedExecutionDispatchRequest | HostedExecutionWake,
 ): Promise<void> {
+  const wake = resolveHostedWake(dispatch);
   if (existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
     return;
   }
 
-  if (dispatch.event.kind === "member.activated") {
+  if (wake.kind === "member.activated") {
     return;
   }
 
   throw new Error(
-    `Hosted execution for ${dispatch.event.kind} requires member.activated bootstrap first.`,
+    `Hosted execution for ${wake.kind} requires member.activated bootstrap first.`,
   );
 }
 

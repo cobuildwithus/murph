@@ -3,14 +3,14 @@ import {
 } from "@murphai/device-syncd/config";
 import type {
   HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution/contracts";
+} from "@murphai/hosted-execution";
 import {
   parseHostedAssistantDeliveryEffects,
 } from "@murphai/hosted-execution/side-effects";
 import {
   parseHostedExecutionBundleRef,
   parseHostedExecutionRunnerRequest,
-} from "@murphai/hosted-execution/parsers";
+} from "@murphai/hosted-execution";
 
 import type {
   HostedAssistantRuntimeDeviceSyncConfig,
@@ -45,7 +45,11 @@ export function parseHostedAssistantRuntimeJobRequest(
       : parseHostedAssistantRuntimeResume(record.resume);
 
   return {
-    ...request,
+    bundle: request.bundle,
+    dispatch: request.dispatch,
+    ...(record.wake === undefined ? {} : { wake: request.wake }),
+    ...(request.run === undefined ? {} : { run: request.run }),
+    ...(request.sharePack === undefined ? {} : { sharePack: request.sharePack }),
     ...(record.currentBundleRef === undefined
       ? {}
       : {
