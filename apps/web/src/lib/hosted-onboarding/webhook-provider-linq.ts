@@ -20,6 +20,7 @@ import {
   claimHostedLinqQuotaReplyNotice,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
+  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   type HostedLinqWebhookEvent,
@@ -177,8 +178,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         phoneLookupKey,
         userId: existingMember.id,
       }),
-      sourceId: `linq:${input.event.event_id}`,
-      sourceType: "hosted_webhook_receipt",
       tx: input.prisma,
     });
 
@@ -232,6 +231,137 @@ export async function planHostedOnboardingLinqWebhook(input: {
     messageId: summary.messageId,
     sourceEventId: input.event.event_id,
   });
+}
+
+export async function tryHandleHostedOnboardingLinqDirectWakeFastPath(input: {
+  event: HostedLinqWebhookEvent;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedOnboardingLinqWebhookResponse | null> {
+  if (input.event.event_type !== "message.received") {
+    return null;
+  }
+
+  const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
+  const summary = summarizeHostedLinqMessage(messageEvent);
+  const occurredAt = resolveHostedLinqOccurredAt(messageEvent);
+  const participantPhoneNumber = resolveHostedLinqParticipantPhoneNumber(messageEvent);
+  const recipientPhoneNumber = resolveHostedLinqRecipientPhoneNumber(messageEvent);
+
+  if (summary.isFromMe || !participantPhoneNumber) {
+    return null;
+  }
+
+  const phoneLookupKey = createHostedPhoneLookupKey(participantPhoneNumber);
+
+  if (!phoneLookupKey) {
+    return null;
+  }
+
+  const existingMemberLookup = await lookupHostedMemberIdentityByPhoneNumber({
+    phoneNumber: participantPhoneNumber,
+    prisma: input.prisma,
+  });
+  const existingMember = existingMemberLookup?.core ?? null;
+
+  if (
+    !existingMember
+    || isHostedMemberSuspended(existingMember.suspendedAt)
+    || !hasHostedMemberActiveAccess(existingMember)
+  ) {
+    return null;
+  }
+
+  const member = await readHostedMemberSnapshot({
+    memberId: existingMember.id,
+    prisma: input.prisma,
+  });
+
+  if (!member) {
+    return null;
+  }
+
+  const routeDecision = resolveHostedLinqActiveRouteDecision({
+    homeChatId: member.routing?.linqChatId ?? null,
+    homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+    incomingChatId: summary.chatId,
+    incomingRecipientPhone: recipientPhoneNumber,
+  });
+
+  if (routeDecision.kind === "redirect_to_home") {
+    return null;
+  }
+
+  if (routeDecision.kind === "ignore_unknown_home") {
+    return buildIgnoredLinqWebhookPlan("unknown-home-line").response;
+  }
+
+  const dailyState = await input.prisma.hostedLinqDailyState.findUnique({
+    where: {
+      memberId_dayUtc: {
+        dayUtc: resolveHostedLinqDayUtc(occurredAt),
+        memberId: existingMember.id,
+      },
+    },
+  });
+  const nextInboundCount = (dailyState?.inboundCount ?? 0) + 1;
+
+  if (nextInboundCount > 100) {
+    if (!dailyState?.quotaReplySentAt) {
+      return null;
+    }
+
+    await bindHostedMemberHomeLinqChatAndTrackInbound({
+      chatId: summary.chatId,
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+      recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
+        homeChatId: member.routing?.linqChatId ?? null,
+        homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+        incomingChatId: summary.chatId,
+        incomingRecipientPhone: recipientPhoneNumber,
+      }),
+    });
+
+    return buildIgnoredLinqWebhookPlan("daily-quota-reached").response;
+  }
+
+  await bindHostedMemberHomeLinqChatAndTrackInbound({
+    chatId: summary.chatId,
+    memberId: existingMember.id,
+    occurredAt,
+    prisma: input.prisma,
+    recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
+      homeChatId: member.routing?.linqChatId ?? null,
+      homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+      incomingChatId: summary.chatId,
+      incomingRecipientPhone: recipientPhoneNumber,
+    }),
+  });
+
+  await materializeHostedExecutionWakeTx({
+    wake: buildHostedExecutionLinqConversationMessageWake({
+      eventId: input.event.event_id,
+      linqEvent: sanitizeHostedLinqEventForStorage(
+        minimizeLinqMessageReceivedEvent(messageEvent),
+        {
+          omitRecipientPhone: true,
+          preserveFrom: true,
+        },
+      ),
+      linqMessageId: summary.messageId,
+      occurredAt,
+      phoneLookupKey,
+      userId: existingMember.id,
+    }),
+    tx: input.prisma,
+  });
+
+  return {
+    ok: true,
+    ignored: false,
+    reason: "dispatched-active-member",
+  };
 }
 
 function buildIgnoredLinqWebhookPlan(

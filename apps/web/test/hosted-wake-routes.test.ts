@@ -80,7 +80,7 @@ describe("hosted wake internal routes", () => {
       wake: {
         behavior: "ordered",
         createdAt: "2026-04-17T00:00:00.000Z",
-        dedupeKey: "dispatch:assistant.cron.tick:evt_tick",
+        dedupeKey: "evt_tick",
         id: "wake_24",
         kind: "assistant.cron.tick",
         occurredAt: "2026-04-17T00:00:00.000Z",

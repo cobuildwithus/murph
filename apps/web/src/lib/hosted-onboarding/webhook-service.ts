@@ -31,17 +31,17 @@ import {
   continueHostedWebhookReceipt,
   listHostedWebhookReceiptContinuationCandidates,
   HostedWebhookReceiptSideEffectDrainError,
-  type HostedWebhookPlan,
   type HostedWebhookReceiptClaim,
+  type HostedWebhookPlan,
 } from "./webhook-receipts";
 import {
-  markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,
   recordHostedWebhookReceipt,
 } from "./webhook-receipt-store";
 import {
   planHostedOnboardingLinqWebhook,
+  tryHandleHostedOnboardingLinqDirectWakeFastPath,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -108,6 +108,35 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const prisma = input.prisma ?? getPrisma();
     if (event.event_type === "message.received") {
       requireHostedLinqMessageReceivedEvent(event);
+
+      const directWakeResponse = await runHostedOnboardingWebhookTransaction(
+        prisma,
+        (transaction) =>
+          tryHandleHostedOnboardingLinqDirectWakeFastPath({
+            event,
+            prisma: transaction,
+          }),
+      );
+
+      if (directWakeResponse) {
+        responseReason = directWakeResponse.reason ?? null;
+        await maybeHandoffHostedExecutionWebhookWake({
+          defer: input.defer,
+          eventId: event.event_id,
+          maxInlineDrainMs: input.maxInlineDrainMs,
+          prisma,
+          response: directWakeResponse,
+          source: "linq",
+        });
+        finishHostedOnboardingTiming(timing, "completed", {
+          duplicate: Boolean(directWakeResponse.duplicate),
+          eventId,
+          eventType,
+          responseReason,
+          signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+        });
+        return directWakeResponse;
+      }
     }
     const receiptTiming = startHostedOnboardingTiming(
       "hosted-onboarding.webhook.linq.receipt",
@@ -116,23 +145,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         eventType,
       },
     );
-  const result = await processHostedOnboardingWebhookPlan({
-    deferSideEffectDrain: input.defer,
-    duplicateResponse: {
-      ok: true,
-      duplicate: true,
-    },
-    eventId: event.event_id,
-    fastPathResponse: {
-      ignored: false,
-      ok: true,
-      reason: "dispatched-active-member",
-    },
-    handlers: createHostedWebhookReceiptHandlers(),
-    plan: (transaction) =>
-      planHostedOnboardingLinqWebhook({
-        event,
-        prisma: transaction,
+    const result = await processHostedOnboardingWebhookPlan({
+      deferSideEffectDrain: input.defer,
+      duplicateResponse: {
+        ok: true,
+        duplicate: true,
+      },
+      eventId: event.event_id,
+      handlers: createHostedWebhookReceiptHandlers(),
+      plan: (transaction) =>
+        planHostedOnboardingLinqWebhook({
+          event,
+          prisma: transaction,
         }),
       prisma,
       signal: input.signal,
@@ -146,42 +170,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType,
       responseReason,
     });
-    if (result.fastPathReceiptClaim) {
-      try {
-        await maybeHandoffHostedExecutionWebhookWake({
-          defer: input.defer,
-          eventId: event.event_id,
-          maxInlineDrainMs: input.maxInlineDrainMs,
-          prisma,
-          response,
-          source: "linq",
-        });
-        await markHostedWebhookReceiptCompleted({
-          claimedReceipt: result.fastPathReceiptClaim,
-          eventId: event.event_id,
-          prisma,
-          source: "linq",
-        });
-      } catch (error) {
-        await markHostedWebhookReceiptFailed({
-          claimedReceipt: result.fastPathReceiptClaim,
-          error,
-          eventId: event.event_id,
-          prisma,
-          source: "linq",
-        });
-        throw error;
-      }
-    } else {
-      await maybeHandoffHostedExecutionWebhookWake({
-        defer: input.defer,
-        eventId: event.event_id,
-        maxInlineDrainMs: input.maxInlineDrainMs,
-        prisma,
-        response,
-        source: "linq",
-      });
-    }
+    await maybeHandoffHostedExecutionWebhookWake({
+      defer: input.defer,
+      eventId: event.event_id,
+      maxInlineDrainMs: input.maxInlineDrainMs,
+      prisma,
+      response,
+      source: "linq",
+    });
     finishHostedOnboardingTiming(timing, "completed", {
       duplicate: Boolean(response.duplicate),
       eventId,
@@ -605,14 +601,12 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
   deferSideEffectDrain?: (drain: () => Promise<void>) => Promise<void> | void;
   duplicateResponse: TResult;
   eventId: string;
-  fastPathResponse: TResult;
   handlers: ReturnType<typeof createHostedWebhookReceiptHandlers>;
   plan: (prisma: Prisma.TransactionClient) => Promise<HostedWebhookPlan<TResult>>;
   prisma: PrismaClient;
   signal?: AbortSignal;
   source: "linq" | "telegram";
 }): Promise<{
-  fastPathReceiptClaim: HostedWebhookReceiptClaim | null;
   response: TResult;
 }> {
   let claimedReceipt = await recordHostedWebhookReceipt({
@@ -623,7 +617,6 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
 
   if (!claimedReceipt) {
     return {
-      fastPathReceiptClaim: null,
       response: input.duplicateResponse,
     };
   }
@@ -637,11 +630,9 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
         input.prisma,
         async (transaction) => {
           const plan = await input.plan(transaction);
-
-        if (shouldUseHostedWebhookDirectWakeFastPath(plan, activeClaim)) {
           const nextClaim = await queueHostedWebhookReceiptSideEffects({
             claimedReceipt: activeClaim,
-            desiredSideEffects: [],
+            desiredSideEffects: plan.desiredSideEffects,
             eventId: input.eventId,
             prisma: transaction,
             source: input.source,
@@ -649,22 +640,6 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
 
           return {
             claimedReceipt: nextClaim,
-            fastPathReceiptClaim: nextClaim,
-            response: plan.response,
-          };
-        }
-
-        const nextClaim = await queueHostedWebhookReceiptSideEffects({
-          claimedReceipt: activeClaim,
-          desiredSideEffects: plan.desiredSideEffects,
-          eventId: input.eventId,
-          prisma: transaction,
-          source: input.source,
-        });
-
-          return {
-            claimedReceipt: nextClaim,
-            fastPathReceiptClaim: null,
             response: plan.response,
           };
         },
@@ -672,22 +647,6 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
 
       claimedReceipt = plannedResult.claimedReceipt;
       response = plannedResult.response;
-
-      if (plannedResult.fastPathReceiptClaim) {
-        return plannedResult;
-      }
-    } else if (activeClaim.state.sideEffects.length === 0) {
-      const wakeTarget = await readHostedWakeTarget({
-        eventId: input.eventId,
-        prisma: input.prisma,
-      });
-
-      if (wakeTarget) {
-        return {
-          fastPathReceiptClaim: activeClaim,
-          response: input.fastPathResponse,
-        };
-      }
     }
 
     if (input.deferSideEffectDrain && hasDeferredHostedWebhookSideEffects(claimedReceipt)) {
@@ -705,7 +664,6 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
           }),
         );
         return {
-          fastPathReceiptClaim: null,
           response: response ?? input.duplicateResponse,
         };
       } catch (error) {
@@ -729,7 +687,6 @@ async function processHostedOnboardingWebhookPlan<TResult extends HostedWebhookS
     });
 
     return {
-      fastPathReceiptClaim: null,
       response: response ?? input.duplicateResponse,
     };
   } catch (error) {
@@ -758,15 +715,6 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
   return typeof prisma.$transaction === "function"
     ? prisma.$transaction(callback)
     : callback(prisma as Prisma.TransactionClient);
-}
-
-function shouldUseHostedWebhookDirectWakeFastPath(
-  plan: HostedWebhookPlan<HostedWebhookServiceResponse>,
-  claimedReceipt: HostedWebhookReceiptClaim,
-): boolean {
-  return plan.response.reason === "dispatched-active-member"
-    && plan.desiredSideEffects.length === 0
-    && claimedReceipt.state.sideEffects.length === 0;
 }
 
 function hasDeferredHostedWebhookSideEffects(

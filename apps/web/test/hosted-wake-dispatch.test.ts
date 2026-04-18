@@ -82,7 +82,7 @@ describe("materializeHostedExecutionWakeTx", () => {
     });
 
     expect(mocks.appendHostedOrderedWakeTx).toHaveBeenCalledWith(expect.objectContaining({
-      dedupeKey: "dispatch:conversation.message:evt_linq_message",
+      dedupeKey: "evt_linq_message",
       kind: "conversation.message",
       occurredAt: "2026-04-18T00:00:00.000Z",
       payload: {
@@ -115,7 +115,7 @@ describe("materializeHostedExecutionWakeTx", () => {
 
     expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
       coalescingKey: "assistant.cron.tick:member_123",
-      dedupeKey: "dispatch:assistant.cron.tick:evt_tick",
+      dedupeKey: "evt_tick",
       kind: "assistant.cron.tick",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "member_123",
@@ -143,7 +143,7 @@ describe("materializeHostedExecutionWakeTx", () => {
 
     expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
       coalescingKey: "assistant.cron.tick:member_123",
-      dedupeKey: "dispatch:assistant.cron.tick:assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z",
+      dedupeKey: "assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z",
       kind: "assistant.cron.tick",
       occurredAt,
       userId: "member_123",

@@ -231,7 +231,7 @@ describe("hosted wake store", () => {
         {
           behavior: "coalescing",
           coalescingKey: "member.channels.updated:member_123",
-          dedupeKey: "dispatch:member.channels.updated:first",
+          dedupeKey: "first",
           kind: "member.channels.updated",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
@@ -245,7 +245,7 @@ describe("hosted wake store", () => {
 
     const result = await appendHostedCoalescingWakeTx({
       coalescingKey: "member.channels.updated:member_123",
-      dedupeKey: "dispatch:member.channels.updated:second",
+      dedupeKey: "second",
       kind: "member.channels.updated",
       occurredAt: "2026-04-17T00:01:00.000Z",
       payload: {
@@ -259,7 +259,7 @@ describe("hosted wake store", () => {
     expect(result.inserted).toBe(false);
     expect(result.updatedExisting).toBe(true);
     expect(result.wake.seq).toBe("1");
-    expect(result.wake.dedupeKey).toBe("dispatch:member.channels.updated:second");
+    expect(result.wake.dedupeKey).toBe("second");
     expect(result.wake.payloadJson).toEqual({
       revision: 2,
     });
@@ -284,7 +284,7 @@ describe("hosted wake store", () => {
         {
           behavior: "edge_triggered",
           coalescingKey: "member.channels.updated:member_123",
-          dedupeKey: "dispatch:member.channels.updated:first",
+          dedupeKey: "first",
           kind: "member.channels.updated",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
@@ -298,7 +298,7 @@ describe("hosted wake store", () => {
 
     const result = await appendHostedEdgeTriggeredWakeTx({
       coalescingKey: "member.channels.updated:member_123",
-      dedupeKey: "dispatch:member.channels.updated:second",
+      dedupeKey: "second",
       kind: "member.channels.updated",
       occurredAt: "2026-04-17T00:01:00.000Z",
       payload: {
@@ -319,7 +319,7 @@ describe("hosted wake store", () => {
     });
 
     expect(listed.wakes).toHaveLength(1);
-    expect(listed.wakes[0]?.dedupeKey).toBe("dispatch:member.channels.updated:first");
+    expect(listed.wakes[0]?.dedupeKey).toBe("first");
   });
 
   it("does not allocate a new seq when a duplicate dedupe key is discovered after the cursor lock", async () => {
@@ -333,7 +333,7 @@ describe("hosted wake store", () => {
         {
           behavior: "ordered",
           coalescingKey: null,
-          dedupeKey: "dispatch:member.activated:member.activated:stripe.invoice.paid:member_123:evt_123",
+          dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_123",
           kind: "member.activated",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
@@ -346,7 +346,7 @@ describe("hosted wake store", () => {
     });
 
     const result = await appendHostedOrderedWakeTx({
-      dedupeKey: "dispatch:member.activated:member.activated:stripe.invoice.paid:member_123:evt_123",
+      dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_123",
       kind: "member.activated",
       occurredAt: "2026-04-17T00:01:00.000Z",
       payload: {
@@ -379,7 +379,7 @@ describe("hosted wake store", () => {
         {
           behavior: "ordered",
           coalescingKey: null,
-          dedupeKey: "dispatch:assistant.cron.tick:evt_4",
+          dedupeKey: "evt_4",
           kind: "assistant.cron.tick",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
@@ -412,7 +412,7 @@ describe("hosted wake store", () => {
         {
           behavior: "ordered",
           coalescingKey: null,
-          dedupeKey: "dispatch:assistant.cron.tick:evt_quarantined",
+          dedupeKey: "evt_quarantined",
           kind: "assistant.cron.tick",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
@@ -425,7 +425,7 @@ describe("hosted wake store", () => {
         {
           behavior: "ordered",
           coalescingKey: null,
-          dedupeKey: "dispatch:assistant.cron.tick:evt_active",
+          dedupeKey: "evt_active",
           kind: "assistant.cron.tick",
           occurredAt: "2026-04-17T00:01:00.000Z",
           payload: {
@@ -470,7 +470,7 @@ describe("hosted wake store", () => {
         {
           behavior: "ordered",
           coalescingKey: null,
-          dedupeKey: "dispatch:conversation.message:telegram:update:321",
+          dedupeKey: "telegram:update:321",
           kind: "conversation.message",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
