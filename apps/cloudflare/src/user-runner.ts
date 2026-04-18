@@ -74,6 +74,7 @@ const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
 interface HostedWakeDrainOutcome {
+  postCursorAction: "cleanup-only" | "finalize-committed";
   wake: HostedExecutionWake | null;
   seq: bigint;
   state: HostedWakeDrainState;
@@ -389,7 +390,7 @@ export class HostedUserRunner {
       expectedVersion = commit.cursor.version;
       await this.syncHostedWakeBundleCacheToCursor(commit.cursor.snapshotRef);
       if (commit.committed) {
-        await this.finalizeCommittedHostedWakesLocally({
+        await this.settleCommittedHostedWakesLocally({
           committedCursor: commit.cursor,
           wakes: advancedWakes,
         });
@@ -440,6 +441,7 @@ export class HostedUserRunner {
         userId,
       });
       return {
+        postCursorAction: "cleanup-only",
         wake: null,
         seq,
         state: "quarantined",
@@ -473,8 +475,8 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD,
       )
-        ? { wake: null, seq, state: "quarantined" }
-        : { wake: null, seq, state: "backpressured" };
+        ? { postCursorAction: "cleanup-only", wake: null, seq, state: "quarantined" }
+        : { postCursorAction: "cleanup-only", wake: null, seq, state: "backpressured" };
     }
 
     if (hostedWake.userId !== userId) {
@@ -490,19 +492,20 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
       )
-        ? { wake: null, seq, state: "quarantined" }
-        : { wake: null, seq, state: "backpressured" };
+        ? { postCursorAction: "cleanup-only", wake: null, seq, state: "quarantined" }
+        : { postCursorAction: "cleanup-only", wake: null, seq, state: "backpressured" };
     }
 
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
-    const state = await this.wakeProcessor.executeWake(hostedWake, {
+    const execution = await this.wakeProcessor.executeWake(hostedWake, {
       holdLeaseUntilCleanup: true,
     });
 
     return {
+      postCursorAction: execution.postCursorAction,
       wake: hostedWake,
       seq,
-      state,
+      state: execution.state,
     };
   }
 
@@ -552,7 +555,7 @@ export class HostedUserRunner {
     }
   }
 
-  private async finalizeCommittedHostedWakesLocally(input: {
+  private async settleCommittedHostedWakesLocally(input: {
     committedCursor: HostedExecutionCursorState;
     wakes: readonly HostedWakeDrainOutcome[];
   }): Promise<void> {
@@ -572,12 +575,18 @@ export class HostedUserRunner {
 
     for (const outcome of committedOutcomes) {
       try {
-        const finalizedCommit = await this.wakeProcessor.finalizeWakeAfterCursorCommit({
-          wake: outcome.wake!,
-        });
+        if (outcome.postCursorAction === "finalize-committed") {
+          const finalizedCommit = await this.wakeProcessor.finalizeWakeAfterCursorCommit({
+            wake: outcome.wake!,
+          });
+
+          if (outcome === finalOutcome) {
+            finalCommittedResult = finalizedCommit;
+            continue;
+          }
+        }
 
         if (outcome === finalOutcome) {
-          finalCommittedResult = finalizedCommit;
           continue;
         }
 

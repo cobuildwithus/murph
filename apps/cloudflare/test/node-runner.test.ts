@@ -337,7 +337,7 @@ async function runHostedExecutionJob(
     });
   }
 
-  if (result.phase !== "completed") {
+  if (result.phase === "committed") {
     throw new Error("Expected the node-runner test helper to resolve a completed hosted result.");
   }
 

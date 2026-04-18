@@ -312,6 +312,105 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(finalizeWakeAfterCursorCommit).not.toHaveBeenCalled();
   });
 
+  it("commits a direct final runtime snapshot once and skips post-cursor finalize", async () => {
+    const fetchMock = vi.fn(async (_url, init) => createCompletedRunnerSuccessResponse({
+      init,
+      omitPhase: true,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "0",
+          nextSeq: "2",
+          version: "cursor_v1",
+        }),
+        wakes: [
+          createHostedWakeRecord({
+            payload: createWake("evt_direct_final"),
+            seq: "1",
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "1",
+          nextSeq: "2",
+          snapshotRef: { key: "bundles/vault/final.bundle.json", kind: "vault" },
+          updatedAt: "2026-03-26T12:00:02.000Z",
+          version: "cursor_v2",
+        }),
+        wakes: [],
+      });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }) => ({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        snapshotRef: body.snapshotRef,
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+    }));
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockResolvedValue({
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        snapshotRef: { key: "bundles/vault/final.bundle.json", kind: "vault" },
+        updatedAt: "2026-03-26T12:00:02.000Z",
+        version: "cursor_v2",
+      }),
+      pendingWakeCount: 0,
+    });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const wakeProcessor = Reflect.get(runner, "wakeProcessor");
+
+    if (
+      !wakeProcessor
+      || typeof wakeProcessor !== "object"
+      || !("finalizeWakeAfterCursorCommit" in wakeProcessor)
+      || !("cleanupWakeAfterCursorCommit" in wakeProcessor)
+    ) {
+      throw new Error("Expected HostedUserRunner wake processor test internals to be available.");
+    }
+
+    const finalizeWakeAfterCursorCommit = vi.spyOn(
+      wakeProcessor,
+      "finalizeWakeAfterCursorCommit",
+    );
+    const cleanupWakeAfterCursorCommit = vi.spyOn(
+      wakeProcessor,
+      "cleanupWakeAfterCursorCommit",
+    );
+
+    await runner.wakeHostedWakes();
+
+    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
+    expect(commitHostedWakeCursorToWeb.mock.calls[0]?.[0].body).toMatchObject({
+      committedSeq: "1",
+      snapshotRef: {
+        key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+      },
+    });
+    expect(finalizeWakeAfterCursorCommit).not.toHaveBeenCalled();
+    expect(readDispatchEventIdsFromSpy(cleanupWakeAfterCursorCommit)).toEqual([
+      "evt_direct_final",
+    ]);
+    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_direct_final"]);
+  });
+
   it("finalizes every committed wake before local cleanup after the cursor advances", async () => {
     const runner = new HostedUserRunner(
       storage.state,
@@ -354,13 +453,13 @@ describe("HostedUserRunner hosted wake drain", () => {
       },
     });
 
-    const finalizeCommittedHostedWakesLocally = Reflect.get(runner, "finalizeCommittedHostedWakesLocally");
+    const settleCommittedHostedWakesLocally = Reflect.get(runner, "settleCommittedHostedWakesLocally");
 
-    if (typeof finalizeCommittedHostedWakesLocally !== "function") {
-      throw new Error("Expected HostedUserRunner finalizeCommittedHostedWakesLocally test helper.");
+    if (typeof settleCommittedHostedWakesLocally !== "function") {
+      throw new Error("Expected HostedUserRunner settleCommittedHostedWakesLocally test helper.");
     }
 
-    await finalizeCommittedHostedWakesLocally.call(runner, {
+    await settleCommittedHostedWakesLocally.call(runner, {
       committedCursor: createCursorState({
         committedSeq: "2",
         nextSeq: "3",
@@ -369,11 +468,13 @@ describe("HostedUserRunner hosted wake drain", () => {
       }),
       wakes: [
         {
+          postCursorAction: "finalize-committed",
           wake: createWake("evt_batch_first"),
           seq: 1n,
           state: "completed",
         },
         {
+          postCursorAction: "finalize-committed",
           wake: createWake("evt_batch_second"),
           seq: 2n,
           state: "completed",
@@ -555,6 +656,7 @@ function createWake(eventId: string) {
 function createCursorState(overrides: Partial<{
   committedSeq: string;
   nextSeq: string;
+  snapshotRef: unknown;
   updatedAt: string;
   version: string;
 }> = {}) {
@@ -562,7 +664,7 @@ function createCursorState(overrides: Partial<{
     committedSeq: overrides.committedSeq ?? "0",
     createdAt: "2026-03-26T12:00:00.000Z",
     nextSeq: overrides.nextSeq ?? "1",
-    snapshotRef: null,
+    snapshotRef: overrides.snapshotRef ?? null,
     updatedAt: overrides.updatedAt ?? "2026-03-26T12:00:00.000Z",
     userId: "member_123",
     version: overrides.version ?? "cursor_v1",
@@ -655,6 +757,28 @@ async function createCommittedRunnerSuccessResponse(input: {
         },
       },
   ), {
+    status: 200,
+  });
+}
+
+async function createCompletedRunnerSuccessResponse(input: {
+  init?: RequestInit;
+  omitPhase?: boolean;
+}): Promise<Response> {
+  const requestBody = JSON.parse(String(input.init?.body));
+  const request = readRunnerJobRequest(requestBody);
+
+  return new Response(JSON.stringify({
+    ...(input.omitPhase ? {} : { phase: "completed" as const }),
+    finalGatewayProjectionSnapshot: null,
+    result: {
+      bundle: Buffer.from(`vault:${request.wake.eventId}`).toString("base64"),
+      result: {
+        ok: true,
+        output: "handled",
+      },
+    },
+  }), {
     status: 200,
   });
 }
