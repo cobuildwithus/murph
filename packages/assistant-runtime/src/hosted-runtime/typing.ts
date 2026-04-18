@@ -6,8 +6,8 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
+  type LinqWebhookEvent,
   parseCanonicalLinqMessageReceivedEvent,
-  parseLinqWebhookEvent,
 } from "@murphai/messaging-ingress/linq-webhook";
 import {
   parseTelegramThreadTarget,
@@ -100,9 +100,11 @@ function startHostedLinqWakeTypingIndicator(input: {
 
   let chatId: string;
   try {
-    const event = parseCanonicalLinqMessageReceivedEvent(
-      parseLinqWebhookEvent(JSON.stringify(input.wake.message.linqEvent)),
-    );
+    if (!isCanonicalLinqWebhookEvent(input.wake.message.linqEvent)) {
+      throw new TypeError("Hosted Linq typing indicator wake is missing a canonical Linq event.");
+    }
+
+    const event = parseCanonicalLinqMessageReceivedEvent(input.wake.message.linqEvent);
     chatId = event.data.chat_id;
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -193,6 +195,22 @@ function buildHostedLinqTypingLogDetails(
     operation,
     provider: "linq",
   };
+}
+
+function isCanonicalLinqWebhookEvent(value: unknown): value is LinqWebhookEvent {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.api_version === "string"
+    && typeof record.created_at === "string"
+    && typeof record.event_id === "string"
+    && typeof record.event_type === "string"
+    && typeof record.data === "object"
+    && record.data !== null
+  );
 }
 
 function createAsyncHostedTypingIndicator(input: {

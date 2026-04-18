@@ -11,7 +11,6 @@ import {
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   parseCanonicalLinqMessageReceivedEvent: vi.fn(),
-  parseLinqWebhookEvent: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   startTelegramTypingSession: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
@@ -30,7 +29,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
   parseCanonicalLinqMessageReceivedEvent:
     mocks.parseCanonicalLinqMessageReceivedEvent,
-  parseLinqWebhookEvent: mocks.parseLinqWebhookEvent,
 }));
 
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
@@ -47,13 +45,27 @@ import {
   stopHostedWakeTypingIndicator,
 } from "../src/hosted-runtime/typing.ts";
 
+function createCanonicalLinqEvent(eventId: string) {
+  return {
+    api_version: "v3",
+    created_at: "2026-04-08T00:00:00.000Z",
+    data: {
+      chat_id: "chat_123",
+      message: {
+        id: "msg_123",
+        parts: [],
+      },
+      received_at: "2026-04-08T00:00:00.000Z",
+    },
+    event_id: eventId,
+    event_type: "message.received",
+  } as const;
+}
+
 function createLinqWake() {
   return buildHostedExecutionLinqConversationMessageWake({
     eventId: "evt_linq_typing",
-    linqEvent: {
-      event_type: "message.received",
-      id: "linq_123",
-    },
+    linqEvent: createCanonicalLinqEvent("evt_linq_typing"),
     occurredAt: "2026-04-08T00:00:00.000Z",
     phoneLookupKey: "15551234567",
     userId: "member_123",
@@ -88,9 +100,6 @@ function createTelegramWakeWithTarget(threadId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.parseLinqWebhookEvent.mockReturnValue({
-    parsed: true,
-  });
   mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue({
     data: {
       chat_id: "chat_123",
@@ -134,7 +143,7 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("fails closed when a Linq payload cannot be parsed", () => {
-    mocks.parseLinqWebhookEvent.mockImplementation(() => {
+    mocks.parseCanonicalLinqMessageReceivedEvent.mockImplementation(() => {
       throw new Error("invalid linq payload");
     });
 
@@ -177,6 +186,11 @@ describe("hosted runtime typing helpers", () => {
       throw new Error("Expected a Linq typing indicator.");
     }
 
+    await vi.waitFor(() => {
+      expect(mocks.parseCanonicalLinqMessageReceivedEvent).toHaveBeenCalledWith(
+        createLinqWake().message.linqEvent,
+      );
+    });
     await vi.waitFor(() => {
       expect(mocks.startLinqChatTypingIndicator).toHaveBeenCalledWith(
         {

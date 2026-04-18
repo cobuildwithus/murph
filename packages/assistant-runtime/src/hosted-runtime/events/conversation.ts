@@ -12,7 +12,7 @@ import {
   parseRawEmailMessage,
 } from "@murphai/inboxd/connectors/email/parsed";
 import {
-  normalizeLinqWebhookEvent,
+  normalizeHostedLinqConversationMessage,
 } from "@murphai/inboxd/connectors/linq/normalize";
 import {
   normalizeHostedTelegramMessage,
@@ -21,14 +21,12 @@ import {
   createParsedInboxPipeline,
   openInboxRuntime,
 } from "@murphai/inboxd";
-import { parseLinqWebhookEvent } from "@murphai/messaging-ingress/linq-webhook";
 import { createConfiguredParserRegistry } from "@murphai/parsers";
 
 import { readHostedRawEmailMessage } from "./email.ts";
 import {
   createHostedLinqAttachmentDownloadDriver,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
-  resolveHostedLinqCaptureExternalId,
 } from "./linq.ts";
 import { createHostedTelegramAttachmentDownloadDriver } from "./telegram.ts";
 import type {
@@ -81,22 +79,13 @@ async function normalizeHostedConversationMessageWake(input: {
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
-    const event = parseLinqWebhookEvent(JSON.stringify(input.wake.message.linqEvent));
-    const capture = await normalizeLinqWebhookEvent({
-      attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
-      defaultAccountId: input.wake.message.phoneLookupKey,
-      downloadDriver: createHostedLinqAttachmentDownloadDriver(),
-      event,
-    });
-
-    return {
-      ...capture,
+    return normalizeHostedLinqConversationMessage({
       accountId: input.wake.message.phoneLookupKey,
-      externalId: resolveHostedLinqCaptureExternalId({
-        fallbackExternalId: capture.externalId,
-        linqMessageId: input.wake.message.linqMessageId ?? null,
-      }),
-    };
+      attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+      downloadDriver: createHostedLinqAttachmentDownloadDriver(),
+      linqEvent: input.wake.message.linqEvent,
+      linqMessageId: input.wake.message.linqMessageId ?? null,
+    });
   }
 
   if (isHostedTelegramConversationMessageWake(input.wake)) {

@@ -730,7 +730,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(3);
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
@@ -766,7 +766,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("defers first-contact signup replies until after the webhook response is committed", async () => {
+  it("keeps first-contact signup replies inline even when a defer hook is provided", async () => {
     const invite = {
       channel: "linq",
       id: "invite_123",
@@ -829,11 +829,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(deferred).toHaveLength(1);
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-
-    await deferred[0]?.();
-
+    expect(deferred).toHaveLength(0);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
@@ -844,17 +840,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         replyToMessageId: "msg_123",
       }),
     );
-    expect(prismaMocks.hostedWebhookReceipt.updateMany.mock.calls).toContainEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({
-          completedAt: expect.any(Date),
-          status: "completed",
-        }),
-      }),
-    ]);
   });
 
-  it("ignores an aborted request signal once a signup reply has been deferred", async () => {
+  it("passes the request signal through inline signup replies", async () => {
     const invite = {
       channel: "linq",
       id: "invite_123",
@@ -916,22 +904,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    controller.abort();
-    await deferred[0]?.();
-
+    expect(deferred).toHaveLength(0);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.not.objectContaining({
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_aborted",
+        }),
+        replyToMessageId: "msg_123",
         signal: controller.signal,
       }),
     );
-    expect(prismaMocks.hostedWebhookReceipt.updateMany.mock.calls).toContainEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({
-          completedAt: expect.any(Date),
-          status: "completed",
-        }),
-      }),
-    ]);
+    controller.abort();
   });
 
   it("sends the signup link even when the first-contact Linq message has no text", async () => {
@@ -1001,7 +986,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(3);
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);

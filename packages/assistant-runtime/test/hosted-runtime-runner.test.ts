@@ -44,17 +44,27 @@ function buildCronWake(
   });
 }
 
+function buildCanonicalLinqEvent(eventId: string) {
+  return {
+    api_version: "v3",
+    created_at: "2026-04-08T00:00:00.000Z",
+    data: {
+      chat_id: "chat_123",
+      message: {
+        id: "msg_123",
+        parts: [],
+      },
+      received_at: "2026-04-08T00:00:00.000Z",
+    },
+    event_id: eventId,
+    event_type: "message.received",
+  } as const;
+}
+
 function buildLinqWake(eventId: string) {
   return buildHostedExecutionLinqConversationMessageWake({
     eventId,
-    linqEvent: {
-      data: {
-        message: {
-          parts: [],
-        },
-      },
-      event_type: "message.received",
-    },
+    linqEvent: buildCanonicalLinqEvent(eventId),
     linqMessageId: "msg_123",
     occurredAt: "2026-04-08T00:00:00.000Z",
     phoneLookupKey: "phone_123",
@@ -71,7 +81,6 @@ const mocks = vi.hoisted(() => ({
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
   parseCanonicalLinqMessageReceivedEvent: vi.fn(),
-  parseLinqWebhookEvent: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
   resumeHostedCommittedExecution: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
@@ -104,7 +113,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
   parseCanonicalLinqMessageReceivedEvent:
     mocks.parseCanonicalLinqMessageReceivedEvent,
-  parseLinqWebhookEvent: mocks.parseLinqWebhookEvent,
 }));
 
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
@@ -239,7 +247,6 @@ beforeEach(() => {
     resolvedConfig: createHostedRuntimeResolvedConfig(runtime?.resolvedConfig ?? {}),
     userEnv: { ...(runtime?.userEnv ?? {}) },
   }));
-  mocks.parseLinqWebhookEvent.mockImplementation((rawBody: string) => JSON.parse(rawBody));
   mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue({
     data: {
       chat_id: "chat_123",
