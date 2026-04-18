@@ -6,7 +6,7 @@ import {
   HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
   type HostedExecutionDispatchLifecycleState,
   type HostedExecutionDispatchRequest,
-  type HostedWakeMessagePayload,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 
 import { getPrisma } from "../prisma";
@@ -61,15 +61,11 @@ export async function appendHostedExecutionWakeTx(input: {
   sourceType: string;
   tx: Prisma.TransactionClient;
 } | {
-  eventId: string;
-  kind: "linq.message.received" | "telegram.message.received";
+  wake: HostedExecutionWake;
   now?: string;
-  occurredAt: string;
-  payload: HostedWakeMessagePayload;
   sourceId?: string | null;
   sourceType: string;
   tx: Prisma.TransactionClient;
-  userId: string;
 }): Promise<HostedExecutionWakeAppendResult> {
   if ("dispatch" in input) {
     await appendHostedExecutionWakePayloadTx({
@@ -83,16 +79,12 @@ export async function appendHostedExecutionWakeTx(input: {
   }
 
   await appendHostedExecutionWakePayloadTx({
-    eventId: input.eventId,
-    kind: input.kind,
-    occurredAt: input.occurredAt,
-    payload: input.payload,
+    wake: input.wake,
     tx: input.tx,
-    userId: input.userId,
   });
 
   return {
-    eventId: input.eventId,
+    eventId: input.wake.eventId,
   };
 }
 
