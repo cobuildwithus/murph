@@ -16,7 +16,6 @@ import {
   createDefaultRunnerMetaRow,
   projectRunnerStateRecord,
   resolveRunnerNextWakeAt,
-  type RunnerBundleSlotRow,
   type RunnerMetaRow,
   type RunnerStoredBundleState,
 } from "./runner-state-helpers.js";
@@ -30,6 +29,11 @@ import {
 interface BundleRefSwapInput {
   expectedVersion: RunnerBundleVersion;
   nextBundleRef: RunnerStateRecord["bundleRef"];
+}
+
+interface RunnerMetaBundleRow extends RunnerMetaRow {
+  bundle_ref_json: string | null;
+  bundle_version: number;
 }
 
 export interface RunnerLeaseOwnerInput {
@@ -48,7 +52,6 @@ export class RunnerStateStore {
     private readonly state: DurableObjectStateLike,
   ) {
     ensureRunnerStateSchema(this.sql);
-    this.ensureCanonicalBundleSlotRowsSync();
     this.ready = Promise.resolve();
   }
 
@@ -67,7 +70,7 @@ export class RunnerStateStore {
       return userId;
     }
 
-    this.insertMetaRowSync(createDefaultRunnerMetaRow(userId));
+    this.insertMetaRowSync(createDefaultRunnerMetaBundleRow(userId));
     this.userId = userId;
     return userId;
   }
@@ -99,8 +102,9 @@ export class RunnerStateStore {
     await this.bootstrapUser(committed.userId);
 
     const meta = this.requireMetaRowSync();
-    const bundleState = this.selectBundleStateSync();
+    const bundleState = readBundleStateFromMeta(meta);
     assignRunnerBundleRefs(bundleState, committed.bundleRef);
+    writeBundleStateToMeta(meta, bundleState);
     this.rememberLastEventMetaSync(meta, committed.eventId);
     if (leaseOwner?.policy === "same-event") {
       this.clearActiveRunLeaseSync(meta, {
@@ -112,7 +116,6 @@ export class RunnerStateStore {
     this.clearLastErrorMetaSync(meta);
     meta.last_run_at = committed.committedAt;
     this.writeMetaRowSync(meta);
-    this.writeBundleStateSync(bundleState);
 
     return this.readStateFromMetaSync(meta);
   }
@@ -184,9 +187,10 @@ export class RunnerStateStore {
     await this.ready;
 
     const meta = this.requireMetaRowSync();
-    const bundleState = this.selectBundleStateSync();
+    const bundleState = readBundleStateFromMeta(meta);
     assignRunnerBundleRefs(bundleState, nextBundleRef);
-    this.writeBundleStateSync(bundleState);
+    writeBundleStateToMeta(meta, bundleState);
+    this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
   }
@@ -263,6 +267,8 @@ export class RunnerStateStore {
     "bundleRef" | "bundleVersion" | "inFlight" | "userId"
   >> {
     await this.ready;
+    // This is DO-local coordination state for bundle restore and local CAS.
+    // Canonical wake ordering and the committed snapshot fence remain web-owned.
     const record = this.readStateSync();
     return {
       bundleRef: record.bundleRef,
@@ -278,7 +284,7 @@ export class RunnerStateStore {
     await this.ready;
 
     const meta = this.requireMetaRowSync();
-    const bundleState = this.selectBundleStateSync();
+    const bundleState = readBundleStateFromMeta(meta);
     if (bundleState.bundleVersion !== input.expectedVersion) {
       return {
         applied: false,
@@ -287,7 +293,8 @@ export class RunnerStateStore {
     }
 
     assignRunnerBundleRefs(bundleState, input.nextBundleRef);
-    this.writeBundleStateSync(bundleState);
+    writeBundleStateToMeta(meta, bundleState);
+    this.writeMetaRowSync(meta);
     return {
       applied: true,
       record: this.readStateFromMetaSync(meta),
@@ -340,22 +347,23 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
 
-  private readStateFromMetaSync(meta: RunnerMetaRow): RunnerStateRecord {
+  private readStateFromMetaSync(meta: RunnerMetaBundleRow): RunnerStateRecord {
     const projected = projectRunnerStateRecord({
-      bundleState: this.selectBundleStateSync(),
+      bundleState: readBundleStateFromMeta(meta),
       meta,
       run: this.volatileRun ?? this.readPersistedRunStatusSync(meta),
       timeline: this.volatileTimeline,
     });
 
     if (projected.changed) {
-      this.writeBundleStateSync(projected.sanitizedBundleState);
+      writeBundleStateToMeta(meta, projected.sanitizedBundleState);
+      this.writeMetaRowSync(meta);
     }
 
     return projected.record;
   }
 
-  private requireMetaRowSync(): RunnerMetaRow {
+  private requireMetaRowSync(): RunnerMetaBundleRow {
     const row = this.selectMetaRowSync();
     if (row) {
       return row;
@@ -366,7 +374,7 @@ export class RunnerStateStore {
       throw new Error("Hosted runner user is not initialized.");
     }
 
-    const meta = createDefaultRunnerMetaRow(userId);
+    const meta = createDefaultRunnerMetaBundleRow(userId);
     this.insertMetaRowSync(meta);
     return meta;
   }
@@ -385,10 +393,12 @@ export class RunnerStateStore {
     return row.user_id;
   }
 
-  private selectMetaRowSync(): RunnerMetaRow | null {
-    const row = this.sql.exec<RunnerMetaRow>(
+  private selectMetaRowSync(): RunnerMetaBundleRow | null {
+    const row = this.sql.exec<RunnerMetaBundleRow>(
       `SELECT
         user_id,
+        bundle_ref_json,
+        bundle_version,
         active_run_event_id,
         active_run_id,
         active_run_attempt,
@@ -411,11 +421,13 @@ export class RunnerStateStore {
     return row;
   }
 
-  private insertMetaRowSync(meta: RunnerMetaRow): void {
+  private insertMetaRowSync(meta: RunnerMetaBundleRow): void {
     this.sql.exec(
       `INSERT OR REPLACE INTO runner_meta (
         singleton,
         user_id,
+        bundle_ref_json,
+        bundle_version,
         active_run_event_id,
         active_run_id,
         active_run_attempt,
@@ -427,9 +439,11 @@ export class RunnerStateStore {
         last_event_id,
         last_run_at,
         next_wake_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
+      meta.bundle_ref_json ?? null,
+      meta.bundle_version ?? 0,
       meta.active_run_event_id,
       meta.active_run_id,
       meta.active_run_attempt,
@@ -444,7 +458,7 @@ export class RunnerStateStore {
     );
   }
 
-  private writeMetaRowSync(meta: RunnerMetaRow): void {
+  private writeMetaRowSync(meta: RunnerMetaBundleRow): void {
     this.insertMetaRowSync(meta);
     this.userId = meta.user_id;
   }
@@ -517,53 +531,6 @@ export class RunnerStateStore {
     return sameHostedExecutionRun(this.readActiveRunContextSync(meta), owner.run);
   }
 
-  private ensureCanonicalBundleSlotRowsSync(): void {
-    this.sql.exec(
-      `INSERT OR IGNORE INTO runner_bundle_slots (
-        slot,
-        bundle_ref_json,
-        bundle_version
-      ) VALUES (?, ?, ?)`,
-      "vault",
-      null,
-      0,
-    );
-  }
-
-  private selectBundleStateSync(): RunnerStoredBundleState {
-    const bundleState = createDefaultRunnerBundleState();
-
-    for (const row of this.sql.exec<RunnerBundleSlotRow>(
-      `SELECT
-        slot,
-        bundle_ref_json,
-        bundle_version
-      FROM runner_bundle_slots`,
-    ).toArray()) {
-      if (row.slot !== "vault") {
-        continue;
-      }
-
-      bundleState.bundleRefJson = row.bundle_ref_json;
-      bundleState.bundleVersion = row.bundle_version;
-    }
-
-    return bundleState;
-  }
-
-  private writeBundleStateSync(bundleState: RunnerStoredBundleState): void {
-    this.sql.exec(
-      `INSERT OR REPLACE INTO runner_bundle_slots (
-        slot,
-        bundle_ref_json,
-        bundle_version
-      ) VALUES (?, ?, ?)`,
-      "vault",
-      bundleState.bundleRefJson,
-      bundleState.bundleVersion,
-    );
-  }
-
   private clearLastErrorMetaSync(meta: RunnerMetaRow): void {
     meta.last_error_at = null;
     meta.last_error_code = null;
@@ -614,6 +581,29 @@ export class RunnerStateStore {
 
     return sql;
   }
+}
+
+function createDefaultRunnerMetaBundleRow(userId: string): RunnerMetaBundleRow {
+  return {
+    ...createDefaultRunnerMetaRow(userId),
+    bundle_ref_json: null,
+    bundle_version: 0,
+  };
+}
+
+function readBundleStateFromMeta(meta: RunnerMetaBundleRow): RunnerStoredBundleState {
+  const bundleState = createDefaultRunnerBundleState();
+  bundleState.bundleRefJson = meta.bundle_ref_json ?? null;
+  bundleState.bundleVersion = meta.bundle_version ?? 0;
+  return bundleState;
+}
+
+function writeBundleStateToMeta(
+  meta: RunnerMetaBundleRow,
+  bundleState: RunnerStoredBundleState,
+): void {
+  meta.bundle_ref_json = bundleState.bundleRefJson;
+  meta.bundle_version = bundleState.bundleVersion;
 }
 
 function sameHostedExecutionRun(

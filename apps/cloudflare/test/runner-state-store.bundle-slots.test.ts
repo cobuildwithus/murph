@@ -123,43 +123,70 @@ function makeBundleRef(key: string): HostedExecutionBundleRef {
   };
 }
 
-function readBundleSlotRows(db: DatabaseSync): Array<{
+function readRunnerMetaBundleState(db: DatabaseSync): {
   bundle_ref_json: string | null;
   bundle_version: number;
-  slot: string;
-}> {
+} {
   return db.prepare(`
-    SELECT slot, bundle_ref_json, bundle_version
-    FROM runner_bundle_slots
-    ORDER BY slot ASC
-  `).all() as Array<{
+    SELECT bundle_ref_json, bundle_version
+    FROM runner_meta
+    WHERE singleton = 1
+  `).get() as {
     bundle_ref_json: string | null;
     bundle_version: number;
-    slot: string;
-  }>;
+  };
 }
 
-describe("RunnerStateStore bundle slot storage", () => {
-  it("stores the canonical vault bundle slot outside runner_meta for fresh state", async () => {
-    const { db, store } = createRunnerStateStoreHarness();
+function readRunnerMetaColumns(db: DatabaseSync): string[] {
+  return (db.prepare("PRAGMA table_info(runner_meta)").all() as Array<{ name: string }>)
+    .map((column) => column.name);
+}
+
+function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
+  const row = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'runner_bundle_slots'
+  `).get() as { name?: string } | undefined;
+  return row?.name === "runner_bundle_slots";
+}
+
+describe("RunnerStateStore bundle metadata", () => {
+  it("hard-cuts the old bundle slot table and stores the vault bundle ref on runner_meta", async () => {
+    const { db, store } = createRunnerStateStoreHarness((database) => {
+      database.exec(`
+        DROP TABLE IF EXISTS runner_meta;
+        DROP TABLE IF EXISTS runner_bundle_slots;
+        CREATE TABLE runner_meta (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          user_id TEXT NOT NULL,
+          runtime_bootstrapped INTEGER NOT NULL DEFAULT 0,
+          in_flight INTEGER NOT NULL DEFAULT 0,
+          last_error_at TEXT,
+          last_error_code TEXT,
+          last_event_id TEXT,
+          last_run_at TEXT,
+          next_wake_at TEXT
+        );
+        CREATE TABLE runner_bundle_slots (
+          slot TEXT PRIMARY KEY,
+          bundle_ref_json TEXT,
+          bundle_version INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+    });
     await store.bootstrapUser("user-fresh");
 
-    const runnerMetaColumns = db.prepare("PRAGMA table_info(runner_meta)").all() as Array<{
-      name: string;
-    }>;
-    expect(runnerMetaColumns.map((column) => column.name)).not.toContain("vault_bundle_ref_json");
-    expect(runnerMetaColumns.map((column) => column.name)).not.toContain("vault_bundle_version");
-
-    expect(readBundleSlotRows(db)).toEqual([
-      {
-        bundle_ref_json: null,
-        bundle_version: 0,
-        slot: "vault",
-      },
-    ]);
+    expect(readRunnerMetaColumns(db)).toContain("bundle_ref_json");
+    expect(readRunnerMetaColumns(db)).toContain("bundle_version");
+    expect(runnerBundleSlotsTableExists(db)).toBe(false);
+    expect(readRunnerMetaBundleState(db)).toEqual({
+      bundle_ref_json: null,
+      bundle_version: 0,
+    });
   });
 
-  it("keeps compare-and-swap bundle versions in the canonical vault slot row", async () => {
+  it("keeps compare-and-swap bundle versions on runner_meta", async () => {
     const currentVaultRef = makeBundleRef("vault/current");
     const nextVaultRef = makeBundleRef("vault/next");
     const { db, store } = createRunnerStateStoreHarness();
@@ -172,13 +199,10 @@ describe("RunnerStateStore bundle slot storage", () => {
     expect(initial.applied).toBe(true);
     expect(initial.record.bundleRef).toEqual(currentVaultRef);
     expect(initial.record.bundleVersion).toBe(1);
-    expect(readBundleSlotRows(db)).toEqual([
-      {
-        bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
-        bundle_version: 1,
-        slot: "vault",
-      },
-    ]);
+    expect(readRunnerMetaBundleState(db)).toEqual({
+      bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
+      bundle_version: 1,
+    });
 
     const swapped = await store.compareAndSwapBundleRefs({
       expectedVersion: initial.record.bundleVersion,
@@ -196,28 +220,53 @@ describe("RunnerStateStore bundle slot storage", () => {
     expect(rejected.record.bundleVersion).toBe(2);
   });
 
+  it("treats repeated cursor syncs of the same bundle ref as a no-op for the local version", async () => {
+    const currentVaultRef = makeBundleRef("vault/current");
+    const nextVaultRef = makeBundleRef("vault/next");
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bootstrapUser("user-cache");
+
+    const firstSync = await store.syncBundleRefCache(currentVaultRef);
+    expect(firstSync.bundleVersion).toBe(1);
+    expect(readRunnerMetaBundleState(db)).toEqual({
+      bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
+      bundle_version: 1,
+    });
+
+    const repeatedSync = await store.syncBundleRefCache(currentVaultRef);
+    expect(repeatedSync.bundleVersion).toBe(1);
+    expect(readRunnerMetaBundleState(db)).toEqual({
+      bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
+      bundle_version: 1,
+    });
+
+    const changedSync = await store.syncBundleRefCache(nextVaultRef);
+    expect(changedSync.bundleVersion).toBe(2);
+    expect(readRunnerMetaBundleState(db)).toEqual({
+      bundle_ref_json: serializeHostedExecutionBundleRef(nextVaultRef),
+      bundle_version: 2,
+    });
+  });
+
   it("repairs malformed bundle refs without dropping their version", async () => {
     const vaultRef = makeBundleRef("vault/current");
     const { db, store } = createRunnerStateStoreHarness();
     await store.bootstrapUser("user-malformed");
 
     db.prepare(`
-      UPDATE runner_bundle_slots
+      UPDATE runner_meta
       SET bundle_ref_json = ?, bundle_version = ?
-      WHERE slot = ?
-    `).run(JSON.stringify({ key: "missing-required-fields" }), 7, "vault");
+      WHERE singleton = 1
+    `).run(JSON.stringify({ key: "missing-required-fields" }), 7);
 
     const state = await store.readState();
     expect(state.bundleRef).toBeNull();
     expect(state.bundleVersion).toBe(7);
     expect(state.lastError).toContain("Hosted runner cleared malformed bundle ref(s): vault.");
-    expect(readBundleSlotRows(db)).toEqual([
-      {
-        bundle_ref_json: null,
-        bundle_version: 7,
-        slot: "vault",
-      },
-    ]);
+    expect(readRunnerMetaBundleState(db)).toEqual({
+      bundle_ref_json: null,
+      bundle_version: 7,
+    });
 
     const repaired = await store.compareAndSwapBundleRefs({
       expectedVersion: state.bundleVersion,

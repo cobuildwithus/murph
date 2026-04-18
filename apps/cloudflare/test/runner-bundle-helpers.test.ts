@@ -149,12 +149,11 @@ describe("RunnerBundleSync", () => {
       updatedAt: "2026-04-02T00:00:00.000Z",
     };
     sql.exec(
-      `UPDATE runner_bundle_slots
+      `UPDATE runner_meta
         SET bundle_ref_json = ?, bundle_version = ?
-        WHERE slot = ?`,
+        WHERE singleton = 1`,
       JSON.stringify(missingRef),
       1,
-      "vault",
     );
 
     const bundleSync = new RunnerBundleSync(
