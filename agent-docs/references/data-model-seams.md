@@ -298,25 +298,24 @@ This patch:
 **Main refactor risk:** do not answer future caller needs by reviving a wide `HostedMemberAggregate` or by leaking encrypted/blind-index columns through the lookup surface.
 The seam stays healthy only if the lookup result remains nested and privacy-minimized.
 
-### 17. Normalize hosted execution dispatch lifecycle around one cross-boundary outcome owner
+### 17. Keep hosted execution status centered on the web-owned wake/cursor lifecycle
 
-**Seam:** `apps/web/prisma/schema.prisma`, `apps/web/src/lib/hosted-execution/outbox.ts`, `apps/web/src/lib/hosted-onboarding/activation-progress.ts`, `packages/hosted-execution/src/contracts.ts`, `apps/cloudflare/src/user-runner/{runner-queue-store.ts,types.ts}`, `apps/cloudflare/src/user-runner.ts`
+**Seam:** `apps/web/src/lib/hosted-wake/store.ts`, `apps/web/src/lib/hosted-wake/dispatch.ts`, `packages/hosted-execution/src/contracts.ts`, `apps/cloudflare/src/user-runner.ts`
 
-Hosted dispatch had been translated across three overlapping models: transport-local web outbox status, Cloudflare queue presence booleans, and the shared hosted-execution outcome union.
-That made web activation state and event outcome reads reason across multiple models even though only one of them should have been product-facing.
+Hosted execution used to translate across overlapping outbox, queue-presence,
+and dispatch-state models. The current tree is simpler: web-owned
+`HostedWake` / `HostedExecutionCursor` rows are the canonical queue and cursor
+truth, while Cloudflare status is a consumer-facing projection over that
+lifecycle plus local execution residue.
 
-This patch:
+**Why this is simpler:** ordering, committed high-water, and snapshot fences now
+live with the canonical wake/cursor owner instead of being split across a web
+outbox and a Cloudflare queue model.
 
-- adds durable `dispatchState` persistence on `ExecutionOutbox` and stores the shared `HostedExecutionEventDispatchState` union there
-- removes the separate `ExecutionOutbox.status` transport column so queue claim/retry/handoff uses `nextAttemptAt`, claim leases, and `lastError` directly
-- updates web outbox finalization so payload cleanup depends on terminal shared outcomes or terminal local failures instead of `status === dispatched`
-- updates activation progress to derive user-facing completion from `dispatchState` plus optional live Cloudflare status
-- teaches the Cloudflare runner queue to return the shared event dispatch status directly on event-scoped reads instead of leaking raw presence booleans across the boundary
-
-**Why this is simpler:** there is now one cross-boundary outcome vocabulary, and the remaining web-local retry mechanics stay as plain queue fields instead of a second status enum that product code could accidentally depend on.
-
-**Main refactor risk:** keep queue-local observability and retry mechanics app-local.
-If future edits collapse those back into the shared outcome union, the boundary will blur again and duplicate-pending versus duplicate-consumed semantics will get harder to preserve.
+**Main refactor risk:** do not let compatibility status fields such as
+`pendingEventCount`, `poisonedEventIds`, or `backpressuredEventIds` become a
+second durable queue truth. They are compatibility/output fields only; the
+canonical owner remains the web-owned wake/cursor seam.
 
 ### 18. Keep device-sync wake hint subshapes with the device-sync runtime owner
 
@@ -457,17 +456,22 @@ It already does the thing the higher-leverage findings above still need to do.
 
 **Main failure mode if changed poorly:** spreading these definitions back across query, assistant-engine, and CLI would recreate exactly the taxonomy drift and duplicate command metadata the repo has been paying down elsewhere.
 
-#### B. Keep hosted execution outbox payload ownership in `@murphai/hosted-execution` with only a thin web Prisma adapter
+#### B. Keep hosted wake payload ownership split between shared wake contracts and the web-owned storage helper
 
-**Seam:** `packages/hosted-execution/src/outbox-payload.ts`, `apps/web/src/lib/hosted-execution/outbox-payload.ts`
+**Seam:** `packages/hosted-execution/src/{contracts,builders,parsers}.ts`, `apps/web/src/lib/hosted-wake/payload.ts`
 
 This seam is already simple and composable enough.
-The hosted-execution package owns the real payload/storage model (`HostedExecutionOutboxPayload`, `buildHostedExecutionOutboxPayload`, `readHostedExecutionOutboxPayload`, canonical storage selection), while the web layer only wraps it to convert the payload into `Prisma.InputJsonObject`.
+`@murphai/hosted-execution` owns the shared wake kinds, payload schemas, and
+normalization helpers, while the web-owned `HostedWake` store owns the
+ciphertext inline-vs-reference storage policy for durable wake rows.
 
-**Why keep it:** this split respects the trust boundary and avoids a second owner.
-Web does not redefine inline-vs-reference payload semantics; it just adapts the shared owner to Prisma.
+**Why keep it:** this split keeps the shared contract vendor-neutral while
+leaving inline-vs-ref storage policy with the canonical queue owner instead of
+reintroducing a second outbox or Cloudflare-owned payload seam.
 
-**Main failure mode if changed poorly:** moving the payload model back into web or letting Prisma types leak into the shared hosted-execution package would recreate a cross-layer contract fork and make Cloudflare/web rollouts harder to keep aligned.
+**Main failure mode if changed poorly:** reintroducing a dispatch/outbox payload
+model or letting Cloudflare define its own payload storage rules would recreate
+the cross-layer drift the hard cut is meant to delete.
 
 ### 24. Keep locally persisted assistant cron routes and schedules owned by the canonical automation contract
 

@@ -122,7 +122,7 @@ repo/
   identity, routing, billing, email authorization, hosted share payloads,
   device-sync authority, hosted AI usage reconciliation, and the canonical
   `HostedWake` / `HostedExecutionCursor` wake and cursor lifecycle.
-- `apps/cloudflare` owns execution coordination only: authenticated dispatch,
+- `apps/cloudflare` owns execution coordination only: authenticated control wakes,
   per-user lease and stale-result fencing, encrypted hosted workspace snapshots,
   encrypted artifact blobs, encrypted runner-secret blobs, execution journals,
   and other opaque runtime blobs needed to execute one hosted job safely.

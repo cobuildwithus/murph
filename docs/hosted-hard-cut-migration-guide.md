@@ -121,7 +121,7 @@ Recommended end state:
 - `conversation.message`
 - `member.activated`
 - `member.channels.updated`
-- `share.accepted`
+- `vault.share.accepted`
 - `device-sync.wake`
 - `assistant.cron.tick`
 
