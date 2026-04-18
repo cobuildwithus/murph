@@ -10,7 +10,6 @@ export type HostedStorageScope =
   | "artifact"
   | "browser-vault-snapshot"
   | "bundle"
-  | "dispatch-payload"
   | "device-sync-runtime"
   | "email-raw"
   | "email-route"
@@ -278,7 +277,6 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "artifact",
   "browser-vault-snapshot",
   "bundle",
-  "dispatch-payload",
   "device-sync-runtime",
   "email-raw",
   "email-route",
