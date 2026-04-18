@@ -1,4 +1,11 @@
 import { describe, expect, it } from "vitest";
+import {
+  buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionTelegramConversationMessageWake,
+  buildHostedExecutionVaultShareAcceptedWake,
+} from "@murphai/hosted-execution";
 
 import {
   createHostedDispatchPayloadStore,
@@ -15,19 +22,16 @@ describe("hosted dispatch payload store confidentiality", () => {
       key: createTestRootKey(),
       keyId: "k-current",
     });
-    const dispatch = {
-      event: {
-        kind: "linq.message.received",
-        userId: "user_live_123",
-        linqEvent: {
-          body: "super secret gateway message",
-        },
-        linqMessageId: "linq-1",
-        phoneLookupKey: "phone-secret",
-      },
+    const dispatch = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_gateway_1",
+      linqEvent: {
+        body: "super secret gateway message",
+      },
+      linqMessageId: "linq-1",
       occurredAt: "2026-04-03T00:00:00.000Z",
-    } as const;
+      phoneLookupKey: "phone-secret",
+      userId: "user_live_123",
+    });
 
     const payloadRef = await store.writeDispatchPayload(dispatch);
 
@@ -46,35 +50,29 @@ describe("hosted dispatch payload store confidentiality", () => {
       key: createTestRootKey(19),
       keyId: "k-current",
     });
-    const linqDispatch = {
-      event: {
-        kind: "linq.message.received",
-        userId: "user_live_456",
-        linqEvent: {
-          body: "private linq body",
-          nested: {
-            senderPhone: "+15555555555",
-          },
-        },
-        phoneLookupKey: "phone-lookup",
-      },
+    const linqDispatch = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_1",
-      occurredAt: "2026-04-03T00:01:00.000Z",
-    } as const;
-    const telegramDispatch = {
-      event: {
-        kind: "telegram.message.received",
-        userId: "user_live_789",
-        telegramMessage: {
-          messageId: "123",
-          schema: "murph.hosted-telegram-message.v1",
-          text: "private telegram text",
-          threadId: "thread_123",
+      linqEvent: {
+        body: "private linq body",
+        nested: {
+          senderPhone: "+15555555555",
         },
       },
+      occurredAt: "2026-04-03T00:01:00.000Z",
+      phoneLookupKey: "phone-lookup",
+      userId: "user_live_456",
+    });
+    const telegramDispatch = buildHostedExecutionTelegramConversationMessageWake({
       eventId: "evt_telegram_1",
       occurredAt: "2026-04-03T00:02:00.000Z",
-    } as const;
+      telegramMessage: {
+        messageId: "123",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "private telegram text",
+        threadId: "thread_123",
+      },
+      userId: "user_live_789",
+    });
 
     const linqPayloadRef = await store.writeDispatchPayload(linqDispatch);
     const telegramPayloadRef = await store.writeDispatchPayload(telegramDispatch);
@@ -94,18 +92,15 @@ describe("hosted dispatch payload store confidentiality", () => {
       key: createTestRootKey(17),
       keyId: "k-current",
     });
-    const dispatch = {
-      event: {
-        kind: "vault.share.accepted",
-        share: {
-          ownerUserId: "user_share_owner",
-          shareId: "hshare_123",
-        },
-        userId: "user_live_share",
-      },
+    const dispatch = buildHostedExecutionVaultShareAcceptedWake({
       eventId: "evt_share_1",
+      memberId: "user_live_share",
       occurredAt: "2026-04-03T00:04:00.000Z",
-    } as const;
+      share: {
+        ownerUserId: "user_share_owner",
+        shareId: "hshare_123",
+      },
+    });
 
     const payloadRef = await store.writeDispatchPayload(dispatch);
 
@@ -120,21 +115,18 @@ describe("hosted dispatch payload store confidentiality", () => {
       key: createTestRootKey(21),
       keyId: "k-current",
     });
-    const dispatch = {
-      event: {
-        kind: "device-sync.wake",
-        connectionId: "conn_123",
-        hint: {
-          eventType: "sleep.updated",
-          traceId: "trace_123",
-        },
-        provider: "oura",
-        reason: "webhook_hint",
-        userId: "user_live_sync",
-      },
+    const dispatch = buildHostedExecutionDeviceSyncWake({
+      connectionId: "conn_123",
       eventId: "evt_wake_1",
+      hint: {
+        eventType: "sleep.updated",
+        traceId: "trace_123",
+      },
       occurredAt: "2026-04-03T00:05:00.000Z",
-    } as const;
+      provider: "oura",
+      reason: "webhook_hint",
+      userId: "user_live_sync",
+    });
 
     const payloadRef = await store.writeDispatchPayload(dispatch);
 
@@ -160,20 +152,17 @@ describe("hosted dispatch payload store confidentiality", () => {
         "k-previous": previousKey,
       },
     });
-    const dispatch = {
-      event: {
-        kind: "device-sync.wake",
-        connectionId: "conn_rotated",
-        hint: {
-          traceId: "trace_rotated",
-        },
-        provider: "oura",
-        reason: "webhook_hint",
-        userId: "user_rotated_123",
-      },
+    const dispatch = buildHostedExecutionDeviceSyncWake({
+      connectionId: "conn_rotated",
       eventId: "evt_rotated",
+      hint: {
+        traceId: "trace_rotated",
+      },
       occurredAt: "2026-04-03T00:04:00.000Z",
-    } as const;
+      provider: "oura",
+      reason: "webhook_hint",
+      userId: "user_rotated_123",
+    });
 
     const payloadRef = await legacyStore.writeDispatchPayload(dispatch);
 
@@ -203,17 +192,14 @@ describe("hosted dispatch payload store confidentiality", () => {
       key: createTestRootKey(23),
       keyId: "k-current",
     });
-    const dispatch = {
-      event: {
-        kind: "email.message.received",
-        userId: "user_live_email",
-        identityId: "identity_1",
-        rawMessageKey: "raw_message_1",
-        selfAddress: "murph@example.com",
-      },
+    const dispatch = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_email_1",
+      identityId: "identity_1",
       occurredAt: "2026-04-03T00:03:00.000Z",
-    } as const;
+      rawMessageKey: "raw_message_1",
+      selfAddress: "murph@example.com",
+      userId: "user_live_email",
+    });
 
     const payloadRef = await store.writeDispatchPayload(dispatch);
 

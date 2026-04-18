@@ -28,7 +28,19 @@ import type {
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
-import type { HostedExecutionBundlePayload } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
+  buildHostedExecutionVaultShareAcceptedWake,
+  type HostedExecutionBundlePayload,
+  type HostedExecutionFirstContactTarget,
+  type HostedExecutionMemberChannels,
+  type HostedExecutionTelegramMessage,
+  type HostedExecutionWake,
+} from "@murphai/hosted-execution";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
@@ -81,6 +93,83 @@ const MEMBER_CHANNELS_LINQ = {
 let runHostedExecutionJobInternal = createHostedExecutionJobRunner({
   runMode: "in-process",
 });
+
+function createActivationWake(input: {
+  eventId: string;
+  firstContact?: HostedExecutionFirstContactTarget | null;
+  memberChannels: HostedExecutionMemberChannels;
+  occurredAt: string;
+  userId: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId: input.eventId,
+    ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
+    memberChannels: input.memberChannels,
+    memberId: input.userId,
+    occurredAt: input.occurredAt,
+  });
+}
+
+function createChannelsUpdatedWake(input: {
+  eventId: string;
+  memberChannels: HostedExecutionMemberChannels;
+  occurredAt: string;
+  userId: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionMemberChannelsUpdatedWake({
+    eventId: input.eventId,
+    memberChannels: input.memberChannels,
+    memberId: input.userId,
+    occurredAt: input.occurredAt,
+  });
+}
+
+function createCronWake(input: {
+  eventId: string;
+  occurredAt: string;
+  reason: "alarm" | "manual" | "device-sync";
+  userId: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionAssistantCronTickWake(input);
+}
+
+function createTelegramWake(input: {
+  eventId: string;
+  occurredAt: string;
+  telegramMessage: HostedExecutionTelegramMessage;
+  userId: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionTelegramConversationMessageWake(input);
+}
+
+function createEmailWake(input: {
+  eventId: string;
+  identityId: string | null;
+  occurredAt: string;
+  rawMessageKey: string;
+  selfAddress?: string | null;
+  userId: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionEmailConversationMessageWake(input);
+}
+
+function createShareAcceptedWake(input: {
+  eventId: string;
+  occurredAt: string;
+  ownerUserId: string;
+  shareId: string;
+  userId: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionVaultShareAcceptedWake({
+    eventId: input.eventId,
+    memberId: input.userId,
+    occurredAt: input.occurredAt,
+    share: {
+      ownerUserId: input.ownerUserId,
+      shareId: input.shareId,
+    },
+  });
+}
 
 type NodeRunnerTestInput =
   Pick<
@@ -374,15 +463,7 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_123",
-          },
-          eventId: "evt_123",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_123", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
       cleanupPaths.push(workspaceRoot);
@@ -421,28 +502,12 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_123",
-          },
-          eventId: "evt_activation_first",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_first", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
       });
 
       const secondActivation = await runHostedExecutionJob({
         bundles: firstActivation.bundles,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_123",
-          },
-          eventId: "evt_activation_second",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_second", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:05:00.000Z", userId: "member_123" }),
       });
 
       expect(secondActivation.result.summary).toContain("Processed member activation");
@@ -472,15 +537,7 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_EMAIL,
-            userId: "member_email_partial",
-          },
-          eventId: "evt_activation_email_partial",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_email_partial", memberChannels: MEMBER_CHANNELS_EMAIL, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_email_partial" }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-partial-"));
       cleanupPaths.push(workspaceRoot);
@@ -512,21 +569,18 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            firstContact: {
-              channel: "linq",
-              identityId: "hbidx:phone:v1:test",
-              threadId: "chat_123",
-              threadIsDirect: true,
-            },
-            memberChannels: MEMBER_CHANNELS_LINQ,
-            userId: "member_linq_bootstrap",
-          },
+        wake: createActivationWake({
           eventId: "evt_activation_linq_bootstrap",
+          firstContact: {
+            channel: "linq",
+            identityId: "hbidx:phone:v1:test",
+            threadId: "chat_123",
+            threadIsDirect: true,
+          },
+          memberChannels: MEMBER_CHANNELS_LINQ,
           occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+          userId: "member_linq_bootstrap",
+        }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-linq-bootstrap-"));
       cleanupPaths.push(workspaceRoot);
@@ -553,34 +607,23 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            firstContact: {
-              channel: "linq",
-              identityId: "hbidx:phone:v1:test",
-              threadId: "chat_123",
-              threadIsDirect: true,
-            },
-            memberChannels: MEMBER_CHANNELS_LINQ,
-            userId: "member_linq_bootstrap",
-          },
+        wake: createActivationWake({
           eventId: "evt_activation_linq_bootstrap_first",
+          firstContact: {
+            channel: "linq",
+            identityId: "hbidx:phone:v1:test",
+            threadId: "chat_123",
+            threadIsDirect: true,
+          },
+          memberChannels: MEMBER_CHANNELS_LINQ,
           occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+          userId: "member_linq_bootstrap",
+        }),
       });
 
       const secondActivation = await runHostedExecutionJob({
         bundles: firstActivation.bundles,
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_LINQ,
-            userId: "member_linq_bootstrap",
-          },
-          eventId: "evt_activation_linq_bootstrap_second",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_linq_bootstrap_second", memberChannels: MEMBER_CHANNELS_LINQ, occurredAt: "2026-03-26T12:05:00.000Z", userId: "member_linq_bootstrap" }),
       });
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-linq-bootstrap-replay-"));
@@ -608,28 +651,12 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_channel_sync",
-          },
-          eventId: "evt_activation_channel_sync",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_channel_sync", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_channel_sync" }),
       });
 
       const enabled = await runHostedExecutionJob({
         bundles: activation.bundles,
-        dispatch: {
-          event: {
-            kind: "member.channels.updated",
-            memberChannels: MEMBER_CHANNELS_LINQ,
-            userId: "member_channel_sync",
-          },
-          eventId: "evt_member_channels_enabled",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createChannelsUpdatedWake({ eventId: "evt_member_channels_enabled", memberChannels: MEMBER_CHANNELS_LINQ, occurredAt: "2026-03-26T12:05:00.000Z", userId: "member_channel_sync" }),
       });
       const enabledWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-channel-sync-enabled-"));
       cleanupPaths.push(enabledWorkspaceRoot);
@@ -647,15 +674,7 @@ describe("runHostedExecutionJob", () => {
 
       const disabled = await runHostedExecutionJob({
         bundles: enabled.bundles,
-        dispatch: {
-          event: {
-            kind: "member.channels.updated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_channel_sync",
-          },
-          eventId: "evt_member_channels_disabled",
-          occurredAt: "2026-03-26T12:10:00.000Z",
-        },
+        wake: createChannelsUpdatedWake({ eventId: "evt_member_channels_disabled", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:10:00.000Z", userId: "member_channel_sync" }),
       });
       const disabledWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-channel-sync-disabled-"));
       cleanupPaths.push(disabledWorkspaceRoot);
@@ -682,33 +701,12 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_telegram_ingress",
-        },
-        eventId: "evt_activation_telegram_ingress",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_telegram_ingress", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_telegram_ingress" }),
     });
 
     const result = await runHostedExecutionJob({
       bundles: activation.bundles,
-      dispatch: {
-        event: {
-          kind: "telegram.message.received",
-          telegramMessage: {
-            messageId: "1",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "hello from Telegram",
-            threadId: "123",
-          },
-          userId: "member_telegram_ingress",
-        },
-        eventId: "evt_telegram_ingress",
-        occurredAt: "2026-03-26T12:05:00.000Z",
-      },
+      wake: createTelegramWake({ eventId: "evt_telegram_ingress", occurredAt: "2026-03-26T12:05:00.000Z", telegramMessage: { messageId: "1", schema: "murph.hosted-telegram-message.v1", text: "hello from Telegram", threadId: "123" }, userId: "member_telegram_ingress" }),
     });
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-ingress-"));
     cleanupPaths.push(workspaceRoot);
@@ -767,15 +765,7 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_EMAIL,
-            userId: "member_email",
-          },
-          eventId: "evt_activation_email",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_email", memberChannels: MEMBER_CHANNELS_EMAIL, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_email" }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-"));
       cleanupPaths.push(workspaceRoot);
@@ -816,15 +806,7 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_EMAIL,
-            userId: "member_email_no_domain",
-          },
-          eventId: "evt_activation_email_no_domain",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_email_no_domain", memberChannels: MEMBER_CHANNELS_EMAIL, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_email_no_domain" }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-no-domain-"));
       cleanupPaths.push(workspaceRoot);
@@ -869,15 +851,7 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_EMAIL,
-            userId: "member_email_late_env",
-          },
-          eventId: "evt_activation_email_late_env",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_email_late_env", memberChannels: MEMBER_CHANNELS_EMAIL, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_email_late_env" }),
       });
 
       process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
@@ -888,15 +862,7 @@ describe("runHostedExecutionJob", () => {
 
       const result = await runHostedExecutionJob({
         bundles: activation.bundles,
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_email_late_env",
-          },
-          eventId: "evt_tick_email_late_env",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createCronWake({ eventId: "evt_tick_email_late_env", occurredAt: "2026-03-26T12:05:00.000Z", reason: "manual", userId: "member_email_late_env" }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-late-env-"));
       cleanupPaths.push(workspaceRoot);
@@ -930,15 +896,7 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_email_fetch",
-        },
-        eventId: "evt_activation_email_fetch",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_email_fetch", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_email_fetch" }),
     });
 
     const raw = [
@@ -980,16 +938,7 @@ describe("runHostedExecutionJob", () => {
 
       const result = await runHostedExecutionJob({
         bundles: activation.bundles,
-        dispatch: {
-          event: {
-            identityId: "assistant@mail.example.test",
-            kind: "email.message.received",
-            rawMessageKey: "raw_email_123",
-            userId: "member_email_fetch",
-          },
-          eventId: "evt_email_fetch",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createEmailWake({ eventId: "evt_email_fetch", identityId: "assistant@mail.example.test", occurredAt: "2026-03-26T12:05:00.000Z", rawMessageKey: "raw_email_123", userId: "member_email_fetch" }),
       });
 
       expect(result.result.summary).toContain("Persisted hosted email capture");
@@ -1009,15 +958,7 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_email_alias",
-        },
-        eventId: "evt_activation_email_alias",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_email_alias", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_email_alias" }),
     });
 
     const raw = [
@@ -1058,16 +999,7 @@ describe("runHostedExecutionJob", () => {
 
       const result = await runHostedExecutionJob({
         bundles: activation.bundles,
-        dispatch: {
-          event: {
-            identityId: "assistant@mail.example.test",
-            kind: "email.message.received",
-            rawMessageKey: "raw_email_alias",
-            userId: "member_email_alias",
-          },
-          eventId: "evt_email_alias",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createEmailWake({ eventId: "evt_email_alias", identityId: "assistant@mail.example.test", occurredAt: "2026-03-26T12:05:00.000Z", rawMessageKey: "raw_email_alias", userId: "member_email_alias" }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-alias-"));
       cleanupPaths.push(workspaceRoot);
@@ -1108,33 +1040,12 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_telegram",
-        },
-        eventId: "evt_activation_telegram",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_telegram", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_telegram" }),
     });
 
     const result = await runHostedExecutionJob({
       bundles: activation.bundles,
-      dispatch: {
-        event: {
-          kind: "telegram.message.received",
-          telegramMessage: {
-            messageId: "789",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "Hello from hosted Telegram.",
-            threadId: "456",
-          },
-          userId: "member_telegram",
-        },
-        eventId: "evt_telegram",
-        occurredAt: "2026-03-26T12:05:00.000Z",
-      },
+      wake: createTelegramWake({ eventId: "evt_telegram", occurredAt: "2026-03-26T12:05:00.000Z", telegramMessage: { messageId: "789", schema: "murph.hosted-telegram-message.v1", text: "Hello from hosted Telegram.", threadId: "456" }, userId: "member_telegram" }),
     });
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-"));
     cleanupPaths.push(workspaceRoot);
@@ -1249,43 +1160,32 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_telegram_attachment",
-          },
-          eventId: "evt_activation_telegram_attachment",
-          occurredAt: "2026-03-29T09:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_telegram_attachment", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-29T09:00:00.000Z", userId: "member_telegram_attachment" }),
       });
 
       const result = await runHostedExecutionJob({
         bundles: activation.bundles,
-        dispatch: {
-          event: {
-            kind: "telegram.message.received",
-            telegramMessage: {
-              attachments: [
-                {
-                  fileId: "file_123",
-                  fileSize: attachmentBytes.byteLength,
-                  fileUniqueId: "photo_unique_123",
-                  height: 20,
-                  kind: "photo",
-                  width: 20,
-                },
-              ],
-              messageId: "790",
-              schema: "murph.hosted-telegram-message.v1",
-              text: "Photo from hosted Telegram.",
-              threadId: "456",
-            },
-            userId: "member_telegram_attachment",
-          },
+        wake: createTelegramWake({
           eventId: "evt_telegram_attachment",
           occurredAt: "2026-03-29T09:05:00.000Z",
-        },
+          telegramMessage: {
+            attachments: [
+              {
+                fileId: "file_123",
+                fileSize: attachmentBytes.byteLength,
+                fileUniqueId: "photo_unique_123",
+                height: 20,
+                kind: "photo",
+                width: 20,
+              },
+            ],
+            messageId: "790",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "Photo from hosted Telegram.",
+            threadId: "456",
+          },
+          userId: "member_telegram_attachment",
+        }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-attachment-"));
       cleanupPaths.push(workspaceRoot);
@@ -1356,15 +1256,7 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_tick_without_bootstrap",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createCronWake({ eventId: "evt_tick_without_bootstrap", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
     })).rejects.toThrow(
       "Hosted execution for assistant.cron.tick requires member.activated bootstrap first.",
     );
@@ -1376,28 +1268,12 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_123",
-        },
-        eventId: "evt_activation",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
     });
 
     const followUp = await runHostedExecutionJob({
       bundles: activation.bundles,
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_tick",
-        occurredAt: "2026-03-26T12:05:00.000Z",
-      },
+      wake: createCronWake({ eventId: "evt_tick", occurredAt: "2026-03-26T12:05:00.000Z", reason: "manual", userId: "member_123" }),
     });
 
     expect(followUp.result.summary).toContain("Processed assistant cron tick (manual)");
@@ -1409,15 +1285,7 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_artifacts",
-        },
-        eventId: "evt_activation_artifacts",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_artifacts", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_artifacts" }),
     });
     const activationWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-activation-"));
     cleanupPaths.push(activationWorkspaceRoot);
@@ -1488,15 +1356,7 @@ describe("runHostedExecutionJob", () => {
           agentState: encodeHostedBundleBase64(snapshot.agentStateBundle),
           vault: encodeHostedBundleBase64(snapshot.vaultBundle),
         },
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_artifacts",
-          },
-          eventId: "evt_artifact_tick",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createCronWake({ eventId: "evt_artifact_tick", occurredAt: "2026-03-26T12:05:00.000Z", reason: "manual", userId: "member_artifacts" }),
       });
 
       expect(requests).toEqual([]);
@@ -1539,15 +1399,7 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_artifacts_missing",
-        },
-        eventId: "evt_activation_artifacts_missing",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_artifacts_missing", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_artifacts_missing" }),
     });
     const activationWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-missing-"));
     cleanupPaths.push(activationWorkspaceRoot);
@@ -1643,15 +1495,7 @@ describe("runHostedExecutionJob", () => {
           agentState: encodeHostedBundleBase64(snapshot.agentStateBundle),
           vault: encodeHostedBundleBase64(snapshot.vaultBundle),
         },
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_artifacts_missing",
-          },
-          eventId: "evt_artifact_missing_tick",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createCronWake({ eventId: "evt_artifact_missing_tick", occurredAt: "2026-03-26T12:05:00.000Z", reason: "manual", userId: "member_artifacts_missing" }),
       })).rejects.toThrow(
         `Hosted runner artifact fetch failed for ${artifactHash}.`,
       );
@@ -1696,31 +1540,12 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_456",
-        },
-        eventId: "evt_activation_share",
-        occurredAt: "2026-03-26T12:25:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_share", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:25:00.000Z", userId: "member_456" }),
     });
 
     const result = await runHostedExecutionJob({
       bundles: activation.bundles,
-      dispatch: {
-        event: {
-          kind: "vault.share.accepted",
-          share: {
-            ownerUserId: "member_sender",
-            shareId: "share_123",
-          },
-          userId: "member_456",
-        },
-        eventId: "evt_share_123",
-        occurredAt: "2026-03-26T12:30:00.000Z",
-      },
+      wake: createShareAcceptedWake({ eventId: "evt_share_123", occurredAt: "2026-03-26T12:30:00.000Z", ownerUserId: "member_sender", shareId: "share_123", userId: "member_456" }),
       sharePack: {
         ownerUserId: "member_sender",
         pack,
@@ -1783,31 +1608,12 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_proxy",
-          },
-          eventId: "evt_activation_share_proxy",
-          occurredAt: "2026-03-26T12:25:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_activation_share_proxy", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:25:00.000Z", userId: "member_proxy" }),
       });
 
       const result = await runHostedExecutionJob({
         bundles: activation.bundles,
-        dispatch: {
-          event: {
-            kind: "vault.share.accepted",
-            share: {
-              ownerUserId: "member_sender",
-              shareId: "share_proxy_123",
-            },
-            userId: "member_proxy",
-          },
-          eventId: "evt_share_proxy_123",
-          occurredAt: "2026-03-26T12:30:00.000Z",
-        },
+        wake: createShareAcceptedWake({ eventId: "evt_share_proxy_123", occurredAt: "2026-03-26T12:30:00.000Z", ownerUserId: "member_sender", shareId: "share_proxy_123", userId: "member_proxy" }),
         sharePack: {
           ownerUserId: "member_sender",
           pack,
@@ -1844,15 +1650,7 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_isolated_env",
-          },
-          eventId: "evt_isolated_env",
-          occurredAt: "2026-03-29T10:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_isolated_env", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-29T10:00:00.000Z", userId: "member_isolated_env" }),
         forwardedEnv: {
           NODE_OPTIONS: "--definitely-invalid-node-option",
         },
@@ -1866,15 +1664,7 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_123",
-        },
-        eventId: "evt_user_env",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_user_env", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
       userEnv: {
         OPENAI_API_KEY: "sk-user",
         XAI_API_KEY: "xai-user",
@@ -1902,15 +1692,7 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_usage_proxy",
-        },
-        eventId: "evt_activation_usage_proxy",
-        occurredAt: "2026-03-29T10:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_activation_usage_proxy", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-29T10:00:00.000Z", userId: "member_usage_proxy" }),
     });
     const activationWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-usage-proxy-seed-"));
     cleanupPaths.push(activationWorkspaceRoot);
@@ -1974,15 +1756,7 @@ describe("runHostedExecutionJob", () => {
           agentState: encodeHostedBundleBase64(snapshot.agentStateBundle),
           vault: encodeHostedBundleBase64(snapshot.vaultBundle),
         },
-        dispatch: {
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_usage_proxy",
-          },
-          eventId: "evt_usage_proxy_export",
-          occurredAt: "2026-03-29T10:06:00.000Z",
-        },
+        wake: createCronWake({ eventId: "evt_usage_proxy_export", occurredAt: "2026-03-29T10:06:00.000Z", reason: "manual", userId: "member_usage_proxy" }),
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-usage-proxy-"));
       cleanupPaths.push(workspaceRoot);
@@ -2024,15 +1798,7 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_123",
-          },
-          eventId: "evt_user_env_restore",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_user_env_restore", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:05:00.000Z", userId: "member_123" }),
         userEnv: {
           CUSTOM_API_KEY: "custom-user-key",
         },
@@ -2068,7 +1834,7 @@ describe("runHostedExecutionJob", () => {
         startedInvocationCount += 1;
       },
       runIsolated: async (input) => {
-        const userId = input.job.request.dispatch.event.userId;
+        const userId = input.job.request.wake.userId;
         const runtime = input.job.runtime ?? {};
         seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
         if (input.job.request.resume) {
@@ -2120,15 +1886,7 @@ describe("runHostedExecutionJob", () => {
         commit: {
           bundleRefs: { agentState: null, vault: null },
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_1",
-          },
-          eventId: "evt_one",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_one", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_1" }),
         userEnv: {
           CUSTOM_API_KEY: "user-one-key",
         },
@@ -2142,15 +1900,7 @@ describe("runHostedExecutionJob", () => {
         commit: {
           bundleRefs: { agentState: null, vault: null },
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_2",
-          },
-          eventId: "evt_two",
-          occurredAt: "2026-03-26T12:00:01.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_two", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:01.000Z", userId: "member_2" }),
         userEnv: {
           CUSTOM_API_KEY: "user-two-key",
         },
@@ -2271,15 +2021,7 @@ describe("runHostedExecutionJob", () => {
           vault: null,
         },
       },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          userId: "member_123",
-        },
-        eventId: "evt_outbox",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createActivationWake({ eventId: "evt_outbox", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
     });
 
     expect(fetchCalls).toEqual([
@@ -2393,15 +2135,7 @@ describe("runHostedExecutionJob", () => {
             vault: null,
           },
         },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: MEMBER_CHANNELS_NONE,
-            userId: "member_123",
-          },
-          eventId: "evt_outbox_send",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
+        wake: createActivationWake({ eventId: "evt_outbox_send", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
       });
 
       expect(fetchCalls).toEqual([]);
@@ -2530,15 +2264,7 @@ describe("runHostedExecutionJob", () => {
           vault: null,
         },
       },
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_outbox_resume",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createCronWake({ eventId: "evt_outbox_resume", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
       resume: {
         committedResult: {
           assistantDeliveryEffects: [
@@ -2704,15 +2430,7 @@ describe("runHostedExecutionJob", () => {
           vault: null,
         },
       },
-      dispatch: {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_outbox_resume_non_idempotent",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
+      wake: createCronWake({ eventId: "evt_outbox_resume_non_idempotent", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
       resume: {
         committedResult: {
           assistantDeliveryEffects: [

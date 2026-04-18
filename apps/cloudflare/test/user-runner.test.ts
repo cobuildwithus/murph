@@ -10,13 +10,15 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 import {
-  buildHostedExecutionWakeFromDispatch,
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
   deriveHostedExecutionErrorCode,
   parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution";
 import type {
-  HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
+  HostedExecutionWake,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -76,12 +78,12 @@ import {
 const describe = baseDescribe.sequential;
 
 class HostedUserRunner extends BaseHostedUserRunner {
-  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
-    return this.enqueueHostedWake(buildHostedExecutionWakeFromDispatch(input));
+  wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
+    return this.enqueueHostedWake(input);
   }
 
-  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
-    return this.enqueueHostedWakeWithOutcome(buildHostedExecutionWakeFromDispatch(input));
+  wakeWithOutcome(input: HostedExecutionWake): Promise<HostedExecutionDispatchResult> {
+    return this.enqueueHostedWakeWithOutcome(input);
   }
 }
 
@@ -597,15 +599,7 @@ describe("HostedUserRunner", () => {
       vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
       const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-      const status = await runner.dispatch({
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_recovered_gc",
-        },
-        eventId: "evt_recovered_gc",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      });
+      const status = await runner.wake(createWake("evt_recovered_gc", "member_recovered_gc"));
 
       expect(fetchMock).not.toHaveBeenCalled();
       expect(status.lastError).toBeNull();
@@ -749,7 +743,7 @@ describe("HostedUserRunner", () => {
       pendingEvents: [{
         attempts: 1,
         availableAt: "2026-03-26T12:00:00.000Z",
-        dispatch: createDispatch("evt_gateway_recovery"),
+        dispatch: createWake("evt_gateway_recovery"),
         enqueuedAt: "2026-03-26T12:00:00.000Z",
         lastError: "lost ack",
       }],
@@ -791,7 +785,7 @@ describe("HostedUserRunner", () => {
     });
 
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const status = await runner.dispatch(createDispatch("evt_gateway_recovery"));
+    const status = await runner.wake(createWake("evt_gateway_recovery"));
 
     expect(status.pendingEventCount).toBe(1);
     expect(status.retryingEventId).toBe("evt_gateway_recovery");
@@ -809,11 +803,11 @@ describe("HostedUserRunner", () => {
       },
     };
     const runner = new HostedUserRunner(storage.state, rotatedEnvironment, bucket.api);
-    const dispatch = createDispatch("evt_rotated_commit_recovery");
+    const dispatch = createWake("evt_rotated_commit_recovery");
     const crypto = await resolveHostedUserCryptoContextForTest({
       bucket,
       environment: rotatedEnvironment,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
 
     await seedRunnerQueueState({
@@ -831,7 +825,7 @@ describe("HostedUserRunner", () => {
       ],
       retryingEventId: dispatch.eventId,
       storage,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
 
     await createHostedExecutionJournalStore({
@@ -839,7 +833,7 @@ describe("HostedUserRunner", () => {
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
-    }).writeCommittedResult(dispatch.event.userId, dispatch.eventId, {
+    }).writeCommittedResult(dispatch.userId, dispatch.eventId, {
       assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-26T12:00:01.000Z",
@@ -850,13 +844,13 @@ describe("HostedUserRunner", () => {
         eventsHandled: 1,
         summary: "recovered",
       },
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
 
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
 
-    const status = await runner.dispatch(dispatch);
+    const status = await runner.wake(dispatch);
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(status.pendingEventCount).toBe(0);
@@ -869,7 +863,7 @@ describe("HostedUserRunner", () => {
         key: crypto.rootKey,
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
-      }).readCommittedResult(dispatch.event.userId, dispatch.eventId),
+      }).readCommittedResult(dispatch.userId, dispatch.eventId),
     ).resolves.toBeNull();
   });
 
@@ -904,19 +898,7 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    const status = await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const status = await runner.wake(createActivationWake("evt_123", "member_123"));
 
     expect(status.userId).toBe("member_123");
     expect(status.lastEventId).toBe("evt_123");
@@ -991,19 +973,7 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    const status = await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_native_container",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const status = await runner.wake(createActivationWake("evt_native_container", "member_123"));
 
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
@@ -1052,16 +1022,12 @@ describe("HostedUserRunner", () => {
 
     expect(bucket.keys().filter((key) => key.includes("/messages/"))).toHaveLength(1);
 
-    await runner.dispatch({
-      event: {
-        identityId: "assistant@mail.example.test",
-        kind: "email.message.received",
-        rawMessageKey,
-        userId,
-      },
-      eventId: `email:${rawMessageKey}`,
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    await runner.wake(createEmailWake({
+      eventId: `email:`,
+      identityId: "assistant@mail.example.test",
+      rawMessageKey,
+      userId,
+    }));
 
     expect(bucket.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
@@ -1080,16 +1046,13 @@ describe("HostedUserRunner", () => {
       plaintext: new TextEncoder().encode("From: alice@example.test\r\n\r\nrecovered"),
       userId,
     });
-    const dispatch = {
-      event: {
-        identityId: "assistant@mail.example.test",
-        kind: "email.message.received" as const,
-        rawMessageKey,
-        userId,
-      },
-      eventId: `email:${rawMessageKey}`,
+    const dispatch = createEmailWake({
+      eventId: `email:`,
+      identityId: "assistant@mail.example.test",
       occurredAt: "2026-03-26T12:00:00.000Z",
-    };
+      rawMessageKey,
+      userId,
+    });
 
     await seedRunnerQueueState({
       runtimeBootstrapped: true,
@@ -1141,7 +1104,7 @@ describe("HostedUserRunner", () => {
 
     expect(bucket.keys().filter((key) => key.includes("/messages/"))).toHaveLength(1);
 
-    const status = await runner.dispatch(dispatch);
+    const status = await runner.wake(dispatch);
 
     expect(status.pendingEventCount).toBe(0);
     expect(bucket.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
@@ -1200,19 +1163,7 @@ describe("HostedUserRunner", () => {
       userId: "member_123",
     });
 
-    await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_native_runtime_env",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    await runner.wake(createActivationWake("evt_native_runtime_env", "member_123"));
 
     const invokeRequest = storage.runnerContainerFetch.mock.calls.find(([input]) => {
       const request = input instanceof Request ? input : new Request(String(input));
@@ -1331,7 +1282,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    await runner.dispatch(createDispatch("evt_commit_callback"));
+    await runner.wake(createWake("evt_commit_callback"));
 
     const invokeCall = storage.runnerContainerFetch.mock.calls.find(([input]) => {
       const request = input instanceof Request ? input : new Request(input);
@@ -1403,12 +1354,12 @@ describe("HostedUserRunner", () => {
       },
       userId: "member_123",
     });
-    await runner.dispatch(createDispatch("evt_user_env_set"));
+    await runner.wake(createWake("evt_user_env_set"));
     await writeRunnerSecretsForTest({
       env: {},
       userId: "member_123",
     });
-    await runner.dispatch(createDispatch("evt_user_env_cleared"));
+    await runner.wake(createWake("evt_user_env_cleared"));
 
     const invokePayloads = await Promise.all(
       storage.runnerContainerFetch.mock.calls
@@ -1494,19 +1445,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const status = await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_final_bundles",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const status = await runner.wake(createActivationWake("evt_final_bundles", "member_123"));
 
     expect(status.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
@@ -1646,15 +1585,7 @@ describe("HostedUserRunner", () => {
       );
       const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-      const status = await runner.dispatch({
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_cleanup_failure",
-        },
-        eventId: "evt_cleanup_failure",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      });
+      const status = await runner.wake(createWake("evt_cleanup_failure", "member_cleanup_failure"));
 
       expect(status.lastError).toBeNull();
       expect(status.pendingEventCount).toBe(0);
@@ -1712,19 +1643,7 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    const status = await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_finalized_recovery",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const status = await runner.wake(createActivationWake("evt_finalized_recovery", "member_123"));
 
     expect(status.lastError).toBeNull();
     expect(status.pendingEventCount).toBe(0);
@@ -1805,19 +1724,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const firstStatus = await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_finalize_retry",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const firstStatus = await runner.wake(createActivationWake("evt_finalize_retry", "member_123"));
     expect(firstStatus.pendingEventCount).toBe(1);
     expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
     expect(firstStatus.timeline?.at(-1)).toMatchObject({
@@ -1841,15 +1748,7 @@ describe("HostedUserRunner", () => {
   it("leaves committed pending crash recovery to the hosted web callback path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_resume_after_crash",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    };
+    const dispatch = createWake("evt_resume_after_crash", "member_123", "2026-03-26T12:00:00.000Z");
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
       summary: "committed",
@@ -1879,12 +1778,12 @@ describe("HostedUserRunner", () => {
         lastError: null,
       }],
       storage,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     const crypto = await resolveHostedUserCryptoContextForTest({
       bucket,
       environment,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     await persistHostedExecutionCommit({
       bucket: bucket.api,
@@ -1898,7 +1797,7 @@ describe("HostedUserRunner", () => {
         bundle: committedPayload.bundles.vault,
         result: committedPayload.result,
       },
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
 
     const fetchSpy = vi.fn(async (_url, init) => {
@@ -1936,15 +1835,7 @@ describe("HostedUserRunner", () => {
   it("does not launch a second resumed run while the first runner is still alive after commit", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_live_runner_guard",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    };
+    const dispatch = createWake("evt_live_runner_guard", "member_123", "2026-03-26T12:00:00.000Z");
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
       summary: "committed",
@@ -1991,7 +1882,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const firstDispatch = runner.dispatch(dispatch);
+    const firstDispatch = runner.wake(dispatch);
     await firstCommitRecorded.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
@@ -2006,15 +1897,7 @@ describe("HostedUserRunner", () => {
   it("does not steal a live commit lease after a runner restart before finalize completes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_restart_live_commit_guard",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    };
+    const dispatch = createWake("evt_restart_live_commit_guard", "member_123", "2026-03-26T12:00:00.000Z");
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
       summary: "committed",
@@ -2061,7 +1944,7 @@ describe("HostedUserRunner", () => {
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(firstRunner, "member_123");
 
-    const firstDispatch = firstRunner.dispatch(dispatch);
+    const firstDispatch = firstRunner.wake(dispatch);
     await firstCommitRecorded.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
@@ -2080,15 +1963,7 @@ describe("HostedUserRunner", () => {
   it("does not clear a live commit lease when the same event is redispatched before finalize completes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_restart_dispatch_guard",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    };
+    const dispatch = createWake("evt_restart_dispatch_guard", "member_123", "2026-03-26T12:00:00.000Z");
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
       summary: "committed",
@@ -2135,12 +2010,12 @@ describe("HostedUserRunner", () => {
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(firstRunner, "member_123");
 
-    const firstDispatch = firstRunner.dispatch(dispatch);
+    const firstDispatch = firstRunner.wake(dispatch);
     await firstCommitRecorded.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const duplicateStatus = await restartedRunner.dispatch(dispatch);
+    const duplicateStatus = await restartedRunner.wake(dispatch);
 
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
     expect(duplicateStatus).toMatchObject({
@@ -2204,9 +2079,9 @@ describe("HostedUserRunner", () => {
 
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatch = createDispatch("evt_long_finalize_lease");
+    const dispatch = createWake("evt_long_finalize_lease");
 
-    const firstDispatch = runner.dispatch(dispatch);
+    const firstDispatch = runner.wake(dispatch);
     await commitInvokeStarted.promise;
 
     vi.setSystemTime(new Date("2026-03-26T12:00:20.000Z"));
@@ -2263,30 +2138,10 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const first = await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_first",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const first = await runner.wake(createActivationWake("evt_first", "member_123"));
     const writeCountAfterFirstRun = bucket.putCount();
 
-    const second = await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_second",
-      occurredAt: "2026-03-26T12:01:00.000Z",
-    });
+    const second = await runner.wake(createWake("evt_second", "member_123"));
 
     expect(second.bundleRef).toEqual(first.bundleRef);
     expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 4);
@@ -2315,15 +2170,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const first = await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_retry_1",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const first = await runner.wake(createWake("evt_retry_1", "member_123"));
 
     expect(first.lastError).toBe("Hosted runner container returned an HTTP error.");
     expect(first.lastErrorCode).toBe("runner_http_error");
@@ -2385,15 +2232,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const status = await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_secret_failure",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const status = await runner.wake(createWake("evt_secret_failure", "member_123"));
 
     expect(status.lastError).toBe("Hosted execution authorization failed.");
     expect(status.lastErrorCode).toBe("authorization_error");
@@ -2438,14 +2277,14 @@ describe("HostedUserRunner", () => {
         {
           attempts: 0,
           availableAt: "2026-03-26T12:00:00.000Z",
-          dispatch: createDispatch("evt_retry_head"),
+          dispatch: createWake("evt_retry_head"),
           enqueuedAt: "2026-03-26T12:00:00.000Z",
           lastError: null,
         },
         {
           attempts: 0,
           availableAt: "2026-03-26T12:00:00.000Z",
-          dispatch: createDispatch("evt_tail"),
+          dispatch: createWake("evt_tail"),
           enqueuedAt: "2026-03-26T12:00:01.000Z",
           lastError: null,
         },
@@ -2501,18 +2340,10 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_lost_response",
-      occurredAt: "2026-03-26T12:15:00.000Z",
-    };
+    const dispatch = createWake("evt_lost_response", "member_123", "2026-03-26T12:15:00.000Z");
 
-    const first = await runner.dispatch(dispatch);
-    const second = await runner.dispatch(dispatch);
+    const first = await runner.wake(dispatch);
+    const second = await runner.wake(dispatch);
 
     expect(first.pendingEventCount).toBe(0);
     expect(first.lastError).toBeNull();
@@ -2524,10 +2355,10 @@ describe("HostedUserRunner", () => {
   it("resolves duplicate queued wakes through the canonical web wake queue", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatch = createDispatch("evt_duplicate_pending");
+    const dispatch = createWake("evt_duplicate_pending");
     await appendTestHostedWake({
       bucket: bucket.api,
-      dispatch,
+      wake: dispatch,
     });
     const fetchMock = vi.fn(async (url, init) => {
       const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
@@ -2547,7 +2378,7 @@ describe("HostedUserRunner", () => {
     });
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
 
-    const result = await runner.dispatchWithOutcome(dispatch);
+    const result = await runner.wakeWithOutcome(dispatch);
 
     expect(result.event).toEqual({
       eventId: "evt_duplicate_pending",
@@ -2579,14 +2410,14 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatch = createDispatch("evt_duplicate_consumed");
+    const dispatch = createWake("evt_duplicate_consumed");
 
-    const first = await runner.dispatchWithOutcome(dispatch);
+    const first = await runner.wakeWithOutcome(dispatch);
     const invokesAfterFirstDispatch = countRunnerContainerCalls(
       storage.runnerContainerFetch,
       "/internal/invoke",
     );
-    const second = await runner.dispatchWithOutcome(dispatch);
+    const second = await runner.wakeWithOutcome(dispatch);
 
     expect(first.event.state).toBe("completed");
     expect(second.event).toEqual({
@@ -2621,9 +2452,9 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatch = createDispatch("evt_duplicate_consumed_status_fallback");
+    const dispatch = createWake("evt_duplicate_consumed_status_fallback");
 
-    const first = await runner.dispatchWithOutcome(dispatch);
+    const first = await runner.wakeWithOutcome(dispatch);
     const invokesAfterFirstDispatch = countRunnerContainerCalls(
       storage.runnerContainerFetch,
       "/internal/invoke",
@@ -2635,7 +2466,7 @@ describe("HostedUserRunner", () => {
       "readHostedWakeStatus",
     );
     readHostedWakeStatusSpy.mockResolvedValueOnce(null);
-    const second = await runner.dispatchWithOutcome(dispatch);
+    const second = await runner.wakeWithOutcome(dispatch);
 
     expect(first.event.state).toBe("completed");
     expect(second.event).toEqual({
@@ -2652,10 +2483,10 @@ describe("HostedUserRunner", () => {
   });
 
   it("reports poisoned events through the shared dispatch outcome surface without rerunning them", async () => {
-    const dispatch = createDispatch("evt_duplicate_poisoned");
+    const dispatch = createWake("evt_duplicate_poisoned");
     const appended = await appendTestHostedWake({
       bucket: bucket.api,
-      dispatch,
+      wake: dispatch,
     });
     await seedRunnerQueueState({
       bucket,
@@ -2663,7 +2494,7 @@ describe("HostedUserRunner", () => {
       lastError: "Hosted runner container returned an HTTP error.",
       lastErrorAt: "2026-03-26T12:00:30.000Z",
       storage,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     await quarantineTestHostedWake({
       body: {
@@ -2671,10 +2502,10 @@ describe("HostedUserRunner", () => {
         wakeId: appended.wake.id,
       },
       bucket: bucket.api,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await seedManagedUserCryptoForTest(runner, dispatch.event.userId);
+    await seedManagedUserCryptoForTest(runner, dispatch.userId);
     const replayFetch = vi.fn(async (url, init) => {
       const hostedWakeResponse = await maybeCreateHostedWakeControlResponse({
         bucket,
@@ -2689,7 +2520,7 @@ describe("HostedUserRunner", () => {
     });
     vi.stubGlobal("fetch", replayFetch);
 
-    const replayed = await runner.dispatchWithOutcome(dispatch);
+    const replayed = await runner.wakeWithOutcome(dispatch);
 
     expect(replayed.event).toEqual({
       eventId: "evt_duplicate_poisoned",
@@ -2722,17 +2553,9 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_missing_commit",
-      occurredAt: "2026-03-26T12:18:00.000Z",
-    };
+    const dispatch = createWake("evt_missing_commit", "member_123", "2026-03-26T12:18:00.000Z");
 
-    const first = await runner.dispatch(dispatch);
+    const first = await runner.wake(dispatch);
 
     expect(first.pendingEventCount).toBe(1);
     expect(first.retryingEventId).toBe("evt_missing_commit");
@@ -2742,7 +2565,7 @@ describe("HostedUserRunner", () => {
     const crypto = await resolveHostedUserCryptoContextForTest({
       bucket,
       environment,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     await persistHostedExecutionCommit({
       bucket: bucket.api,
@@ -2759,7 +2582,7 @@ describe("HostedUserRunner", () => {
           summary: "ok",
         },
       },
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     await persistHostedExecutionFinalBundles({
       bucket: bucket.api,
@@ -2770,10 +2593,10 @@ describe("HostedUserRunner", () => {
       payload: {
         bundle: Buffer.from("vault").toString("base64"),
       },
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
 
-    const second = await runner.dispatch(dispatch);
+    const second = await runner.wake(dispatch);
 
     expect(second.pendingEventCount).toBe(0);
     expect(second.retryingEventId).toBeNull();
@@ -2783,15 +2606,7 @@ describe("HostedUserRunner", () => {
 
   it("applies a prefinalized event on retry without rerunning side effects", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_ack_lost",
-      occurredAt: "2026-03-26T12:20:00.000Z",
-    };
+    const dispatch = createWake("evt_ack_lost", "member_123", "2026-03-26T12:20:00.000Z");
     await seedRunnerQueueState({
       runtimeBootstrapped: false,
       bucket,
@@ -2809,12 +2624,12 @@ describe("HostedUserRunner", () => {
       ],
       retryingEventId: dispatch.eventId,
       storage,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     const crypto = await resolveHostedUserCryptoContextForTest({
       bucket,
       environment,
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     await persistHostedExecutionCommit({
       bucket: bucket.api,
@@ -2831,7 +2646,7 @@ describe("HostedUserRunner", () => {
           summary: "ok",
         },
       },
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     await persistHostedExecutionFinalBundles({
       bucket: bucket.api,
@@ -2842,12 +2657,12 @@ describe("HostedUserRunner", () => {
       payload: {
         bundle: Buffer.from("vault").toString("base64"),
       },
-      userId: dispatch.event.userId,
+      userId: dispatch.userId,
     });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchMock }));
 
-    const status = await runner.dispatch(dispatch);
+    const status = await runner.wake(dispatch);
 
     expect(status.pendingEventCount).toBe(0);
     expect(status.retryingEventId).toBeNull();
@@ -2858,7 +2673,7 @@ describe("HostedUserRunner", () => {
         bucket: bucket.api,
         key: environment.platformEnvelopeKey,
         keyId: environment.platformEnvelopeKeyId,
-      }).readCommittedResult(dispatch.event.userId, dispatch.eventId),
+      }).readCommittedResult(dispatch.userId, dispatch.eventId),
     ).resolves.toBeNull();
   });
 
@@ -2879,15 +2694,7 @@ describe("HostedUserRunner", () => {
     }, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const status = await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_per_run_runner_token",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    const status = await runner.wake(createWake("evt_per_run_runner_token", "member_123"));
 
     expect(status.pendingEventCount).toBe(0);
     expect(status.poisonedEventIds).toEqual([]);
@@ -2910,27 +2717,11 @@ describe("HostedUserRunner", () => {
 
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(firstRunner, "member_123");
-    await firstRunner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_restart_safe",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    await firstRunner.wake(createWake("evt_restart_safe", "member_123"));
 
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     vi.setSystemTime(new Date("2026-03-26T12:30:00.000Z"));
-    await restartedRunner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_restart_safe",
-      occurredAt: "2026-03-26T12:30:00.000Z",
-    });
+    await restartedRunner.wake(createWake("evt_restart_safe", "member_123"));
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
@@ -2947,29 +2738,13 @@ describe("HostedUserRunner", () => {
 
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(firstRunner, "member_123");
-    await firstRunner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_ttl_expiry",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    await firstRunner.wake(createWake("evt_ttl_expiry", "member_123"));
 
     vi.setSystemTime(new Date("2026-04-26T12:00:01.000Z"));
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
 
     await restartedRunner.status();
-    await restartedRunner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_ttl_expiry",
-      occurredAt: "2026-04-26T12:00:01.000Z",
-    });
+    await restartedRunner.wake(createWake("evt_ttl_expiry", "member_123"));
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
@@ -2977,10 +2752,10 @@ describe("HostedUserRunner", () => {
   it("keeps poisoned wakes blocked even after the old replay TTL window passes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = createDispatch("evt_poison_expiry");
+    const dispatch = createWake("evt_poison_expiry");
     const appended = await appendTestHostedWake({
       bucket: bucket.api,
-      dispatch,
+      wake: dispatch,
     });
     await seedRunnerQueueState({
       bucket,
@@ -3014,7 +2789,7 @@ describe("HostedUserRunner", () => {
       }),
     );
     vi.setSystemTime(new Date("2026-04-02T12:00:31.000Z"));
-    const replayed = await runner.dispatchWithOutcome(dispatch);
+    const replayed = await runner.wakeWithOutcome(dispatch);
 
     expect(replayed.event).toEqual({
       eventId: "evt_poison_expiry",
@@ -3098,7 +2873,7 @@ describe("HostedUserRunner", () => {
       }),
     );
 
-    await runner.dispatch(createDispatch("evt_rotated_user_env"));
+    await runner.wake(createWake("evt_rotated_user_env"));
 
     const invokePayloads = await Promise.all(
       storage.runnerContainerFetch.mock.calls
@@ -3182,19 +2957,7 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_bootstrap",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    await runner.wake(createActivationWake("evt_bootstrap", "member_123"));
     const writesAfterBootstrap = bucket.putCount();
 
     await writeRunnerSecretsForTest({
@@ -3258,19 +3021,7 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    await runner.dispatch({
-      event: {
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: false,
-        },
-        userId: "member_123",
-      },
-      eventId: "evt_alarm_clear",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    });
+    await runner.wake(createActivationWake("evt_alarm_clear", "member_123"));
     expect(storage.lastAlarm).toBeNull();
     storage.lastAlarm = Date.parse("2026-03-26T12:05:00.000Z");
     await runner.alarm();
@@ -3471,7 +3222,7 @@ async function seedRunnerQueueState(
     pendingEvents?: Array<{
       attempts: number;
       availableAt: string;
-      dispatch: {
+      dispatch: HostedExecutionWake | {
         event: Record<string, unknown>;
         eventId: string;
         occurredAt: string;
@@ -3644,16 +3395,50 @@ function createGatewayProjectionSnapshot(input: {
   };
 }
 
-function createDispatch(eventId: string) {
-  return {
-    event: {
-      kind: "assistant.cron.tick" as const,
-      reason: "manual" as const,
-      userId: "member_123",
-    },
+function createWake(
+  eventId: string,
+  userId = "member_123",
+  occurredAt = "2026-03-26T12:00:00.000Z",
+): HostedExecutionWake {
+  return buildHostedExecutionAssistantCronTickWake({
     eventId,
-    occurredAt: "2026-03-26T12:00:00.000Z",
-  };
+    occurredAt,
+    reason: "manual",
+    userId,
+  });
+}
+
+function createActivationWake(
+  eventId: string,
+  userId = "member_123",
+  occurredAt = "2026-03-26T12:00:00.000Z",
+): HostedExecutionWake {
+  return buildHostedExecutionMemberActivatedWake({
+    eventId,
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: false,
+    },
+    memberId: userId,
+    occurredAt,
+  });
+}
+
+function createEmailWake(input: {
+  eventId: string;
+  identityId: string | null;
+  occurredAt?: string;
+  rawMessageKey: string;
+  userId: string;
+}): HostedExecutionWake {
+  return buildHostedExecutionEmailConversationMessageWake({
+    eventId: input.eventId,
+    identityId: input.identityId,
+    occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
+    rawMessageKey: input.rawMessageKey,
+    userId: input.userId,
+  });
 }
 
 function createRunnerCommitContext(overrides: Partial<{
@@ -3676,7 +3461,7 @@ async function seedPendingCommitEvent(input: {
   storage: ReturnType<typeof createStorage>;
   userId: string;
 }): Promise<void> {
-  const dispatch = createDispatch(input.eventId);
+  const wake = createWake(input.eventId, input.userId);
   const run = input.run ?? createRunnerCommitContext();
   await seedRunnerQueueState({
     activeRunLease: {
@@ -3690,9 +3475,9 @@ async function seedPendingCommitEvent(input: {
     inFlight: true,
     pendingEvents: [{
       attempts: 0,
-      availableAt: dispatch.occurredAt,
-      dispatch,
-      enqueuedAt: dispatch.occurredAt,
+      availableAt: wake.occurredAt,
+      dispatch: wake,
+      enqueuedAt: wake.occurredAt,
       lastError: null,
     }],
     storage: input.storage,

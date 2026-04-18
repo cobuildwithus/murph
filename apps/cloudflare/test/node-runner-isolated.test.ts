@@ -1,6 +1,7 @@
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
 
+import { buildHostedExecutionAssistantCronTickWake } from "@murphai/hosted-execution";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const spawnMock = vi.fn();
@@ -51,15 +52,12 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       job: {
         request: {
           bundle: null,
-          dispatch: {
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
-              userId: "member_123",
-            },
+          wake: buildHostedExecutionAssistantCronTickWake({
             eventId: "evt_child_cleanup",
             occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+            reason: "manual",
+            userId: "member_123",
+          }),
         },
         runtime: {
           forwardedEnv: {},
@@ -122,15 +120,12 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       job: {
         request: {
           bundle: null,
-          dispatch: {
-            event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
-              userId: "member_123",
-            },
+          wake: buildHostedExecutionAssistantCronTickWake({
             eventId: "evt_child_env",
             occurredAt: "2026-04-08T00:00:00.000Z",
-          },
+            reason: "manual",
+            userId: "member_123",
+          }),
         },
         runtime: {
           forwardedEnv: {},
