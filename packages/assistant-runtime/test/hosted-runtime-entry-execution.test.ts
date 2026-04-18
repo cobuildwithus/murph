@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   executeHostedDispatchEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
+  getAssistantCronStatus: vi.fn(),
+  getAssistantStatus: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
@@ -51,6 +53,8 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 vi.mock("@murphai/assistant-engine", () => ({
+  getAssistantCronStatus: mocks.getAssistantCronStatus,
+  getAssistantStatus: mocks.getAssistantStatus,
   refreshAssistantStatusSnapshot: mocks.refreshAssistantStatusSnapshot,
 }));
 
@@ -126,6 +130,7 @@ beforeEach(() => {
   mocks.createHostedArtifactUploadSink.mockReturnValue(Symbol("artifact-sink"));
   mocks.executeHostedDispatchEvent.mockResolvedValue({
     bootstrapResult: null,
+    maintenanceRequired: true,
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -151,6 +156,15 @@ beforeEach(() => {
     exported: 0,
     failed: 0,
     pending: 0,
+  });
+  mocks.getAssistantCronStatus.mockResolvedValue({
+    nextRunAt: null,
+  });
+  mocks.getAssistantStatus.mockResolvedValue({
+    outbox: {
+      nextAttemptAt: null,
+    },
+    recentTurns: [],
   });
   mocks.refreshAssistantStatusSnapshot.mockResolvedValue(undefined);
 });

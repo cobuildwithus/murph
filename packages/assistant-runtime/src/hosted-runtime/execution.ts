@@ -15,10 +15,15 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  getAssistantCronStatus,
+  getAssistantStatus,
   refreshAssistantStatusSnapshot,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import { assistantGatewayLocalProjectionSourceReader } from "@murphai/assistant-engine/gateway-local-adapter";
+import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
+import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
+import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
@@ -35,6 +40,7 @@ import type {
   HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedCommittedExecutionState,
+  HostedMaintenanceMetrics,
   HostedRestoredExecutionContext,
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
@@ -42,6 +48,18 @@ import type {
 import { summarizeDispatch } from "./summary.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
+
+const HOSTED_ASSISTANT_RECOVERY_RECEIPT_LIMIT = 200;
+const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = "autoReplyCaptureId";
+const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = "autoReplyCaptureIds";
+const AUTO_REPLY_RECEIPT_RETRY_AT_KEY = "autoReplyRetryAt";
+const HOSTED_UNSAFE_ASSISTANT_DELIVERY_TIMELINE_KINDS: ReadonlySet<string> = new Set([
+  "delivery.attempt.started",
+  "delivery.failed",
+  "delivery.queued",
+  "delivery.retry-scheduled",
+  "delivery.sent",
+]);
 
 export async function executeHostedDispatchForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
@@ -88,33 +106,23 @@ export async function executeHostedDispatchForCommit(input: {
     phase: "dispatch.running",
     run: input.request.run ?? null,
   });
-  const maintenanceStartedAtMs = Date.now();
-  const maintenanceMetrics = await runHostedMaintenanceLoop({
-    artifactMaterializer: input.artifactMaterializer ?? null,
-    deviceSyncPort: input.runtime.platform.deviceSyncPort,
-    dispatch: input.request.dispatch,
-    executionContext: await resolveHostedMaintenanceExecutionContext(
-      dispatchExecutionContext,
-    ),
-    requestId: input.request.dispatch.eventId,
-    resolvedConfig: input.runtime.resolvedConfig,
-    skipAssistantAutomation: input.request.dispatch.event.kind === "member.activated"
-      && dispatchMetrics.bootstrapResult?.assistantConfigured === false,
-    timeoutMs: input.runtime.commitTimeoutMs,
-    vaultRoot: input.restored.vaultRoot,
-  });
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    dispatch: input.request.dispatch,
-    details: {
-      maintenanceLatencyMs: Date.now() - maintenanceStartedAtMs,
-      nextWakeAt: maintenanceMetrics.nextWakeAt,
-      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    },
-    message: "Hosted runtime finished maintenance loop.",
-    phase: "dispatch.running",
-    run: input.request.run ?? null,
-  });
+  const maintenanceMetrics = dispatchMetrics.maintenanceRequired
+    ? await runHostedMaintenanceAfterDispatch({
+        artifactMaterializer: input.artifactMaterializer ?? null,
+        bootstrapResult: dispatchMetrics.bootstrapResult,
+        dispatch: input.request.dispatch,
+        executionContext: dispatchExecutionContext,
+        requestId: input.request.dispatch.eventId,
+        run: input.request.run ?? null,
+        runtime: input.runtime,
+        vaultRoot: input.restored.vaultRoot,
+      })
+    : await resolveSkippedHostedMaintenanceMetrics({
+        dispatch: input.request.dispatch,
+        run: input.request.run ?? null,
+        runtime: input.runtime,
+        vaultRoot: input.restored.vaultRoot,
+      });
   const snapshotStartedAtMs = Date.now();
   const committedSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
@@ -183,6 +191,284 @@ async function resolveHostedMaintenanceExecutionContext(
   executionContext: AssistantExecutionContext,
 ): Promise<AssistantExecutionContext> {
   return hydrateHostedExecutionDefaultTarget(executionContext);
+}
+
+async function runHostedMaintenanceAfterDispatch(input: {
+  artifactMaterializer: HostedWorkspaceArtifactMaterializer | null;
+  bootstrapResult: Awaited<ReturnType<typeof executeHostedDispatchEvent>>["bootstrapResult"];
+  dispatch: HostedExecutionDispatchRequest;
+  executionContext: AssistantExecutionContext;
+  requestId: string;
+  run?: HostedExecutionRunContext | null;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "platform" | "resolvedConfig"
+  >;
+  vaultRoot: string;
+}): Promise<HostedMaintenanceMetrics> {
+  const maintenanceStartedAtMs = Date.now();
+  const maintenanceMetrics = await runHostedMaintenanceLoop({
+    artifactMaterializer: input.artifactMaterializer,
+    deviceSyncPort: input.runtime.platform.deviceSyncPort,
+    dispatch: input.dispatch,
+    executionContext: await resolveHostedMaintenanceExecutionContext(
+      input.executionContext,
+    ),
+    requestId: input.requestId,
+    resolvedConfig: input.runtime.resolvedConfig,
+    skipAssistantAutomation: input.dispatch.event.kind === "member.activated"
+      && input.bootstrapResult?.assistantConfigured === false,
+    timeoutMs: input.runtime.commitTimeoutMs,
+    vaultRoot: input.vaultRoot,
+  });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    details: {
+      maintenanceLatencyMs: Date.now() - maintenanceStartedAtMs,
+      nextWakeAt: maintenanceMetrics.nextWakeAt,
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+    },
+    message: "Hosted runtime finished maintenance loop.",
+    phase: "dispatch.running",
+    run: input.run ?? null,
+  });
+  return maintenanceMetrics;
+}
+
+async function resolveSkippedHostedMaintenanceMetrics(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  run?: HostedExecutionRunContext | null;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">;
+  vaultRoot: string;
+}): Promise<HostedMaintenanceMetrics> {
+  const referenceMs = Date.now();
+  const [assistantWakeAt, deviceSyncWakeAt] = await Promise.all([
+    resolveHostedAssistantWakeAt({
+      dispatch: input.dispatch,
+      referenceMs,
+      run: input.run ?? null,
+      vaultRoot: input.vaultRoot,
+    }),
+    resolveHostedDeviceSyncWakeAt({
+      deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
+      dispatch: input.dispatch,
+      referenceMs,
+      run: input.run ?? null,
+      vaultRoot: input.vaultRoot,
+    }),
+  ]);
+  const nextWakeAt = earliestHostedWakeAt(assistantWakeAt, deviceSyncWakeAt);
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    details: {
+      nextWakeAt,
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+    },
+    message: "Hosted runtime skipped the generic maintenance loop for this message wake.",
+    phase: "dispatch.running",
+    run: input.run ?? null,
+  });
+
+  return {
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: false,
+    nextWakeAt,
+    parserProcessed: 0,
+  };
+}
+
+async function resolveHostedAssistantWakeAt(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  referenceMs: number;
+  run?: HostedExecutionRunContext | null;
+  vaultRoot: string;
+}): Promise<string | null> {
+  try {
+    const [status, cronStatus] = await Promise.all([
+      getAssistantStatus({
+        limit: HOSTED_ASSISTANT_RECOVERY_RECEIPT_LIMIT,
+        vault: input.vaultRoot,
+      }),
+      getAssistantCronStatus(input.vaultRoot),
+    ]);
+
+    return earliestHostedWakeAt(
+      normalizeHostedWakeAt(status.outbox.nextAttemptAt, input.referenceMs),
+      normalizeHostedWakeAt(cronStatus.nextRunAt, input.referenceMs),
+      resolveHostedAssistantRecoveryWakeAt({
+        receipts: status.recentTurns,
+        referenceMs: input.referenceMs,
+      }),
+    );
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      dispatch: input.dispatch,
+      error,
+      level: "warn",
+      message:
+        "Hosted runtime could not resolve the preserved assistant wake while skipping maintenance; continuing without it.",
+      phase: "dispatch.running",
+      run: input.run ?? null,
+    });
+    return null;
+  }
+}
+
+async function resolveHostedDeviceSyncWakeAt(input: {
+  deviceSyncConfig: NormalizedHostedAssistantRuntimeConfig["resolvedConfig"]["deviceSync"];
+  dispatch: HostedExecutionDispatchRequest;
+  referenceMs: number;
+  run?: HostedExecutionRunContext | null;
+  vaultRoot: string;
+}): Promise<string | null> {
+  if (!input.deviceSyncConfig) {
+    return null;
+  }
+
+  try {
+    const registry = createDeviceSyncRegistry(
+      createConfiguredDeviceSyncProvidersFromConfigs(
+        input.deviceSyncConfig.providerConfigs,
+      ),
+    );
+
+    if (registry.list().length === 0) {
+      return null;
+    }
+
+    const service = createDeviceSyncService({
+      secret: input.deviceSyncConfig.secret,
+      config: {
+        publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,
+        vaultRoot: input.vaultRoot,
+      },
+      registry,
+    });
+
+    try {
+      return normalizeHostedWakeAt(service.getNextWakeAt(), input.referenceMs);
+    } finally {
+      service.close();
+    }
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      dispatch: input.dispatch,
+      error,
+      level: "warn",
+      message:
+        "Hosted runtime could not resolve the preserved device-sync wake while skipping maintenance; continuing without it.",
+      phase: "dispatch.running",
+      run: input.run ?? null,
+    });
+    return null;
+  }
+}
+
+function resolveHostedAssistantRecoveryWakeAt(input: {
+  receipts: Awaited<ReturnType<typeof getAssistantStatus>>["recentTurns"];
+  referenceMs: number;
+}): string | null {
+  let dueRecovery = false;
+  let nextWakeAt: string | null = null;
+
+  for (const receipt of input.receipts) {
+    if (!isHostedAssistantRecoveryReceiptCandidate(receipt)) {
+      continue;
+    }
+
+    const retryAt = readHostedAssistantAutoReplyRetryAt(receipt);
+    if (!retryAt) {
+      dueRecovery = true;
+      continue;
+    }
+
+    const parsedMs = Date.parse(retryAt);
+    if (!Number.isFinite(parsedMs) || parsedMs <= input.referenceMs) {
+      dueRecovery = true;
+      continue;
+    }
+
+    nextWakeAt = earliestHostedWakeAt(nextWakeAt, new Date(parsedMs).toISOString());
+  }
+
+  if (dueRecovery) {
+    return new Date(input.referenceMs).toISOString();
+  }
+
+  return nextWakeAt;
+}
+
+function isHostedAssistantRecoveryReceiptCandidate(
+  receipt: Awaited<ReturnType<typeof getAssistantStatus>>["recentTurns"][number],
+): boolean {
+  if (receipt.status !== "failed" || receipt.responsePreview !== null) {
+    return false;
+  }
+
+  if (
+    receipt.timeline.some((event) =>
+      HOSTED_UNSAFE_ASSISTANT_DELIVERY_TIMELINE_KINDS.has(event.kind)
+    )
+  ) {
+    return false;
+  }
+
+  const startedEvent = receipt.timeline.find((event) => event.kind === "turn.started");
+  if (!startedEvent) {
+    return false;
+  }
+
+  const groupedCaptureIds = startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0) ?? [];
+  const primaryCaptureId =
+    startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]?.trim()
+    || groupedCaptureIds[0]
+    || null;
+
+  return primaryCaptureId !== null;
+}
+
+function readHostedAssistantAutoReplyRetryAt(
+  receipt: Awaited<ReturnType<typeof getAssistantStatus>>["recentTurns"][number],
+): string | null {
+  for (let index = receipt.timeline.length - 1; index >= 0; index -= 1) {
+    const retryAt = receipt.timeline[index]?.metadata[AUTO_REPLY_RECEIPT_RETRY_AT_KEY];
+    const normalizedRetryAt = normalizeHostedWakeAt(retryAt ?? null);
+    if (normalizedRetryAt) {
+      return normalizedRetryAt;
+    }
+  }
+
+  return null;
+}
+
+function earliestHostedWakeAt(...values: Array<string | null | undefined>): string | null {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function normalizeHostedWakeAt(
+  value: string | null | undefined,
+  referenceMs = Date.now(),
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsedMs = Date.parse(value);
+  if (!Number.isFinite(parsedMs)) {
+    return null;
+  }
+
+  return new Date(Math.max(parsedMs, referenceMs)).toISOString();
 }
 
 export async function completeHostedExecutionAfterCommit(input: {

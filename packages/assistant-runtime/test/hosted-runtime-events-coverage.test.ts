@@ -126,6 +126,7 @@ describe("hosted runtime event coverage", () => {
     expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
+      maintenanceRequired: true,
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -156,6 +157,7 @@ describe("hosted runtime event coverage", () => {
       }),
     ).resolves.toEqual({
       bootstrapResult: null,
+      maintenanceRequired: true,
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -170,6 +172,7 @@ describe("hosted runtime event coverage", () => {
       }),
     ).resolves.toEqual({
       bootstrapResult: null,
+      maintenanceRequired: true,
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -216,6 +219,7 @@ describe("hosted runtime event coverage", () => {
     });
     assert.deepEqual(result, {
       bootstrapResult: null,
+      maintenanceRequired: true,
       shareImportResult: "imported",
       shareImportTitle: "Shared export",
     });

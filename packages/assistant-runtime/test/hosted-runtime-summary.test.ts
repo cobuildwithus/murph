@@ -33,6 +33,7 @@ describe("summarizeDispatch", () => {
         bootstrapResult: null,
         deviceSyncProcessed: 1,
         deviceSyncSkipped: true,
+        maintenanceRequired: true,
         nextWakeAt: null,
         parserProcessed: 2,
         shareImportResult: null,
@@ -68,6 +69,7 @@ describe("summarizeDispatch", () => {
         },
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
+        maintenanceRequired: true,
         nextWakeAt: null,
         parserProcessed: 0,
         shareImportResult: null,
@@ -103,6 +105,7 @@ describe("summarizeDispatch", () => {
         },
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
+        maintenanceRequired: true,
         nextWakeAt: null,
         parserProcessed: 0,
         shareImportResult: null,
@@ -154,6 +157,7 @@ describe("summarizeDispatch", () => {
           },
           deviceSyncProcessed: 0,
           deviceSyncSkipped: false,
+          maintenanceRequired: true,
           nextWakeAt: null,
           parserProcessed: 0,
           shareImportResult: null,
@@ -181,6 +185,7 @@ describe("summarizeDispatch", () => {
         bootstrapResult: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
+        maintenanceRequired: true,
         nextWakeAt: null,
         parserProcessed: 0,
         shareImportResult: null,
@@ -206,6 +211,7 @@ describe("summarizeDispatch", () => {
         bootstrapResult: null,
         deviceSyncProcessed: 0,
         deviceSyncSkipped: false,
+        maintenanceRequired: true,
         nextWakeAt: null,
         parserProcessed: 1,
         shareImportResult: {
@@ -239,7 +245,7 @@ describe("summarizeDispatch", () => {
           phoneLookupKey: "phone_lookup_123",
           userId: "member_123",
         }),
-        expected: "Persisted Linq capture and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
+        expected: "Persisted Linq capture on the hosted conversation lane.",
       },
       {
         dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
@@ -253,7 +259,7 @@ describe("summarizeDispatch", () => {
           },
           userId: "member_123",
         }),
-        expected: "Persisted Telegram capture and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
+        expected: "Persisted Telegram capture on the hosted conversation lane.",
       },
       {
         dispatch: buildHostedExecutionEmailMessageReceivedDispatch({
@@ -263,7 +269,7 @@ describe("summarizeDispatch", () => {
           rawMessageKey: "raw/message.eml",
           userId: "member_123",
         }),
-        expected: "Persisted hosted email capture and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
+        expected: "Persisted hosted email capture on the hosted conversation lane.",
       },
       {
         dispatch: buildHostedExecutionAssistantCronTickDispatch({
@@ -291,6 +297,12 @@ describe("summarizeDispatch", () => {
           bootstrapResult: null,
           deviceSyncProcessed: 2,
           deviceSyncSkipped: false,
+          maintenanceRequired:
+            entry.dispatch.event.kind === "linq.message.received"
+            || entry.dispatch.event.kind === "telegram.message.received"
+            || entry.dispatch.event.kind === "email.message.received"
+              ? false
+              : true,
           nextWakeAt: null,
           parserProcessed: 1,
           shareImportResult: null,
