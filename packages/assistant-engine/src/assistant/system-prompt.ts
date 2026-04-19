@@ -175,7 +175,7 @@ ${routeEstimateLine}
 - For the user's saved current-state context, prefer \`vault-cli memory show\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
 - For wearable questions, prefer \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command before inspecting raw events or samples.
 - Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.
-- Use the canonical write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Slow down only when the target record or command is unclear.`;
+- Use the matching write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. Slow down only when the target record or command is unclear.`;
 }
 
 function buildAssistantAudienceSafetyText(

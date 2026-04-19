@@ -121,4 +121,18 @@ describe('buildAssistantSystemPrompt', () => {
     )
     expect(prompt).toContain('Otherwise, keep the reply natural and direct.')
   })
+
+  it('tells the assistant to trust successful save receipts without inventing no-op writes', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain(
+      'Use the matching write surface directly for straightforward captures and memory updates.',
+    )
+    expect(prompt).toContain(
+      'Treat a successful save receipt as confirmation the requested write completed.',
+    )
+    expect(prompt).toContain(
+      'If the result says nothing changed, do not claim that something new was saved.',
+    )
+  })
 })
