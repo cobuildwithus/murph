@@ -1,5 +1,4 @@
 import localFont from "next/font/local";
-import { dmSansFontUrl, frauncesFontUrl } from "./font-files";
 
 export const fraunces = localFont({
   src: "./fonts/Fraunces-Variable.ttf",

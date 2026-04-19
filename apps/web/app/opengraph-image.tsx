@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { dmSansFontUrl, frauncesFontUrl } from "./font-files";
+import { dmSans400FontPath, fraunces400FontPath, fraunces600FontPath } from "./font-files";
 
 export const alt = "Murph — Wearable data, made useful.";
 export const size = { width: 1200, height: 630 };
@@ -11,18 +11,19 @@ const HEADLINE = "Wearable data,\nmade useful.";
 const SUBTEXT = "Expert-backed experiments, measured by your wearable.";
 
 export default async function OGImage() {
-  const [heroData, frauncesData, dmSansData] = await Promise.all([
+  const [heroData, fraunces400Data, fraunces600Data, dmSans400Data] = await Promise.all([
     readFile(join(process.cwd(), "public", "hero.jpg")).then(
       (buf) => `data:image/jpeg;base64,${buf.toString("base64")}`
     ),
-    readFile(frauncesFontUrl).then(toArrayBuffer),
-    readFile(dmSansFontUrl).then(toArrayBuffer),
+    readFile(fraunces400FontPath).then(toArrayBuffer),
+    readFile(fraunces600FontPath).then(toArrayBuffer),
+    readFile(dmSans400FontPath).then(toArrayBuffer),
   ]);
 
   const fonts: { name: string; data: ArrayBuffer; weight: 400 | 600 }[] = [];
-  fonts.push({ name: "Fraunces", data: frauncesData, weight: 400 });
-  fonts.push({ name: "Fraunces", data: frauncesData, weight: 600 });
-  fonts.push({ name: "DM Sans", data: dmSansData, weight: 400 });
+  fonts.push({ name: "Fraunces", data: fraunces400Data, weight: 400 });
+  fonts.push({ name: "Fraunces", data: fraunces600Data, weight: 600 });
+  fonts.push({ name: "DM Sans", data: dmSans400Data, weight: 400 });
 
   return new ImageResponse(
     (
