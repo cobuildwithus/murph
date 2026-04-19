@@ -4,7 +4,7 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 import {
-  listHostedWakesAfterSeq,
+  listHostedExecutableWakes,
 } from "@/src/lib/hosted-wake/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -14,10 +14,9 @@ const MAX_WAKE_BATCH_LIMIT = 256;
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const body = await readOptionalJsonObject(request);
-  const afterSeq = parseOptionalBigInt(body.afterSeq, "afterSeq");
+  rejectUnsupportedAfterSeq(body);
   const limit = parseOptionalLimit(body.limit);
-  const response = await listHostedWakesAfterSeq({
-    afterSeq,
+  const response = await listHostedExecutableWakes({
     limit,
     prisma: getPrisma(),
     userId,
@@ -26,20 +25,14 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(response);
 });
 
-function parseOptionalBigInt(value: unknown, label: string): bigint | null {
-  if (value === undefined || value === null || value === "") {
-    return null;
+function rejectUnsupportedAfterSeq(body: Record<string, unknown>): void {
+  if (!Object.prototype.hasOwnProperty.call(body, "afterSeq")) {
+    return;
   }
 
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a base-10 integer string.`);
-  }
-
-  try {
-    return BigInt(value);
-  } catch {
-    throw new TypeError(`${label} must be a base-10 integer string.`);
-  }
+  throw new TypeError(
+    "afterSeq is not supported for executable hosted wake fetches.",
+  );
 }
 
 function parseOptionalLimit(value: unknown): number {
