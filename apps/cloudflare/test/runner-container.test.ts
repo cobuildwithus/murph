@@ -470,10 +470,10 @@ describe("RunnerContainer", () => {
     expect(String(thrown)).not.toContain("secret stack");
   });
 
-  it("keeps legacy internal HTTP invoke routes disabled", async () => {
+  it("keeps the canonical internal HTTP run route disabled", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
-    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
+    const response = await container.fetch(new Request("https://runner.internal/internal/run", {
       body: JSON.stringify({
         job: {
           request: createRunnerRequest("evt_no_token"),
@@ -499,7 +499,7 @@ describe("RunnerContainer", () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
     const invokeResponse = await container.fetch(
-      new Request("https://runner.internal/internal/invoke", { method: "GET" }),
+      new Request("https://runner.internal/internal/run", { method: "GET" }),
     );
     const destroyResponse = await container.fetch(
       new Request("https://runner.internal/internal/destroy", { method: "GET" }),

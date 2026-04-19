@@ -561,6 +561,10 @@ export function parseHostedWakeStatusRequest(value: unknown): HostedWakeStatusRe
     record.fetchProof,
     "Hosted wake status request fetchProof",
   );
+  const wakeEventId = readOptionalNonBlankNullableString(
+    record.wakeEventId,
+    "Hosted wake status request wakeEventId",
+  );
   const wakeId = readOptionalNonBlankNullableString(
     record.wakeId,
     "Hosted wake status request wakeId",
@@ -570,7 +574,12 @@ export function parseHostedWakeStatusRequest(value: unknown): HostedWakeStatusRe
     "Hosted wake status request wakeSeq",
   );
 
-  if (fetchProof === undefined && wakeId === undefined && wakeSeq === undefined) {
+  if (
+    fetchProof === undefined
+    && wakeEventId === undefined
+    && wakeId === undefined
+    && wakeSeq === undefined
+  ) {
     return {
       ...(eventId === undefined ? {} : { eventId }),
     };
@@ -578,17 +587,19 @@ export function parseHostedWakeStatusRequest(value: unknown): HostedWakeStatusRe
 
   if (
     fetchProof === undefined
+    || wakeEventId === undefined
     || wakeId === undefined
     || wakeSeq === undefined
   ) {
     throw new TypeError(
-      "Hosted wake status request fetchProof, wakeId, and wakeSeq must be provided together.",
+      "Hosted wake status request fetchProof, wakeEventId, wakeId, and wakeSeq must be provided together.",
     );
   }
 
   return {
     ...(eventId === undefined ? {} : { eventId }),
     fetchProof,
+    wakeEventId,
     wakeId,
     wakeSeq: requireBigIntString(wakeSeq, "Hosted wake status request wakeSeq"),
   };
