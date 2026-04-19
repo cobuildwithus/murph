@@ -38,6 +38,8 @@ const nextEnvTrailingLines = [
   "",
 ];
 const bundleArtifactFlag = "--for-source-bundle";
+const nextEnvDeclarationImportPathPattern =
+  /^\.\/\.next(?:-(?:dev|smoke)(?:-[a-z0-9-]+)?)?(?:\/dev)?\/types\/routes\.d\.ts$/u;
 
 export function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
   return [...nextEnvCommonLines, `import "${routeTypesImportPath}";`, ...nextEnvTrailingLines].join(
@@ -50,20 +52,6 @@ export function buildNextEnvDeclarationArtifacts(
 ): string[] {
   return routeTypesImportPaths.map(buildNextEnvDeclarationArtifact);
 }
-
-export const allowedDeclarationArtifacts = new Map<string, string[]>([
-  [
-    "apps/web/next-env.d.ts",
-    buildNextEnvDeclarationArtifacts([
-      "./.next/types/routes.d.ts",
-      "./.next-dev/types/routes.d.ts",
-      "./.next-dev/dev/types/routes.d.ts",
-      "./.next-smoke/types/routes.d.ts",
-      "./.next-smoke/dev/types/routes.d.ts",
-      "./.next/dev/types/routes.d.ts",
-    ]),
-  ],
-]);
 
 export async function main(): Promise<void> {
   const checkWorkingTreeBundleArtifacts = process.argv.includes(bundleArtifactFlag);
@@ -173,8 +161,40 @@ export function isAllowedDeclarationArtifactContents(
   relativePath: string,
   contents: string,
 ): boolean {
-  const expectedContents = allowedDeclarationArtifacts.get(relativePath);
-  return expectedContents?.includes(contents) ?? false;
+  if (relativePath === "apps/web/next-env.d.ts") {
+    return isAllowedNextEnvDeclarationArtifactContents(contents);
+  }
+
+  return false;
+}
+
+export function isAllowedNextEnvDeclarationArtifactContents(contents: string): boolean {
+  const normalizedContents = normalizeDeclarationArtifactContents(contents);
+  const lines = normalizedContents.split("\n");
+
+  if (lines.length !== 6) {
+    return false;
+  }
+
+  const [referenceLine, imageReferenceLine, importLine, spacerLine, noteLine, docsLine] = lines;
+
+  if (
+    referenceLine !== nextEnvCommonLines[0]
+    || imageReferenceLine !== nextEnvCommonLines[1]
+    || spacerLine !== nextEnvTrailingLines[0]
+    || noteLine !== nextEnvTrailingLines[1]
+    || docsLine !== nextEnvTrailingLines[2]
+  ) {
+    return false;
+  }
+
+  const importMatch = importLine.match(/^import ["'](\.\/[^"'`]+)["'];$/u);
+
+  return importMatch !== null && isAllowedNextEnvRouteTypesImportPath(importMatch[1]);
+}
+
+export function isAllowedNextEnvRouteTypesImportPath(routeTypesImportPath: string): boolean {
+  return nextEnvDeclarationImportPathPattern.test(routeTypesImportPath);
 }
 
 export function shouldSkipSourceArtifactDirectory(name: string): boolean {
@@ -230,6 +250,10 @@ export function getBlockedWorkingTreeArtifactPath(
   }
 
   return null;
+}
+
+function normalizeDeclarationArtifactContents(contents: string): string {
+  return contents.replace(/\r\n/g, "\n").replace(/\n$/u, "");
 }
 
 async function findBlockedTrackedArtifacts(): Promise<string[]> {
