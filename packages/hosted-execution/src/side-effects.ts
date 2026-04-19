@@ -24,9 +24,6 @@ export const hostedAssistantDeliveryRecordStateValues = [
   "failed",
   "failed_ambiguous",
 ] as const;
-const hostedAssistantDeliveryLegacyRecordStateValues = [
-  "prepared",
-] as const;
 
 export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES =
   hostedAssistantDeliveryRecordStateValues;
@@ -112,11 +109,6 @@ interface HostedAssistantDeliveryRecordBase {
   recordedAt: string;
 }
 
-export interface HostedAssistantDeliveryPreparedRecord
-  extends HostedAssistantDeliveryRecordBase {
-  state: "prepared";
-}
-
 export interface HostedAssistantDeliveryPendingRecord
   extends HostedAssistantDeliveryRecordBase {
   state: "pending";
@@ -148,16 +140,12 @@ export interface HostedAssistantDeliveryAmbiguousFailureRecord
   state: "failed_ambiguous";
 }
 
-export type HostedAssistantDeliveryPreparedSideEffectRecord =
-  HostedAssistantDeliveryPreparedRecord;
-
 export type HostedAssistantDeliverySentSideEffectRecord =
   HostedAssistantDeliverySentRecord;
 
 export type HostedAssistantDeliveryRecord =
   | HostedAssistantDeliveryPendingRecord
   | HostedAssistantDeliverySendingRecord
-  | HostedAssistantDeliveryPreparedRecord
   | HostedAssistantDeliverySentRecord
   | HostedAssistantDeliveryFailedRecord
   | HostedAssistantDeliveryAmbiguousFailureRecord;
@@ -201,18 +189,6 @@ export function buildHostedAssistantDeliveryPendingRecord(input: {
     ...buildHostedAssistantDeliveryIdentity(input),
     recordedAt: requireString(input.recordedAt, "Hosted assistant pending side effect recordedAt"),
     state: "pending",
-  };
-}
-
-export function buildHostedAssistantDeliveryPreparedRecord(input: {
-  dedupeKey: string;
-  effectId: string;
-  recordedAt: string;
-}): HostedAssistantDeliveryPreparedRecord {
-  return {
-    ...buildHostedAssistantDeliveryIdentity(input),
-    recordedAt: requireString(input.recordedAt, "Hosted assistant prepared side effect recordedAt"),
-    state: "prepared",
   };
 }
 
@@ -387,23 +363,6 @@ export function parseHostedAssistantDeliveryRecord(
     ),
   };
 
-  if (state === "prepared") {
-    return {
-      ...baseRecord,
-      attempt: {
-        channel: null,
-        idempotencyKey: null,
-        messageLength: null,
-        providerMessageId: null,
-        providerThreadId: null,
-        startedAt: baseRecord.recordedAt,
-        target: null,
-        targetKind: null,
-      },
-      state: "sending",
-    };
-  }
-
   switch (state) {
     case "pending":
       return {
@@ -533,10 +492,6 @@ function requireHostedAssistantDeliveryEffectId(
   record: Record<string, unknown>,
   label: string,
 ): string {
-  if (record.intentId !== undefined) {
-    throw new TypeError(`${label} intentId is no longer supported.`);
-  }
-
   return requireString(record.effectId, `${label} effectId`);
 }
 
@@ -590,10 +545,10 @@ function requireHostedExecutionSideEffectRecordState(
 function requireHostedAssistantDeliveryRecordState(
   value: unknown,
   label: string,
-): HostedAssistantDeliveryRecordState | "prepared" {
+): HostedAssistantDeliveryRecordState {
   const state = requireString(value, label);
 
-  if (isHostedAssistantDeliveryStoredRecordState(state)) {
+  if (isHostedAssistantDeliveryRecordState(state)) {
     return state;
   }
 
@@ -622,13 +577,6 @@ export function isHostedAssistantDeliveryRecordState(
   value: string,
 ): value is HostedAssistantDeliveryRecordState {
   return (hostedAssistantDeliveryRecordStateValues as readonly string[]).includes(value);
-}
-
-function isHostedAssistantDeliveryStoredRecordState(
-  value: string,
-): value is HostedAssistantDeliveryRecordState | "prepared" {
-  return isHostedAssistantDeliveryRecordState(value)
-    || (hostedAssistantDeliveryLegacyRecordStateValues as readonly string[]).includes(value);
 }
 
 function parseHostedAssistantDeliveryPayload(

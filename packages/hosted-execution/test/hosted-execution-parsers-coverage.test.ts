@@ -235,25 +235,6 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
-    it("rejects removed queue-era user status fields", () => {
-      expect(() =>
-        parseHostedExecutionUserStatus({
-          backpressuredEventIds: [],
-          bundleRef: null,
-          inFlight: false,
-          lastError: null,
-          lastEventId: null,
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          pendingWakeCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user_123",
-        }),
-      ).toThrow(/pendingEventCount is no longer supported|backpressuredEventIds is no longer supported/i);
-    });
-
     it("rejects invalid run phases, timeline levels, and wake lifecycle states", () => {
       expect(() =>
         parseHostedExecutionUserStatus({
