@@ -39,7 +39,13 @@ vi.mock("@murphai/core", () => ({
   },
   importSamples: async (payload: unknown) => {
     coreModuleCalls.importSamples.push(payload);
-    return { ok: true, kind: "samples" as const };
+    return {
+      count: 1,
+      manifestPath: "raw/samples/steps/import_mock/manifest.json",
+      records: [{ id: "smp_mock_01" }],
+      shardPaths: ["ledger/samples/2026/2026-03.jsonl"],
+      transformId: "xfm_mock",
+    };
   },
   importDeviceBatch: async (payload: unknown) => {
     coreModuleCalls.importDeviceBatch.push(payload);
@@ -125,7 +131,31 @@ test("createImporters delegates through the default core runtime exports", async
 
   assert.deepEqual(documentResult, { ok: true, kind: "document" });
   assert.deepEqual(mealResult, { ok: true, kind: "meal" });
-  assert.deepEqual(sampleResult, { ok: true, kind: "samples" });
+  assert.deepEqual(sampleResult, {
+    importedCount: 1,
+    imports: [
+      {
+        importedCount: 1,
+        ledgerFiles: ["ledger/samples/2026/2026-03.jsonl"],
+        lookupIds: ["smp_mock_01"],
+        manifestPath: "raw/samples/steps/import_mock/manifest.json",
+        skipReasons: [],
+        skippedCount: 0,
+        stream: "steps",
+        timeZone: "UTC",
+        transformId: "xfm_mock",
+        tsColumn: "timestamp",
+        unit: "count",
+        valueColumn: "value",
+      },
+    ],
+    ledgerFiles: ["ledger/samples/2026/2026-03.jsonl"],
+    lookupIds: ["smp_mock_01"],
+    metadataColumns: [],
+    skippedCount: 0,
+    timeZone: "UTC",
+    tsColumn: "timestamp",
+  });
   assert.deepEqual(assessmentResult, { ok: true, kind: "assessment" });
   assert.deepEqual(deviceBatchResult, { ok: true, kind: "device-batch" });
   assert.equal(coreModuleCalls.importDocument.length, 1);
@@ -649,7 +679,7 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
     "murph-importers-coverage-",
   );
 
-  const payload = await prepareCsvSampleImport({
+  const plan = await prepareCsvSampleImport({
     filePath,
     vaultRoot: "/tmp/canonical-vault",
     vault: "/tmp/example-vault",
@@ -660,16 +690,20 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
     delimiter: ",",
   });
 
-  assert.equal(payload.vaultRoot, "/tmp/canonical-vault");
-  assert.equal(payload.importConfig.metadataColumns, undefined);
-  assert.equal(payload.samples.length, 2);
-  assert.equal(payload.batchProvenance?.sourceFileName, "glucose.csv");
-  assert.equal(payload.batchProvenance?.importConfig?.valueColumn, "value");
-  assert.equal(payload.batchProvenance?.rows?.length, 2);
-  assert.equal(payload.batchProvenance?.rows?.[0]?.rowNumber, 3);
-  assert.equal(payload.batchProvenance?.rows?.[0]?.metadata, undefined);
-  assert.equal(payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
-  assert.equal(payload.samples[1]?.value, 95);
+  const [payload] = plan.imports;
+
+  assert.ok(payload);
+  assert.equal(plan.vaultRoot, "/tmp/canonical-vault");
+  assert.equal(plan.tsColumn, "recorded");
+  assert.equal(payload.payload.importConfig.metadataColumns, undefined);
+  assert.equal(payload.importedCount, 2);
+  assert.equal(payload.payload.batchProvenance?.sourceFileName, "glucose.csv");
+  assert.equal(payload.payload.batchProvenance?.importConfig?.valueColumn, "value");
+  assert.equal(payload.payload.batchProvenance?.rows?.length, 2);
+  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.rowNumber, 3);
+  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.metadata, undefined);
+  assert.equal(payload.payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
+  assert.equal(payload.payload.samples[1]?.value, 95);
 });
 
 test("prepareCsvSampleImport infers SpO2 sample columns and skips placeholder rows", async () => {
@@ -684,22 +718,25 @@ test("prepareCsvSampleImport infers SpO2 sample columns and skips placeholder ro
     "murph-importers-coverage-",
   );
 
-  const payload = await prepareCsvSampleImport({
+  const plan = await prepareCsvSampleImport({
     filePath,
     vaultRoot: "/tmp/canonical-vault",
     stream: "SpO2",
     metadataColumns: ["Motion"],
   });
 
+  const [payload] = plan.imports;
+
+  assert.ok(payload);
   assert.equal(payload.stream, "spo2");
   assert.equal(payload.unit, "%");
-  assert.equal(payload.importConfig.tsColumn, "Time");
-  assert.equal(payload.importConfig.valueColumn, "Oxygen Level");
-  assert.equal(payload.samples.length, 2);
-  assert.equal(payload.samples[0]?.recordedAt, "2026-04-17T00:55:47.000Z");
-  assert.deepEqual(payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
-  assert.equal(payload.batchProvenance?.rows?.[2]?.skipped, true);
-  assert.equal(payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
+  assert.equal(plan.tsColumn, "Time");
+  assert.equal(payload.valueColumn, "Oxygen Level");
+  assert.equal(payload.importedCount, 2);
+  assert.equal(payload.payload.samples[0]?.recordedAt, "2026-04-17T00:55:47.000Z");
+  assert.deepEqual(payload.payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
+  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipped, true);
+  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
 });
 
 test("prepareCsvSampleImport rejects header-only files", async () => {

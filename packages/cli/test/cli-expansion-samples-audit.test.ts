@@ -93,10 +93,13 @@ test.sequential('samples commands support richer import options plus show/list/b
     )
 
     const imported = await runSliceCli<{
-      transformId: string
+      imports: Array<{
+        manifestFile: string | null
+        stream: string
+        transformId: string | null
+      }>
       lookupIds: string[]
-      manifestFile: string
-      stream: string
+      streams: string[]
     }>([
       'samples',
       'import-csv',
@@ -127,10 +130,11 @@ test.sequential('samples commands support richer import options plus show/list/b
 
     assert.equal(imported.ok, true)
     assert.equal(imported.meta?.command, 'samples import-csv')
-    assert.equal(requireData(imported).stream, 'heart_rate')
-    assert.match(requireData(imported).transformId, /^xfm_/u)
+    assert.deepEqual(requireData(imported).streams, ['heart_rate'])
+    assert.equal(requireData(imported).imports[0]?.stream, 'heart_rate')
+    assert.match(String(requireData(imported).imports[0]?.transformId), /^xfm_/u)
     assert.equal(requireData(imported).lookupIds.length, 2)
-    await access(path.join(vaultRoot, requireData(imported).manifestFile))
+    await access(path.join(vaultRoot, requireData(imported).imports[0]?.manifestFile ?? ''))
 
     const csvMetadataColumns = await runSliceCli([
       'samples',
@@ -230,19 +234,19 @@ test.sequential('samples commands support richer import options plus show/list/b
       'samples',
       'batch',
       'show',
-      requireData(imported).transformId,
+      String(requireData(imported).imports[0]?.transformId),
       '--vault',
       vaultRoot,
     ])
     assert.equal(batchShow.ok, true)
-    assert.equal(requireData(batchShow).batchId, requireData(imported).transformId)
+    assert.equal(requireData(batchShow).batchId, requireData(imported).imports[0]?.transformId)
     assert.equal(requireData(batchShow).stream, 'heart_rate')
     assert.deepEqual(
       requireData(batchShow).sampleIds,
       requireData(imported).lookupIds,
     )
     assert.deepEqual(requireData(batchShow).importConfig.metadataColumns, ['device', 'context'])
-    assert.equal(requireData(batchShow).manifest.importId, requireData(imported).transformId)
+    assert.equal(requireData(batchShow).manifest.importId, requireData(imported).imports[0]?.transformId)
 
     const batchList = await runSliceCli<{
       items: Array<{
@@ -260,7 +264,7 @@ test.sequential('samples commands support richer import options plus show/list/b
     assert.equal(batchList.ok, true)
     assert.deepEqual(
       requireData(batchList).items.map((item) => item.batchId),
-      [requireData(imported).transformId],
+      [requireData(imported).imports[0]?.transformId],
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

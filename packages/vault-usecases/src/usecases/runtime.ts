@@ -93,7 +93,10 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
 }
 
 function isImportersRuntimeModule(value: unknown): value is ImportersFactoryRuntimeModule {
-  return isPlainObject(value) && typeof value.createImporters === "function"
+  return (
+    isPlainObject(value)
+    && typeof value.createImporters === "function"
+  )
 }
 
 export async function loadImportersRuntimeModule(): Promise<ImportersFactoryRuntimeModule> {

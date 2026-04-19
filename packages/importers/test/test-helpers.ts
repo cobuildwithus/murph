@@ -45,7 +45,15 @@ export function createCorePortSpy() {
       },
       async importSamples(payload: SampleImportPayload) {
         calls.samples.push(payload);
-        return { ok: true, kind: "samples" as const };
+        return {
+          count: payload.samples.length,
+          manifestPath: `raw/samples/${payload.stream}/import_spy/manifest.json`,
+          records: payload.samples.map((_, index) => ({
+            id: `smp_spy_${index + 1}`,
+          })),
+          shardPaths: ["ledger/samples/2026/2026-03.jsonl"],
+          transformId: "xfm_spy",
+        };
       },
     },
   };

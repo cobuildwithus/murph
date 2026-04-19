@@ -183,6 +183,50 @@ test("importCsvSamples parses rows and emits recordedAt values for core", async 
   assert.equal(samplePayload.batchProvenance?.rows?.[1]?.rawValue, "75");
 });
 
+test("importCsvSamples auto-imports multiple recognizable sample columns and normalizes suffixed values", async () => {
+  const filePath = await createTempFile(
+    "o2ring-multi.csv",
+    [
+      "Time,Oxygen Level,Pulse Rate,Steps",
+      '00:55:47 Apr 17 2026,88%,75 bpm,"1,234"',
+      '00:55:48 Apr 17 2026,89%,74 bpm,"1,235"',
+      "09:16:00 Apr 17 2026,--,--,--",
+    ].join("\n"),
+  );
+  const { calls, corePort } = createCorePortSpy();
+
+  const result = await importCsvSamples(
+    {
+      filePath,
+    },
+    { corePort },
+  );
+
+  assert.equal(calls.samples.length, 3);
+  assert.deepEqual(calls.samples.map((payload) => payload.stream), [
+    "spo2",
+    "heart_rate",
+    "steps",
+  ]);
+  assert.equal(calls.samples[0]?.samples[0]?.value, 88);
+  assert.equal(calls.samples[1]?.samples[0]?.value, 75);
+  assert.equal(calls.samples[2]?.samples[0]?.value, 1234);
+  assert.equal(result.importedCount, 6);
+  assert.equal(result.skippedCount, 3);
+  assert.deepEqual(
+    result.imports.map((entry) => ({
+      stream: entry.stream,
+      skippedCount: entry.skippedCount,
+      transformId: entry.transformId,
+    })),
+    [
+      { stream: "spo2", skippedCount: 1, transformId: "xfm_spy" },
+      { stream: "heart_rate", skippedCount: 1, transformId: "xfm_spy" },
+      { stream: "steps", skippedCount: 1, transformId: "xfm_spy" },
+    ],
+  );
+});
+
 test("createSamplePresetRegistry rejects duplicate preset ids", () => {
   const registry = createSamplePresetRegistry();
 
@@ -437,7 +481,7 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
     ].join("\n"),
   );
 
-  const payload = await prepareCsvSampleImport({
+  const plan = await prepareCsvSampleImport({
     filePath,
     vaultRoot,
     vault: "/tmp/example-vault",
@@ -448,16 +492,21 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
     delimiter: ",",
   });
 
-  assert.equal(payload.vaultRoot, vaultRoot);
-  assert.equal(payload.importConfig.metadataColumns, undefined);
-  assert.equal(payload.samples.length, 2);
-  assert.equal(payload.batchProvenance?.sourceFileName, "glucose.csv");
-  assert.equal(payload.batchProvenance?.importConfig?.valueColumn, "value");
-  assert.equal(payload.batchProvenance?.rows?.length, 2);
-  assert.equal(payload.batchProvenance?.rows?.[0]?.rowNumber, 3);
-  assert.equal(payload.batchProvenance?.rows?.[0]?.metadata, undefined);
-  assert.equal(payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
-  assert.equal(payload.samples[1]?.value, 95);
+  const [payload] = plan.imports;
+
+  assert.ok(payload);
+  assert.equal(plan.vaultRoot, vaultRoot);
+  assert.equal(plan.tsColumn, "recorded");
+  assert.equal(plan.metadataColumns, undefined);
+  assert.equal(payload.payload.importConfig.metadataColumns, undefined);
+  assert.equal(payload.importedCount, 2);
+  assert.equal(payload.payload.batchProvenance?.sourceFileName, "glucose.csv");
+  assert.equal(payload.payload.batchProvenance?.importConfig?.valueColumn, "value");
+  assert.equal(payload.payload.batchProvenance?.rows?.length, 2);
+  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.rowNumber, 3);
+  assert.equal(payload.payload.batchProvenance?.rows?.[0]?.metadata, undefined);
+  assert.equal(payload.payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
+  assert.equal(payload.payload.samples[1]?.value, 95);
 });
 
 test("prepareCsvSampleImport infers SpO2 imports from O2Ring-style CSV rows and skips placeholder values", async () => {
@@ -478,26 +527,29 @@ test("prepareCsvSampleImport infers SpO2 imports from O2Ring-style CSV rows and 
     ].join("\n"),
   );
 
-  const payload = await prepareCsvSampleImport({
+  const plan = await prepareCsvSampleImport({
     filePath,
     vaultRoot,
     stream: "SpO2",
     metadataColumns: ["Motion"],
   });
 
+  const [payload] = plan.imports;
+
+  assert.ok(payload);
   assert.equal(payload.stream, "spo2");
   assert.equal(payload.unit, "%");
-  assert.equal(payload.importConfig.tsColumn, "Time");
-  assert.equal(payload.importConfig.valueColumn, "Oxygen Level");
-  assert.deepEqual(payload.importConfig.metadataColumns, ["Motion"]);
-  assert.equal(payload.samples.length, 2);
-  assert.equal(payload.samples[0]?.recordedAt, "2026-04-16T16:55:47.000Z");
-  assert.equal(payload.samples[0]?.value, 88);
-  assert.equal(payload.batchProvenance?.rows?.length, 3);
-  assert.deepEqual(payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
-  assert.equal(payload.batchProvenance?.rows?.[2]?.skipped, true);
-  assert.equal(payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
-  assert.equal(payload.batchProvenance?.rows?.[2]?.rawValue, "--");
+  assert.equal(plan.tsColumn, "Time");
+  assert.equal(payload.valueColumn, "Oxygen Level");
+  assert.deepEqual(payload.payload.importConfig.metadataColumns, ["Motion"]);
+  assert.equal(payload.importedCount, 2);
+  assert.equal(payload.payload.samples[0]?.recordedAt, "2026-04-16T16:55:47.000Z");
+  assert.equal(payload.payload.samples[0]?.value, 88);
+  assert.equal(payload.payload.batchProvenance?.rows?.length, 3);
+  assert.deepEqual(payload.payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
+  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipped, true);
+  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
+  assert.equal(payload.payload.batchProvenance?.rows?.[2]?.rawValue, "--");
 });
 
 test("prepareCsvSampleImport rejects header-only files", async () => {
@@ -581,10 +633,7 @@ test("importCsvSamples with the real core runtime writes a batch manifest with r
 
   await coreRuntime.initializeVault({ vaultRoot });
 
-  const result = await importCsvSamples<{
-    count: number;
-    manifestPath: string;
-  }>(
+  const result = await importCsvSamples(
     {
       filePath,
       vaultRoot,
@@ -598,11 +647,14 @@ test("importCsvSamples with the real core runtime writes a batch manifest with r
     { corePort: coreRuntime },
   );
 
-  assert.equal(result.count, 2);
-  assert.match(result.manifestPath, /^raw\/samples\/heart_rate\/.+\/manifest\.json$/u);
+  assert.equal(result.importedCount, 2);
+  assert.equal(result.lookupIds.length, 2);
+  assert.equal(result.imports.length, 1);
+  assert.match(String(result.imports[0]?.transformId), /^xfm_/u);
+  assert.match(String(result.imports[0]?.manifestPath), /^raw\/samples\/heart_rate\/.+\/manifest\.json$/u);
 
   const manifest = JSON.parse(
-    await readFile(join(vaultRoot, result.manifestPath), "utf8"),
+    await readFile(join(vaultRoot, result.imports[0]?.manifestPath ?? ""), "utf8"),
   ) as {
     importKind: string;
     provenance: {

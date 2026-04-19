@@ -171,6 +171,7 @@ export interface EventScaffoldResult {
     | "note"
     | "symptom"
     | "observation"
+    | "measurement"
     | "medication_intake"
     | "supplement_intake"
     | "activity_session"
@@ -1078,13 +1079,30 @@ export interface ImportersRuntime {
     requestId?: string | null
     source?: string
   }): Promise<{
-    count: number
-    records: Array<{
-      id: string
+    importedCount: number
+    imports: Array<{
+      stream: string
+      unit: string
+      timeZone: string
+      tsColumn: string
+      valueColumn: string
+      importedCount: number
+      skippedCount: number
+      skipReasons: Array<{
+        count: number
+        reason: string
+      }>
+      transformId: string | null
+      manifestPath: string | null
+      lookupIds: string[]
+      ledgerFiles: string[]
     }>
-    transformId: string
-    manifestPath: string
-    shardPaths: string[]
+    skippedCount: number
+    lookupIds: string[]
+    ledgerFiles: string[]
+    metadataColumns: string[]
+    timeZone: string
+    tsColumn: string
   }>
   importAssessmentResponse(input: {
     filePath: string
@@ -1123,11 +1141,20 @@ export interface ImportersRuntimeModule {
     requestId?: string | null
     source?: string
   }): Promise<{
-    stream: string
+    timeZone: string
+    tsColumn: string
+    metadataColumns?: string[]
+    imports: Array<{
+      stream: string
+      valueColumn: string
+    }>
   }>
 }
 
-export type ImportersFactoryRuntimeModule = Pick<ImportersRuntimeModule, "createImporters">
+export type ImportersFactoryRuntimeModule = Pick<
+  ImportersRuntimeModule,
+  "createImporters"
+>
 
 export type QueryEntity = QueryCanonicalEntity
 export type QueryRecord = QueryCanonicalEntity

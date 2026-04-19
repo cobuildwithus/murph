@@ -490,18 +490,41 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 {
   "vault": "<path>",
   "sourceFile": "<path>",
-  "stream": "glucose",
-  "importedCount": 42,
-  "transformId": "xfm_123",
-  "manifestFile": "<path>",
+  "timeZone": "America/New_York",
+  "tsColumn": "Time",
+  "importedCount": 84,
+  "skippedCount": 3,
   "lookupIds": ["smp_123", "smp_124"],
-  "ledgerFiles": ["<path>"]
+  "ledgerFiles": ["<path>"],
+  "streams": ["spo2", "heart_rate"],
+  "imports": [
+    {
+      "stream": "spo2",
+      "unit": "%",
+      "timeZone": "America/New_York",
+      "tsColumn": "Time",
+      "valueColumn": "Oxygen Level",
+      "importedCount": 42,
+      "skippedCount": 1,
+      "skipReasons": [{ "reason": "non-numeric value", "count": 1 }],
+      "transformId": "xfm_123",
+      "manifestFile": "<path>",
+      "lookupIds": ["smp_123", "smp_124"],
+      "ledgerFiles": ["<path>"]
+    }
+  ],
+  "inferred": {
+    "timeZone": "America/New_York",
+    "tsColumn": "Time",
+    "metadataColumns": ["Motion"],
+    "imports": [{ "stream": "spo2", "valueColumn": "Oxygen Level" }]
+  }
 }
 ```
 
-`transformId` identifies the raw import batch only. `manifestFile` points at the immutable batch sidecar with checksum, import-config, and row provenance. Use the returned `lookupIds` or `list --kind sample` for follow-on reads.
+Each entry in `imports` represents one stream-specific batch attempt. When a stream had no importable rows after best-effort parsing, that entry still reports `skippedCount` and `skipReasons`, but its `transformId`, `manifestFile`, `lookupIds`, and `ledgerFiles` stay empty or `null` because no canonical batch was written.
 
-`samples import-csv` should make a best-effort pass over real-world device exports: it may infer `stream`, timestamp column, value column, and default unit from recognizable headers, normalize common naive timestamps using the vault timezone, and skip malformed rows in provenance instead of failing the entire batch. Ambiguous multi-metric CSVs still require `--stream` or `--value-column`.
+`samples import-csv` should make a best-effort pass over real-world device exports: it may infer one shared timestamp column, import every recognizable metric column in the same file, normalize common naive timestamps using the vault timezone, parse obvious numeric suffixes such as `%`, `bpm`, and digit group separators, and skip malformed rows in provenance instead of failing the entire batch. It should fail only for true ambiguity, such as multiple plausible timestamp columns or multiple columns mapping to the same canonical stream.
 
 ### `experiment create`
 

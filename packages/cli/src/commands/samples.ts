@@ -129,7 +129,7 @@ export function registerSamplesCommands(
   samples.command(
     'import-csv',
     {
-      description: 'Import timestamped numeric samples from a CSV file.',
+      description: 'Import timestamped numeric samples from a CSV file, auto-detecting every recognizable metric column when possible.',
       args: z.object({
         file: pathSchema.describe('Source CSV file to import.'),
       }),
@@ -153,7 +153,7 @@ export function registerSamplesCommands(
           .string()
           .min(1)
           .optional()
-          .describe('Optional numeric value column override. When omitted, the importer will infer a recognizable metric column when the CSV is unambiguous.'),
+          .describe('Optional numeric value column override. When omitted, the importer will infer a recognizable metric column, or import all recognizable metrics when the CSV is unambiguous.'),
         unit: z
           .string()
           .min(1)

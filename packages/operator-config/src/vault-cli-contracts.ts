@@ -146,6 +146,20 @@ const bodyMeasurementEntryResultSchema = z.object({
   note: z.string().min(1).optional(),
 })
 
+const measurementQualifierValueResultSchema = z.union([
+  z.string().min(1),
+  z.number(),
+  z.boolean(),
+])
+
+export const measurementEntryResultSchema = z.object({
+  metric: slugSchema,
+  value: z.number(),
+  unit: z.string().min(1),
+  qualifiers: z.record(z.string().min(1), measurementQualifierValueResultSchema).optional(),
+  note: z.string().min(1).optional(),
+})
+
 export const workoutUnitPreferenceValuesResultSchema = z.object({
   weight: z.enum(['lb', 'kg']).nullable(),
   bodyMeasurement: z.enum(['cm', 'in']).nullable(),
@@ -234,20 +248,22 @@ export const workoutAddResultSchema = z.object({
   note: z.string().min(1),
 })
 
-export const workoutMeasurementAddResultSchema = z.object({
+export const measurementAddResultSchema = z.object({
   vault: pathSchema,
   eventId: z.string().min(1),
   lookupId: z.string().min(1),
   ledgerFile: pathSchema,
   created: z.boolean(),
   occurredAt: isoTimestampSchema,
-  kind: z.literal('body_measurement'),
+  kind: z.literal('measurement'),
   title: z.string().min(1),
-  measurements: z.array(bodyMeasurementEntryResultSchema).min(1).max(25),
+  measurements: z.array(measurementEntryResultSchema).min(1).max(25),
   media: z.array(storedMediaResultSchema).max(10),
   manifestFile: pathSchema.nullable(),
   note: z.string().min(1).nullable(),
 })
+
+export const workoutMeasurementAddResultSchema = measurementAddResultSchema
 
 export const workoutUnitPreferencesResultSchema = z.object({
   vault: pathSchema,
@@ -309,12 +325,45 @@ export const interventionAddResultSchema = z.object({
 export const samplesImportCsvResultSchema = z.object({
   vault: pathSchema,
   sourceFile: pathSchema,
-  stream: z.string().min(1),
+  timeZone: timeZoneSchema,
+  tsColumn: z.string().min(1),
   importedCount: z.number().int().nonnegative(),
-  transformId: z.string().min(1),
-  manifestFile: pathSchema,
+  skippedCount: z.number().int().nonnegative(),
   lookupIds: z.array(z.string().min(1)).min(1),
   ledgerFiles: z.array(pathSchema).min(1),
+  streams: z.array(z.string().min(1)).min(1),
+  imports: z.array(
+    z.object({
+      stream: z.string().min(1),
+      unit: z.string().min(1),
+      timeZone: timeZoneSchema,
+      tsColumn: z.string().min(1),
+      valueColumn: z.string().min(1),
+      importedCount: z.number().int().nonnegative(),
+      skippedCount: z.number().int().nonnegative(),
+      skipReasons: z.array(
+        z.object({
+          count: z.number().int().positive(),
+          reason: z.string().min(1),
+        }),
+      ),
+      transformId: z.string().min(1).nullable(),
+      manifestFile: pathSchema.nullable(),
+      lookupIds: z.array(z.string().min(1)),
+      ledgerFiles: z.array(pathSchema),
+    }),
+  ).min(1),
+  inferred: z.object({
+    timeZone: timeZoneSchema,
+    tsColumn: z.string().min(1),
+    metadataColumns: z.array(z.string().min(1)),
+    imports: z.array(
+      z.object({
+        stream: z.string().min(1),
+        valueColumn: z.string().min(1),
+      }),
+    ).min(1),
+  }),
 })
 
 export const experimentCreateResultSchema = z.object({

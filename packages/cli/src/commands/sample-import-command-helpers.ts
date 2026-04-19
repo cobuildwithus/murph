@@ -17,14 +17,33 @@ interface ImportCsvSamplesRuntimeInput {
   vaultRoot: string
 }
 
-interface ImportCsvSamplesRuntimeResult {
-  count: number
-  transformId: string
-  manifestPath: string
-  records: Array<{
-    id: string
+interface ImportCsvSamplesRuntimeResultItem {
+  importedCount: number
+  ledgerFiles: string[]
+  lookupIds: string[]
+  manifestPath: string | null
+  skipReasons: Array<{
+    count: number
+    reason: string
   }>
-  shardPaths: string[]
+  skippedCount: number
+  stream: string
+  timeZone: string
+  transformId: string | null
+  tsColumn: string
+  unit: string
+  valueColumn: string
+}
+
+interface ImportCsvSamplesRuntimeResult {
+  importedCount: number
+  imports: ImportCsvSamplesRuntimeResultItem[]
+  ledgerFiles: string[]
+  lookupIds: string[]
+  metadataColumns: string[]
+  skippedCount: number
+  timeZone: string
+  tsColumn: string
 }
 
 interface ImportersRuntimeModule {
@@ -33,9 +52,6 @@ interface ImportersRuntimeModule {
       input: ImportCsvSamplesRuntimeInput,
     ): Promise<ImportCsvSamplesRuntimeResult>
   }
-  prepareCsvSampleImport(input: ImportCsvSamplesRuntimeInput): Promise<{
-    stream: string
-  }>
 }
 
 export interface ImportCsvSamplesOptions {
@@ -57,18 +73,51 @@ let importersRuntimePromise: Promise<ImportersRuntimeModule> | null = null
 export async function importCsvSamples(options: ImportCsvSamplesOptions) {
   const importers = await loadImportersRuntime()
   const runtimeInput = createImportCsvSamplesRuntimeInput(options)
-  const preparedImport = await importers.prepareCsvSampleImport(runtimeInput)
-  const result = await importers.createImporters().importCsvSamples(runtimeInput)
+  const runtime = importers.createImporters()
+
+  if (!runtime || typeof runtime.importCsvSamples !== 'function') {
+    importersRuntimePromise = null
+    throw createRuntimeUnavailableError(
+      'samples import-csv',
+      new TypeError('Importer runtime package did not match the expected module shape.'),
+    )
+  }
+
+  const result = await runtime.importCsvSamples(runtimeInput)
 
   return {
     vault: options.vault,
     sourceFile: options.file,
-    stream: preparedImport.stream,
-    importedCount: result.count,
-    transformId: result.transformId,
-    manifestFile: result.manifestPath,
-    lookupIds: result.records.map((record) => record.id),
-    ledgerFiles: result.shardPaths,
+    timeZone: result.timeZone,
+    tsColumn: result.tsColumn,
+    importedCount: result.importedCount,
+    skippedCount: result.skippedCount,
+    lookupIds: result.lookupIds,
+    ledgerFiles: result.ledgerFiles,
+    streams: result.imports.map((entry) => entry.stream),
+    imports: result.imports.map((entry) => ({
+      stream: entry.stream,
+      unit: entry.unit,
+      timeZone: entry.timeZone,
+      tsColumn: entry.tsColumn,
+      valueColumn: entry.valueColumn,
+      importedCount: entry.importedCount,
+      skippedCount: entry.skippedCount,
+      skipReasons: entry.skipReasons,
+      transformId: entry.transformId,
+      manifestFile: entry.manifestPath,
+      lookupIds: entry.lookupIds,
+      ledgerFiles: entry.ledgerFiles,
+    })),
+    inferred: {
+      timeZone: result.timeZone,
+      tsColumn: result.tsColumn,
+      imports: result.imports.map((entry) => ({
+        stream: entry.stream,
+        valueColumn: entry.valueColumn,
+      })),
+      metadataColumns: result.metadataColumns,
+    },
   }
 }
 
@@ -95,10 +144,7 @@ async function loadImportersRuntime(): Promise<ImportersRuntimeModule> {
     try {
       const runtime = await loadRuntimeModule<ImportersRuntimeModule>('@murphai/importers')
 
-      if (
-        typeof runtime.createImporters !== 'function' ||
-        typeof runtime.prepareCsvSampleImport !== 'function'
-      ) {
+      if (typeof runtime.createImporters !== 'function') {
         throw new TypeError('Importer runtime package did not match the expected module shape.')
       }
 
