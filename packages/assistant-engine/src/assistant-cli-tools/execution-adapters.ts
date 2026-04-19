@@ -442,14 +442,6 @@ async function createAssistantPayloadFile(
 async function resolveAssistantCliLauncher(
   cliProcessEnv: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
-  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
-  if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
-    return {
-      argvPrefix: [localBuiltCliBinPath],
-      command: process.execPath,
-    }
-  }
-
   const vaultCliBinary = await resolveExecutableOnPath(
     'vault-cli',
     cliProcessEnv,
@@ -458,6 +450,14 @@ async function resolveAssistantCliLauncher(
     return {
       argvPrefix: [],
       command: vaultCliBinary,
+    }
+  }
+
+  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
+  if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
+    return {
+      argvPrefix: [localBuiltCliBinPath],
+      command: process.execPath,
     }
   }
 
