@@ -6,20 +6,10 @@ import { test } from "vitest";
 
 import { vi } from "vitest";
 
-vi.mock("next/font/google", () => ({
-  Fraunces() {
+vi.mock("next/font/local", () => ({
+  default(input: { variable?: string }) {
     return {
-      variable: "font-fraunces",
-    };
-  },
-  DM_Sans() {
-    return {
-      variable: "font-dm-sans",
-    };
-  },
-  DM_Mono() {
-    return {
-      variable: "font-dm-mono",
+      variable: input.variable ?? "font-local",
     };
   },
 }));
@@ -72,6 +62,9 @@ test("RootLayout renders the Apache footer with support and GitHub links", () =>
   assert.match(markup, /data-providers="true"/);
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
   assert.match(markup, /data-privy-client-id="client_123"/);
+  assert.match(markup, /<html lang="en" class="[^"]*--font-serif[^"]*"/u);
+  assert.match(markup, /<html lang="en" class="[^"]*--font-sans[^"]*"/u);
+  assert.match(markup, /<html lang="en" class="[^"]*--font-mono[^"]*"/u);
   assert.match(markup, /Murph is open source and licensed under Apache 2\.0\./);
   assert.match(markup, /Contact support/);
   assert.match(markup, /mailto:support@withmurph\.ai/u);

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Fraunces, DM_Sans, DM_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import Script from "next/script";
@@ -14,23 +13,7 @@ import {
 
 import "./globals.css";
 import { cn } from "@/src/lib/utils";
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-serif",
-  weight: ["400", "600"],
-});
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-sans",
-});
-
-const dmMono = DM_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  weight: ["400"],
-});
+import { dmMono, dmSans, fraunces } from "./font-assets";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 const SUPPORT_EMAIL = "support@withmurph.ai";
