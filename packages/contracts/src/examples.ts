@@ -397,7 +397,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
   },
   {
     schemaVersion: "murph.event.v1",
-    id: "evt_01JNV44MEASUREMENT000000001",
+    id: "evt_01JNV44M31G7YQ9K8TR2D5H6ZP",
     kind: "measurement",
     occurredAt: "2026-03-12T07:00:00Z",
     recordedAt: "2026-03-12T07:00:10Z",
@@ -409,7 +409,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
       {
         role: "media_1",
         kind: "photo",
-        relativePath: "raw/measurements/2026/03/evt_01JNV44MEASUREMENT000000001/front.jpg",
+        relativePath: "raw/measurements/2026/03/evt_01JNV44M31G7YQ9K8TR2D5H6ZP/front.jpg",
         mediaType: "image/jpeg",
         sha256: "4343434343434343434343434343434343434343434343434343434343434343",
         originalFileName: "front.jpg",
@@ -423,12 +423,12 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     media: [
       {
         kind: "photo",
-        relativePath: "raw/measurements/2026/03/evt_01JNV44MEASUREMENT000000001/front.jpg",
+        relativePath: "raw/measurements/2026/03/evt_01JNV44M31G7YQ9K8TR2D5H6ZP/front.jpg",
         mediaType: "image/jpeg",
       }
     ],
     rawRefs: [
-      "raw/measurements/2026/03/evt_01JNV44MEASUREMENT000000001/front.jpg"
+      "raw/measurements/2026/03/evt_01JNV44M31G7YQ9K8TR2D5H6ZP/front.jpg"
     ],
   },
   {

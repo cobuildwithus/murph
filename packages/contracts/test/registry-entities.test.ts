@@ -333,12 +333,12 @@ describe("health registry seam", () => {
       },
       {
         type: "addresses_condition",
-        targetId: "cond_insomnia",
+        targetId: "cond_fatigue",
         sourceKeys: ["relatedConditionIds"],
       },
       {
         type: "addresses_condition",
-        targetId: "cond_fatigue",
+        targetId: "cond_insomnia",
         sourceKeys: ["relatedConditionIds"],
       },
       {

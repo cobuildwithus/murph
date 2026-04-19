@@ -390,7 +390,7 @@ describe("workout-core", () => {
   test("loads the workout core runtime through the shared runtime importer", async () => {
     const fakeRuntime = {
       addActivitySession: vi.fn(),
-      addBodyMeasurement: vi.fn(),
+      addMeasurement: vi.fn(),
     };
 
     const workoutCoreModule = await importWithMocks<typeof import("../src/usecases/workout-core.ts")>(
@@ -759,7 +759,7 @@ describe("workout-measurement", () => {
         },
       },
     }));
-    const addBodyMeasurement = vi.fn(async (_input: { draft: { title: string } }) => ({
+    const addMeasurement = vi.fn(async (_input: { draft: { title: string } }) => ({
       eventId: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
       ledgerFile: "journal/body-measurement.md",
       created: true,
@@ -775,7 +775,7 @@ describe("workout-measurement", () => {
       },
     }));
     const loadWorkoutCoreRuntime = vi.fn(async () => ({
-      addBodyMeasurement,
+      addMeasurement,
     }));
 
     const workoutMeasurementModule = (await importWithMocks(
@@ -800,12 +800,12 @@ describe("workout-measurement", () => {
       mediaPaths: [" /tmp/photo.jpg ", "", " /tmp/photo-2.jpg "],
     });
     assert.equal(added.eventId, "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    assert.equal(addBodyMeasurement.mock.calls.length, 1);
-    const addBodyMeasurementFirstCall = addBodyMeasurement.mock.calls.at(0);
-    assert.ok(addBodyMeasurementFirstCall);
-    const [addBodyMeasurementInput] = addBodyMeasurementFirstCall;
-    assert.ok(addBodyMeasurementInput);
-    assert.equal(addBodyMeasurementInput.draft.title, "Weight check-in");
+    assert.equal(addMeasurement.mock.calls.length, 1);
+    const addMeasurementFirstCall = addMeasurement.mock.calls.at(0);
+    assert.ok(addMeasurementFirstCall);
+    const [addMeasurementInput] = addMeasurementFirstCall;
+    assert.ok(addMeasurementInput);
+    assert.equal(addMeasurementInput.draft.title, "Weight");
 
     const shown = await workoutMeasurementModule.showWorkoutUnitPreferences("./vault");
     assert.equal(shown.unitPreferences.weight, "lb");
