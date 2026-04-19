@@ -55,7 +55,7 @@ export function normalizeHostedWakeLifecycleState(
 export function isHostedWakeLifecycleTerminal(
   state: HostedWakeLifecycleState,
 ): boolean {
-  return state === "completed" || state === "replaced" || state === "poisoned";
+  return state === "completed" || state === "replaced" || state === "quarantined";
 }
 
 export async function materializeHostedExecutionWakeTx(input: {

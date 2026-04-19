@@ -3,7 +3,7 @@ import type { SharePack } from "@murphai/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type WakeDispatchRecord = {
-  wakeState: "completed" | "poisoned" | "queued" | "replaced";
+  wakeState: "completed" | "quarantined" | "queued" | "replaced";
   eventId: string;
 };
 
@@ -555,7 +555,7 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
   });
 
-  it("releases a processing share when the wake lifecycle is poisoned before local reconciliation catches up", async () => {
+  it("releases a processing share when the wake lifecycle is quarantined before local reconciliation catches up", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma: prisma as never,
@@ -574,7 +574,7 @@ describe("hosted share service", () => {
     });
 
     prisma.outboxRows[0]!.wakeState = "queued";
-    prisma.outboxRows[0]!.wakeState = "poisoned";
+    prisma.outboxRows[0]!.wakeState = "quarantined";
 
     await expect(buildHostedSharePageData({
       authenticatedMember: {

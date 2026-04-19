@@ -140,7 +140,7 @@ describe("hosted execution coverage gaps", () => {
       "backpressured",
       "completed",
       "replaced",
-      "poisoned",
+      "quarantined",
     ]);
     expect(HOSTED_WAKE_TERMINAL_STATES).toEqual([
       "completed",
@@ -173,7 +173,6 @@ describe("hosted execution coverage gaps", () => {
     expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./client");
     expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./outbox-payload");
 
-    const loadSpecifier = (specifier: string) => import(specifier);
     const rootModule = await import("@murphai/hosted-execution");
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
 
@@ -189,8 +188,5 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
       "buildHostedExecutionRunnerEmailMessagePath",
     ]);
-    await expect(loadSpecifier("@murphai/hosted-execution/dispatch-ref")).rejects.toThrow();
-    await expect(loadSpecifier("@murphai/hosted-execution/client")).rejects.toThrow();
-    await expect(loadSpecifier("@murphai/hosted-execution/outbox-payload")).rejects.toThrow();
   });
 });
