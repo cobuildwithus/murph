@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildHostedExecutionAssistantCronTickWake,
   HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
+
+const TEST_SNAPSHOT_REF = {
+  hash: "hash_24",
+  key: "bundles/vault/hash_24",
+  size: 24,
+  updatedAt: "2026-04-17T00:00:00.000Z",
+} as const;
 
 const mocks = vi.hoisted(() => ({
   appendHostedExecutionWakePayloadTx: vi.fn(),
@@ -160,7 +166,7 @@ describe("hosted wake internal routes", () => {
         committedSeq: "24",
         createdAt: "2026-04-17T00:00:00.000Z",
         nextSeq: "25",
-        snapshotRef: { checkpoint: "wake_24" },
+        snapshotRef: TEST_SNAPSHOT_REF,
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",
         version: "4",
@@ -180,12 +186,13 @@ describe("hosted wake internal routes", () => {
   });
 
   it("parses and forwards wake append requests", async () => {
-    const wake = buildHostedExecutionAssistantCronTickWake({
+    const wake = {
       eventId: "evt_tick",
+      kind: "assistant.cron.tick",
       occurredAt: "2026-04-17T00:00:00.000Z",
       reason: "manual",
       userId: "member_123",
-    });
+    };
     mocks.readOptionalJsonObject.mockResolvedValue({
       wake,
     });
@@ -213,12 +220,13 @@ describe("hosted wake internal routes", () => {
 
   it("rejects wake append requests whose wake userId does not match the bound user", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
-      wake: buildHostedExecutionAssistantCronTickWake({
+      wake: {
         eventId: "evt_tick",
+        kind: "assistant.cron.tick",
         occurredAt: "2026-04-17T00:00:00.000Z",
         reason: "manual",
         userId: "member_other",
-      }),
+      },
     });
 
     const { POST } = await import("../app/api/internal/hosted-wake/append/route");
@@ -287,9 +295,7 @@ describe("hosted wake internal routes", () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       committedSeq: "24",
       expectedVersion: "3",
-      snapshotRef: {
-        checkpoint: "wake_24",
-      },
+      snapshotRef: TEST_SNAPSHOT_REF,
     });
 
     const { POST } = await import("../app/api/internal/hosted-wake/commit/route");
@@ -302,9 +308,7 @@ describe("hosted wake internal routes", () => {
         committedSeq: "24",
         createdAt: "2026-04-17T00:00:00.000Z",
         nextSeq: "25",
-        snapshotRef: {
-          checkpoint: "wake_24",
-        },
+        snapshotRef: TEST_SNAPSHOT_REF,
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",
         version: "4",
@@ -315,9 +319,7 @@ describe("hosted wake internal routes", () => {
     expect(mocks.commitHostedExecutionCursorTx).toHaveBeenCalledWith({
       committedSeq: 24n,
       expectedVersion: 3n,
-      snapshotRef: {
-        checkpoint: "wake_24",
-      },
+      snapshotRef: TEST_SNAPSHOT_REF,
       tx: expect.objectContaining({
         label: "wake-route-tx",
       }),
@@ -356,9 +358,7 @@ describe("hosted wake internal routes", () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       committedSeq: "24",
       expectedVersion: "3",
-      snapshotRef: {
-        checkpoint: "wake_24_final",
-      },
+      snapshotRef: TEST_SNAPSHOT_REF,
     });
     mocks.commitHostedExecutionCursorTx.mockResolvedValueOnce({
       committed: true,
@@ -366,9 +366,7 @@ describe("hosted wake internal routes", () => {
         committedSeq: "24",
         createdAt: "2026-04-17T00:00:00.000Z",
         nextSeq: "25",
-        snapshotRef: {
-          checkpoint: "wake_24_final",
-        },
+        snapshotRef: TEST_SNAPSHOT_REF,
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",
         version: "4",
@@ -385,9 +383,7 @@ describe("hosted wake internal routes", () => {
         committedSeq: "24",
         createdAt: "2026-04-17T00:00:00.000Z",
         nextSeq: "25",
-        snapshotRef: {
-          checkpoint: "wake_24_final",
-        },
+        snapshotRef: TEST_SNAPSHOT_REF,
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",
         version: "4",
@@ -398,14 +394,34 @@ describe("hosted wake internal routes", () => {
     expect(mocks.commitHostedExecutionCursorTx).toHaveBeenCalledWith({
       committedSeq: 24n,
       expectedVersion: 3n,
-      snapshotRef: {
-        checkpoint: "wake_24_final",
-      },
+      snapshotRef: TEST_SNAPSHOT_REF,
       tx: expect.objectContaining({
         label: "wake-route-tx",
       }),
       userId: "member_123",
     });
+  });
+
+  it("rejects commit requests whose snapshotRef is not a hosted bundle ref", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      committedSeq: "24",
+      expectedVersion: "3",
+      snapshotRef: {
+        checkpoint: "wake_24",
+      },
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/commit/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.commitHostedExecutionCursorTx).not.toHaveBeenCalled();
   });
 
   it("parses and forwards hosted wake materialization requests", async () => {
@@ -440,8 +456,10 @@ describe("hosted wake internal routes", () => {
 
   it("parses and forwards wake quarantine requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
+      fetchProof: "proof_24",
       quarantineCode: "invalid-dispatch-payload",
       wakeId: "wake_24",
+      wakeSeq: "24",
     });
 
     const { POST } = await import("../app/api/internal/hosted-wake/quarantine/route");
@@ -452,12 +470,14 @@ describe("hosted wake internal routes", () => {
       quarantined: true,
     });
     expect(mocks.quarantineHostedWakeTx).toHaveBeenCalledWith({
+      fetchProof: "proof_24",
       quarantineCode: "invalid-dispatch-payload",
       tx: expect.objectContaining({
         label: "wake-route-tx",
       }),
       userId: "member_123",
       wakeId: "wake_24",
+      wakeSeq: 24n,
     });
   });
 

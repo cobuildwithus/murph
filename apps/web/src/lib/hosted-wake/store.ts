@@ -3,6 +3,7 @@ import type {
   HostedExecutionCursorState,
   HostedWakeCommitResponse,
   HostedWakeFetchResponse,
+  HostedWakeTerminalState,
 } from "@murphai/hosted-execution/contracts";
 
 import { getPrisma } from "../prisma";
@@ -113,12 +114,16 @@ export async function countPendingHostedWakes(input: {
     terminals
       .filter((terminal) => {
         const wake = wakesById.get(terminal.wakeId);
+        const receipt = {
+          ...terminal,
+          state: parseHostedWakeTerminalState(terminal.state),
+        };
         return Boolean(
           wake
-            && (terminal.state === "completed" || terminal.state === "replaced")
+            && (receipt.state === "completed" || receipt.state === "replaced")
             && isCurrentHostedWakeTerminalReceipt({
               cursor,
-              receipt: terminal,
+              receipt,
               wake,
             }),
         );
@@ -156,25 +161,33 @@ export async function listHostedWakesAfterSeq(
 
   return {
     cursor: projectHostedExecutionCursorRecord(cursor),
-    wakes: (await hydrateHostedWakeRecordsTx({
+    wakes: await Promise.all((await hydrateHostedWakeRecordsTx({
       records: wakes,
       tx: prisma,
-    })).map((wake) => ({
+    })).map(async (wake) => ({
       ...wake,
       fetchProof: issueHostedWakeFetchProof({
         fetchedCommittedSeq: cursor.committedSeq,
         fetchedCursorVersion: cursor.version,
         userId: wake.userId,
+        wakeEventId: await resolveHostedWakeCurrentEventIdTx({
+          tx: prisma,
+          wake: {
+            id: wake.id,
+            seq: BigInt(wake.seq),
+            userId: wake.userId,
+          },
+        }),
         wakeId: wake.id,
         wakeSeq: BigInt(wake.seq),
       }),
-    })),
+    }))),
   };
 }
 
 export async function recordHostedWakeTerminalTx(input: {
   fetchProof: string;
-  state: "completed" | "replaced";
+  state: "completed" | "quarantined" | "replaced";
   tx: HostedWakeMutationTx;
   userId: string;
   wakeId: string;
@@ -186,65 +199,39 @@ export async function recordHostedWakeTerminalTx(input: {
     wakeId: input.wakeId,
     wakeSeq: input.wakeSeq,
   });
-  const wake = await input.tx.hostedWake.findFirst({
-    where: {
-      id: input.wakeId,
-      seq: input.wakeSeq,
-      userId: input.userId,
-    },
-    select: {
-      id: true,
-    },
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+  const fetchFence = parseHostedWakeFetchFence(claims);
+
+  assertCurrentHostedWakeFetchFence(cursor, fetchFence);
+  const wake = await readCurrentHostedWakeTerminalTargetTx({
+    tx: input.tx,
+    userId: input.userId,
+    wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq,
   });
 
   if (!wake) {
     return false;
   }
 
-  const existing = await input.tx.hostedWakeTerminal.findUnique({
-    where: {
-      wakeId: input.wakeId,
-    },
+  assertCurrentHostedWakeFetchIdentity(claims, wake.currentEventId);
+
+  if (input.state === "quarantined" && wake.quarantinedAt === null) {
+    return false;
+  }
+
+  await upsertHostedWakeTerminalTx({
+    fetchedCommittedSeq: fetchFence.fetchedCommittedSeq,
+    fetchedCursorVersion: fetchFence.fetchedCursorVersion,
+    state: input.state,
+    tx: input.tx,
+    userId: input.userId,
+    wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq,
   });
-
-  if (!existing) {
-    await input.tx.hostedWakeTerminal.create({
-      data: {
-        fetchedCommittedSeq: BigInt(claims.fetchedCommittedSeq),
-        fetchedCursorVersion: BigInt(claims.fetchedCursorVersion),
-        state: input.state,
-        userId: input.userId,
-        wakeId: input.wakeId,
-        wakeSeq: input.wakeSeq,
-      },
-    });
-    return true;
-  }
-
-  if (
-    existing.userId !== input.userId
-    || existing.wakeSeq !== input.wakeSeq
-    || existing.state !== input.state
-  ) {
-    throw new TypeError("Hosted wake terminal receipt conflicts with the existing canonical record.");
-  }
-
-  const fetchedCommittedSeq = BigInt(claims.fetchedCommittedSeq);
-  const fetchedCursorVersion = BigInt(claims.fetchedCursorVersion);
-  if (shouldRefreshTerminalFetchFence(existing, {
-    fetchedCommittedSeq,
-    fetchedCursorVersion,
-  })) {
-    await input.tx.hostedWakeTerminal.update({
-      where: {
-        wakeId: input.wakeId,
-      },
-      data: {
-        fetchedCommittedSeq,
-        fetchedCursorVersion,
-      },
-    });
-  }
 
   return true;
 }
@@ -305,7 +292,6 @@ export async function commitHostedExecutionCursorTx(input: {
       },
       select: {
         id: true,
-        quarantinedAt: true,
       },
     });
 
@@ -316,25 +302,40 @@ export async function commitHostedExecutionCursorTx(input: {
       };
     }
 
-    if (!wake.quarantinedAt) {
-      const receipt = await input.tx.hostedWakeTerminal.findUnique({
-        where: {
-          wakeId: wake.id,
-        },
-      });
-
-      if (!isTerminalHostedWakeReceipt(receipt, {
-        fetchedCommittedSeq: cursor.committedSeq,
-        fetchedCursorVersion: cursor.version,
-        userId: input.userId,
+    const receipt = await input.tx.hostedWakeTerminal.findUnique({
+      where: {
         wakeId: wake.id,
-        wakeSeq: input.committedSeq,
-      })) {
-        return {
-          committed: false,
-          cursor: projectHostedExecutionCursorRecord(cursor),
-        };
-      }
+      },
+    });
+    const currentReceipt = {
+      cursor,
+      receipt: receipt === null ? null : {
+        ...receipt,
+        state: parseHostedWakeTerminalState(receipt.state),
+      },
+      wake: {
+        id: wake.id,
+        seq: input.committedSeq,
+        userId: input.userId,
+      },
+    };
+
+    if (!isCurrentHostedWakeTerminalReceipt(currentReceipt)) {
+      return {
+        committed: false,
+        cursor: projectHostedExecutionCursorRecord(cursor),
+      };
+    }
+
+    if (
+      currentReceipt.receipt.state !== "completed"
+      && currentReceipt.receipt.state !== "quarantined"
+      && currentReceipt.receipt.state !== "replaced"
+    ) {
+      return {
+        committed: false,
+        cursor: projectHostedExecutionCursorRecord(cursor),
+      };
     }
   }
 
@@ -363,27 +364,6 @@ export async function commitHostedExecutionCursorTx(input: {
   };
 }
 
-function isTerminalHostedWakeReceipt(
-  receipt: HostedWakeTerminalRow | null,
-  input: {
-    fetchedCommittedSeq: bigint;
-    fetchedCursorVersion: bigint;
-    userId: string;
-    wakeId: string;
-    wakeSeq: bigint;
-  },
-): boolean {
-  return Boolean(
-    receipt
-      && receipt.fetchedCommittedSeq === input.fetchedCommittedSeq
-      && receipt.fetchedCursorVersion === input.fetchedCursorVersion
-      && receipt.userId === input.userId
-      && receipt.wakeId === input.wakeId
-      && receipt.wakeSeq === input.wakeSeq
-      && (receipt.state === "completed" || receipt.state === "replaced"),
-  );
-}
-
 function shouldRefreshTerminalFetchFence(
   receipt: HostedWakeTerminalRow,
   input: {
@@ -399,18 +379,47 @@ function shouldRefreshTerminalFetchFence(
 }
 
 export async function quarantineHostedWakeTx(input: {
+  fetchProof: string;
   quarantineCode: string;
   tx: HostedWakeMutationTx;
   userId: string;
   wakeId: string;
+  wakeSeq: bigint;
 }): Promise<boolean> {
   if (!input.quarantineCode.trim()) {
     throw new TypeError("quarantineCode must not be blank.");
   }
 
+  const claims = verifyHostedWakeFetchProof({
+    proof: input.fetchProof,
+    userId: input.userId,
+    wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq,
+  });
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+  const fetchFence = parseHostedWakeFetchFence(claims);
+
+  assertCurrentHostedWakeFetchFence(cursor, fetchFence);
+  const wake = await readCurrentHostedWakeTerminalTargetTx({
+    tx: input.tx,
+    userId: input.userId,
+    wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq,
+  });
+
+  if (!wake) {
+    return false;
+  }
+
+  assertCurrentHostedWakeFetchIdentity(claims, wake.currentEventId);
+
   const updated = await input.tx.hostedWake.updateMany({
     where: {
       id: input.wakeId,
+      seq: input.wakeSeq,
       quarantinedAt: null,
       userId: input.userId,
     },
@@ -420,7 +429,21 @@ export async function quarantineHostedWakeTx(input: {
     },
   });
 
-  return updated.count === 1;
+  if (updated.count !== 1) {
+    return false;
+  }
+
+  await upsertHostedWakeTerminalTx({
+    fetchedCommittedSeq: fetchFence.fetchedCommittedSeq,
+    fetchedCursorVersion: fetchFence.fetchedCursorVersion,
+    state: "quarantined",
+    tx: input.tx,
+    userId: input.userId,
+    wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq,
+  });
+
+  return true;
 }
 
 export async function findHostedWakeEventIdByEventIdTx(input: {
@@ -599,10 +622,8 @@ async function resolveHostedWakeEventResolutionTx(input: {
     throw new Error(`Hosted wake ${activeEvent.wakeId} missing for event ${activeEvent.eventId}.`);
   }
 
-  if (input.userId && wake.userId !== input.userId) {
-    throw new Error(
-      `Hosted wake ${activeEvent.wakeId} is not owned by ${input.userId} for event ${activeEvent.eventId}.`,
-    );
+  if (wake.userId !== input.userId) {
+    return null;
   }
 
   return {
@@ -646,7 +667,7 @@ async function resolveHostedWakeActiveEventTx(input: {
 
 async function resolveHostedWakeCurrentEventIdTx(input: {
   tx: HostedWakeStoreClient;
-  wake: HostedWakeRow;
+  wake: Pick<HostedWakeRow, "dedupeKey" | "id" | "seq" | "userId">;
 }): Promise<string> {
   const currentEvent = await findCurrentHostedWakeEventByWakeIdTx({
     tx: input.tx,
@@ -655,4 +676,138 @@ async function resolveHostedWakeCurrentEventIdTx(input: {
   });
 
   return currentEvent?.eventId ?? resolveHostedWakeEventId(input.wake);
+}
+
+function parseHostedWakeFetchFence(
+  claims: ReturnType<typeof verifyHostedWakeFetchProof>,
+): {
+  fetchedCommittedSeq: bigint;
+  fetchedCursorVersion: bigint;
+} {
+  return {
+    fetchedCommittedSeq: BigInt(claims.fetchedCommittedSeq),
+    fetchedCursorVersion: BigInt(claims.fetchedCursorVersion),
+  };
+}
+
+function assertCurrentHostedWakeFetchFence(
+  cursor: {
+    committedSeq: bigint;
+    version: bigint;
+  },
+  input: {
+    fetchedCommittedSeq: bigint;
+    fetchedCursorVersion: bigint;
+  },
+): void {
+  if (
+    cursor.committedSeq !== input.fetchedCommittedSeq
+    || cursor.version !== input.fetchedCursorVersion
+  ) {
+    throw new TypeError("Hosted wake fetch proof is stale for the current cursor.");
+  }
+}
+
+async function upsertHostedWakeTerminalTx(input: {
+  fetchedCommittedSeq: bigint;
+  fetchedCursorVersion: bigint;
+  state: "completed" | "quarantined" | "replaced";
+  tx: HostedWakeMutationTx;
+  userId: string;
+  wakeId: string;
+  wakeSeq: bigint;
+}): Promise<void> {
+  const existing = await input.tx.hostedWakeTerminal.findUnique({
+    where: {
+      wakeId: input.wakeId,
+    },
+  });
+  const typedExisting = existing === null ? null : {
+    ...existing,
+    state: parseHostedWakeTerminalState(existing.state),
+  };
+
+  if (!typedExisting) {
+    await input.tx.hostedWakeTerminal.create({
+      data: {
+        fetchedCommittedSeq: input.fetchedCommittedSeq,
+        fetchedCursorVersion: input.fetchedCursorVersion,
+        state: input.state,
+        userId: input.userId,
+        wakeId: input.wakeId,
+        wakeSeq: input.wakeSeq,
+      },
+    });
+    return;
+  }
+
+  if (
+    typedExisting.userId !== input.userId
+    || typedExisting.wakeSeq !== input.wakeSeq
+    || typedExisting.state !== input.state
+  ) {
+    throw new TypeError("Hosted wake terminal receipt conflicts with the existing canonical record.");
+  }
+
+  if (shouldRefreshTerminalFetchFence(typedExisting, input)) {
+    await input.tx.hostedWakeTerminal.update({
+      where: {
+        wakeId: input.wakeId,
+      },
+      data: {
+        fetchedCommittedSeq: input.fetchedCommittedSeq,
+        fetchedCursorVersion: input.fetchedCursorVersion,
+      },
+    });
+  }
+}
+
+async function readCurrentHostedWakeTerminalTargetTx(input: {
+  tx: HostedWakeMutationTx;
+  userId: string;
+  wakeId: string;
+  wakeSeq: bigint;
+}): Promise<{
+  currentEventId: string;
+  quarantinedAt: Date | null;
+} | null> {
+  const wake = await input.tx.hostedWake.findFirst({
+    where: {
+      id: input.wakeId,
+      seq: input.wakeSeq,
+      userId: input.userId,
+    },
+  });
+
+  if (!wake) {
+    return null;
+  }
+
+  return {
+    currentEventId: await resolveHostedWakeCurrentEventIdTx({
+      tx: input.tx,
+      wake,
+    }),
+    quarantinedAt: wake.quarantinedAt,
+  };
+}
+
+function assertCurrentHostedWakeFetchIdentity(
+  claims: ReturnType<typeof verifyHostedWakeFetchProof>,
+  currentEventId: string,
+): void {
+  if (claims.wakeEventId !== currentEventId) {
+    throw new TypeError("Hosted wake fetch proof is stale for the current wake identity.");
+  }
+}
+
+function parseHostedWakeTerminalState(value: string): HostedWakeTerminalState {
+  switch (value) {
+    case "completed":
+    case "quarantined":
+    case "replaced":
+      return value;
+    default:
+      throw new TypeError(`Hosted wake terminal state is invalid: ${value}`);
+  }
 }

@@ -13,6 +13,7 @@ import {
   countPendingHostedWakes,
   listHostedWakesAfterSeq,
   projectHostedWakeRecord,
+  quarantineHostedWakeTx,
   readLatestHostedWakeLifecycleByKind,
   readHostedExecutionCursor,
   readHostedWakeLifecycleByEventIdTx,
@@ -79,7 +80,7 @@ interface TestWakeTerminalState {
   createdAt: Date;
   fetchedCommittedSeq: bigint;
   fetchedCursorVersion: bigint;
-  state: "completed" | "replaced";
+  state: "completed" | "quarantined" | "replaced";
   updatedAt: Date;
   userId: string;
   wakeId: string;
@@ -304,6 +305,7 @@ describe("hosted wake store", () => {
         fetchedCommittedSeq: 1n,
         fetchedCursorVersion: 4n,
         userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
         wakeId: "wake_other",
         wakeSeq: 2n,
       }),
@@ -315,7 +317,7 @@ describe("hosted wake store", () => {
     })).rejects.toThrow(/wakeId/i);
   });
 
-  it("rejects advancing the cursor when the recorded terminal receipt came from an older committed cursor position", async () => {
+  it("rejects recording terminal state from a stale fetch proof before cursor advancement", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
         committedSeq: 1n,
@@ -337,10 +339,45 @@ describe("hosted wake store", () => {
         fetchedCommittedSeq: 0n,
         fetchedCursorVersion: 3n,
         userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
         wakeId: "wake_1",
         wakeSeq: 2n,
       }),
       state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).rejects.toThrow(/stale/i);
+  });
+
+  it("binds quarantine to the fetched wake identity before cursor advancement", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    await expect(quarantineHostedWakeTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 1n,
+        fetchedCursorVersion: 4n,
+        userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      quarantineCode: "invalid-wake-payload",
       tx,
       userId: "member_123",
       wakeId: "wake_1",
@@ -356,14 +393,48 @@ describe("hosted wake store", () => {
       tx,
       userId: "member_123",
     })).resolves.toEqual({
-      committed: false,
+      committed: true,
       cursor: expect.objectContaining({
-        committedSeq: "1",
+        committedSeq: "2",
         nextSeq: "3",
         userId: "member_123",
-        version: "4",
+        version: "5",
       }),
     });
+  });
+
+  it("rejects quarantining a wake from a stale fetch proof", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    await expect(quarantineHostedWakeTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 0n,
+        fetchedCursorVersion: 3n,
+        userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      quarantineCode: "invalid-wake-payload",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).rejects.toThrow(/stale/i);
   });
 
   it("refreshes the terminal receipt fetch fence when the same wake is re-fetched from the current cursor", async () => {
@@ -388,6 +459,7 @@ describe("hosted wake store", () => {
         fetchedCommittedSeq: 0n,
         fetchedCursorVersion: 3n,
         userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
         wakeId: "wake_1",
         wakeSeq: 2n,
       }),
@@ -396,13 +468,14 @@ describe("hosted wake store", () => {
       userId: "member_123",
       wakeId: "wake_1",
       wakeSeq: 2n,
-    })).resolves.toBe(true);
+    })).rejects.toThrow(/stale/i);
 
     await expect(recordHostedWakeTerminalTx({
       fetchProof: issueHostedWakeFetchProof({
         fetchedCommittedSeq: 1n,
         fetchedCursorVersion: 4n,
         userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
         wakeId: "wake_1",
         wakeSeq: 2n,
       }),
@@ -570,7 +643,7 @@ describe("hosted wake store", () => {
       eventId: "corrupt-event",
       tx,
       userId: "member_a",
-    })).rejects.toThrow(/not owned by member_a/i);
+    })).resolves.toBeNull();
   });
 
   it("treats already-committed cursor seqs as stale no-op commits when the snapshot is unchanged", async () => {
@@ -950,7 +1023,7 @@ describe("hosted wake store", () => {
       userId: "member_123",
       wakeId: staleWake!.id,
       wakeSeq: 1n,
-    })).resolves.toBe(true);
+    })).rejects.toThrow(/stale/i);
 
     const staleCommit = await commitHostedExecutionCursorTx({
       committedSeq: 1n,
@@ -1055,6 +1128,61 @@ describe("hosted wake store", () => {
         version: "9",
       }),
     });
+  });
+
+  it("rejects a coalesced wake proof whose logical event identity was replaced in place", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 2n,
+        userId: "member_123",
+        version: 7n,
+      },
+      wakes: [
+        {
+          behavior: "coalescing",
+          coalescingKey: "member.channels.updated:member_123",
+          dedupeKey: "first",
+          kind: "member.channels.updated",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload: {
+            revision: 1,
+          },
+          seq: 1n,
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await appendHostedCoalescingWakeTx({
+      coalescingKey: "member.channels.updated:member_123",
+      dedupeKey: "second",
+      eventId: "second",
+      kind: "member.channels.updated",
+      occurredAt: "2026-04-17T00:01:00.000Z",
+      payload: {
+        revision: 2,
+      },
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      tx,
+      userId: "member_123",
+    });
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 0n,
+        fetchedCursorVersion: 8n,
+        userId: "member_123",
+        wakeEventId: "first",
+        wakeId: "wake_1",
+        wakeSeq: 1n,
+      }),
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 1n,
+    })).rejects.toThrow(/identity/i);
   });
 
   it("clears a pre-rewrite terminal receipt when a coalescing wake is rewritten in place", async () => {
@@ -1645,7 +1773,7 @@ function createHostedWakeStoreHarness(input?: {
         return cloneWakeEvent(event);
       },
       findFirst(args: {
-        orderBy?: { createdAt: "desc" };
+        orderBy?: { createdAt: "asc" | "desc" };
         where:
           | {
             replacedByEventId: null;
@@ -1654,7 +1782,7 @@ function createHostedWakeStoreHarness(input?: {
           }
           | {
             eventId: string;
-            userId: string;
+            userId?: string;
           };
       }): TestWakeEventState | null {
         const where = args.where;
@@ -1662,7 +1790,7 @@ function createHostedWakeStoreHarness(input?: {
         if ("eventId" in where) {
           const event = state.wakeEvents.find((candidate) =>
             candidate.eventId === where.eventId
-            && candidate.userId === where.userId);
+            && (where.userId === undefined || candidate.userId === where.userId));
           return event ? cloneWakeEvent(event) : null;
         }
 
@@ -1994,6 +2122,33 @@ function createHostedWakeStoreHarness(input?: {
 
             return selected;
           });
+      },
+      updateMany(args: {
+        data: {
+          quarantineCode: string;
+          quarantinedAt: Date;
+        };
+        where: {
+          id: string;
+          quarantinedAt: null;
+          seq: bigint;
+          userId: string;
+        };
+      }): { count: number } {
+        const wake = state.wakes.find((candidate) =>
+          candidate.id === args.where.id
+          && candidate.seq === args.where.seq
+          && candidate.userId === args.where.userId
+          && candidate.quarantinedAt === null);
+
+        if (!wake) {
+          return { count: 0 };
+        }
+
+        wake.quarantineCode = args.data.quarantineCode;
+        wake.quarantinedAt = new Date(args.data.quarantinedAt);
+        wake.updatedAt = new Date(wake.updatedAt.getTime() + 1);
+        return { count: 1 };
       },
       findUnique(args: {
         where:

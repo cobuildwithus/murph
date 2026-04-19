@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { parseHostedWakeCommitRequest } from "@murphai/hosted-execution/parsers";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -12,10 +13,10 @@ import {
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
-  const body = await readOptionalJsonObject(request);
-  const committedSeq = parseRequiredBigInt(body.committedSeq, "committedSeq");
-  const expectedVersion = parseRequiredBigInt(body.expectedVersion, "expectedVersion");
-  const snapshotRef = parseSnapshotRef(body, "snapshotRef");
+  const body = parseHostedWakeCommitRequest(await readOptionalJsonObject(request));
+  const committedSeq = BigInt(body.committedSeq);
+  const expectedVersion = BigInt(body.expectedVersion);
+  const snapshotRef = parseSnapshotRef(body);
   const response = await getPrisma().$transaction((tx) => {
     return commitHostedExecutionCursorTx({
       committedSeq,
@@ -29,45 +30,23 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(response);
 });
 
-function parseRequiredBigInt(value: unknown, label: string): bigint {
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a base-10 integer string.`);
-  }
-
-  try {
-    return BigInt(value);
-  } catch {
-    throw new TypeError(`${label} must be a base-10 integer string.`);
-  }
-}
-
 function parseSnapshotRef(
-  body: Record<string, unknown>,
-  key: string,
-): Prisma.InputJsonValue | null | undefined {
-  if (!(key in body)) {
+  body: ReturnType<typeof parseHostedWakeCommitRequest>,
+): Prisma.InputJsonObject | null | undefined {
+  if (!("snapshotRef" in body)) {
     return undefined;
   }
 
-  const value = body[key];
+  const snapshotRef = body.snapshotRef;
 
-  if (value === null) {
+  if (!snapshotRef) {
     return null;
   }
 
-  if (
-    typeof value === "string"
-    || typeof value === "number"
-    || typeof value === "boolean"
-    || Array.isArray(value)
-    || isPlainJsonObject(value)
-  ) {
-    return value as Prisma.InputJsonValue;
-  }
-
-  throw new TypeError("snapshotRef must be valid JSON.");
-}
-
-function isPlainJsonObject(value: unknown): value is Record<string, Prisma.InputJsonValue> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return {
+    hash: snapshotRef.hash,
+    key: snapshotRef.key,
+    size: snapshotRef.size,
+    updatedAt: snapshotRef.updatedAt,
+  };
 }
