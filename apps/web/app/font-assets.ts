@@ -1,22 +1,21 @@
-import localFont from "next/font/local";
+import { DM_Mono, DM_Sans, Fraunces } from "next/font/google";
 
-export const fraunces = localFont({
-  src: "./fonts/Fraunces-Variable.ttf",
+export const fraunces = Fraunces({
+  subsets: ["latin"],
   variable: "--font-serif",
-  weight: "400 900",
   display: "swap",
+  weight: ["400", "600"],
 });
 
-export const dmSans = localFont({
-  src: "./fonts/DMSans-Variable.ttf",
+export const dmSans = DM_Sans({
+  subsets: ["latin"],
   variable: "--font-sans",
-  weight: "100 1000",
   display: "swap",
 });
 
-export const dmMono = localFont({
-  src: "./fonts/DMMono-Regular.ttf",
+export const dmMono = DM_Mono({
+  subsets: ["latin"],
   variable: "--font-mono",
-  weight: "400",
   display: "swap",
+  weight: ["400"],
 });

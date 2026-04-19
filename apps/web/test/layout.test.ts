@@ -6,10 +6,20 @@ import { test } from "vitest";
 
 import { vi } from "vitest";
 
-vi.mock("next/font/local", () => ({
-  default(input: { variable?: string }) {
+vi.mock("next/font/google", () => ({
+  Fraunces(input: { variable?: string }) {
     return {
-      variable: input.variable ?? "font-local",
+      variable: input.variable ?? "font-fraunces",
+    };
+  },
+  DM_Sans(input: { variable?: string }) {
+    return {
+      variable: input.variable ?? "font-sans",
+    };
+  },
+  DM_Mono(input: { variable?: string }) {
+    return {
+      variable: input.variable ?? "font-mono",
     };
   },
 }));
