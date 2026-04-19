@@ -1256,6 +1256,57 @@ describe("HostedUserRunner", () => {
     ]);
   });
 
+  it("rematerializes due assistant follow-up wakes between drain rounds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    await seedRunnerQueueState({
+      runtimeBootstrapped: true,
+      bucket,
+      environment,
+      storage,
+      userId: "member_123",
+    });
+    const inboundWake = await appendTestHostedWake({
+      bucket: bucket.api,
+      wake: createEmailWake({
+        eventId: "evt_inbound_email",
+        identityId: "murph@example.com",
+        rawMessageKey: "raw/email/msg-1.eml",
+        userId: "member_123",
+      }),
+    });
+    const fetchSpy = vi.fn().mockImplementation(async (_url, init) => {
+      const request = readRunnerJobRequest(JSON.parse(String(init?.body)));
+
+      return await createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+        payload: request.wake.eventId === "evt_inbound_email"
+          ? createRunnerSuccessPayload({
+            wakeMaterializationHints: {
+              assistantWakeAt: "2026-03-26T12:00:00.000Z",
+            },
+          })
+          : createRunnerSuccessPayload(),
+      });
+    });
+    vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchSpy }));
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    const result = await runner.wakeHostedWakes({
+      targetSeqHint: inboundWake.wake.seq,
+    });
+
+    expect(result.committedSeq).toBe("2");
+    expect(result.targetReached).toBe(true);
+    expect(readDispatchedEventIds(fetchSpy)).toEqual([
+      "evt_inbound_email",
+      "assistant.cron.tick:member_123:alarm:2026-03-26T12:00:00.000Z",
+    ]);
+  });
+
   it("revalidates stale future device-sync hints on a bounded alarm and drains the materialized wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
