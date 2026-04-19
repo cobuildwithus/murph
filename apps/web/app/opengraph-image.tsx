@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { dmSansFontUrl, frauncesFontUrl } from "./font-files";
 
 export const alt = "Murph — Wearable data, made useful.";
 export const size = { width: 1200, height: 630 };
@@ -10,34 +11,18 @@ const HEADLINE = "Wearable data,\nmade useful.";
 const SUBTEXT = "Expert-backed experiments, measured by your wearable.";
 
 export default async function OGImage() {
-  const [heroData, fraunces400, fraunces600, dmSans400] = await Promise.all([
-    readFile(join(process.cwd(), "public/hero.jpg")).then(
+  const [heroData, frauncesData, dmSansData] = await Promise.all([
+    readFile(join(process.cwd(), "public", "hero.jpg")).then(
       (buf) => `data:image/jpeg;base64,${buf.toString("base64")}`
     ),
-    fetch("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9,400", {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    })
-      .then((r) => r.text())
-      .then((css) => css.match(/url\(([^)]+)\)/)?.[1])
-      .then((url) => (url ? fetch(url).then((r) => r.arrayBuffer()) : null)),
-    fetch("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9,600", {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    })
-      .then((r) => r.text())
-      .then((css) => css.match(/url\(([^)]+)\)/)?.[1])
-      .then((url) => (url ? fetch(url).then((r) => r.arrayBuffer()) : null)),
-    fetch("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400", {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    })
-      .then((r) => r.text())
-      .then((css) => css.match(/url\(([^)]+)\)/)?.[1])
-      .then((url) => (url ? fetch(url).then((r) => r.arrayBuffer()) : null)),
+    readFile(frauncesFontUrl).then(toArrayBuffer),
+    readFile(dmSansFontUrl).then(toArrayBuffer),
   ]);
 
   const fonts: { name: string; data: ArrayBuffer; weight: 400 | 600 }[] = [];
-  if (fraunces400) fonts.push({ name: "Fraunces", data: fraunces400, weight: 400 });
-  if (fraunces600) fonts.push({ name: "Fraunces", data: fraunces600, weight: 600 });
-  if (dmSans400) fonts.push({ name: "DM Sans", data: dmSans400, weight: 400 });
+  fonts.push({ name: "Fraunces", data: frauncesData, weight: 400 });
+  fonts.push({ name: "Fraunces", data: frauncesData, weight: 600 });
+  fonts.push({ name: "DM Sans", data: dmSansData, weight: 400 });
 
   return new ImageResponse(
     (
@@ -143,6 +128,10 @@ export default async function OGImage() {
       fonts,
     }
   );
+}
+
+function toArrayBuffer(buffer: Buffer) {
+  return Uint8Array.from(buffer).buffer;
 }
 
 function DotGrid() {
