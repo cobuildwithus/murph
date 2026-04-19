@@ -455,6 +455,25 @@ async function fetchHostedWebControlPlaneJson(input: {
     };
     error.status = response.status;
     error.statusCode = response.status;
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        description: input.description,
+        method,
+        path: input.path,
+        responseOrigin: input.transport.mode === "direct"
+          ? new URL(input.transport.webControlBaseUrl).origin
+          : CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+        responseStatus: response.status,
+        transport: input.transport.mode,
+        userId: input.boundUserId,
+      },
+      error,
+      level: "warn",
+      message: "Hosted runtime control-plane response returned non-OK.",
+      phase: "side-effects.draining",
+      userId: input.boundUserId,
+    });
     throw error;
   }
 
@@ -520,6 +539,21 @@ async function fetchHostedJson(input: {
     };
     error.status = response.status;
     error.statusCode = response.status;
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        description: input.description,
+        method: input.method,
+        path: input.url.pathname,
+        responseOrigin: input.url.origin,
+        responseStatus: response.status,
+      },
+      error,
+      level: "warn",
+      message: "Hosted runtime upstream response returned non-OK.",
+      phase: "side-effects.draining",
+      userId: null,
+    });
     throw error;
   }
 
@@ -548,6 +582,20 @@ async function fetchHostedResponse(input: {
       signal: AbortSignal.timeout(input.timeoutMs),
     });
   } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        description: input.description,
+        method: input.init?.method ?? "GET",
+        path: input.url.pathname,
+        responseOrigin: input.url.origin,
+      },
+      error,
+      level: "warn",
+      message: "Hosted runtime upstream request failed.",
+      phase: "side-effects.draining",
+      userId: null,
+    });
     throw new Error(
       `${input.description} request failed.${formatHostedResponseFetchCause(error)}`,
       { cause: error },
@@ -579,6 +627,18 @@ function assertHostedOk(response: Response, description: string): void {
   };
   error.status = response.status;
   error.statusCode = response.status;
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details: {
+      description,
+      responseStatus: response.status,
+    },
+    error,
+    level: "warn",
+    message: "Hosted runtime upstream response returned non-OK.",
+    phase: "side-effects.draining",
+    userId: null,
+  });
   throw error;
 }
 

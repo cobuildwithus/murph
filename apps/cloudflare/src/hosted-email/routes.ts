@@ -5,6 +5,9 @@
  */
 
 import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
@@ -83,25 +86,70 @@ export async function createHostedEmailUserAddress(input: {
     input.config.signingSecret,
     `user:${input.userId}`,
   );
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.webControlBaseUrl,
-    body: JSON.stringify({
-      aliasKey,
-    }),
-    boundUserId: input.userId,
-    callbackSigning: input.webCallbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
-    timeoutMs: HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS,
-  }).catch((error: unknown) => {
-    throw new Error(
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.webControlBaseUrl,
+      body: JSON.stringify({
+        aliasKey,
+      }),
+      boundUserId: input.userId,
+      callbackSigning: input.webCallbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+      timeoutMs: HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS,
+    });
+  } catch (error) {
+    const wrappedError = new Error(
       `Hosted email route registration failed: ${formatHostedEmailRouteErrorDetails(error)}`,
+      { cause: error },
     );
-  });
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        operation: "register-reply-alias",
+        path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+        userId: input.userId,
+        webControlOrigin: readHostedWebControlOrigin(input.webControlBaseUrl),
+      },
+      error: wrappedError,
+      level: "warn",
+      message: "Hosted email route registration request failed.",
+      phase: "side-effects.draining",
+      userId: input.userId,
+    });
+    throw wrappedError;
+  }
 
   if (!response.ok) {
-    throw new Error(`Hosted email route registration failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    const error = new Error(
+      responseDetail.length > 0
+        ? `Hosted email route registration failed with HTTP ${response.status}. ${responseDetail}`
+        : `Hosted email route registration failed with HTTP ${response.status}.`,
+    ) as Error & {
+      status: number;
+      statusCode: number;
+    };
+    error.status = response.status;
+    error.statusCode = response.status;
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        operation: "register-reply-alias",
+        path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+        responseStatus: response.status,
+        userId: input.userId,
+        webControlOrigin: readHostedWebControlOrigin(input.webControlBaseUrl),
+      },
+      error,
+      level: "warn",
+      message: "Hosted email route registration response returned non-OK.",
+      phase: "side-effects.draining",
+      userId: input.userId,
+    });
+    throw error;
   }
 
   return formatHostedEmailAddress(
@@ -216,24 +264,77 @@ async function resolveHostedEmailRouteUserId(input: {
       timeoutMs: HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS,
     });
   } catch (error) {
-    throw new HostedEmailIngressRouteResolutionError(
+    const wrappedError = new HostedEmailIngressRouteResolutionError(
       `Hosted email route resolution failed: ${formatHostedEmailRouteErrorDetails(error)}`,
     );
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        operation: "resolve-route-user-id",
+        path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+        envelopeFrom: input.context.envelopeFrom ?? null,
+        headerFrom: input.context.headerFrom ?? null,
+        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
+      },
+      error: wrappedError,
+      level: "warn",
+      message: "Hosted email route resolution request failed.",
+      phase: "side-effects.draining",
+      userId: null,
+    });
+    throw wrappedError;
   }
 
   if (!response.ok) {
-    throw new HostedEmailIngressRouteResolutionError(
-      `Hosted email route resolution failed with HTTP ${response.status}.`,
+    const responseDetail = (await response.text()).trim();
+    const error = new HostedEmailIngressRouteResolutionError(
+      responseDetail.length > 0
+        ? `Hosted email route resolution failed with HTTP ${response.status}. ${responseDetail}`
+        : `Hosted email route resolution failed with HTTP ${response.status}.`,
     );
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        operation: "resolve-route-user-id",
+        path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+        responseStatus: response.status,
+        envelopeFrom: input.context.envelopeFrom ?? null,
+        headerFrom: input.context.headerFrom ?? null,
+        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
+      },
+      error,
+      level: "warn",
+      message: "Hosted email route resolution response returned non-OK.",
+      phase: "side-effects.draining",
+      userId: null,
+    });
+    throw error;
   }
 
   let payload: { userId: string | null };
   try {
     payload = parseHostedEmailRouteResolutionCallbackResponse(await response.json());
   } catch (error) {
-    throw new HostedEmailIngressRouteResolutionError(
+    const wrappedError = new HostedEmailIngressRouteResolutionError(
       `Hosted email route resolution returned invalid JSON: ${formatHostedEmailRouteErrorDetails(error)}`,
     );
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        operation: "resolve-route-user-id",
+        path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+        responseStatus: response.status,
+        envelopeFrom: input.context.envelopeFrom ?? null,
+        headerFrom: input.context.headerFrom ?? null,
+        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
+      },
+      error: wrappedError,
+      level: "warn",
+      message: "Hosted email route resolution returned invalid JSON.",
+      phase: "side-effects.draining",
+      userId: null,
+    });
+    throw wrappedError;
   }
 
   if (payload.userId === null) {
@@ -244,12 +345,41 @@ async function resolveHostedEmailRouteUserId(input: {
     ? payload.userId.trim()
     : null;
   if (!userId) {
-    throw new HostedEmailIngressRouteResolutionError(
+    const error = new HostedEmailIngressRouteResolutionError(
       "Hosted email route resolution returned an invalid payload.",
     );
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        operation: "resolve-route-user-id",
+        path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+        responseStatus: response.status,
+        envelopeFrom: input.context.envelopeFrom ?? null,
+        headerFrom: input.context.headerFrom ?? null,
+        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
+      },
+      error,
+      level: "warn",
+      message: "Hosted email route resolution returned an invalid payload.",
+      phase: "side-effects.draining",
+      userId: null,
+    });
+    throw error;
   }
 
   return userId;
+}
+
+function readHostedWebControlOrigin(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
 }
 
 function formatHostedEmailRouteErrorDetails(error: unknown): string {

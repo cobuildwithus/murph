@@ -1,10 +1,136 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 import { buildHostedExecutionRuntimePlatform } from "../src/runtime-platform.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
-import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
+import {
+  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+  createHostedExecutionTestEnv,
+} from "./hosted-execution-fixtures.ts";
 
 describe("buildHostedExecutionRuntimePlatform", () => {
+  beforeEach(() => {
+    mocks.emitHostedExecutionStructuredLog.mockReset();
+  });
+
+  it("logs upstream request failures with safe request metadata", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await expect(
+      platform.effectsPort.readRawEmailMessage("raw_123"),
+    ).rejects.toThrow("Hosted raw email read raw_123 request failed.");
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          description: "Hosted raw email read raw_123",
+          method: "GET",
+          path: "/messages/raw_123",
+          responseOrigin: "http://results.worker",
+        },
+        level: "warn",
+        message: "Hosted runtime upstream request failed.",
+        phase: "side-effects.draining",
+        userId: null,
+      }),
+    );
+  });
+
+  it("logs non-OK control-plane responses with response metadata", async () => {
+    const fetchMock = vi.fn(async () => new Response("boom", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 503,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      webControlBaseUrl: "https://web.example.test/app",
+    });
+
+    await expect(platform.deviceSyncPort!.fetchSnapshot({
+      connectionId: "conn_123",
+    })).rejects.toThrow(/Hosted device-sync runtime snapshot failed with HTTP 503/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          description: "Hosted device-sync runtime snapshot",
+          method: "POST",
+          path: "/api/internal/device-sync/runtime/snapshot",
+          responseOrigin: "https://web.example.test",
+          responseStatus: 503,
+          transport: "direct",
+          userId: "member_123",
+        },
+        level: "warn",
+        message: "Hosted runtime control-plane response returned non-OK.",
+        phase: "side-effects.draining",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("logs non-OK internal upstream responses with response metadata", async () => {
+    const fetchMock = vi.fn(async () => new Response("artifact missing", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 500,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await expect(
+      platform.effectsPort.readRawEmailMessage("raw_123"),
+    ).rejects.toThrow("Hosted raw email read raw_123 failed with HTTP 500.");
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          description: "Hosted raw email read raw_123",
+          responseStatus: 500,
+        },
+        level: "warn",
+        message: "Hosted runtime upstream response returned non-OK.",
+        phase: "side-effects.draining",
+        userId: null,
+      }),
+    );
+  });
+
   it("routes raw email reads through the Cloudflare internal effects port and attaches the per-run proxy token", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({

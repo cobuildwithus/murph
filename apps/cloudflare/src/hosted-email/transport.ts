@@ -5,6 +5,7 @@
  */
 
 import { EmailMessage } from "cloudflare:email";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
 import type { HostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
@@ -146,7 +147,22 @@ async function sendHostedEmailMimeMessage(input: {
         ? error.trim()
         : "Hosted email send failed.";
     const normalizedDetails = details.length > 0 ? details : "Hosted email send failed.";
-    throw new Error(`${input.recipient}: ${normalizedDetails}`);
+    const wrappedError = new Error(`${input.recipient}: ${normalizedDetails}`, {
+      cause: error,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        fromAddress: input.fromAddress,
+        recipient: input.recipient,
+      },
+      error: wrappedError,
+      level: "warn",
+      message: "Hosted email send failed.",
+      phase: "side-effects.draining",
+      userId: null,
+    });
+    throw wrappedError;
   }
 }
 
