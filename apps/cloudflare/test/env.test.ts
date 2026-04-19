@@ -27,8 +27,8 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.runnerTimeoutMs).toBe(60_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
     expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
-    expect(environment.hostedWebEncryption.keyVersion).toBe("v1");
-    expect(environment.hostedWebEncryption.key).toHaveLength(32);
+    expect(environment.hostedWakeEncryption.keyVersion).toBe("v1");
+    expect(environment.hostedWakeEncryption.key).toHaveLength(32);
     expect(environment.webCallbackSigning.keyId).toBe("v1");
     expect(environment.webCallbackSigning.privateKeyJwkJson).toContain("\"kty\":\"EC\"");
   });
@@ -113,12 +113,12 @@ describe("readHostedExecutionEnvironment", () => {
     ).toThrow(/HOSTED_WEB_BASE_URL must be a valid absolute URL/u);
   });
 
-  it("rejects a missing hosted web encryption key", () => {
+  it("rejects a missing hosted wake encryption key", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_WEB_ENCRYPTION_KEY: undefined,
+        HOSTED_WAKE_ENCRYPTION_KEY: undefined,
       })),
-    ).toThrow(/HOSTED_WEB_ENCRYPTION_KEY is required/u);
+    ).toThrow(/HOSTED_WAKE_ENCRYPTION_KEY is required/u);
   });
 
   it("does not accept the removed bundle-key alias", () => {

@@ -1,11 +1,13 @@
 export const CLOUDFLARE_HOSTED_RUNTIME_HOSTS = {
   artifactStore: "artifacts.worker",
   effectsPort: "results.worker",
+  webControlPlane: "web-control.worker",
 } as const;
 
 export const CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS = {
   artifactStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore}`,
   effectsPort: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort}`,
+  webControlPlane: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane}`,
 } as const;
 
 export const CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES = new Set<string>(

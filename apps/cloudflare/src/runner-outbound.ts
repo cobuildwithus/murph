@@ -11,6 +11,7 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
+import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
   requireRunnerInternalProxyAuthorization,
   resolveRunnerOutboundUserCryptoContext,
@@ -42,6 +43,15 @@ export async function handleRunnerOutboundRequest(
       return handleRunnerResultsRequest({
         bucket: env.BUNDLES,
         env,
+        environment,
+        request,
+        url,
+        userId,
+      });
+    }
+
+    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
+      return handleRunnerWebControlRequest({
         environment,
         request,
         url,

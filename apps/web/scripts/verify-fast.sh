@@ -54,6 +54,14 @@ compose_hosted_web_encryption_key_version_for_build() {
   printf '%s\n' "${HOSTED_WEB_ENCRYPTION_KEY_VERSION:-$hosted_web_default_hosted_key_version}"
 }
 
+compose_hosted_wake_encryption_key_for_build() {
+  printf '%s\n' "${HOSTED_WAKE_ENCRYPTION_KEY:-$hosted_web_default_hosted_key}"
+}
+
+compose_hosted_wake_encryption_key_version_for_build() {
+  printf '%s\n' "${HOSTED_WAKE_ENCRYPTION_KEY_VERSION:-$hosted_web_default_hosted_key_version}"
+}
+
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
 tracked_background_pids=()
 
@@ -162,12 +170,16 @@ if [[ "$verify_step_parallel" != "1" ]]; then
   build_contact_privacy_keys="$(compose_hosted_contact_privacy_keys_for_build)"
   build_hosted_web_encryption_key="$(compose_hosted_web_encryption_key_for_build)"
   build_hosted_web_encryption_key_version="$(compose_hosted_web_encryption_key_version_for_build)"
+  build_hosted_wake_encryption_key="$(compose_hosted_wake_encryption_key_for_build)"
+  build_hosted_wake_encryption_key_version="$(compose_hosted_wake_encryption_key_version_for_build)"
   build_privy_app_id="$(compose_privy_app_id_for_build)"
   DATABASE_URL="$build_database_url" \
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION="$build_contact_privacy_current_key_version" \
     HOSTED_CONTACT_PRIVACY_KEYS="$build_contact_privacy_keys" \
     HOSTED_WEB_ENCRYPTION_KEY="$build_hosted_web_encryption_key" \
     HOSTED_WEB_ENCRYPTION_KEY_VERSION="$build_hosted_web_encryption_key_version" \
+    HOSTED_WAKE_ENCRYPTION_KEY="$build_hosted_wake_encryption_key" \
+    HOSTED_WAKE_ENCRYPTION_KEY_VERSION="$build_hosted_wake_encryption_key_version" \
     NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
     NODE_OPTIONS="$next_build_node_options" \
     next build
@@ -192,12 +204,16 @@ build_contact_privacy_current_key_version="$(compose_hosted_contact_privacy_curr
 build_contact_privacy_keys="$(compose_hosted_contact_privacy_keys_for_build)"
 build_hosted_web_encryption_key="$(compose_hosted_web_encryption_key_for_build)"
 build_hosted_web_encryption_key_version="$(compose_hosted_web_encryption_key_version_for_build)"
+build_hosted_wake_encryption_key="$(compose_hosted_wake_encryption_key_for_build)"
+build_hosted_wake_encryption_key_version="$(compose_hosted_wake_encryption_key_version_for_build)"
 build_privy_app_id="$(compose_privy_app_id_for_build)"
 DATABASE_URL="$build_database_url" \
   HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION="$build_contact_privacy_current_key_version" \
   HOSTED_CONTACT_PRIVACY_KEYS="$build_contact_privacy_keys" \
   HOSTED_WEB_ENCRYPTION_KEY="$build_hosted_web_encryption_key" \
   HOSTED_WEB_ENCRYPTION_KEY_VERSION="$build_hosted_web_encryption_key_version" \
+  HOSTED_WAKE_ENCRYPTION_KEY="$build_hosted_wake_encryption_key" \
+  HOSTED_WAKE_ENCRYPTION_KEY_VERSION="$build_hosted_wake_encryption_key_version" \
   NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
   NODE_OPTIONS="$next_build_node_options" \
   next build

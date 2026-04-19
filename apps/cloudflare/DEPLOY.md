@@ -60,9 +60,11 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 - `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
+- `HOSTED_WAKE_ENCRYPTION_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
 The callback-signing key remains part of the required worker secret surface because every canonical hosted wake append/fetch/commit call now goes through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The wake encryption key is execution-only and should decrypt hosted wake payloads only. Do not reuse the broader web-owned `HOSTED_WEB_ENCRYPTION_*` private-field lane in Cloudflare.
 
 ## Optional Vars
 
@@ -124,6 +126,8 @@ Key rotation and future envelope lanes:
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`
 - `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK`
+- `HOSTED_WAKE_ENCRYPTION_KEY_VERSION`
+- `HOSTED_WAKE_ENCRYPTION_KEYRING_JSON`
 
 Hosted assistant provider secrets:
 
@@ -164,6 +168,7 @@ export HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK=...
 export HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK=...
 export HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK=...
+export HOSTED_WAKE_ENCRYPTION_KEY=...
 export HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=...
 
 pnpm --dir apps/cloudflare deploy:preflight

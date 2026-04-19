@@ -4,10 +4,10 @@ import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
 export const TEST_AUTOMATION_RECIPIENT_KEY_ID = "automation:v1";
 export const TEST_RECOVERY_RECIPIENT_KEY_ID = "recovery:v1";
 export const TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID = "tee-automation:v1";
-export const TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION = "v1";
-export const TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES = Buffer.alloc(32, 5);
-export const TEST_HOSTED_WEB_ENCRYPTION_KEY =
-  TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES.toString("base64url");
+export const TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "v1";
+export const TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES = Buffer.alloc(32, 5);
+export const TEST_HOSTED_WAKE_ENCRYPTION_KEY =
+  TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES.toString("base64url");
 
 export const TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK = {
   crv: "P-256",
@@ -49,7 +49,7 @@ export const TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON = JSON.stringify(
 const ENCRYPTED_SECRET_PREFIX = "hbds";
 const AES_256_GCM = "aes-256-gcm";
 const GCM_IV_BYTES = 12;
-const HOSTED_SECRET_SCOPE_SALT = Buffer.from("murph.hosted.device-sync.secret.v1", "utf8");
+const HOSTED_WAKE_SCOPE_SALT = Buffer.from("murph.hosted.wake.payload.v1", "utf8");
 
 export function createHostedExecutionTestEnv(
   overrides: Partial<Record<string, string | undefined>> = {},
@@ -70,10 +70,10 @@ export function createHostedExecutionTestEnv(
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+    HOSTED_WAKE_ENCRYPTION_KEY: TEST_HOSTED_WAKE_ENCRYPTION_KEY,
+    HOSTED_WAKE_ENCRYPTION_KEY_VERSION: TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION,
     HOSTED_WEB_BASE_URL: "https://web.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-    HOSTED_WEB_ENCRYPTION_KEY: TEST_HOSTED_WEB_ENCRYPTION_KEY,
-    HOSTED_WEB_ENCRYPTION_KEY_VERSION: TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
     ...overrides,
   };
 }
@@ -88,12 +88,12 @@ export function encryptTestHostedWakePayload(input: {
   const cipher = createCipheriv(
     AES_256_GCM,
     deriveHostedSecretScopeKey(
-      TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES,
-      `hosted-member-private-field:${input.field ?? "hosted-wake-ref-payload"}`,
+      TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES,
+      `hosted-wake-payload:${input.field ?? "hosted-wake-ref-payload"}`,
     ),
     iv,
   );
-  cipher.setAAD(buildHostedWebFieldAad({
+  cipher.setAAD(buildHostedWakeFieldAad({
     field: input.field ?? "hosted-wake-ref-payload",
     userId: input.userId,
   }));
@@ -104,7 +104,7 @@ export function encryptTestHostedWakePayload(input: {
     payloadBytes: plaintext.byteLength,
     payloadCiphertext: [
       ENCRYPTED_SECRET_PREFIX,
-      TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
+      TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION,
       iv.toString("base64url"),
       authTag.toString("base64url"),
       ciphertext.toString("base64url"),
@@ -112,14 +112,14 @@ export function encryptTestHostedWakePayload(input: {
   };
 }
 
-function buildHostedWebFieldAad(input: {
+function buildHostedWakeFieldAad(input: {
   field: string;
   userId: string;
 }): Buffer {
   return Buffer.from(JSON.stringify({
     field: input.field,
     memberId: input.userId,
-    purpose: "hosted-member-private-field",
+    purpose: "hosted-wake-payload",
   }), "utf8");
 }
 
@@ -128,7 +128,7 @@ function deriveHostedSecretScopeKey(rootKey: Buffer, scope: string): Buffer {
     hkdfSync(
       "sha256",
       rootKey,
-      HOSTED_SECRET_SCOPE_SALT,
+      HOSTED_WAKE_SCOPE_SALT,
       Buffer.from(scope, "utf8"),
       32,
     ),

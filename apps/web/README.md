@@ -57,6 +57,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedSharePayload` owns canonical encrypted share payloads in Postgres
 - `HostedExecutionCursor` owns the canonical committed high-water and snapshot fence
 - `HostedWake` owns the canonical ordered hosted wake queue
+- fetched hosted wakes carry short-lived web-minted advance proofs, and cursor
+  advancement must present the proof for the exact fetched wake identity rather
+  than trusting a caller-supplied seq alone
 - `HostedAiUsage` owns the canonical hosted usage ledger
 
 ## Key environment variables
@@ -97,6 +100,9 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+- `HOSTED_WAKE_COMMIT_PROOF_KEY`
+- `HOSTED_WAKE_COMMIT_PROOF_KEY_ID`
+- `HOSTED_WAKE_COMMIT_PROOF_KEYRING_JSON`
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
@@ -110,6 +116,9 @@ Hosted onboarding extras:
 - `HOSTED_WEB_ENCRYPTION_KEY`
 - `HOSTED_WEB_ENCRYPTION_KEY_VERSION`
 - `HOSTED_WEB_ENCRYPTION_KEYRING_JSON`
+- `HOSTED_WAKE_ENCRYPTION_KEY`
+- `HOSTED_WAKE_ENCRYPTION_KEY_VERSION`
+- `HOSTED_WAKE_ENCRYPTION_KEYRING_JSON`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
@@ -162,6 +171,18 @@ Callback auth contract:
   `{ keyId: publicJwk }` verification keyring for staged rotation
 - `apps/cloudflare` signs those callbacks with
   `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
+- `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
+  boundary; the isolated execution child talks back through the worker-owned
+  `web-control.worker` proxy instead of receiving the signing key directly
+- `apps/web` also mints short-lived hosted wake advance proofs with
+  `HOSTED_WAKE_COMMIT_PROOF_KEY`
+- `HOSTED_WAKE_COMMIT_PROOF_KEY_ID` selects the active wake-proof key id and
+  defaults to `v1`
+- `HOSTED_WAKE_COMMIT_PROOF_KEYRING_JSON` is the optional
+  `{ keyId: encodedKey }` verification keyring for staged wake-proof rotation
+- hosted wake payload ciphertext uses the separate
+  `HOSTED_WAKE_ENCRYPTION_*` key lane, while member/share private fields remain
+  on the web-only `HOSTED_WEB_ENCRYPTION_*` lane
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production
 project domain or a custom domain. Do not use ephemeral preview deployment URLs

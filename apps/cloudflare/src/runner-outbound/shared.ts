@@ -21,6 +21,7 @@ export interface RunnerOutboundEnvironmentSource extends WorkerEnvironmentContra
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
 ]);
 
 export async function resolveRunnerOutboundUserCryptoContext(input: {

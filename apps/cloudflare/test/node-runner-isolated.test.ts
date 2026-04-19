@@ -76,7 +76,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     vi.stubEnv("HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN", "local-loopback-token");
     vi.stubEnv("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY", "platform-key");
     vi.stubEnv("HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG", "cobuildwithus");
-    vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK", '{"kty":"EC","d":"secret"}');
+    vi.stubEnv("HOSTED_WAKE_ENCRYPTION_KEY", Buffer.alloc(32, 5).toString("base64url"));
     const module = await import("../src/node-runner-isolated.ts");
 
     spawnMock.mockImplementation((_command, _args, options) => {
@@ -86,8 +86,9 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
       });
+      expect(options?.env?.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
+      expect(options?.env?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
 
       const child = new EventEmitter() as EventEmitter & {
         kill: ReturnType<typeof vi.fn>;

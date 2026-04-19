@@ -31,6 +31,12 @@ export function createHostedWebSmokeEnvironment(
     HOSTED_WEB_ENCRYPTION_KEY_VERSION:
       environment.HOSTED_WEB_ENCRYPTION_KEY_VERSION
       ?? hostedWebSmokeDefaultEncryptionKeyVersion,
+    HOSTED_WAKE_ENCRYPTION_KEY:
+      environment.HOSTED_WAKE_ENCRYPTION_KEY
+      ?? hostedWebSmokeDefaultEncryptionKey,
+    HOSTED_WAKE_ENCRYPTION_KEY_VERSION:
+      environment.HOSTED_WAKE_ENCRYPTION_KEY_VERSION
+      ?? hostedWebSmokeDefaultEncryptionKeyVersion,
     NEXT_PUBLIC_PRIVY_APP_ID: environment.NEXT_PUBLIC_PRIVY_APP_ID ?? hostedWebSmokeDefaultPrivyAppId,
     [hostedWebDistModeEnvVarName]: hostedWebSmokeDistMode,
   };

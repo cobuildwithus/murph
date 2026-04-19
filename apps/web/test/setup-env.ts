@@ -22,6 +22,8 @@ process.env.HOSTED_CONTACT_PRIVACY_KEYS ??= `v1:${HOSTED_WEB_TEST_KEY}`;
 process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION ??= "v1";
 process.env.HOSTED_WEB_ENCRYPTION_KEY ??= HOSTED_WEB_TEST_KEY;
 process.env.HOSTED_WEB_ENCRYPTION_KEY_VERSION ??= "v1";
+process.env.HOSTED_WAKE_ENCRYPTION_KEY ??= HOSTED_WEB_TEST_KEY;
+process.env.HOSTED_WAKE_ENCRYPTION_KEY_VERSION ??= "v1";
 
 afterEach(() => {
   delete globalForHostedWebTests.__murphHostedOnboardingEnv;
