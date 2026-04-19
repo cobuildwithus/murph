@@ -6,10 +6,8 @@ import type {
   HostedWakeLifecycleState,
 } from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   buildHostedExecutionAssistantCronTickWake,
-  isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -174,19 +172,10 @@ function buildHostedWakeDedupeKeyFromEventId(
   return eventId;
 }
 
-function resolveHostedWakePayloadSchema(wake: HostedExecutionWake): HostedWakePayloadSchema {
-  return isHostedConversationMessageWake(wake)
-    ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
-    : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA;
+function resolveHostedWakePayloadSchema(_wake: HostedExecutionWake): HostedWakePayloadSchema {
+  return HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
 }
 
 function buildHostedWakePayloadValue(wake: HostedExecutionWake): unknown {
-  if (!isHostedConversationMessageWake(wake)) {
-    return wake;
-  }
-
-  return {
-    eventId: wake.eventId,
-    ...wake.message,
-  };
+  return wake;
 }
