@@ -45,6 +45,8 @@ import type {
   HostedWakeLifecycleState,
   HostedWakeMaterializationHints,
   HostedWakeMaterializeResponse,
+  HostedWakeCommitRequest,
+  HostedWakeQuarantineRequest,
   HostedWakePayloadSchema,
   HostedWakeQuarantineResponse,
   HostedWakeRecord,
@@ -624,6 +626,13 @@ export function parseHostedExecutionBundleRef(
   return parseRuntimeHostedExecutionBundleRef(value, label);
 }
 
+export function parseHostedExecutionCursorSnapshotRef(
+  value: unknown,
+  label = "Hosted execution cursor snapshotRef",
+): HostedExecutionBundleRefState {
+  return parseHostedExecutionBundleRef(value === undefined ? null : value, label);
+}
+
 export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent {
   const record = requireObject(value, "Hosted execution event");
   const kind = requireString(record.kind, "Hosted execution event kind");
@@ -824,7 +833,10 @@ export function parseHostedExecutionCursorState(
     ),
     createdAt: requireString(record.createdAt, "Hosted execution cursor state createdAt"),
     nextSeq: requireBigIntString(record.nextSeq, "Hosted execution cursor state nextSeq"),
-    snapshotRef: record.snapshotRef ?? null,
+    snapshotRef: parseHostedExecutionCursorSnapshotRef(
+      record.snapshotRef,
+      "Hosted execution cursor state snapshotRef",
+    ),
     updatedAt: requireString(record.updatedAt, "Hosted execution cursor state updatedAt"),
     userId: requireString(record.userId, "Hosted execution cursor state userId"),
     version: requireBigIntString(record.version, "Hosted execution cursor state version"),
@@ -1001,6 +1013,31 @@ export function parseHostedWakeCommitResponse(
   };
 }
 
+export function parseHostedWakeCommitRequest(
+  value: unknown,
+): HostedWakeCommitRequest {
+  const record = requireObject(value, "Hosted wake commit request");
+
+  return {
+    committedSeq: requireBigIntString(
+      record.committedSeq,
+      "Hosted wake commit request committedSeq",
+    ),
+    expectedVersion: requireBigIntString(
+      record.expectedVersion,
+      "Hosted wake commit request expectedVersion",
+    ),
+    ...(record.snapshotRef === undefined
+      ? {}
+      : {
+          snapshotRef: parseHostedExecutionCursorSnapshotRef(
+            record.snapshotRef,
+            "Hosted wake commit request snapshotRef",
+          ),
+        }),
+  };
+}
+
 export function parseHostedWakeTerminalResponse(
   value: unknown,
 ): HostedWakeTerminalResponse {
@@ -1051,6 +1088,31 @@ export function parseHostedWakeQuarantineResponse(
 
   return {
     quarantined: requireBoolean(record.quarantined, "Hosted wake quarantine response quarantined"),
+  };
+}
+
+export function parseHostedWakeQuarantineRequest(
+  value: unknown,
+): HostedWakeQuarantineRequest {
+  const record = requireObject(value, "Hosted wake quarantine request");
+
+  return {
+    fetchProof: requireString(
+      record.fetchProof,
+      "Hosted wake quarantine request fetchProof",
+    ),
+    quarantineCode: requireString(
+      record.quarantineCode,
+      "Hosted wake quarantine request quarantineCode",
+    ),
+    wakeId: requireString(
+      record.wakeId,
+      "Hosted wake quarantine request wakeId",
+    ),
+    wakeSeq: requireBigIntString(
+      record.wakeSeq,
+      "Hosted wake quarantine request wakeSeq",
+    ),
   };
 }
 

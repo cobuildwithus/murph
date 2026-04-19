@@ -289,7 +289,7 @@ export class HostedUserRunner {
   }> {
     const wakeMaterializationHints = await this.stateStore.readWakeMaterializationHints();
 
-    if (!hostedWakeMaterializationDueNow(wakeMaterializationHints)) {
+    if (!shouldRefreshHostedWakeMaterialization(wakeMaterializationHints)) {
       return {
         targetSeqHint: null,
         wakeMaterializationHints,
@@ -360,7 +360,11 @@ export class HostedUserRunner {
           break;
         }
 
-        if (outcome.state === "completed" || outcome.state === "replaced") {
+        if (
+          outcome.state === "completed"
+          || outcome.state === "quarantined"
+          || outcome.state === "replaced"
+        ) {
           try {
             const terminal = await recordHostedWakeTerminalInWeb({
               baseUrl: this.env.hostedWebBaseUrl,
@@ -1038,6 +1042,20 @@ function hostedWakeMaterializationDueNow(
 
   return hostedWakeHintDueNow(wakeMaterializationHints.assistantWakeAt)
     || hostedWakeHintDueNow(wakeMaterializationHints.deviceSyncWakeAt);
+}
+
+function shouldRefreshHostedWakeMaterialization(
+  wakeMaterializationHints: HostedWakeMaterializationHints | null,
+): boolean {
+  if (!wakeMaterializationHints) {
+    return true;
+  }
+
+  if (wakeMaterializationHints.deviceSyncWakeAt == null) {
+    return true;
+  }
+
+  return hostedWakeMaterializationDueNow(wakeMaterializationHints);
 }
 
 function hostedWakeHintDueNow(value: string | null | undefined): boolean {

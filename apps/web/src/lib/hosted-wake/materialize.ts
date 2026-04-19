@@ -7,7 +7,55 @@ import type {
 import { buildHostedDeviceSyncWake } from "../device-sync/wake";
 import { materializeHostedAssistantCronWakeTx, appendHostedExecutionWakePayloadTx } from "./queue";
 
-type HostedWakeMaterializeTx = Pick<Prisma.TransactionClient, "deviceConnection">;
+type HostedWakeMaterializeTx = Pick<
+  Prisma.TransactionClient,
+  "$executeRaw" | "$executeRawUnsafe" | "$queryRaw" | "$queryRawUnsafe" | "$transaction"
+> & {
+  deviceConnection: {
+    findFirst(args: {
+      orderBy: Array<
+        { id: "asc" | "desc" }
+        | { nextReconcileAt: "asc" | "desc" }
+        | { updatedAt: "asc" | "desc" }
+      >;
+      select: {
+        nextReconcileAt: true;
+      };
+      where: {
+        nextReconcileAt: {
+          gt: Date;
+        };
+        status: "active";
+        userId: string;
+      };
+    }): Promise<{
+      nextReconcileAt: Date | null;
+    } | null>;
+    findMany(args: {
+      orderBy: Array<
+        { id: "asc" | "desc" }
+        | { nextReconcileAt: "asc" | "desc" }
+        | { updatedAt: "asc" | "desc" }
+      >;
+      select: {
+        id: true;
+        nextReconcileAt: true;
+        provider: true;
+      };
+      where: {
+        nextReconcileAt: {
+          lte: Date;
+        };
+        status: "active";
+        userId: string;
+      };
+    }): Promise<Array<{
+      id: string;
+      nextReconcileAt: Date | null;
+      provider: string;
+    }>>;
+  };
+};
 
 export async function materializeHostedDueWakesTx(input: {
   now?: Date;
@@ -24,7 +72,7 @@ export async function materializeHostedDueWakesTx(input: {
     const appended = await materializeHostedAssistantCronWakeTx({
       occurredAt: nowIso,
       reason: "alarm",
-      tx: input.tx,
+      tx: asHostedWakeQueueTx(input.tx),
       userId: input.userId,
     });
     targetSeqHint = maxHostedWakeSeq(targetSeqHint, appended.wake.seq);
@@ -52,7 +100,7 @@ export async function materializeHostedDueWakesTx(input: {
 
   for (const connection of dueConnections) {
     const appended = await appendHostedExecutionWakePayloadTx({
-      tx: input.tx,
+      tx: asHostedWakeQueueTx(input.tx),
       wake: buildHostedDeviceSyncWake({
         connectionId: connection.id,
         hint: {
@@ -147,4 +195,10 @@ function isRunnableWakeHint(value: string | null, now: Date): boolean {
 function maxHostedWakeSeq(current: bigint | null, candidate: string): bigint {
   const parsed = BigInt(candidate);
   return current === null || parsed > current ? parsed : current;
+}
+
+function asHostedWakeQueueTx(tx: HostedWakeMaterializeTx): Prisma.TransactionClient {
+  // Production callers always provide a Prisma transaction client. Tests inject a structural
+  // subset because materialization only reads deviceConnection and passes the tx through mocks.
+  return tx as unknown as Prisma.TransactionClient;
 }

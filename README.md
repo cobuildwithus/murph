@@ -138,7 +138,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
 | `packages/openclaw-plugin`   | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault.             |
 | `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and the canonical Postgres-owned `HostedWake` / `HostedExecutionCursor` lifecycle. |
-| `apps/cloudflare`            | Hosted execution plane for authenticated wake/control requests, per-user coordination, encrypted hosted bundles, and container-backed runs. |
+| `apps/cloudflare`            | Hosted execution plane for authenticated wake/control requests, per-user coordination, DO-local pending-commit state, encrypted hosted bundles, and container-backed runs. |
 | `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |
 
 ## Local and hosted surfaces
@@ -158,7 +158,7 @@ Murph now has three distinct runtime tiers:
 
 ### 3. Hosted execution plane
 
-- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runs, keeps the decryptable hosted device-sync runtime/token escrow, executes one-shot inbox/parser/assistant/device-sync/share-import work through the workspace-private `@murphai/assistant-runtime` package, and advances wake progress only through the web-owned cursor commit path
+- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runs, keeps only DO-local pending-commit/runtime coordination state, executes one-shot inbox/parser/assistant/device-sync/share-import work through the workspace-private `@murphai/assistant-runtime` package, and advances wake progress only through the web-owned cursor commit path
 - it is intentionally separate from the public hosted web app
 
 ## CLI surface

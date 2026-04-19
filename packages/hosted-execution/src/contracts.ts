@@ -279,6 +279,7 @@ export type HostedExecutionSystemWake = Exclude<
 >;
 
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
+export type HostedWakeSnapshotRef = HostedExecutionBundleRefState;
 
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
@@ -368,7 +369,7 @@ export interface HostedExecutionCursorState {
   committedSeq: string;
   createdAt: string;
   nextSeq: string;
-  snapshotRef: unknown | null;
+  snapshotRef: HostedWakeSnapshotRef;
   updatedAt: string;
   userId: string;
   version: string;
@@ -425,7 +426,7 @@ export interface HostedWakeFetchResponse {
 export interface HostedWakeCommitRequest {
   committedSeq: string;
   expectedVersion: string;
-  snapshotRef?: unknown | null;
+  snapshotRef?: HostedWakeSnapshotRef;
 }
 
 export interface HostedWakeCommitResponse {
@@ -448,6 +449,7 @@ export interface HostedWakeAppendResponse {
 
 export const HOSTED_WAKE_TERMINAL_STATES = [
   "completed",
+  "quarantined",
   "replaced",
 ] as const;
 
@@ -475,8 +477,10 @@ export interface HostedWakeMaterializeResponse {
 }
 
 export interface HostedWakeQuarantineRequest {
+  fetchProof: string;
   quarantineCode: string;
   wakeId: string;
+  wakeSeq: string;
 }
 
 export interface HostedWakeQuarantineResponse {

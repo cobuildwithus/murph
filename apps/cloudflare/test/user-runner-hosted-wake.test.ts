@@ -160,13 +160,20 @@ describe("HostedUserRunner hosted wake drain", () => {
       wakeSeq: "1",
     }));
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
-    expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledOnce();
-    expect(recordHostedWakeTerminalInWeb.mock.calls[0]?.[0].body).toEqual({
-      fetchProof: "proof_2",
-      state: "completed",
-      wakeId: "wake_2",
-      wakeSeq: "2",
-    });
+    expect(recordHostedWakeTerminalInWeb.mock.calls.map(([input]) => input.body)).toEqual([
+      {
+        fetchProof: "proof_1",
+        state: "quarantined",
+        wakeId: "wake_1",
+        wakeSeq: "1",
+      },
+      {
+        fetchProof: "proof_2",
+        state: "completed",
+        wakeId: "wake_2",
+        wakeSeq: "2",
+      },
+    ]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_poison"]);
   });
 
@@ -244,7 +251,20 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     expect(quarantineHostedWakeInWeb).not.toHaveBeenCalled();
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
-    expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledOnce();
+    expect(recordHostedWakeTerminalInWeb.mock.calls.map(([input]) => input.body)).toEqual([
+      {
+        fetchProof: "proof_1",
+        state: "quarantined",
+        wakeId: "wake_1",
+        wakeSeq: "1",
+      },
+      {
+        fetchProof: "proof_2",
+        state: "completed",
+        wakeId: "wake_2",
+        wakeSeq: "2",
+      },
+    ]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_quarantine"]);
   });
 

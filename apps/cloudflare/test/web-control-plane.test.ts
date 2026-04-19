@@ -5,6 +5,7 @@ import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contr
 import {
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
+  quarantineHostedWakeInWeb,
   readHostedWakeStatusFromWeb,
   recordHostedWakeTerminalInWeb,
 } from "../src/web-control-plane.ts";
@@ -73,6 +74,7 @@ describe("cloudflare web control plane wake helpers", () => {
 
   it("commits the hosted wake cursor through the web control plane", async () => {
     let observedRequest: ObservedRequest | null = null;
+    const snapshotRef = createBundleRef("wake_24");
 
     await expect(
       commitHostedWakeCursorToWeb({
@@ -80,9 +82,7 @@ describe("cloudflare web control plane wake helpers", () => {
         body: {
           committedSeq: "24",
           expectedVersion: "3",
-          snapshotRef: {
-            checkpoint: "wake_24",
-          },
+          snapshotRef,
         },
         boundUserId: "user_123",
         fetchImpl: vi.fn(async (url, init) => {
@@ -94,9 +94,7 @@ describe("cloudflare web control plane wake helpers", () => {
                 committedSeq: "24",
                 createdAt: "2026-04-17T00:00:00.000Z",
                 nextSeq: "25",
-                snapshotRef: {
-                  checkpoint: "wake_24",
-                },
+                snapshotRef,
                 updatedAt: "2026-04-17T00:00:00.000Z",
                 userId: "user_123",
                 version: "4",
@@ -116,9 +114,7 @@ describe("cloudflare web control plane wake helpers", () => {
         committedSeq: "24",
         createdAt: "2026-04-17T00:00:00.000Z",
         nextSeq: "25",
-        snapshotRef: {
-          checkpoint: "wake_24",
-        },
+        snapshotRef,
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "user_123",
         version: "4",
@@ -136,9 +132,52 @@ describe("cloudflare web control plane wake helpers", () => {
     expect(JSON.parse(String(request.init?.body))).toEqual({
       committedSeq: "24",
       expectedVersion: "3",
-      snapshotRef: {
-        checkpoint: "wake_24",
-      },
+      snapshotRef,
+    });
+  });
+
+  it("records hosted wake quarantine requests with the fetched wake proof", async () => {
+    let observedRequest: ObservedRequest | null = null;
+
+    await expect(
+      quarantineHostedWakeInWeb({
+        baseUrl: "https://runner.example.test/root/",
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              quarantined: true,
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        fetchProof: "proof_24",
+        quarantineCode: "invalid-wake-payload",
+        timeoutMs: 2_500,
+        wakeId: "wake_24",
+        wakeSeq: "24",
+      }),
+    ).resolves.toEqual({
+      quarantined: true,
+    });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/api/internal/hosted-wake/quarantine",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("content-type")).toBe("application/json");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(String(request.init?.body))).toEqual({
+      fetchProof: "proof_24",
+      quarantineCode: "invalid-wake-payload",
+      wakeId: "wake_24",
+      wakeSeq: "24",
     });
   });
 
@@ -256,4 +295,13 @@ function requireObservedRequest(request: ObservedRequest | null): ObservedReques
   }
 
   return request;
+}
+
+function createBundleRef(id: string) {
+  return {
+    hash: `hash-${id}`,
+    key: `bundles/vault/${id}.bundle.json`,
+    size: 128,
+    updatedAt: "2026-04-17T00:00:00.000Z",
+  };
 }
