@@ -1,5 +1,8 @@
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
-import { normalizeOptionalString } from "./deploy-automation/shared.ts";
+import {
+  normalizeOptionalString,
+  readBooleanEnv,
+} from "./deploy-automation/shared.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -54,8 +57,7 @@ export function assertHostedDeployEnvironment(
 }
 
 export function parseDeployWorkerFlag(value: string | undefined): boolean {
-  const normalized = normalizeOptionalString(value);
-  return normalized === "1" || normalized === "true" || normalized === "yes";
+  return readBooleanEnv(value, false);
 }
 
 function listMissingRequiredEnvNames(

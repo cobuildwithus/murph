@@ -7,6 +7,27 @@ export function normalizeOptionalString(value: string | undefined): string | nul
   return normalized.length > 0 ? normalized : null;
 }
 
+const BOOLEAN_ENV_TRUE_VALUES = new Set(["1", "true", "yes"]);
+const BOOLEAN_ENV_FALSE_VALUES = new Set(["0", "false", "no"]);
+
+export function readBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (BOOLEAN_ENV_TRUE_VALUES.has(normalized)) {
+    return true;
+  }
+
+  if (BOOLEAN_ENV_FALSE_VALUES.has(normalized)) {
+    return false;
+  }
+
+  throw new Error("Boolean env values must be one of: 1, 0, true, false, yes, no.");
+}
+
 export function requireConfiguredString(value: string | undefined, label: string): string {
   const normalized = normalizeOptionalString(value);
 
