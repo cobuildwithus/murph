@@ -7,13 +7,11 @@ import {
 
 const mocks = vi.hoisted(() => ({
   appendHostedCoalescingWakeTx: vi.fn(),
-  appendHostedEdgeTriggeredWakeTx: vi.fn(),
   appendHostedOrderedWakeTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-wake/store", () => ({
   appendHostedCoalescingWakeTx: mocks.appendHostedCoalescingWakeTx,
-  appendHostedEdgeTriggeredWakeTx: mocks.appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx: mocks.appendHostedOrderedWakeTx,
   findHostedWakeEventIdByEventIdTx: vi.fn(),
   readHostedWakeLifecycleByDedupeKeyTx: vi.fn(),

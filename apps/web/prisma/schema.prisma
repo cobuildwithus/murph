@@ -189,7 +189,6 @@ enum HostedRevnetIssuanceStatus {
 enum HostedWakeBehavior {
   ordered
   coalescing
-  edge_triggered
 }
 
 model HostedMember {
@@ -370,6 +369,7 @@ model HostedWakeTerminal {
   wakeSeq             BigInt       @map("wake_seq")
   state               String
   fetchedCommittedSeq BigInt       @map("fetched_committed_seq")
+  fetchedCursorVersion BigInt      @map("fetched_cursor_version")
   createdAt           DateTime     @default(now()) @map("created_at")
   updatedAt           DateTime     @updatedAt @map("updated_at")
   member              HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)

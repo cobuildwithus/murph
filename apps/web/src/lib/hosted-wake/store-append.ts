@@ -5,6 +5,8 @@ import { Prisma } from "@prisma/client";
 import {
   allocateHostedWakeSeqTx,
   assertHostedWakeUserMatch,
+  bumpHostedExecutionCursorVersionTx,
+  clearHostedWakeTerminalTx,
   createHostedWakeEventTx,
   ensureHostedExecutionCursorRowTx,
   findHostedWakeByDedupeKeyTx,
@@ -41,17 +43,6 @@ export async function appendHostedCoalescingWakeTx(
   return appendHostedWakeTx({
     ...input,
     behavior: "coalescing",
-  });
-}
-
-export async function appendHostedEdgeTriggeredWakeTx(
-  input: Omit<AppendHostedWakeInput, "behavior"> & {
-    coalescingKey: string;
-  },
-): Promise<AppendHostedWakeResult> {
-  return appendHostedWakeTx({
-    ...input,
-    behavior: "edge_triggered",
   });
 }
 
@@ -163,6 +154,14 @@ export async function appendHostedWakeTx(
           quarantinedAt: null,
         },
       });
+      await clearHostedWakeTerminalTx({
+        tx: input.tx,
+        wakeId: unresolved.id,
+      });
+      await bumpHostedExecutionCursorVersionTx({
+        tx: input.tx,
+        userId: input.userId,
+      });
 
       return {
         duplicate: false,
@@ -170,26 +169,6 @@ export async function appendHostedWakeTx(
         updatedExisting: true,
         wake: await hydrateHostedWakeRecordTx({
           record: updated,
-          tx: input.tx,
-        }),
-      };
-    }
-  }
-
-  if (input.behavior === "edge_triggered") {
-    const unresolved = await findUncommittedWakeByCoalescingKeyTx({
-      coalescingKey: input.coalescingKey ?? null,
-      tx: input.tx,
-      userId: input.userId,
-    });
-
-    if (unresolved) {
-      return {
-        duplicate: false,
-        inserted: false,
-        updatedExisting: false,
-        wake: await hydrateHostedWakeRecordTx({
-          record: unresolved,
           tx: input.tx,
         }),
       };

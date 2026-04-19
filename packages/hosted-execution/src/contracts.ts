@@ -4,11 +4,6 @@ import type {
 } from "@murphai/runtime-state";
 import type {
   HostedExecutionDeviceSyncJobHint as DeviceSyncHostedExecutionDeviceSyncJobHint,
-  HostedExecutionDeviceSyncRuntimeConnectionSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionSnapshot,
-  HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
-  HostedExecutionDeviceSyncRuntimeLocalStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse as DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  HostedExecutionDeviceSyncRuntimeTokenBundle as DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle,
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -352,7 +347,6 @@ export interface HostedWakeExecutionResult {
 export const HOSTED_WAKE_BEHAVIORS = [
   "ordered",
   "coalescing",
-  "edge_triggered",
 ] as const;
 
 export type HostedWakeBehavior =
@@ -509,21 +503,6 @@ export type HostedExecutionDeviceSyncJobHint =
 
 export type HostedExecutionDeviceSyncWakeHint =
   DeviceSyncHostedExecutionDeviceSyncWakeHint;
-
-export type HostedExecutionDeviceSyncRuntimeTokenBundle =
-  DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle;
-
-export type HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot =
-  DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
-
-export type HostedExecutionDeviceSyncRuntimeLocalStateSnapshot =
-  DeviceSyncHostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
-
-export type HostedExecutionDeviceSyncRuntimeConnectionSnapshot =
-  DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionSnapshot;
-
-export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
-  DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse;
 
 export const HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR =
   "Hosted execution wake handling is not configured.";
