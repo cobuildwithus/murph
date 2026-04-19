@@ -27,12 +27,12 @@ export interface HostedBillingPlanPresentation {
 
 const HOSTED_BILLING_PLAN_DEFINITIONS = {
   launch_annual: {
-    badge: "Save $30",
+    badge: "2 months free",
     code: "launch_annual",
     displayName: "Annual",
     interval: "year",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
-    recurringAmountUsdCents: 15_000,
+    recurringAmountUsdCents: 8_000,
   },
   launch_monthly: {
     badge: null,
@@ -40,7 +40,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     displayName: "Monthly",
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-    recurringAmountUsdCents: 1_500,
+    recurringAmountUsdCents: 800,
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
