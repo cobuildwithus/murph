@@ -169,6 +169,8 @@ export async function commitTestHostedWakeCursor(input: {
   const nextSnapshotRef = hasSnapshotRef
     ? input.body.snapshotRef ?? null
     : state.cursor.snapshotRef ?? null;
+  const snapshotRefChanged = hasSnapshotRef
+    && JSON.stringify(state.cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotRef);
 
   if (
     (shouldAdvanceCommittedSeq
@@ -180,8 +182,9 @@ export async function commitTestHostedWakeCursor(input: {
           && targetWake.wakeState !== "replaced"
           && targetWake.wakeState !== "poisoned")
       ))
+    || (committedSeq < currentCommittedSeq)
     || (!shouldAdvanceCommittedSeq && committedSeq !== currentCommittedSeq)
-    || !shouldAdvanceCommittedSeq
+    || (!shouldAdvanceCommittedSeq && !snapshotRefChanged)
   ) {
     return {
       committed: false,
@@ -239,9 +242,12 @@ export async function quarantineTestHostedWake(input: {
   userId: string;
 }): Promise<HostedWakeQuarantineResponse> {
   const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
-  const wake = state.wakes.find((candidate) => candidate.id === input.body.wakeId);
+  const wake = state.wakes.find((candidate) =>
+    candidate.id === input.body.wakeId
+    && candidate.seq === input.body.wakeSeq
+  );
 
-  if (!wake) {
+  if (!wake || input.body.fetchProof !== `${wake.id}:${wake.seq}:${wake.updatedAt}`) {
     return { quarantined: false };
   }
 

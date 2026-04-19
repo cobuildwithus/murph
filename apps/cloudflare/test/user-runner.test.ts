@@ -1516,7 +1516,7 @@ describe("HostedUserRunner", () => {
     const stateStore = new RunnerStateStore(storage.state as never);
 
     const firstStatus = await runner.wake(createActivationWake("evt_finalize_retry", "member_123"));
-    expect(firstStatus.pendingWakeCount).toBe(1);
+    expect(firstStatus.pendingWakeCount).toBe(0);
     expect(firstStatus.lastEventId).toBe("evt_finalize_retry");
     expect(firstStatus.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
@@ -1532,7 +1532,7 @@ describe("HostedUserRunner", () => {
     await runner.wakeHostedWakes();
 
     const finalStatus = await runner.status();
-    expect(finalStatus.pendingWakeCount).toBe(1);
+    expect(finalStatus.pendingWakeCount).toBe(0);
     expect(finalStatus.lastEventId).toBe("evt_finalize_retry");
     expect(finalStatus.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
@@ -2115,7 +2115,7 @@ describe("HostedUserRunner", () => {
 
     expect(first.lastEventId).toBe("evt_lost_response");
     expect(second).toEqual({
-      committedSeq: "0",
+      committedSeq: "1",
       requestedTargetSeq: null,
       targetReached: true,
     });
@@ -2263,8 +2263,10 @@ describe("HostedUserRunner", () => {
     });
     await quarantineTestHostedWake({
       body: {
+        fetchProof: `${appended.wake.id}:${appended.wake.seq}:${appended.wake.updatedAt}`,
         quarantineCode: "duplicate-poisoned-test",
         wakeId: appended.wake.id,
+        wakeSeq: appended.wake.seq,
       },
       bucket: bucket.api,
       userId: dispatch.userId,
@@ -2459,8 +2461,10 @@ describe("HostedUserRunner", () => {
     });
     await quarantineTestHostedWake({
       body: {
+        fetchProof: `${appended.wake.id}:${appended.wake.seq}:${appended.wake.updatedAt}`,
         quarantineCode: "poison-expiry-test",
         wakeId: appended.wake.id,
+        wakeSeq: appended.wake.seq,
       },
       bucket: bucket.api,
       userId: "member_123",
