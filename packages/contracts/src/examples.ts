@@ -475,6 +475,17 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
   },
   {
     schemaVersion: "murph.sample.v1",
+    id: "smp_01JNV45Z8R79C4Q9N6P5T6W7YX",
+    stream: "spo2",
+    recordedAt: "2026-03-12T06:05:00Z",
+    dayKey: "2026-03-12",
+    source: "device",
+    quality: "normalized",
+    value: 97.5,
+    unit: "%",
+  },
+  {
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV4628FSM6B5NQ8VJSEW415",
     stream: "hrv",
     recordedAt: "2026-03-12T06:01:00Z",

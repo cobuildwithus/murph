@@ -143,22 +143,22 @@ export function registerSamplesCommands(
           .string()
           .min(1)
           .optional()
-          .describe('Stream identifier to write under. Required unless the selected preset supplies it.'),
+          .describe('Optional stream identifier. Recognized aliases such as SpO2 are accepted, and the importer can infer the stream from recognizable CSV headers when unambiguous.'),
         tsColumn: z
           .string()
           .min(1)
           .optional()
-          .describe('CSV column containing timestamps. Required unless the selected preset supplies it.'),
+          .describe('Optional timestamp column override. When omitted, the importer will use recognizable timestamp headers such as time or timestamp.'),
         valueColumn: z
           .string()
           .min(1)
           .optional()
-          .describe('CSV column containing the numeric value. Required unless the selected preset supplies it.'),
+          .describe('Optional numeric value column override. When omitted, the importer will infer a recognizable metric column when the CSV is unambiguous.'),
         unit: z
           .string()
           .min(1)
           .optional()
-          .describe('Unit label for the imported values. Required unless the selected preset supplies it.'),
+          .describe('Optional unit override. When omitted, the importer will use the preset unit or a stream-specific default.'),
         delimiter: z
           .string()
           .length(1)

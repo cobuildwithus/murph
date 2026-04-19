@@ -1268,6 +1268,28 @@ test("importSamples normalizes uppercase unit aliases and falls back invalid sou
   assert.equal(record.quality, "raw");
 });
 
+test("importSamples supports spo2 with percent unit aliases", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const imported = await importSamples({
+    vaultRoot,
+    stream: "spo2",
+    unit: "percent",
+    samples: [
+      {
+        recordedAt: "2026-01-15T10:00:00.000Z",
+        value: 97.2,
+      },
+    ],
+  });
+  const record = expectRecord<SampleRecord>(imported.records[0]);
+
+  assert.equal(record.stream, "spo2");
+  assert.equal(record.unit, "%");
+  assert.equal(record.value, 97.2);
+});
+
 test("importSamples rejects invalid sample objects and unsupported units", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });

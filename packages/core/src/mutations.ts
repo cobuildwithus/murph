@@ -578,6 +578,12 @@ const NUMERIC_UNIT_ALIASES = {
   heart_rate: {
     bpm: "bpm",
   },
+  spo2: {
+    "%": "%",
+    percent: "%",
+    percentage: "%",
+    spo2_percent: "%",
+  },
   hrv: {
     ms: "ms",
   },

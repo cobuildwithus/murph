@@ -423,6 +423,8 @@ test("prepareMealImport accepts ingredients-only structured meals", async () => 
 });
 
 test("prepareCsvSampleImport skips blank rows and omits empty metadata columns", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-"));
+  await coreRuntime.initializeVault({ vaultRoot });
   const filePath = await createTempFile(
     "glucose.csv",
     [
@@ -437,7 +439,7 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
 
   const payload = await prepareCsvSampleImport({
     filePath,
-    vaultRoot: "/tmp/canonical-vault",
+    vaultRoot,
     vault: "/tmp/example-vault",
     stream: "glucose",
     tsColumn: "recorded",
@@ -446,7 +448,7 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
     delimiter: ",",
   });
 
-  assert.equal(payload.vaultRoot, "/tmp/canonical-vault");
+  assert.equal(payload.vaultRoot, vaultRoot);
   assert.equal(payload.importConfig.metadataColumns, undefined);
   assert.equal(payload.samples.length, 2);
   assert.equal(payload.batchProvenance?.sourceFileName, "glucose.csv");
@@ -456,6 +458,46 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
   assert.equal(payload.batchProvenance?.rows?.[0]?.metadata, undefined);
   assert.equal(payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
   assert.equal(payload.samples[1]?.value, 95);
+});
+
+test("prepareCsvSampleImport infers SpO2 imports from O2Ring-style CSV rows and skips placeholder values", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-"));
+  await coreRuntime.initializeVault({ vaultRoot });
+  await coreRuntime.updateVaultSummary({
+    vaultRoot,
+    timezone: "Asia/Kuala_Lumpur",
+  });
+
+  const filePath = await createTempFile(
+    "o2ring.csv",
+    [
+      "Time,Oxygen Level,Pulse Rate,Motion",
+      "00:55:47 Apr 17 2026,88,75,0",
+      "00:55:48 Apr 17 2026,89,74,0",
+      "09:16:00 Apr 17 2026,--,--,0",
+    ].join("\n"),
+  );
+
+  const payload = await prepareCsvSampleImport({
+    filePath,
+    vaultRoot,
+    stream: "SpO2",
+    metadataColumns: ["Motion"],
+  });
+
+  assert.equal(payload.stream, "spo2");
+  assert.equal(payload.unit, "%");
+  assert.equal(payload.importConfig.tsColumn, "Time");
+  assert.equal(payload.importConfig.valueColumn, "Oxygen Level");
+  assert.deepEqual(payload.importConfig.metadataColumns, ["Motion"]);
+  assert.equal(payload.samples.length, 2);
+  assert.equal(payload.samples[0]?.recordedAt, "2026-04-16T16:55:47.000Z");
+  assert.equal(payload.samples[0]?.value, 88);
+  assert.equal(payload.batchProvenance?.rows?.length, 3);
+  assert.deepEqual(payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
+  assert.equal(payload.batchProvenance?.rows?.[2]?.skipped, true);
+  assert.equal(payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
+  assert.equal(payload.batchProvenance?.rows?.[2]?.rawValue, "--");
 });
 
 test("prepareCsvSampleImport rejects header-only files", async () => {
