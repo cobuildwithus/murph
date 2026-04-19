@@ -592,7 +592,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_direct_final"]);
   });
 
-  it("uses a snapshot-only cursor commit when pending cleanup publishes a newer final bundle", async () => {
+  it("commits the finalized pending bundle once and keeps cleanup local-only afterward", async () => {
     const runner = new HostedUserRunner(
       storage.state,
       environment,
@@ -617,53 +617,38 @@ describe("HostedUserRunner hosted wake drain", () => {
       throw new Error("Expected HostedUserRunner state store test internals to be available.");
     }
 
-    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
     const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
-
-    if (typeof writePendingCommit !== "function" || typeof readPendingCommit !== "function") {
+    if (typeof readPendingCommit !== "function") {
       throw new Error("Expected HostedUserRunner state store pending commit helpers.");
     }
-
-    const finalBundleRef = {
-      hash: "final-hash",
-      key: "bundles/vault/final.bundle.json",
-      size: 128,
-      updatedAt: "2026-03-26T12:00:01.000Z",
-    };
-    const committedBundleRef = {
-      hash: "committed-hash",
-      key: "bundles/vault/committed.bundle.json",
-      size: 96,
-      updatedAt: "2026-03-26T12:00:00.500Z",
-    };
-    const { payloadCiphertext } = encryptTestHostedWakePayload({
-      userId: "member_123",
-      value: createWake("evt_cleanup_snapshot"),
-    });
-    await writePendingCommit.call(stateStore, {
-      assistantDeliveryEffects: [],
-      bundleRef: finalBundleRef,
-      committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: "evt_cleanup_snapshot",
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-      result: {
-        eventsHandled: 1,
-        nextWakeAt: null,
-        summary: "handled",
-      },
-      schemaVersion: 1,
-      userId: "member_123",
-      wake: {
-        eventId: "evt_cleanup_snapshot",
-        kind: "assistant.cron.tick",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        payloadCiphertext,
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-        seq: "1",
-        userId: "member_123",
-      },
-    });
-
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "0",
+          nextSeq: "2",
+          version: "cursor_v1",
+        }),
+        wakes: [
+          createHostedWakeRecord({
+            payload: createWake("evt_commit_finalized_bundle"),
+            seq: "1",
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: createCursorState({
+          committedSeq: "1",
+          nextSeq: "2",
+          updatedAt: "2026-03-26T12:00:02.000Z",
+          version: "cursor_v2",
+        }),
+        wakes: [],
+      });
     const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
     commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }) => ({
       committed: true,
@@ -675,269 +660,39 @@ describe("HostedUserRunner hosted wake drain", () => {
         version: "cursor_v3",
       }),
     }));
-
-    const cursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
+    const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
+    recordHostedWakeTerminalInWeb.mockResolvedValue({
+      recorded: true,
+    });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockResolvedValue({
       cursor: createCursorState({
         committedSeq: "1",
         nextSeq: "2",
-        snapshotRef: committedBundleRef,
-        updatedAt: "2026-03-26T12:00:01.500Z",
-        version: "cursor_v2",
-      }),
-      wake: null,
-    });
-
-    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
-    expect(commitHostedWakeCursorToWeb.mock.calls[0]?.[0].body).toEqual({
-      committedSeq: "1",
-      expectedVersion: "cursor_v2",
-      snapshotRef: finalBundleRef,
-    });
-    expect(cursor).toMatchObject({
-      committedSeq: "1",
-      snapshotRef: finalBundleRef,
-      version: "cursor_v3",
-    });
-    await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
-  });
-
-  it("keeps pending cleanup when a duplicate finalize already published the same final snapshot", async () => {
-    const runner = new HostedUserRunner(
-      storage.state,
-      environment,
-      bucket.api,
-      {
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      },
-    );
-    await seedManagedUserCryptoForTest(runner, "member_123");
-    const wakeProcessor = Reflect.get(runner, "wakeProcessor");
-    const stateStore = Reflect.get(runner, "stateStore");
-
-    if (
-      !wakeProcessor
-      || typeof wakeProcessor !== "object"
-      || !("cleanupWakeAfterCursorCommit" in wakeProcessor)
-    ) {
-      throw new Error("Expected HostedUserRunner wake processor test internals to be available.");
-    }
-
-    if (!stateStore || typeof stateStore !== "object") {
-      throw new Error("Expected HostedUserRunner state store test internals to be available.");
-    }
-
-    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
-    const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
-
-    if (typeof writePendingCommit !== "function" || typeof readPendingCommit !== "function") {
-      throw new Error("Expected HostedUserRunner state store pending commit helpers.");
-    }
-
-    const finalBundleRef = {
-      hash: "final-duplicate-hash",
-      key: "bundles/vault/final-duplicate.bundle.json",
-      size: 144,
-      updatedAt: "2026-03-26T12:00:01.000Z",
-    };
-    const committedBundleRef = {
-      hash: "committed-duplicate-hash",
-      key: "bundles/vault/committed-duplicate.bundle.json",
-      size: 96,
-      updatedAt: "2026-03-26T12:00:00.500Z",
-    };
-    const { payloadCiphertext } = encryptTestHostedWakePayload({
-      userId: "member_123",
-      value: createWake("evt_cleanup_duplicate_snapshot"),
-    });
-    await writePendingCommit.call(stateStore, {
-      assistantDeliveryEffects: [],
-      bundleRef: finalBundleRef,
-      committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: "evt_cleanup_duplicate_snapshot",
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-      result: {
-        eventsHandled: 1,
-        nextWakeAt: null,
-        summary: "handled",
-      },
-      schemaVersion: 1,
-      userId: "member_123",
-      wake: {
-        eventId: "evt_cleanup_duplicate_snapshot",
-        kind: "assistant.cron.tick",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        payloadCiphertext,
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-        seq: "1",
-        userId: "member_123",
-      },
-    });
-
-    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
-    commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }) => ({
-      committed: false,
-      cursor: createCursorState({
-        committedSeq: body.committedSeq,
-        nextSeq: "2",
-        snapshotRef: body.snapshotRef,
+        snapshotRef: null,
         updatedAt: "2026-03-26T12:00:02.000Z",
-        version: "cursor_v3",
-      }),
-    }));
-
-    const conflictedCursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
-      cursor: createCursorState({
-        committedSeq: "1",
-        nextSeq: "2",
-        snapshotRef: committedBundleRef,
-        updatedAt: "2026-03-26T12:00:01.500Z",
         version: "cursor_v2",
       }),
-      wake: null,
+      pendingWakeCount: 0,
     });
-
-    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
-    expect(commitHostedWakeCursorToWeb.mock.calls[0]?.[0].body).toEqual({
-      committedSeq: "1",
-      expectedVersion: "cursor_v2",
-      snapshotRef: finalBundleRef,
-    });
-    expect(conflictedCursor).toMatchObject({
-      committedSeq: "1",
-      snapshotRef: finalBundleRef,
-      version: "cursor_v3",
-    });
-    await expect(readPendingCommit.call(stateStore)).resolves.toMatchObject({
-      bundleRef: finalBundleRef,
-      eventId: "evt_cleanup_duplicate_snapshot",
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-    });
-
-    const reconciledCursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
-      cursor: conflictedCursor,
-      wake: null,
-    });
-
-    expect(reconciledCursor).toMatchObject({
-      committedSeq: "1",
-      snapshotRef: finalBundleRef,
-      version: "cursor_v3",
-    });
-    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
-    await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
-  });
-
-  it("keeps pending cleanup state when the snapshot-only finalize CAS loses against a stale cursor", async () => {
-    const runner = new HostedUserRunner(
-      storage.state,
-      environment,
-      bucket.api,
-      {
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      },
+    const cleanupWakeAfterCursorCommit = vi.spyOn(
+      wakeProcessor,
+      "cleanupWakeAfterCursorCommit",
     );
-    await seedManagedUserCryptoForTest(runner, "member_123");
-    const wakeProcessor = Reflect.get(runner, "wakeProcessor");
-    const stateStore = Reflect.get(runner, "stateStore");
 
-    if (
-      !wakeProcessor
-      || typeof wakeProcessor !== "object"
-      || !("cleanupWakeAfterCursorCommit" in wakeProcessor)
-    ) {
-      throw new Error("Expected HostedUserRunner wake processor test internals to be available.");
-    }
-
-    if (!stateStore || typeof stateStore !== "object") {
-      throw new Error("Expected HostedUserRunner state store test internals to be available.");
-    }
-
-    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
-    const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
-
-    if (typeof writePendingCommit !== "function" || typeof readPendingCommit !== "function") {
-      throw new Error("Expected HostedUserRunner state store pending commit helpers.");
-    }
-
-    const finalBundleRef = {
-      hash: "final-stale-hash",
-      key: "bundles/vault/final-stale.bundle.json",
-      size: 128,
-      updatedAt: "2026-03-26T12:00:01.000Z",
-    };
-    const committedBundleRef = {
-      hash: "committed-stale-hash",
-      key: "bundles/vault/committed-stale.bundle.json",
-      size: 96,
-      updatedAt: "2026-03-26T12:00:00.500Z",
-    };
-    const { payloadCiphertext } = encryptTestHostedWakePayload({
-      userId: "member_123",
-      value: createWake("evt_cleanup_stale_snapshot"),
-    });
-    await writePendingCommit.call(stateStore, {
-      assistantDeliveryEffects: [],
-      bundleRef: finalBundleRef,
-      committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: "evt_cleanup_stale_snapshot",
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-      result: {
-        eventsHandled: 1,
-        nextWakeAt: null,
-        summary: "handled",
-      },
-      schemaVersion: 1,
-      userId: "member_123",
-      wake: {
-        eventId: "evt_cleanup_stale_snapshot",
-        kind: "assistant.cron.tick",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        payloadCiphertext,
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-        seq: "1",
-        userId: "member_123",
-      },
-    });
-
-    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
-    commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }) => ({
-      committed: false,
-      cursor: createCursorState({
-        committedSeq: body.committedSeq,
-        nextSeq: "2",
-        snapshotRef: committedBundleRef,
-        updatedAt: "2026-03-26T12:00:02.000Z",
-        version: "cursor_v3",
-      }),
-    }));
-
-    const conflictedCursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
-      cursor: createCursorState({
-        committedSeq: "1",
-        nextSeq: "2",
-        snapshotRef: committedBundleRef,
-        updatedAt: "2026-03-26T12:00:01.500Z",
-        version: "cursor_v2",
-      }),
-      wake: null,
-    });
+    await runner.wakeHostedWakes();
 
     expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
-    expect(commitHostedWakeCursorToWeb.mock.calls[0]?.[0].body).toEqual({
+    expect(commitHostedWakeCursorToWeb.mock.calls[0]?.[0].body).toMatchObject({
       committedSeq: "1",
-      expectedVersion: "cursor_v2",
-      snapshotRef: finalBundleRef,
+      expectedVersion: "cursor_v1",
+      snapshotRef: null,
     });
-    expect(conflictedCursor).toMatchObject({
-      committedSeq: "1",
-      snapshotRef: committedBundleRef,
-      version: "cursor_v3",
-    });
-    await expect(readPendingCommit.call(stateStore)).resolves.toMatchObject({
-      bundleRef: finalBundleRef,
-      eventId: "evt_cleanup_stale_snapshot",
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-    });
+    expect(cleanupWakeAfterCursorCommit).toHaveBeenCalledOnce();
+    expect(await readPendingCommit.call(stateStore)).toBeNull();
+    expect(readDispatchedEventIds(fetchMock)).toEqual([
+      "evt_commit_finalized_bundle",
+    ]);
   });
 
   it("drops stale pending cleanup once the web cursor has advanced past that wake seq", async () => {
@@ -1256,6 +1011,38 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledOnce();
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_inline_system"]);
+  });
+
+  it("returns targetReached false when the web cursor stays behind the requested seq", async () => {
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb.mockResolvedValueOnce({
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "3",
+        version: "cursor_v1",
+      }),
+      wakes: [],
+    });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    await expect(
+      runner.wakeHostedWakes({
+        targetSeqHint: "2",
+      }),
+    ).resolves.toEqual({
+      committedSeq: "1",
+      requestedTargetSeq: "2",
+      targetReached: false,
+    });
   });
 });
 

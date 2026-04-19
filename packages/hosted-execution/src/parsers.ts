@@ -36,6 +36,7 @@ import type {
   HostedExecutionRunnerResult,
   HostedExecutionShareReference,
   HostedExecutionUserStatus,
+  HostedExecutionWakeDrainResult,
   HostedExecutionVaultShareAcceptedEvent,
   HostedFetchedWakeRecord,
   HostedWakeBehavior,
@@ -51,6 +52,7 @@ import type {
   HostedWakeRecord,
   HostedWakeStatus,
   HostedWakeStatusResponse,
+  HostedWakeTerminalResponse,
 } from "./contracts.ts";
 import {
   type HostedExecutionBundlePayload,
@@ -473,6 +475,27 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
       timeline: parseHostedExecutionTimelineEntries(record.timeline),
     }),
     userId: requireString(record.userId, "Hosted execution user status userId"),
+  };
+}
+
+export function parseHostedExecutionWakeDrainResult(
+  value: unknown,
+): HostedExecutionWakeDrainResult {
+  const record = requireObject(value, "Hosted execution wake drain result");
+
+  return {
+    committedSeq: requireBigIntString(
+      record.committedSeq,
+      "Hosted execution wake drain result committedSeq",
+    ),
+    requestedTargetSeq: readNullableString(
+      record.requestedTargetSeq,
+      "Hosted execution wake drain result requestedTargetSeq",
+    ),
+    targetReached: requireBoolean(
+      record.targetReached,
+      "Hosted execution wake drain result targetReached",
+    ),
   };
 }
 
@@ -971,7 +994,7 @@ function parseHostedFetchedWakeRecord(value: unknown): HostedFetchedWakeRecord {
 
   return {
     ...parseHostedWakeRecord(record),
-    commitProof: requireString(record.commitProof, "Hosted fetched wake record commitProof"),
+    fetchProof: requireString(record.fetchProof, "Hosted fetched wake record fetchProof"),
   };
 }
 
@@ -983,6 +1006,16 @@ export function parseHostedWakeCommitResponse(
   return {
     committed: requireBoolean(record.committed, "Hosted wake commit response committed"),
     cursor: parseHostedExecutionCursorState(record.cursor),
+  };
+}
+
+export function parseHostedWakeTerminalResponse(
+  value: unknown,
+): HostedWakeTerminalResponse {
+  const record = requireObject(value, "Hosted wake terminal response");
+
+  return {
+    recorded: requireBoolean(record.recorded, "Hosted wake terminal response recorded"),
   };
 }
 

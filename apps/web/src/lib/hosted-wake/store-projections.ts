@@ -32,6 +32,16 @@ export async function resolveHostedWakeLifecycleStateTx(input: {
     return "poisoned";
   }
 
+  const terminal = await input.tx.hostedWakeTerminal.findUnique({
+    where: {
+      wakeId: input.record.id,
+    },
+  });
+
+  if (terminal?.state === "completed" || terminal?.state === "replaced") {
+    return terminal.state;
+  }
+
   const cursor = await ensureHostedExecutionCursorRowTx({
     tx: input.tx,
     userId: input.record.userId,

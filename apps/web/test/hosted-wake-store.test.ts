@@ -5,7 +5,7 @@ import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "@murphai/hosted-execution"
 import {
   encodeHostedWakeStoredPayload,
 } from "@/src/lib/hosted-wake/payload";
-import { issueHostedWakeFetchProof } from "@/src/lib/hosted-wake/commit-proof";
+import { issueHostedWakeFetchProof } from "@/src/lib/hosted-wake/fetch-proof";
 import {
   appendHostedCoalescingWakeTx,
   appendHostedEdgeTriggeredWakeTx,
@@ -87,10 +87,10 @@ describe("hosted wake store", () => {
       "2222222222222222222222222222222222222222222222222222222222222222";
     process.env.HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "test";
     delete process.env.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON;
-    process.env.HOSTED_WAKE_COMMIT_PROOF_KEY_ID = "test";
-    process.env.HOSTED_WAKE_COMMIT_PROOF_KEY =
+    process.env.HOSTED_WAKE_FETCH_PROOF_KEY_ID = "test";
+    process.env.HOSTED_WAKE_FETCH_PROOF_KEY =
       "1111111111111111111111111111111111111111111111111111111111111111";
-    delete process.env.HOSTED_WAKE_COMMIT_PROOF_KEYRING_JSON;
+    delete process.env.HOSTED_WAKE_FETCH_PROOF_KEYRING_JSON;
   });
 
   it("fails closed when projecting a corrupted wake record kind or schema", () => {
@@ -309,7 +309,7 @@ describe("hosted wake store", () => {
     })).rejects.toThrow(/wakeId/i);
   });
 
-  it("allows snapshot-only CAS updates at the already-committed seq", async () => {
+  it("rejects snapshot-only cursor mutations at the already-committed seq", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
         committedSeq: 2n,
@@ -333,15 +333,15 @@ describe("hosted wake store", () => {
     });
 
     expect(result).toEqual({
-      committed: true,
+      committed: false,
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "4",
         snapshotRef: {
-          checkpoint: "wake_2_finalized",
+          checkpoint: "wake_2",
         },
         userId: "member_123",
-        version: "8",
+        version: "7",
       }),
     });
   });
@@ -1149,6 +1149,25 @@ function createHostedWakeStoreHarness(input?: {
       }): TestWakeTerminalState | null {
         const terminal = state.wakeTerminals.find((candidate) => candidate.wakeId === args.where.wakeId);
         return terminal ? cloneWakeTerminal(terminal) : null;
+      },
+      findMany(args: {
+        where: {
+          userId: string;
+          wakeId: { in: string[] };
+        };
+        select: {
+          state: true;
+          wakeId: true;
+        };
+      }): Array<Pick<TestWakeTerminalState, "state" | "wakeId">> {
+        return state.wakeTerminals
+          .filter((terminal) =>
+            terminal.userId === args.where.userId
+            && args.where.wakeId.in.includes(terminal.wakeId))
+          .map((terminal) => ({
+            state: terminal.state,
+            wakeId: terminal.wakeId,
+          }));
       },
     },
     hostedWake: {

@@ -8,6 +8,7 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 import {
+  countPendingHostedWakes,
   readHostedExecutionCursor,
 } from "@/src/lib/hosted-wake/store";
 
@@ -20,8 +21,10 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
     userId,
   });
-
-  const pendingWakeCount = countPendingWakes(cursor);
+  const pendingWakeCount = await countPendingHostedWakes({
+    prisma,
+    userId,
+  });
   const wakeLifecycle = eventId
     ? await readHostedWakeLifecycle({
       eventId,
@@ -53,19 +56,4 @@ function readOptionalEventId(value: unknown): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-function countPendingWakes(input: {
-  committedSeq: string;
-  nextSeq: string;
-}): number {
-  const pending = BigInt(input.nextSeq) - BigInt(input.committedSeq) - 1n;
-
-  if (pending <= 0n) {
-    return 0;
-  }
-
-  return pending > BigInt(Number.MAX_SAFE_INTEGER)
-    ? Number.MAX_SAFE_INTEGER
-    : Number(pending);
 }

@@ -57,9 +57,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedSharePayload` owns canonical encrypted share payloads in Postgres
 - `HostedExecutionCursor` owns the canonical committed high-water and snapshot fence
 - `HostedWake` owns the canonical ordered hosted wake queue
-- fetched hosted wakes carry short-lived web-minted advance proofs, and cursor
-  advancement must present the proof for the exact fetched wake identity rather
-  than trusting a caller-supplied seq alone
+- `HostedWakeTerminal` owns the canonical terminal receipt for each executed wake
+- fetched hosted wakes carry short-lived web-minted fetch proofs, and cursor
+  advancement is allowed only after web records the terminal receipt for that
+  exact fetched wake identity
 - `HostedAiUsage` owns the canonical hosted usage ledger
 
 ## Key environment variables
@@ -100,9 +101,9 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
-- `HOSTED_WAKE_COMMIT_PROOF_KEY`
-- `HOSTED_WAKE_COMMIT_PROOF_KEY_ID`
-- `HOSTED_WAKE_COMMIT_PROOF_KEYRING_JSON`
+- `HOSTED_WAKE_FETCH_PROOF_KEY`
+- `HOSTED_WAKE_FETCH_PROOF_KEY_ID`
+- `HOSTED_WAKE_FETCH_PROOF_KEYRING_JSON`
 Provider-owned webhook-admin settings:
 
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
@@ -174,11 +175,11 @@ Callback auth contract:
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
   boundary; the isolated execution child talks back through the worker-owned
   `web-control.worker` proxy instead of receiving the signing key directly
-- `apps/web` also mints short-lived hosted wake advance proofs with
-  `HOSTED_WAKE_COMMIT_PROOF_KEY`
-- `HOSTED_WAKE_COMMIT_PROOF_KEY_ID` selects the active wake-proof key id and
+- `apps/web` also mints short-lived hosted wake fetch proofs with
+  `HOSTED_WAKE_FETCH_PROOF_KEY`
+- `HOSTED_WAKE_FETCH_PROOF_KEY_ID` selects the active wake-proof key id and
   defaults to `v1`
-- `HOSTED_WAKE_COMMIT_PROOF_KEYRING_JSON` is the optional
+- `HOSTED_WAKE_FETCH_PROOF_KEYRING_JSON` is the optional
   `{ keyId: encodedKey }` verification keyring for staged wake-proof rotation
 - hosted wake payload ciphertext uses the separate
   `HOSTED_WAKE_ENCRYPTION_*` key lane, while member/share private fields remain

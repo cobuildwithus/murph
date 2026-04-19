@@ -20,7 +20,7 @@ import {
 import {
   issueHostedWakeFetchProof,
   verifyHostedWakeFetchProof,
-} from "./commit-proof";
+} from "./fetch-proof";
 import type {
   HostedWakeEventRow,
   HostedWakeLifecycleRecord,
@@ -62,6 +62,53 @@ export async function readHostedExecutionCursor(input: {
   });
 
   return projectHostedExecutionCursorRecord(cursor);
+}
+
+export async function countPendingHostedWakes(input: {
+  prisma?: HostedWakeStoreClient;
+  userId: string;
+}): Promise<number> {
+  const prisma = input.prisma ?? getPrisma();
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: prisma,
+    userId: input.userId,
+  });
+  const wakes = await prisma.hostedWake.findMany({
+    where: {
+      seq: {
+        gt: cursor.committedSeq,
+      },
+      userId: input.userId,
+    },
+    select: {
+      id: true,
+      quarantinedAt: true,
+    },
+  });
+
+  if (wakes.length === 0) {
+    return 0;
+  }
+
+  const terminals = await prisma.hostedWakeTerminal.findMany({
+    where: {
+      userId: input.userId,
+      wakeId: {
+        in: wakes.map((wake) => wake.id),
+      },
+    },
+    select: {
+      state: true,
+      wakeId: true,
+    },
+  });
+  const terminalWakeIds = new Set(
+    terminals
+      .filter((terminal) => terminal.state === "completed" || terminal.state === "replaced")
+      .map((terminal) => terminal.wakeId),
+  );
+
+  return wakes.filter((wake) => !wake.quarantinedAt && !terminalWakeIds.has(wake.id)).length;
 }
 
 export async function listHostedWakesAfterSeq(
@@ -206,6 +253,13 @@ export async function commitHostedExecutionCursorTx(input: {
     };
   }
 
+  if (!shouldAdvanceCommittedSeq) {
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
+  }
+
   if (shouldAdvanceCommittedSeq && !canAdvanceSingleWake) {
     return {
       committed: false,
@@ -256,16 +310,10 @@ export async function commitHostedExecutionCursorTx(input: {
     where: {
       userId: input.userId,
       version: input.expectedVersion,
-      ...(shouldAdvanceCommittedSeq
-        ? {
-            committedSeq: cursor.committedSeq,
-          }
-        : {
-            committedSeq: cursor.committedSeq,
-          }),
+      committedSeq: cursor.committedSeq,
     },
     data: {
-      committedSeq: shouldAdvanceCommittedSeq ? input.committedSeq : cursor.committedSeq,
+      committedSeq: input.committedSeq,
       snapshotRef: nextSnapshotRef,
       version: {
         increment: 1,

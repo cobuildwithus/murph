@@ -7,6 +7,7 @@ import {
 const mocks = vi.hoisted(() => ({
   appendHostedExecutionWakePayloadTx: vi.fn(),
   commitHostedExecutionCursorTx: vi.fn(),
+  countPendingHostedWakes: vi.fn(),
   getPrisma: vi.fn(),
   listHostedWakeRepairCandidates: vi.fn(),
   listHostedWakesAfterSeq: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock("@/src/lib/hosted-wake/queue", () => ({
 
 vi.mock("@/src/lib/hosted-wake/store", () => ({
   commitHostedExecutionCursorTx: mocks.commitHostedExecutionCursorTx,
+  countPendingHostedWakes: mocks.countPendingHostedWakes,
   listHostedWakeRepairCandidates: mocks.listHostedWakeRepairCandidates,
   listHostedWakesAfterSeq: mocks.listHostedWakesAfterSeq,
   quarantineHostedWakeTx: mocks.quarantineHostedWakeTx,
@@ -147,6 +149,7 @@ describe("hosted wake internal routes", () => {
       userId: "member_123",
       version: "3",
     });
+    mocks.countPendingHostedWakes.mockResolvedValue(1);
     mocks.readHostedWakeLifecycle.mockResolvedValue({
       eventId: "evt_tick",
       state: "queued",
@@ -349,7 +352,7 @@ describe("hosted wake internal routes", () => {
     });
   });
 
-  it("parses and forwards snapshot-only wake cursor commit requests", async () => {
+  it("parses and forwards wake cursor commit requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       committedSeq: "24",
       expectedVersion: "3",

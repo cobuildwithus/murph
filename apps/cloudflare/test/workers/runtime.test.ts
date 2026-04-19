@@ -5,6 +5,7 @@ import { env, exports } from "cloudflare:workers";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import {
   afterEach,
+  beforeEach,
   describe as baseDescribe,
   expect,
   it,
@@ -50,6 +51,7 @@ import {
   type HostedWakeFetchRequest,
   type HostedWakeQuarantineRequest,
   type HostedWakeStatusRequest,
+  type HostedWakeTerminalRequest,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedWakeAppendRequest,
@@ -60,6 +62,7 @@ import {
   fetchTestHostedWakeBatch,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
+  recordTestHostedWakeTerminal,
 } from "./test-hosted-wake-control.ts";
 
 interface UserRunnerRpcStub {
@@ -77,6 +80,10 @@ const worker = (exports as {
 }).default;
 
 describe("cloudflare worker runtime suite", () => {
+  beforeEach(() => {
+    installOidcJwksFetch();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -313,6 +320,15 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
   if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/commit") {
     const body = await request.clone().json() as HostedWakeCommitRequest;
     return Response.json(await commitTestHostedWakeCursor({
+      body,
+      bucket,
+      userId,
+    }));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/terminal") {
+    const body = await request.clone().json() as HostedWakeTerminalRequest;
+    return Response.json(await recordTestHostedWakeTerminal({
       body,
       bucket,
       userId,

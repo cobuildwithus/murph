@@ -319,6 +319,12 @@ export interface HostedExecutionUserStatus {
   userId: string;
 }
 
+export interface HostedExecutionWakeDrainResult {
+  committedSeq: string;
+  requestedTargetSeq: string | null;
+  targetReached: boolean;
+}
+
 export const HOSTED_WAKE_LIFECYCLE_STATES = [
   "queued",
   "backpressured",
@@ -406,10 +412,10 @@ export type HostedWakeRecord =
 
 export type HostedFetchedWakeRecord =
   | (HostedConversationMessageWakeRecord & {
-      commitProof: string;
+      fetchProof: string;
     })
   | (HostedSystemWakeRecord & {
-      commitProof: string;
+      fetchProof: string;
     });
 
 export interface HostedWakeFetchRequest {
@@ -422,13 +428,7 @@ export interface HostedWakeFetchResponse {
   wakes: HostedFetchedWakeRecord[];
 }
 
-export interface HostedWakeCommitAdvance {
-  proof: string;
-  wakeId: string;
-}
-
 export interface HostedWakeCommitRequest {
-  advance?: HostedWakeCommitAdvance | null;
   committedSeq: string;
   expectedVersion: string;
   snapshotRef?: unknown | null;
@@ -450,6 +450,25 @@ export interface HostedWakeAppendResponse {
   inserted: boolean;
   updatedExisting: boolean;
   wake: HostedWakeRecord;
+}
+
+export const HOSTED_WAKE_TERMINAL_STATES = [
+  "completed",
+  "replaced",
+] as const;
+
+export type HostedWakeTerminalState =
+  (typeof HOSTED_WAKE_TERMINAL_STATES)[number];
+
+export interface HostedWakeTerminalRequest {
+  fetchProof: string;
+  state: HostedWakeTerminalState;
+  wakeId: string;
+  wakeSeq: string;
+}
+
+export interface HostedWakeTerminalResponse {
+  recorded: boolean;
 }
 
 export interface HostedWakeMaterializeRequest {
