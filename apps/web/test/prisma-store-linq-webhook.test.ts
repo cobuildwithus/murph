@@ -40,6 +40,18 @@ function createStore(seed: MutableLinqWebhookEvent[] = []) {
 
   const linqWebhookEvent = {
     create: async ({ data }: { data: Record<string, unknown> }) => {
+      if (
+        typeof data.userId === "string"
+        && typeof data.eventId === "string"
+        && [...events.values()].some((event) =>
+          event.userId === data.userId
+          && event.eventId === data.eventId)
+      ) {
+        const error = new Error("Unique constraint failed on the fields: (`user_id`,`event_id`)");
+        Object.assign(error, { code: "P2002" });
+        throw error;
+      }
+
       createCalls.push({ ...data });
       const event = normalizeEventRecord(nextId, data);
       events.set(event.id, event);
@@ -47,12 +59,22 @@ function createStore(seed: MutableLinqWebhookEvent[] = []) {
       return cloneEvent(event);
     },
     findUnique: async ({ where }: { where: Record<string, unknown> }) => {
-      if (typeof where.eventId !== "string") {
+      const compoundWhere = (
+        typeof where.userId_eventId === "object"
+        && where.userId_eventId
+        && !Array.isArray(where.userId_eventId)
+      )
+        ? where.userId_eventId as Record<string, unknown>
+        : where;
+      if (typeof compoundWhere.eventId !== "string") {
         return null;
       }
 
       for (const event of events.values()) {
-        if (event.eventId === where.eventId) {
+        if (
+          event.eventId === compoundWhere.eventId
+          && (typeof compoundWhere.userId !== "string" || event.userId === compoundWhere.userId)
+        ) {
           return cloneEvent(event);
         }
       }
@@ -129,6 +151,54 @@ describe("PrismaLinqControlPlaneStore hosted Linq webhook events", () => {
 
     expect(listed).toEqual([queued.event]);
     expect("payload" in listed[0]!).toBe(false);
+  });
+
+  it("keeps duplicate recovery scoped to the same owner when another user already used the raw provider event id", async () => {
+    const { createCalls, store } = createStore([
+      normalizeEventRecord(1, {
+        userId: "user-other",
+        bindingId: "linqb_other",
+        recipientPhone: createHostedPhoneLookupKey(DEFAULT_RECIPIENT_PHONE),
+        eventId: "evt_shared_123",
+        traceId: "trace-other",
+        eventType: "message.received",
+        chatId: createHostedOpaqueIdentifier("linq.chat", "chat_other"),
+        messageId: createHostedOpaqueIdentifier("linq.message", "msg_other"),
+        occurredAt: new Date("2026-03-25T09:59:00.000Z"),
+        receivedAt: new Date("2026-03-25T09:59:01.000Z"),
+      }),
+    ]);
+
+    const first = await store.queueWebhookEventIfNew({
+      userId: "user-123",
+      bindingId: "linqb_123",
+      recipientPhone: DEFAULT_RECIPIENT_PHONE,
+      eventId: "evt_shared_123",
+      traceId: "trace-user",
+      eventType: "message.received",
+      chatId: "chat_123",
+      messageId: "msg_123",
+      occurredAt: "2026-03-25T10:00:05.000Z",
+      receivedAt: "2026-03-25T10:00:06.000Z",
+    });
+    const duplicate = await store.queueWebhookEventIfNew({
+      userId: "user-123",
+      bindingId: "linqb_123",
+      recipientPhone: DEFAULT_RECIPIENT_PHONE,
+      eventId: "evt_shared_123",
+      traceId: "trace-user",
+      eventType: "message.received",
+      chatId: "chat_123",
+      messageId: "msg_123",
+      occurredAt: "2026-03-25T10:00:05.000Z",
+      receivedAt: "2026-03-25T10:00:06.000Z",
+    });
+
+    expect(first.inserted).toBe(true);
+    expect(duplicate.inserted).toBe(false);
+    expect(duplicate.event.userId).toBe("user-123");
+    expect(duplicate.event.bindingId).toBe("linqb_123");
+    expect(createCalls).toHaveLength(1);
   });
 });
 

@@ -182,6 +182,7 @@ export async function clearHostedWakeTerminalTx(input: {
 export async function findHostedWakeByDedupeKeyTx(input: {
   dedupeKey: string | null;
   tx: HostedWakeStoreClient;
+  userId: string;
 }): Promise<HostedWakeRow | null> {
   if (!input.dedupeKey) {
     return null;
@@ -189,7 +190,10 @@ export async function findHostedWakeByDedupeKeyTx(input: {
 
   return input.tx.hostedWake.findUnique({
     where: {
-      dedupeKey: input.dedupeKey,
+      userId_dedupeKey: {
+        dedupeKey: input.dedupeKey,
+        userId: input.userId,
+      },
     },
   });
 }
@@ -197,7 +201,7 @@ export async function findHostedWakeByDedupeKeyTx(input: {
 export async function findHostedWakeByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeRow | null> {
   const eventId = input.eventId.trim();
 
@@ -208,18 +212,24 @@ export async function findHostedWakeByEventIdTx(input: {
   const event = await findHostedWakeEventByEventIdTx({
     eventId,
     tx: input.tx,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
 
   if (!event) {
     return null;
   }
 
-  return input.tx.hostedWake.findUnique({
+  const wake = await input.tx.hostedWake.findUnique({
     where: {
       id: event.wakeId,
     },
   });
+
+  if (input.userId && wake && wake.userId !== input.userId) {
+    return null;
+  }
+
+  return wake;
 }
 
 export async function createHostedWakeEventTx(input: {
@@ -248,7 +258,7 @@ export async function createHostedWakeEventTx(input: {
 export async function findHostedWakeEventByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeEventRow | null> {
   const eventId = input.eventId.trim();
 
@@ -256,18 +266,12 @@ export async function findHostedWakeEventByEventIdTx(input: {
     return null;
   }
 
-  if (input.userId) {
-    return input.tx.hostedWakeEvent.findFirst({
-      where: {
+  return input.tx.hostedWakeEvent.findUnique({
+    where: {
+      userId_eventId: {
         eventId,
         userId: input.userId,
       },
-    });
-  }
-
-  return input.tx.hostedWakeEvent.findUnique({
-    where: {
-      eventId,
     },
   });
 }

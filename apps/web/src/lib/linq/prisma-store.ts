@@ -202,7 +202,10 @@ export class PrismaLinqControlPlaneStore {
 
       const existing = await this.prisma.linqWebhookEvent.findUnique({
         where: {
-          eventId: input.eventId,
+          userId_eventId: {
+            eventId: input.eventId,
+            userId: input.userId,
+          },
         },
         include: {
           binding: true,

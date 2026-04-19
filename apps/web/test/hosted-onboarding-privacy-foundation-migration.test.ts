@@ -81,6 +81,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedWake",
   "HostedWakeEvent",
   "HostedWakePayload",
+  "HostedWakeTerminal",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -141,6 +142,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const ownerScopedExternalEventIdentityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604191945_owner_scoped_external_event_identity/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "202604141730_hosted_member_identity_optional_phone",
@@ -150,6 +158,7 @@ describe("hosted Prisma baseline migration", () => {
       "202604191700_hosted_wake_event_identity",
       "202604191830_hosted_wake_terminal_receipts",
       "202604191915_hosted_wake_terminal_fetch_cursor_version",
+      "202604191945_owner_scoped_external_event_identity",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
@@ -208,6 +217,18 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedWakeTerminalFetchCursorVersionMigrationSql).toContain(
       'ADD COLUMN "fetched_cursor_version" BIGINT NOT NULL DEFAULT -1',
+    );
+    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key")',
+    );
+    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id", "event_id")',
+    );
+    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
+      'CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id")',
+    );
+    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "linq_webhook_event_user_id_event_id_key" ON "linq_webhook_event"("user_id", "event_id")',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
