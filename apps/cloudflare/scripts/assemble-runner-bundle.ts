@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import {
-  hostedRunnerBuildPackageNames,
-  hostedRunnerWorkspacePackageNames,
+  hostedRunnerBundleOnlyDependencyNames,
   runnerBundleDirectoryName,
+  resolveHostedRunnerBuildPackageNames,
+  resolveHostedRunnerWorkspacePackageNames,
 } from "./runner-bundle-contract.js";
 import { installPackedRunnerDependencies } from "./runner-bundle/dependency-install.js";
 import { materializeFinalRunnerBundle } from "./runner-bundle/final-bundle.js";
@@ -33,6 +34,9 @@ const runnerBundleDeployRoot = path.join(
 const runnerBundleDisplayRoot =
   path.relative(appDir, runnerBundleDeployRoot) || runnerBundleDeployRoot;
 const shouldSkipBuild = process.argv.includes("--skip-build");
+const shouldSkipBundleOnlyDependencies = process.argv.includes(
+  "--skip-bundle-only-dependencies",
+);
 
 await assembleRunnerBundle();
 
@@ -42,6 +46,13 @@ async function assembleRunnerBundle(): Promise<void> {
   );
   const stagingBundleDir = path.join(stagingRoot, runnerBundleDirectoryName);
   const tarballsDir = path.join(stagingRoot, "tarballs");
+  const includeBundleOnlyDependencies = !shouldSkipBundleOnlyDependencies;
+  const hostedRunnerWorkspacePackageNames = resolveHostedRunnerWorkspacePackageNames({
+    includeBundleOnlyDependencies,
+  });
+  const hostedRunnerBuildPackageNames = resolveHostedRunnerBuildPackageNames({
+    includeBundleOnlyDependencies,
+  });
   const packedWorkspacePackageNames = [...hostedRunnerWorkspacePackageNames].sort();
 
   try {
@@ -52,7 +63,12 @@ async function assembleRunnerBundle(): Promise<void> {
       await runPnpmCommand(["build"], { cwd: appDir });
     }
 
-    await stageHostedRunnerRuntimeArtifact(stagingBundleDir, { appDir });
+    await stageHostedRunnerRuntimeArtifact(stagingBundleDir, {
+      appDir,
+      bundleOnlyDependencyNames: includeBundleOnlyDependencies
+        ? hostedRunnerBundleOnlyDependencyNames
+        : [],
+    });
     await mkdir(tarballsDir, { recursive: true });
     const tarballPaths = await packWorkspacePackageArtifacts(
       packedWorkspacePackageNames,

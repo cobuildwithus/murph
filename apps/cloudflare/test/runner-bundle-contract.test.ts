@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   hostedRunnerBuildPackageNames,
   hostedRunnerWorkspacePackageNames,
+  resolveHostedRunnerBuildPackageNames,
+  resolveHostedRunnerWorkspacePackageNames,
 } from "../scripts/runner-bundle-contract.js";
 
 describe("runner bundle package closure", () => {
@@ -55,5 +57,41 @@ describe("runner bundle package closure", () => {
       "@murphai/setup-cli",
       "@murphai/vault-usecases",
     ]);
+  });
+
+  it("can resolve a hosted-local bundle closure without the bundled murph shell", () => {
+    expect(
+      resolveHostedRunnerWorkspacePackageNames({
+        includeBundleOnlyDependencies: false,
+      }),
+    ).toEqual([
+      "@murphai/assistant-engine",
+      "@murphai/assistant-runtime",
+      "@murphai/cloudflare-hosted-control",
+      "@murphai/contracts",
+      "@murphai/core",
+      "@murphai/device-syncd",
+      "@murphai/gateway-core",
+      "@murphai/gateway-local",
+      "@murphai/hosted-execution",
+      "@murphai/importers",
+      "@murphai/inbox-services",
+      "@murphai/inboxd",
+      "@murphai/messaging-ingress",
+      "@murphai/operator-config",
+      "@murphai/parsers",
+      "@murphai/query",
+      "@murphai/runtime-state",
+      "@murphai/vault-usecases",
+    ]);
+    expect(
+      resolveHostedRunnerBuildPackageNames({
+        includeBundleOnlyDependencies: false,
+      }),
+    ).toEqual(
+      resolveHostedRunnerWorkspacePackageNames({
+        includeBundleOnlyDependencies: false,
+      }),
+    );
   });
 });

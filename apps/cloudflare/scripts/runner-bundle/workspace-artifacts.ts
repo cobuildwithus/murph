@@ -44,6 +44,7 @@ export async function stageHostedRunnerRuntimeArtifact(
   bundleDir: string,
   input: {
     appDir: string;
+    bundleOnlyDependencyNames?: readonly string[];
   },
 ): Promise<void> {
   const runtimePackageJson = JSON.parse(
@@ -72,7 +73,8 @@ export async function stageHostedRunnerRuntimeArtifact(
         dependencies: {
           ...(runtimePackageJson.dependencies ?? {}),
           ...createBundleOnlyWorkspaceDependencySpecs(
-            hostedRunnerBundleOnlyDependencyNames,
+            input.bundleOnlyDependencyNames
+            ?? hostedRunnerBundleOnlyDependencyNames,
           ),
         },
         engines: runtimePackageJson.engines,
