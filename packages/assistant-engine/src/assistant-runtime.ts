@@ -1,8 +1,24 @@
 export * from './assistant-automation.js'
+export {
+  buildAssistantCliGuidanceText,
+  prepareAssistantDirectCliEnv,
+  resolveAssistantCliAccessContext,
+} from './assistant-cli-access.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'
 export * from './assistant-service.js'
 export * from './assistant-status.js'
+export {
+  createDefaultAssistantCapabilityRegistry,
+  createDefaultAssistantToolCatalog,
+  createInboxRoutingAssistantCapabilityRegistry,
+  createInboxRoutingAssistantToolCatalog,
+  createNotificationTurnAssistantToolCatalog,
+  createProviderTurnAssistantCapabilityRegistry,
+  createProviderTurnAssistantCapabilityRuntime,
+  createProviderTurnAssistantToolCatalog,
+  readAssistantCliLlmsManifest,
+} from './assistant-cli-tools.js'
 export * from './assistant/channel-adapters.js'
 export * from './assistant/conversation-policy.js'
 export * from './assistant/conversation-ref.js'
