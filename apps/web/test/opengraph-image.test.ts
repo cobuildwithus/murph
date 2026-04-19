@@ -7,8 +7,9 @@ const { imageResponseSpy, readFileMock } = vi.hoisted(() => ({
   readFileMock: vi.fn(async (path: string | URL) => {
     const value = String(path);
     if (value.includes("hero.jpg")) return Buffer.from("hero");
-    if (value.includes("Fraunces-Variable.ttf")) return Buffer.from([1, 2, 3]);
-    if (value.includes("DMSans-Variable.ttf")) return Buffer.from([4, 5, 6]);
+    if (value.includes("Fraunces-400.ttf")) return Buffer.from([1, 2, 3]);
+    if (value.includes("Fraunces-600.ttf")) return Buffer.from([4, 5, 6]);
+    if (value.includes("DMSans-400.ttf")) return Buffer.from([7, 8, 9]);
     throw new Error(`Unexpected readFile path: ${value}`);
   }),
 }));
@@ -49,12 +50,13 @@ test("OGImage reads bundled hero and font assets without fetching Google Fonts",
   } finally {
     fetchSpy.mockRestore();
   }
-  expect(readFileMock).toHaveBeenCalledTimes(3);
+  expect(readFileMock).toHaveBeenCalledTimes(4);
 
   const readPaths = readFileMock.mock.calls.map(([path]) => String(path));
   assert.equal(readPaths.some((path) => path.includes("public/hero.jpg")), true);
-  assert.equal(readPaths.some((path) => path.includes("Fraunces-Variable.ttf")), true);
-  assert.equal(readPaths.some((path) => path.includes("DMSans-Variable.ttf")), true);
+  assert.equal(readPaths.some((path) => path.includes("Fraunces-400.ttf")), true);
+  assert.equal(readPaths.some((path) => path.includes("Fraunces-600.ttf")), true);
+  assert.equal(readPaths.some((path) => path.includes("DMSans-400.ttf")), true);
 
   expect(imageResponseSpy).toHaveBeenCalledTimes(1);
 
