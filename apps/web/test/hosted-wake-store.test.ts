@@ -1,9 +1,11 @@
 import { Prisma } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "@murphai/hosted-execution";
 
 import {
   encodeHostedWakeStoredPayload,
 } from "@/src/lib/hosted-wake/payload";
+import { issueHostedWakeFetchProof } from "@/src/lib/hosted-wake/commit-proof";
 import {
   appendHostedCoalescingWakeTx,
   appendHostedEdgeTriggeredWakeTx,
@@ -13,9 +15,11 @@ import {
   projectHostedWakeRecord,
   readLatestHostedWakeLifecycleByKind,
   readHostedExecutionCursor,
+  recordHostedWakeTerminalTx,
 } from "@/src/lib/hosted-wake/store";
 import {
   findHostedExecutionWakeEventIdTx,
+  readHostedExecutionWakeLifecycleStateTx,
   readHostedExecutionWakeTargetTx,
 } from "@/src/lib/hosted-wake/queue";
 
@@ -58,7 +62,37 @@ interface TestWakePayloadState {
   wakeId: string;
 }
 
+interface TestWakeEventState {
+  createdAt: Date;
+  eventId: string;
+  replacedByEventId: string | null;
+  updatedAt: Date;
+  userId: string;
+  wakeId: string;
+}
+
+interface TestWakeTerminalState {
+  createdAt: Date;
+  fetchedCommittedSeq: bigint;
+  state: "completed" | "replaced";
+  updatedAt: Date;
+  userId: string;
+  wakeId: string;
+  wakeSeq: bigint;
+}
+
 describe("hosted wake store", () => {
+  beforeEach(() => {
+    process.env.HOSTED_WAKE_ENCRYPTION_KEY =
+      "2222222222222222222222222222222222222222222222222222222222222222";
+    process.env.HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "test";
+    delete process.env.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON;
+    process.env.HOSTED_WAKE_COMMIT_PROOF_KEY_ID = "test";
+    process.env.HOSTED_WAKE_COMMIT_PROOF_KEY =
+      "1111111111111111111111111111111111111111111111111111111111111111";
+    delete process.env.HOSTED_WAKE_COMMIT_PROOF_KEYRING_JSON;
+  });
+
   it("fails closed when projecting a corrupted wake record kind or schema", () => {
     expect(() =>
       projectHostedWakeRecord(makeProjectedWakeRow({
@@ -71,14 +105,14 @@ describe("hosted wake store", () => {
         kind: "assistant.cron.tick",
         payloadSchema: "murph.hosted-wake-conversation-message.v1",
       })),
-    ).toThrow(/Hosted system wake payload schema is invalid/i);
+    ).toThrow(/Hosted wake payload schema is invalid/i);
 
     expect(() =>
       projectHostedWakeRecord(makeProjectedWakeRow({
         kind: "conversation.message",
         payloadSchema: "murph.hosted-wake-system.v1",
       })),
-    ).toThrow(/Hosted conversation wake payload schema is invalid/i);
+    ).toThrow(/Hosted wake payload schema is invalid/i);
   });
 
   it("rejects cursor commits that skip over already-allocated wake rows", async () => {
@@ -151,7 +185,35 @@ describe("hosted wake store", () => {
         userId: "member_123",
         version: 4n,
       },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
     });
+
+    const listed = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+    const wake = listed.wakes[0];
+
+    expect(wake).toEqual(expect.objectContaining({
+      fetchProof: expect.any(String),
+      id: expect.any(String),
+      seq: "2",
+    }));
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: wake!.fetchProof,
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: wake!.id,
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
 
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 2n,
@@ -175,6 +237,76 @@ describe("hosted wake store", () => {
         version: "5",
       }),
     });
+  });
+
+  it("rejects advancing the cursor without a recorded terminal receipt", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    const result = await commitHostedExecutionCursorTx({
+      committedSeq: 2n,
+      expectedVersion: 4n,
+      snapshotRef: {
+        checkpoint: "wake_2",
+      },
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "1",
+        nextSeq: "3",
+        userId: "member_123",
+        version: "4",
+      }),
+    });
+  });
+
+  it("rejects recording terminal state with a proof for a different wake", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 1n,
+        userId: "member_123",
+        wakeId: "wake_other",
+        wakeSeq: 2n,
+      }),
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).rejects.toThrow(/wakeId/i);
   });
 
   it("allows snapshot-only CAS updates at the already-committed seq", async () => {
@@ -314,12 +446,13 @@ describe("hosted wake store", () => {
     const result = await appendHostedCoalescingWakeTx({
       coalescingKey: "member.channels.updated:member_123",
       dedupeKey: "second",
+      eventId: "second",
       kind: "member.channels.updated",
       occurredAt: "2026-04-17T00:01:00.000Z",
       payload: {
         revision: 2,
       },
-      payloadSchema: "murph.hosted-wake-system.v1",
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       tx,
       userId: "member_123",
     });
@@ -327,7 +460,7 @@ describe("hosted wake store", () => {
     expect(result.inserted).toBe(false);
     expect(result.updatedExisting).toBe(true);
     expect(result.wake.seq).toBe("1");
-    expect(result.wake.dedupeKey).toBe("second");
+    expect(result.wake.dedupeKey).toBe("first");
     expect(result.wake.payloadCiphertext).toEqual(expect.any(String));
     expect(result.wake).not.toHaveProperty("payloadJson");
 
@@ -338,8 +471,98 @@ describe("hosted wake store", () => {
 
     expect(listed.wakes).toHaveLength(1);
     expect(listed.wakes[0]?.seq).toBe("1");
+    expect(listed.wakes[0]?.fetchProof).toEqual(expect.any(String));
     expect(listed.wakes[0]?.payloadCiphertext).toEqual(expect.any(String));
     expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
+
+    await expect(findHostedExecutionWakeEventIdTx({
+      eventId: "first",
+      tx,
+      userId: "member_123",
+    })).resolves.toBe("first");
+    await expect(findHostedExecutionWakeEventIdTx({
+      eventId: "second",
+      tx,
+      userId: "member_123",
+    })).resolves.toBe("second");
+    await expect(readHostedExecutionWakeTargetTx({
+      eventId: "first",
+      tx,
+      userId: "member_123",
+    })).resolves.toBeNull();
+    await expect(readHostedExecutionWakeTargetTx({
+      eventId: "second",
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      eventId: "second",
+      seq: "1",
+      userId: "member_123",
+    });
+    await expect(readHostedExecutionWakeLifecycleStateTx({
+      eventId: "first",
+      tx,
+      userId: "member_123",
+    })).resolves.toBe("replaced");
+    await expect(readHostedExecutionWakeLifecycleStateTx({
+      eventId: "second",
+      tx,
+      userId: "member_123",
+    })).resolves.toBe("queued");
+  });
+
+  it("fails closed when another user queries a wake event id they do not own", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 2n,
+        userId: "member_123",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "evt_member_123",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload: {
+            revision: 1,
+          },
+          seq: 1n,
+          userId: "member_123",
+        },
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "evt_member_456",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:01:00.000Z",
+          payload: {
+            revision: 2,
+          },
+          seq: 2n,
+          userId: "member_456",
+        },
+      ],
+    });
+
+    await expect(findHostedExecutionWakeEventIdTx({
+      eventId: "evt_member_456",
+      tx,
+      userId: "member_123",
+    })).resolves.toBeNull();
+
+    await expect(readHostedExecutionWakeTargetTx({
+      eventId: "evt_member_456",
+      tx,
+      userId: "member_123",
+    })).resolves.toBeNull();
+
+    await expect(readHostedExecutionWakeLifecycleStateTx({
+      eventId: "evt_member_456",
+      tx,
+      userId: "member_123",
+    })).resolves.toBeNull();
   });
 
   it("suppresses duplicate unresolved edge-triggered wakes", async () => {
@@ -368,12 +591,13 @@ describe("hosted wake store", () => {
     const result = await appendHostedEdgeTriggeredWakeTx({
       coalescingKey: "member.channels.updated:member_123",
       dedupeKey: "second",
+      eventId: "second",
       kind: "member.channels.updated",
       occurredAt: "2026-04-17T00:01:00.000Z",
       payload: {
         revision: 2,
       },
-      payloadSchema: "murph.hosted-wake-system.v1",
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       tx,
       userId: "member_123",
     });
@@ -389,6 +613,7 @@ describe("hosted wake store", () => {
 
     expect(listed.wakes).toHaveLength(1);
     expect(listed.wakes[0]?.dedupeKey).toBe("first");
+    expect(listed.wakes[0]?.fetchProof).toEqual(expect.any(String));
   });
 
   it("does not allocate a new seq when a duplicate dedupe key is discovered after the cursor lock", async () => {
@@ -416,12 +641,13 @@ describe("hosted wake store", () => {
 
     const result = await appendHostedOrderedWakeTx({
       dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_123",
+      eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
       kind: "member.activated",
       occurredAt: "2026-04-17T00:01:00.000Z",
       payload: {
         revision: 2,
       },
-      payloadSchema: "murph.hosted-wake-system.v1",
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       tx,
       userId: "member_123",
     });
@@ -468,6 +694,7 @@ describe("hosted wake store", () => {
 
     expect(listed.wakes).toHaveLength(1);
     expect(listed.wakes[0]?.seq).toBe("4");
+    expect(listed.wakes[0]?.fetchProof).toEqual(expect.any(String));
     expect(listed.wakes[0]?.payloadCiphertext).toEqual(expect.any(String));
     expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
   });
@@ -602,11 +829,13 @@ describe("hosted wake store", () => {
     await expect(findHostedExecutionWakeEventIdTx({
       eventId: "telegram:update:321",
       tx,
+      userId: "member_123",
     })).resolves.toBe("telegram:update:321");
 
     await expect(readHostedExecutionWakeTargetTx({
       eventId: "telegram:update:321",
       tx,
+      userId: "member_123",
     })).resolves.toEqual({
       eventId: "telegram:update:321",
       seq: "1",
@@ -640,9 +869,13 @@ function createHostedWakeStoreHarness(input?: {
 }): Prisma.TransactionClient {
   const userId = input?.cursor?.userId ?? "member_123";
   const createdAt = new Date("2026-04-17T00:00:00.000Z");
+  const wakeEvents: TestWakeEventState[] = [];
   const payloads: TestWakePayloadState[] = [];
+  const wakeTerminals: TestWakeTerminalState[] = [];
   const state: {
     cursor: TestCursorState;
+    wakeEvents: TestWakeEventState[];
+    wakeTerminals: TestWakeTerminalState[];
     payloads: TestWakePayloadState[];
     wakes: TestWakeState[];
   } = {
@@ -655,6 +888,8 @@ function createHostedWakeStoreHarness(input?: {
       userId,
       version: input?.cursor?.version ?? 0n,
     },
+    wakeEvents,
+    wakeTerminals,
     payloads,
     wakes: (input?.wakes ?? []).map((wake, index) => {
       const id = `wake_${index + 1}`;
@@ -664,9 +899,18 @@ function createHostedWakeStoreHarness(input?: {
           createdAt,
           payloadBytes: encoded.payloadBytes,
           payloadCiphertext: encoded.payloadRefCiphertext,
-          payloadSchema: wake.kind === "conversation.message"
-            ? "murph.hosted-wake-conversation-message.v1"
-            : "murph.hosted-wake-system.v1",
+          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+          updatedAt: createdAt,
+          userId: wake.userId,
+          wakeId: id,
+        });
+      }
+
+      if (wake.dedupeKey) {
+        wakeEvents.push({
+          createdAt,
+          eventId: wake.dedupeKey,
+          replacedByEventId: null,
           updatedAt: createdAt,
           userId: wake.userId,
           wakeId: id,
@@ -684,9 +928,7 @@ function createHostedWakeStoreHarness(input?: {
         payloadBytes: encoded.payloadBytes,
         payloadInlineCiphertext: encoded.payloadInlineCiphertext,
         payloadRef: encoded.storage === "ref" ? id : null,
-        payloadSchema: wake.kind === "conversation.message"
-          ? "murph.hosted-wake-conversation-message.v1"
-          : "murph.hosted-wake-system.v1",
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         quarantineCode: wake.quarantinedAt ? "invalid-dispatch-payload" : null,
         quarantinedAt: wake.quarantinedAt ? new Date(wake.quarantinedAt) : null,
         seq: wake.seq,
@@ -792,14 +1034,18 @@ function createHostedWakeStoreHarness(input?: {
         return payload ? cloneWakePayload(payload) : null;
       },
       upsert(args: {
-        create: TestWakePayloadState;
+        create: Omit<TestWakePayloadState, "createdAt" | "updatedAt">;
         update: Omit<TestWakePayloadState, "createdAt" | "wakeId">;
         where: { wakeId: string };
       }): TestWakePayloadState {
         const payload = state.payloads.find((candidate) => candidate.wakeId === args.where.wakeId);
 
         if (!payload) {
-          const createdPayload = cloneWakePayload(args.create);
+          const createdPayload: TestWakePayloadState = {
+            ...args.create,
+            createdAt,
+            updatedAt: createdAt,
+          };
           state.payloads.push(createdPayload);
           return cloneWakePayload(createdPayload);
         }
@@ -807,6 +1053,102 @@ function createHostedWakeStoreHarness(input?: {
         Object.assign(payload, args.update);
         payload.updatedAt = new Date(payload.updatedAt.getTime() + 1);
         return cloneWakePayload(payload);
+      },
+    },
+    hostedWakeEvent: {
+      create(args: {
+        data: Omit<TestWakeEventState, "createdAt" | "updatedAt">;
+      }): TestWakeEventState {
+        const event: TestWakeEventState = {
+          ...args.data,
+          createdAt,
+          updatedAt: createdAt,
+        };
+        state.wakeEvents.push(event);
+        return cloneWakeEvent(event);
+      },
+      findFirst(args: {
+        orderBy?: { createdAt: "desc" };
+        where:
+          | {
+            replacedByEventId: null;
+            userId: string;
+            wakeId: string;
+          }
+          | {
+            eventId: string;
+            userId: string;
+          };
+      }): TestWakeEventState | null {
+        const where = args.where;
+
+        if ("eventId" in where) {
+          const event = state.wakeEvents.find((candidate) =>
+            candidate.eventId === where.eventId
+            && candidate.userId === where.userId);
+          return event ? cloneWakeEvent(event) : null;
+        }
+
+        const event = state.wakeEvents
+          .filter((candidate) =>
+            candidate.replacedByEventId === where.replacedByEventId
+            && candidate.userId === where.userId
+            && candidate.wakeId === where.wakeId)
+          .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
+
+        return event ? cloneWakeEvent(event) : null;
+      },
+      findUnique(args: {
+        where: {
+          eventId: string;
+        };
+      }): TestWakeEventState | null {
+        const event = state.wakeEvents.find((candidate) => candidate.eventId === args.where.eventId);
+        return event ? cloneWakeEvent(event) : null;
+      },
+      updateMany(args: {
+        data: {
+          replacedByEventId: string;
+        };
+        where: {
+          eventId: string;
+          replacedByEventId: null;
+          userId: string;
+        };
+      }): { count: number } {
+        const event = state.wakeEvents.find((candidate) =>
+          candidate.eventId === args.where.eventId
+          && candidate.replacedByEventId === args.where.replacedByEventId
+          && candidate.userId === args.where.userId);
+
+        if (!event) {
+          return { count: 0 };
+        }
+
+        event.replacedByEventId = args.data.replacedByEventId;
+        event.updatedAt = new Date(event.updatedAt.getTime() + 1);
+        return { count: 1 };
+      },
+    },
+    hostedWakeTerminal: {
+      create(args: {
+        data: Omit<TestWakeTerminalState, "createdAt" | "updatedAt">;
+      }): TestWakeTerminalState {
+        const terminal: TestWakeTerminalState = {
+          ...args.data,
+          createdAt,
+          updatedAt: createdAt,
+        };
+        state.wakeTerminals.push(terminal);
+        return cloneWakeTerminal(terminal);
+      },
+      findUnique(args: {
+        where: {
+          wakeId: string;
+        };
+      }): TestWakeTerminalState | null {
+        const terminal = state.wakeTerminals.find((candidate) => candidate.wakeId === args.where.wakeId);
+        return terminal ? cloneWakeTerminal(terminal) : null;
       },
     },
     hostedWake: {
@@ -848,7 +1190,11 @@ function createHostedWakeStoreHarness(input?: {
         return cloneWake(wake);
       },
       findFirst(args: {
-        orderBy: { seq: "desc" };
+        orderBy?: { seq: "desc" };
+        select?: {
+          id: true;
+          quarantinedAt?: true;
+        };
         where:
           | {
             coalescingKey: string | null;
@@ -857,10 +1203,19 @@ function createHostedWakeStoreHarness(input?: {
             userId: string;
           }
           | {
+            id: string;
+            seq: bigint;
+            userId: string;
+          }
+          | {
+            seq: bigint;
+            userId: string;
+          }
+          | {
             kind: string;
             userId: string;
           };
-      }): TestWakeState | null {
+      }): TestWakeState | Pick<TestWakeState, "id" | "quarantinedAt"> | null {
         const where = args.where;
 
         if ("kind" in where) {
@@ -871,6 +1226,45 @@ function createHostedWakeStoreHarness(input?: {
             .sort((left, right) => Number(right.seq - left.seq))[0];
 
           return candidate ? cloneWake(candidate) : null;
+        }
+
+        if ("id" in where) {
+          const candidate = state.wakes.find((wake) =>
+            wake.id === where.id
+            && wake.seq === where.seq
+            && wake.userId === where.userId);
+
+          if (!candidate) {
+            return null;
+          }
+
+          if (args.select?.id) {
+            return {
+              id: candidate.id,
+              ...(args.select.quarantinedAt ? { quarantinedAt: candidate.quarantinedAt } : {}),
+            };
+          }
+
+          return cloneWake(candidate);
+        }
+
+        if (typeof where.seq === "bigint") {
+          const candidate = state.wakes.find((wake) =>
+            wake.seq === where.seq
+            && wake.userId === where.userId);
+
+          if (!candidate) {
+            return null;
+          }
+
+          if (args.select?.id) {
+            return {
+              id: candidate.id,
+              ...(args.select.quarantinedAt ? { quarantinedAt: candidate.quarantinedAt } : {}),
+            };
+          }
+
+          return cloneWake(candidate);
         }
 
         const candidate = state.wakes
@@ -917,8 +1311,19 @@ function createHostedWakeStoreHarness(input?: {
           .slice(0, args.take)
           .map((wake) => cloneWake(wake));
       },
-      findUnique(args: { where: { dedupeKey: string } }): TestWakeState | null {
-        const wake = state.wakes.find((candidate) => candidate.dedupeKey === args.where.dedupeKey);
+      findUnique(args: {
+        where:
+          | { dedupeKey: string }
+          | { id: string };
+      }): TestWakeState | null {
+        const where = args.where;
+
+        if ("id" in where) {
+          const wake = state.wakes.find((candidate) => candidate.id === where.id);
+          return wake ? cloneWake(wake) : null;
+        }
+
+        const wake = state.wakes.find((candidate) => candidate.dedupeKey === where.dedupeKey);
         return wake ? cloneWake(wake) : null;
       },
       update(args: {
@@ -946,6 +1351,38 @@ function createHostedWakeStoreHarness(input?: {
   return tx as unknown as Prisma.TransactionClient;
 }
 
+function createHarnessWake(input: {
+  kind: string;
+  seq: bigint;
+  userId: string;
+}): {
+  behavior: TestWakeState["behavior"];
+  coalescingKey: string | null;
+  dedupeKey: string | null;
+  kind: string;
+  occurredAt: string;
+  payload: unknown;
+  seq: bigint;
+  userId: string;
+} {
+  return {
+    behavior: "ordered",
+    coalescingKey: null,
+    dedupeKey: `${input.kind}:${input.seq}`,
+    kind: input.kind,
+    occurredAt: "2026-04-17T00:00:00.000Z",
+    payload: {
+      eventId: `evt_${input.seq}`,
+      kind: input.kind,
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      reason: "manual",
+      userId: input.userId,
+    },
+    seq: input.seq,
+    userId: input.userId,
+  };
+}
+
 function makeProjectedWakeRow(
   overrides: Partial<Parameters<typeof projectHostedWakeRecord>[0]> = {},
 ): Parameters<typeof projectHostedWakeRecord>[0] {
@@ -960,7 +1397,7 @@ function makeProjectedWakeRow(
     payloadBytes: 1,
     payloadInlineCiphertext: null,
     payloadRef: null,
-    payloadSchema: "murph.hosted-wake-system.v1",
+    payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
     quarantineCode: null,
     quarantinedAt: null,
     seq: 1n,
@@ -1000,5 +1437,21 @@ function cloneWakePayload(payload: TestWakePayloadState): TestWakePayloadState {
     ...payload,
     createdAt: new Date(payload.createdAt),
     updatedAt: new Date(payload.updatedAt),
+  };
+}
+
+function cloneWakeEvent(event: TestWakeEventState): TestWakeEventState {
+  return {
+    ...event,
+    createdAt: new Date(event.createdAt),
+    updatedAt: new Date(event.updatedAt),
+  };
+}
+
+function cloneWakeTerminal(terminal: TestWakeTerminalState): TestWakeTerminalState {
+  return {
+    ...terminal,
+    createdAt: new Date(terminal.createdAt),
+    updatedAt: new Date(terminal.updatedAt),
   };
 }

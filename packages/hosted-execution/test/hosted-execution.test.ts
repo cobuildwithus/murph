@@ -146,6 +146,7 @@ describe("hosted execution coverage gaps", () => {
       "queued",
       "backpressured",
       "completed",
+      "replaced",
       "poisoned",
     ]);
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(

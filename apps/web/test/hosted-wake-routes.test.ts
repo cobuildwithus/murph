@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
   listHostedWakeRepairCandidates: vi.fn(),
   listHostedWakesAfterSeq: vi.fn(),
   materializeHostedDueWakesTx: vi.fn(),
-  readHostedWakeLifecycleState: vi.fn(),
+  recordHostedWakeTerminalTx: vi.fn(),
+  readHostedWakeLifecycle: vi.fn(),
   readHostedExecutionCursor: vi.fn(),
   readOptionalJsonObject: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -45,8 +46,8 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
-  readHostedWakeLifecycleState:
-    mocks.readHostedWakeLifecycleState,
+  readHostedWakeLifecycle:
+    mocks.readHostedWakeLifecycle,
 }));
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
@@ -66,6 +67,7 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
   listHostedWakeRepairCandidates: mocks.listHostedWakeRepairCandidates,
   listHostedWakesAfterSeq: mocks.listHostedWakesAfterSeq,
   quarantineHostedWakeTx: mocks.quarantineHostedWakeTx,
+  recordHostedWakeTerminalTx: mocks.recordHostedWakeTerminalTx,
   readHostedExecutionCursor: mocks.readHostedExecutionCursor,
 }));
 
@@ -119,7 +121,7 @@ describe("hosted wake internal routes", () => {
       wakes: [
         {
           behavior: "ordered",
-          commitProof: "proof_24",
+          fetchProof: "proof_24",
           createdAt: "2026-04-17T00:00:00.000Z",
           dedupeKey: "evt_tick",
           id: "wake_24",
@@ -145,7 +147,10 @@ describe("hosted wake internal routes", () => {
       userId: "member_123",
       version: "3",
     });
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("queued");
+    mocks.readHostedWakeLifecycle.mockResolvedValue({
+      eventId: "evt_tick",
+      state: "queued",
+    });
     mocks.commitHostedExecutionCursorTx.mockResolvedValue({
       committed: true,
       cursor: {
@@ -158,6 +163,7 @@ describe("hosted wake internal routes", () => {
         version: "4",
       },
     });
+    mocks.recordHostedWakeTerminalTx.mockResolvedValue(true);
     mocks.quarantineHostedWakeTx.mockResolvedValue(true);
     mocks.listHostedWakeRepairCandidates.mockResolvedValue([
       {
@@ -248,7 +254,7 @@ describe("hosted wake internal routes", () => {
       wakes: [
         {
           behavior: "ordered",
-          commitProof: "proof_24",
+          fetchProof: "proof_24",
           createdAt: "2026-04-17T00:00:00.000Z",
           dedupeKey: "evt_tick",
           id: "wake_24",
@@ -276,10 +282,6 @@ describe("hosted wake internal routes", () => {
 
   it("parses and forwards wake cursor commit requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
-      advance: {
-        proof: "proof_24",
-        wakeId: "wake_24",
-      },
       committedSeq: "24",
       expectedVersion: "3",
       snapshotRef: {
@@ -308,14 +310,93 @@ describe("hosted wake internal routes", () => {
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
     expect(mocks.getPrisma).toHaveBeenCalledOnce();
     expect(mocks.commitHostedExecutionCursorTx).toHaveBeenCalledWith({
-      advance: {
-        proof: "proof_24",
-        wakeId: "wake_24",
-      },
       committedSeq: 24n,
       expectedVersion: 3n,
       snapshotRef: {
         checkpoint: "wake_24",
+      },
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      userId: "member_123",
+    });
+  });
+
+  it("parses and forwards hosted wake terminal receipt requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      fetchProof: "proof_24",
+      state: "completed",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/terminal/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      recorded: true,
+    });
+    expect(mocks.recordHostedWakeTerminalTx).toHaveBeenCalledWith({
+      fetchProof: "proof_24",
+      state: "completed",
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      userId: "member_123",
+      wakeId: "wake_24",
+      wakeSeq: 24n,
+    });
+  });
+
+  it("parses and forwards snapshot-only wake cursor commit requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      committedSeq: "24",
+      expectedVersion: "3",
+      snapshotRef: {
+        checkpoint: "wake_24_final",
+      },
+    });
+    mocks.commitHostedExecutionCursorTx.mockResolvedValueOnce({
+      committed: true,
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "25",
+        snapshotRef: {
+          checkpoint: "wake_24_final",
+        },
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "4",
+      },
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/commit/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      committed: true,
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "25",
+        snapshotRef: {
+          checkpoint: "wake_24_final",
+        },
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "4",
+      },
+    });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(mocks.getPrisma).toHaveBeenCalledOnce();
+    expect(mocks.commitHostedExecutionCursorTx).toHaveBeenCalledWith({
+      committedSeq: 24n,
+      expectedVersion: 3n,
+      snapshotRef: {
+        checkpoint: "wake_24_final",
       },
       tx: expect.objectContaining({
         label: "wake-route-tx",
@@ -403,9 +484,10 @@ describe("hosted wake internal routes", () => {
       prisma: expect.anything(),
       userId: "member_123",
     });
-    expect(mocks.readHostedWakeLifecycleState).toHaveBeenCalledWith({
+    expect(mocks.readHostedWakeLifecycle).toHaveBeenCalledWith({
       eventId: "evt_tick",
       prisma: expect.anything(),
+      userId: "member_123",
     });
   });
 
@@ -413,7 +495,7 @@ describe("hosted wake internal routes", () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       eventId: "evt_missing",
     });
-    mocks.readHostedWakeLifecycleState.mockResolvedValue(null);
+    mocks.readHostedWakeLifecycle.mockResolvedValue(null);
 
     const { POST } = await import("../app/api/internal/hosted-wake/status/route");
     const response = await POST(new Request("https://example.test", { method: "POST" }));
@@ -430,6 +512,36 @@ describe("hosted wake internal routes", () => {
         version: "3",
       },
       pendingWakeCount: 1,
+    });
+  });
+
+  it("returns replacement metadata when a coalesced event has been superseded", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      eventId: "evt_old",
+    });
+    mocks.readHostedWakeLifecycle.mockResolvedValue({
+      eventId: "evt_old",
+      replacedByEventId: "evt_new",
+      state: "replaced",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/status/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "3",
+      },
+      pendingWakeCount: 1,
+      replacedByEventId: "evt_new",
+      wakeState: "replaced",
     });
   });
 

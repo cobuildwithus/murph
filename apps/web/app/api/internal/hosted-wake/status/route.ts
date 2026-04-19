@@ -1,5 +1,5 @@
 import {
-  readHostedWakeLifecycleState,
+  readHostedWakeLifecycle,
 } from "@/src/lib/hosted-wake/lifecycle";
 import {
   requireHostedCloudflareCallbackRequest,
@@ -22,16 +22,22 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const pendingWakeCount = countPendingWakes(cursor);
-  const wakeState = eventId
-    ? await readHostedWakeLifecycleState({
+  const wakeLifecycle = eventId
+    ? await readHostedWakeLifecycle({
       eventId,
       prisma,
+      userId,
     })
     : undefined;
 
   return jsonOk({
     cursor,
-    ...(wakeState === null || wakeState === undefined ? {} : { wakeState }),
+    ...(wakeLifecycle?.replacedByEventId
+      ? {
+          replacedByEventId: wakeLifecycle.replacedByEventId,
+        }
+      : {}),
+    ...(wakeLifecycle?.state === undefined ? {} : { wakeState: wakeLifecycle.state }),
     pendingWakeCount,
   });
 });

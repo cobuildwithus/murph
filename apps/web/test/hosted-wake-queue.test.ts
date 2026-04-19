@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -16,7 +16,7 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
   appendHostedEdgeTriggeredWakeTx: mocks.appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx: mocks.appendHostedOrderedWakeTx,
   findHostedWakeEventIdByEventIdTx: vi.fn(),
-  readHostedWakeLifecycleByDedupeKeyTx: vi.fn(),
+  readHostedWakeLifecycleByEventIdTx: vi.fn(),
   readHostedWakeScheduleByEventIdTx: vi.fn(),
 }));
 
@@ -39,7 +39,7 @@ describe("materializeHostedExecutionWakeTx", () => {
         id: "wake_1",
         kind: "conversation.message",
         occurredAt: "2026-04-18T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         seq: "1",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
@@ -55,7 +55,7 @@ describe("materializeHostedExecutionWakeTx", () => {
         id: "wake_2",
         kind: "assistant.cron.tick",
         occurredAt: "2026-04-18T00:00:00.000Z",
-        payloadSchema: "murph.hosted-wake-system.v1",
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         seq: "2",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
@@ -90,13 +90,11 @@ describe("materializeHostedExecutionWakeTx", () => {
 
     expect(mocks.appendHostedOrderedWakeTx).toHaveBeenCalledWith(expect.objectContaining({
       dedupeKey: "evt_linq_message",
+      eventId: "evt_linq_message",
       kind: "conversation.message",
       occurredAt: "2026-04-18T00:00:00.000Z",
-      payload: {
-        eventId: "evt_linq_message",
-        ...wake.message,
-      },
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payload: wake,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: "member_123",
     }));
     expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -122,12 +120,43 @@ describe("materializeHostedExecutionWakeTx", () => {
     expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
       coalescingKey: "assistant.cron.tick:member_123",
       dedupeKey: "evt_tick",
+      eventId: "evt_tick",
       kind: "assistant.cron.tick",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "member_123",
     }));
     expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
       kind: "assistant.cron.tick",
+    }));
+  });
+
+  it("persists assistant cron wakes with the full canonical wake payload", async () => {
+    const wake = buildHostedExecutionAssistantCronTickWake({
+      eventId: "evt_tick_full_payload",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      reason: "manual",
+      userId: "member_123",
+    });
+
+    await materializeHostedExecutionWakeTx({
+      wake,
+      tx: {} as never,
+    });
+
+    expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
+      coalescingKey: "assistant.cron.tick:member_123",
+      dedupeKey: "evt_tick_full_payload",
+      eventId: "evt_tick_full_payload",
+      kind: "assistant.cron.tick",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      payload: wake,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      userId: "member_123",
+    }));
+    expect(mocks.appendHostedCoalescingWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        event: expect.anything(),
+      }),
     }));
   });
 
@@ -150,6 +179,7 @@ describe("materializeHostedExecutionWakeTx", () => {
     expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
       coalescingKey: "assistant.cron.tick:member_123",
       dedupeKey: "assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z",
+      eventId: "assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z",
       kind: "assistant.cron.tick",
       occurredAt,
       userId: "member_123",

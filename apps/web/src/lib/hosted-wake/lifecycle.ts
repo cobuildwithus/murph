@@ -12,9 +12,14 @@ import { getPrisma } from "../prisma";
 import {
   appendHostedExecutionWakePayloadTx,
   findHostedExecutionWakeEventIdTx,
-  readHostedExecutionWakeLifecycleStateTx,
   readHostedExecutionWakeTargetTx,
 } from "./queue";
+import {
+  readHostedWakeLifecycleByEventIdTx,
+} from "./store";
+import type {
+  HostedWakeLifecycleRecord,
+} from "./store.types";
 
 const HOSTED_WAKE_LIFECYCLE_STATE_SET = new Set<HostedWakeLifecycleState>(
   HOSTED_WAKE_LIFECYCLE_STATES,
@@ -22,7 +27,10 @@ const HOSTED_WAKE_LIFECYCLE_STATE_SET = new Set<HostedWakeLifecycleState>(
 
 type HostedWakeClient = PrismaClient | Prisma.TransactionClient;
 
-export type { HostedWakeLifecycleState };
+export type {
+  HostedWakeLifecycleRecord,
+  HostedWakeLifecycleState,
+};
 
 export interface HostedExecutionWakeMaterializationResult {
   eventId: string;
@@ -47,7 +55,7 @@ export function normalizeHostedWakeLifecycleState(
 export function isHostedWakeLifecycleTerminal(
   state: HostedWakeLifecycleState,
 ): boolean {
-  return state === "completed" || state === "poisoned";
+  return state === "completed" || state === "replaced" || state === "poisoned";
 }
 
 export async function materializeHostedExecutionWakeTx(input: {
@@ -67,11 +75,13 @@ export async function materializeHostedExecutionWakeTx(input: {
 export async function readHostedWakeTarget(input: {
   eventId: string;
   prisma?: HostedWakeClient;
+  userId: string;
 }): Promise<HostedWakeTarget | null> {
   const prisma = input.prisma ?? getPrisma();
   const wakeRecord = await readHostedExecutionWakeTargetTx({
     eventId: input.eventId,
     tx: prisma,
+    userId: input.userId,
   });
 
   if (!wakeRecord) {
@@ -88,22 +98,36 @@ export async function readHostedWakeTarget(input: {
 export async function findHostedWakeByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeClient;
+  userId?: string;
 }): Promise<string | null> {
   return findHostedExecutionWakeEventIdTx({
     eventId: input.eventId,
     tx: input.tx,
+    ...(input.userId ? { userId: input.userId } : {}),
   });
 }
 
 export async function readHostedWakeLifecycleState(input: {
   eventId: string;
   prisma?: HostedWakeClient;
+  userId?: string;
 }): Promise<HostedWakeLifecycleState | null> {
+  const lifecycle = await readHostedWakeLifecycle(input);
+
+  return lifecycle?.state ?? null;
+}
+
+export async function readHostedWakeLifecycle(input: {
+  eventId: string;
+  prisma?: HostedWakeClient;
+  userId?: string;
+}): Promise<HostedWakeLifecycleRecord | null> {
   const prisma = input.prisma ?? getPrisma();
-  const state = await readHostedExecutionWakeLifecycleStateTx({
+  const lifecycle = await readHostedWakeLifecycleByEventIdTx({
     eventId: input.eventId,
     tx: prisma,
+    ...(input.userId ? { userId: input.userId } : {}),
   });
 
-  return state ?? null;
+  return lifecycle ?? null;
 }

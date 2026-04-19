@@ -5,10 +5,14 @@ import { Prisma } from "@prisma/client";
 import {
   allocateHostedWakeSeqTx,
   assertHostedWakeUserMatch,
+  createHostedWakeEventTx,
   ensureHostedExecutionCursorRowTx,
   findHostedWakeByDedupeKeyTx,
+  findHostedWakeByEventIdTx,
+  findCurrentHostedWakeEventByWakeIdTx,
   findUncommittedWakeByCoalescingKeyTx,
   lockHostedExecutionCursorRowTx,
+  replaceHostedWakeEventTx,
   writeHostedWakePayloadStorageTx,
 } from "./store-data";
 import { encodeHostedWakeStoredPayload } from "./payload";
@@ -17,6 +21,7 @@ import {
   requireOccurredAtDate,
   type AppendHostedWakeInput,
   type AppendHostedWakeResult,
+  type HostedWakeRow,
 } from "./store.types";
 
 export async function appendHostedOrderedWakeTx(
@@ -64,14 +69,26 @@ export async function appendHostedWakeTx(
     userId: input.userId,
   });
 
-  if (input.dedupeKey) {
-    const existingDuplicate = await findHostedWakeByDedupeKeyTx({
-      dedupeKey: input.dedupeKey,
-      tx: input.tx,
-    });
+  {
+    const existingDuplicate = input.eventId
+      ? await findHostedWakeByEventIdTx({
+        eventId: input.eventId,
+        tx: input.tx,
+        userId: input.userId,
+      })
+      : input.dedupeKey
+        ? await findHostedWakeByDedupeKeyTx({
+          dedupeKey: input.dedupeKey,
+          tx: input.tx,
+        })
+        : null;
 
     if (existingDuplicate) {
-      assertHostedWakeUserMatch(existingDuplicate, input.userId, input.dedupeKey);
+      assertHostedWakeUserMatch(
+        existingDuplicate,
+        input.userId,
+        input.eventId ?? input.dedupeKey ?? existingDuplicate.id,
+      );
       return {
         duplicate: true,
         inserted: false,
@@ -92,19 +109,17 @@ export async function appendHostedWakeTx(
     });
 
     if (unresolved) {
-      if (input.dedupeKey && unresolved.dedupeKey === input.dedupeKey) {
-        return {
-          duplicate: true,
-          inserted: false,
-          updatedExisting: false,
-          wake: await hydrateHostedWakeRecordTx({
-            record: unresolved,
-            tx: input.tx,
-          }),
-        };
-      }
-
       if (occurredAt.getTime() < unresolved.occurredAt.getTime()) {
+        await recordHostedWakeReplacementTx({
+          eventId: input.eventId,
+          replacementEventId: await resolveCurrentHostedWakeEventIdTx({
+            tx: input.tx,
+            wake: unresolved,
+          }),
+          tx: input.tx,
+          userId: input.userId,
+          wake: unresolved,
+        });
         return {
           duplicate: false,
           inserted: false,
@@ -127,12 +142,17 @@ export async function appendHostedWakeTx(
         userId: input.userId,
         wakeId: unresolved.id,
       });
+      await replaceCurrentHostedWakeEventTx({
+        nextEventId: input.eventId,
+        tx: input.tx,
+        userId: input.userId,
+        wake: unresolved,
+      });
       const updated = await input.tx.hostedWake.update({
         where: {
           id: unresolved.id,
         },
         data: {
-          dedupeKey: input.dedupeKey ?? null,
           kind: input.kind,
           occurredAt,
           payloadBytes: encodedPayload.payloadBytes,
@@ -220,6 +240,14 @@ async function createHostedWakeTx(
       userId: input.userId,
       wakeId,
     });
+    if (input.eventId) {
+      await createHostedWakeEventTx({
+        eventId: input.eventId,
+        tx: input.tx,
+        userId: input.userId,
+        wakeId,
+      });
+    }
 
     return {
       duplicate: false,
@@ -234,15 +262,26 @@ async function createHostedWakeTx(
     if (
       error instanceof Prisma.PrismaClientKnownRequestError
       && error.code === "P2002"
-      && input.dedupeKey
     ) {
-      const existing = await findHostedWakeByDedupeKeyTx({
-        dedupeKey: input.dedupeKey,
-        tx: input.tx,
-      });
+      const existing = input.eventId
+        ? await findHostedWakeByEventIdTx({
+          eventId: input.eventId,
+          tx: input.tx,
+          userId: input.userId,
+        })
+        : input.dedupeKey
+          ? await findHostedWakeByDedupeKeyTx({
+            dedupeKey: input.dedupeKey,
+            tx: input.tx,
+          })
+          : null;
 
       if (existing) {
-        assertHostedWakeUserMatch(existing, input.userId, input.dedupeKey);
+        assertHostedWakeUserMatch(
+          existing,
+          input.userId,
+          input.eventId ?? input.dedupeKey ?? existing.id,
+        );
         return {
           duplicate: true,
           inserted: false,
@@ -257,4 +296,86 @@ async function createHostedWakeTx(
 
     throw error;
   }
+}
+
+async function replaceCurrentHostedWakeEventTx(input: {
+  nextEventId?: string | null;
+  tx: AppendHostedWakeInput["tx"];
+  userId: string;
+  wake: HostedWakeRow;
+}): Promise<void> {
+  const nextEventId = input.nextEventId?.trim();
+
+  if (!nextEventId) {
+    return;
+  }
+
+  const currentEvent = await findCurrentHostedWakeEventByWakeIdTx({
+    tx: input.tx,
+    userId: input.userId,
+    wakeId: input.wake.id,
+  });
+
+  if (currentEvent?.eventId === nextEventId) {
+    return;
+  }
+
+  if (currentEvent) {
+    await replaceHostedWakeEventTx({
+      eventId: currentEvent.eventId,
+      replacedByEventId: nextEventId,
+      tx: input.tx,
+      userId: input.userId,
+    });
+  } else if (input.wake.dedupeKey && input.wake.dedupeKey !== nextEventId) {
+    await createHostedWakeEventTx({
+      eventId: input.wake.dedupeKey,
+      replacedByEventId: nextEventId,
+      tx: input.tx,
+      userId: input.userId,
+      wakeId: input.wake.id,
+    });
+  }
+
+  await createHostedWakeEventTx({
+    eventId: nextEventId,
+    tx: input.tx,
+    userId: input.userId,
+    wakeId: input.wake.id,
+  });
+}
+
+async function recordHostedWakeReplacementTx(input: {
+  eventId?: string | null;
+  replacementEventId: string | null;
+  tx: AppendHostedWakeInput["tx"];
+  userId: string;
+  wake: HostedWakeRow;
+}): Promise<void> {
+  const eventId = input.eventId?.trim();
+
+  if (!eventId || !input.replacementEventId || eventId === input.replacementEventId) {
+    return;
+  }
+
+  await createHostedWakeEventTx({
+    eventId,
+    replacedByEventId: input.replacementEventId,
+    tx: input.tx,
+    userId: input.userId,
+    wakeId: input.wake.id,
+  });
+}
+
+async function resolveCurrentHostedWakeEventIdTx(input: {
+  tx: AppendHostedWakeInput["tx"];
+  wake: HostedWakeRow;
+}): Promise<string | null> {
+  const currentEvent = await findCurrentHostedWakeEventByWakeIdTx({
+    tx: input.tx,
+    userId: input.wake.userId,
+    wakeId: input.wake.id,
+  });
+
+  return currentEvent?.eventId ?? input.wake.dedupeKey ?? null;
 }

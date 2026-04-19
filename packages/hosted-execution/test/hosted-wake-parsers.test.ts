@@ -6,10 +6,10 @@ import {
   parseHostedWakeCommitResponse,
   parseHostedWakeExecutionPayload,
   parseHostedWakeFetchResponse,
+  parseHostedWakeTerminalResponse,
 } from "../src/parsers.ts";
 import {
   buildHostedExecutionAssistantCronTickWake,
-  buildHostedExecutionConversationMessageWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -17,8 +17,7 @@ import {
   buildHostedExecutionVaultShareAcceptedWake,
 } from "../src/builders.ts";
 import {
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
 } from "../src/contracts.ts";
 import {
   parseHostedExecutionConversationMessagePayload,
@@ -47,6 +46,7 @@ describe("hosted wake parser contracts", () => {
         {
           behavior: "coalescing",
           coalescingKey: "member.channels.updated:member-1",
+          fetchProof: "wake-1:12:proof",
           createdAt: "2026-04-17T00:00:00.000Z",
           dedupeKey: "member.channels.updated:test",
           id: "wake-1",
@@ -54,7 +54,7 @@ describe("hosted wake parser contracts", () => {
           occurredAt: "2026-04-17T00:00:00.000Z",
           payloadBytes: 64,
           payloadCiphertext: "ciphertext:wake-1",
-          payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
           quarantineCode: null,
           quarantinedAt: null,
           seq: "12",
@@ -67,6 +67,7 @@ describe("hosted wake parser contracts", () => {
     expect(parsed.cursor.version).toBe("4");
     expect(parsed.wakes[0]).toMatchObject({
       behavior: "coalescing",
+      fetchProof: "wake-1:12:proof",
       kind: "member.channels.updated",
       payloadBytes: 64,
       payloadCiphertext: "ciphertext:wake-1",
@@ -88,6 +89,7 @@ describe("hosted wake parser contracts", () => {
       wakes: [
         {
           behavior: "ordered",
+          fetchProof: "wake-1:12:proof",
           createdAt: "2026-04-17T00:00:00.000Z",
           dedupeKey: "member.channels.updated:test",
           id: "wake-1",
@@ -95,7 +97,7 @@ describe("hosted wake parser contracts", () => {
           occurredAt: "2026-04-17T00:00:00.000Z",
           payloadBytes: 128,
           payloadCiphertext: "opaque-ciphertext",
-          payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
           quarantineCode: null,
           quarantinedAt: null,
           seq: "12",
@@ -106,6 +108,7 @@ describe("hosted wake parser contracts", () => {
     });
 
     expect(parsedFetch.wakes[0]).toMatchObject({
+      fetchProof: "wake-1:12:proof",
       payloadBytes: 128,
       payloadCiphertext: "opaque-ciphertext",
     });
@@ -126,7 +129,7 @@ describe("hosted wake parser contracts", () => {
         occurredAt: "2026-04-17T00:00:00.000Z",
         payloadBytes: 128,
         payloadCiphertext: "opaque-ciphertext",
-        payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "12",
@@ -154,7 +157,7 @@ describe("hosted wake parser contracts", () => {
       payloadJson: {
         legacy: true,
       },
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq: "12",
       updatedAt: "2026-04-17T00:00:00.000Z",
       userId: "member-1",
@@ -167,7 +170,7 @@ describe("hosted wake parser contracts", () => {
       kind: "member.channels.updated",
       occurredAt: "2026-04-17T00:00:00.000Z",
       payloadInlineCiphertext: "inline-ciphertext",
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq: "12",
       updatedAt: "2026-04-17T00:00:00.000Z",
       userId: "member-1",
@@ -180,7 +183,7 @@ describe("hosted wake parser contracts", () => {
       kind: "member.channels.updated",
       occurredAt: "2026-04-17T00:00:00.000Z",
       payloadRef: "wake_payload_1",
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq: "12",
       updatedAt: "2026-04-17T00:00:00.000Z",
       userId: "member-1",
@@ -197,6 +200,33 @@ describe("hosted wake parser contracts", () => {
       userId: "member-1",
       version: "1",
     })).toThrow(/committedSeq/i);
+  });
+
+  it("rejects fetched wake records that omit fetch proofs", () => {
+    expect(() => parseHostedWakeFetchResponse({
+      cursor: {
+        committedSeq: "12",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "13",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "4",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          createdAt: "2026-04-17T00:00:00.000Z",
+          id: "wake-1",
+          kind: "member.channels.updated",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+          seq: "12",
+          updatedAt: "2026-04-17T00:00:00.000Z",
+          userId: "member-1",
+        },
+      ],
+    })).toThrow(/fetchProof/i);
   });
 
   it("parses cursor commit responses", () => {
@@ -227,26 +257,29 @@ describe("hosted wake parser contracts", () => {
     });
   });
 
-  it("rejects system payloads that carry a conversation wake", () => {
-    expect(() => parseHostedWakeExecutionPayload({
-      decryptedPayload: buildHostedExecutionConversationMessageWake({
-        eventId: "evt_email",
-        message: {
-          channel: "email",
-          identityId: "assistant@example.com",
-          rawMessageKey: "raw_123",
-        },
-        occurredAt: "2026-04-17T00:00:00.000Z",
-        userId: "member-1",
-      }),
-      kind: "conversation.message",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-      userId: "member-1",
-    })).toThrow(/system payload schema/i);
+  it("parses hosted wake terminal responses", () => {
+    expect(parseHostedWakeTerminalResponse({
+      recorded: true,
+    })).toEqual({
+      recorded: true,
+    });
   });
 
-  it("parses canonical conversation wake payloads into conversation wakes", () => {
+  it("rejects wake payloads that do not serialize the full wake contract", () => {
+    expect(() => parseHostedWakeExecutionPayload({
+      decryptedPayload: {
+        channel: "email",
+        identityId: "assistant@example.com",
+        rawMessageKey: "raw_123",
+      },
+      kind: "conversation.message",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      userId: "member-1",
+    })).toThrow(/kind/i);
+  });
+
+  it("parses canonical full wake payloads into conversation wakes", () => {
     const wake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_email",
       identityId: "assistant@example.com",
@@ -257,13 +290,10 @@ describe("hosted wake parser contracts", () => {
     });
 
     expect(parseHostedWakeExecutionPayload({
-      decryptedPayload: {
-        eventId: wake.eventId,
-        ...wake.message,
-      },
+      decryptedPayload: wake,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
   });
@@ -379,13 +409,10 @@ describe("hosted wake parser contracts", () => {
     });
 
     expect(parseHostedWakeExecutionPayload({
-      decryptedPayload: {
-        eventId: telegramWake.eventId,
-        ...telegramWake.message,
-      },
+      decryptedPayload: telegramWake,
       kind: telegramWake.kind,
       occurredAt: telegramWake.occurredAt,
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: telegramWake.userId,
     })).toEqual(telegramWake);
 
@@ -401,7 +428,7 @@ describe("hosted wake parser contracts", () => {
         id: "wake_123",
         kind: "member.channels.updated",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "1",
@@ -411,7 +438,7 @@ describe("hosted wake parser contracts", () => {
     ).toThrow(/Unsupported hosted wake behavior/i);
   });
 
-  it("parses system payload wake records and rejects mismatches", () => {
+  it("parses full wake payloads and rejects record metadata mismatches", () => {
     const memberWake = buildHostedExecutionMemberActivatedWake({
       eventId: "wake_member_system",
       firstContact: null,
@@ -428,7 +455,7 @@ describe("hosted wake parser contracts", () => {
       decryptedPayload: memberWake,
       kind: memberWake.kind,
       occurredAt: memberWake.occurredAt,
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
     })).toEqual(memberWake);
 
@@ -436,7 +463,7 @@ describe("hosted wake parser contracts", () => {
       decryptedPayload: memberWake,
       kind: "member.channels.updated",
       occurredAt: memberWake.occurredAt,
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
     })).toThrow(/payload kind must match/i);
 
@@ -444,7 +471,7 @@ describe("hosted wake parser contracts", () => {
       decryptedPayload: memberWake,
       kind: memberWake.kind,
       occurredAt: "2026-04-17T01:00:00.000Z",
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
     })).toThrow(/payload occurredAt must match/i);
 
@@ -452,9 +479,9 @@ describe("hosted wake parser contracts", () => {
       decryptedPayload: memberWake,
       kind: memberWake.kind,
       occurredAt: memberWake.occurredAt,
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: "murph.hosted-wake-system.v1" as never,
       userId: memberWake.userId,
-    })).toThrow(/requires conversation\.message kind/i);
+    })).toThrow(/execution payload schema/i);
   });
 
   it("rejects wake records that still use the removed legacy message payload schema", () => {
@@ -473,7 +500,7 @@ describe("hosted wake parser contracts", () => {
     })).toThrow(/Unsupported hosted wake payload schema/i);
   });
 
-  it("rejects wake records whose kind and payload schema disagree", () => {
+  it("rejects wake records whose payload schema is not the canonical execution schema", () => {
     expect(() => parseHostedWakeRecord({
       behavior: "ordered",
       createdAt: "2026-04-17T00:00:00.000Z",
@@ -482,11 +509,11 @@ describe("hosted wake parser contracts", () => {
       occurredAt: "2026-04-17T00:00:00.000Z",
       payloadBytes: 32,
       payloadCiphertext: "ciphertext:member",
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: "murph.hosted-wake-conversation-message.v1",
       seq: "1",
       updatedAt: "2026-04-17T00:00:00.000Z",
       userId: "member-1",
-    })).toThrow(/system kinds require the system payload schema/i);
+    })).toThrow(/Unsupported hosted wake payload schema/i);
   });
 
   it("parses wake status responses with canonical wakeState input", () => {
@@ -558,6 +585,36 @@ describe("hosted wake parser contracts", () => {
       },
       pendingWakeCount: 0,
       wakeState: "queued",
+    });
+  });
+
+  it("parses replacement metadata for superseded coalesced wake events", () => {
+    expect(parseHostedWakeStatusResponse({
+      cursor: {
+        committedSeq: "1",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "2",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "1",
+      },
+      pendingWakeCount: 0,
+      replacedByEventId: "evt_new",
+      wakeState: "replaced",
+    })).toEqual({
+      cursor: {
+        committedSeq: "1",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "2",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "1",
+      },
+      pendingWakeCount: 0,
+      replacedByEventId: "evt_new",
+      wakeState: "replaced",
     });
   });
 });

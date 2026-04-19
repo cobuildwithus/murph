@@ -8,8 +8,8 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   ensureHostedExecutionCursorRowTx,
-  findHostedWakeByDedupeKeyTx,
-  findHostedWakeByEventIdTx,
+  findCurrentHostedWakeEventByWakeIdTx,
+  findHostedWakeEventByEventIdTx,
   resolveHostedWakeEventId,
 } from "./store-data";
 import {
@@ -17,11 +17,18 @@ import {
   projectHostedExecutionCursorRecord,
   resolveHostedWakeLifecycleStateTx,
 } from "./store-projections";
+import {
+  issueHostedWakeFetchProof,
+  verifyHostedWakeFetchProof,
+} from "./commit-proof";
 import type {
+  HostedWakeEventRow,
   HostedWakeLifecycleRecord,
   HostedWakeMutationTx,
   HostedWakeRepairCandidate,
+  HostedWakeRow,
   HostedWakeStoreClient,
+  HostedWakeTerminalRow,
   ListHostedWakesInput,
 } from "./store.types";
 
@@ -84,11 +91,78 @@ export async function listHostedWakesAfterSeq(
 
   return {
     cursor: projectHostedExecutionCursorRecord(cursor),
-    wakes: await hydrateHostedWakeRecordsTx({
+    wakes: (await hydrateHostedWakeRecordsTx({
       records: wakes,
       tx: prisma,
-    }),
+    })).map((wake) => ({
+      ...wake,
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: cursor.committedSeq,
+        userId: wake.userId,
+        wakeId: wake.id,
+        wakeSeq: BigInt(wake.seq),
+      }),
+    })),
   };
+}
+
+export async function recordHostedWakeTerminalTx(input: {
+  fetchProof: string;
+  state: "completed" | "replaced";
+  tx: HostedWakeMutationTx;
+  userId: string;
+  wakeId: string;
+  wakeSeq: bigint;
+}): Promise<boolean> {
+  const claims = verifyHostedWakeFetchProof({
+    proof: input.fetchProof,
+    userId: input.userId,
+    wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq,
+  });
+  const wake = await input.tx.hostedWake.findFirst({
+    where: {
+      id: input.wakeId,
+      seq: input.wakeSeq,
+      userId: input.userId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!wake) {
+    return false;
+  }
+
+  const existing = await input.tx.hostedWakeTerminal.findUnique({
+    where: {
+      wakeId: input.wakeId,
+    },
+  });
+
+  if (!existing) {
+    await input.tx.hostedWakeTerminal.create({
+      data: {
+        fetchedCommittedSeq: BigInt(claims.fetchedCommittedSeq),
+        state: input.state,
+        userId: input.userId,
+        wakeId: input.wakeId,
+        wakeSeq: input.wakeSeq,
+      },
+    });
+    return true;
+  }
+
+  if (
+    existing.userId !== input.userId
+    || existing.wakeSeq !== input.wakeSeq
+    || existing.state !== input.state
+  ) {
+    throw new TypeError("Hosted wake terminal receipt conflicts with the existing canonical record.");
+  }
+
+  return true;
 }
 
 export async function commitHostedExecutionCursorTx(input: {
@@ -121,10 +195,8 @@ export async function commitHostedExecutionCursorTx(input: {
   const snapshotRefChanged = input.snapshotRef !== undefined
     && JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotJson);
   const shouldAdvanceCommittedSeq = input.committedSeq > cursor.committedSeq;
-  // Today's Cloudflare runner commits one wake at a time. Keep that invariant explicit here
-  // so a bad caller cannot skip over already-allocated but unseen wake rows.
-  const canAdvanceSingleWake =
-    input.committedSeq === cursor.committedSeq + 1n
+  const canAdvanceSingleWake = shouldAdvanceCommittedSeq
+    && input.committedSeq === cursor.committedSeq + 1n
     && input.committedSeq < cursor.nextSeq;
 
   if (!shouldAdvanceCommittedSeq && !snapshotRefChanged) {
@@ -139,6 +211,45 @@ export async function commitHostedExecutionCursorTx(input: {
       committed: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
     };
+  }
+
+  if (shouldAdvanceCommittedSeq) {
+    const wake = await input.tx.hostedWake.findFirst({
+      where: {
+        seq: input.committedSeq,
+        userId: input.userId,
+      },
+      select: {
+        id: true,
+        quarantinedAt: true,
+      },
+    });
+
+    if (!wake) {
+      return {
+        committed: false,
+        cursor: projectHostedExecutionCursorRecord(cursor),
+      };
+    }
+
+    if (!wake.quarantinedAt) {
+      const receipt = await input.tx.hostedWakeTerminal.findUnique({
+        where: {
+          wakeId: wake.id,
+        },
+      });
+
+      if (!isTerminalHostedWakeReceipt(receipt, {
+        userId: input.userId,
+        wakeId: wake.id,
+        wakeSeq: input.committedSeq,
+      })) {
+        return {
+          committed: false,
+          cursor: projectHostedExecutionCursorRecord(cursor),
+        };
+      }
+    }
   }
 
   const updated = await input.tx.hostedExecutionCursor.updateMany({
@@ -172,6 +283,23 @@ export async function commitHostedExecutionCursorTx(input: {
   };
 }
 
+function isTerminalHostedWakeReceipt(
+  receipt: HostedWakeTerminalRow | null,
+  input: {
+    userId: string;
+    wakeId: string;
+    wakeSeq: bigint;
+  },
+): boolean {
+  return Boolean(
+    receipt
+      && receipt.userId === input.userId
+      && receipt.wakeId === input.wakeId
+      && receipt.wakeSeq === input.wakeSeq
+      && (receipt.state === "completed" || receipt.state === "replaced"),
+  );
+}
+
 export async function quarantineHostedWakeTx(input: {
   quarantineCode: string;
   tx: HostedWakeMutationTx;
@@ -200,56 +328,80 @@ export async function quarantineHostedWakeTx(input: {
 export async function findHostedWakeEventIdByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
+  userId?: string;
 }): Promise<string | null> {
-  const row = await findHostedWakeByEventIdTx(input);
+  const event = await findHostedWakeEventByEventIdTx(input);
 
-  if (!row) {
+  if (!event) {
     return null;
   }
 
-  return resolveHostedWakeEventId(row);
+  return event.eventId;
 }
 
-export async function readHostedWakeLifecycleByDedupeKeyTx(input: {
-  dedupeKey: string;
+export async function readHostedWakeLifecycleByEventIdTx(input: {
+  eventId: string;
   tx: HostedWakeStoreClient;
+  userId?: string;
 }): Promise<HostedWakeLifecycleRecord | null> {
-  const row = await findHostedWakeByDedupeKeyTx({
-    dedupeKey: input.dedupeKey,
-    tx: input.tx,
-  });
+  const resolved = await resolveHostedWakeEventResolutionTx(input);
 
-  if (!row) {
+  if (!resolved) {
     return null;
+  }
+
+  if (resolved.event.replacedByEventId) {
+    return {
+      eventId: resolved.event.eventId,
+      replacedByEventId: resolved.event.replacedByEventId,
+      state: "replaced",
+    };
   }
 
   return {
-    eventId: row.dedupeKey ?? row.id,
+    eventId: resolved.activeEvent.eventId,
     state: await resolveHostedWakeLifecycleStateTx({
-      record: row,
+      record: resolved.wake,
       tx: input.tx,
     }),
   };
 }
 
+export async function readHostedWakeLifecycleByDedupeKeyTx(input: {
+  dedupeKey: string;
+  tx: HostedWakeStoreClient;
+  userId?: string;
+}): Promise<HostedWakeLifecycleRecord | null> {
+  return readHostedWakeLifecycleByEventIdTx({
+    eventId: input.dedupeKey,
+    tx: input.tx,
+    ...(input.userId ? { userId: input.userId } : {}),
+  });
+}
+
 export async function readHostedWakeScheduleByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
+  userId?: string;
 }): Promise<{
   eventId: string;
   seq: string;
   userId: string;
 } | null> {
-  const row = await findHostedWakeByEventIdTx(input);
+  const resolved = await resolveHostedWakeEventResolutionTx(input);
 
-  if (!row) {
+  if (!resolved) {
+    return null;
+  }
+
+  if (resolved.event.replacedByEventId) {
     return null;
   }
 
   return {
-    eventId: resolveHostedWakeEventId(row),
-    seq: row.seq.toString(),
-    userId: row.userId,
+    eventId: resolved.activeEvent.eventId,
+    seq: resolved.wake.seq.toString(),
+    userId: resolved.wake.userId,
   };
 }
 
@@ -274,7 +426,10 @@ export async function readLatestHostedWakeLifecycleByKind(input: {
   }
 
   return {
-    eventId: resolveHostedWakeEventId(wake),
+    eventId: await resolveHostedWakeCurrentEventIdTx({
+      tx: prisma,
+      wake,
+    }),
     state: await resolveHostedWakeLifecycleStateTx({
       record: wake,
       tx: prisma,
@@ -314,4 +469,86 @@ export async function listHostedWakeRepairCandidates(input: {
     targetSeqHint: row.target_seq_hint.toString(),
     userId: row.user_id,
   }));
+}
+
+async function resolveHostedWakeEventResolutionTx(input: {
+  eventId: string;
+  tx: HostedWakeStoreClient;
+  userId?: string;
+}): Promise<{
+  activeEvent: HostedWakeEventRow;
+  event: HostedWakeEventRow;
+  wake: HostedWakeRow;
+} | null> {
+  const event = await findHostedWakeEventByEventIdTx(input);
+
+  if (!event) {
+    return null;
+  }
+
+  const activeEvent = await resolveHostedWakeActiveEventTx({
+    event,
+    tx: input.tx,
+    ...(input.userId ? { userId: input.userId } : {}),
+  });
+  const wake = await input.tx.hostedWake.findUnique({
+    where: {
+      id: activeEvent.wakeId,
+    },
+  });
+
+  if (!wake) {
+    throw new Error(`Hosted wake ${activeEvent.wakeId} missing for event ${activeEvent.eventId}.`);
+  }
+
+  return {
+    activeEvent,
+    event,
+    wake,
+  };
+}
+
+async function resolveHostedWakeActiveEventTx(input: {
+  event: HostedWakeEventRow;
+  tx: HostedWakeStoreClient;
+  userId?: string;
+}): Promise<HostedWakeEventRow> {
+  const seen = new Set<string>();
+  let current = input.event;
+
+  while (current.replacedByEventId) {
+    if (seen.has(current.eventId)) {
+      throw new Error(`Hosted wake event replacement loop detected for ${current.eventId}.`);
+    }
+    seen.add(current.eventId);
+
+    const replacement = await findHostedWakeEventByEventIdTx({
+      eventId: current.replacedByEventId,
+      tx: input.tx,
+      ...(input.userId ? { userId: input.userId } : { userId: current.userId }),
+    });
+
+    if (!replacement) {
+      throw new Error(
+        `Hosted wake replacement event ${current.replacedByEventId} missing for ${current.eventId}.`,
+      );
+    }
+
+    current = replacement;
+  }
+
+  return current;
+}
+
+async function resolveHostedWakeCurrentEventIdTx(input: {
+  tx: HostedWakeStoreClient;
+  wake: HostedWakeRow;
+}): Promise<string> {
+  const currentEvent = await findCurrentHostedWakeEventByWakeIdTx({
+    tx: input.tx,
+    userId: input.wake.userId,
+    wakeId: input.wake.id,
+  });
+
+  return currentEvent?.eventId ?? resolveHostedWakeEventId(input.wake);
 }
