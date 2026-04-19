@@ -7,46 +7,46 @@ const AES_GCM_ALGORITHM = "AES-GCM";
 const HKDF_HASH = "SHA-256";
 const GCM_IV_BYTES = 12;
 const GCM_AUTH_TAG_BYTES = 16;
-const HOSTED_WEB_ENCRYPTION_KEY_BYTES = 32;
-const HOSTED_SECRET_SCOPE_SALT = new TextEncoder().encode("murph.hosted.device-sync.secret.v1");
+const HOSTED_WAKE_ENCRYPTION_KEY_BYTES = 32;
+const HOSTED_WAKE_SCOPE_SALT = new TextEncoder().encode("murph.hosted.wake.payload.v1");
 const BASE64_CANONICAL_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const BASE64URL_CANONICAL_PATTERN = /^[A-Za-z0-9_-]*$/u;
 const HOSTED_WAKE_INLINE_PAYLOAD_FIELD = "hosted-wake-inline-payload";
 const HOSTED_WAKE_REF_PAYLOAD_FIELD = "hosted-wake-ref-payload";
 
-export interface HostedWebEncryptionEnvironment {
+export interface HostedWakeEncryptionEnvironment {
   key: Uint8Array;
   keyVersion: string;
   keysByVersion: Readonly<Record<string, Uint8Array>>;
 }
 
-export function readHostedWebEncryptionEnvironment(
+export function readHostedWakeEncryptionEnvironment(
   source: StringEnvSource = process.env,
-): HostedWebEncryptionEnvironment {
-  const encryptionKey = decodeHostedWebEncryptionKey(
-    requireHostedWebEncryptionString(
-      source.HOSTED_WEB_ENCRYPTION_KEY,
-      "HOSTED_WEB_ENCRYPTION_KEY",
+): HostedWakeEncryptionEnvironment {
+  const encryptionKey = decodeHostedWakeEncryptionKey(
+    requireHostedWakeEncryptionString(
+      source.HOSTED_WAKE_ENCRYPTION_KEY,
+      "HOSTED_WAKE_ENCRYPTION_KEY",
     ),
   );
-  const keyVersion = normalizeOptionalString(source.HOSTED_WEB_ENCRYPTION_KEY_VERSION) ?? "v1";
+  const keyVersion = normalizeOptionalString(source.HOSTED_WAKE_ENCRYPTION_KEY_VERSION) ?? "v1";
 
   return {
     key: encryptionKey,
     keyVersion,
-    keysByVersion: decodeHostedWebEncryptionKeyring({
+    keysByVersion: decodeHostedWakeEncryptionKeyring({
       currentKey: encryptionKey,
       currentKeyVersion: keyVersion,
-      keyringJson: normalizeOptionalString(source.HOSTED_WEB_ENCRYPTION_KEYRING_JSON),
-      label: "HOSTED_WEB_ENCRYPTION_KEYRING_JSON",
+      keyringJson: normalizeOptionalString(source.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON),
+      label: "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
     }),
   };
 }
 
 export async function decryptHostedWakePayloadCiphertext(input: {
   ciphertext: string;
-  environment: HostedWebEncryptionEnvironment;
+  environment: HostedWakeEncryptionEnvironment;
   userId: string;
 }): Promise<unknown> {
   const fields = [
@@ -57,7 +57,7 @@ export async function decryptHostedWakePayloadCiphertext(input: {
 
   for (const field of fields) {
     try {
-      const plaintext = await decryptHostedWebPrivateFieldCiphertext({
+      const plaintext = await decryptHostedWakeCiphertext({
         ciphertext: input.ciphertext,
         environment: input.environment,
         field,
@@ -75,7 +75,7 @@ export async function decryptHostedWakePayloadCiphertext(input: {
     : new TypeError("Hosted wake payload ciphertext is invalid.");
 }
 
-function requireHostedWebEncryptionString(
+function requireHostedWakeEncryptionString(
   value: string | null | undefined,
   label: string,
 ): string {
@@ -93,11 +93,11 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return normalized ? normalized : null;
 }
 
-function decodeHostedWebEncryptionKey(value: string): Uint8Array {
+function decodeHostedWakeEncryptionKey(value: string): Uint8Array {
   const normalized = value.trim();
 
   if (!normalized) {
-    throw new TypeError("Hosted web encryption key must not be empty.");
+    throw new TypeError("Hosted wake encryption key must not be empty.");
   }
 
   if (/^[0-9a-f]{64}$/iu.test(normalized)) {
@@ -106,19 +106,19 @@ function decodeHostedWebEncryptionKey(value: string): Uint8Array {
 
   const decoded = decodeStrictBase64(
     normalizeBase64Url(normalized),
-    "Hosted web encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
+    "Hosted wake encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
   );
 
-  if (decoded.byteLength !== HOSTED_WEB_ENCRYPTION_KEY_BYTES) {
+  if (decoded.byteLength !== HOSTED_WAKE_ENCRYPTION_KEY_BYTES) {
     throw new TypeError(
-      "Hosted web encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
+      "Hosted wake encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
     );
   }
 
   return decoded;
 }
 
-function decodeHostedWebEncryptionKeyring(input: {
+function decodeHostedWakeEncryptionKeyring(input: {
   currentKey: Uint8Array;
   currentKeyVersion: string;
   keyringJson: string | null;
@@ -152,7 +152,7 @@ function decodeHostedWebEncryptionKeyring(input: {
         throw new TypeError(`${input.label} entry ${version} must be a non-empty encoded key.`);
       }
 
-      keysByVersion[version] = decodeHostedWebEncryptionKey(encodedKey);
+      keysByVersion[version] = decodeHostedWakeEncryptionKey(encodedKey);
     }
   }
 
@@ -169,9 +169,9 @@ function decodeHostedWebEncryptionKeyring(input: {
   return keysByVersion;
 }
 
-async function decryptHostedWebPrivateFieldCiphertext(input: {
+async function decryptHostedWakeCiphertext(input: {
   ciphertext: string;
-  environment: HostedWebEncryptionEnvironment;
+  environment: HostedWakeEncryptionEnvironment;
   field: string;
   userId: string;
 }): Promise<string> {
@@ -184,30 +184,30 @@ async function decryptHostedWebPrivateFieldCiphertext(input: {
     || !tagText
     || ciphertextText === undefined
   ) {
-    throw new TypeError("Encrypted hosted secret payload is malformed.");
+    throw new TypeError("Encrypted hosted wake payload is malformed.");
   }
 
   const key = input.environment.keysByVersion[payloadKeyVersion];
 
   if (!key) {
     throw new TypeError(
-      `Encrypted hosted secret payload references unknown key version ${payloadKeyVersion}.`,
+      `Encrypted hosted wake payload references unknown key version ${payloadKeyVersion}.`,
     );
   }
 
-  const scopedKey = await deriveHostedSecretScopeKey(
+  const scopedKey = await deriveHostedWakeScopeKey(
     key,
-    `hosted-member-private-field:${input.field}`,
+    `hosted-wake-payload:${input.field}`,
   );
-  const iv = decodeStrictBase64Url(ivText, "Encrypted hosted secret payload is malformed.");
-  const authTag = decodeStrictBase64Url(tagText, "Encrypted hosted secret payload is malformed.");
+  const iv = decodeStrictBase64Url(ivText, "Encrypted hosted wake payload is malformed.");
+  const authTag = decodeStrictBase64Url(tagText, "Encrypted hosted wake payload is malformed.");
   const ciphertext = decodeStrictBase64Url(
     ciphertextText,
-    "Encrypted hosted secret payload is malformed.",
+    "Encrypted hosted wake payload is malformed.",
   );
 
   if (iv.byteLength !== GCM_IV_BYTES || authTag.byteLength !== GCM_AUTH_TAG_BYTES) {
-    throw new TypeError("Encrypted hosted secret payload is malformed.");
+    throw new TypeError("Encrypted hosted wake payload is malformed.");
   }
 
   const keyHandle = await crypto.subtle.importKey(
@@ -219,7 +219,7 @@ async function decryptHostedWebPrivateFieldCiphertext(input: {
   );
   const plaintext = await crypto.subtle.decrypt(
     {
-      additionalData: toArrayBuffer(buildHostedWebFieldAad({
+      additionalData: toArrayBuffer(buildHostedWakeFieldAad({
         field: input.field,
         userId: input.userId,
       })),
@@ -234,18 +234,18 @@ async function decryptHostedWebPrivateFieldCiphertext(input: {
   return new TextDecoder().decode(plaintext);
 }
 
-function buildHostedWebFieldAad(input: {
+function buildHostedWakeFieldAad(input: {
   field: string;
   userId: string;
 }): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({
     field: input.field,
     memberId: input.userId,
-    purpose: "hosted-member-private-field",
+    purpose: "hosted-wake-payload",
   }));
 }
 
-async function deriveHostedSecretScopeKey(
+async function deriveHostedWakeScopeKey(
   rootKey: Uint8Array,
   scope: string,
 ): Promise<Uint8Array> {
@@ -261,10 +261,10 @@ async function deriveHostedSecretScopeKey(
       hash: HKDF_HASH,
       info: toArrayBuffer(new TextEncoder().encode(scope)),
       name: "HKDF",
-      salt: toArrayBuffer(HOSTED_SECRET_SCOPE_SALT),
+      salt: toArrayBuffer(HOSTED_WAKE_SCOPE_SALT),
     },
     keyMaterial,
-    HOSTED_WEB_ENCRYPTION_KEY_BYTES * 8,
+    HOSTED_WAKE_ENCRYPTION_KEY_BYTES * 8,
   );
 
   return new Uint8Array(derivedBits);

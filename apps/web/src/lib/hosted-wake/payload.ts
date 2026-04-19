@@ -1,14 +1,15 @@
 import { Buffer } from "node:buffer";
 
 import {
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution";
 
 import {
-  decryptHostedWebNullableString,
-  encryptHostedWebNullableString,
-} from "../hosted-web/encryption";
+  decryptHostedWakeNullableString,
+  encryptHostedWakeNullableString,
+} from "./encryption";
 export const HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES = 16 * 1024;
 
 const HOSTED_WAKE_INLINE_PAYLOAD_FIELD = "hosted-wake-inline-payload";
@@ -36,9 +37,9 @@ export function encodeHostedWakeStoredPayload(input: {
   const payloadBytes = Buffer.byteLength(serialized, "utf8");
 
   if (payloadBytes <= HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES) {
-    const payloadInlineCiphertext = encryptHostedWebNullableString({
+    const payloadInlineCiphertext = encryptHostedWakeNullableString({
       field: HOSTED_WAKE_INLINE_PAYLOAD_FIELD,
-      memberId: input.userId,
+      userId: input.userId,
       value: serialized,
     });
 
@@ -54,9 +55,9 @@ export function encodeHostedWakeStoredPayload(input: {
     };
   }
 
-  const payloadRefCiphertext = encryptHostedWebNullableString({
+  const payloadRefCiphertext = encryptHostedWakeNullableString({
     field: HOSTED_WAKE_REF_PAYLOAD_FIELD,
-    memberId: input.userId,
+    userId: input.userId,
     value: serialized,
   });
 
@@ -86,9 +87,9 @@ export function decodeHostedWakeStoredPayload(input: {
   const field = input.payloadInlineCiphertext
     ? HOSTED_WAKE_INLINE_PAYLOAD_FIELD
     : HOSTED_WAKE_REF_PAYLOAD_FIELD;
-  const decrypted = decryptHostedWebNullableString({
+  const decrypted = decryptHostedWakeNullableString({
     field,
-    memberId: input.userId,
+    userId: input.userId,
     value: encryptedValue,
   });
 
@@ -100,6 +101,7 @@ export function decodeHostedWakeStoredPayload(input: {
 }
 
 export {
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
   HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
 };

@@ -20,9 +20,9 @@ import {
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
 import {
-  readHostedWebEncryptionEnvironment,
-  type HostedWebEncryptionEnvironment,
-} from "./hosted-web-encryption.ts";
+  readHostedWakeEncryptionEnvironment,
+  type HostedWakeEncryptionEnvironment,
+} from "./hosted-wake-encryption.ts";
 import type { StringEnvSource } from "./string-env.ts";
 
 export type HostedExecutionEnvironment = Omit<
@@ -30,9 +30,9 @@ export type HostedExecutionEnvironment = Omit<
   | "automationRecipientPrivateJwkJson"
   | "automationRecipientPrivateKeyringJson"
   | "automationRecipientPublicJwkJson"
-  | "hostedWebEncryptionKey"
-  | "hostedWebEncryptionKeyVersion"
-  | "hostedWebEncryptionKeyringJson"
+  | "hostedWakeEncryptionKey"
+  | "hostedWakeEncryptionKeyVersion"
+  | "hostedWakeEncryptionKeyringJson"
   | "recoveryRecipientPublicJwkJson"
   | "teeAutomationRecipientPublicJwkJson"
   | "platformEnvelopeKeyBase64"
@@ -41,7 +41,7 @@ export type HostedExecutionEnvironment = Omit<
   automationRecipientPrivateKey: HostedUserRecipientPrivateKeyJwk;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
   hostedWebBaseUrl: string;
-  hostedWebEncryption: HostedWebEncryptionEnvironment;
+  hostedWakeEncryption: HostedWakeEncryptionEnvironment;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   platformEnvelopeKey: Uint8Array;
   platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
@@ -58,9 +58,9 @@ export function readHostedExecutionEnvironment(
     automationRecipientPrivateJwkJson,
     automationRecipientPrivateKeyringJson,
     automationRecipientPublicJwkJson,
-    hostedWebEncryptionKey,
-    hostedWebEncryptionKeyVersion,
-    hostedWebEncryptionKeyringJson,
+    hostedWakeEncryptionKey,
+    hostedWakeEncryptionKeyVersion,
+    hostedWakeEncryptionKeyringJson,
     recoveryRecipientPublicJwkJson,
     teeAutomationRecipientPublicJwkJson,
     platformEnvelopeKeyBase64,
@@ -97,10 +97,10 @@ export function readHostedExecutionEnvironment(
       keyringJson: automationRecipientPrivateKeyringJson,
     }),
     automationRecipientPublicKey,
-    hostedWebEncryption: readHostedWebEncryptionEnvironment({
-      HOSTED_WEB_ENCRYPTION_KEY: hostedWebEncryptionKey,
-      HOSTED_WEB_ENCRYPTION_KEYRING_JSON: hostedWebEncryptionKeyringJson ?? undefined,
-      HOSTED_WEB_ENCRYPTION_KEY_VERSION: hostedWebEncryptionKeyVersion,
+    hostedWakeEncryption: readHostedWakeEncryptionEnvironment({
+      HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
+      HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: hostedWakeEncryptionKeyringJson ?? undefined,
+      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: hostedWakeEncryptionKeyVersion,
     }),
     platformEnvelopeKey,
     platformEnvelopeKeysById: decodeHostedExecutionPlatformEnvelopeKeyring({

@@ -57,6 +57,7 @@ Required worker secrets:
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`
 - `HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`
+- `HOSTED_WAKE_ENCRYPTION_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
 Required worker vars:
@@ -78,6 +79,7 @@ Defaulted worker vars:
 Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
+- `HOSTED_WAKE_ENCRYPTION_KEY_VERSION` and `HOSTED_WAKE_ENCRYPTION_KEYRING_JSON` for wake-payload key rotation inside the execution plane
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`, and `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` for staged key rotation or future envelope lanes
 - `HOSTED_ASSISTANT_*` config plus supported assistant provider API keys
@@ -87,6 +89,8 @@ Optional execution vars and secrets:
 When hosted email sender identity is configured, deploy automation renders an environment-specific native `HOSTED_EMAIL` send binding and constrains it with `allowed_sender_addresses` so outbound sender selection remains config-owned.
 
 The runtime always includes the minimal `assistant`, `parsers`, and `web` env profiles. Deploy automation layers `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default. Hosted device-sync runtime config is derived directly from worker env into `runtime.resolvedConfig`, so it stays outside the child-env profile surface.
+
+Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the child process reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
 
 ## Deploy Artifacts
 

@@ -185,6 +185,47 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("routes hosted web control-plane calls through the worker proxy when callback signing stays outside the child", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      connections: [],
+      generatedAt: "2026-04-07T00:00:00.000Z",
+      userId: "member_123",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const snapshot = await platform.deviceSyncPort!.fetchSnapshot({
+      connectionId: "conn_123",
+    });
+
+    expect(snapshot.userId).toBe("member_123");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the proxied web-control fetch to run.");
+    }
+    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    expect(request).toBeInstanceOf(Request);
+    expect((request as Request).url).toBe("http://web-control.worker/api/internal/device-sync/runtime/snapshot");
+    expect((request as Request).method).toBe("POST");
+    expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect((request as Request).headers.get("content-type")).toBe("application/json");
+    await expect((request as Request).json()).resolves.toEqual({
+      connectionId: "conn_123",
+      userId: "member_123",
+    });
+  });
+
   it("exposes only the shared hosted effects port methods needed after the cutover", async () => {
     const rawMessage = new Uint8Array([0x61, 0x62, 0x63]);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

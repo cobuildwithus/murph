@@ -32,6 +32,16 @@ import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts
 
 const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
 
+type HostedWebControlTransport =
+  | {
+    callbackSigning: HostedWebCallbackSigningEnvironment;
+    mode: "direct";
+    webControlBaseUrl: string;
+  }
+  | {
+    mode: "proxy";
+  };
+
 export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
@@ -50,15 +60,17 @@ export function buildHostedExecutionRuntimePlatform(input: {
     input.fetchImpl ?? fetch,
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
-  const webControlBaseUrl = input.webControlBaseUrl ?? null;
-  const webCallbackSigning = input.webCallbackSigning ?? null;
-  const hostedWebDeviceSyncPort = webControlBaseUrl && webCallbackSigning
+  const hostedWebControlTransport = resolveHostedWebControlTransport({
+    internalWorkerProxyToken: input.internalWorkerProxyToken ?? null,
+    webCallbackSigning: input.webCallbackSigning ?? null,
+    webControlBaseUrl: input.webControlBaseUrl ?? null,
+  });
+  const hostedWebDeviceSyncPort = hostedWebControlTransport
     ? createHostedWebDeviceSyncPort({
-        baseUrl: webControlBaseUrl,
         boundUserId: input.boundUserId,
-        callbackSigning: webCallbackSigning,
         fetchImpl,
         timeoutMs,
+        transport: hostedWebControlTransport,
       })
     : null;
 
@@ -131,28 +143,24 @@ export function buildHostedExecutionRuntimePlatform(input: {
         return target ? { target } : undefined;
       },
     },
-    ...(webControlBaseUrl && webCallbackSigning
+    ...(hostedWebControlTransport
       ? {
           usageExportPort: {
             async recordUsage(usage) {
-              const body = JSON.stringify({
-                usage,
-              });
-              const response = await fetchHostedExecutionWebControlPlaneResponse({
-                baseUrl: webControlBaseUrl,
-                body,
+              const payload = await fetchHostedWebControlPlaneJson({
+                body: {
+                  usage,
+                },
                 boundUserId: input.boundUserId,
-                callbackSigning: webCallbackSigning,
+                description: "Hosted usage export",
                 fetchImpl,
-                method: "POST",
                 path: HOSTED_WEB_USAGE_RECORD_PATH,
                 timeoutMs,
+                transport: hostedWebControlTransport,
               });
-              assertHostedOk(response, "Hosted usage export");
-              const text = await response.text();
 
               try {
-                return parseHostedRuntimeUsageRecordResponse(JSON.parse(text) as unknown);
+                return parseHostedRuntimeUsageRecordResponse(payload);
               } catch (error) {
                 throw new Error("Hosted usage export returned invalid JSON.", {
                   cause: error,
@@ -163,6 +171,28 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
   };
+}
+
+function resolveHostedWebControlTransport(input: {
+  internalWorkerProxyToken: string | null;
+  webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
+  webControlBaseUrl: string | null;
+}): HostedWebControlTransport | null {
+  if (input.webControlBaseUrl && input.webCallbackSigning) {
+    return {
+      callbackSigning: input.webCallbackSigning,
+      mode: "direct",
+      webControlBaseUrl: input.webControlBaseUrl,
+    };
+  }
+
+  if (input.internalWorkerProxyToken) {
+    return {
+      mode: "proxy",
+    };
+  }
+
+  return null;
 }
 
 function createCloudflareHostedRuntimeFetch(
@@ -324,11 +354,10 @@ function isTokenizedLocalInternalProxyBaseUrl(value: URL): boolean {
 }
 
 function createHostedWebDeviceSyncPort(input: {
-  baseUrl: string;
   boundUserId: string;
-  callbackSigning: HostedWebCallbackSigningEnvironment;
   fetchImpl: typeof fetch;
   timeoutMs: number;
+  transport: HostedWebControlTransport;
 }) {
   return {
     async applyUpdates(runtimeInput: {
@@ -336,32 +365,30 @@ function createHostedWebDeviceSyncPort(input: {
       updates: unknown;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
-        baseUrl: input.baseUrl,
         body: {
           ...(runtimeInput.occurredAt ? { occurredAt: runtimeInput.occurredAt } : {}),
           updates: runtimeInput.updates,
           userId: input.boundUserId,
         },
         boundUserId: input.boundUserId,
-        callbackSigning: input.callbackSigning,
         description: "Hosted device-sync runtime apply",
         fetchImpl: input.fetchImpl,
         path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
         timeoutMs: input.timeoutMs,
+        transport: input.transport,
       });
 
       return parseHostedExecutionDeviceSyncRuntimeApplyResponse(payload);
     },
     async createConnectLink({ provider }: { provider: string }) {
       const payload = await fetchHostedWebControlPlaneJson({
-        baseUrl: input.baseUrl,
         boundUserId: input.boundUserId,
-        callbackSigning: input.callbackSigning,
         description: `Hosted device-sync connect link ${provider}`,
         fetchImpl: input.fetchImpl,
         method: "POST",
         path: buildHostedExecutionDeviceSyncConnectLinkPath(provider),
         timeoutMs: input.timeoutMs,
+        transport: input.transport,
       });
 
       return parseHostedExecutionDeviceSyncConnectLinkResponse(payload);
@@ -371,18 +398,17 @@ function createHostedWebDeviceSyncPort(input: {
       provider?: string | null;
     } = {}) {
       const payload = await fetchHostedWebControlPlaneJson({
-        baseUrl: input.baseUrl,
         body: {
           ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
           ...(runtimeInput.provider ? { provider: runtimeInput.provider } : {}),
           userId: input.boundUserId,
         },
         boundUserId: input.boundUserId,
-        callbackSigning: input.callbackSigning,
         description: "Hosted device-sync runtime snapshot",
         fetchImpl: input.fetchImpl,
         path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
         timeoutMs: input.timeoutMs,
+        transport: input.transport,
       });
 
       return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(payload);
@@ -391,27 +417,45 @@ function createHostedWebDeviceSyncPort(input: {
 }
 
 async function fetchHostedWebControlPlaneJson(input: {
-  baseUrl: string;
   body?: Record<string, unknown>;
   boundUserId: string;
-  callbackSigning: HostedWebCallbackSigningEnvironment;
   description: string;
   fetchImpl: typeof fetch;
   method?: "GET" | "POST";
   path: string;
   timeoutMs: number;
+  transport: HostedWebControlTransport;
 }): Promise<unknown> {
+  const method = input.method ?? (input.body === undefined ? "GET" : "POST");
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body,
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: input.method ?? (input.body === undefined ? "GET" : "POST"),
-    path: input.path,
-    timeoutMs: input.timeoutMs,
-  });
+  const response = input.transport.mode === "direct"
+    ? await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.transport.webControlBaseUrl,
+      body,
+      boundUserId: input.boundUserId,
+      callbackSigning: input.transport.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method,
+      path: input.path,
+      timeoutMs: input.timeoutMs,
+    })
+    : await fetchHostedResponse({
+      description: input.description,
+      fetchImpl: input.fetchImpl,
+      init: {
+        ...(body === undefined ? {} : { body }),
+        ...(body === undefined
+          ? {}
+          : {
+            headers: {
+              "content-type": "application/json",
+            },
+          }),
+        method,
+      },
+      timeoutMs: input.timeoutMs,
+      url: createHostedWebControlProxyUrl(input.path),
+    });
 
   if (!response.ok) {
     const detail = (await response.text()).trim();
@@ -438,6 +482,13 @@ async function fetchHostedWebControlPlaneJson(input: {
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
+}
+
+function createHostedWebControlProxyUrl(path: string): URL {
+  return new URL(
+    path.replace(/^\/+/u, ""),
+    `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}/`,
+  );
 }
 
 async function fetchHostedJson(input: {

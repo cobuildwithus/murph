@@ -4,7 +4,6 @@ import {
   runHostedAssistantRuntimeJobInProcessDetailed,
 } from "@murphai/assistant-runtime";
 
-import { readHostedExecutionEnvironment } from "./env.js";
 import { buildHostedExecutionRuntimePlatform } from "./runtime-platform.js";
 
 async function main(): Promise<void> {
@@ -13,7 +12,6 @@ async function main(): Promise<void> {
   );
 
   try {
-    const environment = readHostedExecutionEnvironment();
     const result = await runHostedAssistantRuntimeJobInProcessDetailed(
       input.job,
       {
@@ -23,8 +21,6 @@ async function main(): Promise<void> {
           internalWorkerProxyToken: input.internalWorkerProxyToken,
           localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
           localLoopbackProxyToken: input.localLoopbackProxyToken,
-          webCallbackSigning: environment.webCallbackSigning,
-          webControlBaseUrl: environment.hostedWebBaseUrl,
         }),
       },
     );
