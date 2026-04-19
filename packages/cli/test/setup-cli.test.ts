@@ -61,6 +61,7 @@ import {
 } from '@murphai/operator-config/setup-runtime-env'
 import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 import type { SetupResult } from '@murphai/operator-config/setup-cli-contracts'
+import { loadCliEnvFiles } from '../src/cli-entry.ts'
 import {
   commandOutputFromError,
   ensureCliRuntimeArtifacts,
@@ -74,6 +75,7 @@ import {
 
 const execFileAsync = promisify(execFile)
 const SETUP_ALIAS_TIMEOUT_MS = 45_000
+const SETUP_ONBOARD_TIMEOUT_MS = 90_000
 
 type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]
 type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
@@ -635,86 +637,37 @@ async function writeExecutable(
   await chmod(absolutePath, 0o755)
 }
 
+function restoreEnvironmentVariable(
+  key: string,
+  value: string | undefined,
+): void {
+  if (value === undefined) {
+    delete process.env[key]
+    return
+  }
+
+  process.env[key] = value
+}
+
 function buildExpectedCliShimScript(
   cliBinPath: string,
   shimName: 'murph' | 'vault-cli' = 'murph',
 ): string {
-  const generatedRepoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
-
   return `#!/usr/bin/env bash
 set -euo pipefail
 
-repo_root_exists() {
-  local candidate="\${1:-}"
-  if [ -z "$candidate" ] || [ ! -d "$candidate" ]; then
-    return 1
-  fi
-
-  if [ -f "$candidate/packages/cli/src/bin.ts" ]; then
-    return 0
-  fi
-
-  if [ -f "$candidate/packages/cli/dist/bin.js" ]; then
-    return 0
-  fi
-
-  return 1
-}
-
-canonicalize_repo_root() {
-  (
-    cd "\${1:-}" >/dev/null 2>&1 && pwd -P
-  )
-}
-
-find_repo_root_from_pwd() {
-  local candidate
-  if ! candidate="$(pwd -P 2>/dev/null)"; then
-    return 1
-  fi
-
-  while true; do
-    if repo_root_exists "$candidate"; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-
-    if [ "$candidate" = "/" ]; then
-      return 1
-    fi
-
-    candidate="$(dirname "$candidate")"
-  done
-}
-
-resolve_repo_root() {
-  if repo_root_exists "\${MURPH_REPO_ROOT:-}"; then
-    canonicalize_repo_root "\${MURPH_REPO_ROOT}"
-    return 0
-  fi
-
-  if repo_root_exists '${generatedRepoRoot}'; then
-    canonicalize_repo_root '${generatedRepoRoot}'
-    return 0
-  fi
-
-  find_repo_root_from_pwd
-}
-
-repo_root="$(resolve_repo_root || true)"
-if [ -z "$repo_root" ]; then
-  printf '%s\n' 'Murph CLI shim could not locate the repo checkout. Run \`pnpm exec tsx packages/cli/src/bin.ts setup\` or \`./scripts/setup-host.sh\` from the repo checkout to refresh the shims, or set \`MURPH_REPO_ROOT\`.' >&2
-  exit 1
-fi
-
-cli_bin_path="$repo_root/packages/cli/dist/bin.js"
+cli_bin_path=${quoteShellArgument(cliBinPath)}
 if [ ! -f "$cli_bin_path" ]; then
-  printf '%s\n' 'Murph CLI build output is unavailable. Run \`pnpm --dir <repo> build:test-runtime:prepared\` (preferred) or \`pnpm --dir <repo> build\` from the repo checkout.' >&2
+  printf '%s\n' 'Murph CLI build output is unavailable. Re-run setup from the current checkout to refresh the shims.' >&2
   exit 1
 fi
 
-exec env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
+exec env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} node "$cli_bin_path" "$@"
 `
+}
+
+function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`
 }
 
 function makeBootstrapResult(vault: string, options?: {
@@ -2542,7 +2495,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const murphShimPath = path.join(homeRoot, '.local', 'bin', 'murph')
   const vaultCliShimPath = path.join(homeRoot, '.local', 'bin', 'vault-cli')
-  const shellProfilePath = path.join(homeRoot, '.zshrc')
   const installedFormulas = new Set<string>()
   const runCalls: Array<{ file: string; args: string[] }> = []
   const initCalls: Array<{ requestId: string | null; vault: string }> = []
@@ -2692,11 +2644,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       result.steps.some((step) => step.id === 'assistant-defaults' && step.status === 'completed'),
       true,
     )
-    assert.equal(
-      result.notes.includes('Open a new shell or run source ~/.zshrc to use murph immediately.'),
-      true,
-    )
-
     const modelText = await readFile(expectedWhisperModelPath, 'utf8')
     const operatorConfig = JSON.parse(await readFile(operatorConfigPath, 'utf8')) as {
       assistant?: {
@@ -2726,7 +2673,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     }
     const murphShim = await readFile(murphShimPath, 'utf8')
     const vaultCliShim = await readFile(vaultCliShimPath, 'utf8')
-    const shellProfile = await readFile(shellProfilePath, 'utf8')
     assert.equal(modelText, 'model')
     assert.equal(operatorConfig.defaultVault, '~/vault')
     assert.equal(operatorConfig.assistant?.backend?.adapter, 'codex-cli')
@@ -2750,7 +2696,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     assert.equal(operatorConfig.assistant?.account?.quota?.primaryWindow?.remainingPercent, 55)
     assert.equal(murphShim, buildExpectedCliShimScript(cliBinPath, 'murph'))
     assert.equal(vaultCliShim, buildExpectedCliShimScript(cliBinPath, 'vault-cli'))
-    assert.match(shellProfile, /export PATH="\$HOME\/\.local\/bin:\$PATH"/u)
     assert.equal(
       runCalls.some(
         ({ args, file }) => path.basename(file) === 'brew' && args.join(' ') === 'install ffmpeg',
@@ -3101,17 +3046,17 @@ exit 23
       'dist',
       'bin.js',
     )
-    assert.deepEqual(result.stdout.trim().split('\n'), [
-      'program:vault-cli',
-      `node:${canonicalCliBinPath}`,
-    ])
+    const [programLine, nodeLine] = result.stdout.trim().split('\n')
+    assert.equal(programLine, 'program:vault-cli')
+    assert.equal(nodeLine?.startsWith('node:'), true)
+    assert.equal(await realpath(nodeLine.slice('node:'.length)), canonicalCliBinPath)
     await assert.rejects(readFile(repairMarkerPath, 'utf8'), /ENOENT/u)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
 })
 
-test.sequential('CLI shim recovers from a moved repo checkout when invoked inside the new checkout', async () => {
+test.sequential('CLI shim fails loudly after a moved repo checkout until setup refreshes the shims', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-moved-checkout-'))
   const staleRepoRoot = path.join(tempRoot, 'old-repo')
   const liveRepoRoot = path.join(tempRoot, 'renamed-repo')
@@ -3124,12 +3069,13 @@ test.sequential('CLI shim recovers from a moved repo checkout when invoked insid
     await writeFile(path.join(liveCliDistRoot, 'bin.js'), `console.log('moved-ok')\n`, 'utf8')
     await writeExecutable(shimPath, buildExpectedCliShimScript(staleCliBinPath, 'murph'))
 
-    const result = await execFileAsync(shimPath, [], {
-      cwd: path.join(liveRepoRoot, 'packages', 'cli'),
-      env: withoutNodeV8Coverage(process.env),
-    })
-
-    assert.equal(result.stdout.trim(), 'moved-ok')
+    await assert.rejects(
+      execFileAsync(shimPath, [], {
+        cwd: path.join(liveRepoRoot, 'packages', 'cli'),
+        env: withoutNodeV8Coverage(process.env),
+      }),
+      /Murph CLI build output is unavailable\./u,
+    )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -3597,76 +3543,90 @@ test.sequential('murph use saves an existing vault as the active default vault',
   }
 }, SETUP_ALIAS_TIMEOUT_MS)
 
-test.sequential('murph init loads VAULT from a local .env file during setup bootstrap', async () => {
+test.sequential('murph onboard loads VAULT from a local .env file during setup bootstrap', async () => {
   const originalVault = process.env.VAULT
+  const originalHome = process.env.HOME
+  const originalCwd = process.cwd()
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-vault-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-home-'))
-  const envVault = path.join(tempRoot, 'vault-from-dotenv')
+  const envVault = path.join(await realpath(tempRoot), 'vault-from-dotenv')
 
   delete process.env.VAULT
   await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
 
   try {
-    await runSetupAliasRaw('murph', ['init'], {
-      cwd: tempRoot,
-      env: {
-        HOME: homeRoot,
-      },
-    })
+    process.chdir(tempRoot)
+    process.env.HOME = homeRoot
+    loadCliEnvFiles(tempRoot)
 
-    await readFile(path.join(envVault, 'vault.json'), 'utf8')
-    await readFile(path.join(envVault, 'CORE.md'), 'utf8')
+    const result = requireData(
+      await runSetupCli<SetupResult>(
+        ['onboard'],
+        {
+          async setupMacos(input: { vault: string }) {
+            return makeSetupResult(path.resolve(input.vault))
+          },
+        },
+        'murph',
+      ),
+    )
+
+    assert.equal(result.vault, envVault)
   } finally {
-    if (originalVault === undefined) {
-      delete process.env.VAULT
-    } else {
-      process.env.VAULT = originalVault
-    }
-
+    process.chdir(originalCwd)
+    restoreEnvironmentVariable('HOME', originalHome)
+    restoreEnvironmentVariable('VAULT', originalVault)
     await rm(tempRoot, { recursive: true, force: true })
     await rm(homeRoot, { recursive: true, force: true })
   }
-})
+}, SETUP_ONBOARD_TIMEOUT_MS)
 
-test.sequential('murph init keeps exported VAULT values ahead of local .env files during setup bootstrap', async () => {
+test.sequential('murph onboard keeps exported VAULT values ahead of local .env files during setup bootstrap', async () => {
   const originalVault = process.env.VAULT
+  const originalHome = process.env.HOME
+  const originalCwd = process.cwd()
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-home-'))
-  const shellVault = path.join(tempRoot, 'vault-from-shell')
-  const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
+  const shellVault = path.join(await realpath(tempRoot), 'vault-from-shell')
 
   delete process.env.VAULT
   await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
 
   try {
-    await runSetupAliasRaw('murph', ['init'], {
-      cwd: tempRoot,
-      env: {
-        VAULT: './vault-from-shell',
-        HOME: homeRoot,
-      },
-    })
+    process.chdir(tempRoot)
+    process.env.HOME = homeRoot
+    process.env.VAULT = './vault-from-shell'
+    loadCliEnvFiles(tempRoot)
 
-    await readFile(path.join(shellVault, 'vault.json'), 'utf8')
-    await assert.rejects(readFile(path.join(dotenvVault, 'vault.json'), 'utf8'))
+    const result = requireData(
+      await runSetupCli<SetupResult>(
+        ['onboard'],
+        {
+          async setupMacos(input: { vault: string }) {
+            return makeSetupResult(path.resolve(input.vault))
+          },
+        },
+        'murph',
+      ),
+    )
+
+    assert.equal(result.vault, shellVault)
   } finally {
-    if (originalVault === undefined) {
-      delete process.env.VAULT
-    } else {
-      process.env.VAULT = originalVault
-    }
-
+    process.chdir(originalCwd)
+    restoreEnvironmentVariable('HOME', originalHome)
+    restoreEnvironmentVariable('VAULT', originalVault)
     await rm(tempRoot, { recursive: true, force: true })
     await rm(homeRoot, { recursive: true, force: true })
   }
-})
+}, SETUP_ONBOARD_TIMEOUT_MS)
 
-test.sequential('murph prefers .env.local values over .env defaults', async () => {
+test.sequential('murph onboard prefers .env.local values over .env defaults', async () => {
   const originalVault = process.env.VAULT
+  const originalHome = process.env.HOME
+  const originalCwd = process.cwd()
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-local-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-local-home-'))
-  const localVault = path.join(tempRoot, 'vault-from-dotenv-local')
-  const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
+  const localVault = path.join(await realpath(tempRoot), 'vault-from-dotenv-local')
 
   delete process.env.VAULT
   await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
@@ -3677,26 +3637,31 @@ test.sequential('murph prefers .env.local values over .env defaults', async () =
   )
 
   try {
-    await runSetupAliasRaw('murph', ['init'], {
-      cwd: tempRoot,
-      env: {
-        HOME: homeRoot,
-      },
-    })
+    process.chdir(tempRoot)
+    process.env.HOME = homeRoot
+    loadCliEnvFiles(tempRoot)
 
-    await readFile(path.join(localVault, 'vault.json'), 'utf8')
-    await assert.rejects(readFile(path.join(dotenvVault, 'vault.json'), 'utf8'))
+    const result = requireData(
+      await runSetupCli<SetupResult>(
+        ['onboard'],
+        {
+          async setupMacos(input: { vault: string }) {
+            return makeSetupResult(path.resolve(input.vault))
+          },
+        },
+        'murph',
+      ),
+    )
+
+    assert.equal(result.vault, localVault)
   } finally {
-    if (originalVault === undefined) {
-      delete process.env.VAULT
-    } else {
-      process.env.VAULT = originalVault
-    }
-
+    process.chdir(originalCwd)
+    restoreEnvironmentVariable('HOME', originalHome)
+    restoreEnvironmentVariable('VAULT', originalVault)
     await rm(tempRoot, { recursive: true, force: true })
     await rm(homeRoot, { recursive: true, force: true })
   }
-})
+}, SETUP_ONBOARD_TIMEOUT_MS)
 
 test.sequential('setup-macos wrapper rejects non-macOS hosts before bootstrapping', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wrapper-linux-'))
