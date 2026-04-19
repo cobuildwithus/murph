@@ -354,6 +354,7 @@ async function persistHostedDeviceSyncWake(input: {
     context: "device-sync.wake",
     eventId: input.wake.eventId,
     prisma: input.store.prisma,
+    userId: input.wake.userId,
   });
 }
 

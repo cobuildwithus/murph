@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
 
+import {
+  DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY,
+  DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY_ID,
+} from "../../../../scripts/dev-hosted-local/constants.ts";
+
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedLocalE2eRunnerTimeoutMs = "240000";
@@ -164,6 +169,12 @@ export function resolveHostedLocalSmokeWebEnv(
     HOSTED_WAKE_ENCRYPTION_KEY_VERSION:
       source.HOSTED_WAKE_ENCRYPTION_KEY_VERSION
       ?? hostedWebSmokeDefaultEncryptionKeyVersion,
+    HOSTED_WAKE_FETCH_PROOF_KEY:
+      source.HOSTED_WAKE_FETCH_PROOF_KEY
+      ?? DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY,
+    HOSTED_WAKE_FETCH_PROOF_KEY_ID:
+      source.HOSTED_WAKE_FETCH_PROOF_KEY_ID
+      ?? DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY_ID,
   };
 }
 

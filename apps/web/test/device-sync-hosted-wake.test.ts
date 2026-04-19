@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => {
     handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
       eventId: string;
       prisma?: unknown;
+      userId: string;
     }) => {
       await state.drainHostedExecutionOutboxBestEffort({
         eventIds: [input.eventId],

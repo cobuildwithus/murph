@@ -86,6 +86,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ok: true,
       reason: "wake-appended-active-member",
     },
+    wakeUserId: existingMember.id,
   };
 }
 

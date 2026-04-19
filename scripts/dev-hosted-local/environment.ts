@@ -5,6 +5,8 @@ import {
   cloudflareDir,
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
+  DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY,
+  DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY_ID,
   repoRoot,
   WRANGLER_VAR_ALLOWLIST,
 } from "./constants.ts";
@@ -147,6 +149,12 @@ export function buildHostedLocalDevOverrides(
   return {
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
+    HOSTED_WAKE_FETCH_PROOF_KEY:
+      cloudflareDevVars.HOSTED_WAKE_FETCH_PROOF_KEY?.trim()
+      ?? DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY,
+    HOSTED_WAKE_FETCH_PROOF_KEY_ID:
+      cloudflareDevVars.HOSTED_WAKE_FETCH_PROOF_KEY_ID?.trim()
+      ?? DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY_ID,
     HOSTED_WEB_BASE_URL: webOrigin,
     ...(callbackPrivateJwkJson
       ? {

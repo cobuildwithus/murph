@@ -515,19 +515,18 @@ test("active invite state omits Murph contact actions when no assigned number is
   assert.ok(markup.includes('href="/settings"'));
 });
 
-test("active invite state explains when vault and assistant setup is still running", () => {
+test("activating invite state explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
       authenticated: true,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
-        activationPending: true,
         session: {
           authenticated: true,
           expiresAt: null,
           matchesInvite: true,
         },
-        stage: "active",
+        stage: "activating",
       }),
       inviteCode: "invite-code",
       shareCode: "share-code",
@@ -544,7 +543,7 @@ test("active invite state explains when vault and assistant setup is still runni
     }),
   );
 
-  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /Finishing your setup/);
   assert.match(markup, /Setup finishes in about a minute\./);
   assert.match(markup, /Setting up your vault and assistant/);
   assert.match(markup, /This takes about a minute\. We’ll update here when it’s done\./);
@@ -730,7 +729,7 @@ test("verify-stage auth-settling guard only holds until the first hosted refresh
         },
       }),
     }),
-    true,
+    false,
   );
   assert.equal(
     shouldAwaitHostedInviteSessionResolution({
@@ -753,7 +752,6 @@ function createStatus(
   },
 ): HostedInviteStatusPayload {
   return {
-    activationPending: false,
     billing: {
       defaultPlanCode: getHostedDefaultBillingPlanCode(),
       plans: listHostedBillingPlanPresentations(),
@@ -807,7 +805,6 @@ function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePage
 
 function createCompletionPayload(stage: HostedPrivyCompletionPayload["stage"]): HostedPrivyCompletionPayload {
   return {
-    activationPending: false,
     inviteCode: "invite-code",
     joinUrl: "https://join.example.test/join/invite-code",
     messagingSetupRequired: false,

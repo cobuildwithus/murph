@@ -230,7 +230,6 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result).toEqual({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
@@ -391,7 +390,6 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
-      activationPending: false,
       inviteCode: "public-phone-only-invite",
       joinUrl: "https://join.example.test/join/public-phone-only-invite",
       memberId: "member_phone_only",
@@ -465,7 +463,6 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
-      activationPending: false,
       inviteCode: "public-telegram-invite",
       joinUrl: "https://join.example.test/join/public-telegram-invite",
       memberId: "member_telegram_only",
@@ -543,7 +540,6 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
@@ -896,7 +892,6 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
-      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,

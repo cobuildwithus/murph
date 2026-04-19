@@ -127,8 +127,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const inboundWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: `linq.message.received:local:${directReplyUserId}:evt_direct_reply`,
-      linqEvent: buildHostedLinqInboundEvent(directReplyUserId, materializedChatId),
-      linqMessageId: `msg_local_${directReplyUserId}`,
+      linqMessage: buildHostedLinqInboundMessage(directReplyUserId, materializedChatId),
       occurredAt: new Date().toISOString(),
       phoneLookupKey: requireLinqPhoneLookupKey(directReplyUserId),
       userId: directReplyUserId,
@@ -168,11 +167,10 @@ describe("hosted local Linq first-contact e2e", () => {
 
     const firstInboundWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_name`,
-      linqEvent: buildHostedLinqInboundEvent(fastReplyUserId, materializedChatId, {
+      linqMessage: buildHostedLinqInboundMessage(fastReplyUserId, materializedChatId, {
         messageId: `msg_fast_name_${fastReplyUserId}`,
         text: "U can call me Rocket Man",
       }),
-      linqMessageId: `msg_fast_name_${fastReplyUserId}`,
       occurredAt: new Date().toISOString(),
       phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
@@ -181,11 +179,10 @@ describe("hosted local Linq first-contact e2e", () => {
 
     const secondInboundWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_goals`,
-      linqEvent: buildHostedLinqInboundEvent(fastReplyUserId, materializedChatId, {
+      linqMessage: buildHostedLinqInboundMessage(fastReplyUserId, materializedChatId, {
         messageId: `msg_fast_goals_${fastReplyUserId}`,
         text: "I want to build more strength, improve endurance, and get fitter overall.",
       }),
-      linqMessageId: `msg_fast_goals_${fastReplyUserId}`,
       occurredAt: new Date().toISOString(),
       phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
       userId: fastReplyUserId,
@@ -262,6 +259,36 @@ function buildActivationWake(userId: string) {
     },
     occurredAt: new Date().toISOString(),
   });
+}
+
+function buildHostedLinqInboundMessage(
+  userId: string,
+  chatId: string,
+  input: {
+    messageId?: string;
+    text?: string;
+  } = {},
+) {
+  const event = buildHostedLinqInboundEvent(userId, chatId, input);
+  const data = event.data as {
+    chat_id: string;
+    from: string;
+    is_from_me: boolean;
+    message: {
+      id: string;
+      parts: Array<{ type: "text"; value: string }>;
+    };
+    service: string;
+  };
+
+  return {
+    chatId: data.chat_id,
+    from: data.from,
+    isFromMe: data.is_from_me,
+    messageId: data.message.id,
+    parts: data.message.parts,
+    service: data.service,
+  };
 }
 
 function requireLinqStub(): HostedLocalLinqStub {

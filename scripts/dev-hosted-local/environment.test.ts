@@ -183,6 +183,8 @@ describe("buildHostedLocalDevOverrides", () => {
     expect(overrides).toMatchObject({
       HOSTED_EXECUTION_DISPATCH_URL: "http://127.0.0.1:8787",
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://127.0.0.1:3000",
+      HOSTED_WAKE_FETCH_PROOF_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      HOSTED_WAKE_FETCH_PROOF_KEY_ID: "v1",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
       VERCEL_PROJECT_PRODUCTION_URL: "127.0.0.1:3000",
@@ -193,6 +195,16 @@ describe("buildHostedLocalDevOverrides", () => {
       x: "callback-x",
       y: "callback-y",
     });
+  });
+
+  it("preserves an explicit wake fetch proof key override", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {
+      HOSTED_WAKE_FETCH_PROOF_KEY: "custom-proof-key",
+      HOSTED_WAKE_FETCH_PROOF_KEY_ID: "custom-proof-key-id",
+    });
+
+    expect(overrides.HOSTED_WAKE_FETCH_PROOF_KEY).toBe("custom-proof-key");
+    expect(overrides.HOSTED_WAKE_FETCH_PROOF_KEY_ID).toBe("custom-proof-key-id");
   });
 });
 

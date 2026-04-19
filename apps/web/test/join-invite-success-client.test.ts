@@ -80,25 +80,25 @@ test("blocked success page does not pretend setup is still running", () => {
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
 
-test("active success page explains when vault and assistant setup is still running", () => {
+test("activating success page explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
-      initialStatus: createStatus("active", true),
+      initialStatus: createStatus("activating"),
       inviteCode: "invite-code",
       sessionId: null,
       shareCode: null,
     }),
   );
 
-  assert.match(markup, /You’re all set/);
+  assert.match(markup, /Finishing your setup/);
   assert.match(markup, /Payment confirmed\./);
   assert.match(markup, /Setup finishes in about a minute/);
-  assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
+  assert.match(markup, /We&#x27;ll keep checking automatically/);
 });
 
 test("checkout-stage success page reconciles the returned session once and updates the ready copy", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify(createStatus("active", true)), {
+    new Response(JSON.stringify(createStatus("activating")), {
       status: 200,
     }),
   );
@@ -119,12 +119,25 @@ test("checkout-stage success page reconciles the returned session once and updat
   await view.cleanup();
 });
 
+test("active success page returns to the invite with a hard navigation", async () => {
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("active"),
+  });
+  const continueButton = findButtonByText(view.container, /Continue/);
+
+  await act(async () => {
+    continueButton.click();
+  });
+
+  expect(view.locationAssign).toHaveBeenCalledWith("/join/invite-code");
+
+  await view.cleanup();
+});
+
 function createStatus(
   stage: HostedInviteStatusPayload["stage"],
-  activationPending = false,
 ): HostedInviteStatusPayload {
   return {
-    activationPending,
     billing: {
       defaultPlanCode: getHostedDefaultBillingPlanCode(),
       plans: listHostedBillingPlanPresentations(),
@@ -153,7 +166,8 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
   sessionId?: string | null;
 }) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
-  const cleanupGlobals = installJoinInviteSuccessClientGlobals(window, document);
+  const locationAssign = vi.fn();
+  const cleanupGlobals = installJoinInviteSuccessClientGlobals(window, document, locationAssign);
   activeJoinInviteSuccessClientCleanups.add(cleanupGlobals);
   const container = document.getElementById("root");
   assert.ok(container);
@@ -181,18 +195,24 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
       activeJoinInviteSuccessClientCleanups.delete(cleanupGlobals);
     },
     container,
+    locationAssign,
   };
 }
 
 function installJoinInviteSuccessClientGlobals(
   window: Window & typeof globalThis,
   document: Document,
+  locationAssign: ReturnType<typeof vi.fn>,
 ) {
+  const location = {
+    ...window.location,
+    assign: locationAssign,
+  };
   const restoreEntries = [
     setJoinInviteSuccessClientGlobal("window", window),
     setJoinInviteSuccessClientGlobal("self", window),
     setJoinInviteSuccessClientGlobal("document", document),
-    setJoinInviteSuccessClientGlobal("location", window.location),
+    setJoinInviteSuccessClientGlobal("location", location),
     setJoinInviteSuccessClientGlobal("navigator", window.navigator),
     setJoinInviteSuccessClientGlobal("HTMLElement", window.HTMLElement),
     setJoinInviteSuccessClientGlobal("Node", window.Node),
@@ -213,6 +233,11 @@ function installJoinInviteSuccessClientGlobals(
     setJoinInviteSuccessClientGlobal("cancelIdleCallback", () => {}),
     setJoinInviteSuccessClientGlobal("IS_REACT_ACT_ENVIRONMENT", true),
   ];
+
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: location,
+  });
 
   return () => {
     for (const restore of restoreEntries.reverse()) {
@@ -240,6 +265,14 @@ function setJoinInviteSuccessClientGlobal(key: string, value: unknown) {
 
     Reflect.deleteProperty(globalThis, key);
   };
+}
+
+function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find((candidate) =>
+    pattern.test(candidate.textContent ?? ""),
+  );
+  assert.ok(button);
+  return button as HTMLButtonElement;
 }
 
 function loadJoinInviteSuccessClientLinkedom(): {

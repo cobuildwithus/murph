@@ -219,14 +219,14 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       },
     });
 
-    await expect(
-      handleHostedOnboardingLinqWebhook({
+    const response = await handleHostedOnboardingLinqWebhook({
         maxInlineDrainMs: 250,
         rawBody: buildLinqMessageWebhookBody(),
         signature: null,
         timestamp: null,
-      }),
-    ).resolves.toMatchObject({
+      });
+
+    expect(response).toMatchObject({
       ignored: false,
       ok: true,
       reason: "wake-appended-active-member",
@@ -257,6 +257,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.readHostedWakeTarget).toHaveBeenCalledWith({
       eventId: "evt_123",
       prisma,
+      userId: "member_123",
     });
     expect(mocks.triggerHostedWakeUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
@@ -264,6 +265,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       timeoutMs: 250,
       userId: "member_123",
     });
+    expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });

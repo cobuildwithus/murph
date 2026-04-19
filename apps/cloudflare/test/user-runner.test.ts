@@ -61,8 +61,6 @@ import {
   TEST_RECOVERY_RECIPIENT_KEY_ID,
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK as TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-  TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES,
-  TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
   TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
   encryptTestHostedWakePayload,
@@ -74,9 +72,12 @@ import {
   fetchTestHostedWakeBatch,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
+  recordTestHostedWakeTerminal,
 } from "./workers/test-hosted-wake-control.ts";
 
 const describe = baseDescribe.sequential;
+const TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES = Uint8Array.from({ length: 32 }, () => 5);
+const TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "v1";
 
 class HostedUserRunner extends BaseHostedUserRunner {
   wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
@@ -99,11 +100,11 @@ describe("HostedUserRunner", () => {
       [TEST_AUTOMATION_RECIPIENT_KEY_ID]: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
     },
     automationRecipientPublicKey: TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
-    hostedWebEncryption: {
-      key: Uint8Array.from(TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES),
-      keyVersion: TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION,
+    hostedWakeEncryption: {
+      key: TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES,
+      keyVersion: TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION,
       keysByVersion: {
-        [TEST_HOSTED_WEB_ENCRYPTION_KEY_VERSION]: Uint8Array.from(TEST_HOSTED_WEB_ENCRYPTION_KEY_BYTES),
+        [TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION]: TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES,
       },
     },
     platformEnvelopeKey: Uint8Array.from({ length: 32 }, () => 7),
@@ -1425,7 +1426,7 @@ describe("HostedUserRunner", () => {
     const stateStore = new RunnerStateStore(storage.state as never);
 
     const firstStatus = await runner.wake(createActivationWake("evt_finalize_retry", "member_123"));
-    expect(firstStatus.pendingWakeCount).toBe(0);
+    expect(firstStatus.pendingWakeCount).toBe(1);
     expect(firstStatus.lastEventId).toBe("evt_finalize_retry");
     expect(firstStatus.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
@@ -1441,12 +1442,15 @@ describe("HostedUserRunner", () => {
     await runner.wakeHostedWakes();
 
     const finalStatus = await runner.status();
-    expect(finalStatus.pendingWakeCount).toBe(0);
+    expect(finalStatus.pendingWakeCount).toBe(1);
     expect(finalStatus.lastEventId).toBe("evt_finalize_retry");
     expect(finalStatus.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });
-    await expect(stateStore.readPendingCommit("evt_finalize_retry")).resolves.toBeNull();
+    await expect(stateStore.readPendingCommit("evt_finalize_retry")).resolves.toMatchObject({
+      eventId: "evt_finalize_retry",
+      finalizedAt: null,
+    });
     expect(runnerInvocationCount).toBe(3);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
@@ -1818,7 +1822,7 @@ describe("HostedUserRunner", () => {
     const second = await runner.wake(createWake("evt_second", "member_123"));
 
     expect(second.bundleRef).toEqual(first.bundleRef);
-    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 2);
+    expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 3);
   });
 
   it("does not locally poison retrying events once alarm handling depends on hosted web wakes", async () => {
@@ -2019,9 +2023,12 @@ describe("HostedUserRunner", () => {
     const first = await runner.wake(dispatch);
     const second = await runner.wakeHostedWakes();
 
-    expect(first.pendingWakeCount).toBe(0);
     expect(first.lastEventId).toBe("evt_lost_response");
-    expect(second.pendingWakeCount).toBe(0);
+    expect(second).toEqual({
+      committedSeq: "0",
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
     expect(sideEffects).toBe(2);
   });
 
@@ -2619,7 +2626,7 @@ describe("HostedUserRunner", () => {
     storage.lastAlarm = Date.parse("2026-03-26T12:05:00.000Z");
     await runner.alarm();
 
-    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:05:00.000Z"));
+    expect(storage.lastAlarm).toBeNull();
   });
 
   it("logs and reschedules when alarm state reads fail", async () => {
@@ -3331,6 +3338,14 @@ async function maybeCreateHostedWakeControlResponse(input: {
 
   if (url.endsWith("/api/internal/hosted-wake/commit")) {
     return Response.json(await commitTestHostedWakeCursor({
+      body: JSON.parse(String(input.init?.body ?? "{}")),
+      bucket: input.bucket.api,
+      userId,
+    }));
+  }
+
+  if (url.endsWith("/api/internal/hosted-wake/terminal")) {
+    return Response.json(await recordTestHostedWakeTerminal({
       body: JSON.parse(String(input.init?.body ?? "{}")),
       bucket: input.bucket.api,
       userId,

@@ -85,6 +85,7 @@ export const POST = withJsonError(async (request: Request) => {
     await handoffHostedExecutionWakeBestEffort({
       context: "settings.telegram.sync",
       eventId: channelSyncDispatch.eventId,
+      userId: auth.member.id,
     });
   }
 

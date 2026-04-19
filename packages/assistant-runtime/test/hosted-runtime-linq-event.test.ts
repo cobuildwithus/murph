@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createHostedLinqAttachmentDownloadDriver,
   normalizeHostedLinqAttachmentUrl,
-  resolveHostedLinqCaptureExternalId,
 } from "../src/hosted-runtime/events/linq.ts";
 
 const originalFetch = globalThis.fetch;
@@ -29,28 +28,6 @@ function setFetch(value: typeof globalThis.fetch | undefined) {
 afterEach(() => {
   vi.clearAllMocks();
   restoreFetch();
-});
-
-describe("resolveHostedLinqCaptureExternalId", () => {
-  it("prefers the explicit hosted Linq message id for reply threading", () => {
-    assert.equal(
-      resolveHostedLinqCaptureExternalId({
-        fallbackExternalId: "linq:hbid:linq.message:v1:opaque",
-        linqMessageId: " msg_real_123 ",
-      }),
-      "linq:msg_real_123",
-    );
-  });
-
-  it("falls back to the normalized capture external id when the hosted message id is absent", () => {
-    assert.equal(
-      resolveHostedLinqCaptureExternalId({
-        fallbackExternalId: " linq:msg_fallback_123 ",
-        linqMessageId: null,
-      }),
-      "linq:msg_fallback_123",
-    );
-  });
 });
 
 describe("normalizeHostedLinqAttachmentUrl", () => {

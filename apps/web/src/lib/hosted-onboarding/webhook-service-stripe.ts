@@ -70,13 +70,16 @@ export async function handleHostedStripeWebhook(input: {
 
     const hostedExecutionEventId = reconciled?.hostedExecutionEventId ?? null;
 
-    if (hostedExecutionEventId) {
+    const hostedExecutionMemberId = reconciled?.activatedMemberId ?? null;
+
+    if (hostedExecutionEventId && hostedExecutionMemberId) {
       if (input.defer) {
         await input.defer(async () => {
           await handoffHostedExecutionWakeBestEffort({
             context: "stripe.webhook",
             eventId: hostedExecutionEventId,
             prisma,
+            userId: hostedExecutionMemberId,
           });
         });
       } else {
@@ -84,6 +87,7 @@ export async function handleHostedStripeWebhook(input: {
           context: "stripe.webhook",
           eventId: hostedExecutionEventId,
           prisma,
+          userId: hostedExecutionMemberId,
         });
       }
     }
