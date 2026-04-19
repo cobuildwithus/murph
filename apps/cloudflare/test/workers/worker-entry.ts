@@ -6,7 +6,10 @@ import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import worker from "../../src/index.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";
-import { readHostedExecutionEnvironment } from "../../src/env.ts";
+import {
+  readHostedExecutionEnvironment,
+  type HostedExecutionEnvironment,
+} from "../../src/env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
 import { createHostedUserKeyStore } from "../../src/user-key-store.js";
 import { RunnerBundleSync } from "../../src/user-runner/runner-bundle-sync.js";
@@ -14,6 +17,10 @@ import { RunnerStateStore } from "../../src/user-runner/runner-state-store.js";
 import type { RunnerPendingCommitRecord } from "../../src/user-runner/types.js";
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
+import {
+  appendHostedWakeInWeb,
+  readHostedWakeStatusFromWeb,
+} from "../../src/web-control-plane.ts";
 import {
   armRunnerCommitPause,
   buildSeededDuplicateCommitPayload,
@@ -39,6 +46,7 @@ type TestWorkerEnvironment = WorkerEnvironmentSource & {
 
 export class VitestUserRunnerDurableObject extends DurableObject {
   private readonly bucket: R2BucketLike;
+  private readonly runtimeEnv: HostedExecutionEnvironment;
   private readonly stateStore: RunnerStateStore;
   private readonly runner: HostedUserRunner;
 
@@ -48,9 +56,12 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     this.stateStore = new RunnerStateStore(
       ctx as unknown as import("../../src/user-runner.ts").DurableObjectStateLike,
     );
+    this.runtimeEnv = readHostedExecutionEnvironment(
+      env as unknown as Readonly<Record<string, string | undefined>>,
+    );
     this.runner = new HostedUserRunner(
       ctx as unknown as import("../../src/user-runner.ts").DurableObjectStateLike,
-      readHostedExecutionEnvironment(env as unknown as Readonly<Record<string, string | undefined>>),
+      this.runtimeEnv,
       this.bucket,
       env,
       env.RUNNER_CONTAINER,
@@ -62,11 +73,11 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
-    return this.runner.enqueueHostedWake(input);
+    return wakeRunnerForTest(this.runner, this.runtimeEnv, input);
   }
 
   async wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult> {
-    return this.runner.enqueueHostedWakeWithOutcome(input);
+    return wakeRunnerWithOutcomeForTest(this.runner, this.runtimeEnv, input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -113,6 +124,77 @@ export class VitestUserRunnerDurableObject extends DurableObject {
 
   override async alarm(): Promise<void> {
     await this.runner.alarm();
+  }
+}
+
+async function wakeRunnerForTest(
+  runner: HostedUserRunner,
+  runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
+  wake: HostedExecutionWake,
+): Promise<HostedExecutionUserStatus> {
+  await runner.bootstrapUser(wake.userId);
+  const append = await appendHostedWakeInWeb({
+    baseUrl: runtimeEnv.hostedWebBaseUrl,
+    boundUserId: wake.userId,
+    callbackSigning: runtimeEnv.webCallbackSigning,
+    timeoutMs: runtimeEnv.runnerTimeoutMs,
+    wake,
+  });
+
+  await runner.wakeHostedWakes({
+    targetSeqHint: append.wake.seq,
+  });
+  return runner.status();
+}
+
+async function wakeRunnerWithOutcomeForTest(
+  runner: HostedUserRunner,
+  runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
+  wake: HostedExecutionWake,
+): Promise<HostedWakeExecutionResult> {
+  await runner.bootstrapUser(wake.userId);
+  const append = await appendHostedWakeInWeb({
+    baseUrl: runtimeEnv.hostedWebBaseUrl,
+    boundUserId: wake.userId,
+    callbackSigning: runtimeEnv.webCallbackSigning,
+    timeoutMs: runtimeEnv.runnerTimeoutMs,
+    wake,
+  });
+
+  await runner.wakeHostedWakes({
+    targetSeqHint: append.wake.seq,
+  });
+
+  try {
+    const wakeStatus = await readHostedWakeStatusFromWeb({
+      baseUrl: runtimeEnv.hostedWebBaseUrl,
+      body: {
+        eventId: wake.eventId,
+      },
+      boundUserId: wake.userId,
+      callbackSigning: runtimeEnv.webCallbackSigning,
+      timeoutMs: runtimeEnv.runnerTimeoutMs,
+    });
+
+    return {
+      event: {
+        eventId: wake.eventId,
+        lastError: null,
+        state: wakeStatus.wakeState ?? "queued",
+        userId: wake.userId,
+      },
+      status: await runner.status(),
+    };
+  } catch {
+    return {
+      event: {
+        eventId: wake.eventId,
+        lastError: null,
+        state: "queued",
+        userId: wake.userId,
+      },
+      status: await runner.status(),
+    };
   }
 }
 

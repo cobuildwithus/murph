@@ -53,6 +53,7 @@ import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner as BaseHostedUserRunner } from "../src/user-runner.js";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import type { RunnerPendingCommitRecord } from "../src/user-runner/types.js";
+import * as webControlPlane from "../src/web-control-plane.js";
 import { encodeHostedRunnerSecretsPayload } from "../src/runner-secrets.js";
 import {
   TEST_AUTOMATION_RECIPIENT_KEY_ID,
@@ -78,14 +79,94 @@ import {
 const describe = baseDescribe.sequential;
 const TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES = Uint8Array.from({ length: 32 }, () => 5);
 const TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "v1";
+let activeHostedExecutionEnvironment: HostedExecutionEnvironment | null = null;
 
 class HostedUserRunner extends BaseHostedUserRunner {
   wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
-    return this.enqueueHostedWake(input);
+    return wakeRunnerForTest(this, input);
   }
 
   wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult> {
-    return this.enqueueHostedWakeWithOutcome(input);
+    return wakeRunnerWithOutcomeForTest(this, input);
+  }
+}
+
+function requireActiveHostedExecutionEnvironment(): HostedExecutionEnvironment {
+  if (!activeHostedExecutionEnvironment) {
+    throw new Error("Hosted execution test environment is not configured.");
+  }
+
+  return activeHostedExecutionEnvironment;
+}
+
+async function wakeRunnerForTest(
+  runner: HostedUserRunner,
+  wake: HostedExecutionWake,
+): Promise<HostedExecutionUserStatus> {
+  const environment = requireActiveHostedExecutionEnvironment();
+  await runner.bootstrapUser(wake.userId);
+  const append = await webControlPlane.appendHostedWakeInWeb({
+    baseUrl: environment.hostedWebBaseUrl,
+    boundUserId: wake.userId,
+    callbackSigning: environment.webCallbackSigning,
+    timeoutMs: environment.runnerTimeoutMs,
+    wake,
+  });
+
+  await runner.wakeHostedWakes({
+    targetSeqHint: append.wake.seq,
+  });
+  return runner.status();
+}
+
+async function wakeRunnerWithOutcomeForTest(
+  runner: HostedUserRunner,
+  wake: HostedExecutionWake,
+): Promise<HostedWakeExecutionResult> {
+  const environment = requireActiveHostedExecutionEnvironment();
+  await runner.bootstrapUser(wake.userId);
+  const append = await webControlPlane.appendHostedWakeInWeb({
+    baseUrl: environment.hostedWebBaseUrl,
+    boundUserId: wake.userId,
+    callbackSigning: environment.webCallbackSigning,
+    timeoutMs: environment.runnerTimeoutMs,
+    wake,
+  });
+
+  await runner.wakeHostedWakes({
+    targetSeqHint: append.wake.seq,
+  });
+
+  try {
+    const wakeStatus = await webControlPlane.readHostedWakeStatusFromWeb({
+      baseUrl: environment.hostedWebBaseUrl,
+      body: {
+        eventId: wake.eventId,
+      },
+      boundUserId: wake.userId,
+      callbackSigning: environment.webCallbackSigning,
+      timeoutMs: environment.runnerTimeoutMs,
+    });
+
+    return {
+      event: {
+        eventId: wake.eventId,
+        lastError: null,
+        state: wakeStatus.wakeState ?? "queued",
+        userId: wake.userId,
+      },
+      status: await runner.status(),
+    };
+  } catch {
+    return {
+      event: {
+        eventId: wake.eventId,
+        lastError: null,
+        state: "queued",
+        userId: wake.userId,
+      },
+      status: await runner.status(),
+    };
   }
 }
 
@@ -135,6 +216,7 @@ describe("HostedUserRunner", () => {
   beforeEach(() => {
     bucket.clear();
     storage.clear();
+    activeHostedExecutionEnvironment = environment;
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -208,6 +290,14 @@ describe("HostedUserRunner", () => {
 
     await store.clearRunnerSecrets(input.userId);
   }
+
+  it("does not expose hosted wake enqueue wrappers on the runner surface", () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    expect("enqueueHostedWake" in runner).toBe(false);
+    expect("enqueueHostedWakeWithOutcome" in runner).toBe(false);
+    expect("wakeHostedWakes" in runner).toBe(true);
+  });
 
   it("roundtrips encrypted bundle payloads through object storage", async () => {
     const bundleStore = createHostedBundleStore({
@@ -2139,13 +2229,8 @@ describe("HostedUserRunner", () => {
       storage.runnerContainerFetch,
       "/internal/invoke",
     );
-    const readHostedWakeStatusSpy = vi.spyOn(
-      runner as unknown as {
-        readHostedWakeStatus: (...args: never[]) => Promise<unknown>;
-      },
-      "readHostedWakeStatus",
-    );
-    readHostedWakeStatusSpy.mockResolvedValueOnce(null);
+    const readHostedWakeStatusSpy = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusSpy.mockRejectedValueOnce(new Error("status unavailable"));
     const second = await runner.wakeWithOutcome(dispatch);
 
     expect(first.event.state).toBe("completed");
