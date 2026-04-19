@@ -15,14 +15,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./assistant-cli-access": {
-      "types": "./dist/assistant-cli-access.d.ts",
-      "default": "./dist/assistant-cli-access.js"
-    },
-    "./assistant-cli-tools": {
-      "types": "./dist/assistant-cli-tools.d.ts",
-      "default": "./dist/assistant-cli-tools.js"
-    },
     "./assistant-automation": {
       "types": "./dist/assistant-automation.d.ts",
       "default": "./dist/assistant-automation.js"

@@ -14,7 +14,7 @@ import {
   createDefaultAssistantCapabilityRegistry,
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-cli-tools'
+} from '@murphai/assistant-engine'
 import { materializeInboxModelBundle } from '@murphai/assistant-engine/inbox-model-harness'
 import {
   CliBackedCapabilityHost,
@@ -164,6 +164,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
       resumeState: null,
       provider: 'codex-cli',
       providerOptions: {
+        provider: 'codex-cli',
         continuityFingerprint: 'fingerprint-inbox-model-harness',
         model: 'gpt-5.4',
         reasoningEffort: null,
@@ -177,7 +178,6 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
         providerName: undefined,
         resumeKind: 'codex-session',
       },
-      providerBinding: null,
       alias: null,
       binding: {
         conversationKey: null,

@@ -61,7 +61,7 @@ import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
 } from '@murphai/assistant-engine/assistant-provider'
-import { prepareAssistantDirectCliEnv } from '@murphai/assistant-engine/assistant-cli-access'
+import { prepareAssistantDirectCliEnv } from '@murphai/assistant-engine'
 import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,
@@ -141,6 +141,7 @@ test('serializeAssistantProviderSessionOptions sanitizes settings for the select
     approvalPolicy: null,
     profile: null,
     oss: false,
+    provider: 'openai-compatible',
     baseUrl: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OLLAMA_API_KEY',
     providerName: 'ollama',
@@ -181,6 +182,7 @@ test('serializeAssistantProviderSessionOptions preserves an explicit Codex home 
     approvalPolicy: 'on-request',
     profile: 'primary',
     oss: false,
+    provider: 'codex-cli',
     codexHome: '/tmp/codex-1',
     executionDriver: 'codex-cli',
     resumeKind: 'codex-session',

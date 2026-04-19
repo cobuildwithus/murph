@@ -78,7 +78,6 @@ const TEST_SESSION: Awaited<ReturnType<AssistantLocalService['getSession']>> = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: { ...TEST_PROVIDER_OPTIONS },
-  providerBinding: null,
   alias: null,
   binding: {
     actorId: null,

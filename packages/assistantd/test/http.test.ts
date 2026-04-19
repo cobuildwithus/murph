@@ -40,7 +40,6 @@ const TEST_SESSION = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: { ...TEST_PROVIDER_OPTIONS },
-  providerBinding: null,
   alias: 'chat:test',
   binding: {
     conversationKey: 'chat:test',

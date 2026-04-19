@@ -82,14 +82,8 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(setupCliManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-backend'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-contracts'], undefined)
-  assert.deepEqual(assistantEngineManifest.exports?.['./assistant-cli-access'], {
-    default: './dist/assistant-cli-access.js',
-    types: './dist/assistant-cli-access.d.ts',
-  })
-  assert.deepEqual(assistantEngineManifest.exports?.['./assistant-cli-tools'], {
-    default: './dist/assistant-cli-tools.js',
-    types: './dist/assistant-cli-tools.d.ts',
-  })
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'], undefined)
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/query-record-command-helpers'], undefined)
