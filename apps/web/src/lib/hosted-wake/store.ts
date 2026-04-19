@@ -121,8 +121,20 @@ export async function commitHostedExecutionCursorTx(input: {
   const snapshotRefChanged = input.snapshotRef !== undefined
     && JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotJson);
   const shouldAdvanceCommittedSeq = input.committedSeq > cursor.committedSeq;
+  // Today's Cloudflare runner commits one wake at a time. Keep that invariant explicit here
+  // so a bad caller cannot skip over already-allocated but unseen wake rows.
+  const canAdvanceSingleWake =
+    input.committedSeq === cursor.committedSeq + 1n
+    && input.committedSeq < cursor.nextSeq;
 
   if (!shouldAdvanceCommittedSeq && !snapshotRefChanged) {
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
+  }
+
+  if (shouldAdvanceCommittedSeq && !canAdvanceSingleWake) {
     return {
       committed: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
@@ -136,9 +148,6 @@ export async function commitHostedExecutionCursorTx(input: {
       ...(shouldAdvanceCommittedSeq
         ? {
             committedSeq: cursor.committedSeq,
-            nextSeq: {
-              gt: input.committedSeq,
-            },
           }
         : {
             committedSeq: cursor.committedSeq,
