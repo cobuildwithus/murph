@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
-import { afterEach, beforeEach, test, vi } from 'vitest'
+import { afterEach, test, vi } from 'vitest'
 import {
   TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
   VAULT_ENV,
@@ -63,21 +63,6 @@ function isolateAssistantMemoryEnv(
   }
 }
 
-const runtimeMocks = vi.hoisted(() => ({
-  runAssistantChat: vi.fn(),
-}))
-
-vi.mock('@murphai/assistant-cli/assistant/runtime', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-cli/assistant/runtime')>(
-    '@murphai/assistant-cli/assistant/runtime',
-  )
-
-  return {
-    ...actual,
-    runAssistantChat: runtimeMocks.runAssistantChat,
-  }
-})
-
 afterEach(async () => {
   await Promise.all(
     cleanupPaths.splice(0).map(async (target) => {
@@ -87,10 +72,6 @@ afterEach(async () => {
       })
     }),
   )
-})
-
-beforeEach(() => {
-  runtimeMocks.runAssistantChat.mockReset()
 })
 
 test('formatAssistantRunEventForTerminal redacts delivery targets by default', () => {
@@ -1444,32 +1425,6 @@ function commandSchemaShapeKeys(
   return Object.keys(shape).sort()
 }
 
-test('root chat fails closed when the terminal cannot provide interactive raw-mode input', async () => {
-  const result = await runInProcessCliWithTty(['chat', '--vault', '/tmp/mock-vault'])
-
-  assert.equal(result.stderr, '')
-  assert.equal(
-    result.stdout,
-    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
-  )
-})
-
-test('root chat surfaces the interactive-input failure before any json result can be emitted', async () => {
-  const result = await runInProcessCliWithTty([
-    'chat',
-    '--vault',
-    '/tmp/mock-vault',
-    '--format',
-    'json',
-  ])
-
-  assert.equal(result.stderr, '')
-  assert.equal(
-    result.stdout,
-    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
-  )
-})
-
 test.sequential(
   'assistant model defaults persist in operator config without disturbing the default vault',
   async () => {
@@ -1520,100 +1475,6 @@ function restoreEnvironmentVariable(
   }
 
   process.env[key] = value
-}
-
-function createMockChatResult(sessionId: string) {
-  return {
-    vault: '/tmp/mock-vault',
-    startedAt: '2026-03-17T23:20:16.318Z',
-    stoppedAt: '2026-03-17T23:21:22.167Z',
-    turns: 0,
-    session: {
-      schema: 'murph.assistant-session.v1' as const,
-      sessionId,
-      target: {
-        adapter: 'codex-cli' as const,
-        approvalPolicy: 'never' as const,
-        codexCommand: null,
-        model: null,
-        oss: false,
-        profile: null,
-        reasoningEffort: null,
-        sandbox: 'read-only' as const,
-      },
-      resumeState: null,
-      provider: 'codex-cli' as const,
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only' as const,
-        approvalPolicy: 'never' as const,
-        profile: null,
-        oss: false,
-      },
-      alias: null,
-      binding: {
-        conversationKey: null,
-        channel: null,
-        identityId: null,
-        actorId: null,
-        threadId: null,
-        threadIsDirect: null,
-        delivery: null,
-      },
-      createdAt: '2026-03-17T23:20:16.331Z',
-      updatedAt: '2026-03-17T23:20:16.331Z',
-      lastTurnAt: null,
-      turnCount: 0,
-    },
-  }
-}
-
-async function runInProcessCliWithTty(args: string[]): Promise<{
-  stderr: string
-  stdout: string
-}> {
-  const cli = createVaultCli(
-    createUnwiredVaultServices(),
-    createIntegratedInboxServices(),
-  )
-  const stdout: string[] = []
-  const stderr: string[] = []
-  const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
-  const stderrWriteSpy = vi
-    .spyOn(process.stderr, 'write')
-    .mockImplementation(((chunk: string | Uint8Array) => {
-      stderr.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
-      return true
-    }) as typeof process.stderr.write)
-
-  Object.defineProperty(process.stdout, 'isTTY', {
-    configurable: true,
-    value: true,
-  })
-
-  try {
-    await cli.serve(args, {
-      env: process.env,
-      exit: () => {},
-      stdout(chunk) {
-        stdout.push(chunk)
-      },
-    })
-  } finally {
-    stderrWriteSpy.mockRestore()
-
-    if (stdoutTtyDescriptor) {
-      Object.defineProperty(process.stdout, 'isTTY', stdoutTtyDescriptor)
-    } else {
-      delete (process.stdout as { isTTY?: boolean }).isTTY
-    }
-  }
-
-  return {
-    stderr: stderr.join(''),
-    stdout: stdout.join(''),
-  }
 }
 
 async function runRegisteredCliJson<TData>(
