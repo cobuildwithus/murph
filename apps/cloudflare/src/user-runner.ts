@@ -16,7 +16,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
-import { HostedGatewayProjectionStore } from "./gateway-store.js";
+import { HostedGatewayProjectionCache } from "./gateway-projection-cache.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
   createHostedUserKeyStore,
@@ -180,11 +180,7 @@ export class HostedUserRunner {
         this.stateStore,
       ),
       crypto,
-      gatewayStore: new HostedGatewayProjectionStore(this.state, {
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
-        keysById: crypto.keysById,
-      }),
+      gatewayCache: new HostedGatewayProjectionCache(),
       runnerSecrets: this.createRunnerSecretsService(crypto),
       userId,
     };
@@ -748,7 +744,7 @@ export class HostedUserRunner {
         const userId = await this.requireBoundUserId();
         const stores = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
         const result = await input.run(userId, stores);
-        await stores.gatewayStore.applySnapshot(input.gatewayProjectionSnapshot ?? null);
+        await stores.gatewayCache.applySnapshot(input.gatewayProjectionSnapshot ?? null);
         return result;
       });
     });
