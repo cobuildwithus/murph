@@ -328,12 +328,12 @@ The web signal bridge then had to cast `signalPayload` straight to `HostedExecut
 This patch:
 
 - makes `packages/device-syncd/src/hosted-runtime.ts` the shared owner of `HostedExecutionDeviceSyncJobHint`, `HostedExecutionDeviceSyncWakeHint`, and `parseHostedExecutionDeviceSyncWakeHint(...)`
-- turns the hosted-execution contract types into aliases of that device-sync owner instead of parallel interface copies
+- keeps the hosted-execution wake contract pointed at that device-sync owner for the nested hint shape only, while leaving runtime snapshot/apply/token contracts on the device-sync owner package instead of re-exporting them again through `@murphai/hosted-execution`
 - has `packages/hosted-execution/src/parsers.ts` delegate nested wake-hint parsing to the device-sync runtime owner while keeping the outer hosted dispatch event parser in `@murphai/hosted-execution`
 - replaces the raw cast in `apps/web/src/lib/device-sync/hosted-dispatch.ts` with the shared owner parser so signals, dispatch parsing, and runtime normalization now consume one hint shape
 
 **Why this is simpler:** one more wake-hint field or job-hint attribute now lands in one device-sync owner instead of requiring coordinated edits across device-syncd, hosted-execution contracts, hosted-execution parsers, and the hosted web signal bridge.
-The hosted-execution package still owns the outer dispatch event; it just stops pretending to own the device-sync-specific nested payload too.
+The hosted-execution package still owns the outer dispatch event; it just stops pretending to own the device-sync-specific nested payload too, and it no longer republishes the broader device-sync runtime snapshot/token surface.
 
 **Main refactor risk:** keep the shared ownership limited to the nested wake-hint subshape.
 Do not move hosted dispatch ids, event kinds, or transport policy into `device-syncd`, or the hosted execution boundary will blur in the other direction.

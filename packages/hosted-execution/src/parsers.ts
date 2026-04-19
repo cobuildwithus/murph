@@ -4,7 +4,6 @@ import {
   type SharePack,
 } from "@murphai/contracts";
 import {
-  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse as parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
@@ -20,7 +19,6 @@ import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionWake,
   HostedExecutionWakeAppendRequest,
@@ -812,12 +810,6 @@ export function parseHostedExecutionRunnerSharePack(value: unknown): HostedExecu
 
 export function parseHostedExecutionSharePack(value: unknown): SharePack {
   return assertContract(sharePackSchema, value, "share pack");
-}
-
-export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
-  value: unknown,
-): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
-  return parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse(value);
 }
 
 export function parseHostedExecutionCursorState(

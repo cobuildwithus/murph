@@ -5,8 +5,6 @@ import type {
   HostedExecutionWake,
   HostedExecutionUserStatus,
   HostedWakeMaterializationHints,
-  HostedWakeExecutionResult,
-  HostedWakeStatus,
 } from "@murphai/hosted-execution";
 import type { HostedWakeRecord } from "@murphai/hosted-execution/contracts";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
@@ -33,7 +31,6 @@ import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
 import {
-  appendHostedWakeInWeb,
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
   materializeHostedDueWakesInWeb,
@@ -273,42 +270,6 @@ export class HostedUserRunner {
 
   async status(): Promise<HostedExecutionUserStatus> {
     return this.composeUserStatus(await this.stateStore.readState());
-  }
-
-  async enqueueHostedWake(
-    wake: HostedExecutionWake,
-  ): Promise<HostedExecutionUserStatus> {
-    await this.ensureManagedUserCryptoForActivationWakeIfNeeded(wake);
-    await this.stateStore.bootstrapUser(wake.userId);
-    const append = await appendHostedWakeInWeb({
-      baseUrl: this.readHostedWebControlBaseUrl(),
-      boundUserId: wake.userId,
-      callbackSigning: this.env.webCallbackSigning,
-      wake,
-      timeoutMs: this.env.runnerTimeoutMs,
-    });
-
-    await this.wakeHostedWakes({
-      targetSeqHint: append.wake.seq,
-    });
-    return this.status();
-  }
-
-  async enqueueHostedWakeWithOutcome(
-    wake: HostedExecutionWake,
-  ): Promise<HostedWakeExecutionResult> {
-    const status = await this.enqueueHostedWake(wake);
-    const event = await this.readHostedWakeStatus(wake) ?? {
-      eventId: wake.eventId,
-      lastError: null,
-      state: "queued" as const,
-      userId: wake.userId,
-    };
-
-    return {
-      event,
-      status,
-    };
   }
 
   async wakeHostedWakes(input: {
@@ -771,45 +732,6 @@ export class HostedUserRunner {
     });
 
     return wakeStatus.cursor.committedSeq;
-  }
-
-  private async readHostedWakeStatus(
-    wake: Pick<HostedExecutionWake, "eventId" | "userId">,
-  ): Promise<HostedWakeStatus | null> {
-    try {
-      const wakeStatus = await readHostedWakeStatusFromWeb({
-        baseUrl: this.readHostedWebControlBaseUrl(),
-        body: {
-          eventId: wake.eventId,
-        },
-        boundUserId: wake.userId,
-        callbackSigning: this.env.webCallbackSigning,
-        timeoutMs: this.env.runnerTimeoutMs,
-      });
-      const wakeState = wakeStatus.wakeState;
-
-      if (!wakeState) {
-        return null;
-      }
-
-      return {
-        eventId: wake.eventId,
-        lastError: null,
-        state: wakeState,
-        userId: wake.userId,
-      };
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        eventId: wake.eventId,
-        level: "warn",
-        message: "Hosted wake status read failed; returning a conservative queued result.",
-        phase: "wake.running",
-        userId: wake.userId,
-      });
-      return null;
-    }
   }
 
   private async applyHostedTransition<T>(input: {

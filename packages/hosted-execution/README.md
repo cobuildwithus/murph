@@ -22,4 +22,9 @@ Cloudflare execution worker.
 - app-local auth adapters still own deployment-specific bearer token acquisition plus callback signing and verification
 - operator-facing hosted public-origin fallback and Cloudflare callback-key config stay app-local and are intentionally documented in `apps/web/README.md`, not here
 - Cloudflare operational control routes are private owner APIs, not part of this public package
-- device-sync control-plane and other execution-time-only owner contracts stay outside this public package
+- device-sync runtime snapshot/apply/token contracts stay on `@murphai/device-syncd/hosted-runtime`; this package only carries the outer hosted wake/control seam plus the shared device-sync wake-hint shape needed by that seam
+
+## Migration note
+
+This package now hard-cuts device-sync runtime snapshot/apply/token exports.
+Consumers that previously imported those symbols from `@murphai/hosted-execution` or `@murphai/hosted-execution/parsers` must import them from `@murphai/device-syncd/hosted-runtime` instead.
