@@ -5,17 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createAssistantFoodAutoLogHooks: vi.fn(),
   createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
-  createConfiguredParserRegistry: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
   createDeviceSyncService: vi.fn(),
-  createInboxParserService: vi.fn(),
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
-  openInboxRuntime: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
-  rebuildRuntimeFromVault: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
@@ -32,16 +28,6 @@ vi.mock("@murphai/device-syncd/registry", () => ({
 
 vi.mock("@murphai/device-syncd/service", () => ({
   createDeviceSyncService: mocks.createDeviceSyncService,
-}));
-
-vi.mock("@murphai/inboxd/runtime", () => ({
-  openInboxRuntime: mocks.openInboxRuntime,
-  rebuildRuntimeFromVault: mocks.rebuildRuntimeFromVault,
-}));
-
-vi.mock("@murphai/parsers", () => ({
-  createConfiguredParserRegistry: mocks.createConfiguredParserRegistry,
-  createInboxParserService: mocks.createInboxParserService,
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -79,11 +65,8 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  drainHostedParserQueue,
-  drainHostedParserQueueUntilSettled,
   runHostedAssistantAutomation,
   runHostedAssistantCronWakeLane,
-  runHostedConversationAssistantAutomation,
   runHostedDeviceSyncPass,
   runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
@@ -102,13 +85,6 @@ const DEVICE_SYNC_CONFIG = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.createConfiguredParserRegistry.mockResolvedValue({
-    ffmpeg: Symbol("ffmpeg"),
-    registry: Symbol("parser-registry"),
-  });
-  mocks.createInboxParserService.mockReturnValue({
-    drain: vi.fn(async () => []),
-  });
   mocks.createIntegratedInboxServices.mockReturnValue(Symbol("inbox-services"));
   mocks.createAssistantFoodAutoLogHooks.mockReturnValue(Symbol("food-auto-log-hooks"));
   mocks.createIntegratedVaultServices.mockReturnValue(Symbol("vault-services"));
@@ -148,145 +124,23 @@ beforeEach(() => {
   mocks.reconcileHostedDeviceSyncControlPlaneState.mockResolvedValue(undefined);
 });
 
-describe("drainHostedParserQueue", () => {
-  it("hydrates unique pending artifact paths before draining the parser queue", async () => {
-    const close = vi.fn();
-    const drain = vi.fn(async () => [{ id: "job_1" }, { id: "job_2" }]);
-    const artifactMaterializer = vi.fn(async () => undefined);
-
-    mocks.openInboxRuntime.mockResolvedValue({
-      close,
-      getCapture: (captureId: string) => (
-        captureId === "capture_1"
-          ? {
-              attachments: [
-                {
-                  attachmentId: "attachment_1",
-                  storedPath: "vault/raw/a.bin",
-                },
-              ],
-            }
-          : {
-              attachments: [
-                {
-                  attachmentId: "attachment_2",
-                  storedPath: "vault/raw/a.bin",
-                },
-                {
-                  attachmentId: "attachment_3",
-                  storedPath: "vault/raw/b.bin",
-                },
-              ],
-            }
-      ),
-      listAttachmentParseJobs: () => [
-        {
-          attachmentId: "attachment_1",
-          captureId: "capture_1",
-        },
-        {
-          attachmentId: "attachment_2",
-          captureId: "capture_2",
-        },
-        {
-          attachmentId: "attachment_3",
-          captureId: "capture_2",
-        },
-      ],
-    });
-    mocks.createInboxParserService.mockReturnValue({
-      drain,
-    });
-
-    const result = await drainHostedParserQueue({
-      artifactMaterializer,
-      vaultRoot: "/tmp/vault-root",
-    });
-
-    expect(result).toEqual({
-      nextWakeAt: null,
-      processedJobs: 2,
-    });
-    expect(mocks.rebuildRuntimeFromVault).toHaveBeenCalledWith({
-      runtime: expect.any(Object),
-      vaultRoot: "/tmp/vault-root",
-    });
-    expect(artifactMaterializer).toHaveBeenCalledWith([
-      "vault/raw/a.bin",
-      "vault/raw/b.bin",
-    ]);
-    expect(drain).toHaveBeenCalledWith({
-      maxJobs: 50,
-    });
-    expect(close).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("drainHostedParserQueueUntilSettled", () => {
-  it("keeps draining parser work until the queue settles", async () => {
-    const close = vi.fn();
-    const drain = vi
-      .fn()
-      .mockResolvedValueOnce([{ id: "job_1" }])
-      .mockResolvedValueOnce([]);
-
-    mocks.openInboxRuntime.mockResolvedValue({
-      close,
-      getCapture: vi.fn(() => null),
-      listAttachmentParseJobs: vi.fn(() => []),
-    });
-    mocks.createInboxParserService.mockReturnValue({
-      drain,
-    });
-
-    await expect(
-      drainHostedParserQueueUntilSettled({
-        vaultRoot: "/tmp/vault-root",
-      }),
-    ).resolves.toEqual({
-      nextWakeAt: null,
-      processedJobs: 1,
-    });
-
-    expect(drain).toHaveBeenCalledTimes(2);
-  });
-
-  it("schedules an immediate follow-up wake when parser work never settles within the cap", async () => {
-    vi.useFakeTimers();
-
-    try {
-      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
-      const close = vi.fn();
-      const drain = vi.fn(async () => [{ id: "job_1" }]);
-
-      mocks.openInboxRuntime.mockResolvedValue({
-        close,
-        getCapture: vi.fn(() => null),
-        listAttachmentParseJobs: vi.fn(() => []),
-      });
-      mocks.createInboxParserService.mockReturnValue({
-        drain,
-      });
-
-      const result = await drainHostedParserQueueUntilSettled({
-        vaultRoot: "/tmp/vault-root",
-      });
-
-      expect(result.processedJobs).toBe(10);
-      expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
-      expect(drain).toHaveBeenCalledTimes(10);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
 describe("runHostedAssistantAutomation", () => {
   it("logs automation events emitted during the hosted pass", async () => {
     mocks.readAssistantAutomationState
       .mockResolvedValueOnce({
-        autoReply: [],
-        inboxScanCursor: null,
+        autoReply: [
+          {
+            channel: "telegram",
+            cursor: {
+              captureId: "capture_122",
+              importedAt: "2026-04-08T00:05:00.000Z",
+            },
+          },
+        ],
+        inboxScanCursor: {
+          captureId: "capture_122",
+          importedAt: "2026-04-08T00:05:00.000Z",
+        },
         updatedAt: "2026-04-08T00:00:00.000Z",
         version: 1,
       })
@@ -343,6 +197,16 @@ describe("runHostedAssistantAutomation", () => {
       progressed: true,
     });
 
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          autoReplyChannels: "telegram",
+          autoReplyCursorSummary: "telegram:capture_122",
+          inboxScanCursor: "capture_122",
+        }),
+        message: "Hosted assistant automation pass starting.",
+      }),
+    );
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
@@ -408,81 +272,6 @@ describe("runHostedAssistantAutomation", () => {
         },
       ),
     ).rejects.toThrow("automation failed");
-  });
-});
-
-describe("runHostedConversationAssistantAutomation", () => {
-  it("returns the hosted assistant skip path when the runtime is not ready", async () => {
-    mocks.readHostedAssistantRuntimeState.mockResolvedValue({
-      assistantActiveProfileId: "platform-default",
-      assistantActiveProfileManagedBy: "platform",
-      assistantActiveProfileReady: false,
-      assistantConfigInvalid: false,
-      assistantConfigPresent: true,
-      assistantConfigStatus: "hosted-env",
-      assistantConfigured: false,
-      assistantProvider: "openai-compatible",
-    });
-
-    await expect(
-      runHostedConversationAssistantAutomation({
-        executionContext: {
-          hosted: {
-            issueDeviceConnectLink: vi.fn(),
-            memberId: "member_123",
-            userEnvKeys: [],
-          },
-        },
-        requestId: "req_123",
-        vaultRoot: "/tmp/vault-root",
-        wake: {
-          eventId: "evt_conversation_skip",
-          kind: "assistant.cron.tick",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
-          userId: "member_123",
-        },
-      }),
-    ).resolves.toEqual({
-      nextWakeAt: null,
-      progressed: false,
-    });
-
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        level: "warn",
-        message:
-          "Hosted assistant automation skipped because the active hosted assistant profile (openai-compatible) is not ready.",
-      }),
-    );
-  });
-
-  it("delegates to hosted assistant automation when the runtime is ready", async () => {
-    await expect(
-      runHostedConversationAssistantAutomation({
-        executionContext: {
-          hosted: {
-            issueDeviceConnectLink: vi.fn(),
-            memberId: "member_123",
-            userEnvKeys: [],
-          },
-        },
-        requestId: "req_123",
-        vaultRoot: "/tmp/vault-root",
-        wake: {
-          eventId: "evt_conversation_ready",
-          kind: "assistant.cron.tick",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
-          userId: "member_123",
-        },
-      }),
-    ).resolves.toEqual({
-      nextWakeAt: "2026-04-08T01:00:00.000Z",
-      progressed: false,
-    });
-
-    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -780,7 +569,6 @@ describe("runHostedAssistantCronWakeLane", () => {
       vault: "/tmp/vault-root",
       vaultServices: expect.anything(),
     });
-    expect(mocks.openInboxRuntime).not.toHaveBeenCalled();
     expect(mocks.createDeviceSyncService).not.toHaveBeenCalled();
   });
 
@@ -1023,7 +811,6 @@ describe("runHostedDeviceSyncWakeLane", () => {
       },
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
-    expect(mocks.openInboxRuntime).not.toHaveBeenCalled();
   });
 });
 

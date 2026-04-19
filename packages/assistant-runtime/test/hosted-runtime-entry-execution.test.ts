@@ -24,7 +24,6 @@ const mocks = vi.hoisted(() => ({
   restoreHostedExecutionContext: vi.fn(),
   resumeHostedCommittedExecution: vi.fn(),
   runHostedAssistantCronWakeLane: vi.fn(),
-  runHostedConversationAssistantAutomation: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   runHostedNoopSystemWakeLane: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
@@ -97,8 +96,6 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedAssistantCronWakeLane: mocks.runHostedAssistantCronWakeLane,
-  runHostedConversationAssistantAutomation:
-    mocks.runHostedConversationAssistantAutomation,
   runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane: mocks.runHostedNoopSystemWakeLane,
 }));
@@ -142,10 +139,6 @@ beforeEach(() => {
     followupExecution: "assistant-cron",
     shareImportResult: null,
     shareImportTitle: null,
-  });
-  mocks.runHostedConversationAssistantAutomation.mockResolvedValue({
-    nextWakeAt: "2026-04-08T00:30:00.000Z",
-    progressed: false,
   });
   mocks.runHostedAssistantCronWakeLane.mockResolvedValue({
     deviceSyncProcessed: 0,

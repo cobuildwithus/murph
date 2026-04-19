@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
   createDeviceSyncRegistry: vi.fn(),
   createDeviceSyncService: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
-  drainHostedParserQueueUntilSettled: vi.fn(),
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
@@ -37,7 +36,6 @@ const mocks = vi.hoisted(() => ({
   readHostedAssistantExecutionDefaultTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
   runHostedAssistantCronWakeLane: vi.fn(),
-  runHostedConversationAssistantAutomation: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   runHostedNoopSystemWakeLane: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
@@ -111,9 +109,6 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedAssistantCronWakeLane: mocks.runHostedAssistantCronWakeLane,
-  drainHostedParserQueueUntilSettled: mocks.drainHostedParserQueueUntilSettled,
-  runHostedConversationAssistantAutomation:
-    mocks.runHostedConversationAssistantAutomation,
   runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane: mocks.runHostedNoopSystemWakeLane,
 }));
@@ -238,14 +233,6 @@ beforeEach(() => {
     nextWakeAt: null,
     parserProcessed: 0,
     wakeMaterializationHints: null,
-  });
-  mocks.runHostedConversationAssistantAutomation.mockResolvedValue({
-    nextWakeAt: null,
-    progressed: false,
-  });
-  mocks.drainHostedParserQueueUntilSettled.mockResolvedValue({
-    nextWakeAt: null,
-    processedJobs: 0,
   });
   mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([
     {
@@ -773,8 +760,6 @@ describe("executeHostedWakeForCommit", () => {
     expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
-    expect(mocks.drainHostedParserQueueUntilSettled).not.toHaveBeenCalled();
-    expect(mocks.runHostedConversationAssistantAutomation).not.toHaveBeenCalled();
     assert.equal(result.committedResult.result.nextWakeAt, null);
     assert.equal(
       result.committedResult.result.summary,
@@ -852,8 +837,6 @@ describe("executeHostedWakeForCommit", () => {
       runtimeEnv: {},
     });
 
-    expect(mocks.drainHostedParserQueueUntilSettled).not.toHaveBeenCalled();
-    expect(mocks.runHostedConversationAssistantAutomation).not.toHaveBeenCalled();
     expect(result.committedResult.result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
     expect(result.committedResult.result.summary).toBe(
       "Persisted Telegram capture on the hosted conversation lane.",
