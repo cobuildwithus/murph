@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const createPrivyClient = vi.fn();
-  const privyUsersGet = vi.fn();
   const privyUsersSetCustomMetadata = vi.fn();
   class PrivyClient {
     constructor(input: unknown) {
@@ -11,7 +10,6 @@ const mocks = vi.hoisted(() => {
 
     users() {
       return {
-        get: privyUsersGet,
         setCustomMetadata: privyUsersSetCustomMetadata,
       };
     }
@@ -20,7 +18,6 @@ const mocks = vi.hoisted(() => {
   return {
     cookies: vi.fn(),
     createPrivyClient,
-    privyUsersGet,
     isHostedOnboardingRevnetEnabled: vi.fn(),
     privyUsersSetCustomMetadata,
     PrivyClient,
@@ -31,11 +28,13 @@ const mocks = vi.hoisted(() => {
       telegramBotUsername: null as string | null,
       telegramWebhookSecret: null as string | null,
     },
+    verifyIdentityToken: vi.fn(),
   };
 });
 
 vi.mock("@privy-io/node", () => ({
   PrivyClient: mocks.PrivyClient,
+  verifyIdentityToken: mocks.verifyIdentityToken,
 }));
 
 vi.mock("next/headers", () => ({
@@ -69,12 +68,7 @@ describe("hosted Privy verification", () => {
     vi.clearAllMocks();
     delete (globalThis as typeof globalThis & {
       __murphHostedPrivyManagementClient?: unknown;
-      __murphHostedPrivyVerificationClient?: unknown;
     }).__murphHostedPrivyManagementClient;
-    delete (globalThis as typeof globalThis & {
-      __murphHostedPrivyManagementClient?: unknown;
-      __murphHostedPrivyVerificationClient?: unknown;
-    }).__murphHostedPrivyVerificationClient;
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
     mocks.runtimeEnv.privyAppId = "cm_app_123";
     mocks.runtimeEnv.privyAppSecret = "app_secret_123";
@@ -105,7 +99,6 @@ describe("hosted Privy verification", () => {
       hasHostedPrivyPhoneAuthConfig(
         createProcessEnv({
           NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
-          PRIVY_APP_SECRET: "app_secret_123",
         }),
       ),
     ).toBe(false);
@@ -113,7 +106,6 @@ describe("hosted Privy verification", () => {
       hasHostedPrivyPhoneAuthConfig(
         createProcessEnv({
           NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
-          PRIVY_APP_SECRET: "app_secret_123",
           PRIVY_VERIFICATION_KEY: "privy-verification-key",
         }),
       ),
@@ -121,7 +113,7 @@ describe("hosted Privy verification", () => {
   });
 
   it("fails fast when the hosted phone-auth config is incomplete", () => {
-    mocks.runtimeEnv.privyAppSecret = null;
+    mocks.runtimeEnv.privyVerificationKey = null;
 
     try {
       requireHostedPrivyPhoneAuthConfig();
@@ -134,8 +126,8 @@ describe("hosted Privy verification", () => {
     }
   });
 
-  it("verifies the identity token through the Privy users API and uses the verified linked accounts", async () => {
-    mocks.privyUsersGet.mockResolvedValue({
+  it("verifies the identity token directly and uses the verified linked accounts", async () => {
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -173,14 +165,12 @@ describe("hosted Privy verification", () => {
       },
     });
 
-    expect(mocks.createPrivyClient).toHaveBeenCalledWith({
-      appId: "cm_app_123",
-      appSecret: "app_secret_123",
-      jwtVerificationKey: "line-1\nline-2",
+    expect(mocks.verifyIdentityToken).toHaveBeenCalledWith({
+      app_id: "cm_app_123",
+      identity_token: "signed-identity-token",
+      verification_key: "line-1\nline-2",
     });
-    expect(mocks.privyUsersGet).toHaveBeenCalledWith({
-      id_token: "signed-identity-token",
-    });
+    expect(mocks.createPrivyClient).not.toHaveBeenCalled();
   });
 
   it("reads the hosted Privy identity token from the cookie header", () => {
@@ -207,7 +197,7 @@ describe("hosted Privy verification", () => {
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
     });
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -240,9 +230,9 @@ describe("hosted Privy verification", () => {
         address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
       },
     });
-    expect(mocks.privyUsersGet).toHaveBeenCalledWith(
+    expect(mocks.verifyIdentityToken).toHaveBeenCalledWith(
       expect.objectContaining({
-        id_token: "cookie-token",
+        identity_token: "cookie-token",
       }),
     );
   });
@@ -252,7 +242,7 @@ describe("hosted Privy verification", () => {
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
       httpStatus: 401,
     });
-    expect(mocks.privyUsersGet).not.toHaveBeenCalled();
+    expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
   });
 
   it("requires the Privy verification key config for hosted verification", async () => {
@@ -262,11 +252,11 @@ describe("hosted Privy verification", () => {
       code: "PRIVY_CONFIG_REQUIRED",
       httpStatus: 500,
     });
-    expect(mocks.privyUsersGet).not.toHaveBeenCalled();
+    expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
   });
 
-  it("maps Privy users API failures to hosted auth errors", async () => {
-    mocks.privyUsersGet.mockRejectedValue(new Error("bad token"));
+  it("maps direct verifier failures to hosted auth errors", async () => {
+    mocks.verifyIdentityToken.mockRejectedValue(new Error("bad token"));
 
     await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_AUTH_FAILED",
@@ -331,7 +321,7 @@ describe("hosted Privy verification", () => {
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
     });
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -361,7 +351,7 @@ describe("hosted Privy verification", () => {
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
     });
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -390,7 +380,7 @@ describe("hosted Privy verification", () => {
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
     });
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -417,7 +407,7 @@ describe("hosted Privy verification", () => {
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
     });
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -436,7 +426,7 @@ describe("hosted Privy verification", () => {
   });
 
   it("rejects malformed verifier results", async () => {
-    mocks.privyUsersGet.mockResolvedValue({});
+    mocks.verifyIdentityToken.mockResolvedValue({});
 
     await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_AUTH_FAILED",
@@ -445,7 +435,7 @@ describe("hosted Privy verification", () => {
   });
 
   it("rejects verified sessions whose linked phone account is not actually verified", async () => {
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -474,7 +464,7 @@ describe("hosted Privy verification", () => {
   });
 
   it("allows verified sessions without an embedded wallet account", async () => {
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
@@ -502,7 +492,7 @@ describe("hosted Privy verification", () => {
   });
 
   it("allows verified sessions that only include a non-ethereum embedded wallet when RevNet is disabled", async () => {
-    mocks.privyUsersGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
