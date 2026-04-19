@@ -29,7 +29,6 @@ export type HostedExecutionJobRunMode = "in-process" | "isolated";
 export interface HostedExecutionJobOptions {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
-  localLoopbackProxyToken?: string | null;
   signal?: AbortSignal;
 }
 
@@ -95,7 +94,6 @@ export function createHostedExecutionJobRunner(
       commitTimeoutMs: runtime.commitTimeoutMs,
       internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
       localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
-      localLoopbackProxyToken: options?.localLoopbackProxyToken ?? null,
       webCallbackSigning: environment.webCallbackSigning,
       webControlBaseUrl: environment.hostedWebBaseUrl,
     });
@@ -113,7 +111,6 @@ export function createHostedExecutionJobRunner(
       {
         internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
         localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
-        localLoopbackProxyToken: options?.localLoopbackProxyToken ?? null,
         job: {
           request: input.request,
           runtime,

@@ -32,6 +32,7 @@ Internal control routes:
 
 The supported worker HTTP surface stops at those three control routes plus the public banner and health checks.
 Hosted assistant post-commit delivery recovery now comes from the shared outbox mirror inside the encrypted vault plus pending-commit Durable Object state, not a separate assistant-delivery journal route.
+When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only to bridge local child-runtime requests back onto the same per-run opaque internal-worker proxy token contract used by direct `http://*.worker` requests.
 
 ## Storage Contract
 

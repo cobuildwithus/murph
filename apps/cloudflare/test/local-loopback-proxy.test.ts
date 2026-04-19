@@ -43,7 +43,7 @@ describe("proxyLocalLoopbackRequest", () => {
       }),
       startMessage: "started",
       upstreamUrl: new URL(
-        "http://127.0.0.1:8788/__murph/local-internal-proxy/secret-token/results.worker/messages/raw_123",
+        "http://127.0.0.1:8788/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_123",
       ),
     })).resolves.toBeInstanceOf(Response);
 
@@ -53,9 +53,9 @@ describe("proxyLocalLoopbackRequest", () => {
     expect(startLog?.details).toMatchObject({
       upstreamOrigin: "http://127.0.0.1:8788",
       upstreamPathname:
-        "/__murph/local-internal-proxy/<redacted>/results.worker/messages/raw_123",
+        "/__murph/local-internal-proxy/users/<redacted>/results.worker/messages/raw_123",
     });
-    expect(String(startLog?.details?.upstreamPathname)).not.toContain("secret-token");
+    expect(String(startLog?.details?.upstreamPathname)).not.toContain("member_123");
   });
 
   it("accepts IPv6 loopback proxy base URLs", () => {

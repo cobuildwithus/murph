@@ -51,7 +51,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
       internalWorkerProxyToken: "runner-proxy-token",
       localInternalProxyBaseUrl: "http://127.0.0.1:8787",
-      localLoopbackProxyToken: "local-loopback-token",
     });
 
     await platform.effectsPort.readRawEmailMessage("raw_123");
@@ -64,16 +63,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
     expect((request as Request).url).toBe(
-      "http://127.0.0.1:8787/__murph/local-internal-proxy/local-loopback-token/results.worker/messages/raw_123",
+      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_123",
     );
-    expect((request as Request).headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
     expect((request as Request).method).toBe("GET");
   });
 
-  it("fails closed before issuing loopback bridge requests when the local loopback token is missing", async () => {
+  it("does not require a second local bridge token when loopback proxying is enabled", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -82,12 +80,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       localInternalProxyBaseUrl: "http://127.0.0.1:8787",
     });
 
-    await expect(
-      platform.effectsPort.readRawEmailMessage("raw_123"),
-    ).rejects.toThrow(
-      "Hosted raw email read raw_123 request failed.",
+    await platform.effectsPort.readRawEmailMessage("raw_123");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the bridged effects port fetch to run.");
+    }
+    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    expect((request as Request).url).toBe(
+      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_123",
     );
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("binds device-sync runtime requests to the hosted member id at the signed web callback seam", async () => {

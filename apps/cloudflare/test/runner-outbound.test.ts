@@ -5,8 +5,12 @@ import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
+import { resolveRunnerOutboundUserRunnerStub } from "../src/runner-outbound/shared.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
-import type { WorkerUserRunnerNamespaceLike } from "../src/worker-contracts.ts";
+import type {
+  WorkerBootstrapUserRunnerStubLike,
+  WorkerUserRunnerNamespaceLike,
+} from "../src/worker-contracts.ts";
 
 const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
@@ -15,6 +19,37 @@ const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`
 describe("handleRunnerOutboundRequest", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("bootstraps the bound user before returning the outbound stub", async () => {
+    const bootstrapUser = vi.fn(async (userId: string) => ({ userId }));
+    const env = createDirectRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName() {
+          return { bootstrapUser };
+        },
+      },
+    });
+
+    const stub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
+
+    expect(typeof stub.bootstrapUser).toBe("function");
+    expect(bootstrapUser).toHaveBeenCalledOnce();
+    expect(bootstrapUser).toHaveBeenCalledWith("member_123");
+  });
+
+  it("fails closed when the runner stub is malformed at runtime", async () => {
+    const env = createDirectRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName() {
+          return {} as never;
+        },
+      },
+    });
+
+    await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).rejects.toThrow(
+      'User runner stub does not implement bootstrapUser.',
+    );
   });
 
   it("rejects internal worker proxy traffic when the proxy header is missing", async () => {
@@ -109,9 +144,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request("http://127.0.0.1:8788/health?from=runner", {
-        headers: createRunnerProxyHeaders({
-          "x-hosted-execution-user-id": "member_123",
-        }),
+        headers: createRunnerProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -140,7 +173,7 @@ function createRunnerOutboundEnv(
   overrides: Partial<RunnerOutboundEnvironmentSource> = {},
 ): RunnerOutboundEnvironmentSource {
   const values = new Map<string, string>();
-  const defaultUserRunnerNamespace: WorkerUserRunnerNamespaceLike = {
+  const defaultUserRunnerNamespace: WorkerUserRunnerNamespaceLike<WorkerBootstrapUserRunnerStubLike> = {
     getByName() {
       return {
         async bootstrapUser() {
@@ -217,6 +250,15 @@ function createRunnerOutboundEnv(
         };
       },
     },
+  };
+}
+
+function createDirectRunnerOutboundEnv(
+  overrides: Partial<RunnerOutboundEnvironmentSource>,
+): RunnerOutboundEnvironmentSource {
+  return {
+    ...createRunnerOutboundEnv(),
+    ...overrides,
   };
 }
 
