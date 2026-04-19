@@ -7,9 +7,11 @@ import type {
 import { buildHostedDeviceSyncWake } from "../device-sync/wake";
 import { materializeHostedAssistantCronWakeTx, appendHostedExecutionWakePayloadTx } from "./queue";
 
+type HostedWakeMaterializeTx = Pick<Prisma.TransactionClient, "deviceConnection">;
+
 export async function materializeHostedDueWakesTx(input: {
   now?: Date;
-  tx: Prisma.TransactionClient;
+  tx: HostedWakeMaterializeTx;
   userId: string;
   wakeMaterializationHints?: HostedWakeMaterializationHints | null;
 }): Promise<HostedWakeMaterializeResponse> {
@@ -28,27 +30,25 @@ export async function materializeHostedDueWakesTx(input: {
     targetSeqHint = maxHostedWakeSeq(targetSeqHint, appended.wake.seq);
   }
 
-  const dueConnections = isRunnableWakeHint(nextHints?.deviceSyncWakeAt ?? null, now)
-    ? await input.tx.deviceConnection.findMany({
-        where: {
-          nextReconcileAt: {
-            lte: now,
-          },
-          status: "active",
-          userId: input.userId,
-        },
-        orderBy: [
-          { nextReconcileAt: "asc" },
-          { updatedAt: "asc" },
-          { id: "asc" },
-        ],
-        select: {
-          id: true,
-          nextReconcileAt: true,
-          provider: true,
-        },
-      })
-    : [];
+  const dueConnections = await input.tx.deviceConnection.findMany({
+    where: {
+      nextReconcileAt: {
+        lte: now,
+      },
+      status: "active",
+      userId: input.userId,
+    },
+    orderBy: [
+      { nextReconcileAt: "asc" },
+      { updatedAt: "asc" },
+      { id: "asc" },
+    ],
+    select: {
+      id: true,
+      nextReconcileAt: true,
+      provider: true,
+    },
+  });
 
   for (const connection of dueConnections) {
     const appended = await appendHostedExecutionWakePayloadTx({
