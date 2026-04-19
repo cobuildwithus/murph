@@ -2,6 +2,7 @@ import {
   HOSTED_WAKE_PAYLOAD_SCHEMAS,
   isHostedExecutionWakeKind,
   parseHostedExecutionBundleRef,
+  type HostedWakeMaterializationHints,
   type HostedExecutionRunContext,
   type HostedExecutionRunnerResult,
   deriveHostedExecutionErrorCode,
@@ -40,6 +41,7 @@ interface RunnerMetaBundleRow extends RunnerMetaRow {
   bundle_ref_json: string | null;
   bundle_version: number;
   pending_commit_json: string | null;
+  wake_materialization_hints_json: string | null;
 }
 
 export interface RunnerLeaseOwnerInput {
@@ -311,16 +313,29 @@ export class RunnerStateStore {
 
   async syncNextWake(input: {
     preferredWakeAt?: string | null;
+    wakeMaterializationHints?: HostedWakeMaterializationHints | null;
   }): Promise<RunnerStateRecord> {
     await this.ready;
 
     const meta = this.requireMetaRowSync();
+    const wakeMaterializationHints = input.wakeMaterializationHints === undefined
+      ? parseWakeMaterializationHints(meta.wake_materialization_hints_json)
+      : normalizeWakeMaterializationHints(input.wakeMaterializationHints);
     meta.next_wake_at = resolveRunnerNextWakeAt({
       preferredWakeAt: input.preferredWakeAt ?? null,
+      wakeMaterializationHints,
     });
+    meta.wake_materialization_hints_json = serializeWakeMaterializationHints(
+      wakeMaterializationHints,
+    );
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
+  }
+
+  async readWakeMaterializationHints(): Promise<HostedWakeMaterializationHints | null> {
+    await this.ready;
+    return parseWakeMaterializationHints(this.requireMetaRowSync().wake_materialization_hints_json);
   }
 
   async readPendingCommit(eventId?: string): Promise<RunnerPendingCommitRecord | null> {
@@ -621,6 +636,7 @@ function createDefaultRunnerMetaBundleRow(userId: string): RunnerMetaBundleRow {
     bundle_ref_json: null,
     bundle_version: 0,
     pending_commit_json: null,
+    wake_materialization_hints_json: null,
   };
 }
 
@@ -752,6 +768,7 @@ function parsePendingCommitResult(
     eventsHandled?: unknown;
     nextWakeAt?: unknown;
     summary?: unknown;
+    wakeMaterializationHints?: unknown;
   };
   if (
     typeof record.summary !== "string"
@@ -763,13 +780,80 @@ function parsePendingCommitResult(
       && record.nextWakeAt !== null
       && typeof record.nextWakeAt !== "string"
     )
+    || (
+      record.wakeMaterializationHints !== undefined
+      && record.wakeMaterializationHints !== null
+      && (
+        typeof record.wakeMaterializationHints !== "object"
+        || Array.isArray(record.wakeMaterializationHints)
+      )
+    )
   ) {
     return null;
   }
 
+  const wakeMaterializationHints = record.wakeMaterializationHints === undefined
+    ? undefined
+    : normalizeWakeMaterializationHints(record.wakeMaterializationHints as HostedWakeMaterializationHints | null);
+
   return {
     eventsHandled: record.eventsHandled,
     ...(record.nextWakeAt !== undefined ? { nextWakeAt: record.nextWakeAt ?? null } : {}),
+    ...(wakeMaterializationHints !== undefined ? { wakeMaterializationHints } : {}),
     summary: record.summary,
   };
+}
+
+function normalizeWakeMaterializationHints(
+  value: HostedWakeMaterializationHints | null,
+): HostedWakeMaterializationHints | null {
+  if (!value) {
+    return null;
+  }
+
+  const hints: HostedWakeMaterializationHints = {
+    ...(value.assistantWakeAt === undefined
+      ? {}
+      : { assistantWakeAt: normalizeWakeHintTimestamp(value.assistantWakeAt) }),
+    ...(value.deviceSyncWakeAt === undefined
+      ? {}
+      : { deviceSyncWakeAt: normalizeWakeHintTimestamp(value.deviceSyncWakeAt) }),
+  };
+
+  return Object.keys(hints).length > 0 ? hints : null;
+}
+
+function normalizeWakeHintTimestamp(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) {
+    return value ?? null;
+  }
+
+  const parsedMs = Date.parse(value);
+  if (!Number.isFinite(parsedMs)) {
+    return null;
+  }
+
+  return new Date(parsedMs).toISOString();
+}
+
+function parseWakeMaterializationHints(
+  value: string | null,
+): HostedWakeMaterializationHints | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as HostedWakeMaterializationHints | null;
+    return normalizeWakeMaterializationHints(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function serializeWakeMaterializationHints(
+  value: HostedWakeMaterializationHints | null,
+): string | null {
+  const normalized = normalizeWakeMaterializationHints(value);
+  return normalized ? JSON.stringify(normalized) : null;
 }

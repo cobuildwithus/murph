@@ -195,6 +195,14 @@ function parseHostedExecutionRunnerSummary(
       : {
           nextWakeAt: readNullableString(record.nextWakeAt, `${label}.nextWakeAt`),
         }),
+    ...(record.wakeMaterializationHints === undefined
+      ? {}
+      : {
+          wakeMaterializationHints: parseHostedWakeMaterializationHints(
+            record.wakeMaterializationHints,
+            `${label}.wakeMaterializationHints`,
+          ),
+        }),
     summary: requireString(record.summary, `${label}.summary`),
   };
 }
@@ -254,6 +262,36 @@ function readNullableString(value: unknown, label: string): string | null {
   }
 
   return requireString(value, label);
+}
+
+function parseHostedWakeMaterializationHints(
+  value: unknown,
+  label: string,
+): HostedExecutionRunnerResult["result"]["wakeMaterializationHints"] {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+
+  return {
+    ...(record.assistantWakeAt === undefined
+      ? {}
+      : {
+          assistantWakeAt: readNullableString(
+            record.assistantWakeAt,
+            `${label}.assistantWakeAt`,
+          ),
+        }),
+    ...(record.deviceSyncWakeAt === undefined
+      ? {}
+      : {
+          deviceSyncWakeAt: readNullableString(
+            record.deviceSyncWakeAt,
+            `${label}.deviceSyncWakeAt`,
+          ),
+        }),
+  };
 }
 
 function rejectRemovedHostedAssistantRuntimeField(

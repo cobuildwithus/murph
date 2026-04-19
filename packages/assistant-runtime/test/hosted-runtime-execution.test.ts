@@ -1073,6 +1073,10 @@ describe("executeHostedWakeForCommit", () => {
       });
 
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
+      expect(result.committedResult.result.wakeMaterializationHints).toEqual({
+        assistantWakeAt: "2026-04-08T00:10:00.000Z",
+        deviceSyncWakeAt: null,
+      });
       assert.equal(
         result.committedResult.result.summary,
         "Persisted hosted email capture on the hosted conversation lane.",
@@ -1192,6 +1196,10 @@ describe("executeHostedWakeForCommit", () => {
       expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
       expect(close).toHaveBeenCalledTimes(1);
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:25:00.000Z");
+      expect(result.committedResult.result.wakeMaterializationHints).toEqual({
+        assistantWakeAt: null,
+        deviceSyncWakeAt: "2026-04-08T00:25:00.000Z",
+      });
     } finally {
       vi.useRealTimers();
     }

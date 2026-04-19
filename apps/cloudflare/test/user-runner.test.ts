@@ -14,13 +14,13 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   deriveHostedExecutionErrorCode,
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution";
 import type {
   HostedWakeExecutionResult,
   HostedExecutionWake,
+  HostedWakeMaterializationHints,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -2621,7 +2621,32 @@ describe("HostedUserRunner", () => {
 
     expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:05:00.000Z"));
   });
+
 });
+
+function normalizeHostedWakeMaterializationHintsForTest(
+  value: HostedWakeMaterializationHints | null,
+): HostedWakeMaterializationHints | null {
+  if (!value) {
+    return null;
+  }
+
+  const hints: HostedWakeMaterializationHints = {
+    ...(value.assistantWakeAt === undefined ? {} : { assistantWakeAt: value.assistantWakeAt }),
+    ...(value.deviceSyncWakeAt === undefined ? {} : { deviceSyncWakeAt: value.deviceSyncWakeAt }),
+  };
+
+  return Object.keys(hints).length > 0 ? hints : null;
+}
+
+function isHostedWakeHintDueForTest(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const parsedMs = Date.parse(value);
+  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
+}
 
 function createBucket() {
   const values = new Map<string, string>();
@@ -3124,9 +3149,7 @@ function createPendingCommitWakeRecord(
     kind: wake.kind,
     occurredAt: wake.occurredAt,
     payloadCiphertext,
-    payloadSchema: wake.kind === "conversation.message"
-      ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
-      : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
     seq: "1",
     userId: wake.userId,
   };
@@ -3141,6 +3164,7 @@ interface RunnerSuccessPayload {
   result: {
     eventsHandled: number;
     nextWakeAt?: string | null;
+    wakeMaterializationHints?: HostedWakeMaterializationHints | null;
     summary: string;
   };
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
@@ -3157,6 +3181,7 @@ function normalizeRunnerSuccessPayload(
   input: RunnerSuccessPayloadLike = {},
 ): RunnerSuccessPayload {
   const nextWakeAt = input.result?.nextWakeAt;
+  const wakeMaterializationHints = input.result?.wakeMaterializationHints;
 
   return {
     bundles: {
@@ -3167,6 +3192,7 @@ function normalizeRunnerSuccessPayload(
     result: {
       eventsHandled: input.result?.eventsHandled ?? 1,
       ...(nextWakeAt !== undefined ? { nextWakeAt } : {}),
+      ...(wakeMaterializationHints !== undefined ? { wakeMaterializationHints } : {}),
       summary: input.result?.summary ?? "ok",
     },
     assistantDeliveryEffects: input.assistantDeliveryEffects ?? [],
@@ -3179,6 +3205,7 @@ function createRunnerSuccessPayload(input: Partial<{
   eventsHandled: number;
   gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   nextWakeAt: string | null;
+  wakeMaterializationHints: HostedWakeMaterializationHints | null;
   summary: string;
   vault: string | null;
 }> = {}): RunnerSuccessPayload {
@@ -3191,6 +3218,7 @@ function createRunnerSuccessPayload(input: Partial<{
     result: {
       eventsHandled: input.eventsHandled,
       nextWakeAt: input.nextWakeAt,
+      wakeMaterializationHints: input.wakeMaterializationHints,
       summary: input.summary,
     },
     assistantDeliveryEffects: input.assistantDeliveryEffects,
@@ -3293,6 +3321,40 @@ async function maybeCreateHostedWakeControlResponse(input: {
     }));
   }
 
+  if (url.endsWith("/api/internal/hosted-wake/materialize")) {
+    const requestBody = JSON.parse(String(input.init?.body ?? "{}")) as {
+      wakeMaterializationHints?: HostedWakeMaterializationHints | null;
+    };
+    const wakeMaterializationHints = normalizeHostedWakeMaterializationHintsForTest(
+      requestBody.wakeMaterializationHints ?? null,
+    );
+    let targetSeqHint: string | null = null;
+    const nowIso = new Date(Date.now()).toISOString();
+
+    if (isHostedWakeHintDueForTest(wakeMaterializationHints?.assistantWakeAt ?? null)) {
+      const appended = await appendTestHostedWake({
+        bucket: input.bucket.api,
+        wake: buildHostedExecutionAssistantCronTickWake({
+          eventId: `assistant.cron.tick:${userId}:alarm:${nowIso}`,
+          occurredAt: nowIso,
+          reason: "alarm",
+          userId,
+        }),
+      });
+      targetSeqHint = appended.wake.seq;
+    }
+
+    return Response.json({
+      targetSeqHint,
+      wakeMaterializationHints: normalizeHostedWakeMaterializationHintsForTest({
+        assistantWakeAt: isHostedWakeHintDueForTest(wakeMaterializationHints?.assistantWakeAt ?? null)
+          ? null
+          : wakeMaterializationHints?.assistantWakeAt ?? null,
+        deviceSyncWakeAt: wakeMaterializationHints?.deviceSyncWakeAt ?? null,
+      }),
+    });
+  }
+
   return null;
 }
 
@@ -3337,9 +3399,7 @@ async function createCommittedRunnerSuccessResponse(input: {
         id: `wake_${wakeAppendRequest.eventId}`,
         kind: wakeAppendRequest.kind,
         occurredAt: wakeAppendRequest.occurredAt,
-        payloadSchema: wakeAppendRequest.kind === "conversation.message"
-          ? "murph.hosted-wake-conversation-message.v1"
-          : "murph.hosted-wake-system.v1",
+        payloadSchema: "murph.hosted-wake-execution.v1",
         quarantineCode: null,
         quarantinedAt: null,
         seq: "1",

@@ -135,7 +135,12 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;
-  reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
+  reason:
+    | "connected"
+    | "webhook_hint"
+    | "disconnected"
+    | "reauthorization_required"
+    | "reconcile_due";
 }
 
 export interface HostedExecutionShareReference {
@@ -168,10 +173,44 @@ export interface HostedExecutionBaseWake {
   userId: string;
 }
 
+export interface HostedExecutionLinqConversationTextPart {
+  type: "text";
+  value: string;
+}
+
+export interface HostedExecutionLinqConversationLinkPart {
+  type: "link";
+  value: string;
+}
+
+export interface HostedExecutionLinqConversationMediaPart {
+  attachmentId?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+  size?: number | null;
+  type: "media" | "voice_memo";
+  url?: string | null;
+}
+
+export type HostedExecutionLinqConversationMessagePart =
+  | HostedExecutionLinqConversationTextPart
+  | HostedExecutionLinqConversationLinkPart
+  | HostedExecutionLinqConversationMediaPart;
+
+export interface HostedExecutionLinqConversationMessage {
+  chatId: string;
+  from: string;
+  isFromMe: boolean;
+  messageId: string;
+  parts: HostedExecutionLinqConversationMessagePart[];
+  replyToMessageId?: string | null;
+  replyToPartIndex?: number | null;
+  service?: string | null;
+}
+
 export interface HostedExecutionLinqConversationMessagePayload {
   channel: "linq";
-  linqEvent: Record<string, unknown>;
-  linqMessageId?: string | null;
+  linqMessage: HostedExecutionLinqConversationMessage;
   phoneLookupKey: string;
 }
 
@@ -234,6 +273,11 @@ export type HostedExecutionWake =
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareAcceptedWake;
 
+export interface HostedWakeMaterializationHints {
+  assistantWakeAt?: string | null;
+  deviceSyncWakeAt?: string | null;
+}
+
 export type HostedExecutionSystemWake = Exclude<
   HostedExecutionWake,
   HostedExecutionConversationMessageWake
@@ -253,6 +297,7 @@ export interface HostedExecutionRunnerResult {
   result: {
     eventsHandled: number;
     nextWakeAt?: string | null;
+    wakeMaterializationHints?: HostedWakeMaterializationHints | null;
     summary: string;
   };
 }
@@ -278,6 +323,7 @@ export const HOSTED_WAKE_LIFECYCLE_STATES = [
   "queued",
   "backpressured",
   "completed",
+  "replaced",
   "poisoned",
 ] as const;
 
@@ -287,6 +333,7 @@ export type HostedWakeLifecycleState =
 export interface HostedWakeStatus {
   eventId: string;
   lastError: string | null;
+  replacedByEventId?: string | null;
   state: HostedWakeLifecycleState;
   userId: string;
 }
@@ -305,13 +352,13 @@ export const HOSTED_WAKE_BEHAVIORS = [
 export type HostedWakeBehavior =
   (typeof HOSTED_WAKE_BEHAVIORS)[number];
 
+export const HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA = "murph.hosted-wake-execution.v1";
 export const HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA =
-  "murph.hosted-wake-conversation-message.v1";
-export const HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA = "murph.hosted-wake-system.v1";
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
+export const HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA = HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
 
 export const HOSTED_WAKE_PAYLOAD_SCHEMAS = [
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
 ] as const;
 
 export type HostedWakePayloadSchema =
@@ -345,17 +392,25 @@ interface HostedWakeRecordBase {
 
 export interface HostedConversationMessageWakeRecord extends HostedWakeRecordBase {
   kind: "conversation.message";
-  payloadSchema: typeof HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA;
+  payloadSchema: typeof HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
 }
 
 export interface HostedSystemWakeRecord extends HostedWakeRecordBase {
   kind: HostedExecutionSystemWake["kind"];
-  payloadSchema: typeof HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA;
+  payloadSchema: typeof HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
 }
 
 export type HostedWakeRecord =
   | HostedConversationMessageWakeRecord
   | HostedSystemWakeRecord;
+
+export type HostedFetchedWakeRecord =
+  | (HostedConversationMessageWakeRecord & {
+      commitProof: string;
+    })
+  | (HostedSystemWakeRecord & {
+      commitProof: string;
+    });
 
 export interface HostedWakeFetchRequest {
   afterSeq?: string | null;
@@ -364,10 +419,16 @@ export interface HostedWakeFetchRequest {
 
 export interface HostedWakeFetchResponse {
   cursor: HostedExecutionCursorState;
-  wakes: HostedWakeRecord[];
+  wakes: HostedFetchedWakeRecord[];
+}
+
+export interface HostedWakeCommitAdvance {
+  proof: string;
+  wakeId: string;
 }
 
 export interface HostedWakeCommitRequest {
+  advance?: HostedWakeCommitAdvance | null;
   committedSeq: string;
   expectedVersion: string;
   snapshotRef?: unknown | null;
@@ -391,6 +452,15 @@ export interface HostedWakeAppendResponse {
   wake: HostedWakeRecord;
 }
 
+export interface HostedWakeMaterializeRequest {
+  wakeMaterializationHints?: HostedWakeMaterializationHints | null;
+}
+
+export interface HostedWakeMaterializeResponse {
+  targetSeqHint: string | null;
+  wakeMaterializationHints: HostedWakeMaterializationHints | null;
+}
+
 export interface HostedWakeQuarantineRequest {
   quarantineCode: string;
   wakeId: string;
@@ -406,6 +476,7 @@ export interface HostedWakeStatusRequest {
 
 export interface HostedWakeStatusResponse {
   cursor: HostedExecutionCursorState;
+  replacedByEventId?: string | null;
   wakeState?: HostedWakeLifecycleState | null;
   pendingWakeCount: number;
 }

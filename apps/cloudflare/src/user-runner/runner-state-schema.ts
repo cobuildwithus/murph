@@ -30,7 +30,8 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       last_event_id TEXT,
       last_run_at TEXT,
       next_wake_at TEXT,
-      pending_commit_json TEXT
+      pending_commit_json TEXT,
+      wake_materialization_hints_json TEXT
     )
   `);
   // Greenfield hard cut: the runner only persists one vault bundle pointer now,
@@ -59,6 +60,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "last_run_at",
       "next_wake_at",
       "pending_commit_json",
+      "wake_materialization_hints_json",
     ],
   });
 }
@@ -97,6 +99,10 @@ function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
     {
       columnName: "pending_commit_json",
       ddl: "ALTER TABLE runner_meta ADD COLUMN pending_commit_json TEXT",
+    },
+    {
+      columnName: "wake_materialization_hints_json",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN wake_materialization_hints_json TEXT",
     },
   ] as const;
 

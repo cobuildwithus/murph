@@ -6,6 +6,7 @@
 
 import {
   summarizeHostedExecutionErrorCode,
+  type HostedWakeMaterializationHints,
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
@@ -36,6 +37,7 @@ export interface RunnerMetaRow {
   last_run_at: string | null;
   next_wake_at: string | null;
   pending_commit_json: string | null;
+  wake_materialization_hints_json: string | null;
   user_id: string;
 }
 
@@ -92,6 +94,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     last_run_at: null,
     next_wake_at: null,
     pending_commit_json: null,
+    wake_materialization_hints_json: null,
     user_id: userId,
   };
 }
@@ -144,8 +147,13 @@ export function projectRunnerStateRecord(input: {
 
 export function resolveRunnerNextWakeAt(input: {
   preferredWakeAt?: string | null;
+  wakeMaterializationHints?: HostedWakeMaterializationHints | null;
 }): string | null {
-  return normalizePreferredWakeAt(input.preferredWakeAt ?? null);
+  return earliestRunnerWakeAt(
+    normalizePreferredWakeAt(input.preferredWakeAt ?? null),
+    normalizePreferredWakeAt(input.wakeMaterializationHints?.assistantWakeAt ?? null),
+    normalizePreferredWakeAt(input.wakeMaterializationHints?.deviceSyncWakeAt ?? null),
+  );
 }
 
 function normalizePreferredWakeAt(value: string | null): string | null {
@@ -159,6 +167,12 @@ function normalizePreferredWakeAt(value: string | null): string | null {
   }
 
   return new Date(Math.max(parsedMs, Date.now())).toISOString();
+}
+
+function earliestRunnerWakeAt(...values: Array<string | null | undefined>): string | null {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
 }
 
 function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRef | null {

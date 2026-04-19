@@ -9,13 +9,11 @@ import {
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import {
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   HOSTED_WAKE_PAYLOAD_SCHEMAS,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
   HOSTED_WAKE_BEHAVIORS,
   isHostedConversationMessageChannel,
   isHostedExecutionWakeKind,
-  isHostedSystemWake,
 } from "./contracts.ts";
 
 import type {
@@ -31,6 +29,7 @@ import type {
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
   HostedExecutionCursorState,
+  HostedExecutionLinqConversationMessagePayload,
   HostedExecutionMemberActivatedEvent,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerSharePack,
@@ -38,12 +37,15 @@ import type {
   HostedExecutionShareReference,
   HostedExecutionUserStatus,
   HostedExecutionVaultShareAcceptedEvent,
+  HostedFetchedWakeRecord,
   HostedWakeBehavior,
   HostedWakeAppendResponse,
   HostedWakeCommitResponse,
   HostedWakeExecutionResult,
   HostedWakeFetchResponse,
   HostedWakeLifecycleState,
+  HostedWakeMaterializationHints,
+  HostedWakeMaterializeResponse,
   HostedWakePayloadSchema,
   HostedWakeQuarantineResponse,
   HostedWakeRecord,
@@ -206,18 +208,10 @@ export function parseHostedExecutionConversationMessagePayload(
     case "linq":
       return {
         channel,
-        linqEvent: requireObject(
-          record.linqEvent,
-          "Hosted execution conversation.message wake payload linqEvent",
+        linqMessage: parseHostedExecutionLinqConversationMessage(
+          record.linqMessage,
+          "Hosted execution conversation.message wake payload linqMessage",
         ),
-        ...(record.linqMessageId === undefined
-          ? {}
-          : {
-              linqMessageId: readOptionalNullableString(
-                record.linqMessageId,
-                "Hosted execution conversation.message wake payload linqMessageId",
-              ),
-            }),
         phoneLookupKey: requireString(
           record.phoneLookupKey,
           "Hosted execution conversation.message wake payload phoneLookupKey",
@@ -249,6 +243,94 @@ export function parseHostedExecutionConversationMessagePayload(
             }),
       };
   }
+}
+
+function parseHostedExecutionLinqConversationMessage(
+  value: unknown,
+  label: string,
+): HostedExecutionLinqConversationMessagePayload["linqMessage"] {
+  const record = requireObject(value, label);
+  return {
+    chatId: requireString(record.chatId, `${label} chatId`),
+    from: requireString(record.from, `${label} from`),
+    isFromMe: requireBoolean(record.isFromMe, `${label} isFromMe`),
+    messageId: requireString(record.messageId, `${label} messageId`),
+    parts: requireArray(record.parts, `${label} parts`).map((entry, index) =>
+      parseHostedExecutionLinqConversationMessagePart(entry, `${label} parts[${index}]`)
+    ),
+    ...(record.replyToMessageId === undefined
+      ? {}
+      : {
+          replyToMessageId: readOptionalNullableString(
+            record.replyToMessageId,
+            `${label} replyToMessageId`,
+          ),
+        }),
+    ...(record.replyToPartIndex === undefined
+      ? {}
+      : {
+          replyToPartIndex: readNullableNumber(
+            record.replyToPartIndex,
+            `${label} replyToPartIndex`,
+          ),
+        }),
+    ...(record.service === undefined
+      ? {}
+      : {
+          service: readOptionalNullableString(record.service, `${label} service`),
+        }),
+  };
+}
+
+function parseHostedExecutionLinqConversationMessagePart(
+  value: unknown,
+  label: string,
+): HostedExecutionLinqConversationMessagePayload["linqMessage"]["parts"][number] {
+  const record = requireObject(value, label);
+  const type = requireString(record.type, `${label} type`);
+
+  if (type === "text" || type === "link") {
+    return {
+      type,
+      value: requireString(record.value, `${label} value`),
+    };
+  }
+
+  if (type === "media" || type === "voice_memo") {
+    return {
+      ...(record.attachmentId === undefined
+        ? {}
+        : {
+            attachmentId: readOptionalNullableString(
+              record.attachmentId,
+              `${label} attachmentId`,
+            ),
+          }),
+      ...(record.fileName === undefined
+        ? {}
+        : {
+            fileName: readOptionalNullableString(record.fileName, `${label} fileName`),
+          }),
+      ...(record.mimeType === undefined
+        ? {}
+        : {
+            mimeType: readOptionalNullableString(record.mimeType, `${label} mimeType`),
+          }),
+      ...(record.size === undefined
+        ? {}
+        : {
+            size: readNullableNumber(record.size, `${label} size`),
+          }),
+      type,
+      ...(record.url === undefined
+        ? {}
+        : {
+            url: readOptionalNullableString(record.url, `${label} url`),
+          }),
+    };
+  }
+
+  throw new TypeError(`${label} type must be "text", "link", "media", or "voice_memo".`);
 }
 
 export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {
@@ -343,6 +425,12 @@ export function parseHostedWakeStatus(
       event.lastError,
       "Hosted wake status lastError",
     ),
+    ...(event.replacedByEventId === undefined ? {} : {
+      replacedByEventId: readNullableString(
+        event.replacedByEventId,
+        "Hosted wake status replacedByEventId",
+      ),
+    }),
     state: parseHostedWakeLifecycleState(event.state, {
       invalidStateMessage: "Unsupported hosted wake lifecycle state",
       label: "Hosted wake status state",
@@ -433,6 +521,12 @@ export function parseHostedWakeStatusResponse(value: unknown): HostedWakeStatusR
 
   return {
     cursor: parseHostedExecutionCursorState(record.cursor),
+    ...(record.replacedByEventId === undefined ? {} : {
+      replacedByEventId: readNullableString(
+        record.replacedByEventId,
+        "Hosted wake status response replacedByEventId",
+      ),
+    }),
     ...(parsedWakeState === undefined ? {} : {
       wakeState: parsedWakeState,
     }),
@@ -731,12 +825,13 @@ export function parseHostedWakeRecord(
   const payloadSchema = parseHostedWakePayloadSchema(record.payloadSchema);
   const opaquePayloadTransport = readHostedWakeOpaquePayloadTransport(record);
 
+  if (payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
+    throw new TypeError(
+      "Hosted wake record requires the execution payload schema.",
+    );
+  }
+
   if (kind === "conversation.message") {
-    if (payloadSchema !== HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA) {
-      throw new TypeError(
-        "Hosted wake record conversation.message kind requires the conversation payload schema.",
-      );
-    }
     return {
       behavior: parseHostedWakeBehavior(record.behavior),
       coalescingKey: readOptionalNullableString(
@@ -762,12 +857,6 @@ export function parseHostedWakeRecord(
       updatedAt: requireString(record.updatedAt, "Hosted wake record updatedAt"),
       userId: requireString(record.userId, "Hosted wake record userId"),
     };
-  }
-
-  if (payloadSchema !== HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA) {
-    throw new TypeError(
-      "Hosted wake record system kinds require the system payload schema.",
-    );
   }
 
   return {
@@ -804,49 +893,25 @@ export function parseHostedWakeExecutionPayload(input: {
   payloadSchema: HostedWakePayloadSchema;
   userId: string;
 }): HostedExecutionWake {
-  switch (input.payloadSchema) {
-    case HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA: {
-      if (input.kind !== "conversation.message") {
-        throw new TypeError(
-          "Hosted wake conversation payload schema requires conversation.message kind.",
-        );
-      }
-
-      const payload = parseHostedExecutionConversationMessagePayload(input.decryptedPayload);
-      return buildHostedExecutionConversationMessageWake({
-        eventId: requireString(
-          requireObject(input.decryptedPayload, "Hosted wake conversation payload").eventId,
-          "Hosted wake conversation payload eventId",
-        ),
-        message: payload,
-        occurredAt: input.occurredAt,
-        userId: input.userId,
-      });
-    }
-    case HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA: {
-      const wake = parseHostedExecutionWake(input.decryptedPayload);
-
-      if (wake.userId !== input.userId) {
-        throw new TypeError("Hosted wake payload userId must match the wake record.");
-      }
-
-      if (wake.kind !== input.kind) {
-        throw new TypeError("Hosted wake payload kind must match the wake record.");
-      }
-
-      if (wake.occurredAt !== input.occurredAt) {
-        throw new TypeError("Hosted wake payload occurredAt must match the wake record.");
-      }
-
-      if (!isHostedSystemWake(wake)) {
-        throw new TypeError(
-          "Hosted wake system payload schema cannot carry a conversation.message wake.",
-        );
-      }
-
-      return wake;
-    }
+  if (input.payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
+    throw new TypeError("Hosted wake payload requires the execution payload schema.");
   }
+
+  const wake = parseHostedExecutionWake(input.decryptedPayload);
+
+  if (wake.userId !== input.userId) {
+    throw new TypeError("Hosted wake payload userId must match the wake record.");
+  }
+
+  if (wake.kind !== input.kind) {
+    throw new TypeError("Hosted wake payload kind must match the wake record.");
+  }
+
+  if (wake.occurredAt !== input.occurredAt) {
+    throw new TypeError("Hosted wake payload occurredAt must match the wake record.");
+  }
+
+  return wake;
 }
 
 function readHostedWakeOpaquePayloadTransport(
@@ -897,7 +962,16 @@ export function parseHostedWakeFetchResponse(
   return {
     cursor: parseHostedExecutionCursorState(record.cursor),
     wakes: requireArray(record.wakes, "Hosted wake fetch response wakes")
-      .map((entry) => parseHostedWakeRecord(entry)),
+      .map((entry) => parseHostedFetchedWakeRecord(entry)),
+  };
+}
+
+function parseHostedFetchedWakeRecord(value: unknown): HostedFetchedWakeRecord {
+  const record = requireObject(value, "Hosted fetched wake record");
+
+  return {
+    ...parseHostedWakeRecord(record),
+    commitProof: requireString(record.commitProof, "Hosted fetched wake record commitProof"),
   };
 }
 
@@ -928,6 +1002,23 @@ export function parseHostedWakeAppendResponse(
   };
 }
 
+export function parseHostedWakeMaterializeResponse(
+  value: unknown,
+): HostedWakeMaterializeResponse {
+  const record = requireObject(value, "Hosted wake materialize response");
+
+  return {
+    targetSeqHint: readNullableString(
+      record.targetSeqHint,
+      "Hosted wake materialize response targetSeqHint",
+    ),
+    wakeMaterializationHints: parseHostedWakeMaterializationHints(
+      record.wakeMaterializationHints ?? null,
+      "Hosted wake materialize response wakeMaterializationHints",
+    ),
+  };
+}
+
 export function parseHostedWakeQuarantineResponse(
   value: unknown,
 ): HostedWakeQuarantineResponse {
@@ -946,6 +1037,36 @@ function parseHostedWakeBehavior(value: unknown): HostedWakeBehavior {
   }
 
   throw new TypeError(`Unsupported hosted wake behavior: ${behavior}`);
+}
+
+function parseHostedWakeMaterializationHints(
+  value: unknown,
+  label: string,
+): HostedWakeMaterializationHints | null {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+
+  return {
+    ...(record.assistantWakeAt === undefined
+      ? {}
+      : {
+          assistantWakeAt: readNullableString(
+            record.assistantWakeAt,
+            `${label}.assistantWakeAt`,
+          ),
+        }),
+    ...(record.deviceSyncWakeAt === undefined
+      ? {}
+      : {
+          deviceSyncWakeAt: readNullableString(
+            record.deviceSyncWakeAt,
+            `${label}.deviceSyncWakeAt`,
+          ),
+        }),
+  };
 }
 
 function parseHostedConversationMessageChannel(
@@ -1012,6 +1133,7 @@ function parseHostedWakeLifecycleState(
     state === "queued"
     || state === "backpressured"
     || state === "completed"
+    || state === "replaced"
     || state === "poisoned"
   ) {
     return state;

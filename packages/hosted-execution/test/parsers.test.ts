@@ -129,6 +129,34 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("parses device-sync reconcile_due wakes", () => {
+    expect(
+      parseHostedExecutionEvent({
+        connectionId: "connection-1",
+        hint: {
+          nextReconcileAt: "2026-04-09T01:00:00Z",
+          occurredAt: "2026-04-09T00:00:00Z",
+          reason: "scheduled-reconcile",
+        },
+        kind: "device-sync.wake",
+        provider: "oura",
+        reason: "reconcile_due",
+        userId: "user-1",
+      }),
+    ).toEqual({
+      connectionId: "connection-1",
+      hint: {
+        nextReconcileAt: "2026-04-09T01:00:00Z",
+        occurredAt: "2026-04-09T00:00:00Z",
+        reason: "scheduled-reconcile",
+      },
+      kind: "device-sync.wake",
+      provider: "oura",
+      reason: "reconcile_due",
+      userId: "user-1",
+    });
+  });
+
   it("rejects unsupported assistant cron reasons", () => {
     expect(() =>
       parseHostedExecutionEvent({
@@ -176,8 +204,12 @@ describe("parseHostedExecutionEvent", () => {
     expect(() =>
       parseHostedExecutionEvent({
         kind: "linq.message.received",
-        linqEvent: {
-          eventId: "linq_evt_123",
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
         },
         phoneLookupKey: "phone_lookup_123",
         userId: "user-1",
