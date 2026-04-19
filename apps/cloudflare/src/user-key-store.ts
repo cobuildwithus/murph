@@ -38,6 +38,27 @@ export interface HostedUserKeyAuditRecord {
   userId: string;
 }
 
+export type HostedUserCryptoRepairNeededReason =
+  | "missing-envelope"
+  | "legacy-object-key-location"
+  | "managed-recipient-reconciliation";
+
+export class HostedUserCryptoRepairNeededError extends Error {
+  readonly reason: HostedUserCryptoRepairNeededReason;
+  readonly userId: string;
+
+  constructor(input: {
+    message: string;
+    reason: HostedUserCryptoRepairNeededReason;
+    userId: string;
+  }) {
+    super(input.message);
+    this.name = "HostedUserCryptoRepairNeededError";
+    this.reason = input.reason;
+    this.userId = input.userId;
+  }
+}
+
 export interface HostedUserKeyStore {
   hasManagedUserCryptoEnvelope(userId: string): Promise<boolean>;
   provisionManagedUserCryptoAtActivation(
@@ -191,9 +212,10 @@ async function resolveHostedUserRootKeyEnvelope(input: {
 
   if (!existingEnvelope) {
     if (input.accessMode !== "activation-provision") {
-      throw new Error(
-        `Hosted user root key envelope ${input.userId} is missing. Activation provisioning must complete before runtime access.`,
-      );
+      throw createHostedUserCryptoRepairNeededError({
+        reason: "missing-envelope",
+        userId: input.userId,
+      });
     }
 
     const created = await createHostedUserRootKeyEnvelope({
@@ -220,6 +242,13 @@ async function resolveHostedUserRootKeyEnvelope(input: {
   }
 
   if (storedEnvelope && storedEnvelope.objectKey !== currentObjectKey) {
+    if (input.accessMode !== "activation-provision") {
+      throw createHostedUserCryptoRepairNeededError({
+        reason: "legacy-object-key-location",
+        userId: input.userId,
+      });
+    }
+
     await writeHostedUserRootKeyEnvelope({
       bucket: input.bucket,
       envelope: existingEnvelope,
@@ -242,6 +271,13 @@ async function resolveHostedUserRootKeyEnvelope(input: {
       envelope: existingEnvelope,
       rootKey: null,
     };
+  }
+
+  if (input.accessMode !== "activation-provision") {
+    throw createHostedUserCryptoRepairNeededError({
+      reason: "managed-recipient-reconciliation",
+      userId: input.userId,
+    });
   }
 
   const rootKey = await unwrapHostedAutomationRootKey({
@@ -524,6 +560,32 @@ function assertOptionalRecipientPairConfigured(input: {
   }
 
   throw new TypeError(`${input.keyLabel} keyId and public key must either both be configured or both be omitted.`);
+}
+
+function createHostedUserCryptoRepairNeededError(input: {
+  reason: HostedUserCryptoRepairNeededReason;
+  userId: string;
+}): HostedUserCryptoRepairNeededError {
+  switch (input.reason) {
+    case "missing-envelope":
+      return new HostedUserCryptoRepairNeededError({
+        message: "Hosted user root key envelope repair is required before runtime access: missing envelope.",
+        reason: input.reason,
+        userId: input.userId,
+      });
+    case "legacy-object-key-location":
+      return new HostedUserCryptoRepairNeededError({
+        message: "Hosted user root key envelope repair is required before runtime access: legacy object-key location.",
+        reason: input.reason,
+        userId: input.userId,
+      });
+    case "managed-recipient-reconciliation":
+      return new HostedUserCryptoRepairNeededError({
+        message: "Hosted user root key envelope repair is required before runtime access: managed recipients require reconciliation.",
+        reason: input.reason,
+        userId: input.userId,
+      });
+  }
 }
 
 async function emitHostedUserKeyAudit(
