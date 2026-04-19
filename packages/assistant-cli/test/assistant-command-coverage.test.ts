@@ -130,7 +130,6 @@ const TEST_SESSION: AssistantSession = {
     provider: 'codex-cli',
     resumeKind: 'codex-session',
   },
-  providerBinding: null,
   alias: 'chat:test',
   binding: {
     conversationKey: 'chat:test',
@@ -283,7 +282,7 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
     channel: 'telegram',
     identityId: 'identity_saved',
     participantId: 'participant_saved',
-    sourceThreadId: 'thread_saved',
+    threadId: 'thread_saved',
     deliveryTarget: 'telegram:thread_saved',
   })
   commandMocks.sendAssistantMessage.mockResolvedValueOnce(TEST_ASK_RESULT)
@@ -311,7 +310,7 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
       providerName: 'ollama',
       sandbox: 'workspace-write',
       session: undefined,
-      sourceThread: 'thread_cli',
+      thread: 'thread_cli',
       vault: '/tmp/vault',
     },
   })
@@ -328,7 +327,7 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
       deliveryTarget: 'chat_original',
       identityId: 'identity_cli',
       participantId: 'participant_cli',
-      sourceThreadId: 'thread_cli',
+      threadId: 'thread_cli',
     },
   )
   assert.deepEqual(
@@ -359,7 +358,7 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
     providerName: 'ollama',
     sandbox: 'workspace-write',
     sessionId: undefined,
-    sourceThreadId: 'thread_saved',
+    threadId: 'thread_saved',
     vault: '/tmp/vault',
   })
 })
@@ -418,7 +417,7 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
     channel: 'email',
     identityId: 'inbox_saved',
     participantId: 'recipient_saved@example.com',
-    sourceThreadId: 'thread_saved',
+    threadId: 'thread_saved',
     deliveryTarget: 'recipient_saved@example.com',
   })
   commandMocks.deliverAssistantMessage.mockResolvedValueOnce({
@@ -435,7 +434,7 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
       identity: 'identity_cli',
       participant: 'participant_cli',
       session: undefined,
-      sourceThread: 'thread_cli',
+      thread: 'thread_cli',
       vault: '/tmp/vault',
     },
   })
@@ -461,7 +460,7 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
     message: 'Delivery test message',
     participantId: 'recipient_saved@example.com',
     sessionId: undefined,
-    sourceThreadId: 'thread_saved',
+    threadId: 'thread_saved',
     target: 'recipient_saved@example.com',
     vault: '/tmp/vault',
   })
@@ -472,7 +471,7 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
     message: 'Reuse the existing session',
     participantId: undefined,
     sessionId: 'session_existing',
-    sourceThreadId: undefined,
+    threadId: undefined,
     target: 'session_override',
     vault: '/tmp/vault',
   })
@@ -656,7 +655,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     deliveryTarget: 'recipient@example.com',
     identityId: 'inbox_123',
     participantId: null,
-    sourceThreadId: null,
+    threadId: null,
   })
   commandMocks.clearAssistantSelfDeliveryTargets.mockResolvedValueOnce(['telegram'])
 
@@ -683,7 +682,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
       assert.ok(error instanceof VaultCliError)
       assert.equal(
         error.message.includes(
-          'require at least --participant, --sourceThread, or --deliveryTarget',
+          'require at least --participant, --thread, or --deliveryTarget',
         ),
         true,
       )
@@ -739,7 +738,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
       deliveryTarget: 'recipient@example.com',
       identityId: 'inbox_123',
       participantId: null,
-      sourceThreadId: null,
+      threadId: null,
     },
   })
   assert.deepEqual(clearResult, {
@@ -751,7 +750,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     deliveryTarget: 'recipient@example.com',
     identityId: 'inbox_123',
     participantId: null,
-    sourceThreadId: null,
+    threadId: null,
   })
 })
 
@@ -773,7 +772,7 @@ test('assistant command help describes routing shapes and flat header JSON input
     true,
   )
   assert.equal(
-    readOptionDescription(ask, 'sourceThread')?.includes(
+    readOptionDescription(ask, 'thread')?.includes(
       '<chatId>:topic:<messageThreadId>',
     ),
     true,
@@ -802,7 +801,7 @@ test('assistant command help describes routing shapes and flat header JSON input
   )
   assert.equal(
     selfTargetSet.description?.includes(
-      'Provide at least one of --participant, --sourceThread, or --deliveryTarget',
+      'Provide at least one of --participant, --thread, or --deliveryTarget',
     ),
     true,
   )

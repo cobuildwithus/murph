@@ -116,7 +116,6 @@ const TEST_SESSION = {
     provider: 'codex-cli',
     resumeKind: 'codex-session',
   },
-  providerBinding: null,
   alias: 'chat:daemon',
   binding: {
     conversationKey: 'chat:daemon',

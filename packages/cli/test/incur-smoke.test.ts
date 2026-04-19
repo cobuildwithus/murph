@@ -1139,7 +1139,7 @@ test('assistant session list schema emits the normalized session output shape', 
 
   assert.notEqual(sessionVariant, undefined)
   assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), false)
   assert.equal('target' in (sessionVariant?.properties ?? {}), true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
@@ -1171,7 +1171,7 @@ test('assistant session show schema emits the normalized session output shape', 
 
   assert.notEqual(sessionVariant, undefined)
   assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), false)
   assert.equal('target' in (sessionVariant?.properties ?? {}), true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
