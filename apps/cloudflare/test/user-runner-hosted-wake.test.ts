@@ -25,6 +25,7 @@ import {
   TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
   encryptTestHostedWakePayload,
+  issueTestHostedWakeFetchProof,
 } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
@@ -33,6 +34,7 @@ const bucket = createBucket();
 const storage = createStorage();
 const TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES = Uint8Array.from({ length: 32 }, () => 5);
 const TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "v1";
+type HostedWakeSnapshotRef = HostedExecutionCursorState["snapshotRef"];
 const environment: HostedExecutionEnvironment = {
   allowedRunnerSecretKeys: null,
   automationRecipientKeyId: TEST_AUTOMATION_RECIPIENT_KEY_ID,
@@ -82,6 +84,23 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("advances past poisoned hosted wake rows so later wakes still run", async () => {
+    const initialCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "3",
+      version: "cursor_v1",
+    });
+    const poisonedWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      payload: {
+        invalid: true,
+      },
+      seq: "1",
+    });
+    const followingWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      payload: createWake("evt_after_poison"),
+      seq: "2",
+    });
     const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
       init,
     }));
@@ -89,22 +108,10 @@ describe("HostedUserRunner hosted wake drain", () => {
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
       .mockResolvedValueOnce({
-        cursor: createCursorState({
-          committedSeq: "0",
-          nextSeq: "3",
-          version: "cursor_v1",
-        }),
+        cursor: initialCursor,
         wakes: [
-          createHostedWakeRecord({
-            payload: {
-              invalid: true,
-            },
-            seq: "1",
-          }),
-          createHostedWakeRecord({
-            payload: createWake("evt_after_poison"),
-            seq: "2",
-          }),
+          poisonedWake,
+          followingWake,
         ],
       })
       .mockResolvedValueOnce({
@@ -158,7 +165,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     await runner.wakeHostedWakes();
 
     expect(quarantineHostedWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
-      fetchProof: "proof_1",
+      fetchProof: poisonedWake.fetchProof,
       quarantineCode: "invalid-wake-payload",
       wakeId: "wake_1",
       wakeSeq: "1",
@@ -166,13 +173,13 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
     expect(recordHostedWakeTerminalInWeb.mock.calls.map(([input]) => input.body)).toEqual([
       {
-        fetchProof: "proof_1",
+        fetchProof: poisonedWake.fetchProof,
         state: "quarantined",
         wakeId: "wake_1",
         wakeSeq: "1",
       },
       {
-        fetchProof: "proof_2",
+        fetchProof: followingWake.fetchProof,
         state: "completed",
         wakeId: "wake_2",
         wakeSeq: "2",
@@ -182,6 +189,22 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("advances past already-quarantined wakes before dispatching later rows", async () => {
+    const initialCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "3",
+      version: "cursor_v1",
+    });
+    const quarantinedWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      quarantineCode: "invalid-wake-payload",
+      quarantinedAt: "2026-03-26T12:00:00.500Z",
+      seq: "1",
+    });
+    const followingWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      payload: createWake("evt_after_quarantine"),
+      seq: "2",
+    });
     const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
       init,
     }));
@@ -189,21 +212,10 @@ describe("HostedUserRunner hosted wake drain", () => {
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
       .mockResolvedValueOnce({
-        cursor: createCursorState({
-          committedSeq: "0",
-          nextSeq: "3",
-          version: "cursor_v1",
-        }),
+        cursor: initialCursor,
         wakes: [
-          createHostedWakeRecord({
-            quarantineCode: "invalid-wake-payload",
-            quarantinedAt: "2026-03-26T12:00:00.500Z",
-            seq: "1",
-          }),
-          createHostedWakeRecord({
-            payload: createWake("evt_after_quarantine"),
-            seq: "2",
-          }),
+          quarantinedWake,
+          followingWake,
         ],
       })
       .mockResolvedValueOnce({
@@ -257,13 +269,13 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
     expect(recordHostedWakeTerminalInWeb.mock.calls.map(([input]) => input.body)).toEqual([
       {
-        fetchProof: "proof_1",
+        fetchProof: quarantinedWake.fetchProof,
         state: "quarantined",
         wakeId: "wake_1",
         wakeSeq: "1",
       },
       {
-        fetchProof: "proof_2",
+        fetchProof: followingWake.fetchProof,
         state: "completed",
         wakeId: "wake_2",
         wakeSeq: "2",
@@ -373,7 +385,7 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("commits the last completed wake snapshot instead of a later mutable bundle cache read", async () => {
-    let committedSnapshotRef: ReturnType<typeof createBundleRef> | null = null;
+    let committedSnapshotRef: HostedWakeSnapshotRef = null;
     const finalizedBundleRef = createBundleRef("final");
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
@@ -408,13 +420,13 @@ describe("HostedUserRunner hosted wake drain", () => {
     commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }: {
       body: HostedWakeCommitRequest;
     }) => {
-      committedSnapshotRef = body.snapshotRef ?? null;
+      committedSnapshotRef = readSnapshotRef(body.snapshotRef);
       return {
         committed: true,
         cursor: createCursorState({
           committedSeq: "1",
           nextSeq: "3",
-          snapshotRef: body.snapshotRef ?? null,
+          snapshotRef: readSnapshotRef(body.snapshotRef),
           updatedAt: "2026-03-26T12:00:03.000Z",
           version: "cursor_v2",
         }),
@@ -558,12 +570,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         cursor: createCursorState({
           committedSeq: "1",
           nextSeq: "2",
-          snapshotRef: {
-            hash: "final-hash",
-            key: "bundles/vault/final.bundle.json",
-            size: 222,
-            updatedAt: "2026-03-26T12:00:03.000Z",
-          },
+          snapshotRef: createBundleRef("final"),
           updatedAt: "2026-03-26T12:00:03.000Z",
           version: "cursor_v3",
         }),
@@ -579,7 +586,7 @@ describe("HostedUserRunner hosted wake drain", () => {
           cursor: createCursorState({
             committedSeq: "1",
             nextSeq: "2",
-            snapshotRef: body.snapshotRef ?? null,
+            snapshotRef: readSnapshotRef(body.snapshotRef),
             updatedAt: "2026-03-26T12:00:01.000Z",
             version: "cursor_v2",
           }),
@@ -591,7 +598,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         cursor: createCursorState({
           committedSeq: "1",
           nextSeq: "2",
-          snapshotRef: body.snapshotRef ?? null,
+          snapshotRef: readSnapshotRef(body.snapshotRef),
           updatedAt: "2026-03-26T12:00:03.000Z",
           version: "cursor_v3",
         }),
@@ -713,7 +720,7 @@ describe("HostedUserRunner hosted wake drain", () => {
           cursor: createCursorState({
             committedSeq: "1",
             nextSeq: "2",
-            snapshotRef: body.snapshotRef ?? null,
+            snapshotRef: readSnapshotRef(body.snapshotRef),
             updatedAt: "2026-03-26T12:00:01.000Z",
             version: "cursor_v2",
           }),
@@ -725,7 +732,7 @@ describe("HostedUserRunner hosted wake drain", () => {
         cursor: createCursorState({
           committedSeq: "1",
           nextSeq: "2",
-          snapshotRef: body.snapshotRef ?? null,
+          snapshotRef: readSnapshotRef(body.snapshotRef),
           updatedAt: "2026-03-26T12:00:03.000Z",
           version: "cursor_v3",
         }),
@@ -854,7 +861,7 @@ describe("HostedUserRunner hosted wake drain", () => {
           cursor: createCursorState({
             committedSeq: "1",
             nextSeq: "2",
-            snapshotRef: body.snapshotRef ?? null,
+            snapshotRef: readSnapshotRef(body.snapshotRef),
             updatedAt: "2026-03-26T12:00:01.000Z",
             version: "cursor_v2",
           }),
@@ -1007,7 +1014,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       cursor: createCursorState({
         committedSeq: "1",
         nextSeq: "2",
-        snapshotRef: body.snapshotRef ?? null,
+        snapshotRef: readSnapshotRef(body.snapshotRef),
         updatedAt: "2026-03-26T12:00:02.000Z",
         version: "cursor_v2",
       }),
@@ -1131,7 +1138,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       cursor: createCursorState({
         committedSeq: body.committedSeq,
         nextSeq: "2",
-        snapshotRef: body.snapshotRef ?? null,
+        snapshotRef: readSnapshotRef(body.snapshotRef),
         updatedAt: "2026-03-26T12:00:02.000Z",
         version: "cursor_v3",
       }),
@@ -1534,7 +1541,7 @@ function createWake(eventId: string) {
 function createCursorState(overrides: Partial<{
   committedSeq: string;
   nextSeq: string;
-  snapshotRef: HostedExecutionCursorState["snapshotRef"];
+  snapshotRef: HostedWakeSnapshotRef;
   updatedAt: string;
   version: string;
 }> = {}): HostedExecutionCursorState {
@@ -1549,7 +1556,11 @@ function createCursorState(overrides: Partial<{
   };
 }
 
-function createBundleRef(id: string): NonNullable<HostedExecutionCursorState["snapshotRef"]> {
+function readSnapshotRef(snapshotRef: HostedWakeCommitRequest["snapshotRef"] | undefined): HostedWakeSnapshotRef {
+  return snapshotRef ?? null;
+}
+
+function createBundleRef(id: string): NonNullable<HostedWakeSnapshotRef> {
   return {
     hash: `hash-${id}`,
     key: `bundles/vault/${id}.bundle.json`,
@@ -1559,6 +1570,7 @@ function createBundleRef(id: string): NonNullable<HostedExecutionCursorState["sn
 }
 
 function createHostedWakeRecord(input: {
+  cursor?: Pick<HostedExecutionCursorState, "committedSeq" | "version">;
   kind?: HostedFetchedWakeRecord["kind"];
   occurredAt?: string;
   payloadField?: "hosted-wake-inline-payload" | "hosted-wake-ref-payload";
@@ -1567,7 +1579,9 @@ function createHostedWakeRecord(input: {
   quarantineCode?: string | null;
   quarantinedAt?: string | null;
   seq: string;
+  wakeEventId?: string;
 }): HostedFetchedWakeRecord {
+  const wakeEventId = resolveTestWakeEventId(input);
   const payloadTransport = input.payload === undefined
     ? {}
     : encryptTestHostedWakePayload({
@@ -1581,7 +1595,15 @@ function createHostedWakeRecord(input: {
     });
   const base = {
     behavior: "ordered" as const,
-    fetchProof: `proof_${input.seq}`,
+    fetchProof: issueTestHostedWakeFetchProof({
+      cursor: input.cursor ?? createCursorState(),
+      wake: {
+        eventId: wakeEventId,
+        id: `wake_${input.seq}`,
+        seq: input.seq,
+        userId: "member_123",
+      },
+    }),
     createdAt: "2026-03-26T12:00:00.000Z",
     id: `wake_${input.seq}`,
     occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
@@ -1612,6 +1634,27 @@ function createHostedWakeRecord(input: {
     kind: input.kind ?? "assistant.cron.tick",
     payloadSchema,
   };
+}
+
+function resolveTestWakeEventId(input: {
+  payload?: unknown;
+  seq: string;
+  wakeEventId?: string;
+}): string {
+  if (input.wakeEventId) {
+    return input.wakeEventId;
+  }
+
+  if (
+    input.payload
+    && typeof input.payload === "object"
+    && "eventId" in input.payload
+    && typeof input.payload.eventId === "string"
+  ) {
+    return input.payload.eventId;
+  }
+
+  return `evt_${input.seq}`;
 }
 
 async function createCommittedRunnerSuccessResponse(input: {

@@ -2455,6 +2455,86 @@ describe("HostedUserRunner", () => {
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
   });
 
+  it("rejects stale hosted wake helper proofs after the fetched cursor fence advances", async () => {
+    const firstWake = createWake("evt_stale_proof_first");
+    const secondWake = createWake("evt_stale_proof_second");
+    const firstAppended = await appendTestHostedWake({
+      bucket: bucket.api,
+      wake: firstWake,
+    });
+    const secondAppended = await appendTestHostedWake({
+      bucket: bucket.api,
+      wake: secondWake,
+    });
+    const fetched = await fetchTestHostedWakeBatch({
+      body: {
+        afterSeq: null,
+        limit: 2,
+      },
+      bucket: bucket.api,
+      userId: firstWake.userId,
+    });
+    const firstFetchProof = fetched.wakes.find((wake) => wake.id === firstAppended.wake.id)?.fetchProof;
+    const secondFetchProof = fetched.wakes.find((wake) => wake.id === secondAppended.wake.id)?.fetchProof;
+
+    expect(firstFetchProof).toBeTruthy();
+    expect(secondFetchProof).toBeTruthy();
+
+    await expect(quarantineTestHostedWake({
+      body: {
+        fetchProof: String(firstFetchProof),
+        quarantineCode: "stale-proof-seed",
+        wakeId: firstAppended.wake.id,
+        wakeSeq: firstAppended.wake.seq,
+      },
+      bucket: bucket.api,
+      userId: firstWake.userId,
+    })).resolves.toEqual({
+      quarantined: true,
+    });
+
+    await expect(commitTestHostedWakeCursor({
+      body: {
+        committedSeq: firstAppended.wake.seq,
+        expectedVersion: fetched.cursor.version,
+        snapshotRef: null,
+      },
+      bucket: bucket.api,
+      userId: firstWake.userId,
+    })).resolves.toMatchObject({
+      committed: true,
+      cursor: expect.objectContaining({
+        committedSeq: firstAppended.wake.seq,
+      }),
+    });
+
+    await expect(quarantineTestHostedWake({
+      body: {
+        fetchProof: String(secondFetchProof),
+        quarantineCode: "stale-proof-rejected",
+        wakeId: secondAppended.wake.id,
+        wakeSeq: secondAppended.wake.seq,
+      },
+      bucket: bucket.api,
+      userId: firstWake.userId,
+    })).resolves.toEqual({
+      quarantined: false,
+    });
+
+    await expect(recordTestHostedWakeTerminal({
+      body: {
+        fetchProof: String(secondFetchProof),
+        state: "completed",
+        wakeId: secondAppended.wake.id,
+        wakeSeq: secondAppended.wake.seq,
+      },
+      bucket: bucket.api,
+      userId: firstWake.userId,
+    })).resolves.toEqual({
+      recorded: false,
+    });
+  });
+
   it("accepts a phase-less final runner result without entering committed recovery", async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(

@@ -9,6 +9,7 @@ import type {
   HostedWakeAppendRequest,
   HostedWakeCommitRequest,
   HostedWakeFetchRequest,
+  HostedWakeMaterializeRequest,
   HostedWakeQuarantineRequest,
   HostedWakeStatusRequest,
   HostedWakeTerminalRequest,
@@ -24,6 +25,7 @@ import {
   appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
+  materializeTestHostedWakes,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
   recordTestHostedWakeTerminal,
@@ -382,6 +384,16 @@ async function handleHostedWakeControlRequest(
   if (method === "POST" && url.pathname === "/api/internal/hosted-wake/terminal") {
     const body = await readJsonBody<HostedWakeTerminalRequest>(request);
     response.end(JSON.stringify(await recordTestHostedWakeTerminal({
+      body,
+      bucket,
+      userId,
+    })));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/materialize") {
+    const body = await readJsonBody<HostedWakeMaterializeRequest>(request);
+    response.end(JSON.stringify(await materializeTestHostedWakes({
       body,
       bucket,
       userId,

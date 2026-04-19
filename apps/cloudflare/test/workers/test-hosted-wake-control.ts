@@ -10,6 +10,8 @@ import type {
   HostedWakeFetchRequest,
   HostedWakeLifecycleState,
   HostedWakeFetchResponse,
+  HostedWakeMaterializeRequest,
+  HostedWakeMaterializeResponse,
   HostedWakeTerminalRequest,
   HostedWakeTerminalResponse,
   HostedWakeQuarantineRequest,
@@ -23,6 +25,8 @@ import {
 } from "@murphai/hosted-execution";
 import {
   encryptTestHostedWakePayload,
+  issueTestHostedWakeFetchProof,
+  verifyTestHostedWakeFetchProof,
 } from "../hosted-execution-fixtures.js";
 
 import type { R2BucketLike } from "../../src/bundle-store.js";
@@ -144,7 +148,7 @@ export async function fetchTestHostedWakeBatch(input: {
     .filter((wake) => parseSeq(wake.seq) > afterSeq)
     .sort((left, right) => compareSeq(left.seq, right.seq))
     .slice(0, limit)
-    .map(toHostedFetchedWakeRecord);
+    .map((wake) => toHostedFetchedWakeRecord(wake, state.cursor));
 
   return {
     cursor: state.cursor,
@@ -170,6 +174,9 @@ export async function commitTestHostedWakeCursor(input: {
   const currentCommittedSeq = parseSeq(state.cursor.committedSeq);
   const shouldAdvanceCommittedSeq = committedSeq > currentCommittedSeq;
   const targetWake = state.wakes.find((candidate) => parseSeq(candidate.seq) === committedSeq);
+  const targetWakeState = targetWake?.terminalState
+    ? toStoredWakeLifecycleState(targetWake.terminalState)
+    : null;
   const hasSnapshotRef = "snapshotRef" in input.body;
   const nextSnapshotRef = hasSnapshotRef
     ? input.body.snapshotRef ?? null
@@ -183,9 +190,7 @@ export async function commitTestHostedWakeCursor(input: {
         committedSeq !== currentCommittedSeq + 1n
         || committedSeq >= parseSeq(state.cursor.nextSeq)
         || !targetWake
-        || (targetWake.terminalState !== "completed"
-          && targetWake.terminalState !== "quarantined"
-          && targetWake.terminalState !== "replaced")
+        || !isCommitEligibleStoredWakeState(targetWakeState)
       ))
     || (committedSeq < currentCommittedSeq)
     || (!shouldAdvanceCommittedSeq && committedSeq !== currentCommittedSeq)
@@ -217,6 +222,19 @@ export async function commitTestHostedWakeCursor(input: {
   };
 }
 
+export async function materializeTestHostedWakes(input: {
+  body: HostedWakeMaterializeRequest;
+  bucket: R2BucketLike;
+  userId: string;
+}): Promise<HostedWakeMaterializeResponse> {
+  await readStoredHostedWakeControlState(input.bucket, input.userId);
+
+  return {
+    targetSeqHint: null,
+    wakeMaterializationHints: null,
+  };
+}
+
 export async function recordTestHostedWakeTerminal(input: {
   body: HostedWakeTerminalRequest;
   bucket: R2BucketLike;
@@ -227,7 +245,19 @@ export async function recordTestHostedWakeTerminal(input: {
     candidate.id === input.body.wakeId
     && candidate.seq === input.body.wakeSeq);
 
-  if (!wake || input.body.fetchProof !== buildStoredWakeFetchProof(wake)) {
+  if (
+    !wake
+    || !verifyTestHostedWakeFetchProof({
+      cursor: state.cursor,
+      proof: input.body.fetchProof,
+      wake: {
+        eventId: wake.eventId,
+        id: wake.id,
+        seq: wake.seq,
+        userId: wake.userId,
+      },
+    })
+  ) {
     return {
       recorded: false,
     };
@@ -248,6 +278,14 @@ function toStoredWakeLifecycleState(
   return state === "quarantined" ? "poisoned" : state;
 }
 
+function isCommitEligibleStoredWakeState(
+  state: HostedWakeLifecycleState | null,
+): boolean {
+  return state === "completed"
+    || state === "poisoned"
+    || state === "replaced";
+}
+
 export async function quarantineTestHostedWake(input: {
   body: HostedWakeQuarantineRequest;
   bucket: R2BucketLike;
@@ -259,12 +297,24 @@ export async function quarantineTestHostedWake(input: {
     && candidate.seq === input.body.wakeSeq
   );
 
-  if (!wake || input.body.fetchProof !== buildStoredWakeFetchProof(wake)) {
+  if (
+    !wake
+    || !verifyTestHostedWakeFetchProof({
+      cursor: state.cursor,
+      proof: input.body.fetchProof,
+      wake: {
+        eventId: wake.eventId,
+        id: wake.id,
+        seq: wake.seq,
+        userId: wake.userId,
+      },
+    })
+  ) {
     return { quarantined: false };
   }
 
   wake.terminalState = "quarantined";
-  wake.wakeState = "poisoned";
+  wake.wakeState = toStoredWakeLifecycleState("quarantined");
   wake.quarantineCode = input.body.quarantineCode;
   wake.quarantinedAt = new Date().toISOString();
   wake.updatedAt = wake.quarantinedAt;
@@ -378,15 +428,22 @@ function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {
   };
 }
 
-function toHostedFetchedWakeRecord(wake: StoredHostedWakeRecord): HostedFetchedWakeRecord {
+function toHostedFetchedWakeRecord(
+  wake: StoredHostedWakeRecord,
+  cursor: Pick<HostedExecutionCursorState, "committedSeq" | "version">,
+): HostedFetchedWakeRecord {
   return {
     ...toHostedWakeRecord(wake),
-    fetchProof: buildStoredWakeFetchProof(wake),
+    fetchProof: issueTestHostedWakeFetchProof({
+      cursor,
+      wake: {
+        eventId: wake.eventId,
+        id: wake.id,
+        seq: wake.seq,
+        userId: wake.userId,
+      },
+    }),
   };
-}
-
-function buildStoredWakeFetchProof(wake: Pick<StoredHostedWakeRecord, "eventId" | "id" | "seq">): string {
-  return `${wake.id}:${wake.seq}:${wake.eventId}`;
 }
 
 function parseSeq(value: string): bigint {
