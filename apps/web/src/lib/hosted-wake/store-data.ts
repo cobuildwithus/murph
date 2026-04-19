@@ -152,6 +152,33 @@ export async function allocateHostedWakeSeqTx(input: {
   return rows[0].seq;
 }
 
+export async function bumpHostedExecutionCursorVersionTx(input: {
+  tx: HostedWakeMutationTx;
+  userId: string;
+}): Promise<void> {
+  await input.tx.hostedExecutionCursor.update({
+    where: {
+      userId: input.userId,
+    },
+    data: {
+      version: {
+        increment: 1,
+      },
+    },
+  });
+}
+
+export async function clearHostedWakeTerminalTx(input: {
+  tx: HostedWakeMutationTx;
+  wakeId: string;
+}): Promise<void> {
+  await input.tx.hostedWakeTerminal.deleteMany({
+    where: {
+      wakeId: input.wakeId,
+    },
+  });
+}
+
 export async function findHostedWakeByDedupeKeyTx(input: {
   dedupeKey: string | null;
   tx: HostedWakeStoreClient;
