@@ -18,8 +18,6 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 
-import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts";
-
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
@@ -53,10 +51,7 @@ export async function runHostedExecutionJobIsolatedDetailed(
         cwd: launcherRoot,
         detached: process.platform !== "win32",
         env: createHostedRuntimeChildProcessEnv({
-          forwardedEnv: {
-            ...readHostedExecutionProcessEnv(process.env),
-            ...(input.job.runtime?.forwardedEnv ?? {}),
-          },
+          forwardedEnv: { ...(input.job.runtime?.forwardedEnv ?? {}) },
           isTypeScriptChild,
           launcherDirectories,
         }),

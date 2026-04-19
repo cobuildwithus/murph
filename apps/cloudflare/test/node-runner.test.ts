@@ -1694,6 +1694,52 @@ describe("runHostedExecutionJob", () => {
     ).rejects.toThrow("Hosted assistant runtime child did not emit a result payload.");
   });
 
+  it("does not read direct hosted env when a worker proxy token is present", async () => {
+    const readEnvironment = vi.fn(() => {
+      throw new Error("Expected worker-proxy mode to avoid direct hosted env reads.");
+    });
+    const runIsolated = vi.fn(async (): Promise<HostedAssistantRuntimeJobResult> => ({
+      finalGatewayProjectionSnapshot: null,
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 0,
+          summary: "ok",
+        },
+      },
+    }));
+    const runHostedExecutionJob = createHostedExecutionJobRunner({
+      readEnvironment,
+      runIsolated,
+      runMode: "isolated",
+    });
+
+    await expect(runHostedExecutionJob({
+      request: {
+        bundle: null,
+        wake: createActivationWake({
+          eventId: "evt_proxy_transport_only",
+          memberChannels: MEMBER_CHANNELS_NONE,
+          occurredAt: "2026-03-29T10:05:00.000Z",
+          userId: "member_proxy_transport_only",
+        }),
+      },
+    }, {
+      internalWorkerProxyToken: "proxy-token",
+    })).resolves.toMatchObject({
+      result: {
+        result: {
+          summary: "ok",
+        },
+      },
+    });
+
+    expect(readEnvironment).not.toHaveBeenCalled();
+    expect(runIsolated).toHaveBeenCalledWith(expect.objectContaining({
+      internalWorkerProxyToken: "proxy-token",
+    }), expect.any(Object));
+  });
+
   it("preserves encrypted runner-secret overrides across one-shot runs", async () => {
     const result = await runHostedExecutionJob({
       bundles: {

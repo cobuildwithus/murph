@@ -77,7 +77,6 @@ vi.mock("./environment.ts", () => ({
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       input.overrides?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL
       ?? "http://127.0.0.1:8787",
-    HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
   })),
   warnForMissingEnv: vi.fn(),
@@ -174,7 +173,6 @@ describe("hosted local dev stack", () => {
       ],
       expect.objectContaining({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
-        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_ASSISTANT_PROVIDER: "venice",
         TSX_TSCONFIG_PATH: expect.stringMatching(/tsconfig\.base\.json$/),
@@ -195,6 +193,20 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledTimes(2);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
+    expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
+      host: "127.0.0.1",
+      label: "cloudflare",
+      path: "/health",
+      port: 8787,
+      protocol: "http",
+    });
+    expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(2, {
+      host: "127.0.0.1",
+      label: "web",
+      path: "/api/internal/health",
+      port: 3000,
+      protocol: "http",
+    });
   });
 
   it("uses the Docker bridge gateway as the worker bridge host on Linux", async () => {
@@ -236,7 +248,6 @@ describe("hosted local dev stack", () => {
       expect.any(Array),
       expect.objectContaining({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://172.17.0.1:8787",
-        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
       }),
       expect.any(Object),
     );

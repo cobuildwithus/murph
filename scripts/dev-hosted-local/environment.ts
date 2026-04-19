@@ -95,9 +95,6 @@ export function mergeCloudflareLocalEnv(input: {
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
-    HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN:
-      resolvedExisting.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN?.trim()
-      ?? randomBytes(16).toString("hex"),
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
       ?? workerOrigin,
@@ -114,6 +111,7 @@ function stripDeprecatedHostedLocalProxyEnv(
 ): Record<string, string> {
   const next = { ...input };
   delete next.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL;
+  delete next.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN;
   delete next.HOSTED_EXECUTION_RUNNER_HOST_ALIAS;
   return next;
 }
@@ -145,10 +143,30 @@ export function buildHostedLocalDevOverrides(
   const workerBaseUrl = `${config.workerProtocol}://${config.workerHost}:${config.workerPort}`;
   const callbackPrivateJwkJson = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
   const callbackKeyId = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?.trim();
+  const hostedWakeEncryptionKey = cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY?.trim();
+  const hostedWakeEncryptionKeyVersion =
+    cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION?.trim();
+  const hostedWakeEncryptionKeyringJson =
+    cloudflareDevVars.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON?.trim();
 
   return {
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
+    ...(hostedWakeEncryptionKey
+      ? {
+        HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
+      }
+      : {}),
+    ...(hostedWakeEncryptionKeyVersion
+      ? {
+        HOSTED_WAKE_ENCRYPTION_KEY_VERSION: hostedWakeEncryptionKeyVersion,
+      }
+      : {}),
+    ...(hostedWakeEncryptionKeyringJson
+      ? {
+        HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: hostedWakeEncryptionKeyringJson,
+      }
+      : {}),
     HOSTED_WAKE_FETCH_PROOF_KEY:
       cloudflareDevVars.HOSTED_WAKE_FETCH_PROOF_KEY?.trim()
       ?? DEFAULT_HOSTED_WAKE_FETCH_PROOF_KEY,

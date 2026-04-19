@@ -13,7 +13,6 @@ import {
 import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "./internal-hosts.ts";
-import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts";
 import { methodNotAllowed } from "./json.ts";
 import {
   buildLocalInternalProxyRouteBaseUrl,
@@ -311,7 +310,6 @@ export class RunnerContainer extends Container {
       startOptions: {
         enableInternet: true,
         envVars: {
-          ...readRunnerContainerSupervisorEnvVars(this.environment),
           HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: runnerControlToken,
           PORT: String(RUNNER_PORT),
         },
@@ -771,24 +769,6 @@ function isMissingRunnerContainerError(error: unknown): boolean {
   }
 
   return error.message.includes("No such container");
-}
-
-function readRunnerContainerSupervisorEnvVars(
-  source: RunnerContainerEnvironmentSource,
-): Record<string, string> {
-  return readHostedExecutionProcessEnv(asRunnerContainerStringEnvSource(source));
-}
-
-function asRunnerContainerStringEnvSource(
-  source: RunnerContainerEnvironmentSource,
-): Record<string, string | undefined> {
-  const values: Record<string, string | undefined> = {};
-
-  for (const [key, value] of Object.entries(source)) {
-    values[key] = typeof value === "string" ? value : undefined;
-  }
-
-  return values;
 }
 
 function computeHostedRunElapsedMs(

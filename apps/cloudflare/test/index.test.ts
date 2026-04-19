@@ -1,6 +1,5 @@
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { createServer, type IncomingMessage } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -129,7 +128,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("proxies local loopback requests through the worker when a local proxy token is configured", async () => {
+  it("does not expose the removed legacy local loopback proxy route", async () => {
     const upstreamFetch = vi.fn(async (input: RequestInfo | URL) =>
       new Response(JSON.stringify({
         ok: true,
@@ -161,116 +160,11 @@ describe("cloudflare worker routes", () => {
       }),
     );
 
-    expect(upstreamFetch).toHaveBeenCalledTimes(1);
-    const [upstreamInput] = upstreamFetch.mock.calls[0] ?? [];
-    expect(upstreamInput).toBeInstanceOf(Request);
-    const upstreamRequest = upstreamInput as Request;
-    expect(upstreamRequest.url).toBe("http://127.0.0.1:8788/chats/chat_123/messages?foo=bar");
-    expect(upstreamRequest.method).toBe("POST");
-    expect(await upstreamRequest.text()).toBe(JSON.stringify({ message: "hello" }));
-    expect(upstreamRequest.headers.get("authorization")).toBe("Bearer local");
-    expect(upstreamRequest.headers.get("connection")).toBeNull();
-
-    expect(response.status).toBe(202);
-    expect(response.headers.get("connection")).toBeNull();
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      ok: true,
-      proxied: "http://127.0.0.1:8788/chats/chat_123/messages?foo=bar",
+      error: "Not found",
     });
-  });
-
-  it("streams local loopback proxy POST bodies to a real loopback upstream", async () => {
-    const observedRequests: Array<{
-      body: string;
-      headers: Record<string, string | string[] | undefined>;
-      method: string;
-      url: string;
-    }> = [];
-    const server = createServer(async (request, response) => {
-      observedRequests.push({
-        body: await readIncomingMessageBody(request),
-        headers: request.headers,
-        method: request.method ?? "GET",
-        url: request.url ?? "/",
-      });
-      response.statusCode = 201;
-      response.setHeader("connection", "keep-alive");
-      response.setHeader("content-type", "application/json; charset=utf-8");
-      response.end(JSON.stringify({ ok: true }));
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => resolve());
-    });
-
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the loopback proxy test server to expose a TCP port.");
-      }
-
-      const response = await worker.fetch(
-        new Request(
-          `https://runner.example.test/__murph/local-loopback-proxy/local-token/${encodeURIComponent(`http://127.0.0.1:${address.port}`)}/chats/chat_123/messages?foo=bar`,
-          {
-            body: JSON.stringify({ message: "hello" }),
-            headers: {
-              authorization: "Bearer local",
-              connection: "keep-alive",
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          },
-        ),
-        createWorkerEnv(createUserRunnerStub(), {
-          HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
-        }),
-      );
-
-      expect(response.status).toBe(201);
-      expect(response.headers.get("connection")).toBeNull();
-      await expect(response.json()).resolves.toEqual({ ok: true });
-      expect(observedRequests).toHaveLength(1);
-      expect(observedRequests[0]).toMatchObject({
-        body: JSON.stringify({ message: "hello" }),
-        headers: expect.objectContaining({
-          authorization: "Bearer local",
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-        url: "/chats/chat_123/messages?foo=bar",
-      });
-    } finally {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
-    }
-  });
-
-  it("rejects non-loopback local proxy targets and bad local proxy tokens", async () => {
-    const env = createWorkerEnv(createUserRunnerStub(), {
-      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
-    });
-
-    const unauthorizedResponse = await worker.fetch(
-      new Request(
-        "https://runner.example.test/__murph/local-loopback-proxy/wrong-token/http%3A%2F%2F127.0.0.1%3A8788/ping",
-      ),
-      env,
-    );
-    expect(unauthorizedResponse.status).toBe(401);
-
-    const invalidTargetResponse = await worker.fetch(
-      new Request(
-        "https://runner.example.test/__murph/local-loopback-proxy/local-token/http%3A%2F%2Fexample.com%2Fapi/ping",
-      ),
-      env,
-    );
-    expect(invalidTargetResponse.status).toBe(400);
-    await expect(invalidTargetResponse.json()).resolves.toEqual({
-      error: "Local loopback proxy only supports loopback http(s) targets.",
-    });
+    expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
   it("routes local internal proxy requests onto the results.worker handler", async () => {
@@ -1118,14 +1012,4 @@ function createTestVercelOidcToken(
 
 function base64UrlEncode(value: string | Buffer): string {
   return Buffer.from(value).toString("base64url");
-}
-
-async function readIncomingMessageBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  return Buffer.concat(chunks).toString("utf8");
 }
