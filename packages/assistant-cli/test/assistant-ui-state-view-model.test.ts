@@ -75,7 +75,6 @@ const TEST_SESSION: AssistantSession = {
     resumeKind: null,
     headers: null,
   },
-  providerBinding: null,
   alias: 'chat:state',
   binding: {
     conversationKey: 'chat:state',

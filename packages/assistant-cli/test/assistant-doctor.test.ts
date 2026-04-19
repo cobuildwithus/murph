@@ -119,7 +119,6 @@ const BASE_SESSION: AssistantSession = {
     executionDriver: 'codex-cli',
     resumeKind: 'codex-session',
   },
-  providerBinding: null,
   alias: 'chat:doctor',
   binding: {
     conversationKey: 'chat:doctor',

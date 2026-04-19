@@ -127,7 +127,6 @@ const TEST_SESSION: AssistantSession = {
     resumeKind: null,
     headers: null,
   },
-  providerBinding: null,
   alias: 'chat:runtime',
   binding: {
     conversationKey: 'chat:runtime',

@@ -68,7 +68,6 @@ const BASE_SESSION: AssistantSession = {
       'X-Workspace': 'murph',
     },
   },
-  providerBinding: null,
   alias: 'chat:security',
   binding: {
     conversationKey: 'chat:security',

@@ -90,7 +90,6 @@ const TEST_SESSION = {
     provider: 'codex-cli',
     resumeKind: 'codex-session',
   },
-  providerBinding: null,
   alias: 'chat:test',
   binding: {
     conversationKey: 'chat:test',
