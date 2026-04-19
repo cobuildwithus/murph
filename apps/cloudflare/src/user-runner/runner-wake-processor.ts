@@ -442,6 +442,31 @@ export class RunnerWakeProcessor {
       await this.restorePendingCommitState(input.pendingCommit);
     }
 
+    if (BigInt(cursor.committedSeq) > BigInt(input.pendingCommit.wake.seq)) {
+      await this.dependencies.stateStore.syncBundleRefCache(
+        parseHostedExecutionBundleRef(
+          cursor.snapshotRef === undefined ? null : cursor.snapshotRef,
+          "Hosted wake stale cleanup cursor snapshotRef",
+        ),
+      );
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          committedSeq: cursor.committedSeq,
+          pendingWakeSeq: input.pendingCommit.wake.seq,
+          runElapsedMs: computeHostedRunElapsedMs(run),
+          version: cursor.version,
+        },
+        eventId: input.pendingCommit.eventId,
+        level: "info",
+        message: "Hosted wake finalize discarded a stale DO-local pending commit after the web cursor advanced beyond its seq.",
+        phase: "completed",
+        run,
+        userId: input.pendingCommit.userId,
+      });
+      return cursor;
+    }
+
     const bundleState = await this.dependencies.stateStore.readBundleMetaState();
     if (JSON.stringify(bundleState.bundleRef ?? null) !== JSON.stringify(cursor.snapshotRef ?? null)) {
       const snapshotCommit = await commitHostedWakeCursorToWeb({
