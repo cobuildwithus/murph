@@ -1112,6 +1112,150 @@ describe("HostedUserRunner", () => {
     expect(fetchHostedWakeBatchFromWeb).toHaveBeenCalledOnce();
   });
 
+  it("materializes hosted wakes on direct drains even when DO-local hints are already fresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    await seedRunnerQueueState({
+      runtimeBootstrapped: true,
+      bucket,
+      environment,
+      storage,
+      userId: "member_123",
+    });
+    const stateStore = new RunnerStateStore(storage.state as never);
+    await stateStore.syncNextWake({
+      preferredWakeAt: "2026-03-26T12:05:00.000Z",
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-03-26T12:15:00.000Z",
+        deviceSyncWakeAt: "2026-03-26T12:20:00.000Z",
+      },
+    });
+    const fetchSpy = vi.fn().mockImplementation(async (_url, init) => {
+      const request = readRunnerJobRequest(JSON.parse(String(init?.body)));
+
+      return createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+        payload: request.wake.eventId === "device-sync.wake:member_123:2026-03-26T12:00:00.000Z"
+          ? createRunnerSuccessPayload({
+            wakeMaterializationHints: {
+              assistantWakeAt: "2026-03-26T12:15:00.000Z",
+              deviceSyncWakeAt: "2026-03-26T12:25:00.000Z",
+            },
+          })
+          : undefined,
+      });
+    });
+    vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchSpy }));
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockImplementation(async () => {
+      const occurredAt = new Date(Date.now()).toISOString();
+      const appended = await appendTestHostedWake({
+        bucket: bucket.api,
+        wake: buildHostedExecutionDeviceSyncWake({
+          connectionId: "conn_direct_due_1",
+          eventId: `device-sync.wake:member_123:${occurredAt}`,
+          hint: {
+            nextReconcileAt: "2026-03-26T12:00:00.000Z",
+            occurredAt,
+            reason: "reconcile_due",
+          },
+          occurredAt,
+          provider: "oura",
+          reason: "reconcile_due",
+          userId: "member_123",
+        }),
+      });
+
+      return {
+        targetSeqHint: appended.wake.seq,
+        wakeMaterializationHints: {
+          assistantWakeAt: "2026-03-26T12:15:00.000Z",
+          deviceSyncWakeAt: "2026-03-26T12:25:00.000Z",
+        },
+      };
+    });
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    const result = await runner.wakeHostedWakes();
+
+    expect(materializeHostedDueWakesInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      boundUserId: "member_123",
+    }));
+    expect(result.requestedTargetSeq).toBe("1");
+    expect(result.committedSeq).toBe("1");
+    expect(result.targetReached).toBe(true);
+    expect(readDispatchedEventIds(fetchSpy)).toEqual([
+      "device-sync.wake:member_123:2026-03-26T12:00:00.000Z",
+    ]);
+    await expect(stateStore.readWakeMaterializationHints()).resolves.toEqual({
+      assistantWakeAt: "2026-03-26T12:15:00.000Z",
+      deviceSyncWakeAt: "2026-03-26T12:25:00.000Z",
+    });
+  });
+
+  it("extends a direct drain target when web materialization appends a higher-seq wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    await seedRunnerQueueState({
+      runtimeBootstrapped: true,
+      bucket,
+      environment,
+      storage,
+      userId: "member_123",
+    });
+    const initialWake = await appendTestHostedWake({
+      bucket: bucket.api,
+      wake: createWake("evt_direct_target_seed"),
+    });
+    const fetchSpy = vi.fn().mockImplementation(async (_url, init) => {
+      await commitResultForRunnerRequest({
+        payload: createRunnerSuccessPayload(),
+        requestBody: JSON.parse(String(init?.body)),
+      });
+
+      return new Response(JSON.stringify(serializeRunnerSuccessPayload(createRunnerSuccessPayload())), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchSpy }));
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockImplementation(async () => {
+      const appended = await appendTestHostedWake({
+        bucket: bucket.api,
+        wake: createWake("evt_direct_target_materialized", "member_123", "2026-03-26T12:00:01.000Z"),
+      });
+
+      return {
+        targetSeqHint: appended.wake.seq,
+        wakeMaterializationHints: null,
+      };
+    });
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    const result = await runner.wakeHostedWakes({
+      targetSeqHint: initialWake.wake.seq,
+    });
+
+    expect(materializeHostedDueWakesInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      boundUserId: "member_123",
+    }));
+    expect(result.requestedTargetSeq).toBe("2");
+    expect(readDispatchedEventIds(fetchSpy)).toEqual([
+      "evt_direct_target_seed",
+      "evt_direct_target_materialized",
+    ]);
+  });
+
   it("revalidates stale future device-sync hints on a bounded alarm and drains the materialized wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
@@ -1129,16 +1273,17 @@ describe("HostedUserRunner", () => {
         bucket,
         environment,
         init,
-        payload: request.wake.eventId === "evt_seed_future_device_sync_hint"
-          ? createRunnerSuccessPayload({
-            wakeMaterializationHints: {
-              deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
-            },
-          })
-          : undefined,
+        payload: undefined,
       });
     });
     vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchSpy }));
+    const stateStore = new RunnerStateStore(storage.state as never);
+    await stateStore.syncNextWake({
+      preferredWakeAt: "2026-03-26T12:01:00.000Z",
+      wakeMaterializationHints: {
+        deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
+      },
+    });
     const materializeHostedDueWakesInWeb = vi.spyOn(
       webControlPlane,
       "materializeHostedDueWakesInWeb",
@@ -1172,9 +1317,6 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await seedManagedUserCryptoForTest(runner, "member_123");
 
-    const seededStatus = await runner.wake(createWake("evt_seed_future_device_sync_hint"));
-    expect(seededStatus.nextWakeAt).toBe("2026-03-26T12:01:00.000Z");
-
     vi.setSystemTime(new Date("2026-03-26T12:01:00.000Z"));
     await runner.alarm();
 
@@ -1182,10 +1324,9 @@ describe("HostedUserRunner", () => {
       boundUserId: "member_123",
     }));
     expect(readDispatchedEventIds(fetchSpy)).toEqual([
-      "evt_seed_future_device_sync_hint",
       "device-sync.wake:member_123:2026-03-26T12:01:00.000Z",
     ]);
-    await expect(new RunnerStateStore(storage.state as never).readWakeMaterializationHints()).resolves.toEqual({
+    await expect(stateStore.readWakeMaterializationHints()).resolves.toEqual({
       deviceSyncWakeAt: "2026-03-26T12:50:00.000Z",
     });
     const status = await runner.status();

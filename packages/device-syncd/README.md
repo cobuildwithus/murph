@@ -20,7 +20,7 @@ What it does:
 - serves a provider-agnostic local control plane for CLI and web auth flows
 - owns OAuth connection state
 - stores encrypted provider tokens in SQLite under `.runtime/operations/device-sync/state.sqlite`
-- keeps `.runtime/operations/device-sync/**` local-only; those secrets, cursors, launcher artifacts, and logs are excluded from hosted workspace snapshots because the hosted lane has its own Cloudflare-owned device-sync control plane and token escrow
+- keeps `.runtime/operations/device-sync/**` local-only; those secrets, cursors, launcher artifacts, and logs are excluded from hosted workspace snapshots because the hosted lane uses a web-owned hosted device-sync control plane plus narrow signed runtime callbacks instead of the local daemon store
 - accepts provider webhooks when a provider supports them
 - runs background backfill and reconcile jobs
 - serializes active jobs per account so rotating refresh-token flows do not race
@@ -96,7 +96,7 @@ Required:
 - `DEVICE_SYNC_SECRET` for the daemon's local bootstrap/service secret
 - `DEVICE_SYNC_CONTROL_TOKEN` for the control-plane bearer token
 
-Those two secrets are part of the local daemon contract. The hosted Cloudflare deploy path uses signed internal routes, agent bearer sessions, and Cloudflare-owned token escrow instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.
+Those two secrets are part of the local daemon contract. The hosted execution path uses signed internal web routes and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.
 
 At least one provider must be configured.
 
