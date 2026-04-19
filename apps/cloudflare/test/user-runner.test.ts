@@ -1051,6 +1051,67 @@ describe("HostedUserRunner", () => {
     expect(storage.lastAlarm).toBeNull();
   });
 
+  it("materializes hosted wakes on alarm when the device-sync hint is missing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    await seedRunnerQueueState({
+      runtimeBootstrapped: true,
+      bucket,
+      environment,
+      nextWakeAt: "2026-03-26T12:00:00.000Z",
+      storage,
+      userId: "member_123",
+    });
+    const stateStore = new RunnerStateStore(storage.state as never);
+    await stateStore.syncNextWake({
+      preferredWakeAt: "2026-03-26T12:00:00.000Z",
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-03-26T12:30:00.000Z",
+      },
+    });
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockResolvedValue({
+      targetSeqHint: null,
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-03-26T12:30:00.000Z",
+        deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
+      },
+    });
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb.mockResolvedValue({
+      cursor: {
+        committedSeq: "0",
+        createdAt: "2026-03-26T12:00:00.000Z",
+        nextSeq: "1",
+        snapshotRef: null,
+        updatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "member_123",
+        version: "1",
+      },
+      wakes: [],
+    });
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    await runner.alarm();
+
+    expect(materializeHostedDueWakesInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      body: {
+        wakeMaterializationHints: {
+          assistantWakeAt: "2026-03-26T12:30:00.000Z",
+        },
+      },
+      boundUserId: "member_123",
+    }));
+    await expect(stateStore.readWakeMaterializationHints()).resolves.toEqual({
+      assistantWakeAt: "2026-03-26T12:30:00.000Z",
+      deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
+    });
+    expect(fetchHostedWakeBatchFromWeb).toHaveBeenCalledOnce();
+  });
+
   it("passes the worker commit callback metadata through the runner container invoke request", async () => {
     const resultPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state").toString("base64"),

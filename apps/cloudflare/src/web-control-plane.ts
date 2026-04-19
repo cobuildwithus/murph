@@ -252,13 +252,17 @@ export async function quarantineHostedWakeInWeb(input: {
   boundUserId: string;
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
   fetchImpl?: typeof fetch;
+  fetchProof: string;
   quarantineCode: string;
   timeoutMs: number | null;
   wakeId: string;
+  wakeSeq: string;
 }): Promise<HostedWakeQuarantineResponse> {
   const body = JSON.stringify({
+    fetchProof: input.fetchProof,
     quarantineCode: input.quarantineCode,
     wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq,
   } satisfies HostedWakeQuarantineRequest);
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: input.baseUrl,
