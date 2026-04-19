@@ -209,18 +209,6 @@ export async function recordHostedWakeTerminalTx(input: {
     throw new TypeError("Hosted wake terminal receipt conflicts with the existing canonical record.");
   }
 
-  const fetchedCommittedSeq = BigInt(claims.fetchedCommittedSeq);
-  if (existing.fetchedCommittedSeq < fetchedCommittedSeq) {
-    await input.tx.hostedWakeTerminal.update({
-      where: {
-        wakeId: input.wakeId,
-      },
-      data: {
-        fetchedCommittedSeq,
-      },
-    });
-  }
-
   return true;
 }
 
@@ -299,7 +287,6 @@ export async function commitHostedExecutionCursorTx(input: {
       });
 
       if (!isTerminalHostedWakeReceipt(receipt, {
-        fetchedCommittedSeq: cursor.committedSeq,
         userId: input.userId,
         wakeId: wake.id,
         wakeSeq: input.committedSeq,
@@ -340,7 +327,6 @@ export async function commitHostedExecutionCursorTx(input: {
 function isTerminalHostedWakeReceipt(
   receipt: HostedWakeTerminalRow | null,
   input: {
-    fetchedCommittedSeq: bigint;
     userId: string;
     wakeId: string;
     wakeSeq: bigint;
@@ -348,7 +334,6 @@ function isTerminalHostedWakeReceipt(
 ): boolean {
   return Boolean(
     receipt
-      && receipt.fetchedCommittedSeq === input.fetchedCommittedSeq
       && receipt.userId === input.userId
       && receipt.wakeId === input.wakeId
       && receipt.wakeSeq === input.wakeSeq
