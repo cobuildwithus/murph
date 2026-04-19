@@ -8,6 +8,7 @@ import {
 import {
   normalizeOptionalString,
   parseOptionalStrictInteger,
+  readBooleanEnv,
 } from "./deploy-automation/shared.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -354,24 +355,6 @@ function readRolloutPercentage(value: string | undefined): number {
   }
 
   return parsed;
-}
-
-function readBooleanEnv(value: string | undefined, fallback: boolean): boolean {
-  const normalized = normalizeOptionalString(value);
-
-  if (!normalized) {
-    return fallback;
-  }
-
-  if (normalized === "1" || normalized === "true") {
-    return true;
-  }
-
-  if (normalized === "0" || normalized === "false") {
-    return false;
-  }
-
-  throw new Error("Boolean env values must be one of: 1, 0, true, false.");
 }
 
 function buildDefaultVersionTag(

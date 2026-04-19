@@ -118,6 +118,7 @@ describe("deploy preflight helpers", () => {
     expect(parseDeployWorkerFlag("true")).toBe(true);
     expect(parseDeployWorkerFlag("1")).toBe(true);
     expect(parseDeployWorkerFlag("yes")).toBe(true);
+    expect(parseDeployWorkerFlag("no")).toBe(false);
     expect(parseDeployWorkerFlag(" false ")).toBe(false);
     expect(parseDeployWorkerFlag(undefined)).toBe(false);
   });
