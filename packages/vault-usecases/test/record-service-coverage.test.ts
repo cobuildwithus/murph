@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -103,6 +103,8 @@ import * as vaultServicesModule from "../src/vault-services.ts";
 import * as workoutsModule from "../src/workouts.ts";
 
 type QueryRecord = Parameters<typeof toCommandShowEntity>[0];
+const FIXED_SHA256 =
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 function sampleQueryRecord(overrides: Partial<QueryRecord> = {}): QueryRecord {
   return {
@@ -134,6 +136,82 @@ function sampleQueryRecord(overrides: Partial<QueryRecord> = {}): QueryRecord {
     tags: ["note"],
     ...overrides,
   };
+}
+
+function createRawImportManifest(input: {
+  importId: string;
+  importKind: "document" | "meal" | "workout_batch";
+  ownerKind: "document" | "meal" | "workout";
+  rawDirectory: string;
+  relativePath: string;
+  originalFileName: string;
+  mediaType: string;
+}) {
+  return {
+    schemaVersion: "murph.raw-import-manifest.v1",
+    importId: input.importId,
+    importKind: input.importKind,
+    importedAt: "2026-04-08T12:00:00.000Z",
+    source: "manual",
+    owner: {
+      kind: input.ownerKind,
+      id: input.importId,
+    },
+    rawDirectory: input.rawDirectory,
+    artifacts: [
+      {
+        role: "source",
+        relativePath: input.relativePath,
+        originalFileName: input.originalFileName,
+        mediaType: input.mediaType,
+        byteSize: 12,
+        sha256: FIXED_SHA256,
+      },
+    ],
+    provenance: {
+      sourceFileName: input.originalFileName,
+    },
+  };
+}
+
+async function writeManifestFile(
+  vaultRoot: string,
+  manifestFile: string,
+  manifest: Record<string, unknown>,
+) {
+  const manifestPath = path.join(vaultRoot, manifestFile);
+  await mkdir(path.dirname(manifestPath), { recursive: true });
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+async function loadManifestReadUsecases(queryRuntime: {
+  readVault: (vault: string) => Promise<unknown>;
+  lookupEntityById: (readModel: unknown, lookup: string) => QueryRecord | null;
+}) {
+  const documentMeal = await importWithMocks<
+    typeof import("../src/usecases/document-meal-read.ts")
+  >("../src/usecases/document-meal-read.ts", {
+    "../src/commands/query-record-command-helpers.ts": mockActualModule(
+      "../src/commands/query-record-command-helpers.ts",
+      (actual) => ({
+        ...actual,
+        loadQueryRuntime: vi.fn(async () => queryRuntime),
+      }),
+    ),
+  });
+  const workoutRead = await importWithMocks<
+    typeof import("../src/usecases/workout-read.ts")
+  >("../src/usecases/workout-read.ts", {
+    "../src/commands/query-record-command-helpers.ts": mockActualModule(
+      "../src/commands/query-record-command-helpers.ts",
+      (actual) => ({
+        ...actual,
+        loadQueryRuntime: vi.fn(async () => queryRuntime),
+      }),
+    ),
+  });
+
+  return { documentMeal, workoutRead };
 }
 
 function createCoreStub<T extends Record<string, unknown>>(overrides: T): T {
@@ -634,6 +712,135 @@ describe("record service seams", () => {
 
     assert.equal(editEventRecord.mock.calls.length, 2);
     assert.equal(deleteEventRecord.mock.calls.length, 1);
+  });
+
+  test("document and workout manifest reads resolve vault-owned manifests through the shared path-safe seam", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "vault-usecases-manifest-read-"));
+    const documentId = "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const workoutEventId = "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const workoutImportId = "xfm_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const documentManifestFile = `raw/documents/2026/04/${documentId}/manifest.json`;
+    const workoutManifestFile = `raw/workouts/2026/04/${workoutEventId}/manifest.json`;
+
+    try {
+      await writeManifestFile(
+        vaultRoot,
+        documentManifestFile,
+        createRawImportManifest({
+          importId: documentId,
+          importKind: "document",
+          ownerKind: "document",
+          rawDirectory: `raw/documents/2026/04/${documentId}`,
+          relativePath: `raw/documents/2026/04/${documentId}/report.pdf`,
+          originalFileName: "report.pdf",
+          mediaType: "application/pdf",
+        }),
+      );
+      await writeManifestFile(
+        vaultRoot,
+        workoutManifestFile,
+        createRawImportManifest({
+          importId: workoutImportId,
+          importKind: "workout_batch",
+          ownerKind: "workout",
+          rawDirectory: `raw/workouts/2026/04/${workoutEventId}`,
+          relativePath: `raw/workouts/2026/04/${workoutEventId}/workout.csv`,
+          originalFileName: "workout.csv",
+          mediaType: "text/csv",
+        }),
+      );
+
+      const queryRuntime = {
+        readVault: vi.fn(async () => ({ vault: vaultRoot })),
+        lookupEntityById: vi.fn((_readModel: unknown, lookup: string) =>
+          lookup === documentId
+            ? sampleQueryRecord({
+                kind: "document",
+                family: "event",
+                entityId: documentId,
+                primaryLookupId: documentId,
+                path: `raw/documents/${documentId}/document.md`,
+                attributes: { documentPath: documentManifestFile },
+              })
+            : lookup === workoutEventId
+              ? sampleQueryRecord({
+                  kind: "activity_session",
+                  family: "event",
+                  entityId: workoutEventId,
+                  primaryLookupId: workoutEventId,
+                  path: `bank/events/${workoutEventId}.md`,
+                  attributes: {
+                    rawRefs: [`raw/workouts/2026/04/${workoutEventId}/workout.csv`],
+                  },
+                })
+              : null,
+        ),
+      };
+      const { documentMeal, workoutRead } = await loadManifestReadUsecases(queryRuntime);
+
+      const shownDocumentManifest = await documentMeal.showDocumentManifest(vaultRoot, documentId);
+      assert.equal(shownDocumentManifest.manifestFile, documentManifestFile);
+      assert.equal(shownDocumentManifest.manifest.importId, documentId);
+
+      const shownWorkoutManifest = await workoutRead.showWorkoutManifest(vaultRoot, workoutEventId);
+      assert.equal(shownWorkoutManifest.manifestFile, workoutManifestFile);
+      assert.equal(shownWorkoutManifest.manifest.importKind, "workout_batch");
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("document and workout manifest reads fail closed when canonical path attributes escape the vault root", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "vault-usecases-manifest-escape-"));
+
+    try {
+      const queryRuntime = {
+        readVault: vi.fn(async () => ({ vault: vaultRoot })),
+        lookupEntityById: vi.fn((_readModel: unknown, lookup: string) =>
+          lookup === "doc_escape"
+            ? sampleQueryRecord({
+                kind: "document",
+                family: "event",
+                entityId: "doc_escape",
+                primaryLookupId: "doc_escape",
+                path: "raw/documents/doc_escape/document.md",
+                attributes: { documentPath: "../outside/manifest.json" },
+              })
+            : lookup === "evt_escape"
+              ? sampleQueryRecord({
+                  kind: "activity_session",
+                  family: "event",
+                  entityId: "evt_escape",
+                  primaryLookupId: "evt_escape",
+                  path: "bank/events/evt_escape.md",
+                  attributes: {
+                    rawRefs: ["../outside/workout.csv"],
+                  },
+                })
+              : null,
+        ),
+      };
+      const { documentMeal, workoutRead } = await loadManifestReadUsecases(queryRuntime);
+
+      await assert.rejects(
+        () => documentMeal.showDocumentManifest(vaultRoot, "doc_escape"),
+        {
+          name: "VaultCliError",
+          code: "invalid_path",
+          message: 'Vault-relative path "../outside/manifest.json" escapes the selected vault root.',
+        },
+      );
+      await assert.rejects(
+        () => workoutRead.showWorkoutManifest(vaultRoot, "evt_escape"),
+        {
+          name: "VaultCliError",
+          code: "invalid_path",
+          message: 'Vault-relative path "../outside/workout.csv" escapes the selected vault root.',
+        },
+      );
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
   });
 
   test("provider, recipe, and food persistence seams use the runtime module", async () => {

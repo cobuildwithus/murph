@@ -40,8 +40,10 @@ import {
   mergeByRelativePath,
   normalizeIsoTimestamp,
   normalizeOptionalText,
+  normalizeOptionalRelativePath,
   normalizeStringArray,
   relativePathEntries,
+  relativePathStrings,
   resolveVaultRelativePath,
   stringArray,
   toEventUpsertVaultCliError,
@@ -88,13 +90,18 @@ describe("helper barrel exports", () => {
     expect(helperApi.mergeByRelativePath).toBe(mergeByRelativePath);
     expect(helperApi.normalizeIsoTimestamp).toBe(normalizeIsoTimestamp);
     expect(helperApi.normalizeOptionalText).toBe(normalizeOptionalText);
+    expect(helperApi.normalizeOptionalRelativePath).toBe(normalizeOptionalRelativePath);
     expect(helperApi.normalizeStringArray).toBe(normalizeStringArray);
+    expect(helperApi.relativePathStrings).toBe(relativePathStrings);
     expect(helperApi.uniqueStrings).toBe(uniqueStrings);
   });
 
   it("keeps helper behavior stable through the public helper barrel", () => {
     expect(helperApi.normalizeOptionalText("  hello  ")).toBe("hello");
     expect(helperApi.normalizeOptionalText("   ")).toBeNull();
+    expect(helperApi.normalizeOptionalRelativePath(" bank/goals/sleep.md ")).toBe(
+      "bank/goals/sleep.md",
+    );
     expect(helperApi.normalizeIsoTimestamp("2026-04-08T12:34:56Z")).toBe(
       "2026-04-08T12:34:56Z",
     );
@@ -103,6 +110,9 @@ describe("helper barrel exports", () => {
       "sleep",
     ]);
     expect(helperApi.uniqueStrings(["goal", "goal", "sleep"])).toEqual(["goal", "sleep"]);
+    expect(helperApi.relativePathStrings([" bank/goals/sleep.md ", "", 1])).toEqual([
+      "bank/goals/sleep.md",
+    ]);
 
     expect(
       helperApi.mergeByRelativePath(
@@ -299,9 +309,35 @@ describe("helper barrel exports", () => {
     expect(normalizeStringArray([" sleep ", "sleep", "", 1])).toEqual(["sleep"]);
     expect(normalizeStringArray("sleep")).toBeUndefined();
     expect(stringArray([" sleep ", "", "wake", 1])).toEqual([" sleep ", "wake"]);
+    expect(normalizeOptionalRelativePath(" bank/goals/goal-a.md ")).toBe("bank/goals/goal-a.md");
     expect(relativePathEntries([{ relativePath: " bank/goals/goal-a.md " }, {}, null])).toEqual([
       "bank/goals/goal-a.md",
     ]);
+    expect(relativePathStrings([" bank/goals/goal-a.md ", "", 1])).toEqual([
+      "bank/goals/goal-a.md",
+    ]);
+    expect(() => normalizeOptionalRelativePath("../escape.md")).toThrowError(
+      'Vault-relative path "../escape.md" escapes the selected vault root.',
+    );
+    try {
+      relativePathEntries([{ relativePath: "../escape.md" }]);
+      throw new Error("expected invalid relativePath entry to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "VaultCliError",
+        code: "invalid_path",
+      });
+    }
+    try {
+      relativePathStrings(["/tmp/escape.md"]);
+      throw new Error("expected invalid raw relative path to throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "VaultCliError",
+        code: "invalid_path",
+        message: 'Vault-relative path "/tmp/escape.md" is invalid.',
+      });
+    }
     expect(
       mergeByRelativePath(
         [{ relativePath: "bank/goals/goal-a.md", title: "old" }],

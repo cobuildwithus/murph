@@ -1,5 +1,6 @@
 import {
   isVaultError,
+  normalizeRelativeVaultPath,
   resolveVaultPathOnDisk,
 } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -84,8 +85,19 @@ export function relativePathEntries(value: unknown) {
       return []
     }
 
-    const relativePath = entry.relativePath.trim()
-    return relativePath.length > 0 ? [relativePath] : []
+    const relativePath = normalizeOptionalRelativePath(entry.relativePath)
+    return relativePath ? [relativePath] : []
+  })
+}
+
+export function relativePathStrings(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((entry) => {
+    const relativePath = normalizeOptionalRelativePath(entry)
+    return relativePath ? [relativePath] : []
   })
 }
 
@@ -121,6 +133,23 @@ export async function resolveVaultRelativePath(
     return resolved.absolutePath
   } catch (error) {
     throw toVaultRelativePathError(relativePath, error)
+  }
+}
+
+export function normalizeOptionalRelativePath(value: unknown) {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  try {
+    return normalizeRelativeVaultPath(trimmed)
+  } catch (error) {
+    throw toVaultRelativePathError(trimmed, error)
   }
 }
 
