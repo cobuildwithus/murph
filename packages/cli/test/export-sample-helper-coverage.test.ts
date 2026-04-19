@@ -307,18 +307,31 @@ test('sample import helper resets its runtime cache after an invalid module shap
             return {
               async importCsvSamples() {
                 return {
-                  count: 2,
-                  transformId: 'xfm_ok_01',
-                  manifestPath: 'raw/samples/heart-rate/import-01/manifest.json',
-                  records: [{ id: 'smp_01' }, { id: 'smp_02' }],
-                  shardPaths: ['ledger/samples/2026-04.ndjson'],
+                  importedCount: 2,
+                  imports: [
+                    {
+                      importedCount: 2,
+                      ledgerFiles: ['ledger/samples/2026-04.ndjson'],
+                      lookupIds: ['smp_01', 'smp_02'],
+                      manifestPath: 'raw/samples/heart-rate/import-01/manifest.json',
+                      skipReasons: [],
+                      skippedCount: 0,
+                      stream: 'heart_rate',
+                      timeZone: 'UTC',
+                      transformId: 'xfm_ok_01',
+                      tsColumn: 'timestamp',
+                      unit: 'bpm',
+                      valueColumn: 'value',
+                    },
+                  ],
+                  ledgerFiles: ['ledger/samples/2026-04.ndjson'],
+                  lookupIds: ['smp_01', 'smp_02'],
+                  metadataColumns: [],
+                  skippedCount: 0,
+                  timeZone: 'UTC',
+                  tsColumn: 'timestamp',
                 }
               },
-            }
-          },
-          async prepareCsvSampleImport() {
-            return {
-              stream: 'heart_rate',
             }
           },
         }
@@ -353,12 +366,35 @@ test('sample import helper resets its runtime cache after an invalid module shap
   assert.deepEqual(result, {
     vault: '/tmp/vault',
     sourceFile: '/tmp/input.csv',
-    stream: 'heart_rate',
+    timeZone: 'UTC',
+    tsColumn: 'timestamp',
     importedCount: 2,
-    transformId: 'xfm_ok_01',
-    manifestFile: 'raw/samples/heart-rate/import-01/manifest.json',
+    skippedCount: 0,
     lookupIds: ['smp_01', 'smp_02'],
     ledgerFiles: ['ledger/samples/2026-04.ndjson'],
+    streams: ['heart_rate'],
+    imports: [
+      {
+        stream: 'heart_rate',
+        unit: 'bpm',
+        timeZone: 'UTC',
+        tsColumn: 'timestamp',
+        valueColumn: 'value',
+        importedCount: 2,
+        skippedCount: 0,
+        skipReasons: [],
+        transformId: 'xfm_ok_01',
+        manifestFile: 'raw/samples/heart-rate/import-01/manifest.json',
+        lookupIds: ['smp_01', 'smp_02'],
+        ledgerFiles: ['ledger/samples/2026-04.ndjson'],
+      },
+    ],
+    inferred: {
+      timeZone: 'UTC',
+      tsColumn: 'timestamp',
+      imports: [{ stream: 'heart_rate', valueColumn: 'value' }],
+      metadataColumns: [],
+    },
   })
 })
 

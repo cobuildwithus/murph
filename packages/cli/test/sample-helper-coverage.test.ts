@@ -37,20 +37,33 @@ async function loadSampleQueryHelpers() {
 
 test('importCsvSamples normalizes runtime output and reuses the loaded importer runtime', async () => {
   const loadRuntimeModule = vi.fn(async () => ({
-    async prepareCsvSampleImport(input: Record<string, unknown>) {
-      return {
-        stream: String(input.stream ?? 'heart_rate'),
-      }
-    },
     createImporters() {
       return {
         async importCsvSamples(input: Record<string, unknown>) {
           return {
-            count: 2,
-            transformId: 'xform_01',
-            manifestPath: 'raw/samples/heart-rate/import_01/manifest.json',
-            records: [{ id: 'smp_01' }, { id: 'smp_02' }],
-            shardPaths: ['ledger/samples/2026/2026-04.jsonl'],
+            importedCount: 2,
+            imports: [
+              {
+                importedCount: 2,
+                ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+                lookupIds: ['smp_01', 'smp_02'],
+                manifestPath: 'raw/samples/heart-rate/import_01/manifest.json',
+                skipReasons: [],
+                skippedCount: 0,
+                stream: String(input.stream ?? 'heart_rate'),
+                timeZone: 'UTC',
+                transformId: 'xform_01',
+                tsColumn: 'timestamp',
+                unit: 'bpm',
+                valueColumn: String(input.valueColumn ?? 'value'),
+              },
+            ],
+            ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+            lookupIds: ['smp_01', 'smp_02'],
+            metadataColumns: ['device', 'quality'],
+            skippedCount: 0,
+            timeZone: 'UTC',
+            tsColumn: 'timestamp',
             echoedVault: input.vaultRoot,
           }
         },
@@ -90,22 +103,68 @@ test('importCsvSamples normalizes runtime output and reuses the loaded importer 
   assert.deepEqual(first, {
     vault: '/vaults/main',
     sourceFile: '/tmp/samples.csv',
-    stream: 'heart_rate',
+    timeZone: 'UTC',
+    tsColumn: 'timestamp',
     importedCount: 2,
-    transformId: 'xform_01',
-    manifestFile: 'raw/samples/heart-rate/import_01/manifest.json',
+    skippedCount: 0,
     lookupIds: ['smp_01', 'smp_02'],
     ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+    streams: ['heart_rate'],
+    imports: [
+      {
+        stream: 'heart_rate',
+        unit: 'bpm',
+        timeZone: 'UTC',
+        tsColumn: 'timestamp',
+        valueColumn: 'value',
+        importedCount: 2,
+        skippedCount: 0,
+        skipReasons: [],
+        transformId: 'xform_01',
+        manifestFile: 'raw/samples/heart-rate/import_01/manifest.json',
+        lookupIds: ['smp_01', 'smp_02'],
+        ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+      },
+    ],
+    inferred: {
+      timeZone: 'UTC',
+      tsColumn: 'timestamp',
+      imports: [{ stream: 'heart_rate', valueColumn: 'value' }],
+      metadataColumns: ['device', 'quality'],
+    },
   })
   assert.deepEqual(second, {
     vault: '/vaults/main',
     sourceFile: '/tmp/samples-2.csv',
-    stream: 'hrv',
+    timeZone: 'UTC',
+    tsColumn: 'timestamp',
     importedCount: 2,
-    transformId: 'xform_01',
-    manifestFile: 'raw/samples/heart-rate/import_01/manifest.json',
+    skippedCount: 0,
     lookupIds: ['smp_01', 'smp_02'],
     ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+    streams: ['hrv'],
+    imports: [
+      {
+        stream: 'hrv',
+        unit: 'bpm',
+        timeZone: 'UTC',
+        tsColumn: 'timestamp',
+        valueColumn: 'value',
+        importedCount: 2,
+        skippedCount: 0,
+        skipReasons: [],
+        transformId: 'xform_01',
+        manifestFile: 'raw/samples/heart-rate/import_01/manifest.json',
+        lookupIds: ['smp_01', 'smp_02'],
+        ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+      },
+    ],
+    inferred: {
+      timeZone: 'UTC',
+      tsColumn: 'timestamp',
+      imports: [{ stream: 'hrv', valueColumn: 'value' }],
+      metadataColumns: ['device', 'quality'],
+    },
   })
 })
 
@@ -114,20 +173,33 @@ test('importCsvSamples resets the cached runtime after loader failures', async (
     .fn()
     .mockRejectedValueOnce(new Error('missing importers runtime'))
     .mockResolvedValue({
-      async prepareCsvSampleImport() {
-        return {
-          stream: 'glucose',
-        }
-      },
       createImporters() {
         return {
           async importCsvSamples() {
             return {
-              count: 1,
-              transformId: 'xform_retry',
-              manifestPath: 'raw/samples/glucose/import_retry/manifest.json',
-              records: [{ id: 'smp_retry' }],
-              shardPaths: ['ledger/samples/2026/2026-04.jsonl'],
+              importedCount: 1,
+              imports: [
+                {
+                  importedCount: 1,
+                  ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+                  lookupIds: ['smp_retry'],
+                  manifestPath: 'raw/samples/glucose/import_retry/manifest.json',
+                  skipReasons: [],
+                  skippedCount: 0,
+                  stream: 'glucose',
+                  timeZone: 'UTC',
+                  transformId: 'xform_retry',
+                  tsColumn: 'timestamp',
+                  unit: 'mg_dL',
+                  valueColumn: 'value',
+                },
+              ],
+              ledgerFiles: ['ledger/samples/2026/2026-04.jsonl'],
+              lookupIds: ['smp_retry'],
+              metadataColumns: [],
+              skippedCount: 0,
+              timeZone: 'UTC',
+              tsColumn: 'timestamp',
             }
           },
         }
@@ -167,7 +239,7 @@ test('importCsvSamples resets the cached runtime after loader failures', async (
   })
 
   assert.equal(loadRuntimeModule.mock.calls.length, 2)
-  assert.equal(retried.stream, 'glucose')
+  assert.deepEqual(retried.streams, ['glucose'])
   assert.deepEqual(retried.lookupIds, ['smp_retry'])
 })
 

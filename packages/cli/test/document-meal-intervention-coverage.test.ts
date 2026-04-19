@@ -691,11 +691,29 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     addMeal: addMealMock,
     async importCsvSamples() {
       return {
-        count: 0,
-        records: [],
-        transformId: 'transform_01JNV422Y2M5ZBV64ZP4N1DRB1',
-        manifestPath: 'raw/samples/transform.json',
-        shardPaths: [],
+        importedCount: 0,
+        imports: [
+          {
+            stream: 'heart_rate',
+            unit: 'bpm',
+            timeZone: 'UTC',
+            tsColumn: 'timestamp',
+            valueColumn: 'value',
+            importedCount: 0,
+            skippedCount: 1,
+            skipReasons: [{ count: 1, reason: 'non-numeric value' }],
+            transformId: null,
+            manifestPath: null,
+            lookupIds: [],
+            ledgerFiles: [],
+          },
+        ],
+        skippedCount: 1,
+        lookupIds: [],
+        ledgerFiles: [],
+        metadataColumns: [],
+        timeZone: 'UTC',
+        tsColumn: 'timestamp',
       }
     },
     async importAssessmentResponse() {

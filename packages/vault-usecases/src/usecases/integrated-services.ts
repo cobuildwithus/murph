@@ -411,24 +411,49 @@ function createIntegratedImporterServices(): ImporterServices {
     async importSamplesCsv(input) {
       const { vault, file, stream, tsColumn, valueColumn, unit } = input
       const importers = await loadImporterRuntime()
-      const result = await importers.importCsvSamples({
+      const runtimeInput = {
         filePath: file,
         vaultRoot: vault,
         stream,
         tsColumn,
         valueColumn,
         unit,
-      })
+      }
+      const result = await importers.importCsvSamples(runtimeInput)
 
       return {
         vault,
         sourceFile: file,
-        stream,
-        importedCount: result.count,
-        transformId: result.transformId,
-        manifestFile: result.manifestPath,
-        lookupIds: result.records.map((record) => record.id),
-        ledgerFiles: result.shardPaths,
+        timeZone: result.timeZone,
+        tsColumn: result.tsColumn,
+        importedCount: result.importedCount,
+        skippedCount: result.skippedCount,
+        lookupIds: result.lookupIds,
+        ledgerFiles: result.ledgerFiles,
+        streams: result.imports.map((entry) => entry.stream),
+        imports: result.imports.map((entry) => ({
+          stream: entry.stream,
+          unit: entry.unit,
+          timeZone: entry.timeZone,
+          tsColumn: entry.tsColumn,
+          valueColumn: entry.valueColumn,
+          importedCount: entry.importedCount,
+          skippedCount: entry.skippedCount,
+          skipReasons: entry.skipReasons,
+          transformId: entry.transformId,
+          manifestFile: entry.manifestPath,
+          lookupIds: entry.lookupIds,
+          ledgerFiles: entry.ledgerFiles,
+        })),
+        inferred: {
+          timeZone: result.timeZone,
+          tsColumn: result.tsColumn,
+          metadataColumns: result.metadataColumns,
+          imports: result.imports.map((entry) => ({
+            stream: entry.stream,
+            valueColumn: entry.valueColumn,
+          })),
+        },
       }
     },
     async importAssessmentResponse(input) {

@@ -10,6 +10,16 @@ export {
   parseDelimitedRows,
   prepareCsvSampleImport,
 } from "./csv-sample-importer.ts";
+export type {
+  CsvSampleImportBatchPlan,
+  CsvSampleImportBatchResult,
+  CsvSampleImportInput,
+  CsvSampleImportPlan,
+  CsvSampleImportResult,
+  CsvSampleImportSkipReasonCount,
+  CsvSampleImportWriteResult,
+  PreparedCsvSampleImportPayload,
+} from "./csv-sample-importer.ts";
 export {
   assertCanonicalWritePort,
   type CanonicalWriteMethod,

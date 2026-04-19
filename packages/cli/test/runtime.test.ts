@@ -306,9 +306,11 @@ test(
       })
 
       const samples = await runCli<{
+        imports: Array<{
+          manifestFile: string | null
+        }>
         lookupIds: string[]
         ledgerFiles: string[]
-        manifestFile: string
       }>([
         'samples',
         'import-csv',
@@ -328,8 +330,8 @@ test(
       assert.equal(samples.meta?.command, 'samples import-csv')
       assert.equal(requireData(samples).lookupIds.length, 2)
       assert.equal(requireData(samples).ledgerFiles.length > 0, true)
-      assert.equal(requireData(samples).manifestFile.length > 0, true)
-      await access(path.join(fixture.vaultRoot, requireData(samples).manifestFile))
+      assert.equal(String(requireData(samples).imports[0]?.manifestFile).length > 0, true)
+      await access(path.join(fixture.vaultRoot, requireData(samples).imports[0]?.manifestFile ?? ''))
     } finally {
       await rm(fixture.vaultRoot, { recursive: true, force: true })
     }
