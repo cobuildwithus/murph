@@ -81,6 +81,37 @@ describe("hosted wake store", () => {
     ).toThrow(/Hosted conversation wake payload schema is invalid/i);
   });
 
+  it("rejects cursor commits that skip over already-allocated wake rows", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 5n,
+        userId: "member_123",
+        version: 4n,
+      },
+    });
+
+    const result = await commitHostedExecutionCursorTx({
+      committedSeq: 3n,
+      expectedVersion: 4n,
+      snapshotRef: {
+        checkpoint: "wake_3",
+      },
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "1",
+        nextSeq: "5",
+        userId: "member_123",
+        version: "4",
+      }),
+    });
+  });
+
   it("rejects cursor commits that advance past the allocated wake head", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
@@ -201,6 +232,43 @@ describe("hosted wake store", () => {
       expectedVersion: 7n,
       snapshotRef: {
         checkpoint: "wake_2",
+      },
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "2",
+        nextSeq: "4",
+        snapshotRef: {
+          checkpoint: "wake_2",
+        },
+        userId: "member_123",
+        version: "7",
+      }),
+    });
+  });
+
+  it("rejects stale cursor commits that move backward", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 2n,
+        nextSeq: 4n,
+        snapshotRef: {
+          checkpoint: "wake_2",
+        },
+        userId: "member_123",
+        version: 7n,
+      },
+    });
+
+    const result = await commitHostedExecutionCursorTx({
+      committedSeq: 1n,
+      expectedVersion: 7n,
+      snapshotRef: {
+        checkpoint: "wake_1",
       },
       tx,
       userId: "member_123",
