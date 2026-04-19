@@ -10,13 +10,14 @@ import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
 import { json } from "../json.ts";
 import { createHostedUserKeyStore } from "../user-key-store.js";
 import type {
+  WorkerBootstrapUserRunnerStubLike,
   WorkerEnvironmentContract,
-  WorkerUserRunnerStubLike,
 } from "../worker-contracts.ts";
 
-type RunnerOutboundUserRunnerStubLike = WorkerUserRunnerStubLike;
+type RunnerOutboundUserRunnerStubLike = WorkerBootstrapUserRunnerStubLike;
 
-export interface RunnerOutboundEnvironmentSource extends WorkerEnvironmentContract {}
+export interface RunnerOutboundEnvironmentSource
+  extends WorkerEnvironmentContract<RunnerOutboundUserRunnerStubLike> {}
 
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
@@ -55,17 +56,8 @@ export async function resolveRunnerOutboundUserRunnerStub(
   userId: string,
 ): Promise<RunnerOutboundUserRunnerStubLike> {
   const stub = env.USER_RUNNER.getByName(userId);
-  try {
-    await stub.bootstrapUser?.(userId);
-  } catch (error) {
-    if (
-      !(error instanceof TypeError)
-      || !error.message.includes('does not implement "bootstrapUser"')
-    ) {
-      throw error;
-    }
-  }
-
+  const bootstrapUser = requireRunnerOutboundUserStubMethod(stub, "bootstrapUser");
+  await bootstrapUser(userId);
   return stub;
 }
 
@@ -100,117 +92,6 @@ export function requireRunnerOutboundHostedWebControlConfig(
 
 export function decodeRouteParam(value: string): string {
   return decodeURIComponent(value);
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function requireNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
-  }
-
-  return value;
-}
-
-export function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!isRecord(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-
-  return value;
-}
-
-export function readOptionalString(value: unknown, label: string): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string or null.`);
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-export function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
-  }
-
-  return value;
-}
-
-export function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-
-  return value;
-}
-
-export function requireBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
-  }
-
-  return value;
-}
-
-export function readNullableString(value: unknown, label: string): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  return requireString(value, label).trim() || null;
-}
-
-export function requireStringArray(value: unknown, label: string): string[] {
-  return requireArray(value, label).map((entry, index) => requireString(entry, `${label}[${index}]`));
-}
-
-export function requirePositiveInteger(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
-  }
-
-  return value;
-}
-
-export function readNullablePositiveInteger(value: unknown, label: string): number | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  return requirePositiveInteger(value, label);
-}
-
-export function readNullableIsoTimestamp(value: unknown, label: string): string | null {
-  const normalized = readNullableString(value, label);
-  if (normalized === null) {
-    return null;
-  }
-
-  if (!Number.isFinite(Date.parse(normalized))) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
-  }
-
-  return normalized;
-}
-
-export function readNullableIsoOrStringField(value: unknown, label: string): string | null {
-  const normalized = readNullableString(value, label);
-  if (normalized === null) {
-    return null;
-  }
-
-  if (label.endsWith("At") && !Number.isFinite(Date.parse(normalized))) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
-  }
-
-  return normalized;
 }
 
 export function timingSafeEquals(left: string, right: string): boolean {
