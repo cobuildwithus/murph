@@ -106,6 +106,27 @@ function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
   });
 }
 
+async function persistPendingCommitFinalizeToken(
+  stateStore: RunnerStateStore,
+  input: {
+    eventId: string | null;
+    finalizeToken: string;
+  },
+): Promise<void> {
+  const pendingCommit = input.eventId
+    ? await stateStore.readPendingCommit(input.eventId)
+    : await stateStore.readPendingCommit();
+
+  if (!pendingCommit || pendingCommit.finalizeToken === input.finalizeToken) {
+    return;
+  }
+
+  await stateStore.writePendingCommit({
+    ...pendingCommit,
+    finalizeToken: input.finalizeToken,
+  });
+}
+
 export class HostedUserRunner {
   private readonly wakeProcessor: RunnerWakeProcessor;
   private readonly eventTransitionLocks = new Map<string, Promise<void>>();
@@ -294,13 +315,42 @@ export class HostedUserRunner {
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
-    return this.composeUserStatus(await this.stateStore.readState());
+    let record = await this.stateStore.readState();
+
+    if (record.inFlight) {
+      const pendingCommit = await this.stateStore.readPendingCommit();
+
+      if (pendingCommit) {
+        try {
+          await this.resumePendingCommittedCleanupIfNeeded();
+          record = await this.stateStore.readState();
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            error,
+            eventId: pendingCommit.eventId,
+            level: "warn",
+            message:
+              "Hosted runner status probe could not resume a pending committed cleanup; returning current runner status.",
+            phase: "completed",
+            userId: pendingCommit.userId,
+          });
+        }
+      }
+    }
+
+    return this.composeUserStatus(record);
   }
 
   async wakeHostedWakes(input: {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedExecutionWakeDrainResult> {
     const result = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
+    if (shouldRetryAlarmDrivenHostedWakeDrain(result)) {
+      await this.wakeScheduler.syncNextWake({
+        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
+      });
+    }
     return toHostedExecutionWakeDrainResult(result);
   }
 
@@ -469,7 +519,7 @@ export class HostedUserRunner {
               stoppingState = "backpressured";
               break;
             }
-            await this.persistPendingCommitFinalizeToken({
+            await persistPendingCommitFinalizeToken(this.stateStore, {
               eventId: outcome.wake?.eventId ?? null,
               finalizeToken: commit.finalizeToken,
             });
@@ -517,7 +567,7 @@ export class HostedUserRunner {
       }
 
       if (stoppingState) {
-        if (stoppingState === "poisoned") {
+        if (stoppingState === "quarantined") {
           continue;
         }
 
@@ -654,6 +704,47 @@ export class HostedUserRunner {
           seq,
           state: "backpressured",
         };
+    }
+
+    const wakeStatus = await readHostedWakeStatusFromWeb({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      body: {
+        eventId: hostedWake.eventId,
+        fetchProof: wake.fetchProof,
+        wakeId: wake.id,
+        wakeSeq: wake.seq,
+      },
+      boundUserId: userId,
+      callbackSigning: this.env.webCallbackSigning,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
+    if (wakeStatus.fetchProofCurrent === false) {
+      await this.syncHostedWakeBundleCacheToCursor(wakeStatus.cursor.snapshotRef);
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          committedSeq: wakeStatus.cursor.committedSeq,
+          replacedByEventId: wakeStatus.replacedByEventId ?? null,
+          version: wakeStatus.cursor.version,
+          wakeEventId: hostedWake.eventId,
+          wakeSeq: wake.seq,
+          wakeState: wakeStatus.wakeState ?? null,
+        },
+        eventId: hostedWake.eventId,
+        level: "info",
+        message:
+          "Hosted wake fetched proof lost currency before runtime execution; rejecting the stale wake and refetching from web.",
+        phase: "wake.running",
+        userId,
+      });
+      return {
+        cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+        refetchBeforeAdvance: true,
+        postCursorAction: "cleanup-only",
+        wake: null,
+        seq,
+        state: "backpressured",
+      };
     }
 
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
@@ -895,18 +986,22 @@ export class HostedUserRunner {
       };
     }
 
+    await this.cleanupCommittedHostedWakesLocally({
+      cursor: published.cursor as TCursor,
+      wake: input.wake,
+    });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       eventId: pendingCommit.eventId,
       level: "info",
       message:
-        "Hosted wake finalized snapshot publish lost a compare-and-swap race; deferring cleanup until the published cursor catches up.",
+        "Hosted wake finalized snapshot publish lost a compare-and-swap race; reconciled local cleanup to the published cursor state.",
       phase: "completed",
       userId: pendingCommit.userId,
     });
     return {
       cursor: published.cursor as TCursor,
-      state: "backpressured",
+      state: "completed",
     };
   }
 
@@ -943,24 +1038,6 @@ export class HostedUserRunner {
       wake: null,
     });
     await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
-  }
-
-  private async persistPendingCommitFinalizeToken(input: {
-    eventId: string | null;
-    finalizeToken: string;
-  }): Promise<void> {
-    const pendingCommit = input.eventId
-      ? await this.stateStore.readPendingCommit(input.eventId)
-      : await this.stateStore.readPendingCommit();
-
-    if (!pendingCommit || pendingCommit.finalizeToken === input.finalizeToken) {
-      return;
-    }
-
-    await this.stateStore.writePendingCommit({
-      ...pendingCommit,
-      finalizeToken: input.finalizeToken,
-    });
   }
 
   private async syncHostedWakeBundleCacheToCursor(

@@ -82,7 +82,9 @@ function initializeSchema(database: DatabaseSync): void {
       last_error_code TEXT,
       last_event_id TEXT,
       last_run_at TEXT,
-      next_wake_at TEXT
+      next_wake_at TEXT,
+      pending_commit_json TEXT,
+      wake_materialization_hints_json TEXT
     );
   `);
 }
