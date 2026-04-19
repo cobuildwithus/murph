@@ -164,20 +164,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
     expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
     expect(rootPackageJson.scripts?.['review:gpt:full']).toBe(
-      'cobuild-review-gpt --config scripts/review-gpt-full.config.sh',
+      'bash scripts/review-gpt-cli.sh --config scripts/review-gpt-full.config.sh',
     )
     expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
     expect(rootPackageJson.scripts?.['chatgpt:thread:export']).toBe(
-      'cobuild-review-gpt thread export --format json --filter-output exportPath',
+      'bash scripts/review-gpt-cli.sh thread export --format json --filter-output exportPath',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:download']).toBe(
-      'cobuild-review-gpt thread download --format json --filter-output downloadedFile',
+      'bash scripts/review-gpt-cli.sh thread download --format json --filter-output downloadedFile',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:watch']).toBe(
-      'cobuild-review-gpt thread wake --no-poll-until-complete --format json',
+      'bash scripts/review-gpt-cli.sh thread wake --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:wake']).toBe(
-      'cobuild-review-gpt thread wake --no-poll-until-complete --format json',
+      'bash scripts/review-gpt-cli.sh thread wake --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
       'node scripts/check-workspace-package-cycles.mjs',
