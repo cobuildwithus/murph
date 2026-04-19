@@ -140,7 +140,7 @@ describe("HostedUserRunner hosted wake drain", () => {
           wakeMaterializationHints: null,
         });
       }
-      return createCommittedRunnerSuccessResponse({
+      return createCompletedRunnerSuccessResponse({
         init: {
           body: await request.clone().text(),
         },
@@ -270,7 +270,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     });
     const fetchMock = vi.fn(async (url, init) => {
       const request = url instanceof Request ? url : new Request(String(url), init);
-      return createCommittedRunnerSuccessResponse({
+      return createCompletedRunnerSuccessResponse({
         init: {
           body: await request.clone().text(),
         },
@@ -368,7 +368,7 @@ describe("HostedUserRunner hosted wake drain", () => {
           pendingWakeCount: Math.max(0, totalWakes - Number(committedSeq)),
         });
       }
-      return createCommittedRunnerSuccessResponse({
+      return createCompletedRunnerSuccessResponse({
         init: {
           body: await request.clone().text(),
         },
@@ -1244,9 +1244,34 @@ describe("HostedUserRunner hosted wake drain", () => {
     recordHostedWakeTerminalInWeb.mockResolvedValue({
       recorded: true,
     });
-    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
-      init,
-    }));
+    const fetchMock = vi.fn(async (url, init) => {
+      const requestEnvelope = url instanceof Request ? url : new Request(String(url), init);
+      const requestBody = typeof init?.body === "string"
+        ? JSON.parse(init.body)
+        : null;
+      const runnerRequest = requestBody ? maybeReadRunnerJobRequest(requestBody) : null;
+
+      if (!runnerRequest) {
+        return Response.json({
+          cursor: {
+            createdAt: "2026-03-26T12:00:00.000Z",
+            committedSeq: "1",
+            nextSeq: "3",
+            snapshotRef: null,
+            updatedAt: "2026-03-26T12:00:03.000Z",
+            userId: "member_123",
+            version: "2",
+          },
+          fetchProofCurrent: true,
+          pendingWakeCount: 1,
+          wakeState: "queued",
+        });
+      }
+
+      return createCompletedRunnerSuccessResponse({
+        init,
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const runner = new HostedUserRunner(
@@ -1440,8 +1465,18 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledOnce();
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_finalize_after_cas"]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(readRunnerJobRequest(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).resume).toEqual({
+    expect(runnerRequestCount).toBe(2);
+    const runnerRequests = fetchMock.mock.calls.flatMap(([url, init]) => {
+      const requestEnvelope = url instanceof Request ? url : new Request(String(url), init);
+      const requestBody = typeof init?.body === "string"
+        ? JSON.parse(init.body)
+        : null;
+      const request = requestBody ? maybeReadRunnerJobRequest(requestBody) : null;
+
+      return request ? [request] : [];
+    });
+    expect(runnerRequests).toHaveLength(2);
+    expect(runnerRequests[1]?.resume).toEqual({
       committedResult: {
         assistantDeliveryEffects: [],
         result: {
@@ -1608,11 +1643,21 @@ describe("HostedUserRunner hosted wake drain", () => {
     await runner.wakeHostedWakes();
 
     expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(runnerRequestCount).toBe(2);
     expect(readDispatchedEventIds(fetchMock)).toEqual([
       "evt_finalize_after_cas_same_seq_race",
     ]);
-    expect(readRunnerJobRequest(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).resume).toEqual({
+    const runnerRequests = fetchMock.mock.calls.flatMap(([url, init]) => {
+      const requestEnvelope = url instanceof Request ? url : new Request(String(url), init);
+      const requestBody = typeof init?.body === "string"
+        ? JSON.parse(init.body)
+        : null;
+      const request = requestBody ? maybeReadRunnerJobRequest(requestBody) : null;
+
+      return request ? [request] : [];
+    });
+    expect(runnerRequests).toHaveLength(2);
+    expect(runnerRequests[1]?.resume).toEqual({
       committedResult: {
         assistantDeliveryEffects: [],
         result: {
@@ -1804,7 +1849,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     await runner.wakeHostedWakes();
 
     expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(runnerRequestCount).toBe(2);
     expect(commitBodies).toHaveLength(1);
     expect(commitBodies[0]).toMatchObject({
       committedSeq: "1",

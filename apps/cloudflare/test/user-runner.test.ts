@@ -2442,7 +2442,7 @@ describe("HostedUserRunner", () => {
     expect(replayed.event).toEqual({
       eventId: "evt_duplicate_poisoned",
       lastError: null,
-      state: "poisoned",
+      state: "quarantined",
       userId: "member_123",
     });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
@@ -2726,7 +2726,7 @@ describe("HostedUserRunner", () => {
     expect(replayed.event).toEqual({
       eventId: "evt_poison_expiry",
       lastError: null,
-      state: "poisoned",
+      state: "quarantined",
       userId: "member_123",
     });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
@@ -2989,6 +2989,40 @@ describe("HostedUserRunner", () => {
     expect(loggedRecord.message).toContain(
       "Hosted wake nudge could not read runner state; scheduling a retry.",
     );
+  });
+
+  it("does not schedule a retry alarm when a direct wake drain exits backpressured", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.bootstrapUser("member_123");
+    vi.spyOn(
+      runner as unknown as {
+        wakeHostedWakesInternal: (input?: { targetSeqHint?: string | null }) => Promise<{
+          committedSeq: string;
+          exitState: "backpressured" | "completed" | "quarantined" | null;
+          requestedTargetSeq: string | null;
+          targetReached: boolean;
+        }>;
+      },
+      "wakeHostedWakesInternal",
+    ).mockResolvedValue({
+      committedSeq: "1",
+      exitState: "backpressured",
+      requestedTargetSeq: "1",
+      targetReached: true,
+    });
+
+    const result = await runner.wakeHostedWakes({
+      targetSeqHint: "1",
+    });
+
+    expect(result).toEqual({
+      committedSeq: "1",
+      requestedTargetSeq: "1",
+      targetReached: true,
+    });
+    expect(storage.lastAlarm).toBeNull();
   });
 
 });
