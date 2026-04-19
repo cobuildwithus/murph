@@ -1,5 +1,5 @@
 import {
-  ROOT_OPTIONS_WITH_VALUES,
+  resolveRootOptionTokenWithValue,
   resolveEffectiveTopLevelToken,
 } from '../command-helpers.js'
 
@@ -215,8 +215,11 @@ function getCommandPath(args: readonly string[]): string | null {
     }
 
     if (token.startsWith('-')) {
-      if (commandTokens.length === 0 && ROOT_OPTIONS_WITH_VALUES.has(token)) {
-        index += 1
+      const rootOptionWithValue = resolveRootOptionTokenWithValue(token)
+      if (commandTokens.length === 0 && rootOptionWithValue !== null) {
+        if (!token.includes('=')) {
+          index += 1
+        }
         continue
       }
 

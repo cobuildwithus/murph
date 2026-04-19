@@ -283,12 +283,28 @@ test('operator config resolves default vaults and injects them only for eligible
     ['--format', 'json', 'assistant', 'run', '--vault', '/tmp/default'],
   )
   assert.deepEqual(
+    applyDefaultVaultToArgs(['--format=json', 'assistant', 'run'], '/tmp/default'),
+    ['--format=json', 'assistant', 'run', '--vault', '/tmp/default'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['--token-offset=5', 'assistant', 'run'], '/tmp/default'),
+    ['--token-offset=5', 'assistant', 'run', '--vault', '/tmp/default'],
+  )
+  assert.deepEqual(
     applyDefaultVaultToArgs(['assistant', '--token-offset', '5'], '/tmp/default'),
     ['assistant', '--token-offset', '5'],
   )
   assert.deepEqual(
     applyDefaultVaultToArgs(['assistant', 'self-target', 'clear'], '/tmp/default'),
     ['assistant', 'self-target', 'clear'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['--format=json', 'assistant', 'self-target', 'list'], '/tmp/default'),
+    ['--format=json', 'assistant', 'self-target', 'list'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['--token-offset=5', 'assistant', 'self-target', 'clear'], '/tmp/default'),
+    ['--token-offset=5', 'assistant', 'self-target', 'clear'],
   )
 })
 

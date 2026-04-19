@@ -260,6 +260,24 @@ test('command helpers normalize top-level tokens, request ids, and JSON headers'
     ]),
     'assistant',
   )
+  assert.equal(
+    resolveEffectiveTopLevelToken([
+      '--format=json',
+      '--token-limit=10',
+      'assistant',
+      'status',
+    ]),
+    'assistant',
+  )
+  assert.equal(
+    resolveEffectiveTopLevelToken([
+      '--filter-output=result',
+      '--token-offset=5',
+      'assistant',
+      'status',
+    ]),
+    'assistant',
+  )
   assert.equal(resolveEffectiveTopLevelToken(['', '--token-offset', '5']), null)
   assert.equal(resolveEffectiveTopLevelToken(['--format', 'json', '--', 'show']), 'show')
   assert.equal(firstString({ a: '   ', b: '  keep-me  ' }, ['a', 'b']), 'keep-me')

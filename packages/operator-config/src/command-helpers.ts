@@ -13,6 +13,13 @@ export const ROOT_OPTIONS_WITH_VALUES = new Set([
   '--token-offset',
 ])
 
+export function resolveRootOptionTokenWithValue(
+  token: string,
+): string | null {
+  const optionToken = token.split('=', 1)[0] ?? token
+  return ROOT_OPTIONS_WITH_VALUES.has(optionToken) ? optionToken : null
+}
+
 type BaseCommandOptionShape = typeof baseCommandOptionsSchema.shape
 
 export function withBaseOptions<const TShape extends z.ZodRawShape = {}>(
@@ -86,7 +93,7 @@ export function resolveEffectiveTopLevelToken(
       return token
     }
 
-    if (ROOT_OPTIONS_WITH_VALUES.has(token)) {
+    if (resolveRootOptionTokenWithValue(token) !== null && !token.includes('=')) {
       index += 1
     }
   }
