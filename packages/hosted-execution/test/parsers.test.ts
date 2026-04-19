@@ -164,7 +164,7 @@ describe("parseHostedExecutionEvent", () => {
         reason: "timer",
         userId: "user-1",
       }),
-    ).toThrow(/assistant\.cron\.tick reason/i);
+    ).toThrow(/assistant\.cron\.tick reason: timer/i);
   });
 
   it("rejects non-Linq channels for Linq home-thread materialization targets", () => {
