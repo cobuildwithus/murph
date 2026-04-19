@@ -21,8 +21,6 @@ import type {
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionWake,
-  HostedExecutionWakeAppendRequest,
-  HostedWakeAppendRequest,
   HostedExecutionWakeKind,
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
@@ -40,6 +38,8 @@ import type {
   HostedWakeBehavior,
   HostedWakeAppendResponse,
   HostedWakeCommitResponse,
+  HostedWakeFinalizeRequest,
+  HostedWakeFinalizeResponse,
   HostedWakeExecutionResult,
   HostedWakeFetchResponse,
   HostedWakeLifecycleState,
@@ -183,18 +183,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
     default:
       throw new TypeError(`Unsupported hosted execution wake kind: ${kind}`);
   }
-}
-
-export function parseHostedWakeAppendRequest(value: unknown): HostedWakeAppendRequest {
-  const record = requireObject(value, "Hosted wake append request");
-
-  if (record.wake !== undefined) {
-    return {
-      wake: parseHostedExecutionWake(record.wake),
-    };
-  }
-
-  throw new TypeError("Hosted wake append request must include wake.");
 }
 
 export function parseHostedExecutionConversationMessagePayload(
@@ -544,6 +532,12 @@ export function parseHostedWakeStatusResponse(value: unknown): HostedWakeStatusR
 
   return {
     cursor: parseHostedExecutionCursorState(record.cursor),
+    ...(record.fetchProofCurrent === undefined ? {} : {
+      fetchProofCurrent: requireBoolean(
+        record.fetchProofCurrent,
+        "Hosted wake status response fetchProofCurrent",
+      ),
+    }),
     ...(record.replacedByEventId === undefined ? {} : {
       replacedByEventId: readNullableString(
         record.replacedByEventId,
@@ -858,34 +852,6 @@ export function parseHostedWakeRecord(
     );
   }
 
-  if (kind === "conversation.message") {
-    return {
-      behavior: parseHostedWakeBehavior(record.behavior),
-      coalescingKey: readOptionalNullableString(
-        record.coalescingKey,
-        "Hosted wake record coalescingKey",
-      ),
-      createdAt: requireString(record.createdAt, "Hosted wake record createdAt"),
-      dedupeKey: readOptionalNullableString(record.dedupeKey, "Hosted wake record dedupeKey"),
-      id: requireString(record.id, "Hosted wake record id"),
-      kind,
-      occurredAt: requireString(record.occurredAt, "Hosted wake record occurredAt"),
-      ...opaquePayloadTransport,
-      payloadSchema,
-      quarantineCode: readOptionalNullableString(
-        record.quarantineCode,
-        "Hosted wake record quarantineCode",
-      ),
-      quarantinedAt: readOptionalNullableString(
-        record.quarantinedAt,
-        "Hosted wake record quarantinedAt",
-      ),
-      seq: requireBigIntString(record.seq, "Hosted wake record seq"),
-      updatedAt: requireString(record.updatedAt, "Hosted wake record updatedAt"),
-      userId: requireString(record.userId, "Hosted wake record userId"),
-    };
-  }
-
   return {
     behavior: parseHostedWakeBehavior(record.behavior),
     coalescingKey: readOptionalNullableString(
@@ -1010,6 +976,14 @@ export function parseHostedWakeCommitResponse(
   return {
     committed: requireBoolean(record.committed, "Hosted wake commit response committed"),
     cursor: parseHostedExecutionCursorState(record.cursor),
+    ...(record.finalizeToken === undefined
+      ? {}
+      : {
+          finalizeToken: readNullableString(
+            record.finalizeToken,
+            "Hosted wake commit response finalizeToken",
+          ),
+        }),
   };
 }
 
@@ -1019,6 +993,14 @@ export function parseHostedWakeCommitRequest(
   const record = requireObject(value, "Hosted wake commit request");
 
   return {
+    ...(record.assistantNextWakeAt === undefined
+      ? {}
+      : {
+          assistantNextWakeAt: readNullableString(
+            record.assistantNextWakeAt,
+            "Hosted wake commit request assistantNextWakeAt",
+          ),
+        }),
     committedSeq: requireBigIntString(
       record.committedSeq,
       "Hosted wake commit request committedSeq",
@@ -1035,6 +1017,42 @@ export function parseHostedWakeCommitRequest(
             "Hosted wake commit request snapshotRef",
           ),
         }),
+  };
+}
+
+export function parseHostedWakeFinalizeResponse(
+  value: unknown,
+): HostedWakeFinalizeResponse {
+  const record = requireObject(value, "Hosted wake finalize response");
+
+  return {
+    finalized: requireBoolean(record.finalized, "Hosted wake finalize response finalized"),
+    cursor: parseHostedExecutionCursorState(record.cursor),
+  };
+}
+
+export function parseHostedWakeFinalizeRequest(
+  value: unknown,
+): HostedWakeFinalizeRequest {
+  const record = requireObject(value, "Hosted wake finalize request");
+
+  return {
+    ...(record.assistantNextWakeAt === undefined
+      ? {}
+      : {
+          assistantNextWakeAt: readNullableString(
+            record.assistantNextWakeAt,
+            "Hosted wake finalize request assistantNextWakeAt",
+          ),
+        }),
+    finalizeToken: requireString(
+      record.finalizeToken,
+      "Hosted wake finalize request finalizeToken",
+    ),
+    snapshotRef: parseHostedExecutionCursorSnapshotRef(
+      record.snapshotRef,
+      "Hosted wake finalize request snapshotRef",
+    ),
   };
 }
 

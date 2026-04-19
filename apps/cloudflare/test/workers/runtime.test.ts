@@ -46,20 +46,17 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedWakeAppendRequest,
   type HostedWakeCommitRequest,
   type HostedWakeFetchRequest,
+  type HostedWakeFinalizeRequest,
   type HostedWakeQuarantineRequest,
   type HostedWakeStatusRequest,
   type HostedWakeTerminalRequest,
 } from "@murphai/hosted-execution/contracts";
 import {
-  parseHostedWakeAppendRequest,
-} from "@murphai/hosted-execution/parsers";
-import {
-  appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
+  finalizeTestHostedWakeCursor,
   materializeTestHostedWakes,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
@@ -301,14 +298,6 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
 
   const bucket = (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES;
 
-  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/append") {
-    const body = parseHostedWakeAppendRequest(await request.clone().json() as HostedWakeAppendRequest);
-    return Response.json(await appendTestHostedWake({
-      bucket,
-      wake: body.wake,
-    }));
-  }
-
   if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/unseen") {
     const body = await request.clone().json() as HostedWakeFetchRequest;
     return Response.json(await fetchTestHostedWakeBatch({
@@ -327,6 +316,15 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
     }));
   }
 
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/finalize") {
+    const body = await request.clone().json() as HostedWakeFinalizeRequest;
+    return Response.json(await finalizeTestHostedWakeCursor({
+      body,
+      bucket,
+      userId,
+    }));
+  }
+
   if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/terminal") {
     const body = await request.clone().json() as HostedWakeTerminalRequest;
     return Response.json(await recordTestHostedWakeTerminal({
@@ -338,7 +336,7 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
 
   if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/materialize") {
     return Response.json(await materializeTestHostedWakes({
-      body: await request.clone().json(),
+      body: {},
       bucket,
       userId,
     }));

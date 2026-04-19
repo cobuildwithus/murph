@@ -7,6 +7,8 @@ import {
   parseHostedWakeCommitResponse,
   parseHostedWakeExecutionPayload,
   parseHostedWakeFetchResponse,
+  parseHostedWakeFinalizeRequest,
+  parseHostedWakeFinalizeResponse,
   parseHostedWakeQuarantineRequest,
   parseHostedWakeTerminalResponse,
 } from "../src/parsers.ts";
@@ -24,7 +26,6 @@ import {
 import {
   parseHostedExecutionConversationMessagePayload,
   parseHostedExecutionWake,
-  parseHostedWakeAppendRequest,
   parseHostedWakeRecord,
   parseHostedWakeStatusResponse,
 } from "../src/parsers.ts";
@@ -261,6 +262,7 @@ describe("hosted wake parser contracts", () => {
         userId: "member-1",
         version: "8",
       },
+      finalizeToken: "finalize_token_24",
     });
 
     expect(parsed).toEqual({
@@ -274,10 +276,11 @@ describe("hosted wake parser contracts", () => {
         userId: "member-1",
         version: "8",
       },
+      finalizeToken: "finalize_token_24",
     });
   });
 
-  it("parses hosted wake commit requests and quarantine requests", () => {
+  it("parses hosted wake commit, finalize, and quarantine requests", () => {
     expect(parseHostedWakeCommitRequest({
       committedSeq: "24",
       expectedVersion: "8",
@@ -285,6 +288,16 @@ describe("hosted wake parser contracts", () => {
     })).toEqual({
       committedSeq: "24",
       expectedVersion: "8",
+      snapshotRef: TEST_SNAPSHOT_REF,
+    });
+
+    expect(parseHostedWakeFinalizeRequest({
+      assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      finalizeToken: "finalize_token_24",
+      snapshotRef: TEST_SNAPSHOT_REF,
+    })).toEqual({
+      assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      finalizeToken: "finalize_token_24",
       snapshotRef: TEST_SNAPSHOT_REF,
     });
 
@@ -316,6 +329,32 @@ describe("hosted wake parser contracts", () => {
       recorded: true,
     })).toEqual({
       recorded: true,
+    });
+  });
+
+  it("parses hosted wake finalize responses", () => {
+    expect(parseHostedWakeFinalizeResponse({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "25",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:05.000Z",
+        userId: "member-1",
+        version: "9",
+      },
+      finalized: true,
+    })).toEqual({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "25",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:05.000Z",
+        userId: "member-1",
+        version: "9",
+      },
+      finalized: true,
     });
   });
 
@@ -469,10 +508,6 @@ describe("hosted wake parser contracts", () => {
       payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: telegramWake.userId,
     })).toEqual(telegramWake);
-
-    expect(() =>
-      parseHostedWakeAppendRequest({}),
-    ).toThrow(/must include wake/i);
 
     expect(() =>
       parseHostedWakeRecord({

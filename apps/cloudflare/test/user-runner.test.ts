@@ -16,7 +16,6 @@ import {
   buildHostedExecutionMemberActivatedWake,
   deriveHostedExecutionErrorCode,
   HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-  parseHostedWakeAppendRequest,
 } from "@murphai/hosted-execution";
 import type {
   HostedWakeExecutionResult,
@@ -72,6 +71,7 @@ import {
   appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
+  finalizeTestHostedWakeCursor,
   materializeTestHostedWakes,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
@@ -82,6 +82,7 @@ const describe = baseDescribe.sequential;
 const TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES = Uint8Array.from({ length: 32 }, () => 5);
 const TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "v1";
 let activeHostedExecutionEnvironment: HostedExecutionEnvironment | null = null;
+let activeHostedWakeBucket: ReturnType<typeof createBucket> | null = null;
 
 class HostedUserRunner extends BaseHostedUserRunner {
   wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
@@ -101,17 +102,21 @@ function requireActiveHostedExecutionEnvironment(): HostedExecutionEnvironment {
   return activeHostedExecutionEnvironment;
 }
 
+function requireActiveHostedWakeBucket(): ReturnType<typeof createBucket> {
+  if (!activeHostedWakeBucket) {
+    throw new Error("Hosted wake bucket is not configured.");
+  }
+
+  return activeHostedWakeBucket;
+}
+
 async function wakeRunnerForTest(
   runner: HostedUserRunner,
   wake: HostedExecutionWake,
 ): Promise<HostedExecutionUserStatus> {
-  const environment = requireActiveHostedExecutionEnvironment();
   await runner.bootstrapUser(wake.userId);
-  const append = await webControlPlane.appendHostedWakeInWeb({
-    baseUrl: environment.hostedWebBaseUrl,
-    boundUserId: wake.userId,
-    callbackSigning: environment.webCallbackSigning,
-    timeoutMs: environment.runnerTimeoutMs,
+  const append = await appendTestHostedWake({
+    bucket: requireActiveHostedWakeBucket().api,
     wake,
   });
 
@@ -127,11 +132,8 @@ async function wakeRunnerWithOutcomeForTest(
 ): Promise<HostedWakeExecutionResult> {
   const environment = requireActiveHostedExecutionEnvironment();
   await runner.bootstrapUser(wake.userId);
-  const append = await webControlPlane.appendHostedWakeInWeb({
-    baseUrl: environment.hostedWebBaseUrl,
-    boundUserId: wake.userId,
-    callbackSigning: environment.webCallbackSigning,
-    timeoutMs: environment.runnerTimeoutMs,
+  const append = await appendTestHostedWake({
+    bucket: requireActiveHostedWakeBucket().api,
     wake,
   });
 
@@ -219,6 +221,7 @@ describe("HostedUserRunner", () => {
     bucket.clear();
     storage.clear();
     activeHostedExecutionEnvironment = environment;
+    activeHostedWakeBucket = bucket;
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -3494,6 +3497,7 @@ function createPendingCommitRecord(input: {
     bundleRef: input.bundleRef ?? null,
     committedAt: input.committedAt,
     eventId: input.eventId,
+    finalizeToken: null,
     finalizedAt: input.finalizedAt ?? null,
     result: input.result,
     schemaVersion: 1,
@@ -3646,14 +3650,6 @@ async function maybeCreateHostedWakeControlResponse(input: {
   const headers = new Headers(input.init?.headers);
   const userId = headers.get("x-hosted-execution-user-id") ?? "member_123";
 
-  if (url.endsWith("/api/internal/hosted-wake/append")) {
-    const requestBody = parseHostedWakeAppendRequest(JSON.parse(String(input.init?.body ?? "{}")));
-    return Response.json(await appendTestHostedWake({
-      bucket: input.bucket.api,
-      wake: requestBody.wake,
-    }));
-  }
-
   if (url.endsWith("/api/internal/hosted-wake/unseen")) {
     return Response.json(await fetchTestHostedWakeBatch({
       body: JSON.parse(String(input.init?.body ?? "{}")),
@@ -3664,6 +3660,14 @@ async function maybeCreateHostedWakeControlResponse(input: {
 
   if (url.endsWith("/api/internal/hosted-wake/commit")) {
     return Response.json(await commitTestHostedWakeCursor({
+      body: JSON.parse(String(input.init?.body ?? "{}")),
+      bucket: input.bucket.api,
+      userId,
+    }));
+  }
+
+  if (url.endsWith("/api/internal/hosted-wake/finalize")) {
+    return Response.json(await finalizeTestHostedWakeCursor({
       body: JSON.parse(String(input.init?.body ?? "{}")),
       bucket: input.bucket.api,
       userId,
@@ -3732,31 +3736,6 @@ async function createCommittedRunnerSuccessResponse(input: {
 }): Promise<Response> {
   const payload = normalizeRunnerSuccessPayload(input.payload);
   const requestBody = JSON.parse(String(input.init?.body));
-  const wakeAppendRequest = maybeReadHostedWakeAppendRequest(requestBody);
-
-  if (wakeAppendRequest) {
-    return new Response(JSON.stringify({
-      duplicate: false,
-      inserted: true,
-      updatedExisting: false,
-      wake: {
-        behavior: "ordered",
-        createdAt: wakeAppendRequest.occurredAt,
-        dedupeKey: `${wakeAppendRequest.eventId}`,
-        id: `wake_${wakeAppendRequest.eventId}`,
-        kind: wakeAppendRequest.kind,
-        occurredAt: wakeAppendRequest.occurredAt,
-        payloadSchema: "murph.hosted-wake-execution.v1",
-        quarantineCode: null,
-        quarantinedAt: null,
-        seq: "1",
-        updatedAt: wakeAppendRequest.occurredAt,
-        userId: wakeAppendRequest.userId,
-      },
-    }), {
-      status: 200,
-    });
-  }
 
   return new Response(JSON.stringify(
     readRunnerJobRequest(requestBody).resume
@@ -3835,26 +3814,6 @@ function readRunnerJobRequest(value: unknown): {
     resume: requestRecord.resume,
     wake,
   };
-}
-
-function maybeReadHostedWakeAppendRequest(value: unknown): {
-  eventId: string;
-  kind: string;
-  occurredAt: string;
-  userId: string;
-} | null {
-  try {
-    const request = parseHostedWakeAppendRequest(value);
-
-    return {
-      eventId: request.wake.eventId,
-      kind: request.wake.kind,
-      occurredAt: request.wake.occurredAt,
-      userId: request.wake.userId,
-    };
-  } catch {
-    return null;
-  }
 }
 
 async function commitResultForRunnerRequest(input: {
