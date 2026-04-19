@@ -48,14 +48,14 @@ This patch moves `reconcileSubmittedHostedRevnetIssuances(...)` into `stripe-rev
 
 **Seam:** `apps/cloudflare/src/user-runner/runner-queue-store.ts`
 
-**Symbols/clusters:** `enqueueDispatch`, `claimNextDuePendingDispatch`, `applyCommittedDispatch`, `syncCommittedBundles`, `compareAndSwapBundleRefs`, `recordRunPhase`, `readPendingDispatch*`, `writeConsumedEventSync`, `writePoisonedEventSync`, `writeBackpressuredEventSync`
+**Symbols/clusters:** `enqueueDispatch`, `claimNextDuePendingDispatch`, `applyCommittedDispatch`, `syncCommittedBundles`, `compareAndSwapBundleRefs`, `recordRunPhase`, `readPendingDispatch*`, `writeConsumedEventSync`, `writeQuarantinedEventSync`, `writeBackpressuredEventSync`
 
-**Current cost:** one file owns pending queue storage, payload hydration, bundle compare-and-swap state, consumed/poisoned/backpressured event history, wake scheduling inputs, and run/timeline meta projection. Local changes are risky because readers have to keep several tables and invariants in mind at once.
+**Current cost:** one file owns pending queue storage, payload hydration, bundle compare-and-swap state, consumed/quarantined/backpressured event history, wake scheduling inputs, and run/timeline meta projection. Local changes are risky because readers have to keep several tables and invariants in mind at once.
 
 **Simpler target:** keep `RunnerQueueStore` as the orchestration façade, but move concrete persistence seams into smaller modules such as:
 
 - `user-runner/runner-queue/pending-dispatches.ts` for pending row CRUD and payload hydration
-- `user-runner/runner-queue/event-history.ts` for consumed/poisoned/backpressured tables
+- `user-runner/runner-queue/event-history.ts` for consumed/quarantined/backpressured tables
 - `user-runner/runner-queue/bundle-state.ts` for bundle slot reads and compare-and-swap
 
 **Incremental extraction path:** move one helper cluster at a time behind context-aware module functions that receive `sql` and `dispatchPayloadStore`, without changing the SQL schema or the public `RunnerQueueStore` API first.

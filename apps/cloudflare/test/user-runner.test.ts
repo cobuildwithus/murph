@@ -2388,8 +2388,8 @@ describe("HostedUserRunner", () => {
     );
   });
 
-  it("reports poisoned events through the shared dispatch outcome surface without rerunning them", async () => {
-    const dispatch = createWake("evt_duplicate_poisoned");
+  it("reports quarantined wakes through the shared dispatch outcome surface without rerunning them", async () => {
+    const dispatch = createWake("evt_duplicate_quarantined");
     const appended = await appendTestHostedWake({
       bucket: bucket.api,
       wake: dispatch,
@@ -2414,7 +2414,7 @@ describe("HostedUserRunner", () => {
     await quarantineTestHostedWake({
       body: {
         fetchProof: String(fetchProof),
-        quarantineCode: "duplicate-poisoned-test",
+        quarantineCode: "duplicate-quarantined-test",
         wakeId: appended.wake.id,
         wakeSeq: appended.wake.seq,
       },
@@ -2433,14 +2433,14 @@ describe("HostedUserRunner", () => {
         return hostedWakeResponse;
       }
 
-      throw new Error(`Unexpected fetch during poisoned duplicate replay: ${String(url)}`);
+      throw new Error(`Unexpected fetch during quarantined duplicate replay: ${String(url)}`);
     });
     vi.stubGlobal("fetch", replayFetch);
 
     const replayed = await runner.wakeWithOutcome(dispatch);
 
     expect(replayed.event).toEqual({
-      eventId: "evt_duplicate_poisoned",
+      eventId: "evt_duplicate_quarantined",
       lastError: null,
       state: "quarantined",
       userId: "member_123",
@@ -2672,10 +2672,10 @@ describe("HostedUserRunner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps poisoned wakes blocked even after the old replay TTL window passes", async () => {
+  it("keeps quarantined wakes blocked even after the old replay TTL window passes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = createWake("evt_poison_expiry");
+    const dispatch = createWake("evt_quarantine_expiry");
     const appended = await appendTestHostedWake({
       bucket: bucket.api,
       wake: dispatch,
@@ -2700,7 +2700,7 @@ describe("HostedUserRunner", () => {
     await quarantineTestHostedWake({
       body: {
         fetchProof: String(fetchProof),
-        quarantineCode: "poison-expiry-test",
+        quarantineCode: "quarantine-expiry-test",
         wakeId: appended.wake.id,
         wakeSeq: appended.wake.seq,
       },
@@ -2724,7 +2724,7 @@ describe("HostedUserRunner", () => {
     const replayed = await runner.wakeWithOutcome(dispatch);
 
     expect(replayed.event).toEqual({
-      eventId: "evt_poison_expiry",
+      eventId: "evt_quarantine_expiry",
       lastError: null,
       state: "quarantined",
       userId: "member_123",
@@ -3249,11 +3249,6 @@ async function seedRunnerQueueState(
       };
       enqueuedAt: string;
       lastError: string | null;
-    }>;
-    poisonedEvents?: Array<{
-      eventId: string;
-      lastError: string;
-      poisonedAt: string;
     }>;
     pendingCommit?: RunnerPendingCommitRecord | null;
     storage: ReturnType<typeof createStorage>;

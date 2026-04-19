@@ -10,7 +10,7 @@ export const HOSTED_EXECUTION_RUN_PHASES = [
   "completed",
   "retry.scheduled",
   "failed",
-  "poisoned",
+  "quarantined",
 ] as const;
 
 export type HostedExecutionRunPhase = (typeof HOSTED_EXECUTION_RUN_PHASES)[number];
