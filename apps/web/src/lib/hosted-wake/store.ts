@@ -121,7 +121,7 @@ export async function countPendingHostedWakes(input: {
         };
         return Boolean(
           wake
-            && (receipt.state === "completed" || receipt.state === "replaced")
+            && receipt.state === "completed"
             && isCurrentHostedWakeTerminalReceipt({
               cursor,
               receipt,
@@ -189,7 +189,7 @@ export async function listHostedWakesAfterSeq(
 
 export async function recordHostedWakeTerminalTx(input: {
   fetchProof: string;
-  state: "completed" | "quarantined" | "replaced";
+  state: "completed" | "quarantined";
   tx: HostedWakeMutationTx;
   userId: string;
   wakeId: string;
@@ -340,7 +340,6 @@ export async function commitHostedExecutionCursorTx(input: {
     if (
       currentReceipt.receipt.state !== "completed"
       && currentReceipt.receipt.state !== "quarantined"
-      && currentReceipt.receipt.state !== "replaced"
     ) {
       return {
         committed: false,

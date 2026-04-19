@@ -1,5 +1,3 @@
-import type { HostedWakeTerminalState } from "@murphai/hosted-execution/contracts";
-
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -53,10 +51,10 @@ function parseRequiredBigInt(value: unknown, label: string): bigint {
   }
 }
 
-function parseTerminalState(value: unknown): HostedWakeTerminalState {
-  if (value === "completed" || value === "replaced") {
+function parseTerminalState(value: unknown): "completed" | "quarantined" {
+  if (value === "completed" || value === "quarantined") {
     return value;
   }
 
-  throw new TypeError("state must be a terminal hosted wake state.");
+  throw new TypeError("state must be a hosted wake callback terminal state.");
 }
