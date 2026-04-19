@@ -1755,6 +1755,156 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("reconciliation sends explicit null observed fences when the hosted baseline has no versioned state yet", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse = {
+        connections: [
+          {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-04T09:00:00.000Z",
+              createdAt: "2026-04-04T09:00:00.000Z",
+              displayName: "Hosted Demo",
+              externalAccountId: "demo-null-fence",
+              id: "hosted_conn_null_fence",
+              metadata: {
+                hosted: true,
+              },
+              provider: "demo",
+              scopes: ["offline", "read:data"],
+              status: "active",
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              nextReconcileAt: null,
+            },
+            tokenBundle: null,
+          },
+        ],
+        generatedAt: "2026-04-04T09:10:00.000Z",
+        userId: "member_123",
+      };
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T10:10:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during reconciliation");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const seeded = service.store.upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        displayName: "Hosted Demo",
+        externalAccountId: "demo-null-fence",
+        metadata: {
+          hosted: true,
+        },
+        provider: "demo",
+        scopes: ["offline", "read:data"],
+        status: "active",
+        tokens: {
+          accessToken: "seed-access-token",
+          accessTokenEncrypted: "enc:seed-access-token",
+          accessTokenExpiresAt: "2026-04-05T00:00:00.000Z",
+          refreshToken: "seed-refresh-token",
+          refreshTokenEncrypted: "enc:seed-refresh-token",
+        },
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_null_fence");
+      assert.equal(localAccountId, seeded.id);
+
+      service.store.patchAccount(localAccountId, {
+        displayName: "Local Null Fence",
+      });
+      service.store.markSyncStarted(localAccountId, "2026-04-06T09:40:00.000Z");
+
+      const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      const storedLocalAccount = service.store.getAccountById(localAccountId);
+      assert.ok(storedLocalAccount);
+      const updated = service.store.updateAccountTokens(localAccountId, {
+        accessToken: "local-first-access",
+        accessTokenEncrypted: codec.encrypt(
+          "local-first-access",
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: storedLocalAccount.externalAccountId,
+            provider: storedLocalAccount.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+        refreshToken: "local-first-refresh",
+        refreshTokenEncrypted: codec.encrypt(
+          "local-first-refresh",
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: storedLocalAccount.externalAccountId,
+            provider: storedLocalAccount.provider,
+            purpose: "device-sync-refresh-token",
+          }),
+        ),
+      });
+      assert.ok(updated);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
+        connection: {
+          displayName: "Local Null Fence",
+        },
+        connectionId: "hosted_conn_null_fence",
+        localState: {
+          lastSyncStartedAt: "2026-04-06T09:40:00.000Z",
+        },
+        observedTokenVersion: null,
+        observedUpdatedAt: null,
+        tokenBundle: {
+          accessToken: "local-first-access",
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          keyVersion: "local-runtime",
+          refreshToken: "local-first-refresh",
+          tokenVersion: 1,
+        },
+      });
+    } finally {
+      service.close();
+      await cleanup();
+    }
+  });
+
   test("reconciliation sends no updates when the mirrored local state is unchanged or older than the hosted baseline", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

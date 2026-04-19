@@ -102,20 +102,13 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           tx,
         );
         const baseline = buildHostedRuntimeConnectionSnapshot(record, storedAccount);
-        const stateMutationRequested = Boolean(update.connection) || Boolean(update.localState);
+        const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
         const tokenMutationRequested = update.tokenBundle !== undefined;
         const connectionWriteRequested = stateMutationRequested || tokenMutationRequested;
-        const connectionVersionMismatch = Boolean(
-          stateMutationRequested
-          && update.observedUpdatedAt !== undefined
-          && update.observedUpdatedAt !== null
-          && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt,
-        );
-        const tokenVersionMismatch = Boolean(
-          connectionWriteRequested
-          && update.observedTokenVersion !== undefined
-          && (baseline.tokenBundle?.tokenVersion ?? null) !== update.observedTokenVersion,
-        );
+        const connectionVersionMismatch = stateMutationRequested
+          && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
+        const tokenVersionMismatch = tokenMutationRequested
+          && (baseline.tokenBundle?.tokenVersion ?? null) !== update.observedTokenVersion;
         const versionMismatch = connectionVersionMismatch || tokenVersionMismatch;
         const nextAccount = buildPublicConnectionFromRuntimeSnapshot(baseline);
         let tokenBundleToPersist: HostedExecutionDeviceSyncRuntimeTokenBundle | null | undefined;

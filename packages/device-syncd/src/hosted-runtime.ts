@@ -606,55 +606,79 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
   index: number,
 ): HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   const record = requireObject(value, `Hosted device-sync runtime apply request updates[${index}]`);
+  const connection = record.connection === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
+        record.connection,
+        index,
+      );
+  const localState = record.localState === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(record.localState, index);
+  const observedUpdatedAt = record.observedUpdatedAt === undefined
+    ? undefined
+    : readNullableIsoTimestamp(
+        record.observedUpdatedAt,
+        `Hosted device-sync runtime apply request updates[${index}].observedUpdatedAt`,
+      );
+  const observedTokenVersion = record.observedTokenVersion === undefined
+    ? undefined
+    : readNullablePositiveInteger(
+        record.observedTokenVersion,
+        `Hosted device-sync runtime apply request updates[${index}].observedTokenVersion`,
+      );
+  const seed = record.seed === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncRuntimeConnectionSeed(record.seed, index);
+  const tokenBundle = record.tokenBundle === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+        record.tokenBundle,
+        `Hosted device-sync runtime apply request updates[${index}].tokenBundle`,
+      );
+
+  assertHostedExecutionDeviceSyncRuntimeMutationFences({
+    connection: connection !== undefined,
+    index,
+    localState: localState !== undefined,
+    observedTokenVersion,
+    observedUpdatedAt,
+    tokenBundle: tokenBundle !== undefined,
+  });
 
   return {
     connectionId: requireString(
       record.connectionId,
       `Hosted device-sync runtime apply request updates[${index}].connectionId`,
     ),
-    ...(record.connection === undefined
-      ? {}
-      : {
-          connection: parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
-            record.connection,
-            index,
-          ),
-        }),
-    ...(record.localState === undefined
-      ? {}
-      : {
-          localState: parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(record.localState, index),
-        }),
-    ...(record.observedUpdatedAt === undefined
-      ? {}
-      : {
-          observedUpdatedAt: readNullableIsoTimestamp(
-            record.observedUpdatedAt,
-            `Hosted device-sync runtime apply request updates[${index}].observedUpdatedAt`,
-          ),
-        }),
-    ...(record.observedTokenVersion === undefined
-      ? {}
-      : {
-          observedTokenVersion: readNullablePositiveInteger(
-            record.observedTokenVersion,
-            `Hosted device-sync runtime apply request updates[${index}].observedTokenVersion`,
-          ),
-        }),
-    ...(record.seed === undefined
-      ? {}
-      : {
-          seed: parseHostedExecutionDeviceSyncRuntimeConnectionSeed(record.seed, index),
-        }),
-    ...(record.tokenBundle === undefined
-      ? {}
-      : {
-          tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
-            record.tokenBundle,
-            `Hosted device-sync runtime apply request updates[${index}].tokenBundle`,
-          ),
-        }),
+    ...(connection === undefined ? {} : { connection }),
+    ...(localState === undefined ? {} : { localState }),
+    ...(observedUpdatedAt === undefined ? {} : { observedUpdatedAt }),
+    ...(observedTokenVersion === undefined ? {} : { observedTokenVersion }),
+    ...(seed === undefined ? {} : { seed }),
+    ...(tokenBundle === undefined ? {} : { tokenBundle }),
   };
+}
+
+function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {
+  connection: boolean;
+  index: number;
+  localState: boolean;
+  observedTokenVersion: number | null | undefined;
+  observedUpdatedAt: string | null | undefined;
+  tokenBundle: boolean;
+}): void {
+  if ((input.connection || input.localState) && input.observedUpdatedAt === undefined) {
+    throw new TypeError(
+      `Hosted device-sync runtime apply request updates[${input.index}].observedUpdatedAt is required when connection or localState mutations are present.`,
+    );
+  }
+
+  if (input.tokenBundle && input.observedTokenVersion === undefined) {
+    throw new TypeError(
+      `Hosted device-sync runtime apply request updates[${input.index}].observedTokenVersion is required when tokenBundle mutations are present.`,
+    );
+  }
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnectionSeed(

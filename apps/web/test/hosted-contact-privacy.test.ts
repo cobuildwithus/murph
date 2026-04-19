@@ -314,12 +314,14 @@ describe("hosted contact privacy", () => {
           localState: {
             clearError: true,
           },
+          observedUpdatedAt: null,
         },
         {
           connection: {
             status: "active",
           },
           connectionId: "conn_123",
+          observedUpdatedAt: null,
         },
       ],
       userId: "user_123",
