@@ -440,7 +440,6 @@ export class RunnerWakeProcessor {
     deferredCleanup: boolean;
   }> {
     let cursor = input.cursor;
-    let pendingCommitState = input.pendingCommit;
     const wake = input.wake ?? await this.restoreWakeFromPendingCommit(input.pendingCommit);
     const run = await this.resolvePendingCommitCleanupRun({
       pendingCommit: input.pendingCommit,
@@ -458,9 +457,6 @@ export class RunnerWakeProcessor {
         input.pendingCommit.userId,
         finalRunnerResult.browserVaultSnapshot ?? null,
       );
-      pendingCommitState = await this.dependencies.stateStore.readPendingCommit(
-        input.pendingCommit.eventId,
-      ) ?? input.pendingCommit;
     } else {
       await this.restorePendingCommitState(input.pendingCommit);
     }
@@ -516,23 +512,8 @@ export class RunnerWakeProcessor {
         snapshotCommit.cursor.snapshotRef === undefined ? null : snapshotCommit.cursor.snapshotRef,
         "Hosted wake cleanup cursor snapshotRef",
       );
+      await this.dependencies.stateStore.syncBundleRefCache(committedSnapshotRef);
       if (!snapshotCommit.committed) {
-        const latestPendingCommit = await this.dependencies.stateStore.readPendingCommit(
-          input.pendingCommit.eventId,
-        );
-        if (latestPendingCommit) {
-          pendingCommitState = latestPendingCommit;
-          await this.restorePendingCommitState(latestPendingCommit);
-        } else {
-          await this.dependencies.stateStore.syncBundleRefCache(pendingBundleRef);
-        }
-        if (sameHostedExecutionBundleRef(committedSnapshotRef, pendingCommitState.bundleRef)) {
-          await this.dependencies.stateStore.syncBundleRefCache(committedSnapshotRef);
-          return {
-            cursor,
-            deferredCleanup: false,
-          };
-        }
         await this.dependencies.stateStore.completeWakeRun({
           eventId: input.pendingCommit.eventId,
           finishedAt: new Date().toISOString(),
@@ -561,7 +542,6 @@ export class RunnerWakeProcessor {
           deferredCleanup: true,
         };
       }
-      await this.dependencies.stateStore.syncBundleRefCache(committedSnapshotRef);
     }
 
     return {
