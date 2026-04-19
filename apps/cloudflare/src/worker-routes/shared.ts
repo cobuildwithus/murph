@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionWakeDrainResult,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 
@@ -17,7 +18,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   status(): Promise<HostedExecutionUserStatus>;
   wakeHostedWakes(input?: {
     targetSeqHint?: string | null;
-  }): Promise<HostedExecutionUserStatus>;
+  }): Promise<HostedExecutionWakeDrainResult>;
 }
 
 export interface WorkerEnvironmentSource

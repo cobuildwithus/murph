@@ -1,3 +1,4 @@
+import type { HostedExecutionWakeDrainResult } from "@murphai/hosted-execution/contracts";
 import type { PrismaClient } from "@prisma/client";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
@@ -11,18 +12,16 @@ export async function triggerHostedWakeUser(input: {
   targetSeqHint?: string | null;
   timeoutMs?: number;
   userId: string;
-}): Promise<boolean> {
+}): Promise<HostedExecutionWakeDrainResult | null> {
   const client = readHostedExecutionControlClientIfConfigured(input.timeoutMs);
 
   if (!client) {
-    return false;
+    return null;
   }
 
-  await client.wakeUser(input.userId, {
+  return await client.wakeUser(input.userId, {
     ...(input.targetSeqHint === undefined ? {} : { targetSeqHint: input.targetSeqHint }),
   });
-
-  return true;
 }
 
 export async function triggerHostedWakeUserBestEffort(input: {
@@ -32,7 +31,13 @@ export async function triggerHostedWakeUserBestEffort(input: {
   userId: string;
 }): Promise<boolean> {
   try {
-    return await triggerHostedWakeUser(input);
+    const result = await triggerHostedWakeUser(input);
+
+    if (!result) {
+      return false;
+    }
+
+    return input.targetSeqHint == null || result.targetReached;
   } catch (error) {
     console.error(
       input.context
@@ -50,12 +55,14 @@ export async function handoffHostedExecutionWakeBestEffort(input: {
   eventId: string;
   prisma?: PrismaClient;
   timeoutMs?: number;
+  userId: string;
 }): Promise<void> {
   try {
     const prisma = input.prisma ?? getPrisma();
     const target = await readHostedWakeTarget({
       eventId: input.eventId,
       prisma,
+      userId: input.userId,
     });
 
     if (!target) {

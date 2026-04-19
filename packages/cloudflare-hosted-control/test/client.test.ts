@@ -207,7 +207,11 @@ describe("createCloudflareHostedControlClient", () => {
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
         observedRequest = { init, url: String(url) };
-        return createJsonResponse(createUserStatus({ userId: "user_123" }));
+        return createJsonResponse(createWakeDrainResult({
+          committedSeq: "42",
+          requestedTargetSeq: "42",
+          targetReached: true,
+        }));
       }) as typeof fetch,
       getBearerToken: async () => "Bearer token-123",
       timeoutMs: 2_500,
@@ -215,7 +219,11 @@ describe("createCloudflareHostedControlClient", () => {
 
     await expect(
       client.wakeUser("user_123", { targetSeqHint: "42" }),
-    ).resolves.toEqual(createUserStatus({ userId: "user_123" }));
+    ).resolves.toEqual(createWakeDrainResult({
+      committedSeq: "42",
+      requestedTargetSeq: "42",
+      targetReached: true,
+    }));
 
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/wake");
@@ -320,5 +328,19 @@ function createUserStatus(
     nextWakeAt: input.nextWakeAt ?? null,
     pendingWakeCount: input.pendingWakeCount ?? 0,
     userId: input.userId ?? "user_123",
+  };
+}
+
+function createWakeDrainResult(
+  input: Partial<{
+    committedSeq: string;
+    requestedTargetSeq: string | null;
+    targetReached: boolean;
+  }> = {},
+) {
+  return {
+    committedSeq: input.committedSeq ?? "0",
+    requestedTargetSeq: input.requestedTargetSeq ?? null,
+    targetReached: input.targetReached ?? true,
   };
 }

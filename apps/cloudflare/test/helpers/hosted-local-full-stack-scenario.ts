@@ -2,6 +2,7 @@ import type { Server as HttpServer } from "node:http";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionWakeDrainResult,
   type HostedExecutionUserStatus,
   type HostedExecutionWake,
   type HostedWakeAppendResponse,
@@ -59,7 +60,7 @@ export interface HostedLocalFullStackScenario {
     userId: string,
   ): Promise<{
     append: HostedWakeAppendResponse;
-    wakeStatus: HostedExecutionUserStatus;
+    wakeResult: HostedExecutionWakeDrainResult;
   }>;
   enqueueWake(wake: HostedExecutionWake, userId: string): Promise<HostedWakeAppendResponse>;
   harness: HostedLocalDevHarness;
@@ -71,7 +72,7 @@ export interface HostedLocalFullStackScenario {
       timeoutMs?: number;
     },
   ): Promise<HostedExecutionUserStatus>;
-  waitForLatestPendingWake(userId: string): Promise<HostedExecutionUserStatus>;
+  waitForLatestPendingWake(userId: string): Promise<HostedExecutionWakeDrainResult>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
   seedActiveHostedMember(input: HostedActiveMemberSeedArgs): Promise<void>;
