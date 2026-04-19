@@ -13,11 +13,16 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  normalizeOptionalRelativePath,
+  relativePathEntries,
+  relativePathStrings,
+  resolveVaultRelativePath,
+} from './vault-usecase-helpers.js'
+import {
   deleteEventRecord,
   editEventRecord,
 } from './event-record-mutations.js'
 import { asListEnvelope, toListEntity } from './shared.js'
-import { relativePathEntries } from './vault-usecase-helpers.js'
 
 type DocumentMealKind = 'document' | 'meal'
 
@@ -53,29 +58,23 @@ export type RawImportManifestResult = z.infer<
   typeof rawImportManifestResultSchema
 >
 
-function stringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-}
-
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
 }
 
 function resolveManifestArtifactPaths(record: QueryRecord): string[] {
-  const documentPath = firstString(record.attributes, ['documentPath', 'document_path'])
+  const documentPath = normalizeOptionalRelativePath(
+    firstString(record.attributes, ['documentPath', 'document_path']),
+  )
 
   return uniqueStrings([
     ...relativePathEntries(record.attributes.attachments),
-    ...stringArray(record.attributes.rawRefs),
+    ...relativePathStrings(record.attributes.rawRefs),
     ...(documentPath ? [documentPath] : []),
-    ...stringArray(record.attributes.photoPaths),
-    ...stringArray(record.attributes.photo_paths),
-    ...stringArray(record.attributes.audioPaths),
-    ...stringArray(record.attributes.audio_paths),
+    ...relativePathStrings(record.attributes.photoPaths),
+    ...relativePathStrings(record.attributes.photo_paths),
+    ...relativePathStrings(record.attributes.audioPaths),
+    ...relativePathStrings(record.attributes.audio_paths),
   ])
 }
 
@@ -126,7 +125,7 @@ async function readImportManifest(
   vault: string,
   manifestFile: string,
 ): Promise<RawImportManifest> {
-  const manifestPath = path.join(vault, ...manifestFile.split('/'))
+  const manifestPath = await resolveVaultRelativePath(vault, manifestFile)
   let manifestText: string
 
   try {

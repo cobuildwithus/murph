@@ -12,7 +12,11 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { asListEnvelope, toListEntity } from './shared.js'
-import { relativePathEntries } from './vault-usecase-helpers.js'
+import {
+  relativePathEntries,
+  relativePathStrings,
+  resolveVaultRelativePath,
+} from './vault-usecase-helpers.js'
 
 const DEFAULT_LIST_LIMIT = 50
 const TRACKED_WORKOUT_EVENT_KINDS = ['activity_session', 'body_measurement'] as const
@@ -33,14 +37,6 @@ export const workoutImportManifestResultSchema = z.object({
   manifest: rawImportManifestSchema,
 })
 
-function stringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-}
-
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
 }
@@ -49,7 +45,7 @@ function resolveManifestFile(record: QueryRecord): string {
   const workoutAttributes = isJsonObject(record.attributes.workout) ? record.attributes.workout : null
   const rawRefs = uniqueStrings([
     ...relativePathEntries(record.attributes.attachments),
-    ...stringArray(record.attributes.rawRefs),
+    ...relativePathStrings(record.attributes.rawRefs),
     ...relativePathEntries(record.attributes.media),
     ...relativePathEntries(workoutAttributes?.media),
   ])
@@ -94,7 +90,7 @@ async function readImportManifest(
   vault: string,
   manifestFile: string,
 ): Promise<RawImportManifest> {
-  const manifestPath = path.join(vault, ...manifestFile.split('/'))
+  const manifestPath = await resolveVaultRelativePath(vault, manifestFile)
   let manifestText: string
 
   try {
