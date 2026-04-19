@@ -6,7 +6,6 @@ import {
   buildHostedAssistantDeliveryEffect,
   buildHostedAssistantDeliveryFailedRecord,
   buildHostedAssistantDeliveryPendingRecord,
-  buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
   type HostedAssistantDeliveryPayload,
@@ -108,16 +107,25 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedExecutionSideEffects(payload)).toEqual(payload);
   });
 
-  it("builds canonical effects and prepared records without a duplicate intentId", () => {
+  it("builds canonical effects and sending records with only the canonical effect id", () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-1",
       effectId: "intent-1",
       payload: createHostedAssistantDeliveryPayload(),
     });
-    const record = buildHostedAssistantDeliveryPreparedRecord({
+    const record = buildHostedAssistantDeliverySendingRecord({
+      attempt: createHostedAssistantDeliveryAttempt({
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-12T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      }),
       dedupeKey: "dedupe-1",
       effectId: "intent-1",
-      recordedAt: "2026-04-12T00:00:00.000Z",
     });
 
     expect(effect).toEqual({
@@ -127,14 +135,22 @@ describe("hosted assistant delivery contracts", () => {
       payload: createHostedAssistantDeliveryPayload(),
     });
     expect(record).toEqual({
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-12T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      },
       effectId: "intent-1",
       fingerprint: "dedupe-1",
       kind: "assistant.delivery",
       recordedAt: "2026-04-12T00:00:00.000Z",
-      state: "prepared",
+      state: "sending",
     });
-    expect("intentId" in effect).toBe(false);
-    expect("intentId" in record).toBe(false);
   });
 
   it("parses sent assistant delivery records with gateway-owned target kinds", () => {
@@ -162,19 +178,6 @@ describe("hosted assistant delivery contracts", () => {
     }
 
     expect(record.delivery.targetKind).toBe("participant");
-  });
-
-  it("rejects removed hosted assistant-delivery intentId fields", () => {
-    expect(() =>
-      parseHostedAssistantDeliveryRecord({
-        effectId: "intent-1",
-        fingerprint: "dedupe-1",
-        intentId: "intent-1",
-        kind: "assistant.delivery",
-        recordedAt: "2026-04-08T00:00:00.000Z",
-        state: "prepared",
-      })
-    ).toThrow("intentId is no longer supported");
   });
 
   it("builds and parses pending, sending, sent, and failed records", () => {
@@ -220,32 +223,16 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedExecutionSideEffectRecord(sent)).toEqual(sent);
   });
 
-  it("upgrades legacy prepared records into sending records", () => {
-    const record = parseHostedAssistantDeliveryRecord({
-      effectId: "intent-legacy",
-      fingerprint: "dedupe-legacy",
-      kind: "assistant.delivery",
-      recordedAt: "2026-04-08T00:00:00.000Z",
-      state: "prepared",
-    });
-
-    expect(record).toEqual({
-      attempt: {
-        channel: null,
-        idempotencyKey: null,
-        messageLength: null,
-        providerMessageId: null,
-        providerThreadId: null,
-        startedAt: "2026-04-08T00:00:00.000Z",
-        target: null,
-        targetKind: null,
-      },
-      effectId: "intent-legacy",
-      fingerprint: "dedupe-legacy",
-      kind: "assistant.delivery",
-      recordedAt: "2026-04-08T00:00:00.000Z",
-      state: "sending",
-    });
+  it("rejects removed prepared assistant delivery records", () => {
+    expect(() =>
+      parseHostedAssistantDeliveryRecord({
+        effectId: "effect_prepared",
+        fingerprint: "dedupe_prepared",
+        kind: "assistant.delivery",
+        recordedAt: "2026-04-08T00:00:00.000Z",
+        state: "prepared",
+      }),
+    ).toThrow("Unsupported hosted assistant delivery record state: prepared");
   });
 
   it("parses individual side effects and rejects unsupported kinds", () => {

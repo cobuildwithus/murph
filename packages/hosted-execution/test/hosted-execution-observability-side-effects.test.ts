@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_ASSISTANT_DELIVERY_KIND,
-  buildHostedAssistantDeliveryPreparedRecord,
+  buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
   buildHostedExecutionSafeErrorDetails,
@@ -428,16 +428,35 @@ describe("hosted execution side-effects", () => {
       payload: createHostedAssistantDeliveryPayload(),
     });
 
-    expect(buildHostedAssistantDeliveryPreparedRecord({
+    expect(buildHostedAssistantDeliverySendingRecord({
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      },
       dedupeKey: "dedupe_123",
       effectId: "intent_123",
-      recordedAt: "2026-04-08T00:00:00.000Z",
     })).toEqual({
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      },
       effectId: "intent_123",
       fingerprint: "dedupe_123",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
-      state: "prepared",
+      state: "sending",
     });
 
     expect(buildHostedAssistantDeliverySentRecord({
@@ -548,11 +567,20 @@ describe("hosted execution side-effects", () => {
       state: "unknown",
     })).toThrow(/Unsupported hosted assistant delivery record state: unknown/i);
 
-    expect(() => buildHostedAssistantDeliveryPreparedRecord({
+    expect(() => buildHostedAssistantDeliverySendingRecord({
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "",
+        target: null,
+        targetKind: null,
+      },
       dedupeKey: "dedupe_123",
       effectId: "intent_123",
-      recordedAt: "",
-    })).toThrow(/recordedAt must be a non-empty string/i);
+    })).toThrow(/startedAt must be a non-empty string/i);
 
     expect(() => buildHostedAssistantDeliverySentRecord({
       dedupeKey: "dedupe_123",
@@ -579,15 +607,34 @@ describe("hosted execution side-effects", () => {
       fingerprint: "fingerprint_123",
       kind: "other",
       recordedAt: "2026-04-08T00:00:00.000Z",
-      state: "prepared",
+      state: "sending",
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      },
     })).toThrow(/Unsupported hosted assistant delivery kind: other/i);
   });
 
   it("exposes assistant-delivery-specific aliases and guards", () => {
-    const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
+    const sendingRecord = buildHostedAssistantDeliverySendingRecord({
+      attempt: {
+        channel: null,
+        idempotencyKey: null,
+        messageLength: null,
+        providerMessageId: null,
+        providerThreadId: null,
+        startedAt: "2026-04-08T00:00:00.000Z",
+        target: null,
+        targetKind: null,
+      },
       dedupeKey: "dedupe_123",
       effectId: "intent_123",
-      recordedAt: "2026-04-08T00:00:00.000Z",
     });
 
     expect(parseHostedAssistantDeliverySideEffect({
@@ -611,28 +658,8 @@ describe("hosted execution side-effects", () => {
       kind: "assistant.delivery",
       payload: createHostedAssistantDeliveryPayload(),
     }]);
-    expect(parseHostedAssistantDeliveryRecord(preparedRecord)).toEqual({
-      attempt: {
-        channel: null,
-        idempotencyKey: null,
-        messageLength: null,
-        providerMessageId: null,
-        providerThreadId: null,
-        startedAt: "2026-04-08T00:00:00.000Z",
-        target: null,
-        targetKind: null,
-      },
-      effectId: "intent_123",
-      fingerprint: "dedupe_123",
-      kind: "assistant.delivery",
-      recordedAt: "2026-04-08T00:00:00.000Z",
-      state: "sending",
-    });
+    expect(parseHostedAssistantDeliveryRecord(sendingRecord)).toEqual(sendingRecord);
     expect(isHostedAssistantDeliveryKind(HOSTED_ASSISTANT_DELIVERY_KIND)).toBe(true);
     expect(isHostedAssistantDeliveryKind("other")).toBe(false);
-    expect(() => parseHostedAssistantDeliveryRecord({
-      ...preparedRecord,
-      intentId: "different_intent",
-    })).toThrow(/intentId is no longer supported/i);
   });
 });
