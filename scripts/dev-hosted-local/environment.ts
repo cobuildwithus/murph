@@ -218,7 +218,7 @@ export function normalizeLocalDatabaseUrl(
 }
 
 export function shouldSyncLocalDatabaseSchema(value: string | undefined): boolean {
-  return normalizeLocalDatabaseUrl(value) === DEFAULT_DATABASE_URL;
+  return isLoopbackPostgresUrl(normalizeLocalDatabaseUrl(value));
 }
 
 export function buildWranglerVarArgs(
@@ -616,7 +616,13 @@ function readEscapedCharacter(
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  const normalizedHostname =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+  return normalizedHostname === "127.0.0.1"
+    || normalizedHostname === "localhost"
+    || normalizedHostname === "::1";
 }
 
 function isPostgresProtocol(protocol: string): boolean {

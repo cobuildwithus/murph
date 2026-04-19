@@ -271,18 +271,31 @@ describe("shouldSyncLocalDatabaseSchema", () => {
     ).toBe(false);
   });
 
-  it("returns false for non-default local database targets", () => {
+  it("returns true for custom local loopback database targets", () => {
     expect(
       shouldSyncLocalDatabaseSchema(
         "postgresql://postgres:postgres@127.0.0.1:5432/custom_local_db",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("treats a local postgres url without a database name as the default local sync target", () => {
     expect(
       shouldSyncLocalDatabaseSchema(
         "postgresql://postgres:postgres@127.0.0.1:5432",
+      ),
+    ).toBe(true);
+  });
+
+  it("treats localhost and IPv6 loopback postgres targets as local schema-sync databases", () => {
+    expect(
+      shouldSyncLocalDatabaseSchema(
+        "postgresql://postgres:postgres@localhost:5433/murph_local",
+      ),
+    ).toBe(true);
+    expect(
+      shouldSyncLocalDatabaseSchema(
+        "postgresql://postgres:postgres@[::1]:5432/murph_local",
       ),
     ).toBe(true);
   });
