@@ -19,14 +19,22 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   prisma: PrismaClient;
   response: HostedWebhookServiceResponse;
   source: "linq" | "telegram";
+  userId?: string;
 }): Promise<void> {
   if (input.response.reason !== "wake-appended-active-member") {
+    return;
+  }
+
+  const memberId = input.userId ?? null;
+
+  if (!memberId) {
     return;
   }
 
   const wakeTarget = await readHostedWakeTarget({
     eventId: input.eventId,
     prisma: input.prisma,
+    userId: memberId,
   });
 
   if (!wakeTarget) {
@@ -73,14 +81,14 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       );
       finishHostedOnboardingTiming(handoffTiming, "scheduled", {
         deferred: true,
-        timedOut: true,
+        inlineCompleted: false,
       });
       return;
     }
 
     finishHostedOnboardingTiming(handoffTiming, "completed", {
       deferred: false,
-      timedOut: true,
+      inlineCompleted: false,
     });
     return;
   }

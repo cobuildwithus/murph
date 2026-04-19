@@ -1,8 +1,8 @@
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import {
+  type HostedExecutionWakeDrainResult,
   type HostedWakeAppendRequest,
   type HostedExecutionWake,
-  type HostedExecutionUserStatus,
   type HostedWakeAppendResponse,
   type HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
@@ -29,10 +29,10 @@ export async function appendHostedWakeAndWakeWorker(input: {
   userId: string;
 }): Promise<{
   append: HostedWakeAppendResponse;
-  wakeStatus: HostedExecutionUserStatus;
+  wakeResult: HostedExecutionWakeDrainResult;
 }> {
   const append = await appendHostedWake(input);
-  const wakeStatus = await wakeHostedWorker({
+  const wakeResult = await wakeHostedWorker({
     harness: input.harness,
     targetSeqHint: append.wake.seq,
     userId: input.userId,
@@ -40,7 +40,7 @@ export async function appendHostedWakeAndWakeWorker(input: {
 
   return {
     append,
-    wakeStatus,
+    wakeResult,
   };
 }
 
@@ -126,7 +126,7 @@ export async function wakeHostedWorker(input: {
   harness: HostedLocalDevHarness;
   targetSeqHint?: string | null;
   userId: string;
-}): Promise<HostedExecutionUserStatus> {
+}): Promise<HostedExecutionWakeDrainResult> {
   return await createHostedLocalCloudflareControlClient(input.harness).wakeUser(
     input.userId,
     input.targetSeqHint === undefined
@@ -139,17 +139,17 @@ export async function wakeHostedWorkerForLatestPendingWake(input: {
   harness: HostedLocalDevHarness;
   timeoutMs?: number;
   userId: string;
-}): Promise<HostedExecutionUserStatus> {
+}): Promise<HostedExecutionWakeDrainResult> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const startedAt = Date.now();
-  let lastStatus: HostedExecutionUserStatus | null = null;
+  let lastResult: HostedExecutionWakeDrainResult | null = null;
 
   while ((Date.now() - startedAt) < timeoutMs) {
     const status = await readHostedWakeStatus(input);
 
     if (status.pendingWakeCount > 0) {
       const targetSeqHint = deriveLatestPendingWakeSeq(status);
-      lastStatus = await wakeHostedWorker({
+      lastResult = await wakeHostedWorker({
         harness: input.harness,
         targetSeqHint,
         userId: input.userId,
@@ -158,15 +158,15 @@ export async function wakeHostedWorkerForLatestPendingWake(input: {
       continue;
     }
 
-    if (lastStatus) {
-      return lastStatus;
+    if (lastResult) {
+      return lastResult;
     }
 
     await sleep(100);
   }
 
-  if (lastStatus) {
-    return lastStatus;
+  if (lastResult) {
+    return lastResult;
   }
 
   return await wakeHostedWorker({

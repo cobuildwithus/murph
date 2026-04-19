@@ -8,10 +8,12 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionWakeDrainResult,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
+  parseHostedExecutionWakeDrainResult,
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution/parsers";
 
@@ -50,7 +52,7 @@ export interface CloudflareHostedControlClient {
     options?: {
       targetSeqHint?: string | null;
     },
-  ): Promise<HostedExecutionUserStatus>;
+  ): Promise<HostedExecutionWakeDrainResult>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -119,7 +121,7 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "wake",
-        parse: parseHostedExecutionUserStatus,
+        parse: parseHostedExecutionWakeDrainResult,
         path: buildCloudflareHostedControlUserWakePath(userId),
         request: {
           body,

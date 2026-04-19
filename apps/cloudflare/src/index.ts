@@ -12,6 +12,7 @@ import {
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionWakeDrainResult,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 
@@ -193,7 +194,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async wakeHostedWakes(input?: {
     targetSeqHint?: string | null;
-  }): Promise<HostedExecutionUserStatus> {
+  }): Promise<HostedExecutionWakeDrainResult> {
     return this.runner.wakeHostedWakes(input);
   }
 

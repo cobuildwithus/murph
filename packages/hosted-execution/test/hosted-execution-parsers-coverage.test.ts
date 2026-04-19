@@ -4,6 +4,7 @@ import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 import {
   parseHostedExecutionEvent,
   parseHostedWakeExecutionResult,
+  parseHostedExecutionWakeDrainResult,
   parseHostedExecutionRunnerRequest,
   parseHostedExecutionRunnerResult,
   parseHostedExecutionSharePack,
@@ -219,6 +220,18 @@ describe("hosted execution parsers coverage", () => {
         nextWakeAt: null,
         pendingWakeCount: 0,
         userId: "user_123",
+      });
+    });
+
+    it("parses dedicated wake drain results", () => {
+      expect(parseHostedExecutionWakeDrainResult({
+        committedSeq: "24",
+        requestedTargetSeq: "25",
+        targetReached: false,
+      })).toEqual({
+        committedSeq: "24",
+        requestedTargetSeq: "25",
+        targetReached: false,
       });
     });
 
