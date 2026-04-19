@@ -1,5 +1,11 @@
 import { createHostedWebSmokeEnvironment } from "../../../next-artifacts";
 
+const prismaModuleSpecifier = "../prisma";
+const contactPrivacyModuleSpecifier = "./contact-privacy";
+const hostedMemberIdentityStoreModuleSpecifier = "./hosted-member-identity-store";
+const hostedMemberRoutingStoreModuleSpecifier = "./hosted-member-routing-store";
+const hostedMemberStoreModuleSpecifier = "./hosted-member-store";
+
 interface HostedActiveMemberSeedInput {
   environment?: NodeJS.ProcessEnv;
   memberId: string;
@@ -10,17 +16,74 @@ interface HostedActiveLinqMemberSeedInput extends HostedActiveMemberSeedInput {
   memberPhone: string;
 }
 
+interface HostedMemberSeedPrismaClient {
+  $disconnect(): Promise<void>;
+  $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+}
+
+interface HostedMemberSeedPrismaModule {
+  getPrisma(): HostedMemberSeedPrismaClient;
+}
+
+interface HostedMemberStoreModule {
+  createHostedMember(input: {
+    billingStatus: "active";
+    memberId: string;
+    prisma: unknown;
+  }): Promise<unknown>;
+}
+
+interface ContactPrivacyModule {
+  createHostedPhoneLookupKey(phoneNumber: string): string | null;
+  readHostedPhoneHint(phoneNumber: string): string | null;
+}
+
+interface HostedMemberIdentityStoreModule {
+  upsertHostedMemberIdentity(input: {
+    maskedPhoneNumberHint: string | null;
+    memberId: string;
+    phoneLookupKey: string;
+    phoneNumber: string;
+    phoneNumberVerifiedAt: Date;
+    prisma: unknown;
+    privyUserId: string | null;
+    signupPhoneCodeSendAttemptId: string | null;
+    signupPhoneCodeSendAttemptStartedAt: Date | null;
+    signupPhoneCodeSentAt: Date | null;
+    signupPhoneNumber: string;
+    walletAddress: string | null;
+    walletChainType: string | null;
+    walletCreatedAt: Date | null;
+    walletProvider: string | null;
+  }): Promise<unknown>;
+}
+
+interface HostedMemberRoutingStoreModule {
+  upsertHostedMemberHomeLinqBindingTx(input: {
+    clearPending: boolean;
+    linqChatId: string;
+    memberId: string;
+    prisma: unknown;
+    recipientPhone: string;
+  }): Promise<unknown>;
+  upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
+    clearPending: boolean;
+    memberId: string;
+    prisma: unknown;
+    recipientPhone: string;
+  }): Promise<unknown>;
+}
+
 interface HostedMemberSeedModules {
-  createHostedMember: typeof import("./hosted-member-store").createHostedMember;
-  createHostedPhoneLookupKey: typeof import("./contact-privacy").createHostedPhoneLookupKey;
-  getPrisma: typeof import("../prisma").getPrisma;
-  readHostedPhoneHint: typeof import("./contact-privacy").readHostedPhoneHint;
+  createHostedMember: HostedMemberStoreModule["createHostedMember"];
+  createHostedPhoneLookupKey: ContactPrivacyModule["createHostedPhoneLookupKey"];
+  getPrisma: HostedMemberSeedPrismaModule["getPrisma"];
+  readHostedPhoneHint: ContactPrivacyModule["readHostedPhoneHint"];
   upsertHostedMemberHomeLinqBindingTx:
-    typeof import("./hosted-member-routing-store").upsertHostedMemberHomeLinqBindingTx;
+    HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqBindingTx"];
   upsertHostedMemberHomeLinqRecipientPhoneTx:
-    typeof import("./hosted-member-routing-store").upsertHostedMemberHomeLinqRecipientPhoneTx;
-  upsertHostedMemberIdentity:
-    typeof import("./hosted-member-identity-store").upsertHostedMemberIdentity;
+    HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqRecipientPhoneTx"];
+  upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
 }
 
 export async function seedHostedActiveMember(
@@ -152,27 +215,35 @@ async function loadHostedMemberSeedModules(
     hostedMemberRoutingStoreModule,
     hostedMemberStoreModule,
   ] = await Promise.all([
-    import("../prisma"),
-    import("./contact-privacy"),
-    import("./hosted-member-identity-store"),
-    import("./hosted-member-routing-store"),
-    import("./hosted-member-store"),
+    import(prismaModuleSpecifier),
+    import(contactPrivacyModuleSpecifier),
+    import(hostedMemberIdentityStoreModuleSpecifier),
+    import(hostedMemberRoutingStoreModuleSpecifier),
+    import(hostedMemberStoreModuleSpecifier),
   ]);
 
   if (environment.DATABASE_URL) {
     process.env.DATABASE_URL = environment.DATABASE_URL;
   }
 
+  const typedPrismaModule = prismaModule as HostedMemberSeedPrismaModule;
+  const typedContactPrivacyModule = contactPrivacyModule as ContactPrivacyModule;
+  const typedHostedMemberIdentityStoreModule =
+    hostedMemberIdentityStoreModule as HostedMemberIdentityStoreModule;
+  const typedHostedMemberRoutingStoreModule =
+    hostedMemberRoutingStoreModule as HostedMemberRoutingStoreModule;
+  const typedHostedMemberStoreModule = hostedMemberStoreModule as HostedMemberStoreModule;
+
   return {
-    createHostedMember: hostedMemberStoreModule.createHostedMember,
-    createHostedPhoneLookupKey: contactPrivacyModule.createHostedPhoneLookupKey,
-    getPrisma: prismaModule.getPrisma,
-    readHostedPhoneHint: contactPrivacyModule.readHostedPhoneHint,
+    createHostedMember: typedHostedMemberStoreModule.createHostedMember,
+    createHostedPhoneLookupKey: typedContactPrivacyModule.createHostedPhoneLookupKey,
+    getPrisma: typedPrismaModule.getPrisma,
+    readHostedPhoneHint: typedContactPrivacyModule.readHostedPhoneHint,
     upsertHostedMemberHomeLinqBindingTx:
-      hostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqBindingTx,
+      typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqBindingTx,
     upsertHostedMemberHomeLinqRecipientPhoneTx:
-      hostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqRecipientPhoneTx,
-    upsertHostedMemberIdentity: hostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
+      typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqRecipientPhoneTx,
+    upsertHostedMemberIdentity: typedHostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
   };
 }
 

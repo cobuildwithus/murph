@@ -1,11 +1,31 @@
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
+import type { HostedWakeAppendResponse } from "@murphai/hosted-execution/contracts";
 
 import { createHostedWebSmokeEnvironment } from "../../../next-artifacts";
 
+const prismaModuleSpecifier = "../prisma";
+const hostedWakeQueueModuleSpecifier = "./queue";
+
+interface HostedWakeSeedPrismaClient {
+  $disconnect(): Promise<void>;
+  $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+}
+
+interface HostedWakeSeedPrismaModule {
+  getPrisma(): HostedWakeSeedPrismaClient;
+}
+
+interface HostedWakeQueueModule {
+  appendHostedExecutionWakePayloadTx(input: {
+    tx: unknown;
+    wake: HostedExecutionWake;
+  }): Promise<HostedWakeAppendResponse>;
+}
+
 interface HostedWakeSeedModules {
   appendHostedExecutionWakePayloadTx:
-    typeof import("./queue").appendHostedExecutionWakePayloadTx;
-  getPrisma: typeof import("../prisma").getPrisma;
+    HostedWakeQueueModule["appendHostedExecutionWakePayloadTx"];
+  getPrisma: HostedWakeSeedPrismaModule["getPrisma"];
 }
 
 export async function appendHostedExecutionWakeForTest(input: {
@@ -39,17 +59,20 @@ async function loadHostedWakeSeedModules(
   environment: NodeJS.ProcessEnv,
 ): Promise<HostedWakeSeedModules> {
   const [prismaModule, queueModule] = await Promise.all([
-    import("../prisma"),
-    import("./queue"),
+    import(prismaModuleSpecifier),
+    import(hostedWakeQueueModuleSpecifier),
   ]);
 
   if (environment.DATABASE_URL) {
     process.env.DATABASE_URL = environment.DATABASE_URL;
   }
 
+  const typedPrismaModule = prismaModule as HostedWakeSeedPrismaModule;
+  const typedQueueModule = queueModule as HostedWakeQueueModule;
+
   return {
-    appendHostedExecutionWakePayloadTx: queueModule.appendHostedExecutionWakePayloadTx,
-    getPrisma: prismaModule.getPrisma,
+    appendHostedExecutionWakePayloadTx: typedQueueModule.appendHostedExecutionWakePayloadTx,
+    getPrisma: typedPrismaModule.getPrisma,
   };
 }
 
