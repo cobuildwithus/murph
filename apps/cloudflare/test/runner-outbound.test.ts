@@ -22,20 +22,32 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("bootstraps the bound user before returning the outbound stub", async () => {
-    const bootstrapUser = vi.fn(async (userId: string) => ({ userId }));
+    type ReceiverSensitiveStub = WorkerBootstrapUserRunnerStubLike & {
+      marker: string;
+    };
+    const stub: ReceiverSensitiveStub = {
+      marker: "runner-outbound-stub",
+      bootstrapUser: vi.fn(async function (
+        this: ReceiverSensitiveStub,
+        userId: string,
+      ) {
+        expect(this.marker).toBe("runner-outbound-stub");
+        return { userId };
+      }),
+    };
     const env = createDirectRunnerOutboundEnv({
       USER_RUNNER: {
         getByName() {
-          return { bootstrapUser };
+          return stub;
         },
       },
     });
 
-    const stub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
+    const resolvedStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
 
-    expect(typeof stub.bootstrapUser).toBe("function");
-    expect(bootstrapUser).toHaveBeenCalledOnce();
-    expect(bootstrapUser).toHaveBeenCalledWith("member_123");
+    expect(resolvedStub).toBe(stub);
+    expect(stub.bootstrapUser).toHaveBeenCalledOnce();
+    expect(stub.bootstrapUser).toHaveBeenCalledWith("member_123");
   });
 
   it("fails closed when the runner stub is malformed at runtime", async () => {

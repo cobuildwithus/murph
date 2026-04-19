@@ -56,8 +56,8 @@ export async function resolveRunnerOutboundUserRunnerStub(
   userId: string,
 ): Promise<RunnerOutboundUserRunnerStubLike> {
   const stub = env.USER_RUNNER.getByName(userId);
-  const bootstrapUser = requireRunnerOutboundUserStubMethod(stub, "bootstrapUser");
-  await bootstrapUser(userId);
+  requireRunnerOutboundUserStubMethod(stub, "bootstrapUser");
+  await stub.bootstrapUser(userId);
   return stub;
 }
 
