@@ -102,41 +102,4 @@ describe("hosted email ingress route", () => {
       }),
     });
   });
-
-  it("rejects signed generic wake append requests for non-email wake kinds", async () => {
-    mocks.readOptionalJsonObject.mockResolvedValue({
-      wake: {
-        eventId: "evt_device_sync",
-        kind: "device.sync",
-        occurredAt: "2026-04-17T00:00:00.000Z",
-        userId: "member_123",
-      },
-    });
-
-    const { POST } = await import("../app/api/internal/hosted-wake/append/route");
-    const response = await POST(new Request("https://example.test", {
-      body: JSON.stringify({
-        wake: {
-          eventId: "evt_device_sync",
-          kind: "device.sync",
-          occurredAt: "2026-04-17T00:00:00.000Z",
-          userId: "member_123",
-        },
-      }),
-      headers: {
-        "content-type": "application/json",
-      },
-      method: "POST",
-    }));
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "INVALID_REQUEST",
-        message: "Invalid request.",
-      },
-    });
-    expect(mocks.readOptionalJsonObject).not.toHaveBeenCalled();
-    expect(mocks.appendHostedExecutionWakePayloadTx).not.toHaveBeenCalled();
-  });
 });

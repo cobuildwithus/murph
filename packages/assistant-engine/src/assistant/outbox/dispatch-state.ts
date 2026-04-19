@@ -84,7 +84,9 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
 }): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
     const baseIntent = current ?? input.intent
     const pendingIntent = assistantOutboxIntentSchema.parse({
       ...baseIntent,
@@ -114,7 +116,9 @@ export async function markAssistantOutboxIntentSent(input: {
 
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
 
     if (
       current?.status === 'sent' &&
@@ -201,7 +205,9 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
 
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
     const attemptCount = current?.attemptCount ?? input.sending.attemptCount
     const failedAt = input.failedAt.toISOString()
     const nextAttemptAt = retryable
@@ -278,7 +284,9 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
 }): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
     const baseIntent = current ?? input.sending
     const scheduledAt = input.scheduledAt.toISOString()
     const retryIntent = assistantOutboxIntentSchema.parse({
@@ -327,7 +335,9 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
 }): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
     const baseIntent = current ?? input.intent
     const deliveryIdempotencyKey =
       input.deliveryIdempotencyKey ?? baseIntent.deliveryIdempotencyKey
@@ -407,7 +417,9 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
 
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
     const baseIntent = current ?? input.intent
     const failedAt = input.failedAt.toISOString()
     const nextAttemptAt = input.retryable

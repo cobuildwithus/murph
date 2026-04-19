@@ -385,7 +385,7 @@ test('assistant outbox inventory paths quarantine legacy intent payloads without
     'utf8',
   )
 
-  await assert.rejects(() => readAssistantOutboxIntent(vaultRoot, 'legacy-intent'))
+  assert.equal(await readAssistantOutboxIntent(vaultRoot, 'legacy-intent'), null)
   const status = await getAssistantStatus({
     vault: vaultRoot,
     limit: 5,

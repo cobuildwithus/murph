@@ -27,6 +27,7 @@ import {
   drainAssistantOutboxLocal,
   deliverAssistantOutboxMessage,
   listAssistantOutboxIntentsLocal,
+  readAssistantOutboxIntentMirrorState,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -178,6 +179,14 @@ describe('assistant outbox runtime', () => {
       'utf8',
     )
 
+    await expect(
+      readAssistantOutboxIntentMirrorState({
+        intentId: seeded.intentId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      intent: null,
+    })
     await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
     await expect(readAssistantOutboxIntent(vaultRoot, seeded.intentId)).resolves.toBeNull()
 

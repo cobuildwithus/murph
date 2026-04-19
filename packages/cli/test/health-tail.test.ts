@@ -1853,9 +1853,13 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
         title: "Electrolyte C Mix",
         status: "active",
         startedOn: "2026-03-02",
-        substance: "Vitamin C",
-        dose: 250,
-        unit: "mg",
+        ingredients: [
+          {
+            compound: "Vitamin C",
+            amount: 250,
+            unit: "mg",
+          },
+        ],
         schedule: "post-training",
       }),
       "utf8",

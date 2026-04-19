@@ -28,6 +28,7 @@ export async function readAssistantOutboxIntent(
 
   return readAssistantOutboxIntentAtPath(
     resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+    { vault },
   )
 }
 
@@ -91,6 +92,9 @@ export async function findAssistantOutboxIntentByDedupeKey(
 
 export async function readAssistantOutboxIntentAtPath(
   intentPath: string,
+  options?: {
+    vault?: string
+  },
 ): Promise<AssistantOutboxIntent | null> {
   try {
     return assistantOutboxIntentSchema.parse(
@@ -100,6 +104,16 @@ export async function readAssistantOutboxIntentAtPath(
     if (isMissingFileError(error)) {
       return null
     }
+
+    if (options?.vault) {
+      await quarantineAssistantOutboxIntentFile({
+        error,
+        intentPath,
+        vault: options.vault,
+      })
+      return null
+    }
+
     throw error
   }
 }
@@ -108,16 +122,7 @@ export async function readAssistantOutboxIntentInventoryEntry(
   vault: string,
   intentPath: string,
 ): Promise<AssistantOutboxIntent | null> {
-  try {
-    return await readAssistantOutboxIntentAtPath(intentPath)
-  } catch (error) {
-    await quarantineAssistantOutboxIntentFile({
-      error,
-      intentPath,
-      vault,
-    })
-    return null
-  }
+  return readAssistantOutboxIntentAtPath(intentPath, { vault })
 }
 
 export async function quarantineAssistantOutboxIntentFile(input: {

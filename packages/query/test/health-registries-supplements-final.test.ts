@@ -853,3 +853,60 @@ test("supplement queries cover lookup, aggregation, and filtering branches", asy
   );
   assert.equal(await showSupplementCompound(vaultRoot, "missing compound"), null);
 });
+
+test("supplement compound rollups ignore legacy scalar-only supplement fields", async () => {
+  const vaultRoot = await createVaultRoot("murph-query-supplements-legacy-scalar-");
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/protocols/supplements/legacy-scalar.md",
+    [
+      "---",
+      "schemaVersion: hv/protocol@v1",
+      "protocolId: prot_legacy_scalar",
+      "slug: legacy-scalar",
+      "title: Legacy Scalar",
+      "status: active",
+      "kind: supplement",
+      "substance: Legacy Scalar",
+      "dose: 250",
+      "unit: mg",
+      "---",
+      "# Legacy Scalar",
+      "",
+    ].join("\n"),
+  );
+  await writeVaultFile(
+    vaultRoot,
+    "bank/protocols/supplements/vitamin-c.md",
+    [
+      "---",
+      "schemaVersion: hv/protocol@v1",
+      "protocolId: prot_vitamin_c",
+      "slug: vitamin-c",
+      "title: Vitamin C",
+      "status: active",
+      "kind: supplement",
+      "ingredients:",
+      "  -",
+      "    compound: Vitamin C",
+      "    label: Ascorbic acid",
+      "    amount: 500",
+      "    unit: mg",
+      "---",
+      "# Vitamin C",
+      "",
+    ].join("\n"),
+  );
+
+  const compounds = await listSupplementCompounds(vaultRoot, {
+    status: ["active"],
+  });
+
+  assert.deepEqual(compounds.map((record) => record.lookupId), ["vitamin-c"]);
+  assert.equal((await showSupplementCompound(vaultRoot, "Legacy Scalar")) ?? null, null);
+  assert.equal(
+    (await readSupplement(vaultRoot, "prot_legacy_scalar"))?.entity.substance,
+    "Legacy Scalar",
+  );
+});
