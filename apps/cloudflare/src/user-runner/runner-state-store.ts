@@ -1,7 +1,6 @@
 import {
   HOSTED_WAKE_PAYLOAD_SCHEMAS,
   isHostedExecutionWakeKind,
-  parseHostedExecutionBundleRef,
   type HostedWakeMaterializationHints,
   type HostedExecutionRunContext,
   type HostedExecutionRunnerResult,
@@ -12,6 +11,7 @@ import {
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
+import { parseHostedExecutionBundleRef } from "@murphai/hosted-execution/parsers";
 import { parseHostedAssistantDeliveryEffects } from "@murphai/hosted-execution/side-effects";
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
@@ -44,6 +44,13 @@ interface RunnerMetaBundleRow extends RunnerMetaRow {
   wake_materialization_hints_json: string | null;
 }
 
+export class RunnerPendingCommitCorruptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunnerPendingCommitCorruptionError";
+  }
+}
+
 export interface RunnerLeaseOwnerInput {
   eventId: string;
   policy?: "matching-run" | "same-event";
@@ -51,7 +58,6 @@ export interface RunnerLeaseOwnerInput {
 }
 
 export class RunnerStateStore {
-  private readonly ready: Promise<void>;
   private volatileRun: HostedExecutionRunStatus | null = null;
   private volatileTimeline: HostedExecutionTimelineEntry[] = [];
   private userId: string | null = null;
@@ -60,11 +66,9 @@ export class RunnerStateStore {
     private readonly state: DurableObjectStateLike,
   ) {
     ensureRunnerStateSchema(this.sql);
-    this.ready = Promise.resolve();
   }
 
   async bootstrapUser(userId: string): Promise<string> {
-    await this.ready;
     const meta = this.selectMetaRowSync();
 
     if (meta) {
@@ -84,13 +88,10 @@ export class RunnerStateStore {
   }
 
   async readState(): Promise<RunnerStateRecord> {
-    await this.ready;
     return this.readStateSync();
   }
 
   async clearNextWakeIfDue(nowMs: number): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     const parsedMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;
 
@@ -107,7 +108,6 @@ export class RunnerStateStore {
     run: HostedExecutionRunContext;
     userId: string;
   }): Promise<RunnerStateRecord> {
-    await this.ready;
     await this.bootstrapUser(input.userId);
 
     const meta = this.requireMetaRowSync();
@@ -133,8 +133,6 @@ export class RunnerStateStore {
     finishedAt?: string | null;
     leaseOwner: RunnerLeaseOwnerInput;
   }): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     this.clearActiveRunLeaseSync(meta, input.leaseOwner);
     this.rememberLastEventMetaSync(meta, input.eventId);
@@ -151,8 +149,6 @@ export class RunnerStateStore {
     finishedAt?: string | null;
     leaseOwner: RunnerLeaseOwnerInput;
   }): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     this.clearActiveRunLeaseSync(meta, input.leaseOwner);
     this.rememberLastEventMetaSync(meta, input.eventId);
@@ -166,8 +162,6 @@ export class RunnerStateStore {
   async syncBundleRefCache(
     nextBundleRef: RunnerStateRecord["bundleRef"],
   ): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     const bundleState = readBundleStateFromMeta(meta);
     assignRunnerBundleRefs(bundleState, nextBundleRef);
@@ -178,8 +172,6 @@ export class RunnerStateStore {
   }
 
   async markRuntimeBootstrapped(): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     if (meta.runtime_bootstrapped !== 1) {
       meta.runtime_bootstrapped = 1;
@@ -201,8 +193,6 @@ export class RunnerStateStore {
     runId: string;
     startedAt: string;
   }): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     const nowIso = new Date().toISOString();
     const errorCode = input.error === undefined ? null : deriveHostedExecutionErrorCode(input.error);
@@ -248,7 +238,6 @@ export class RunnerStateStore {
     RunnerStateRecord,
     "bundleRef" | "bundleVersion" | "inFlight" | "userId"
   >> {
-    await this.ready;
     // This is DO-local coordination state for bundle restore and local CAS.
     // Canonical wake ordering and the committed snapshot fence remain web-owned.
     const record = this.readStateSync();
@@ -260,11 +249,21 @@ export class RunnerStateStore {
     };
   }
 
+  async readBundleMetaStateForMutation(): Promise<Pick<
+    RunnerStateRecord,
+    "bundleRef" | "bundleVersion" | "userId"
+  >> {
+    const meta = this.requireMetaRowSync();
+    return {
+      bundleRef: tryParseStoredBundleRefJson(meta.bundle_ref_json),
+      bundleVersion: meta.bundle_version ?? 0,
+      userId: meta.user_id,
+    };
+  }
+
   async compareAndSwapBundleRefs(
     input: BundleRefSwapInput,
   ): Promise<{ applied: boolean; record: RunnerStateRecord }> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     const bundleState = readBundleStateFromMeta(meta);
     if (bundleState.bundleVersion !== input.expectedVersion) {
@@ -284,8 +283,6 @@ export class RunnerStateStore {
   }
 
   async hasActiveRunLease(owner: RunnerLeaseOwnerInput): Promise<boolean> {
-    await this.ready;
-
     return this.hasActiveRunLeaseSync(this.requireMetaRowSync(), owner);
   }
 
@@ -293,8 +290,6 @@ export class RunnerStateStore {
     eventId: string;
     run: HostedExecutionRunContext;
   } | null> {
-    await this.ready;
-
     const meta = this.selectMetaRowSync();
     if (!meta?.active_run_event_id) {
       return null;
@@ -315,8 +310,6 @@ export class RunnerStateStore {
     preferredWakeAt?: string | null;
     wakeMaterializationHints?: HostedWakeMaterializationHints | null;
   }): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
     const wakeMaterializationHints = input.wakeMaterializationHints === undefined
       ? parseWakeMaterializationHints(meta.wake_materialization_hints_json)
@@ -334,13 +327,10 @@ export class RunnerStateStore {
   }
 
   async readWakeMaterializationHints(): Promise<HostedWakeMaterializationHints | null> {
-    await this.ready;
     return parseWakeMaterializationHints(this.requireMetaRowSync().wake_materialization_hints_json);
   }
 
   async readPendingCommit(eventId?: string): Promise<RunnerPendingCommitRecord | null> {
-    await this.ready;
-
     const pendingCommit = parsePendingCommitRecord(
       this.requireMetaRowSync(),
       this.tryResolveUserIdSync(),
@@ -357,7 +347,6 @@ export class RunnerStateStore {
   }
 
   async writePendingCommit(input: RunnerPendingCommitRecord): Promise<RunnerStateRecord> {
-    await this.ready;
     await this.bootstrapUser(input.userId);
 
     const meta = this.requireMetaRowSync();
@@ -375,11 +364,19 @@ export class RunnerStateStore {
   }
 
   async clearPendingCommit(eventId?: string): Promise<RunnerStateRecord> {
-    await this.ready;
-
     const meta = this.requireMetaRowSync();
+    if (!meta.pending_commit_json) {
+      return this.readStateFromMetaSync(meta);
+    }
+
+    if (!eventId) {
+      meta.pending_commit_json = null;
+      this.writeMetaRowSync(meta);
+      return this.readStateFromMetaSync(meta);
+    }
+
     const existing = parsePendingCommitRecord(meta, meta.user_id);
-    if (existing && (!eventId || existing.eventId === eventId)) {
+    if (existing?.eventId === eventId) {
       meta.pending_commit_json = null;
       this.writeMetaRowSync(meta);
     }
@@ -392,19 +389,12 @@ export class RunnerStateStore {
   }
 
   private readStateFromMetaSync(meta: RunnerMetaBundleRow): RunnerStateRecord {
-    const projected = projectRunnerStateRecord({
+    return projectRunnerStateRecord({
       bundleState: readBundleStateFromMeta(meta),
       meta,
       run: this.volatileRun ?? this.readPersistedRunStatusSync(meta),
       timeline: this.volatileTimeline,
-    });
-
-    if (projected.changed) {
-      writeBundleStateToMeta(meta, projected.sanitizedBundleState);
-      this.writeMetaRowSync(meta);
-    }
-
-    return projected.record;
+    }).record;
   }
 
   private requireMetaRowSync(): RunnerMetaBundleRow {
@@ -454,7 +444,8 @@ export class RunnerStateStore {
         last_event_id,
         last_run_at,
         next_wake_at,
-        pending_commit_json
+        pending_commit_json,
+        wake_materialization_hints_json
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -484,8 +475,9 @@ export class RunnerStateStore {
         last_event_id,
         last_run_at,
         next_wake_at,
-        pending_commit_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pending_commit_json,
+        wake_materialization_hints_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.bundle_ref_json ?? null,
@@ -502,6 +494,7 @@ export class RunnerStateStore {
       meta.last_run_at,
       meta.next_wake_at,
       meta.pending_commit_json,
+      meta.wake_materialization_hints_json,
     );
   }
 
@@ -655,6 +648,21 @@ function writeBundleStateToMeta(
   meta.bundle_version = bundleState.bundleVersion;
 }
 
+function tryParseStoredBundleRefJson(value: string | null): RunnerStateRecord["bundleRef"] {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return parseHostedExecutionBundleRef(
+      JSON.parse(value) as unknown,
+      "Hosted runner bundle ref",
+    );
+  } catch {
+    return null;
+  }
+}
+
 function sameHostedExecutionRun(
   left: HostedExecutionRunContext | null,
   right: HostedExecutionRunContext,
@@ -672,32 +680,77 @@ function parsePendingCommitRecord(
   meta: Pick<RunnerMetaBundleRow, "pending_commit_json">,
   userId: string | null,
 ): RunnerPendingCommitRecord | null {
-  if (!meta.pending_commit_json || !userId) {
+  if (!meta.pending_commit_json) {
     return null;
   }
 
+  if (!userId) {
+    throw createPendingCommitCorruptionError(
+      null,
+      "record exists before the runner is bound to a user",
+    );
+  }
+
+  let value: {
+    assistantDeliveryEffects?: unknown;
+    bundleRef?: unknown;
+    committedAt?: unknown;
+    eventId?: unknown;
+    finalizedAt?: unknown;
+    result?: unknown;
+    schemaVersion?: unknown;
+    userId?: unknown;
+    wake?: unknown;
+  };
+
   try {
-    const value = JSON.parse(meta.pending_commit_json) as {
-      assistantDeliveryEffects?: unknown;
-      bundleRef?: unknown;
-      committedAt?: unknown;
-      eventId?: unknown;
-      finalizedAt?: unknown;
-      result?: unknown;
-      schemaVersion?: unknown;
-      userId?: unknown;
-      wake?: unknown;
-    };
-    if (value.schemaVersion !== 1 || value.userId !== userId || typeof value.eventId !== "string") {
-      return null;
-    }
+    value = JSON.parse(meta.pending_commit_json) as typeof value;
+  } catch {
+    throw createPendingCommitCorruptionError(userId, "record is not valid JSON");
+  }
 
-    const result = parsePendingCommitResult(value.result);
-    const wake = parsePendingCommitWake(value.wake, userId);
-    if (!result || !wake || typeof value.committedAt !== "string") {
-      return null;
-    }
+  if (value.schemaVersion !== 1) {
+    throw createPendingCommitCorruptionError(userId, "schemaVersion must be 1");
+  }
 
+  if (typeof value.userId !== "string") {
+    throw createPendingCommitCorruptionError(userId, "record is missing userId");
+  }
+
+  if (value.userId !== userId) {
+    throw createPendingCommitCorruptionError(
+      userId,
+      `record is bound to ${value.userId}, not ${userId}`,
+    );
+  }
+
+  if (typeof value.eventId !== "string" || value.eventId.length === 0) {
+    throw createPendingCommitCorruptionError(userId, "record is missing eventId");
+  }
+
+  if (typeof value.committedAt !== "string" || value.committedAt.length === 0) {
+    throw createPendingCommitCorruptionError(userId, "record is missing committedAt");
+  }
+
+  if (
+    value.finalizedAt !== undefined
+    && value.finalizedAt !== null
+    && typeof value.finalizedAt !== "string"
+  ) {
+    throw createPendingCommitCorruptionError(userId, "finalizedAt must be a string or null");
+  }
+
+  const result = parsePendingCommitResult(value.result);
+  if (!result) {
+    throw createPendingCommitCorruptionError(userId, "result payload is invalid");
+  }
+
+  const wake = parsePendingCommitWake(value.wake, userId);
+  if (!wake) {
+    throw createPendingCommitCorruptionError(userId, "wake payload is invalid");
+  }
+
+  try {
     return {
       assistantDeliveryEffects: parseHostedAssistantDeliveryEffects(
         value.assistantDeliveryEffects ?? [],
@@ -708,17 +761,29 @@ function parsePendingCommitRecord(
       ),
       committedAt: value.committedAt,
       eventId: value.eventId,
-      finalizedAt: value.finalizedAt === null || typeof value.finalizedAt === "string"
-        ? value.finalizedAt
-        : null,
+      finalizedAt: value.finalizedAt === undefined ? null : value.finalizedAt,
       result,
       schemaVersion: 1,
       userId,
       wake,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    throw createPendingCommitCorruptionError(
+      userId,
+      error instanceof Error && error.message
+        ? error.message
+        : "record has an invalid nested payload",
+    );
   }
+}
+
+function createPendingCommitCorruptionError(
+  userId: string | null,
+  reason: string,
+): RunnerPendingCommitCorruptionError {
+  return new RunnerPendingCommitCorruptionError(
+    `Hosted runner pending_commit_json is corrupted${userId ? ` for ${userId}` : ""}: ${reason}.`,
+  );
 }
 
 function parsePendingCommitWake(
