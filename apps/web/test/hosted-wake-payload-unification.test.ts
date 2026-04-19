@@ -128,6 +128,7 @@ describe("hosted wake payload unification", () => {
   it("projects both conversation and system rows through the canonical schema", () => {
     expect(projectHostedWakeRecord({
       behavior: "ordered",
+      coalescingKey: null,
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
       dedupeKey: "evt_linq_message",
       id: "wake_conversation",
@@ -149,6 +150,7 @@ describe("hosted wake payload unification", () => {
 
     expect(projectHostedWakeRecord({
       behavior: "coalescing",
+      coalescingKey: "assistant.cron.tick:member_123",
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
       dedupeKey: "evt_tick",
       id: "wake_system",
@@ -172,6 +174,7 @@ describe("hosted wake payload unification", () => {
   it("fails closed on legacy per-kind payload schemas", () => {
     expect(() => projectHostedWakeRecord({
       behavior: "ordered",
+      coalescingKey: null,
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
       dedupeKey: "evt_legacy",
       id: "wake_legacy",
