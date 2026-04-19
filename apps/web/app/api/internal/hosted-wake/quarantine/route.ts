@@ -1,3 +1,5 @@
+import { parseHostedWakeQuarantineRequest } from "@murphai/hosted-execution/parsers";
+
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -10,31 +12,17 @@ import {
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
-  const body = await readOptionalJsonObject(request);
-  const wakeId = requireNonBlankString(body.wakeId, "wakeId");
-  const quarantineCode = requireNonBlankString(body.quarantineCode, "quarantineCode");
+  const body = parseHostedWakeQuarantineRequest(await readOptionalJsonObject(request));
   const quarantined = await getPrisma().$transaction((tx) => {
     return quarantineHostedWakeTx({
-      quarantineCode,
+      fetchProof: body.fetchProof,
+      quarantineCode: body.quarantineCode,
       tx,
       userId,
-      wakeId,
+      wakeId: body.wakeId,
+      wakeSeq: BigInt(body.wakeSeq),
     });
   });
 
   return jsonOk({ quarantined });
 });
-
-function requireNonBlankString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
-  }
-
-  const normalized = value.trim();
-
-  if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
-  }
-
-  return normalized;
-}
