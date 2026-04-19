@@ -125,7 +125,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
   }, 300_000);
 
-  it("keeps Telegram context when two replies arrive before hosted completion catches up", async () => {
+  it("keeps Telegram context when two messages arrive before hosted completion catches up", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: fastReplyUserId });
     await requireScenario().runWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
 
@@ -140,6 +140,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       expectedSendPath,
       requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
     );
+    const assistantProviderBodyCountBeforeReply = requireScenario().assistantProviderBodies.length;
 
     await requireScenario().enqueueWake(
       buildInboundTelegramWake(fastReplyUserId, {
@@ -161,25 +162,33 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
     await requireScenario().waitForLatestPendingWake(fastReplyUserId);
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
+    await requireTelegramStub().waitForRequestsToSettle({
+      scenario: requireScenario(),
+      userId: fastReplyUserId,
+    });
 
     const replyRequests = await requireTelegramStub().waitForRequestCount({
-      expectedCount: baselineSendCount + 2,
+      expectedCount: baselineSendCount + 1,
       expectedPath: expectedSendPath,
       matchRequest: requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
       scenario: requireScenario(),
       userId: fastReplyUserId,
     });
-    const replyTexts = replyRequests
-      .slice(-2)
-      .map((request) => requireTelegramStub().parseObservedJson(request.body)?.text);
+    const newReplyRequests = replyRequests.slice(baselineSendCount);
+    expect(newReplyRequests).toHaveLength(1);
+    const replyTexts = newReplyRequests.map((request) =>
+      requireTelegramStub().parseObservedJson(request.body)?.text
+    );
 
     expect(replyTexts).toEqual([
-      "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?",
-      "Got you — stronger, fitter, faster, and more endurance.",
+      "What should I call you? And out of those, which ones matter most to you right now?",
     ]);
+    expect(requireScenario().assistantProviderBodies).toHaveLength(
+      assistantProviderBodyCountBeforeReply + 1,
+    );
     expect(requireScenario().assistantProviderBodies.at(-1)).toContain("Rocket Man");
     expect(requireScenario().assistantProviderBodies.at(-1)).toContain("build more strength");
-    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("I’ll call you Rocket Man");
+    expect(requireScenario().assistantProviderBodies.at(-1)).not.toContain("I’ll call you Rocket Man");
   }, 300_000);
 });
 

@@ -135,6 +135,7 @@ describe("hosted local Linq webhook e2e", () => {
     const materializedChatId = requireLinqStub().requireObservedChatId(fastWebhookUserId);
     const expectedReplyChatPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
+    const assistantProviderBodyCountBeforeReply = requireScenario().assistantProviderBodies.length;
 
     const firstWebhook = buildHostedLinqInboundEvent(fastWebhookUserId, materializedChatId, {
       eventId: `evt_webhook_name_${fastWebhookUserId}`,
@@ -165,25 +166,25 @@ describe("hosted local Linq webhook e2e", () => {
     await requireScenario().waitForHostedCompletion(fastWebhookUserId);
 
     const replySends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 2,
+      expectedCount: outboundCountBeforeReply + 1,
       expectedPath: expectedReplyChatPath,
       scenario: requireScenario(),
       userId: fastWebhookUserId,
     });
     const newReplySends = replySends.slice(outboundCountBeforeReply);
-    const firstReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
-    const secondReplyText = requireLinqStub().readObservedMessageText(newReplySends[1]!);
+    expect(newReplySends).toHaveLength(1);
+    const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
 
-    expect(firstReplyText).toBe(
-      "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?",
+    expect(groupedReplyText).toBe(
+      "What should I call you? And out of those, which ones matter most to you right now?",
     );
-    expect(secondReplyText).toBe(
-      "Got you — stronger, fitter, faster, and more endurance.",
+    expect(groupedReplyText).not.toContain("Hey, I'm Murph");
+    expect(requireScenario().assistantProviderBodies).toHaveLength(
+      assistantProviderBodyCountBeforeReply + 1,
     );
-    expect(secondReplyText).not.toContain("What should I call you");
-    expect(secondReplyText).not.toContain("Hey, I'm Murph");
     expect(requireScenario().assistantProviderBodies.at(-1)).toContain("Rocket Man");
     expect(requireScenario().assistantProviderBodies.at(-1)).toContain("build more strength");
+    expect(requireScenario().assistantProviderBodies.at(-1)).not.toContain("I’ll call you Rocket Man");
   }, 300_000);
 });
 

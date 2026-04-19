@@ -142,7 +142,6 @@ describe("hosted local Linq first-contact e2e", () => {
     });
 
     await requireScenario().waitForLatestPendingWake(directReplyUserId);
-    await requireScenario().waitForHostedCompletion(directReplyUserId);
     const replySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: expectedDirectReplyChatPath,
@@ -152,7 +151,7 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(replySend.method).toBe("POST");
   }, 300_000);
 
-  it("keeps Linq context when two replies arrive before hosted completion catches up", async () => {
+  it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(fastReplyUserId),
       memberId: fastReplyUserId,
@@ -172,6 +171,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    const assistantProviderBodyCountBeforeReply = requireScenario().assistantProviderBodies.length;
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       fastReplyUserId,
@@ -208,7 +208,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const statusAfterWait = await requireScenario().harness.readUserStatus(fastReplyUserId);
 
     const replySends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 2,
+      expectedCount: outboundCountBeforeReply + 1,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: fastReplyUserId,
@@ -234,24 +234,26 @@ describe("hosted local Linq first-contact e2e", () => {
     }
 
     const newReplySends = replySends.slice(outboundCountBeforeReply);
-    const firstReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
-    const secondReplyText = requireLinqStub().readObservedMessageText(newReplySends[1]!);
-    if (secondReplyText !== "Got you — stronger, fitter, faster, and more endurance.") {
+    expect(newReplySends).toHaveLength(1);
+    const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
+    if (groupedReplyText !== "What should I call you? And out of those, which ones matter most to you right now?") {
       throw new Error(
-        `Unexpected second Linq reply: ${JSON.stringify({
-          firstReplyText,
+        `Unexpected grouped Linq reply: ${JSON.stringify({
+          groupedReplyText,
           observedAssistantProviderBodies: requireScenario().assistantProviderBodies,
-          secondReplyText,
         })}`,
       );
     }
-    expect(firstReplyText).toBe("Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?");
-    expect(secondReplyText).toBe("Got you — stronger, fitter, faster, and more endurance.");
-    expect(secondReplyText).not.toContain("What should I call you");
-    expect(secondReplyText).not.toContain("Hey, I'm Murph");
-    expect(requireScenario().assistantProviderBodies).toHaveLength(3);
+    expect(groupedReplyText).toBe(
+      "What should I call you? And out of those, which ones matter most to you right now?",
+    );
+    expect(groupedReplyText).not.toContain("Hey, I'm Murph");
+    expect(requireScenario().assistantProviderBodies).toHaveLength(
+      assistantProviderBodyCountBeforeReply + 1,
+    );
     expect(requireScenario().assistantProviderBodies.at(-1)).toContain("Rocket Man");
     expect(requireScenario().assistantProviderBodies.at(-1)).toContain("build more strength");
+    expect(requireScenario().assistantProviderBodies.at(-1)).not.toContain("I’ll call you Rocket Man");
   }, 300_000);
 });
 
