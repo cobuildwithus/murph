@@ -53,7 +53,6 @@ describe("hosted onboarding Telegram webhook route", () => {
     expect(response.status).toBe(202);
     expect(mocks.handleHostedOnboardingTelegramWebhook).toHaveBeenCalledWith({
       defer: expect.any(Function),
-      maxInlineDrainMs: 8_000,
       rawBody: JSON.stringify({
         ok: true,
       }),

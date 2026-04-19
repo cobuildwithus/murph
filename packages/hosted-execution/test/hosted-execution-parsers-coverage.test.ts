@@ -5,6 +5,7 @@ import {
   parseHostedExecutionEvent,
   parseHostedWakeExecutionResult,
   parseHostedExecutionWakeDrainResult,
+  parseHostedExecutionWakeNudgeResult,
   parseHostedExecutionRunnerRequest,
   parseHostedExecutionRunnerResult,
   parseHostedExecutionSharePack,
@@ -232,6 +233,18 @@ describe("hosted execution parsers coverage", () => {
         committedSeq: "24",
         requestedTargetSeq: "25",
         targetReached: false,
+      });
+    });
+
+    it("parses dedicated wake nudge results", () => {
+      expect(parseHostedExecutionWakeNudgeResult({
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: true,
+      })).toEqual({
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: true,
       });
     });
 

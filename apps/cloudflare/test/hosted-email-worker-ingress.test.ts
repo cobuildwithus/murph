@@ -4,6 +4,7 @@ import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "@murphai/hosted-execution"
 const mocks = vi.hoisted(() => ({
   appendHostedEmailIngressWakeInWeb: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
+  nudgeHostedWakes: vi.fn(),
   readHostedExecutionEnvironment: vi.fn(),
   resolveHostedExecutionUserCryptoContext: vi.fn(),
   resolveUserRunnerStub: vi.fn(),
@@ -101,7 +102,18 @@ describe("hosted email worker ingress", () => {
         userId: "user_123",
       },
     });
+    mocks.nudgeHostedWakes.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+    });
+    mocks.wakeHostedWakes.mockResolvedValue({
+      committedSeq: "24",
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
     mocks.resolveUserRunnerStub.mockResolvedValue({
+      nudgeHostedWakes: mocks.nudgeHostedWakes,
       wakeHostedWakes: mocks.wakeHostedWakes,
     });
   });
@@ -149,6 +161,7 @@ describe("hosted email worker ingress", () => {
 
     expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakes).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
@@ -204,9 +217,8 @@ describe("hosted email worker ingress", () => {
       },
       boundUserId: "user_123",
     });
-    expect(mocks.wakeHostedWakes).toHaveBeenCalledWith({
-      targetSeqHint: "24",
-    });
+    expect(mocks.nudgeHostedWakes).toHaveBeenCalledWith();
+    expect(mocks.wakeHostedWakes).toHaveBeenCalledWith();
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
     expect(typeof rawMessageKey).toBe("string");
@@ -257,9 +269,8 @@ describe("hosted email worker ingress", () => {
       }),
       boundUserId: "user_456",
     }));
-    expect(mocks.wakeHostedWakes).toHaveBeenCalledWith({
-      targetSeqHint: "24",
-    });
+    expect(mocks.nudgeHostedWakes).toHaveBeenCalledWith();
+    expect(mocks.wakeHostedWakes).toHaveBeenCalledWith();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
@@ -292,6 +303,7 @@ describe("hosted email worker ingress", () => {
     expect(setReject).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
     expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakes).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
@@ -316,6 +328,7 @@ describe("hosted email worker ingress", () => {
     expect(setReject).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
     expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakes).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
@@ -340,6 +353,7 @@ describe("hosted email worker ingress", () => {
     expect(setReject).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
     expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakes).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 });

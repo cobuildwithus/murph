@@ -5,17 +5,8 @@ const mocks = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
-    lastScheduledDispatchEventId: null as string | null,
-    lastScheduledDispatchPrisma: null as unknown,
-    readHostedWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
-      state.lastScheduledDispatchEventId = input.eventId;
-      state.lastScheduledDispatchPrisma = input.prisma ?? null;
-      return {
-        eventId: input.eventId,
-        seq: "23",
-        userId: "member_telegram_123",
-      };
-    }),
+    nudgeHostedWakeUserBestEffort: vi.fn(async () => true),
+    readHostedWakeTarget: vi.fn(async () => null),
     runtimeEnv: {
       contactPrivacyKeyring: {
         currentVersion: "v1",
@@ -65,28 +56,6 @@ const mocks = vi.hoisted(() => {
         eventId,
       };
     }),
-    triggerHostedWakeUserBestEffort: vi.fn(async (input?: { timeoutMs?: number }) => {
-      if (!state.lastScheduledDispatchEventId) {
-        return false;
-      }
-
-      const drainPromise = Promise.resolve(state.drainHostedExecutionOutboxBestEffort({
-        eventIds: [state.lastScheduledDispatchEventId],
-        limit: 1,
-        prisma: state.lastScheduledDispatchPrisma,
-      })).then(() => true);
-
-      if (typeof input?.timeoutMs === "number" && input.timeoutMs > 0) {
-        return await Promise.race([
-          drainPromise,
-          new Promise<boolean>((resolve) => {
-            setTimeout(() => resolve(false), input.timeoutMs);
-          }),
-        ]);
-      }
-
-      return await drainPromise;
-    }),
   };
 
   return state;
@@ -135,7 +104,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
   handoffHostedExecutionWakeBestEffort: vi.fn(async () => "wake"),
-  triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
+  nudgeHostedWakeUserBestEffort: mocks.nudgeHostedWakeUserBestEffort,
 }));
 
 import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -143,10 +112,9 @@ import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboardi
 describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.lastScheduledDispatchEventId = null;
-    mocks.lastScheduledDispatchPrisma = null;
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
+    mocks.nudgeHostedWakeUserBestEffort.mockResolvedValue(true);
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 
@@ -222,16 +190,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: [
-        "telegram:update:321",
-      ],
-      limit: 1,
-      prisma,
-    });
-    expect(mocks.readHostedWakeTarget).toHaveBeenCalledWith({
-      eventId: "telegram:update:321",
-      prisma,
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+      context: "webhook:telegram",
       userId: "member_telegram_123",
     });
     expect(response).not.toHaveProperty("wakeUserId");
@@ -298,21 +258,17 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(deferred).toHaveLength(1);
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: [
-        "telegram:update:654",
-      ],
-      limit: 1,
-      prisma,
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+      context: "webhook:telegram",
+      userId: "member_telegram_123",
     });
   });
 
-  it("bounds the inline dispatch wait before falling back to deferred recovery", async () => {
-    vi.useFakeTimers();
+  it("returns once deferred recovery is scheduled without an inline nudge wait", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
@@ -341,15 +297,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
     }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
     const deferred: Array<() => Promise<void>> = [];
-    mocks.drainHostedExecutionOutboxBestEffort
-      .mockImplementationOnce(() => new Promise<void>(() => {}))
-      .mockResolvedValueOnce(undefined);
 
-    const responsePromise = handleHostedOnboardingTelegramWebhook({
+    await expect(handleHostedOnboardingTelegramWebhook({
       defer: (drain) => {
         deferred.push(drain);
       },
-      maxInlineDrainMs: 25,
       prisma,
       rawBody: JSON.stringify({
         message: {
@@ -368,27 +320,20 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         update_id: 655,
       }),
       secretToken: "telegram-secret",
-    });
-
-    await vi.advanceTimersByTimeAsync(25);
-
-    await expect(responsePromise).resolves.toMatchObject({
+    })).resolves.toMatchObject({
       ok: true,
       reason: "wake-appended-active-member",
     });
     expect(deferred).toHaveLength(1);
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: [
-        "telegram:update:655",
-      ],
-      limit: 1,
-      prisma,
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+      context: "webhook:telegram",
+      userId: "member_telegram_123",
     });
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(2);
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("accepts Telegram webhooks whose secret header is missing", async () => {

@@ -1,6 +1,6 @@
 import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { triggerHostedWakeUserBestEffort } from "@/src/lib/hosted-wake/control";
+import { nudgeHostedWakeUserBestEffort } from "@/src/lib/hosted-wake/control";
 import { listHostedWakeRepairCandidates } from "@/src/lib/hosted-wake/store";
 
 const HOSTED_WAKE_REPAIR_STALE_MS = 60_000;
@@ -17,9 +17,8 @@ export const GET = withJsonError(async (request: Request) => {
   let nudged = 0;
 
   for (const candidate of candidates) {
-    const woke = await triggerHostedWakeUserBestEffort({
+    const woke = await nudgeHostedWakeUserBestEffort({
       context: "hosted-wake.repair",
-      targetSeqHint: candidate.targetSeqHint,
       userId: candidate.userId,
     });
 

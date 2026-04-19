@@ -321,6 +321,12 @@ export interface HostedExecutionWakeDrainResult {
   targetReached: boolean;
 }
 
+export interface HostedExecutionWakeNudgeResult {
+  accepted: boolean;
+  alarmScheduled: boolean;
+  alreadyRunning: boolean;
+}
+
 export const HOSTED_WAKE_LIFECYCLE_STATES = [
   "queued",
   "backpressured",

@@ -17,47 +17,17 @@ const mocks = vi.hoisted(() => {
     finishHostedOnboardingTiming: vi.fn(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
-    lastScheduledDispatchEventId: null as string | null,
-    lastScheduledDispatchPrisma: null as unknown,
-    wakeTargets: new Map<string, { prisma: unknown; seq: string; userId: string }>(),
-    seedHostedExecutionWakeTarget(input: {
-      eventId: string;
-      prisma?: unknown;
-      seq?: string;
-      userId?: string;
-    }) {
-      state.wakeTargets.set(input.eventId, {
-        prisma: input.prisma ?? null,
-        seq: input.seq ?? "17",
-        userId: input.userId ?? "member_123",
-      });
-    },
+    nudgeHostedWakeUserBestEffort: vi.fn(async () => true),
     sendHostedLinqChatMessage: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
       step,
     })),
-    readHostedWakeTarget: vi.fn(async (input: { eventId: string; prisma?: unknown }) => {
-      const wakeTarget = state.wakeTargets.get(input.eventId) ?? null;
-
-      if (!wakeTarget) {
-        return null;
-      }
-
-      state.lastScheduledDispatchEventId = input.eventId;
-      state.lastScheduledDispatchPrisma = wakeTarget.prisma ?? input.prisma ?? null;
-      return {
-        eventId: input.eventId,
-        seq: wakeTarget.seq,
-        userId: wakeTarget.userId,
-      };
-    }),
+    readHostedWakeTarget: vi.fn(async () => null),
     materializeHostedExecutionWakeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       eventId?: string;
-      tx?: unknown;
-      userId?: string;
       wake?: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
@@ -67,36 +37,9 @@ const mocks = vi.hoisted(() => {
       if (!eventId) {
         throw new Error("Expected a hosted wake append eventId.");
       }
-      state.seedHostedExecutionWakeTarget({
-        eventId,
-        prisma: input.tx ?? null,
-        userId: input.userId ?? "member_123",
-      });
       return {
         eventId,
       };
-    }),
-    triggerHostedWakeUserBestEffort: vi.fn(async (input?: { timeoutMs?: number }) => {
-      if (!state.lastScheduledDispatchEventId) {
-        return false;
-      }
-
-      const drainPromise = Promise.resolve(state.drainHostedExecutionOutboxBestEffort({
-        eventIds: [state.lastScheduledDispatchEventId],
-        limit: 1,
-        prisma: state.lastScheduledDispatchPrisma,
-      })).then(() => true);
-
-      if (typeof input?.timeoutMs === "number" && input.timeoutMs > 0) {
-        return await Promise.race([
-          drainPromise,
-          new Promise<boolean>((resolve) => {
-            setTimeout(() => resolve(false), input.timeoutMs);
-          }),
-        ]);
-      }
-
-      return await drainPromise;
     }),
   };
 
@@ -125,7 +68,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
   handoffHostedExecutionWakeBestEffort: vi.fn(async () => "wake"),
-  triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
+  nudgeHostedWakeUserBestEffort: mocks.nudgeHostedWakeUserBestEffort,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -217,9 +160,6 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.lastScheduledDispatchEventId = null;
-    mocks.lastScheduledDispatchPrisma = null;
-    mocks.wakeTargets.clear();
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -228,6 +168,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
+    mocks.nudgeHostedWakeUserBestEffort.mockResolvedValue(true);
   });
 
   it("reuses an existing transaction when dispatching active-member Linq messages", async () => {
@@ -285,16 +226,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: [
-        "evt_123",
-      ],
-      limit: 1,
-      prisma,
-    });
-    expect(mocks.readHostedWakeTarget).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      prisma,
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+      context: "webhook:linq",
       userId: "member_123",
     });
     expect(response).not.toHaveProperty("wakeUserId");
@@ -339,7 +272,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(
       mocks.finishHostedOnboardingTiming.mock.calls.some(
         ([handle, outcome]) =>
-          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-drain"
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-nudge"
           && outcome === "completed",
       ),
     ).toBe(true);
@@ -395,16 +328,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(deferred).toHaveLength(1);
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: [
-        "evt_deferred_dispatch",
-      ],
-      limit: 1,
-      prisma,
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+      context: "webhook:linq",
+      userId: "member_123",
     });
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -418,7 +348,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(
       mocks.finishHostedOnboardingTiming.mock.calls.some(
         ([handle, outcome]) =>
-          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-drain"
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-nudge"
           && outcome === "completed",
       ),
     ).toBe(true);

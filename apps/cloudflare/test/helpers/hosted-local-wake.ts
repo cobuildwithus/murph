@@ -108,12 +108,36 @@ export async function wakeHostedWorker(input: {
   targetSeqHint?: string | null;
   userId: string;
 }): Promise<HostedExecutionWakeDrainResult> {
-  return await createHostedLocalCloudflareControlClient(input.harness).wakeUser(
-    input.userId,
-    input.targetSeqHint === undefined
-      ? undefined
-      : { targetSeqHint: input.targetSeqHint },
-  );
+  await createHostedLocalCloudflareControlClient(input.harness).nudgeUserRunner(input.userId);
+
+  const targetSeqHint = input.targetSeqHint ?? null;
+  const startedAt = Date.now();
+
+  while ((Date.now() - startedAt) < DEFAULT_TIMEOUT_MS) {
+    const status = await readHostedWakeStatus(input);
+    const targetReached = targetSeqHint === null
+      ? status.pendingWakeCount === 0
+      : BigInt(status.cursor.committedSeq) >= BigInt(targetSeqHint);
+
+    if (targetReached) {
+      return {
+        committedSeq: status.cursor.committedSeq,
+        requestedTargetSeq: targetSeqHint,
+        targetReached: true,
+      };
+    }
+
+    await sleep(100);
+  }
+
+  const status = await readHostedWakeStatus(input);
+  return {
+    committedSeq: status.cursor.committedSeq,
+    requestedTargetSeq: targetSeqHint,
+    targetReached: targetSeqHint === null
+      ? status.pendingWakeCount === 0
+      : BigInt(status.cursor.committedSeq) >= BigInt(targetSeqHint),
+  };
 }
 
 export async function wakeHostedWorkerForLatestPendingWake(input: {

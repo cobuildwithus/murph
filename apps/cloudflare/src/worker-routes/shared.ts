@@ -1,7 +1,8 @@
 import type {
   HostedExecutionWakeDrainResult,
+  HostedExecutionWakeNudgeResult,
   HostedExecutionUserStatus,
-} from "@murphai/hosted-execution/contracts";
+} from "@murphai/hosted-execution";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
@@ -15,6 +16,7 @@ import type {
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
+  nudgeHostedWakes(): Promise<HostedExecutionWakeNudgeResult>;
   status(): Promise<HostedExecutionUserStatus>;
   wakeHostedWakes(input?: {
     targetSeqHint?: string | null;
@@ -32,6 +34,7 @@ export interface WorkerRouteContext {
   request: Request;
   requestText?: Promise<string>;
   url: URL;
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 export async function resolveUserRunnerStub(

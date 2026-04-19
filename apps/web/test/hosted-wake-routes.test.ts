@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   readOptionalJsonObject: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
-  triggerHostedWakeUserBestEffort: vi.fn(),
+  nudgeHostedWakeUserBestEffort: vi.fn(),
   quarantineHostedWakeTx: vi.fn(),
   validateHostedWakeFetchProofCurrent: vi.fn(),
 }));
@@ -62,7 +62,7 @@ vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
-  triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
+  nudgeHostedWakeUserBestEffort: mocks.nudgeHostedWakeUserBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-wake/materialize", () => ({
@@ -92,7 +92,7 @@ describe("hosted wake internal routes", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
-    mocks.triggerHostedWakeUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedWakeUserBestEffort.mockResolvedValue(true);
     mocks.getPrisma.mockReturnValue({
       $transaction: vi.fn(async (callback: (tx: { label: string }) => Promise<unknown>) =>
         callback({ label: "wake-route-tx" })),
@@ -814,9 +814,8 @@ describe("hosted wake internal routes", () => {
       limit: 128,
       olderThan: expect.any(Date),
     });
-    expect(mocks.triggerHostedWakeUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
       context: "hosted-wake.repair",
-      targetSeqHint: "25",
       userId: "member_123",
     });
   });

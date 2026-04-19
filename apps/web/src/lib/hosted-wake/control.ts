@@ -1,43 +1,30 @@
-import type { HostedExecutionWakeDrainResult } from "@murphai/hosted-execution/contracts";
 import type { PrismaClient } from "@prisma/client";
+import type { HostedExecutionWakeNudgeResult } from "@murphai/hosted-execution";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
-import {
-  readHostedWakeTarget,
-} from "./lifecycle";
-import { getPrisma } from "../prisma";
 
-export async function triggerHostedWakeUser(input: {
-  targetSeqHint?: string | null;
+export async function nudgeHostedWakeUser(input: {
   timeoutMs?: number;
   userId: string;
-}): Promise<HostedExecutionWakeDrainResult | null> {
+}): Promise<HostedExecutionWakeNudgeResult | null> {
   const client = readHostedExecutionControlClientIfConfigured(input.timeoutMs);
 
   if (!client) {
     return null;
   }
 
-  return await client.wakeUser(input.userId, {
-    ...(input.targetSeqHint === undefined ? {} : { targetSeqHint: input.targetSeqHint }),
-  });
+  return await client.nudgeUserRunner(input.userId);
 }
 
-export async function triggerHostedWakeUserBestEffort(input: {
+export async function nudgeHostedWakeUserBestEffort(input: {
   context?: string;
-  targetSeqHint?: string | null;
   timeoutMs?: number;
   userId: string;
 }): Promise<boolean> {
   try {
-    const result = await triggerHostedWakeUser(input);
-
-    if (!result) {
-      return false;
-    }
-
-    return input.targetSeqHint == null || result.targetReached;
+    const result = await nudgeHostedWakeUser(input);
+    return result?.accepted ?? false;
   } catch (error) {
     console.error(
       input.context
@@ -57,25 +44,13 @@ export async function handoffHostedExecutionWakeBestEffort(input: {
   timeoutMs?: number;
   userId: string;
 }): Promise<void> {
+  const nudge = () => nudgeHostedWakeUserBestEffort({
+    context: input.context,
+    timeoutMs: input.timeoutMs,
+    userId: input.userId,
+  });
+
   try {
-    const prisma = input.prisma ?? getPrisma();
-    const target = await readHostedWakeTarget({
-      eventId: input.eventId,
-      prisma,
-      userId: input.userId,
-    });
-
-    if (!target) {
-      return;
-    }
-
-    const nudge = () => triggerHostedWakeUserBestEffort({
-      context: input.context,
-      targetSeqHint: target.seq ?? null,
-      timeoutMs: input.timeoutMs,
-      userId: target.userId,
-    });
-
     if (input.defer) {
       await input.defer(async () => {
         await nudge();
@@ -93,3 +68,8 @@ export async function handoffHostedExecutionWakeBestEffort(input: {
     );
   }
 }
+
+// Compatibility aliases for existing callers/tests while the wake surface
+// transitions from drain semantics to simple nudges.
+export const triggerHostedWakeUser = nudgeHostedWakeUser;
+export const triggerHostedWakeUserBestEffort = nudgeHostedWakeUserBestEffort;
