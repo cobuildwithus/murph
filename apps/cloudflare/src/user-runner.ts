@@ -74,6 +74,7 @@ const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
 interface HostedWakeDrainOutcome {
   cursorSnapshotRef: HostedExecutionBundleRef | null;
+  refetchBeforeAdvance: boolean;
   postCursorAction: "cleanup-only" | "finalize-after-commit";
   wake: HostedExecutionWake | null;
   seq: bigint;
@@ -354,6 +355,11 @@ export class HostedUserRunner {
       for (const wake of batch.wakes) {
         const outcome = await this.executeHostedWakeRecord(wake);
 
+        if (outcome.refetchBeforeAdvance) {
+          refetchAfterCommittedWake = true;
+          break;
+        }
+
         if (!shouldAdvanceHostedWakeCursor(outcome.state)) {
           stoppingState = outcome.state;
           break;
@@ -509,6 +515,7 @@ export class HostedUserRunner {
       });
       return {
         cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+        refetchBeforeAdvance: false,
         postCursorAction: "cleanup-only",
         wake: null,
         seq,
@@ -547,6 +554,7 @@ export class HostedUserRunner {
       )
         ? {
           cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          refetchBeforeAdvance: true,
           postCursorAction: "cleanup-only",
           wake: null,
           seq,
@@ -554,6 +562,7 @@ export class HostedUserRunner {
         }
         : {
           cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          refetchBeforeAdvance: false,
           postCursorAction: "cleanup-only",
           wake: null,
           seq,
@@ -578,6 +587,7 @@ export class HostedUserRunner {
       )
         ? {
           cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          refetchBeforeAdvance: true,
           postCursorAction: "cleanup-only",
           wake: null,
           seq,
@@ -585,6 +595,7 @@ export class HostedUserRunner {
         }
         : {
           cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          refetchBeforeAdvance: false,
           postCursorAction: "cleanup-only",
           wake: null,
           seq,
@@ -612,6 +623,7 @@ export class HostedUserRunner {
 
     return {
       cursorSnapshotRef: execution.cursorSnapshotRef,
+      refetchBeforeAdvance: false,
       postCursorAction: execution.postCursorAction,
       wake: hostedWake,
       seq,
