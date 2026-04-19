@@ -25,7 +25,6 @@ interface FixtureVault {
   }
   samples: {
     lookupIds: string[]
-    transformId: string
   }
 }
 
@@ -117,8 +116,10 @@ async function makeFixtureVault(): Promise<FixtureVault> {
   await ensureCliRuntimeArtifactsWithOptions({ forceReverify: true })
   const samples = requireData(
     await runCli<{
+      imports: Array<{
+        transformId: string | null
+      }>
       lookupIds: string[]
-      transformId: string
     }>([
       'samples',
       'import-csv',
@@ -425,7 +426,7 @@ test(
 
       const invalidLookups = [
         [
-          fixture.samples.transformId,
+          'xfm_placeholder',
           'Transform ids identify an import batch, not a query-layer record. Use the returned lookupIds or `list --kind sample` instead.',
         ],
         [

@@ -123,6 +123,10 @@ const COMMAND_PATHS_EXEMPT_FROM_VAULT = new Set([
 
 export function hasExplicitVaultOption(args: readonly string[]): boolean {
   for (const token of args) {
+    if (typeof token !== 'string') {
+      continue
+    }
+
     if (token === '--') {
       return false
     }

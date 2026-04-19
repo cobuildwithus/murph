@@ -238,6 +238,12 @@ test('operator config resolves default vaults and injects them only for eligible
   assert.equal(hasExplicitVaultOption(['assistant', '--vault', '/tmp/vault']), true)
   assert.equal(hasExplicitVaultOption(['assistant', '--vault=/tmp/vault']), true)
   assert.equal(hasExplicitVaultOption(['assistant', '--', '--vault']), false)
+  assert.equal(
+    Reflect.apply(hasExplicitVaultOption, undefined, [
+      ['assistant', null, '--vault', '/tmp/vault'],
+    ]),
+    true,
+  )
 
   assert.deepEqual(applyDefaultVaultToArgs(['assistant', 'run'], null), ['assistant', 'run'])
   assert.deepEqual(

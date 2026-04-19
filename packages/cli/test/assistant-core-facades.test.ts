@@ -68,11 +68,11 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantCliManifest.exports?.['./assistant-daemon-client'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/automation'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/doctor-security'], undefined)
-  assert.equal(assistantCliManifest.exports?.['./assistant/stop'], undefined)
-  assert.deepEqual(assistantCliManifest.exports?.['./assistant/*'], {
-    default: './dist/assistant/*.js',
-    types: './dist/assistant/*.d.ts',
+  assert.deepEqual(assistantCliManifest.exports?.['./assistant/stop'], {
+    default: './dist/assistant/stop.js',
+    types: './dist/assistant/stop.d.ts',
   })
+  assert.equal(assistantCliManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantCliManifest.exports?.['./commands/assistant'] !== undefined, true)
   assert.equal(assistantCliManifest.exports?.['./run-terminal-logging'] !== undefined, true)
 
@@ -90,10 +90,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
     default: './dist/assistant-cli-tools.js',
     types: './dist/assistant-cli-tools.d.ts',
   })
-  assert.deepEqual(assistantEngineManifest.exports?.['./assistant/*'], {
-    default: './dist/assistant/*.js',
-    types: './dist/assistant/*.d.ts',
-  })
+  assert.equal(assistantEngineManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/query-record-command-helpers'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./health-registry-command-metadata'], undefined)
