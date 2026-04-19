@@ -432,7 +432,6 @@ export function parseHostedWakeStatus(
 
 export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionUserStatus {
   const record = requireObject(value, "Hosted execution user status");
-  assertNoLegacyHostedExecutionUserStatusFields(record);
 
   return {
     bundleRef: parseHostedExecutionBundleRef(
@@ -593,25 +592,6 @@ export function parseHostedWakeStatusRequest(value: unknown): HostedWakeStatusRe
     wakeId,
     wakeSeq: requireBigIntString(wakeSeq, "Hosted wake status request wakeSeq"),
   };
-}
-
-function assertNoLegacyHostedExecutionUserStatusFields(
-  record: Record<string, unknown>,
-): void {
-  const legacyField = [
-    "backpressuredEventIds",
-    "pendingEventCount",
-    "poisonedEventIds",
-    "retryingEventId",
-  ].find((key) => record[key] !== undefined);
-
-  if (!legacyField) {
-    return;
-  }
-
-  throw new TypeError(
-    `Hosted execution user status ${legacyField} is no longer supported; use wake-native status fields.`,
-  );
 }
 
 export function parseHostedExecutionTimelineEntries(value: unknown): HostedExecutionTimelineEntry[] {
@@ -885,7 +865,6 @@ export function parseHostedWakeRecord(
   value: unknown,
 ): HostedWakeRecord {
   const record = requireObject(value, "Hosted wake record");
-  assertNoLegacyHostedWakePayloadFields(record);
   const kind = parseHostedExecutionWakeKind(record.kind, "Hosted wake record kind");
   const payloadSchema = parseHostedWakePayloadSchema(record.payloadSchema);
   const opaquePayloadTransport = readHostedWakeOpaquePayloadTransport(record);
@@ -972,23 +951,6 @@ function readHostedWakeOpaquePayloadTransport(
           ),
         }),
   };
-}
-
-function assertNoLegacyHostedWakePayloadFields(record: Record<string, unknown>): void {
-  const legacyField = [
-    "payloadJson",
-    "payloadInlineCiphertext",
-    "payloadRef",
-    "payloadRefCiphertext",
-  ].find((field) => field in record);
-
-  if (!legacyField) {
-    return;
-  }
-
-  throw new TypeError(
-    `Hosted wake record must not include legacy fetched payload field ${legacyField}.`,
-  );
 }
 
 export function parseHostedWakeFetchResponse(

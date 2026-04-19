@@ -8,6 +8,8 @@ import { normalizeNullableString } from "../device-sync/shared";
 
 const HOSTED_WAKE_FETCH_PROOF_CONTEXT = "murph.hosted-wake.fetch-proof.v1:";
 const HOSTED_WAKE_FETCH_PROOF_MAX_TTL_SECONDS = 5 * 60;
+const HOSTED_WAKE_FINALIZE_PROOF_CONTEXT = "murph.hosted-wake.finalize-proof.v1:";
+const HOSTED_WAKE_FINALIZE_PROOF_MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
 const HOSTED_WAKE_FETCH_PROOF_CLOCK_SKEW_SECONDS = 60;
 
 interface HostedWakeFetchProofClaims {
@@ -17,6 +19,18 @@ interface HostedWakeFetchProofClaims {
   iat: number;
   kind: "hosted-wake-fetch-proof";
   wakeEventId: string;
+  userId: string;
+  wakeId: string;
+  wakeSeq: string;
+}
+
+interface HostedWakeFinalizeProofClaims {
+  committedCursorVersion: string;
+  committedSeq: string;
+  exp: number;
+  iat: number;
+  kind: "hosted-wake-finalize-proof";
+  previousSnapshotRef: unknown;
   userId: string;
   wakeId: string;
   wakeSeq: string;
@@ -129,6 +143,103 @@ export function verifyHostedWakeFetchProof(input: {
   return claims;
 }
 
+export function issueHostedWakeFinalizeProof(input: {
+  committedCursorVersion: bigint;
+  committedSeq: bigint;
+  now?: Date;
+  previousSnapshotRef: unknown;
+  userId: string;
+  wakeId: string;
+  wakeSeq: bigint;
+}): string {
+  const now = input.now ?? new Date();
+  const nowSeconds = Math.floor(now.getTime() / 1000);
+  const claims: HostedWakeFinalizeProofClaims = {
+    committedCursorVersion: input.committedCursorVersion.toString(),
+    committedSeq: input.committedSeq.toString(),
+    exp: nowSeconds + HOSTED_WAKE_FINALIZE_PROOF_MAX_TTL_SECONDS,
+    iat: nowSeconds,
+    kind: "hosted-wake-finalize-proof",
+    previousSnapshotRef: input.previousSnapshotRef,
+    userId: input.userId,
+    wakeId: input.wakeId,
+    wakeSeq: input.wakeSeq.toString(),
+  };
+  const encodedClaims = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+  const keyring = readHostedWakeFetchProofKeyring();
+  const signature = signHostedWakeProof(
+    encodedClaims,
+    keyring.currentKey,
+    HOSTED_WAKE_FINALIZE_PROOF_CONTEXT,
+  );
+
+  return `${keyring.currentKeyId}.${encodedClaims}.${signature}`;
+}
+
+export function verifyHostedWakeFinalizeProof(input: {
+  now?: Date;
+  proof: string;
+  userId: string;
+}): HostedWakeFinalizeProofClaims {
+  const proof = normalizeNullableString(input.proof);
+
+  if (!proof) {
+    throw new TypeError("Hosted wake finalize proof must not be blank.");
+  }
+
+  const [keyId, encodedClaims, signature, ...rest] = proof.split(".");
+
+  if (!keyId || !encodedClaims || !signature || rest.length > 0) {
+    throw new TypeError("Hosted wake finalize proof must use keyId.payload.signature format.");
+  }
+
+  const keyring = readHostedWakeFetchProofKeyring();
+  const key = keyring.keysById[keyId];
+
+  if (!key) {
+    throw new TypeError(`Hosted wake finalize proof keyId ${keyId} is not configured.`);
+  }
+
+  const expectedSignature = signHostedWakeProof(
+    encodedClaims,
+    key,
+    HOSTED_WAKE_FINALIZE_PROOF_CONTEXT,
+  );
+
+  if (!secureEqual(expectedSignature, signature)) {
+    throw new TypeError("Hosted wake finalize proof signature is invalid.");
+  }
+
+  const claims = parseHostedWakeFinalizeProofClaims(encodedClaims);
+  const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
+
+  if (claims.kind !== "hosted-wake-finalize-proof") {
+    throw new TypeError("Hosted wake finalize proof kind is invalid.");
+  }
+
+  if (claims.userId !== input.userId) {
+    throw new TypeError("Hosted wake finalize proof userId does not match the requested user.");
+  }
+
+  if (claims.exp <= claims.iat) {
+    throw new TypeError("Hosted wake finalize proof timestamps are invalid.");
+  }
+
+  if (claims.exp - claims.iat > HOSTED_WAKE_FINALIZE_PROOF_MAX_TTL_SECONDS) {
+    throw new TypeError("Hosted wake finalize proof lifetime is too long.");
+  }
+
+  if (nowSeconds < claims.iat - HOSTED_WAKE_FETCH_PROOF_CLOCK_SKEW_SECONDS) {
+    throw new TypeError("Hosted wake finalize proof is not valid yet.");
+  }
+
+  if (nowSeconds > claims.exp + HOSTED_WAKE_FETCH_PROOF_CLOCK_SKEW_SECONDS) {
+    throw new TypeError("Hosted wake finalize proof has expired.");
+  }
+
+  return claims;
+}
+
 function parseHostedWakeFetchProofClaims(encodedClaims: string): HostedWakeFetchProofClaims {
   let decoded = "";
 
@@ -189,9 +300,76 @@ function parseHostedWakeFetchProofClaims(encodedClaims: string): HostedWakeFetch
   };
 }
 
+function parseHostedWakeFinalizeProofClaims(encodedClaims: string): HostedWakeFinalizeProofClaims {
+  let decoded = "";
+
+  try {
+    decoded = Buffer.from(encodedClaims, "base64url").toString("utf8");
+  } catch {
+    throw new TypeError("Hosted wake finalize proof payload is not valid base64url JSON.");
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(decoded);
+  } catch {
+    throw new TypeError("Hosted wake finalize proof payload is not valid JSON.");
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("Hosted wake finalize proof payload must be a JSON object.");
+  }
+
+  const {
+    committedCursorVersion,
+    committedSeq,
+    exp,
+    iat,
+    kind,
+    previousSnapshotRef,
+    userId,
+    wakeId,
+    wakeSeq,
+  } = parsed as Record<string, unknown>;
+
+  if (
+    kind !== "hosted-wake-finalize-proof"
+    || typeof userId !== "string"
+    || typeof wakeId !== "string"
+    || typeof wakeSeq !== "string"
+    || typeof committedSeq !== "string"
+    || typeof committedCursorVersion !== "string"
+    || typeof iat !== "number"
+    || typeof exp !== "number"
+  ) {
+    throw new TypeError("Hosted wake finalize proof payload is missing required claims.");
+  }
+
+  return {
+    committedCursorVersion,
+    committedSeq,
+    exp,
+    iat,
+    kind,
+    previousSnapshotRef: previousSnapshotRef ?? null,
+    userId,
+    wakeId,
+    wakeSeq,
+  };
+}
+
 function signHostedWakeFetchProof(encodedClaims: string, key: Buffer): string {
+  return signHostedWakeProof(encodedClaims, key, HOSTED_WAKE_FETCH_PROOF_CONTEXT);
+}
+
+function signHostedWakeProof(
+  encodedClaims: string,
+  key: Buffer,
+  context: string,
+): string {
   return createHmac("sha256", key)
-    .update(HOSTED_WAKE_FETCH_PROOF_CONTEXT)
+    .update(context)
     .update(encodedClaims)
     .digest("base64url");
 }

@@ -200,6 +200,80 @@ export async function listHostedExecutableWakes(
   };
 }
 
+export async function validateHostedWakeFetchProofCurrent(input: {
+  fetchProof: string;
+  prisma?: HostedWakeStoreClient;
+  userId: string;
+  wakeId: string;
+  wakeSeq: bigint;
+}): Promise<{
+  cursor: HostedExecutionCursorState;
+  fetchProofCurrent: boolean;
+}> {
+  const prisma = input.prisma ?? getPrisma();
+
+  const runValidation = async (tx: HostedWakeMutationTx | HostedWakeStoreClient) => {
+    await ensureHostedExecutionCursorRowTx({
+      tx,
+      userId: input.userId,
+    });
+    await lockHostedExecutionCursorRowTx({
+      tx,
+      userId: input.userId,
+    });
+    const cursor = await ensureHostedExecutionCursorRowTx({
+      tx,
+      userId: input.userId,
+    });
+    const projectedCursor = projectHostedExecutionCursorRecord(cursor);
+
+    try {
+      const claims = verifyHostedWakeFetchProof({
+        proof: input.fetchProof,
+        userId: input.userId,
+        wakeId: input.wakeId,
+        wakeSeq: input.wakeSeq,
+      });
+      const fetchFence = parseHostedWakeFetchFence(claims);
+      assertCurrentHostedWakeFetchFence(cursor, fetchFence);
+      const wake = await readCurrentHostedWakeTerminalTargetTx({
+        tx,
+        userId: input.userId,
+        wakeId: input.wakeId,
+        wakeSeq: input.wakeSeq,
+      });
+
+      if (!wake) {
+        return {
+          cursor: projectedCursor,
+          fetchProofCurrent: false,
+        };
+      }
+
+      assertCurrentHostedWakeFetchIdentity(claims, wake.currentEventId);
+      return {
+        cursor: projectedCursor,
+        fetchProofCurrent: true,
+      };
+    } catch (error) {
+      if (error instanceof HostedWakeFetchProofStaleError) {
+        return {
+          cursor: projectedCursor,
+          fetchProofCurrent: false,
+        };
+      }
+
+      throw error;
+    }
+  };
+
+  if ("$transaction" in prisma && typeof prisma.$transaction === "function") {
+    return prisma.$transaction(async (tx) => runValidation(tx));
+  }
+
+  return runValidation(prisma);
+}
+
 export async function recordHostedWakeTerminalTx(input: {
   fetchProof: string;
   state: "completed" | "quarantined";
@@ -453,8 +527,10 @@ export async function finalizeHostedExecutionCursorTx(input: {
     };
   }
 
-  const nextSnapshotRef = serializeHostedWakeSnapshotRef(input.snapshotRef);
-  const nextSnapshotJson = nextSnapshotRef;
+  const nextSnapshotRef = input.snapshotRef === null
+    ? Prisma.DbNull
+    : serializeHostedWakeSnapshotRef(input.snapshotRef);
+  const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
   if (JSON.stringify(cursor.snapshotRef ?? null) === JSON.stringify(nextSnapshotJson)) {
     return {
       finalized: false,

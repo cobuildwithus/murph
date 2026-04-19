@@ -15,9 +15,10 @@ const mocks = vi.hoisted(() => ({
   appendHostedExecutionWakePayloadTx: vi.fn(),
   commitHostedExecutionCursorTx: vi.fn(),
   countPendingHostedWakes: vi.fn(),
+  finalizeHostedExecutionCursorTx: vi.fn(),
   getPrisma: vi.fn(),
+  listHostedExecutableWakes: vi.fn(),
   listHostedWakeRepairCandidates: vi.fn(),
-  listHostedWakesAfterSeq: vi.fn(),
   materializeHostedAssistantCronWakeTx: vi.fn(),
   materializeHostedDueWakesTx: vi.fn(),
   recordHostedWakeTerminalTx: vi.fn(),
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   requireVercelCronRequest: vi.fn(),
   triggerHostedWakeUserBestEffort: vi.fn(),
   quarantineHostedWakeTx: vi.fn(),
+  validateHostedWakeFetchProofCurrent: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -76,11 +78,13 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
   HostedWakeFetchProofStaleError: mocks.HostedWakeFetchProofStaleError,
   commitHostedExecutionCursorTx: mocks.commitHostedExecutionCursorTx,
   countPendingHostedWakes: mocks.countPendingHostedWakes,
+  finalizeHostedExecutionCursorTx: mocks.finalizeHostedExecutionCursorTx,
+  listHostedExecutableWakes: mocks.listHostedExecutableWakes,
   listHostedWakeRepairCandidates: mocks.listHostedWakeRepairCandidates,
-  listHostedWakesAfterSeq: mocks.listHostedWakesAfterSeq,
   quarantineHostedWakeTx: mocks.quarantineHostedWakeTx,
   recordHostedWakeTerminalTx: mocks.recordHostedWakeTerminalTx,
   readHostedExecutionCursor: mocks.readHostedExecutionCursor,
+  validateHostedWakeFetchProofCurrent: mocks.validateHostedWakeFetchProofCurrent,
 }));
 
 describe("hosted wake internal routes", () => {
@@ -120,7 +124,7 @@ describe("hosted wake internal routes", () => {
         deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
       },
     });
-    mocks.listHostedWakesAfterSeq.mockResolvedValue({
+    mocks.listHostedExecutableWakes.mockResolvedValue({
       cursor: {
         committedSeq: "24",
         createdAt: "2026-04-17T00:00:00.000Z",
@@ -159,6 +163,18 @@ describe("hosted wake internal routes", () => {
       userId: "member_123",
       version: "3",
     });
+    mocks.validateHostedWakeFetchProofCurrent.mockResolvedValue({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "3",
+      },
+      fetchProofCurrent: true,
+    });
     mocks.countPendingHostedWakes.mockResolvedValue(1);
     mocks.readHostedWakeLifecycle.mockResolvedValue({
       eventId: "evt_tick",
@@ -175,6 +191,19 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "4",
       },
+      finalizeToken: "finalize_token_24",
+    });
+    mocks.finalizeHostedExecutionCursorTx.mockResolvedValue({
+      finalized: true,
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "25",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member_123",
+        version: "5",
+      },
     });
     mocks.recordHostedWakeTerminalTx.mockResolvedValue(true);
     mocks.quarantineHostedWakeTx.mockResolvedValue(true);
@@ -189,66 +218,8 @@ describe("hosted wake internal routes", () => {
     ]);
   });
 
-  it("parses and forwards wake append requests", async () => {
-    const wake = {
-      eventId: "evt_tick",
-      kind: "assistant.cron.tick",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      reason: "manual",
-      userId: "member_123",
-    };
-    mocks.readOptionalJsonObject.mockResolvedValue({
-      wake,
-    });
-
-    const { POST } = await import("../app/api/internal/hosted-wake/append/route");
-    const response = await POST(new Request("https://example.test", { method: "POST" }));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      duplicate: false,
-      inserted: true,
-      updatedExisting: false,
-      wake: expect.objectContaining({
-        id: "wake_24",
-        seq: "24",
-      }),
-    });
-    expect(mocks.appendHostedExecutionWakePayloadTx).toHaveBeenCalledWith({
-      wake,
-      tx: expect.objectContaining({
-        label: "wake-route-tx",
-      }),
-    });
-  });
-
-  it("rejects wake append requests whose wake userId does not match the bound user", async () => {
-    mocks.readOptionalJsonObject.mockResolvedValue({
-      wake: {
-        eventId: "evt_tick",
-        kind: "assistant.cron.tick",
-        occurredAt: "2026-04-17T00:00:00.000Z",
-        reason: "manual",
-        userId: "member_other",
-      },
-    });
-
-    const { POST } = await import("../app/api/internal/hosted-wake/append/route");
-    const response = await POST(new Request("https://example.test", { method: "POST" }));
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "INVALID_REQUEST",
-        message: "Invalid request.",
-      },
-    });
-    expect(mocks.appendHostedExecutionWakePayloadTx).not.toHaveBeenCalled();
-  });
-
   it("parses and forwards unseen wake fetch requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
-      afterSeq: "12",
       limit: 128,
     });
 
@@ -287,16 +258,54 @@ describe("hosted wake internal routes", () => {
       ],
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
-    expect(mocks.listHostedWakesAfterSeq).toHaveBeenCalledWith({
-      afterSeq: 12n,
+    expect(mocks.listHostedExecutableWakes).toHaveBeenCalledWith({
       limit: 128,
       prisma: expect.anything(),
       userId: "member_123",
     });
   });
 
+  it("rejects caller-supplied afterSeq on executable unseen wake fetch requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      afterSeq: "1",
+      limit: 128,
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/unseen/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.listHostedExecutableWakes).not.toHaveBeenCalled();
+  });
+
+  it("rejects caller-supplied afterSeq even when present as null on executable unseen wake fetch requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      afterSeq: null,
+      limit: 128,
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/unseen/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.listHostedExecutableWakes).not.toHaveBeenCalled();
+  });
+
   it("parses and forwards wake cursor commit requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
+      assistantNextWakeAt: "2026-04-17T02:00:00.000Z",
       committedSeq: "24",
       expectedVersion: "3",
       snapshotRef: TEST_SNAPSHOT_REF,
@@ -317,12 +326,48 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "4",
       },
+      finalizeToken: "finalize_token_24",
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
     expect(mocks.getPrisma).toHaveBeenCalledOnce();
     expect(mocks.commitHostedExecutionCursorTx).toHaveBeenCalledWith({
+      assistantNextWakeAt: "2026-04-17T02:00:00.000Z",
       committedSeq: 24n,
       expectedVersion: 3n,
+      snapshotRef: TEST_SNAPSHOT_REF,
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      userId: "member_123",
+    });
+  });
+
+  it("parses and forwards wake cursor finalize requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      finalizeToken: "finalize_token_24",
+      snapshotRef: TEST_SNAPSHOT_REF,
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/finalize/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      finalized: true,
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "25",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member_123",
+        version: "5",
+      },
+    });
+    expect(mocks.finalizeHostedExecutionCursorTx).toHaveBeenCalledWith({
+      assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      finalizeToken: "finalize_token_24",
       snapshotRef: TEST_SNAPSHOT_REF,
       tx: expect.objectContaining({
         label: "wake-route-tx",
@@ -450,6 +495,7 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "4",
       },
+      finalizeToken: "finalize_token_24",
     });
 
     const { POST } = await import("../app/api/internal/hosted-wake/commit/route");
@@ -467,6 +513,7 @@ describe("hosted wake internal routes", () => {
         userId: "member_123",
         version: "4",
       },
+      finalizeToken: "finalize_token_24",
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
     expect(mocks.getPrisma).toHaveBeenCalledOnce();
@@ -503,14 +550,7 @@ describe("hosted wake internal routes", () => {
     expect(mocks.commitHostedExecutionCursorTx).not.toHaveBeenCalled();
   });
 
-  it("parses and forwards hosted wake materialization requests", async () => {
-    mocks.readOptionalJsonObject.mockResolvedValue({
-      wakeMaterializationHints: {
-        assistantWakeAt: "2026-04-17T00:00:00.000Z",
-        deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
-      },
-    });
-
+  it("materializes hosted wakes from canonical web-owned state", async () => {
     const { POST } = await import("../app/api/internal/hosted-wake/materialize/route");
     const response = await POST(new Request("https://example.test", { method: "POST" }));
 
@@ -528,10 +568,6 @@ describe("hosted wake internal routes", () => {
         label: "wake-route-tx",
       }),
       userId: "member_123",
-      wakeMaterializationHints: {
-        assistantWakeAt: "2026-04-17T00:00:00.000Z",
-        deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
-      },
     }));
 
     const materializeCall = mocks.materializeHostedDueWakesTx.mock.calls[0]?.[0];
@@ -686,6 +722,79 @@ describe("hosted wake internal routes", () => {
       replacedByEventId: "evt_new",
       wakeState: "replaced",
     });
+  });
+
+  it("validates fetched wake proof currency when status includes the wake proof triple", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      eventId: "evt_old",
+      fetchProof: "proof_24",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    });
+    mocks.readHostedWakeLifecycle.mockResolvedValue({
+      eventId: "evt_old",
+      replacedByEventId: "evt_new",
+      state: "replaced",
+    });
+    mocks.validateHostedWakeFetchProofCurrent.mockResolvedValue({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "3",
+      },
+      fetchProofCurrent: false,
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/status/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "member_123",
+        version: "3",
+      },
+      fetchProofCurrent: false,
+      pendingWakeCount: 1,
+      replacedByEventId: "evt_new",
+      wakeState: "replaced",
+    });
+    expect(mocks.validateHostedWakeFetchProofCurrent).toHaveBeenCalledWith({
+      fetchProof: "proof_24",
+      prisma: expect.anything(),
+      userId: "member_123",
+      wakeId: "wake_24",
+      wakeSeq: 24n,
+    });
+    expect(mocks.readHostedExecutionCursor).not.toHaveBeenCalled();
+  });
+
+  it("rejects partial fetched wake proof input on hosted wake status requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      fetchProof: "proof_24",
+      wakeId: "wake_24",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/status/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.validateHostedWakeFetchProofCurrent).not.toHaveBeenCalled();
   });
 
   it("repairs stale wake cursors through the hosted wake control client", async () => {

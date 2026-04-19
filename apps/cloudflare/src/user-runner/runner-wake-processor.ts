@@ -65,6 +65,7 @@ export interface RunnerUserStores {
 }
 
 export interface RunnerWakeExecutionResult {
+  assistantNextWakeAt?: string | null;
   cursorSnapshotRef: HostedExecutionBundleRef | null;
   postCursorAction: "cleanup-only" | "finalize-after-commit";
   state: HostedWakeLifecycleState;
@@ -176,6 +177,7 @@ export class RunnerWakeProcessor {
         userId,
       });
       return {
+        assistantNextWakeAt: startMode.pendingCommit.result.wakeMaterializationHints?.assistantWakeAt,
         cursorSnapshotRef: startMode.pendingCommit.bundleRef,
         postCursorAction: "cleanup-only",
         state: "completed",
@@ -186,6 +188,7 @@ export class RunnerWakeProcessor {
       try {
         await this.restorePendingCommitState(startMode.pendingCommit);
         return {
+          assistantNextWakeAt: startMode.pendingCommit.result.wakeMaterializationHints?.assistantWakeAt,
           cursorSnapshotRef: startMode.pendingCommit.bundleRef,
           postCursorAction: "finalize-after-commit",
           state: "completed",
@@ -224,6 +227,7 @@ export class RunnerWakeProcessor {
         userId,
       });
       return {
+        assistantNextWakeAt: null,
         cursorSnapshotRef: null,
         postCursorAction: "cleanup-only",
         state: "backpressured",
@@ -322,6 +326,7 @@ export class RunnerWakeProcessor {
         });
       }
       return {
+        assistantNextWakeAt: runnerResult.result.result.wakeMaterializationHints?.assistantWakeAt,
         cursorSnapshotRef,
         postCursorAction: runnerResult.phase === "committed"
           ? "finalize-after-commit"
@@ -504,6 +509,7 @@ export class RunnerWakeProcessor {
         leaseOwner: input.leaseOwner,
       });
       return {
+        assistantNextWakeAt: null,
         cursorSnapshotRef: null,
         postCursorAction: "cleanup-only",
         state: "backpressured",
@@ -530,6 +536,7 @@ export class RunnerWakeProcessor {
         run: input.run,
       });
       return {
+        assistantNextWakeAt: recoveredPendingCommit.result.wakeMaterializationHints?.assistantWakeAt,
         cursorSnapshotRef: recoveredPendingCommit.bundleRef,
         postCursorAction: "cleanup-only",
         state: "completed",
@@ -560,6 +567,7 @@ export class RunnerWakeProcessor {
       run: input.run,
     });
     return {
+      assistantNextWakeAt: recoveredPendingCommit?.result.wakeMaterializationHints?.assistantWakeAt,
       cursorSnapshotRef: null,
       postCursorAction: "cleanup-only",
       state: "backpressured",
@@ -810,6 +818,7 @@ export class RunnerWakeProcessor {
           bundleRef: record.bundleRef,
           committedAt: new Date().toISOString(),
           eventId: input.wake.eventId,
+          finalizeToken: null,
           finalizedAt: null,
           result: input.result.result,
           schemaVersion: 1,

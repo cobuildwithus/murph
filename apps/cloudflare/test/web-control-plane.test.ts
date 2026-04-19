@@ -6,6 +6,8 @@ import {
   HostedWakeTerminalStaleFetchProofError,
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
+  finalizeHostedWakeCursorInWeb,
+  materializeHostedDueWakesInWeb,
   quarantineHostedWakeInWeb,
   readHostedWakeStatusFromWeb,
   recordHostedWakeTerminalInWeb,
@@ -19,7 +21,6 @@ describe("cloudflare web control plane wake helpers", () => {
 
     await expect(
       fetchHostedWakeBatchFromWeb({
-        afterSeq: "12",
         baseUrl: "https://runner.example.test/root/",
         boundUserId: "user_123",
         fetchImpl: vi.fn(async (url, init) => {
@@ -68,7 +69,6 @@ describe("cloudflare web control plane wake helpers", () => {
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(String(request.init?.body))).toEqual({
-      afterSeq: "12",
       limit: 128,
     });
   });
@@ -81,6 +81,7 @@ describe("cloudflare web control plane wake helpers", () => {
       commitHostedWakeCursorToWeb({
         baseUrl: "https://runner.example.test/root/",
         body: {
+          assistantNextWakeAt: "2026-04-17T02:00:00.000Z",
           committedSeq: "24",
           expectedVersion: "3",
           snapshotRef,
@@ -100,6 +101,7 @@ describe("cloudflare web control plane wake helpers", () => {
                 userId: "user_123",
                 version: "4",
               },
+              finalizeToken: "finalize_token_24",
             }),
             {
               headers: { "content-type": "application/json; charset=utf-8" },
@@ -120,6 +122,7 @@ describe("cloudflare web control plane wake helpers", () => {
         userId: "user_123",
         version: "4",
       },
+      finalizeToken: "finalize_token_24",
     });
 
     const request = requireObservedRequest(observedRequest);
@@ -131,10 +134,117 @@ describe("cloudflare web control plane wake helpers", () => {
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(String(request.init?.body))).toEqual({
+      assistantNextWakeAt: "2026-04-17T02:00:00.000Z",
       committedSeq: "24",
       expectedVersion: "3",
       snapshotRef,
     });
+  });
+
+  it("finalizes the hosted wake cursor through the web control plane", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const snapshotRef = createBundleRef("wake_24_final");
+
+    await expect(
+      finalizeHostedWakeCursorInWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+          finalizeToken: "finalize_token_24",
+          snapshotRef,
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              cursor: {
+                committedSeq: "24",
+                createdAt: "2026-04-17T00:00:00.000Z",
+                nextSeq: "25",
+                snapshotRef,
+                updatedAt: "2026-04-17T00:00:01.000Z",
+                userId: "user_123",
+                version: "5",
+              },
+              finalized: true,
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toEqual({
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "25",
+        snapshotRef,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "user_123",
+        version: "5",
+      },
+      finalized: true,
+    });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/api/internal/hosted-wake/finalize",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("content-type")).toBe("application/json");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(String(request.init?.body))).toEqual({
+      assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      finalizeToken: "finalize_token_24",
+      snapshotRef,
+    });
+  });
+
+  it("materializes hosted due wakes without sending DO-local hints", async () => {
+    let observedRequest: ObservedRequest | null = null;
+
+    await expect(
+      materializeHostedDueWakesInWeb({
+        baseUrl: "https://runner.example.test/root/",
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              targetSeqHint: "24",
+              wakeMaterializationHints: {
+                assistantWakeAt: "2026-04-17T02:00:00.000Z",
+              },
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toEqual({
+      targetSeqHint: "24",
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-04-17T02:00:00.000Z",
+      },
+    });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/api/internal/hosted-wake/materialize",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("content-type")).toBeNull();
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.signal).toBeInstanceOf(AbortSignal);
+    expect(request.init?.body).toBeUndefined();
   });
 
   it("records hosted wake quarantine requests with the fetched wake proof", async () => {
@@ -265,6 +375,9 @@ describe("cloudflare web control plane wake helpers", () => {
         baseUrl: "https://runner.example.test/root/",
         body: {
           eventId: "evt_tick",
+          fetchProof: "proof_24",
+          wakeId: "wake_24",
+          wakeSeq: "24",
         },
         boundUserId: "user_123",
         fetchImpl: vi.fn(async (url, init) => {
@@ -280,6 +393,8 @@ describe("cloudflare web control plane wake helpers", () => {
                 userId: "user_123",
                 version: "4",
               },
+              fetchProofCurrent: false,
+              replacedByEventId: "evt_tick_new",
               wakeState: "queued",
               pendingWakeCount: 1,
             }),
@@ -301,6 +416,8 @@ describe("cloudflare web control plane wake helpers", () => {
         userId: "user_123",
         version: "4",
       },
+      fetchProofCurrent: false,
+      replacedByEventId: "evt_tick_new",
       wakeState: "queued",
       pendingWakeCount: 1,
     });
@@ -314,6 +431,9 @@ describe("cloudflare web control plane wake helpers", () => {
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(JSON.parse(String(request.init?.body))).toEqual({
       eventId: "evt_tick",
+      fetchProof: "proof_24",
+      wakeId: "wake_24",
+      wakeSeq: "24",
     });
   });
 });
