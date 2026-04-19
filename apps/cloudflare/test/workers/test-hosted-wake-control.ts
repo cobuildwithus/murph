@@ -10,6 +10,8 @@ import type {
   HostedWakeFetchRequest,
   HostedWakeLifecycleState,
   HostedWakeFetchResponse,
+  HostedWakeFinalizeRequest,
+  HostedWakeFinalizeResponse,
   HostedWakeMaterializeRequest,
   HostedWakeMaterializeResponse,
   HostedWakeTerminalRequest,
@@ -40,9 +42,19 @@ type StoredHostedWakeRecord = HostedWakeRecord & {
 };
 
 type StoredHostedWakeControlState = {
+  assistantNextWakeAt: string | null;
   cursor: HostedExecutionCursorState;
   nextSeq: number;
   wakes: StoredHostedWakeRecord[];
+};
+
+type TestHostedWakeFinalizeTokenClaims = {
+  committedCursorVersion: string;
+  committedSeq: string;
+  previousSnapshotRef: HostedWakeFinalizeRequest["snapshotRef"];
+  userId: string;
+  wakeId: string;
+  wakeSeq: string;
 };
 
 const textEncoder = new TextEncoder();
@@ -136,16 +148,19 @@ export async function appendTestHostedWake(input: {
 }
 
 export async function fetchTestHostedWakeBatch(input: {
-  afterSeq?: string | null;
   body: HostedWakeFetchRequest;
   bucket: R2BucketLike;
   userId: string;
 }): Promise<HostedWakeFetchResponse> {
+  if (Object.prototype.hasOwnProperty.call(input.body as object, "afterSeq")) {
+    throw new TypeError("afterSeq is not supported for executable hosted wake fetches.");
+  }
+
   const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
-  const afterSeq = parseSeq(input.afterSeq ?? input.body.afterSeq ?? state.cursor.committedSeq);
+  const committedSeq = parseSeq(state.cursor.committedSeq);
   const limit = normalizeLimit(input.body.limit);
   const wakes = state.wakes
-    .filter((wake) => parseSeq(wake.seq) > afterSeq)
+    .filter((wake) => parseSeq(wake.seq) > committedSeq)
     .sort((left, right) => compareSeq(left.seq, right.seq))
     .slice(0, limit)
     .map((wake) => toHostedFetchedWakeRecord(wake, state.cursor));
@@ -181,8 +196,10 @@ export async function commitTestHostedWakeCursor(input: {
   const nextSnapshotRef = hasSnapshotRef
     ? input.body.snapshotRef ?? null
     : state.cursor.snapshotRef ?? null;
-  const snapshotRefChanged = hasSnapshotRef
-    && JSON.stringify(state.cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotRef);
+  const hasAssistantNextWakeAt = "assistantNextWakeAt" in input.body;
+  const nextAssistantNextWakeAt = hasAssistantNextWakeAt
+    ? normalizeStoredWakeTimestamp(input.body.assistantNextWakeAt ?? null)
+    : state.assistantNextWakeAt;
 
   if (
     (shouldAdvanceCommittedSeq
@@ -192,9 +209,7 @@ export async function commitTestHostedWakeCursor(input: {
         || !targetWake
         || !isCommitEligibleStoredWakeState(targetWakeState)
       ))
-    || (committedSeq < currentCommittedSeq)
-    || (!shouldAdvanceCommittedSeq && committedSeq !== currentCommittedSeq)
-    || (!shouldAdvanceCommittedSeq && !snapshotRefChanged)
+    || (committedSeq <= currentCommittedSeq)
   ) {
     return {
       committed: false,
@@ -202,9 +217,14 @@ export async function commitTestHostedWakeCursor(input: {
     };
   }
 
+  if (!targetWake) {
+    throw new Error(`Expected committed wake ${committedSeq.toString()} to exist.`);
+  }
+
   const nextVersion = String(parseSeq(state.cursor.version) + 1n);
 
   const now = new Date().toISOString();
+  state.assistantNextWakeAt = nextAssistantNextWakeAt;
   state.cursor = {
     committedSeq: String(committedSeq),
     createdAt: state.cursor.createdAt,
@@ -219,7 +239,118 @@ export async function commitTestHostedWakeCursor(input: {
   return {
     committed: true,
     cursor: state.cursor,
+    finalizeToken: issueTestHostedWakeFinalizeToken({
+      committedCursorVersion: state.cursor.version,
+      committedSeq: state.cursor.committedSeq,
+      previousSnapshotRef: state.cursor.snapshotRef,
+      userId: input.userId,
+      wakeId: targetWake.id,
+      wakeSeq: targetWake.seq,
+    }),
   };
+}
+
+export async function finalizeTestHostedWakeCursor(input: {
+  body: HostedWakeFinalizeRequest;
+  bucket: R2BucketLike;
+  userId: string;
+}): Promise<HostedWakeFinalizeResponse> {
+  const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
+  const claims = parseTestHostedWakeFinalizeToken(input.body.finalizeToken);
+
+  if (
+    !claims
+    || claims.userId !== input.userId
+    || claims.committedSeq !== state.cursor.committedSeq
+    || claims.committedCursorVersion !== state.cursor.version
+    || JSON.stringify(claims.previousSnapshotRef ?? null) !== JSON.stringify(state.cursor.snapshotRef ?? null)
+  ) {
+    return {
+      cursor: state.cursor,
+      finalized: false,
+    };
+  }
+
+  const nextAssistantNextWakeAt = input.body.assistantNextWakeAt === undefined
+    ? state.assistantNextWakeAt
+    : normalizeStoredWakeTimestamp(input.body.assistantNextWakeAt ?? null);
+  const snapshotRefChanged = JSON.stringify(state.cursor.snapshotRef ?? null)
+    !== JSON.stringify(input.body.snapshotRef ?? null);
+
+  if (!snapshotRefChanged) {
+    return {
+      cursor: state.cursor,
+      finalized: false,
+    };
+  }
+
+  const wake = state.wakes.find((candidate) =>
+    candidate.id === claims.wakeId
+    && candidate.seq === claims.wakeSeq
+    && candidate.userId === input.userId
+  );
+
+  if (!wake) {
+    return {
+      cursor: state.cursor,
+      finalized: false,
+    };
+  }
+
+  const now = new Date().toISOString();
+  state.assistantNextWakeAt = nextAssistantNextWakeAt;
+  state.cursor = {
+    ...state.cursor,
+    snapshotRef: input.body.snapshotRef,
+    updatedAt: now,
+    version: String(parseSeq(state.cursor.version) + 1n),
+  };
+  await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
+
+  return {
+    cursor: state.cursor,
+    finalized: true,
+  };
+}
+
+function issueTestHostedWakeFinalizeToken(
+  claims: TestHostedWakeFinalizeTokenClaims,
+): string {
+  return Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+}
+
+function parseTestHostedWakeFinalizeToken(
+  value: string,
+): TestHostedWakeFinalizeTokenClaims | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const claims = parsed as Partial<TestHostedWakeFinalizeTokenClaims>;
+    if (
+      typeof claims.userId !== "string"
+      || typeof claims.wakeId !== "string"
+      || typeof claims.wakeSeq !== "string"
+      || typeof claims.committedSeq !== "string"
+      || typeof claims.committedCursorVersion !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      committedCursorVersion: claims.committedCursorVersion,
+      committedSeq: claims.committedSeq,
+      previousSnapshotRef: claims.previousSnapshotRef ?? null,
+      userId: claims.userId,
+      wakeId: claims.wakeId,
+      wakeSeq: claims.wakeSeq,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function materializeTestHostedWakes(input: {
@@ -227,11 +358,31 @@ export async function materializeTestHostedWakes(input: {
   bucket: R2BucketLike;
   userId: string;
 }): Promise<HostedWakeMaterializeResponse> {
-  await readStoredHostedWakeControlState(input.bucket, input.userId);
+  const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
+  let targetSeqHint: string | null = null;
+  const nowIso = new Date(Date.now()).toISOString();
+
+  if (isStoredWakeHintDue(state.assistantNextWakeAt)) {
+    const appended = await appendTestHostedWake({
+      bucket: input.bucket,
+      wake: {
+        eventId: `assistant.cron.tick:${input.userId}:alarm:${nowIso}`,
+        kind: "assistant.cron.tick",
+        occurredAt: nowIso,
+        reason: "alarm",
+        userId: input.userId,
+      },
+    });
+    targetSeqHint = appended.wake.seq;
+  }
 
   return {
-    targetSeqHint: null,
-    wakeMaterializationHints: null,
+    targetSeqHint,
+    wakeMaterializationHints: state.assistantNextWakeAt === null || isStoredWakeHintDue(state.assistantNextWakeAt)
+      ? null
+      : {
+          assistantWakeAt: state.assistantNextWakeAt,
+        },
   };
 }
 
@@ -275,15 +426,14 @@ export async function recordTestHostedWakeTerminal(input: {
 function toStoredWakeLifecycleState(
   state: HostedWakeTerminalRequest["state"],
 ): HostedWakeLifecycleState {
-  return state === "quarantined" ? "poisoned" : state;
+  return state;
 }
 
 function isCommitEligibleStoredWakeState(
   state: HostedWakeLifecycleState | null,
 ): boolean {
   return state === "completed"
-    || state === "poisoned"
-    || state === "replaced";
+    || state === "quarantined";
 }
 
 export async function quarantineTestHostedWake(input: {
@@ -331,7 +481,7 @@ export async function readTestHostedWakeStatus(input: {
   const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
   const committedSeq = parseSeq(state.cursor.committedSeq);
   const pendingWakeCount = state.wakes.filter((wake) =>
-    wake.wakeState !== "poisoned"
+    wake.wakeState !== "quarantined"
     && wake.wakeState !== "completed"
     && wake.wakeState !== "replaced"
     && parseSeq(wake.seq) > committedSeq
@@ -358,6 +508,7 @@ async function readStoredHostedWakeControlState(
 
   if (!object) {
     return {
+      assistantNextWakeAt: null,
       cursor: {
         committedSeq: "0",
         createdAt: new Date(0).toISOString(),
@@ -388,6 +539,28 @@ async function writeStoredHostedWakeControlState(
 
 function hostedWakeControlObjectKey(userId: string): string {
   return `test/hosted-wakes/${encodeURIComponent(userId)}.json`;
+}
+
+function isStoredWakeHintDue(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const parsedMs = Date.parse(value);
+  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
+}
+
+function normalizeStoredWakeTimestamp(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const parsedMs = Date.parse(value);
+  if (!Number.isFinite(parsedMs)) {
+    return null;
+  }
+
+  return new Date(parsedMs).toISOString();
 }
 
 function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {

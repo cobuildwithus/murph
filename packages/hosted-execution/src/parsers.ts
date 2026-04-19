@@ -51,6 +51,7 @@ import type {
   HostedWakeQuarantineResponse,
   HostedWakeRecord,
   HostedWakeStatus,
+  HostedWakeStatusRequest,
   HostedWakeStatusResponse,
   HostedWakeTerminalResponse,
 } from "./contracts.ts";
@@ -548,6 +549,49 @@ export function parseHostedWakeStatusResponse(value: unknown): HostedWakeStatusR
       wakeState: parsedWakeState,
     }),
     pendingWakeCount: requireNumber(record.pendingWakeCount, "Hosted wake status response pendingWakeCount"),
+  };
+}
+
+export function parseHostedWakeStatusRequest(value: unknown): HostedWakeStatusRequest {
+  const record = requireObject(value, "Hosted wake status request");
+  const eventId = readOptionalNonBlankNullableString(
+    record.eventId,
+    "Hosted wake status request eventId",
+  );
+  const fetchProof = readOptionalNonBlankNullableString(
+    record.fetchProof,
+    "Hosted wake status request fetchProof",
+  );
+  const wakeId = readOptionalNonBlankNullableString(
+    record.wakeId,
+    "Hosted wake status request wakeId",
+  );
+  const wakeSeq = readOptionalNonBlankNullableString(
+    record.wakeSeq,
+    "Hosted wake status request wakeSeq",
+  );
+
+  if (fetchProof === undefined && wakeId === undefined && wakeSeq === undefined) {
+    return {
+      ...(eventId === undefined ? {} : { eventId }),
+    };
+  }
+
+  if (
+    fetchProof === undefined
+    || wakeId === undefined
+    || wakeSeq === undefined
+  ) {
+    throw new TypeError(
+      "Hosted wake status request fetchProof, wakeId, and wakeSeq must be provided together.",
+    );
+  }
+
+  return {
+    ...(eventId === undefined ? {} : { eventId }),
+    fetchProof,
+    wakeId,
+    wakeSeq: requireBigIntString(wakeSeq, "Hosted wake status request wakeSeq"),
   };
 }
 
@@ -1222,6 +1266,22 @@ function requireBigIntString(value: unknown, label: string): string {
   return text;
 }
 
+function readOptionalNonBlankNullableString(
+  value: unknown,
+  label: string,
+): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const text = requireString(value, label).trim();
+  return text.length > 0 ? text : null;
+}
+
 function parseHostedWakeLifecycleState(
   value: unknown,
   options?: {
@@ -1239,7 +1299,7 @@ function parseHostedWakeLifecycleState(
     || state === "backpressured"
     || state === "completed"
     || state === "replaced"
-    || state === "poisoned"
+    || state === "quarantined"
   ) {
     return state;
   }

@@ -122,7 +122,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
   memberId: string;
   prisma: HostedSharePrismaClient;
   shareId: string;
-}): Promise<HostedWakeLifecycleState> {
+}): Promise<HostedWakeLifecycleState | null> {
   const state = await readHostedShareWakeLifecycleState({
     eventId: input.eventId,
     memberId: input.memberId,
@@ -136,7 +136,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
       prisma: input.prisma,
       shareId: input.shareId,
     });
-  } else if (state === "poisoned" || state === "replaced" || state === null) {
+  } else if (state === "quarantined" || state === "replaced" || state === null) {
     await releaseHostedShareAcceptance({
       eventId: input.eventId,
       memberId: input.memberId,
@@ -145,7 +145,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
     });
   }
 
-  return state ?? "poisoned";
+  return state;
 }
 
 async function updateHostedShareAcceptanceClaim(input: {

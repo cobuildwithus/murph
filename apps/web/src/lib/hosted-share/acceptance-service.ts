@@ -231,7 +231,7 @@ async function reconcileHostedShareClaim(input: {
     };
   }
 
-  if (lifecycleState === "poisoned" || lifecycleState === "replaced") {
+  if (lifecycleState === "quarantined" || lifecycleState === "replaced" || lifecycleState === null) {
     return {
       outcome: "continue",
       record: await requireHostedShareLinkById(tx, latest.id),

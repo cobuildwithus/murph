@@ -326,7 +326,7 @@ export const HOSTED_WAKE_LIFECYCLE_STATES = [
   "backpressured",
   "completed",
   "replaced",
-  "poisoned",
+  "quarantined",
 ] as const;
 
 export type HostedWakeLifecycleState =
@@ -336,6 +336,7 @@ export interface HostedWakeStatus {
   eventId: string;
   lastError: string | null;
   replacedByEventId?: string | null;
+  // `replaced` is a coalescing lifecycle fact, not an executor-submitted terminal receipt.
   state: HostedWakeLifecycleState;
   userId: string;
 }

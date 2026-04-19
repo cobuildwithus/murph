@@ -357,6 +357,8 @@ export class RunnerStateStore {
       );
     }
 
+    // This JSON is only valid for the exact fetched wake/cursor fence captured in `input.wake`.
+    // Once that fence is stale, recovery must clear it and rebuild from the canonical web cursor.
     meta.pending_commit_json = JSON.stringify(input);
     this.rememberLastEventMetaSync(meta, input.eventId);
     this.writeMetaRowSync(meta);
@@ -696,6 +698,7 @@ function parsePendingCommitRecord(
     bundleRef?: unknown;
     committedAt?: unknown;
     eventId?: unknown;
+    finalizeToken?: unknown;
     finalizedAt?: unknown;
     result?: unknown;
     schemaVersion?: unknown;
@@ -733,6 +736,14 @@ function parsePendingCommitRecord(
   }
 
   if (
+    value.finalizeToken !== undefined
+    && value.finalizeToken !== null
+    && typeof value.finalizeToken !== "string"
+  ) {
+    throw createPendingCommitCorruptionError(userId, "finalizeToken must be a string or null");
+  }
+
+  if (
     value.finalizedAt !== undefined
     && value.finalizedAt !== null
     && typeof value.finalizedAt !== "string"
@@ -761,6 +772,7 @@ function parsePendingCommitRecord(
       ),
       committedAt: value.committedAt,
       eventId: value.eventId,
+      finalizeToken: value.finalizeToken === undefined ? null : value.finalizeToken,
       finalizedAt: value.finalizedAt === undefined ? null : value.finalizedAt,
       result,
       schemaVersion: 1,

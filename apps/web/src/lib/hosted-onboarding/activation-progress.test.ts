@@ -55,7 +55,7 @@ describe("hosted member activation progress", () => {
   it("returns false when no activation wake has been recorded", async () => {
     mocks.readLatestHostedWakeLifecycleByKind.mockResolvedValue({
       eventId: "evt_activation",
-      state: "poisoned",
+      state: "quarantined",
     });
 
     await expect(isHostedMemberActivationPending({

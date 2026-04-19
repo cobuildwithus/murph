@@ -33,7 +33,7 @@ export async function resolveHostedWakeLifecycleStateTx(input: {
   tx: HostedWakeStoreClient;
 }): Promise<HostedWakeLifecycleState> {
   if (input.record.quarantinedAt) {
-    return "poisoned";
+    return "quarantined";
   }
 
   const cursor = await ensureHostedExecutionCursorRowTx({

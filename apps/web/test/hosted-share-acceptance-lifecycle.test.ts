@@ -29,16 +29,16 @@ describe("hosted share acceptance lifecycle", () => {
     expect(prisma.share.lastEventId).toBe("evt_share");
   });
 
-  it("releases a claimed share when the wake-backed lifecycle is poisoned", async () => {
+  it("releases a claimed share when the wake-backed lifecycle is quarantined", async () => {
     const prisma = createHostedSharePrisma();
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("poisoned");
+    mocks.readHostedWakeLifecycleState.mockResolvedValue("quarantined");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
       memberId: "member_123",
       prisma: prisma as never,
       shareId: "share_123",
-    })).resolves.toBe("poisoned");
+    })).resolves.toBe("quarantined");
     expectReleased(prisma.share);
   });
 
@@ -64,7 +64,7 @@ describe("hosted share acceptance lifecycle", () => {
       memberId: "member_123",
       prisma: prisma as never,
       shareId: "share_123",
-    })).resolves.toBe("poisoned");
+    })).resolves.toBeNull();
     expectReleased(prisma.share);
   });
 });
