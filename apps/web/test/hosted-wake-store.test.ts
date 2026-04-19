@@ -1,6 +1,11 @@
+import { createHmac } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it } from "vitest";
 import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "@murphai/hosted-execution";
+import type {
+  HostedWakeSnapshotRef,
+} from "@murphai/hosted-execution/contracts";
+import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
 
 import {
   encodeHostedWakeStoredPayload,
@@ -28,7 +33,7 @@ import {
   readHostedExecutionWakeTargetTx,
 } from "@/src/lib/hosted-wake/queue";
 
-function makeSnapshotRef(label: string): Prisma.JsonObject {
+function makeSnapshotRef(label: string): HostedWakeSnapshotRef {
   return {
     hash: `hash_${label}`,
     key: `bundles/vault/${label}`,
@@ -41,7 +46,7 @@ interface TestCursorState {
   committedSeq: bigint;
   createdAt: Date;
   nextSeq: bigint;
-  snapshotRef: Prisma.JsonValue | null;
+  snapshotRef: HostedWakeSnapshotRef | null;
   updatedAt: Date;
   userId: string;
   version: bigint;
@@ -314,6 +319,54 @@ describe("hosted wake store", () => {
       wakeId: "wake_1",
       wakeSeq: 2n,
     })).rejects.toThrow(/wakeId/i);
+  });
+
+  it("accepts a legacy fetch proof that predates wakeEventId binding", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const legacyClaims = {
+      exp: nowSeconds + 5 * 60,
+      fetchedCommittedSeq: "1",
+      fetchedCursorVersion: "4",
+      iat: nowSeconds,
+      kind: "hosted-wake-fetch-proof" as const,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: "2",
+    };
+    const encodedClaims = Buffer.from(JSON.stringify(legacyClaims), "utf8").toString("base64url");
+    const signature = createHmac(
+      "sha256",
+      Buffer.from(process.env.HOSTED_WAKE_FETCH_PROOF_KEY ?? "", "hex"),
+    )
+      .update("murph.hosted-wake.fetch-proof.v1:")
+      .update(encodedClaims)
+      .digest("base64url");
+    const fetchProof = `${process.env.HOSTED_WAKE_FETCH_PROOF_KEY_ID ?? "v1"}.${encodedClaims}.${signature}`;
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof,
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
   });
 
   it("rejects recording terminal state from a stale fetch proof before cursor advancement", async () => {
@@ -1712,7 +1765,7 @@ function createHostedWakeStoreHarness(input?: {
       updateMany(args: {
         data: {
           committedSeq: bigint;
-          snapshotRef: Prisma.InputJsonValue | typeof Prisma.DbNull;
+          snapshotRef: HostedWakeSnapshotRef | typeof Prisma.DbNull;
           version: { increment: bigint | number };
         };
         where: {
@@ -1735,9 +1788,14 @@ function createHostedWakeStoreHarness(input?: {
         }
 
         state.cursor.committedSeq = args.data.committedSeq;
-        state.cursor.snapshotRef = args.data.snapshotRef === Prisma.DbNull
-          ? null
-          : args.data.snapshotRef as Prisma.JsonValue;
+        if (args.data.snapshotRef === Prisma.DbNull) {
+          state.cursor.snapshotRef = null;
+        } else {
+          state.cursor.snapshotRef = parseHostedExecutionCursorSnapshotRef(
+            structuredClone(args.data.snapshotRef),
+            "Hosted execution cursor snapshotRef",
+          );
+        }
         state.cursor.version += BigInt(args.data.version.increment);
         state.cursor.updatedAt = new Date(state.cursor.updatedAt.getTime() + 1);
         return { count: 1 };

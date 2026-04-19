@@ -30,6 +30,7 @@ import type { R2BucketLike } from "../../src/bundle-store.js";
 type StoredHostedWakeRecord = HostedWakeRecord & {
   wakeState: HostedWakeLifecycleState;
   eventId: string;
+  terminalState?: HostedWakeTerminalRequest["state"] | null;
   payloadBytes?: number | null;
   payloadCiphertext?: string | null;
 };
@@ -80,11 +81,13 @@ export async function appendTestHostedWake(input: {
       }),
       payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq,
+      terminalState: null,
       updatedAt: now,
       userId: wake.userId,
     } satisfies HostedConversationMessageWakeRecord & {
       wakeState: HostedWakeLifecycleState;
       eventId: string;
+      terminalState?: HostedWakeTerminalRequest["state"] | null;
     }
     : {
       behavior: "ordered",
@@ -102,11 +105,13 @@ export async function appendTestHostedWake(input: {
       }),
       payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq,
+      terminalState: null,
       updatedAt: now,
       userId: wake.userId,
     } satisfies HostedSystemWakeRecord & {
       wakeState: HostedWakeLifecycleState;
       eventId: string;
+      terminalState?: HostedWakeTerminalRequest["state"] | null;
     };
 
   state.nextSeq += 1;
@@ -178,9 +183,9 @@ export async function commitTestHostedWakeCursor(input: {
         committedSeq !== currentCommittedSeq + 1n
         || committedSeq >= parseSeq(state.cursor.nextSeq)
         || !targetWake
-        || (targetWake.wakeState !== "completed"
-          && targetWake.wakeState !== "replaced"
-          && targetWake.wakeState !== "poisoned")
+        || (targetWake.terminalState !== "completed"
+          && targetWake.terminalState !== "quarantined"
+          && targetWake.terminalState !== "replaced")
       ))
     || (committedSeq < currentCommittedSeq)
     || (!shouldAdvanceCommittedSeq && committedSeq !== currentCommittedSeq)
@@ -222,12 +227,13 @@ export async function recordTestHostedWakeTerminal(input: {
     candidate.id === input.body.wakeId
     && candidate.seq === input.body.wakeSeq);
 
-  if (!wake || input.body.fetchProof !== `${wake.id}:${wake.seq}:${wake.updatedAt}`) {
+  if (!wake || input.body.fetchProof !== buildStoredWakeFetchProof(wake)) {
     return {
       recorded: false,
     };
   }
 
+  wake.terminalState = input.body.state;
   wake.wakeState = toStoredWakeLifecycleState(input.body.state);
   wake.updatedAt = new Date().toISOString();
   await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
@@ -253,10 +259,11 @@ export async function quarantineTestHostedWake(input: {
     && candidate.seq === input.body.wakeSeq
   );
 
-  if (!wake || input.body.fetchProof !== `${wake.id}:${wake.seq}:${wake.updatedAt}`) {
+  if (!wake || input.body.fetchProof !== buildStoredWakeFetchProof(wake)) {
     return { quarantined: false };
   }
 
+  wake.terminalState = "quarantined";
   wake.wakeState = "poisoned";
   wake.quarantineCode = input.body.quarantineCode;
   wake.quarantinedAt = new Date().toISOString();
@@ -374,8 +381,12 @@ function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {
 function toHostedFetchedWakeRecord(wake: StoredHostedWakeRecord): HostedFetchedWakeRecord {
   return {
     ...toHostedWakeRecord(wake),
-    fetchProof: `${wake.id}:${wake.seq}:${wake.updatedAt}`,
+    fetchProof: buildStoredWakeFetchProof(wake),
   };
+}
+
+function buildStoredWakeFetchProof(wake: Pick<StoredHostedWakeRecord, "eventId" | "id" | "seq">): string {
+  return `${wake.id}:${wake.seq}:${wake.eventId}`;
 }
 
 function parseSeq(value: string): bigint {

@@ -11,6 +11,7 @@ import {
 } from "@murphai/gateway-core";
 import {
   buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   deriveHostedExecutionErrorCode,
@@ -1110,6 +1111,91 @@ describe("HostedUserRunner", () => {
       deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
     });
     expect(fetchHostedWakeBatchFromWeb).toHaveBeenCalledOnce();
+  });
+
+  it("revalidates stale future device-sync hints on a bounded alarm and drains the materialized wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    await seedRunnerQueueState({
+      runtimeBootstrapped: true,
+      bucket,
+      environment,
+      storage,
+      userId: "member_123",
+    });
+    const fetchSpy = vi.fn().mockImplementation(async (_url, init) => {
+      const request = readRunnerJobRequest(JSON.parse(String(init?.body)));
+
+      return createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+        payload: request.wake.eventId === "evt_seed_future_device_sync_hint"
+          ? createRunnerSuccessPayload({
+            wakeMaterializationHints: {
+              deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
+            },
+          })
+          : undefined,
+      });
+    });
+    vi.stubGlobal("fetch", createHostedWakeAwareFetch({ bucket, handler: fetchSpy }));
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockImplementation(async () => {
+      const occurredAt = new Date(Date.now()).toISOString();
+      const appended = await appendTestHostedWake({
+        bucket: bucket.api,
+        wake: buildHostedExecutionDeviceSyncWake({
+          connectionId: "conn_due_1",
+          eventId: `device-sync.wake:member_123:${occurredAt}`,
+          hint: {
+            nextReconcileAt: "2026-03-26T12:00:00.000Z",
+            occurredAt,
+            reason: "reconcile_due",
+          },
+          occurredAt,
+          provider: "oura",
+          reason: "reconcile_due",
+          userId: "member_123",
+        }),
+      });
+
+      return {
+        targetSeqHint: appended.wake.seq,
+        wakeMaterializationHints: {
+          deviceSyncWakeAt: "2026-03-26T12:50:00.000Z",
+        },
+      };
+    });
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    const seededStatus = await runner.wake(createWake("evt_seed_future_device_sync_hint"));
+    expect(seededStatus.nextWakeAt).toBe("2026-03-26T12:01:00.000Z");
+
+    vi.setSystemTime(new Date("2026-03-26T12:01:00.000Z"));
+    await runner.alarm();
+
+    expect(materializeHostedDueWakesInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      body: {
+        wakeMaterializationHints: {
+          deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
+        },
+      },
+      boundUserId: "member_123",
+    }));
+    expect(readDispatchedEventIds(fetchSpy)).toEqual([
+      "evt_seed_future_device_sync_hint",
+      "device-sync.wake:member_123:2026-03-26T12:01:00.000Z",
+    ]);
+    await expect(new RunnerStateStore(storage.state as never).readWakeMaterializationHints()).resolves.toEqual({
+      deviceSyncWakeAt: "2026-03-26T12:50:00.000Z",
+    });
+    const status = await runner.status();
+    expect(status.nextWakeAt).toBe("2026-03-26T12:02:00.000Z");
   });
 
   it("passes the worker commit callback metadata through the runner container invoke request", async () => {
@@ -2314,6 +2400,16 @@ describe("HostedUserRunner", () => {
       bucket: bucket.api,
       wake: dispatch,
     });
+    const fetched = await fetchTestHostedWakeBatch({
+      body: {
+        afterSeq: null,
+        limit: 1,
+      },
+      bucket: bucket.api,
+      userId: dispatch.userId,
+    });
+    const fetchProof = fetched.wakes.find((wake) => wake.id === appended.wake.id)?.fetchProof;
+    expect(fetchProof).toBeTruthy();
     await seedRunnerQueueState({
       bucket,
       environment,
@@ -2324,7 +2420,7 @@ describe("HostedUserRunner", () => {
     });
     await quarantineTestHostedWake({
       body: {
-        fetchProof: `${appended.wake.id}:${appended.wake.seq}:${appended.wake.updatedAt}`,
+        fetchProof: String(fetchProof),
         quarantineCode: "duplicate-poisoned-test",
         wakeId: appended.wake.id,
         wakeSeq: appended.wake.seq,
@@ -2512,6 +2608,16 @@ describe("HostedUserRunner", () => {
       bucket: bucket.api,
       wake: dispatch,
     });
+    const fetched = await fetchTestHostedWakeBatch({
+      body: {
+        afterSeq: null,
+        limit: 1,
+      },
+      bucket: bucket.api,
+      userId: dispatch.userId,
+    });
+    const fetchProof = fetched.wakes.find((wake) => wake.id === appended.wake.id)?.fetchProof;
+    expect(fetchProof).toBeTruthy();
     await seedRunnerQueueState({
       bucket,
       environment,
@@ -2522,7 +2628,7 @@ describe("HostedUserRunner", () => {
     });
     await quarantineTestHostedWake({
       body: {
-        fetchProof: `${appended.wake.id}:${appended.wake.seq}:${appended.wake.updatedAt}`,
+        fetchProof: String(fetchProof),
         quarantineCode: "poison-expiry-test",
         wakeId: appended.wake.id,
         wakeSeq: appended.wake.seq,
@@ -2581,7 +2687,7 @@ describe("HostedUserRunner", () => {
     ]));
   });
 
-  it("reads runner secrets encrypted with a previous key id after rotation", async () => {
+  it("reads runner secrets encrypted with a previous key id after activation repairs the legacy envelope location", async () => {
     const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const previousEnvironment = {
       ...environment,
@@ -2626,6 +2732,9 @@ describe("HostedUserRunner", () => {
         })),
       }),
     );
+
+    await runner.wake(createActivationWake("evt_repair_rotated_user_env"));
+    storage.runnerContainerFetch.mockClear();
 
     await runner.wake(createWake("evt_rotated_user_env"));
 
