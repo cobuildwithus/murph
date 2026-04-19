@@ -599,6 +599,54 @@ describe("hosted wake store", () => {
     })).rejects.toThrow(/stale/i);
   });
 
+  it("rejects quarantining a wake from a legacy fetch proof that omits wakeEventId binding", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const legacyClaims = {
+      exp: nowSeconds + 5 * 60,
+      fetchedCommittedSeq: "1",
+      fetchedCursorVersion: "4",
+      iat: nowSeconds,
+      kind: "hosted-wake-fetch-proof" as const,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: "2",
+    };
+    const encodedClaims = Buffer.from(JSON.stringify(legacyClaims), "utf8").toString("base64url");
+    const signature = createHmac(
+      "sha256",
+      Buffer.from(process.env.HOSTED_WAKE_FETCH_PROOF_KEY ?? "", "hex"),
+    )
+      .update("murph.hosted-wake.fetch-proof.v1:")
+      .update(encodedClaims)
+      .digest("base64url");
+    const fetchProof = `${process.env.HOSTED_WAKE_FETCH_PROOF_KEY_ID ?? "v1"}.${encodedClaims}.${signature}`;
+
+    await expect(quarantineHostedWakeTx({
+      fetchProof,
+      quarantineCode: "invalid-wake-payload",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).rejects.toThrow(/required claims/i);
+  });
+
   it("locks the cursor before quarantining a wake", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
