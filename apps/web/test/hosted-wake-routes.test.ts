@@ -11,6 +11,7 @@ const TEST_SNAPSHOT_REF = {
 } as const;
 
 const mocks = vi.hoisted(() => ({
+  HostedWakeFetchProofStaleError: class HostedWakeFetchProofStaleError extends TypeError {},
   appendHostedExecutionWakePayloadTx: vi.fn(),
   commitHostedExecutionCursorTx: vi.fn(),
   countPendingHostedWakes: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock("@/src/lib/hosted-wake/queue", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-wake/store", () => ({
+  HostedWakeFetchProofStaleError: mocks.HostedWakeFetchProofStaleError,
   commitHostedExecutionCursorTx: mocks.commitHostedExecutionCursorTx,
   countPendingHostedWakes: mocks.countPendingHostedWakes,
   listHostedWakeRepairCandidates: mocks.listHostedWakeRepairCandidates,
@@ -380,6 +382,33 @@ describe("hosted wake internal routes", () => {
       userId: "member_123",
       wakeId: "wake_24",
       wakeSeq: 24n,
+    });
+  });
+
+  it("maps stale hosted wake terminal fetch fences to a specific conflict response", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      fetchProof: "proof_24",
+      state: "completed",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    });
+    mocks.recordHostedWakeTerminalTx.mockRejectedValue(new mocks.HostedWakeFetchProofStaleError(
+      "Hosted wake fetch proof is stale for the current cursor.",
+    ));
+
+    const { HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE } = await import(
+      "@murphai/hosted-execution/contracts"
+    );
+
+    const { POST } = await import("../app/api/internal/hosted-wake/terminal/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE,
+        message: "Hosted wake fetch proof is stale.",
+      },
     });
   });
 

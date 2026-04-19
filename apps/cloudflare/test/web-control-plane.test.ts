@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 
 import {
+  HostedWakeTerminalStaleFetchProofError,
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
   quarantineHostedWakeInWeb,
@@ -226,6 +227,34 @@ describe("cloudflare web control plane wake helpers", () => {
       wakeId: "wake_24",
       wakeSeq: "24",
     });
+  });
+
+  it("surfaces stale hosted wake terminal receipts as a dedicated error", async () => {
+    await expect(
+      recordHostedWakeTerminalInWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          fetchProof: "proof_24",
+          state: "completed",
+          wakeId: "wake_24",
+          wakeSeq: "24",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async () => new Response(
+          JSON.stringify({
+            error: {
+              code: "HOSTED_WAKE_FETCH_PROOF_STALE",
+              message: "Hosted wake fetch proof is stale.",
+            },
+          }),
+          {
+            headers: { "content-type": "application/json; charset=utf-8" },
+            status: 409,
+          },
+        )) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).rejects.toBeInstanceOf(HostedWakeTerminalStaleFetchProofError);
   });
 
   it("reads canonical hosted wake status from the web control plane", async () => {
