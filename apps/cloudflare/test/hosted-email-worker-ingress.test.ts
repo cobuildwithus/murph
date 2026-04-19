@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedWakeInWeb: vi.fn(),
+  appendHostedEmailIngressWakeInWeb: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
   readHostedExecutionEnvironment: vi.fn(),
   resolveHostedExecutionUserCryptoContext: vi.fn(),
@@ -14,6 +14,17 @@ vi.mock("../src/env.ts", () => ({
   readHostedExecutionEnvironment: mocks.readHostedExecutionEnvironment,
 }));
 
+vi.mock("../src/web-control-plane-email-ingress.ts", async () => {
+  const actual = await vi.importActual<typeof import("../src/web-control-plane-email-ingress.ts")>(
+    "../src/web-control-plane-email-ingress.ts",
+  );
+
+  return {
+    ...actual,
+    appendHostedEmailIngressWakeInWeb: mocks.appendHostedEmailIngressWakeInWeb,
+  };
+});
+
 vi.mock("../src/web-control-plane.ts", async () => {
   const actual = await vi.importActual<typeof import("../src/web-control-plane.ts")>(
     "../src/web-control-plane.ts",
@@ -21,7 +32,6 @@ vi.mock("../src/web-control-plane.ts", async () => {
 
   return {
     ...actual,
-    appendHostedWakeInWeb: mocks.appendHostedWakeInWeb,
     fetchHostedExecutionWebControlPlaneResponse: mocks.fetchHostedExecutionWebControlPlaneResponse,
   };
 });
@@ -72,7 +82,7 @@ describe("hosted email worker ingress", () => {
       rootKey: TEST_KEY,
       rootKeyId: "v1",
     });
-    mocks.appendHostedWakeInWeb.mockResolvedValue({
+    mocks.appendHostedEmailIngressWakeInWeb.mockResolvedValue({
       duplicate: false,
       inserted: true,
       updatedExisting: false,
@@ -167,22 +177,22 @@ describe("hosted email worker ingress", () => {
       to: replyAliasAddress,
     }, createWorkerEnv(bucket));
 
-    expect(mocks.appendHostedWakeInWeb).toHaveBeenCalledTimes(1);
-    const [appendInput] = mocks.appendHostedWakeInWeb.mock.calls[0] ?? [];
-    expect(appendInput.wake).toMatchObject({
-      kind: "conversation.message",
-      userId: "user_123",
-      message: {
-        channel: "email",
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput).toMatchObject({
+      body: {
+        eventId: expect.any(String),
         identityId: "assistant@mail.example.test",
+        occurredAt: expect.any(String),
         selfAddress: replyAliasAddress,
       },
+      boundUserId: "user_123",
     });
     expect(mocks.wakeHostedWakes).toHaveBeenCalledWith({
       targetSeqHint: "24",
     });
 
-    const rawMessageKey = appendInput?.wake?.message?.rawMessageKey;
+    const rawMessageKey = appendInput?.body?.rawMessageKey;
     expect(typeof rawMessageKey).toBe("string");
     await expect(readHostedEmailRawMessage({
       bucket,
@@ -220,17 +230,16 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket));
 
-    expect(mocks.appendHostedWakeInWeb).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
-      wake: expect.objectContaining({
-        kind: "conversation.message",
-        userId: "user_456",
-        message: expect.objectContaining({
-          channel: "email",
-          identityId: "assistant@mail.example.test",
-          selfAddress: "assistant@mail.example.test",
-        }),
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        eventId: expect.any(String),
+        identityId: "assistant@mail.example.test",
+        occurredAt: expect.any(String),
+        rawMessageKey: expect.any(String),
+        selfAddress: "assistant@mail.example.test",
       }),
+      boundUserId: "user_456",
     }));
     expect(mocks.wakeHostedWakes).toHaveBeenCalledWith({
       targetSeqHint: "24",
@@ -265,7 +274,7 @@ describe("hosted email worker ingress", () => {
     }, createWorkerEnv(bucket));
 
     expect(setReject).not.toHaveBeenCalled();
-    expect(mocks.appendHostedWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
     expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
@@ -289,7 +298,7 @@ describe("hosted email worker ingress", () => {
     }, createWorkerEnv(bucket))).rejects.toThrow(/callback unavailable/u);
 
     expect(setReject).not.toHaveBeenCalled();
-    expect(mocks.appendHostedWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
     expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
@@ -313,7 +322,7 @@ describe("hosted email worker ingress", () => {
     }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 503/u);
 
     expect(setReject).not.toHaveBeenCalled();
-    expect(mocks.appendHostedWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
     expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });

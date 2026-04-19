@@ -24,11 +24,10 @@ import {
   type WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
-import { buildHostedExecutionEmailConversationMessageWake } from "@murphai/hosted-execution";
 import {
-  appendHostedWakeInWeb,
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
+import { appendHostedEmailIngressWakeInWeb } from "../web-control-plane-email-ingress.ts";
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 
 const HOSTED_WEB_EMAIL_AUTHORIZATION_PATH = "/api/internal/hosted-execution/email/authorization";
@@ -124,20 +123,19 @@ export async function handleHostedEmailIngress(
     userId: route.userId,
   });
   const eventId = `email:${rawMessageKey}`;
-  const wake = buildHostedExecutionEmailConversationMessageWake({
-    eventId,
-    identityId: route.identityId,
-    occurredAt: new Date().toISOString(),
-    rawMessageKey,
-    selfAddress: route.routeAddress,
-    userId: route.userId,
-  });
+  const occurredAt = new Date().toISOString();
 
-  const append = await appendHostedWakeInWeb({
+  const append = await appendHostedEmailIngressWakeInWeb({
     baseUrl: environment.hostedWebBaseUrl,
+    body: {
+      eventId,
+      identityId: route.identityId,
+      occurredAt,
+      rawMessageKey,
+      selfAddress: route.routeAddress,
+    },
     boundUserId: route.userId,
     callbackSigning: environment.webCallbackSigning,
-    wake,
     fetchImpl: fetch,
     timeoutMs: environment.runnerTimeoutMs,
   });
