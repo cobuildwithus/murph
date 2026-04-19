@@ -9,6 +9,10 @@ export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
 }
 
+export interface WorkerBootstrapUserRunnerStubLike extends WorkerUserRunnerStubLike {
+  bootstrapUser(userId: string): Promise<{ userId: string }>;
+}
+
 export interface WorkerUserRunnerNamespaceLike<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > {
