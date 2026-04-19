@@ -18,7 +18,6 @@ import type { RunnerPendingCommitRecord } from "../../src/user-runner/types.js";
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import {
-  appendHostedWakeInWeb,
   readHostedWakeStatusFromWeb,
 } from "../../src/web-control-plane.ts";
 import {
@@ -39,6 +38,7 @@ import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import { encryptTestHostedWakePayload } from "../hosted-execution-fixtures.js";
+import { appendTestHostedWake } from "./test-hosted-wake-control.ts";
 
 type TestWorkerEnvironment = WorkerEnvironmentSource & {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
@@ -73,11 +73,11 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
-    return wakeRunnerForTest(this.runner, this.runtimeEnv, input);
+    return wakeRunnerForTest(this.bucket, this.runner, input);
   }
 
   async wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult> {
-    return wakeRunnerWithOutcomeForTest(this.runner, this.runtimeEnv, input);
+    return wakeRunnerWithOutcomeForTest(this.bucket, this.runner, this.runtimeEnv, input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -113,6 +113,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
       bundleRef: bundleRecord.bundleRef,
       committedAt: new Date().toISOString(),
       eventId: input.wake.eventId,
+      finalizeToken: null,
       finalizedAt: null,
       result: input.payload.result.result,
       schemaVersion: 1,
@@ -128,16 +129,13 @@ export class VitestUserRunnerDurableObject extends DurableObject {
 }
 
 async function wakeRunnerForTest(
+  bucket: R2BucketLike,
   runner: HostedUserRunner,
-  runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
   wake: HostedExecutionWake,
 ): Promise<HostedExecutionUserStatus> {
   await runner.bootstrapUser(wake.userId);
-  const append = await appendHostedWakeInWeb({
-    baseUrl: runtimeEnv.hostedWebBaseUrl,
-    boundUserId: wake.userId,
-    callbackSigning: runtimeEnv.webCallbackSigning,
-    timeoutMs: runtimeEnv.runnerTimeoutMs,
+  const append = await appendTestHostedWake({
+    bucket,
     wake,
   });
 
@@ -148,16 +146,14 @@ async function wakeRunnerForTest(
 }
 
 async function wakeRunnerWithOutcomeForTest(
+  bucket: R2BucketLike,
   runner: HostedUserRunner,
   runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
   wake: HostedExecutionWake,
 ): Promise<HostedWakeExecutionResult> {
   await runner.bootstrapUser(wake.userId);
-  const append = await appendHostedWakeInWeb({
-    baseUrl: runtimeEnv.hostedWebBaseUrl,
-    boundUserId: wake.userId,
-    callbackSigning: runtimeEnv.webCallbackSigning,
-    timeoutMs: runtimeEnv.runnerTimeoutMs,
+  const append = await appendTestHostedWake({
+    bucket,
     wake,
   });
 

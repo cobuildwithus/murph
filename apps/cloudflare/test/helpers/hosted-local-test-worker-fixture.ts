@@ -6,25 +6,20 @@ import path from "node:path";
 
 import type {
   HostedExecutionUserStatus,
-  HostedWakeAppendRequest,
   HostedWakeCommitRequest,
   HostedWakeFetchRequest,
-  HostedWakeMaterializeRequest,
+  HostedWakeFinalizeRequest,
   HostedWakeQuarantineRequest,
   HostedWakeStatusRequest,
   HostedWakeTerminalRequest,
-} from "@murphai/hosted-execution";
-import {
-  parseHostedWakeAppendRequest,
-} from "@murphai/hosted-execution";
-import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+} from "@murphai/hosted-execution/contracts";
 
 import { repoRoot } from "../../vitest.shared.js";
 import type { R2BucketLike } from "../../src/bundle-store.js";
 import {
-  appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
+  finalizeTestHostedWakeCursor,
   materializeTestHostedWakes,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
@@ -352,15 +347,6 @@ async function handleHostedWakeControlRequest(
     return;
   }
 
-  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/append") {
-    const body = parseHostedWakeAppendRequest(await readJsonBody<HostedWakeAppendRequest>(request));
-    response.end(JSON.stringify(await appendTestHostedWake({
-      bucket,
-      wake: parseHostedExecutionWake(body.wake),
-    })));
-    return;
-  }
-
   if (method === "POST" && url.pathname === "/api/internal/hosted-wake/unseen") {
     const body = await readJsonBody<HostedWakeFetchRequest>(request);
     response.end(JSON.stringify(await fetchTestHostedWakeBatch({
@@ -381,6 +367,16 @@ async function handleHostedWakeControlRequest(
     return;
   }
 
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/finalize") {
+    const body = await readJsonBody<HostedWakeFinalizeRequest>(request);
+    response.end(JSON.stringify(await finalizeTestHostedWakeCursor({
+      body,
+      bucket,
+      userId,
+    })));
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/api/internal/hosted-wake/terminal") {
     const body = await readJsonBody<HostedWakeTerminalRequest>(request);
     response.end(JSON.stringify(await recordTestHostedWakeTerminal({
@@ -392,9 +388,8 @@ async function handleHostedWakeControlRequest(
   }
 
   if (method === "POST" && url.pathname === "/api/internal/hosted-wake/materialize") {
-    const body = await readJsonBody<HostedWakeMaterializeRequest>(request);
     response.end(JSON.stringify(await materializeTestHostedWakes({
-      body,
+      body: {},
       bucket,
       userId,
     })));

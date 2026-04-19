@@ -1,14 +1,12 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE,
-  type HostedExecutionWake,
-  type HostedWakeAppendRequest,
-  type HostedWakeAppendResponse,
   type HostedWakeCommitRequest,
   type HostedWakeCommitResponse,
   type HostedWakeFetchRequest,
   type HostedWakeFetchResponse,
-  type HostedWakeMaterializeRequest,
+  type HostedWakeFinalizeRequest,
+  type HostedWakeFinalizeResponse,
   type HostedWakeMaterializeResponse,
   type HostedWakeTerminalRequest,
   type HostedWakeTerminalResponse,
@@ -18,9 +16,9 @@ import {
   type HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
 import {
-  parseHostedWakeAppendResponse,
   parseHostedWakeCommitResponse,
   parseHostedWakeFetchResponse,
+  parseHostedWakeFinalizeResponse,
   parseHostedWakeMaterializeResponse,
   parseHostedWakeTerminalResponse,
   parseHostedWakeQuarantineResponse,
@@ -116,45 +114,15 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   });
 }
 
-const HOSTED_WEB_HOSTED_WAKE_APPEND_PATH = "/api/internal/hosted-wake/append";
 const HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH = "/api/internal/hosted-wake/commit";
+const HOSTED_WEB_HOSTED_WAKE_FINALIZE_PATH = "/api/internal/hosted-wake/finalize";
 const HOSTED_WEB_HOSTED_WAKE_MATERIALIZE_PATH = "/api/internal/hosted-wake/materialize";
 const HOSTED_WEB_HOSTED_WAKE_TERMINAL_PATH = "/api/internal/hosted-wake/terminal";
 const HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH = "/api/internal/hosted-wake/quarantine";
 const HOSTED_WEB_HOSTED_WAKE_STATUS_PATH = "/api/internal/hosted-wake/status";
 const HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH = "/api/internal/hosted-wake/unseen";
 
-export async function appendHostedWakeInWeb(input: {
-  baseUrl: string;
-  boundUserId: string;
-  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
-  fetchImpl?: typeof fetch;
-  timeoutMs: number | null;
-  wake: HostedExecutionWake;
-}): Promise<HostedWakeAppendResponse> {
-  const body = JSON.stringify({
-    wake: input.wake,
-  } satisfies HostedWakeAppendRequest);
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body,
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_APPEND_PATH,
-    timeoutMs: input.timeoutMs,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Hosted wake append failed with HTTP ${response.status}.`);
-  }
-
-  return parseHostedWakeAppendResponse(await response.json());
-}
-
 export async function fetchHostedWakeBatchFromWeb(input: {
-  afterSeq?: string | null;
   baseUrl: string;
   boundUserId: string;
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
@@ -163,7 +131,6 @@ export async function fetchHostedWakeBatchFromWeb(input: {
   timeoutMs: number | null;
 }): Promise<HostedWakeFetchResponse> {
   const body = JSON.stringify({
-    ...(input.afterSeq === undefined ? {} : { afterSeq: input.afterSeq }),
     ...(input.limit === undefined ? {} : { limit: input.limit }),
   } satisfies HostedWakeFetchRequest);
   const response = await fetchHostedExecutionWebControlPlaneResponse({
@@ -210,6 +177,32 @@ export async function commitHostedWakeCursorToWeb(input: {
   return parseHostedWakeCommitResponse(await response.json());
 }
 
+export async function finalizeHostedWakeCursorInWeb(input: {
+  baseUrl: string;
+  body: HostedWakeFinalizeRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedWakeFinalizeResponse> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body: JSON.stringify(input.body),
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_HOSTED_WAKE_FINALIZE_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted wake cursor finalize failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedWakeFinalizeResponse(await response.json());
+}
+
 export async function recordHostedWakeTerminalInWeb(input: {
   baseUrl: string;
   body: HostedWakeTerminalRequest;
@@ -251,7 +244,6 @@ export async function recordHostedWakeTerminalInWeb(input: {
 
 export async function materializeHostedDueWakesInWeb(input: {
   baseUrl: string;
-  body: HostedWakeMaterializeRequest;
   boundUserId: string;
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
   fetchImpl?: typeof fetch;
@@ -259,7 +251,6 @@ export async function materializeHostedDueWakesInWeb(input: {
 }): Promise<HostedWakeMaterializeResponse> {
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: input.baseUrl,
-    body: JSON.stringify(input.body),
     boundUserId: input.boundUserId,
     callbackSigning: input.callbackSigning,
     fetchImpl: input.fetchImpl,

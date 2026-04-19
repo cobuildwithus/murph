@@ -443,12 +443,6 @@ export interface HostedWakeFinalizeResponse {
   cursor: HostedExecutionCursorState;
 }
 
-export interface HostedExecutionWakeAppendRequest {
-  wake: HostedExecutionWake;
-}
-
-export type HostedWakeAppendRequest = HostedExecutionWakeAppendRequest;
-
 export interface HostedWakeAppendResponse {
   duplicate: boolean;
   inserted: boolean;
@@ -495,10 +489,14 @@ export interface HostedWakeQuarantineResponse {
 
 export interface HostedWakeStatusRequest {
   eventId?: string | null;
+  fetchProof?: string | null;
+  wakeId?: string | null;
+  wakeSeq?: string | null;
 }
 
 export interface HostedWakeStatusResponse {
   cursor: HostedExecutionCursorState;
+  fetchProofCurrent?: boolean;
   replacedByEventId?: string | null;
   wakeState?: HostedWakeLifecycleState | null;
   pendingWakeCount: number;
