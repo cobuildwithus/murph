@@ -122,7 +122,7 @@ export function normalizeAssistantProviderConfig(
   input: AssistantProviderConfigInput | null | undefined,
 ): AssistantProviderConfig {
   return sanitizeAssistantProviderConfig(
-    resolveAssistantProvider(inferAssistantProviderFromConfigInput(input)),
+    resolveAssistantProvider(resolveAssistantProviderForNormalization(input)),
     input,
   )
 }
@@ -438,6 +438,39 @@ function normalizeAssistantPresetId(
   value: SetupAssistantProviderPreset | string | null | undefined,
 ): SetupAssistantProviderPreset | null {
   return resolveOpenAICompatibleProviderPresetFromId(value)?.id ?? null
+}
+
+function resolveAssistantProviderForNormalization(
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantChatProvider | null {
+  if (input?.provider) {
+    return input.provider
+  }
+
+  if (
+    normalizeNullableString(input?.baseUrl) ||
+    normalizeNullableString(input?.apiKeyEnv) ||
+    normalizeNullableString(input?.providerName) ||
+    normalizeAssistantPresetId(input?.presetId) ||
+    normalizeAssistantHeaders(input?.headers) ||
+    normalizeAssistantWebSearchMode(input?.webSearch) ||
+    input?.zeroDataRetention === true
+  ) {
+    return 'openai-compatible'
+  }
+
+  if (
+    normalizeNullableString(input?.codexCommand) ||
+    normalizeNullableString(input?.codexHome) ||
+    normalizeNullableString(input?.profile) ||
+    input?.approvalPolicy !== null && input?.approvalPolicy !== undefined ||
+    input?.sandbox !== null && input?.sandbox !== undefined ||
+    input?.oss === true
+  ) {
+    return 'codex-cli'
+  }
+
+  return null
 }
 
 function canonicalizeAssistantHeaderName(key: string): string {
