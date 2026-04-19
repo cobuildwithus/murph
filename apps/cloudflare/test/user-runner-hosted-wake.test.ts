@@ -89,6 +89,18 @@ describe("HostedUserRunner hosted wake drain", () => {
       nextSeq: "3",
       version: "cursor_v1",
     });
+    const cursorAfterFirstCommit = createCursorState({
+      committedSeq: "1",
+      nextSeq: "3",
+      updatedAt: "2026-03-26T12:00:01.000Z",
+      version: "cursor_v2",
+    });
+    const finalCursor = createCursorState({
+      committedSeq: "2",
+      nextSeq: "3",
+      updatedAt: "2026-03-26T12:00:02.000Z",
+      version: "cursor_v3",
+    });
     const poisonedWake = createHostedWakeRecord({
       cursor: initialCursor,
       payload: {
@@ -96,8 +108,13 @@ describe("HostedUserRunner hosted wake drain", () => {
       },
       seq: "1",
     });
-    const followingWake = createHostedWakeRecord({
+    const staleFollowingWake = createHostedWakeRecord({
       cursor: initialCursor,
+      payload: createWake("evt_after_poison"),
+      seq: "2",
+    });
+    const followingWake = createHostedWakeRecord({
+      cursor: cursorAfterFirstCommit,
       payload: createWake("evt_after_poison"),
       seq: "2",
     });
@@ -111,16 +128,15 @@ describe("HostedUserRunner hosted wake drain", () => {
         cursor: initialCursor,
         wakes: [
           poisonedWake,
-          followingWake,
+          staleFollowingWake,
         ],
       })
       .mockResolvedValueOnce({
-        cursor: createCursorState({
-          committedSeq: "2",
-          nextSeq: "3",
-          updatedAt: "2026-03-26T12:00:02.000Z",
-          version: "cursor_v3",
-        }),
+        cursor: cursorAfterFirstCommit,
+        wakes: [followingWake],
+      })
+      .mockResolvedValueOnce({
+        cursor: finalCursor,
         wakes: [],
       });
     const quarantineHostedWakeInWeb = vi.spyOn(webControlPlane, "quarantineHostedWakeInWeb");
@@ -130,12 +146,10 @@ describe("HostedUserRunner hosted wake drain", () => {
     const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
     commitHostedWakeCursorToWeb.mockResolvedValueOnce({
       committed: true,
-      cursor: createCursorState({
-        committedSeq: "2",
-        nextSeq: "3",
-        updatedAt: "2026-03-26T12:00:02.000Z",
-        version: "cursor_v3",
-      }),
+      cursor: cursorAfterFirstCommit,
+    }).mockResolvedValueOnce({
+      committed: true,
+      cursor: finalCursor,
     });
     const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
     recordHostedWakeTerminalInWeb.mockResolvedValue({
@@ -143,12 +157,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     });
     const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
     readHostedWakeStatusFromWeb.mockResolvedValue({
-      cursor: createCursorState({
-        committedSeq: "2",
-        nextSeq: "3",
-        updatedAt: "2026-03-26T12:00:02.000Z",
-        version: "cursor_v3",
-      }),
+      cursor: finalCursor,
       pendingWakeCount: 0,
     });
 
@@ -194,14 +203,31 @@ describe("HostedUserRunner hosted wake drain", () => {
       nextSeq: "3",
       version: "cursor_v1",
     });
+    const cursorAfterFirstCommit = createCursorState({
+      committedSeq: "1",
+      nextSeq: "3",
+      updatedAt: "2026-03-26T12:00:01.000Z",
+      version: "cursor_v2",
+    });
+    const finalCursor = createCursorState({
+      committedSeq: "2",
+      nextSeq: "3",
+      updatedAt: "2026-03-26T12:00:02.000Z",
+      version: "cursor_v3",
+    });
     const quarantinedWake = createHostedWakeRecord({
       cursor: initialCursor,
       quarantineCode: "invalid-wake-payload",
       quarantinedAt: "2026-03-26T12:00:00.500Z",
       seq: "1",
     });
-    const followingWake = createHostedWakeRecord({
+    const staleFollowingWake = createHostedWakeRecord({
       cursor: initialCursor,
+      payload: createWake("evt_after_quarantine"),
+      seq: "2",
+    });
+    const followingWake = createHostedWakeRecord({
+      cursor: cursorAfterFirstCommit,
       payload: createWake("evt_after_quarantine"),
       seq: "2",
     });
@@ -215,27 +241,24 @@ describe("HostedUserRunner hosted wake drain", () => {
         cursor: initialCursor,
         wakes: [
           quarantinedWake,
-          followingWake,
+          staleFollowingWake,
         ],
       })
       .mockResolvedValueOnce({
-        cursor: createCursorState({
-          committedSeq: "2",
-          nextSeq: "3",
-          updatedAt: "2026-03-26T12:00:02.000Z",
-          version: "cursor_v2",
-        }),
+        cursor: cursorAfterFirstCommit,
+        wakes: [followingWake],
+      })
+      .mockResolvedValueOnce({
+        cursor: finalCursor,
         wakes: [],
       });
     const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
     commitHostedWakeCursorToWeb.mockResolvedValueOnce({
       committed: true,
-      cursor: createCursorState({
-        committedSeq: "2",
-        nextSeq: "3",
-        updatedAt: "2026-03-26T12:00:02.000Z",
-        version: "cursor_v2",
-      }),
+      cursor: cursorAfterFirstCommit,
+    }).mockResolvedValueOnce({
+      committed: true,
+      cursor: finalCursor,
     });
     const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
     recordHostedWakeTerminalInWeb.mockResolvedValue({
@@ -244,12 +267,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     const quarantineHostedWakeInWeb = vi.spyOn(webControlPlane, "quarantineHostedWakeInWeb");
     const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
     readHostedWakeStatusFromWeb.mockResolvedValue({
-      cursor: createCursorState({
-        committedSeq: "2",
-        nextSeq: "3",
-        updatedAt: "2026-03-26T12:00:02.000Z",
-        version: "cursor_v2",
-      }),
+      cursor: finalCursor,
       pendingWakeCount: 0,
     });
 
@@ -282,6 +300,76 @@ describe("HostedUserRunner hosted wake drain", () => {
       },
     ]);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_after_quarantine"]);
+  });
+
+  it("keeps draining past 32 sequential refetch rounds while proofs are re-fenced per commit", async () => {
+    const totalWakes = 33;
+    const finalSeq = String(totalWakes);
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb.mockImplementation(async ({ afterSeq }) => {
+      const committedSeq = afterSeq ?? "0";
+      const nextSeq = BigInt(committedSeq) + 1n;
+      const cursor = createCursorState({
+        committedSeq,
+        nextSeq: String(totalWakes + 1),
+        updatedAt: `2026-03-26T12:00:${committedSeq.padStart(2, "0")}.000Z`,
+        version: `cursor_v${nextSeq.toString()}`,
+      });
+
+      if (nextSeq > BigInt(totalWakes)) {
+        return {
+          cursor,
+          wakes: [],
+        };
+      }
+
+      return {
+        cursor,
+        wakes: [
+          createHostedWakeRecord({
+            cursor,
+            payload: createWake(`evt_${nextSeq.toString()}`),
+            seq: nextSeq.toString(),
+          }),
+        ],
+      };
+    });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb.mockImplementation(async ({ body }) => ({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: body.committedSeq,
+        nextSeq: String(totalWakes + 1),
+        snapshotRef: readSnapshotRef(body.snapshotRef),
+        updatedAt: `2026-03-26T12:01:${body.committedSeq.padStart(2, "0")}.000Z`,
+        version: `cursor_v${(BigInt(body.committedSeq) + 1n).toString()}`,
+      }),
+    }));
+    const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
+    recordHostedWakeTerminalInWeb.mockResolvedValue({
+      recorded: true,
+    });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    const result = await runner.wakeHostedWakes();
+
+    expect(result.committedSeq).toBe(finalSeq);
+    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(totalWakes);
+    expect(fetchHostedWakeBatchFromWeb).toHaveBeenCalledTimes(totalWakes + 1);
+    expect(readDispatchedEventIds(fetchMock)).toHaveLength(totalWakes);
   });
 
   it("skips local post-commit cleanup after losing the cursor compare-and-swap race", async () => {
@@ -387,34 +475,42 @@ describe("HostedUserRunner hosted wake drain", () => {
   it("commits the last completed wake snapshot instead of a later mutable bundle cache read", async () => {
     let committedSnapshotRef: HostedWakeSnapshotRef = null;
     const finalizedBundleRef = createBundleRef("final");
+    const initialCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "3",
+      version: "cursor_v1",
+    });
+    const cursorAfterFirstCommit = createCursorState({
+      committedSeq: "1",
+      nextSeq: "3",
+      snapshotRef: committedSnapshotRef,
+      updatedAt: "2026-03-26T12:00:03.000Z",
+      version: "cursor_v2",
+    });
+    const completedWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      payload: createWake("evt_completed_first"),
+      seq: "1",
+    });
+    const stalePendingCommitWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      payload: createWake("evt_pending_commit_then_fail"),
+      seq: "2",
+    });
+    const pendingCommitWake = createHostedWakeRecord({
+      cursor: cursorAfterFirstCommit,
+      payload: createWake("evt_pending_commit_then_fail"),
+      seq: "2",
+    });
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
       .mockResolvedValueOnce({
-        cursor: createCursorState({
-          committedSeq: "0",
-          nextSeq: "3",
-          version: "cursor_v1",
-        }),
-        wakes: [
-          createHostedWakeRecord({
-            payload: createWake("evt_completed_first"),
-            seq: "1",
-          }),
-          createHostedWakeRecord({
-            payload: createWake("evt_pending_commit_then_fail"),
-            seq: "2",
-          }),
-        ],
+        cursor: initialCursor,
+        wakes: [completedWake, stalePendingCommitWake],
       })
       .mockResolvedValueOnce({
-        cursor: createCursorState({
-          committedSeq: "1",
-          nextSeq: "3",
-          snapshotRef: committedSnapshotRef,
-          updatedAt: "2026-03-26T12:00:03.000Z",
-          version: "cursor_v2",
-        }),
-        wakes: [],
+        cursor: cursorAfterFirstCommit,
+        wakes: [pendingCommitWake],
       });
     const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
     commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }: {
@@ -533,6 +629,10 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
     expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledTimes(1);
+    expect(fetchHostedWakeBatchFromWeb.mock.calls.map(([input]) => input.afterSeq)).toEqual([
+      null,
+      "1",
+    ]);
     expect(commitHostedWakeCursorToWeb.mock.calls[0]?.[0].body).toMatchObject({
       committedSeq: "1",
       expectedVersion: "cursor_v1",
@@ -546,6 +646,119 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(readDispatchedEventIds(fetchMock)).toEqual([
       "evt_completed_first",
       "evt_pending_commit_then_fail",
+    ]);
+  });
+
+  it("refetches after each successful cursor advance before executing a later wake from the same fetched batch", async () => {
+    const initialCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "3",
+      version: "cursor_v1",
+    });
+    const cursorAfterFirstCommit = createCursorState({
+      committedSeq: "1",
+      nextSeq: "3",
+      updatedAt: "2026-03-26T12:00:03.000Z",
+      version: "cursor_v2",
+    });
+    const finalCursor = createCursorState({
+      committedSeq: "2",
+      nextSeq: "3",
+      updatedAt: "2026-03-26T12:00:04.000Z",
+      version: "cursor_v3",
+    });
+    const firstWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      payload: createWake("evt_refetch_first"),
+      seq: "1",
+    });
+    const staleSecondWake = createHostedWakeRecord({
+      cursor: initialCursor,
+      payload: createWake("evt_refetch_second"),
+      seq: "2",
+    });
+    const freshSecondWake = createHostedWakeRecord({
+      cursor: cursorAfterFirstCommit,
+      payload: createWake("evt_refetch_second"),
+      seq: "2",
+    });
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: initialCursor,
+        wakes: [
+          firstWake,
+          staleSecondWake,
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: cursorAfterFirstCommit,
+        wakes: [freshSecondWake],
+      })
+      .mockResolvedValueOnce({
+        cursor: finalCursor,
+        wakes: [],
+      });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb
+      .mockResolvedValueOnce({
+        committed: true,
+        cursor: cursorAfterFirstCommit,
+      })
+      .mockResolvedValueOnce({
+        committed: true,
+        cursor: finalCursor,
+      });
+    const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
+    recordHostedWakeTerminalInWeb.mockResolvedValue({
+      recorded: true,
+    });
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await seedManagedUserCryptoForTest(runner, "member_123");
+
+    await runner.wakeHostedWakes();
+
+    expect(fetchHostedWakeBatchFromWeb.mock.calls.map(([input]) => input.afterSeq)).toEqual([
+      null,
+      "1",
+      "2",
+    ]);
+    expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => ({
+      committedSeq: input.body.committedSeq,
+      expectedVersion: input.body.expectedVersion,
+    }))).toEqual([
+      {
+        committedSeq: "1",
+        expectedVersion: "cursor_v1",
+      },
+      {
+        committedSeq: "2",
+        expectedVersion: "cursor_v2",
+      },
+    ]);
+    const terminalFetchProofs = recordHostedWakeTerminalInWeb.mock.calls.map(
+      ([input]) => input.body.fetchProof,
+    );
+    expect(terminalFetchProofs).toEqual([
+      firstWake.fetchProof,
+      freshSecondWake.fetchProof,
+    ]);
+    expect(terminalFetchProofs).not.toContain(staleSecondWake.fetchProof);
+    expect(readDispatchedEventIds(fetchMock)).toEqual([
+      "evt_refetch_first",
+      "evt_refetch_second",
     ]);
   });
 
