@@ -1,18 +1,72 @@
+import { pathToFileURL } from "node:url";
+
 import {
   formatHostedRuntimeChildResult,
   parseHostedAssistantRuntimeJobInput,
   runHostedAssistantRuntimeJobInProcessDetailed,
 } from "@murphai/assistant-runtime";
+import {
+  buildHostedExecutionSafeErrorDetails,
+  deriveHostedExecutionErrorCode,
+  emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+} from "@murphai/hosted-execution";
 
 import { buildHostedExecutionRuntimePlatform } from "./runtime-platform.js";
 
-async function main(): Promise<void> {
-  const input = parseHostedExecutionChildInput(
-    JSON.parse(await readStandardInput()) as unknown,
-  );
+interface HostedExecutionChildDependencies {
+  emitLog?: typeof emitHostedExecutionStructuredLog;
+  readStandardInput?: () => Promise<string>;
+  runInProcess?: typeof runHostedAssistantRuntimeJobInProcessDetailed;
+  stdout?: Pick<NodeJS.WriteStream, "write">;
+  setExitCode?: (value: number) => void;
+}
+
+interface HostedExecutionChildInput {
+  internalWorkerProxyToken: string | null;
+  localInternalProxyBaseUrl: string | null;
+  job: ReturnType<typeof parseHostedAssistantRuntimeJobInput>;
+}
+
+export async function runHostedExecutionChild(
+  dependencies: HostedExecutionChildDependencies = {},
+): Promise<void> {
+  const emitLog = dependencies.emitLog ?? emitHostedExecutionStructuredLog;
+  const readInput = dependencies.readStandardInput ?? readStandardInput;
+  const runInProcess = dependencies.runInProcess ?? runHostedAssistantRuntimeJobInProcessDetailed;
+  const stdout = dependencies.stdout ?? process.stdout;
+  const setExitCode = dependencies.setExitCode ?? ((value: number) => {
+    process.exitCode = value;
+  });
+
+  let input: HostedExecutionChildInput;
+  try {
+    input = parseHostedExecutionChildInput(
+      JSON.parse(await readInput()) as unknown,
+    );
+  } catch (error) {
+    const safeErrorDetails = buildHostedExecutionSafeErrorDetails(error);
+    emitLog({
+      component: "child",
+      details: {
+        bootstrapStage: "parse",
+        ...(safeErrorDetails ? { bootstrapErrorDetails: safeErrorDetails } : {}),
+      },
+      error,
+      level: "error",
+      message: "Hosted node runner child failed to parse its bootstrap payload.",
+      phase: "failed",
+    });
+    stdout.write(`${formatHostedRuntimeChildResult({
+      ok: false,
+      error: createHostedExecutionChildBootstrapError(error),
+    })}\n`);
+    setExitCode(1);
+    return;
+  }
 
   try {
-    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+    const result = await runInProcess(
       input.job,
       {
         platform: buildHostedExecutionRuntimePlatform({
@@ -23,9 +77,9 @@ async function main(): Promise<void> {
         }),
       },
     );
-    process.stdout.write(`${formatHostedRuntimeChildResult({ ok: true, result })}\n`);
+    stdout.write(`${formatHostedRuntimeChildResult({ ok: true, result })}\n`);
   } catch (error) {
-    process.stdout.write(
+    stdout.write(
       `${formatHostedRuntimeChildResult({
         ok: false,
         error: {
@@ -42,7 +96,7 @@ async function main(): Promise<void> {
         },
       })}\n`,
     );
-    process.exitCode = 1;
+    setExitCode(1);
   }
 }
 
@@ -56,11 +110,7 @@ async function readStandardInput(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function parseHostedExecutionChildInput(value: unknown): {
-  internalWorkerProxyToken: string | null;
-  localInternalProxyBaseUrl: string | null;
-  job: ReturnType<typeof parseHostedAssistantRuntimeJobInput>;
-} {
+function parseHostedExecutionChildInput(value: unknown): HostedExecutionChildInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Hosted node runner child input must be an object.");
   }
@@ -80,6 +130,20 @@ function parseHostedExecutionChildInput(value: unknown): {
   };
 }
 
+function createHostedExecutionChildBootstrapError(error: unknown): {
+  code: string | null;
+  message: string;
+  name: string | null;
+  stack: string | null;
+} {
+  return {
+    code: deriveHostedExecutionErrorCode(error),
+    message: "Hosted node runner child bootstrap payload is invalid.",
+    name: readHostedExecutionSafeErrorName(error),
+    stack: null,
+  };
+}
+
 function readNullableString(value: unknown, label: string): string | null {
   if (value === undefined || value === null) {
     return null;
@@ -88,7 +152,22 @@ function readNullableString(value: unknown, label: string): string | null {
     throw new TypeError(`${label} must be a string or null.`);
   }
 
-  return value;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runHostedExecutionChild().catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "child",
+      details: {
+        bootstrapStage: "top-level",
+      },
+      error,
+      level: "error",
+      message: "Hosted node runner child failed unexpectedly.",
+      phase: "failed",
+    });
+    process.exitCode = 1;
+  });
+}

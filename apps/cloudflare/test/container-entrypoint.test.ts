@@ -4,6 +4,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
 
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
+
 import {
   classifyRunnerJobError,
   startHostedContainerEntrypoint,
@@ -13,6 +27,7 @@ import * as nodeRunner from "../src/node-runner.js";
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 
 afterEach(async () => {
+  vi.clearAllMocks();
   vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.();
@@ -191,6 +206,25 @@ describe("startHostedContainerEntrypoint", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted runner control token is not configured.",
     });
+  });
+
+  it("logs a structured listen failure when the container cannot start", async () => {
+    await expect(startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: -1,
+    })).rejects.toThrow();
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          port: -1,
+        }),
+        level: "error",
+        message: "Hosted container entrypoint failed to start listening.",
+        phase: "failed",
+      }),
+    );
   });
 
   it("returns a stable invalid JSON error for malformed run requests", async () => {
@@ -749,7 +783,18 @@ describe("startHostedContainerEntrypoint", () => {
       }
       expect(signal.aborted).toBe(true);
       expect(abortReason).toBeInstanceOf(Error);
-      expect((abortReason as Error).message).toContain("aborted");
+      expect((abortReason as Error).message).toMatch(/aborted|closed/u);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            exitReason: expect.stringMatching(/^(request\.aborted|response\.closed)$/u),
+          }),
+          level: "warn",
+          message: expect.stringContaining("Hosted container entrypoint exited because the"),
+          phase: "failed",
+        }),
+      );
     } finally {
       spy.mockRestore();
     }

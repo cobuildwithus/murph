@@ -250,11 +250,34 @@ export async function startHostedContainerEntrypoint(input: {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(input.port ?? 8080, () => resolve());
+  }).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        port: input.port ?? 8080,
+      },
+      error,
+      level: "error",
+      message: "Hosted container entrypoint failed to start listening.",
+      phase: "failed",
+    });
+    throw error;
   });
 
   const address = server.address();
   if (!address || typeof address === "string") {
-    throw new Error("Hosted container entrypoint failed to resolve its listening TCP port.");
+    const error = new Error("Hosted container entrypoint failed to resolve its listening TCP port.");
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        port: input.port ?? 8080,
+      },
+      error,
+      level: "error",
+      message: error.message,
+      phase: "failed",
+    });
+    throw error;
   }
 
   return server;
@@ -522,23 +545,55 @@ function createRequestAbortController(
   signal: AbortSignal;
 } {
   const controller = new AbortController();
-  const abort = () => {
-    if (!controller.signal.aborted) {
-      controller.abort(new Error("Hosted runner request aborted before completion."));
+  let exitLogged = false;
+
+  const emitRequestExitLog = (exitReason: "request.aborted" | "response.closed"): void => {
+    if (exitLogged) {
+      return;
     }
+    exitLogged = true;
+
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        exitReason,
+      },
+      level: "warn",
+      message:
+        exitReason === "response.closed"
+          ? "Hosted container entrypoint exited because the response closed before completion."
+          : "Hosted container entrypoint exited because the request aborted before completion.",
+      phase: "failed",
+    });
+  };
+
+  const abort = (exitReason: "request.aborted" | "response.closed") => {
+    if (!controller.signal.aborted) {
+      emitRequestExitLog(exitReason);
+      controller.abort(
+        new Error(
+          exitReason === "response.closed"
+            ? "Hosted runner response closed before completion."
+            : "Hosted runner request aborted before completion.",
+        ),
+      );
+    }
+  };
+  const handleRequestAbort = () => {
+    abort("request.aborted");
   };
   const handleResponseClose = () => {
     if (!response.writableEnded) {
-      abort();
+      abort("response.closed");
     }
   };
 
-  request.once("aborted", abort);
+  request.once("aborted", handleRequestAbort);
   response.once("close", handleResponseClose);
 
   return {
     cleanup: () => {
-      request.off("aborted", abort);
+      request.off("aborted", handleRequestAbort);
       response.off("close", handleResponseClose);
     },
     signal: controller.signal,
