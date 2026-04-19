@@ -25,6 +25,9 @@ import {
   sendAssistantMessage,
   stopAssistantAutomation,
 } from '../assistant/runtime.js'
+import {
+  assertAssistantInkInteractiveInputAvailable,
+} from '../assistant-chat-ink.js'
 import { runAssistantDoctor } from '../assistant/doctor.js'
 import { getAssistantStatus } from '../assistant/status.js'
 import {
@@ -461,6 +464,8 @@ async function runAssistantChatCommand(context: {
   agent: boolean
   formatExplicit: boolean
 }) {
+  assertAssistantInkInteractiveInputAvailable()
+
   const result = await runAssistantChat({
     vault: context.options.vault,
     initialPrompt: context.args.prompt,

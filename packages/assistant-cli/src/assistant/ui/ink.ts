@@ -114,6 +114,9 @@ interface ResolveAssistantInkInputAdapterInput {
   ttyPath?: string
 }
 
+export const ASSISTANT_CHAT_INTERACTIVE_INPUT_ERROR =
+  'Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.'
+
 export function supportsAssistantInkRawMode(
   stdin: AssistantInkInputStream | null | undefined,
 ): boolean {
@@ -189,6 +192,18 @@ export function resolveAssistantInkInputAdapter(
   }
 }
 
+export function assertAssistantInkInteractiveInputAvailable(
+  input?: ResolveAssistantInkInputAdapterInput,
+): void {
+  const inkInput = resolveAssistantInkInputAdapter(input)
+
+  if (!inkInput.stdin) {
+    throw new Error(ASSISTANT_CHAT_INTERACTIVE_INPUT_ERROR)
+  }
+
+  inkInput.close()
+}
+
 export async function runAssistantChatWithInk(
   input: AssistantChatInput,
 ): Promise<AssistantChatResult> {
@@ -229,9 +244,7 @@ export async function runAssistantChatWithInk(
   const inkInput = resolveAssistantInkInputAdapter()
 
   if (!inkInput.stdin) {
-    throw new Error(
-      'Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.',
-    )
+    throw new Error(ASSISTANT_CHAT_INTERACTIVE_INPUT_ERROR)
   }
   const inkStdin = inkInput.stdin
 
