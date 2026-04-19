@@ -126,7 +126,7 @@ const TEST_CHAT_RESULT = {
   session: TEST_SESSION,
 } satisfies AssistantChatResult
 
-test('package manifest exposes the assistant command and runtime logging subpaths', async () => {
+test('package manifest exposes the assistant command, explicit deep assistant subpaths, and runtime logging subpaths', async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as {
@@ -151,6 +151,33 @@ test('package manifest exposes the assistant command and runtime logging subpath
     types: './dist/run-terminal-logging.d.ts',
     default: './dist/run-terminal-logging.js',
   })
+
+  const deepAssistantSubpaths = [
+    'cron',
+    'daemon-client',
+    'doctor',
+    'outbox',
+    'runtime',
+    'service',
+    'status',
+    'stop',
+    'store',
+    'ui/chat-controller-state',
+    'ui/composer-editor',
+    'ui/ink',
+    'ui/model-switcher',
+    'ui/theme',
+    'ui/view-model',
+  ] as const
+
+  for (const subpath of deepAssistantSubpaths) {
+    assert.deepEqual(packageManifest.exports?.[`./assistant/${subpath}`], {
+      types: `./dist/assistant/${subpath}.d.ts`,
+      default: `./dist/assistant/${subpath}.js`,
+    })
+  }
+
+  assert.equal(packageManifest.exports?.['./assistant/*'], undefined)
 })
 
 test('runAssistantChat delegates to the Ink runner and returns its result', async () => {

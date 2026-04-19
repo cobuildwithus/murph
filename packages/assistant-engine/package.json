@@ -27,9 +27,97 @@
       "types": "./dist/assistant-automation.d.ts",
       "default": "./dist/assistant-automation.js"
     },
-    "./assistant/*": {
-      "types": "./dist/assistant/*.d.ts",
-      "default": "./dist/assistant/*.js"
+    "./assistant/automation/artifacts": {
+      "types": "./dist/assistant/automation/artifacts.d.ts",
+      "default": "./dist/assistant/automation/artifacts.js"
+    },
+    "./assistant/automation/prompt-builder": {
+      "types": "./dist/assistant/automation/prompt-builder.d.ts",
+      "default": "./dist/assistant/automation/prompt-builder.js"
+    },
+    "./assistant/automation/shared": {
+      "types": "./dist/assistant/automation/shared.d.ts",
+      "default": "./dist/assistant/automation/shared.js"
+    },
+    "./assistant/bindings": {
+      "types": "./dist/assistant/bindings.d.ts",
+      "default": "./dist/assistant/bindings.js"
+    },
+    "./assistant/channel-adapters": {
+      "types": "./dist/assistant/channel-adapters.d.ts",
+      "default": "./dist/assistant/channel-adapters.js"
+    },
+    "./assistant/conversation-policy": {
+      "types": "./dist/assistant/conversation-policy.d.ts",
+      "default": "./dist/assistant/conversation-policy.js"
+    },
+    "./assistant/cron/store": {
+      "types": "./dist/assistant/cron/store.d.ts",
+      "default": "./dist/assistant/cron/store.js"
+    },
+    "./assistant/diagnostics": {
+      "types": "./dist/assistant/diagnostics.d.ts",
+      "default": "./dist/assistant/diagnostics.js"
+    },
+    "./assistant/failover": {
+      "types": "./dist/assistant/failover.d.ts",
+      "default": "./dist/assistant/failover.js"
+    },
+    "./assistant/fault-injection": {
+      "types": "./dist/assistant/fault-injection.d.ts",
+      "default": "./dist/assistant/fault-injection.js"
+    },
+    "./assistant/memory": {
+      "types": "./dist/assistant/memory.d.ts",
+      "default": "./dist/assistant/memory.js"
+    },
+    "./assistant/provider-turn-recovery": {
+      "types": "./dist/assistant/provider-turn-recovery.d.ts",
+      "default": "./dist/assistant/provider-turn-recovery.js"
+    },
+    "./assistant/quarantine": {
+      "types": "./dist/assistant/quarantine.d.ts",
+      "default": "./dist/assistant/quarantine.js"
+    },
+    "./assistant/receipts": {
+      "types": "./dist/assistant/receipts.d.ts",
+      "default": "./dist/assistant/receipts.js"
+    },
+    "./assistant/redaction": {
+      "types": "./dist/assistant/redaction.d.ts",
+      "default": "./dist/assistant/redaction.js"
+    },
+    "./assistant/reply-sanitizer": {
+      "types": "./dist/assistant/reply-sanitizer.d.ts",
+      "default": "./dist/assistant/reply-sanitizer.js"
+    },
+    "./assistant/runtime-budgets": {
+      "types": "./dist/assistant/runtime-budgets.d.ts",
+      "default": "./dist/assistant/runtime-budgets.js"
+    },
+    "./assistant/runtime-events": {
+      "types": "./dist/assistant/runtime-events.d.ts",
+      "default": "./dist/assistant/runtime-events.js"
+    },
+    "./assistant/runtime-write-lock": {
+      "types": "./dist/assistant/runtime-write-lock.d.ts",
+      "default": "./dist/assistant/runtime-write-lock.js"
+    },
+    "./assistant/state": {
+      "types": "./dist/assistant/state.d.ts",
+      "default": "./dist/assistant/state.js"
+    },
+    "./assistant/state-ids": {
+      "types": "./dist/assistant/state-ids.d.ts",
+      "default": "./dist/assistant/state-ids.js"
+    },
+    "./assistant/store/persistence": {
+      "types": "./dist/assistant/store/persistence.d.ts",
+      "default": "./dist/assistant/store/persistence.js"
+    },
+    "./assistant/turns": {
+      "types": "./dist/assistant/turns.d.ts",
+      "default": "./dist/assistant/turns.js"
     },
     "./assistant-codex": {
       "types": "./dist/assistant-codex.d.ts",
