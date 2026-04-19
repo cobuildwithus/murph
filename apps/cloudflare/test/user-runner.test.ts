@@ -72,6 +72,7 @@ import {
   appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
+  materializeTestHostedWakes,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
   recordTestHostedWakeTerminal,
@@ -1099,11 +1100,6 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     expect(materializeHostedDueWakesInWeb).toHaveBeenCalledWith(expect.objectContaining({
-      body: {
-        wakeMaterializationHints: {
-          assistantWakeAt: "2026-03-26T12:30:00.000Z",
-        },
-      },
       boundUserId: "member_123",
     }));
     await expect(stateStore.readWakeMaterializationHints()).resolves.toEqual({
@@ -1180,11 +1176,6 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     expect(materializeHostedDueWakesInWeb).toHaveBeenCalledWith(expect.objectContaining({
-      body: {
-        wakeMaterializationHints: {
-          deviceSyncWakeAt: "2026-03-26T12:45:00.000Z",
-        },
-      },
       boundUserId: "member_123",
     }));
     expect(readDispatchedEventIds(fetchSpy)).toEqual([
@@ -2402,7 +2393,6 @@ describe("HostedUserRunner", () => {
     });
     const fetched = await fetchTestHostedWakeBatch({
       body: {
-        afterSeq: null,
         limit: 1,
       },
       bucket: bucket.api,
@@ -2468,7 +2458,6 @@ describe("HostedUserRunner", () => {
     });
     const fetched = await fetchTestHostedWakeBatch({
       body: {
-        afterSeq: null,
         limit: 2,
       },
       bucket: bucket.api,
@@ -2690,7 +2679,6 @@ describe("HostedUserRunner", () => {
     });
     const fetched = await fetchTestHostedWakeBatch({
       body: {
-        afterSeq: null,
         limit: 1,
       },
       bucket: bucket.api,
@@ -3094,7 +3082,7 @@ function createStorage() {
     const url = new URL(request.url);
 
     if (url.pathname === "/internal/invoke") {
-      return globalThis.fetch("https://runner-container.internal/__internal/run", {
+      return globalThis.fetch("https://runner-container.internal/internal/run", {
         body: await request.clone().text(),
         headers: {
           authorization: request.headers.get("authorization") ?? "",
@@ -3668,7 +3656,6 @@ async function maybeCreateHostedWakeControlResponse(input: {
 
   if (url.endsWith("/api/internal/hosted-wake/unseen")) {
     return Response.json(await fetchTestHostedWakeBatch({
-      afterSeq: null,
       body: JSON.parse(String(input.init?.body ?? "{}")),
       bucket: input.bucket.api,
       userId,
@@ -3708,37 +3695,11 @@ async function maybeCreateHostedWakeControlResponse(input: {
   }
 
   if (url.endsWith("/api/internal/hosted-wake/materialize")) {
-    const requestBody = JSON.parse(String(input.init?.body ?? "{}")) as {
-      wakeMaterializationHints?: HostedWakeMaterializationHints | null;
-    };
-    const wakeMaterializationHints = normalizeHostedWakeMaterializationHintsForTest(
-      requestBody.wakeMaterializationHints ?? null,
-    );
-    let targetSeqHint: string | null = null;
-    const nowIso = new Date(Date.now()).toISOString();
-
-    if (isHostedWakeHintDueForTest(wakeMaterializationHints?.assistantWakeAt ?? null)) {
-      const appended = await appendTestHostedWake({
-        bucket: input.bucket.api,
-        wake: buildHostedExecutionAssistantCronTickWake({
-          eventId: `assistant.cron.tick:${userId}:alarm:${nowIso}`,
-          occurredAt: nowIso,
-          reason: "alarm",
-          userId,
-        }),
-      });
-      targetSeqHint = appended.wake.seq;
-    }
-
-    return Response.json({
-      targetSeqHint,
-      wakeMaterializationHints: normalizeHostedWakeMaterializationHintsForTest({
-        assistantWakeAt: isHostedWakeHintDueForTest(wakeMaterializationHints?.assistantWakeAt ?? null)
-          ? null
-          : wakeMaterializationHints?.assistantWakeAt ?? null,
-        deviceSyncWakeAt: wakeMaterializationHints?.deviceSyncWakeAt ?? null,
-      }),
-    });
+    return Response.json(await materializeTestHostedWakes({
+      body: JSON.parse(String(input.init?.body ?? "{}")),
+      bucket: input.bucket.api,
+      userId,
+    }));
   }
 
   return null;

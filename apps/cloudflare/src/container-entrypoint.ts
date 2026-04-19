@@ -106,7 +106,7 @@ export async function startHostedContainerEntrypoint(input: {
 
       if (
         request.method !== "POST"
-        || (requestUrl.pathname !== "/__internal/run" && requestUrl.pathname !== "/internal/run")
+        || requestUrl.pathname !== "/internal/run"
       ) {
         response.statusCode = 404;
         response.end("Not found");

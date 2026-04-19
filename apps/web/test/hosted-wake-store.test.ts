@@ -16,7 +16,7 @@ import {
   appendHostedOrderedWakeTx,
   commitHostedExecutionCursorTx,
   countPendingHostedWakes,
-  listHostedWakesAfterSeq,
+  listHostedExecutableWakes,
   projectHostedWakeRecord,
   quarantineHostedWakeTx,
   readLatestHostedWakeLifecycleByKind,
@@ -94,7 +94,7 @@ interface TestWakeTerminalState {
   createdAt: Date;
   fetchedCommittedSeq: bigint;
   fetchedCursorVersion: bigint;
-  state: "completed" | "quarantined" | "replaced";
+  state: "completed" | "quarantined";
   updatedAt: Date;
   userId: string;
   wakeId: string;
@@ -210,7 +210,7 @@ describe("hosted wake store", () => {
       ],
     });
 
-    const listed = await listHostedWakesAfterSeq({
+    const listed = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -524,7 +524,7 @@ describe("hosted wake store", () => {
       }),
     });
 
-    const latestFetch = await listHostedWakesAfterSeq({
+    const latestFetch = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -981,7 +981,7 @@ describe("hosted wake store", () => {
     expect(result.wake.payloadCiphertext).toEqual(expect.any(String));
     expect(result.wake).not.toHaveProperty("payloadJson");
 
-    const listed = await listHostedWakesAfterSeq({
+    const listed = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -1202,7 +1202,7 @@ describe("hosted wake store", () => {
       ],
     });
 
-    const initialFetch = await listHostedWakesAfterSeq({
+    const initialFetch = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -1287,7 +1287,7 @@ describe("hosted wake store", () => {
       userId: "member_123",
     })).resolves.toBe("queued");
 
-    const latestFetch = await listHostedWakesAfterSeq({
+    const latestFetch = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -1418,7 +1418,7 @@ describe("hosted wake store", () => {
       ],
     });
 
-    const initialFetch = await listHostedWakesAfterSeq({
+    const initialFetch = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -1453,7 +1453,7 @@ describe("hosted wake store", () => {
       }),
     }));
 
-    const latestFetch = await listHostedWakesAfterSeq({
+    const latestFetch = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -1555,40 +1555,54 @@ describe("hosted wake store", () => {
     }));
   });
 
-  it("floors unseen wake reads at the committed cursor position", async () => {
+  it("lists executable wake proofs from the current committed cursor", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
-        committedSeq: 3n,
-        nextSeq: 5n,
+        committedSeq: 0n,
+        nextSeq: 3n,
         userId: "member_123",
       },
       wakes: [
         {
           behavior: "ordered",
           coalescingKey: null,
-          dedupeKey: "evt_4",
+          dedupeKey: "evt_1",
           kind: "assistant.cron.tick",
           occurredAt: "2026-04-17T00:00:00.000Z",
           payload: {
-            revision: 4,
+            revision: 1,
           },
-          seq: 4n,
+          seq: 1n,
+          userId: "member_123",
+        },
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "evt_2",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:01.000Z",
+          payload: {
+            revision: 2,
+          },
+          seq: 2n,
           userId: "member_123",
         },
       ],
     });
 
-    const listed = await listHostedWakesAfterSeq({
-      afterSeq: 1n,
+    const listed = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
 
-    expect(listed.wakes).toHaveLength(1);
-    expect(listed.wakes[0]?.seq).toBe("4");
+    expect(listed.cursor).toEqual(expect.objectContaining({
+      committedSeq: "0",
+      nextSeq: "3",
+      userId: "member_123",
+    }));
+    expect(listed.wakes.map((wake) => wake.seq)).toEqual(["1", "2"]);
     expect(listed.wakes[0]?.fetchProof).toEqual(expect.any(String));
-    expect(listed.wakes[0]?.payloadCiphertext).toEqual(expect.any(String));
-    expect(listed.wakes[0]).not.toHaveProperty("payloadJson");
+    expect(listed.wakes[1]?.fetchProof).toEqual(expect.any(String));
   });
 
   it("returns the spilled wake payload ciphertext without exposing storage internals", async () => {
@@ -1616,7 +1630,7 @@ describe("hosted wake store", () => {
       ],
     });
 
-    const listed = await listHostedWakesAfterSeq({
+    const listed = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });
@@ -1668,7 +1682,7 @@ describe("hosted wake store", () => {
       ],
     });
 
-    const listed = await listHostedWakesAfterSeq({
+    const listed = await listHostedExecutableWakes({
       prisma: tx,
       userId: "member_123",
     });

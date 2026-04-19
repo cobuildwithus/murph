@@ -15,6 +15,7 @@ import {
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_WAKE_LIFECYCLE_STATES,
+  HOSTED_WAKE_TERMINAL_STATES,
   HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "../src/contracts.ts";
@@ -23,9 +24,7 @@ import {
   normalizeHostedExecutionString,
 } from "../src/env.ts";
 import {
-  buildHostedExecutionRunnerCommitPath,
   buildHostedExecutionRunnerEmailMessagePath,
-  buildHostedExecutionRunnerSideEffectPath,
 } from "../src/routes.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
@@ -123,12 +122,6 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("builds hosted execution routes with safe path encoding", () => {
-    expect(buildHostedExecutionRunnerCommitPath("evt/123?x=1")).toBe(
-      "/events/evt%2F123%3Fx%3D1/commit",
-    );
-    expect(buildHostedExecutionRunnerSideEffectPath("effect 123")).toBe(
-      "/effects/effect%20123",
-    );
     expect(buildHostedExecutionRunnerEmailMessagePath("raw/message#1")).toBe(
       "/messages/raw%2Fmessage%231",
     );
@@ -148,6 +141,10 @@ describe("hosted execution coverage gaps", () => {
       "completed",
       "replaced",
       "poisoned",
+    ]);
+    expect(HOSTED_WAKE_TERMINAL_STATES).toEqual([
+      "completed",
+      "quarantined",
     ]);
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
       "Hosted execution wake handling is not configured.",
@@ -184,6 +181,8 @@ describe("hosted execution coverage gaps", () => {
 
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
+    expect("buildHostedExecutionRunnerCommitPath" in rootModule).toBe(false);
+    expect("buildHostedExecutionRunnerSideEffectPath" in rootModule).toBe(false);
     expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
