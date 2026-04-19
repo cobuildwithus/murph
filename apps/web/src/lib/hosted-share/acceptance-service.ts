@@ -172,6 +172,7 @@ export async function acceptHostedShareLink(input: {
     context: "hosted-share.acceptance",
     eventId: claim.eventId,
     prisma,
+    userId: memberId,
   });
 
   const imported = Boolean(
@@ -230,7 +231,7 @@ async function reconcileHostedShareClaim(input: {
     };
   }
 
-  if (lifecycleState === "poisoned") {
+  if (lifecycleState === "poisoned" || lifecycleState === "replaced") {
     return {
       outcome: "continue",
       record: await requireHostedShareLinkById(tx, latest.id),

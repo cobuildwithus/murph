@@ -3,7 +3,7 @@ import type { SharePack } from "@murphai/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type WakeDispatchRecord = {
-  wakeState: "completed" | "poisoned" | "queued";
+  wakeState: "completed" | "poisoned" | "queued" | "replaced";
   eventId: string;
 };
 
@@ -14,6 +14,7 @@ const shareHarness = vi.hoisted(() => {
     readHostedWakeLifecycleState: vi.fn(async (input: {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
+      userId: string;
     }) =>
       input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? null),
     materializeHostedExecutionWakeTx: vi.fn(async (input: {
@@ -35,6 +36,7 @@ const shareHarness = vi.hoisted(() => {
     handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
       eventId: string;
       prisma?: unknown;
+      userId: string;
     }) => {
       await state.drainHostedExecutionOutboxBestEffort({
         eventIds: [input.eventId],
@@ -67,16 +69,9 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-wake/control", () => ({
   handoffHostedExecutionWakeBestEffort: shareHarness.handoffHostedExecutionWakeBestEffort,
 }));
-vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(
-    "@/src/lib/hosted-onboarding/invite-service",
-  );
-
-  return {
-    ...actual,
-    issueHostedInviteForPhone: shareHarness.issueHostedInviteForPhone,
-  };
-});
+vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
+  issueHostedInviteForPhone: shareHarness.issueHostedInviteForPhone,
+}));
 
 import {
   acceptHostedShareLink,
@@ -580,6 +575,49 @@ describe("hosted share service", () => {
 
     prisma.outboxRows[0]!.wakeState = "queued";
     prisma.outboxRows[0]!.wakeState = "poisoned";
+
+    await expect(buildHostedSharePageData({
+      authenticatedMember: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      share: {
+        acceptedByCurrentMember: false,
+      },
+      stage: "ready",
+    });
+    expect(prisma.rows[0]).toMatchObject({
+      acceptedAt: null,
+      acceptedByMemberId: null,
+      consumedAt: null,
+      consumedByMemberId: null,
+      lastEventId: null,
+    });
+  });
+
+  it("releases a processing share when the wake lifecycle is replaced before local reconciliation catches up", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    await acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    });
+
+    prisma.outboxRows[0]!.wakeState = "replaced";
 
     await expect(buildHostedSharePageData({
       authenticatedMember: {

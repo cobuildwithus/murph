@@ -62,7 +62,11 @@ export async function buildHostedSharePageData(input: {
     shareId: shareLink.id,
   });
 
-  if (lifecycleState === "completed" || lifecycleState === "poisoned") {
+  if (
+    lifecycleState === "completed"
+    || lifecycleState === "poisoned"
+    || lifecycleState === "replaced"
+  ) {
     data = await buildHostedSharePageDataBase({
       ...input,
       prisma,

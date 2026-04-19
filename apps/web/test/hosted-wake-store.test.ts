@@ -1241,7 +1241,7 @@ function createHostedWakeStoreHarness(input?: {
           if (args.select?.id) {
             return {
               id: candidate.id,
-              ...(args.select.quarantinedAt ? { quarantinedAt: candidate.quarantinedAt } : {}),
+              quarantinedAt: args.select.quarantinedAt ? candidate.quarantinedAt : null,
             };
           }
 
@@ -1260,20 +1260,22 @@ function createHostedWakeStoreHarness(input?: {
           if (args.select?.id) {
             return {
               id: candidate.id,
-              ...(args.select.quarantinedAt ? { quarantinedAt: candidate.quarantinedAt } : {}),
+              quarantinedAt: args.select.quarantinedAt ? candidate.quarantinedAt : null,
             };
           }
 
           return cloneWake(candidate);
         }
 
-        const candidate = state.wakes
-          .filter((wake) =>
-            wake.coalescingKey === where.coalescingKey
-            && wake.userId === where.userId
-            && wake.quarantinedAt === null
-            && wake.seq > where.seq.gt)
-          .sort((left, right) => Number(right.seq - left.seq))[0];
+        const candidate = "coalescingKey" in where
+          ? state.wakes
+            .filter((wake) =>
+              wake.coalescingKey === where.coalescingKey
+              && wake.userId === where.userId
+              && wake.quarantinedAt === null
+              && wake.seq > where.seq.gt)
+            .sort((left, right) => Number(right.seq - left.seq))[0]
+          : undefined;
 
         return candidate ? cloneWake(candidate) : null;
       },
