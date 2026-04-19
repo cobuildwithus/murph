@@ -23,9 +23,6 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
-import {
-  buildHostedExecutionRunnerEmailMessagePath,
-} from "../src/routes.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
   return new TextDecoder().decode(buffer);
@@ -121,12 +118,6 @@ describe("hosted execution coverage gaps", () => {
     );
   });
 
-  it("builds hosted execution routes with safe path encoding", () => {
-    expect(buildHostedExecutionRunnerEmailMessagePath("raw/message#1")).toBe(
-      "/messages/raw%2Fmessage%231",
-    );
-  });
-
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
@@ -186,7 +177,6 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
-      "buildHostedExecutionRunnerEmailMessagePath",
     ]);
   });
 });

@@ -419,6 +419,7 @@ describe("hosted wake store", () => {
       fetchProof: staleFetchProof,
       prisma: tx,
       userId: "member_123",
+      wakeEventId: "assistant.cron.tick:1",
       wakeId: "wake_1",
       wakeSeq: 1n,
     })).resolves.toMatchObject({

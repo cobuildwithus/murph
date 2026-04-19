@@ -204,6 +204,7 @@ export async function validateHostedWakeFetchProofCurrent(input: {
   fetchProof: string;
   prisma?: HostedWakeStoreClient;
   userId: string;
+  wakeEventId: string;
   wakeId: string;
   wakeSeq: bigint;
 }): Promise<{
@@ -234,6 +235,11 @@ export async function validateHostedWakeFetchProofCurrent(input: {
         wakeId: input.wakeId,
         wakeSeq: input.wakeSeq,
       });
+      if (claims.wakeEventId !== input.wakeEventId) {
+        throw new TypeError(
+          "Hosted wake fetch proof wakeEventId does not match the requested event.",
+        );
+      }
       const fetchFence = parseHostedWakeFetchFence(claims);
       assertCurrentHostedWakeFetchFence(cursor, fetchFence);
       const wake = await readCurrentHostedWakeTerminalTargetTx({

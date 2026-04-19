@@ -11,7 +11,6 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
-  buildHostedExecutionRunnerEmailMessagePath,
 } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -172,6 +171,10 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
   };
+}
+
+function buildHostedExecutionRunnerEmailMessagePath(rawMessageKey: string): string {
+  return `/messages/${encodeURIComponent(rawMessageKey)}`;
 }
 
 function resolveHostedWebControlTransport(input: {

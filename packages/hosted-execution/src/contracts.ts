@@ -491,6 +491,7 @@ export interface HostedWakeQuarantineResponse {
 export interface HostedWakeStatusRequest {
   eventId?: string | null;
   fetchProof?: string | null;
+  wakeEventId?: string | null;
   wakeId?: string | null;
   wakeSeq?: string | null;
 }

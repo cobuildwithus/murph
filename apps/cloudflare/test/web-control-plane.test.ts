@@ -376,6 +376,7 @@ describe("cloudflare web control plane wake helpers", () => {
         body: {
           eventId: "evt_tick",
           fetchProof: "proof_24",
+          wakeEventId: "evt_tick",
           wakeId: "wake_24",
           wakeSeq: "24",
         },
@@ -432,6 +433,7 @@ describe("cloudflare web control plane wake helpers", () => {
     expect(JSON.parse(String(request.init?.body))).toEqual({
       eventId: "evt_tick",
       fetchProof: "proof_24",
+      wakeEventId: "evt_tick",
       wakeId: "wake_24",
       wakeSeq: "24",
     });

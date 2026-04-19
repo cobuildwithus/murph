@@ -702,6 +702,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       body: {
         eventId: "evt_stale_terminal",
         fetchProof: staleWake.fetchProof,
+        wakeEventId: "evt_stale_terminal",
         wakeId: staleWake.id,
         wakeSeq: staleWake.seq,
       },
@@ -841,6 +842,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       body: {
         eventId: "evt_stale_pre_execution",
         fetchProof: staleWake.fetchProof,
+        wakeEventId: "evt_stale_pre_execution",
         wakeId: staleWake.id,
         wakeSeq: staleWake.seq,
       },

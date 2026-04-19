@@ -13,7 +13,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       internalWorkerProxyToken: "runner-proxy-token",
     });
 
-    await platform.effectsPort.readRawEmailMessage("raw_123");
+    await platform.effectsPort.readRawEmailMessage("raw/message#1");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
@@ -22,7 +22,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
-    expect((request as Request).url).toBe("http://results.worker/messages/raw_123");
+    expect((request as Request).url).toBe("http://results.worker/messages/raw%2Fmessage%231");
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
@@ -53,7 +53,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       localInternalProxyBaseUrl: "http://127.0.0.1:8787",
     });
 
-    await platform.effectsPort.readRawEmailMessage("raw_123");
+    await platform.effectsPort.readRawEmailMessage("raw/message#1");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
@@ -63,7 +63,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
     expect((request as Request).url).toBe(
-      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_123",
+      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw%2Fmessage%231",
     );
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
@@ -80,7 +80,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       localInternalProxyBaseUrl: "http://127.0.0.1:8787",
     });
 
-    await platform.effectsPort.readRawEmailMessage("raw_123");
+    await platform.effectsPort.readRawEmailMessage("raw/message#1");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstCall = fetchMock.mock.calls[0];
     if (!firstCall) {
@@ -88,7 +88,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect((request as Request).url).toBe(
-      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_123",
+      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw%2Fmessage%231",
     );
   });
 

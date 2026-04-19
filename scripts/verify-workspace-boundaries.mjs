@@ -1032,10 +1032,9 @@ function verifyWorkspaceImportPolicy({
     && specifier === "@murphai/hosted-execution"
     && importsNamedBindingsFromSpecifier(source, specifier, [
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
-      "buildHostedExecutionRunnerEmailMessagePath",
     ])
   ) {
-    return `${path.relative(repoRoot, filePath)} imports runner route helpers from ${JSON.stringify(specifier)}; apps/cloudflare must use @murphai/hosted-execution/routes so runtime route construction stays on the focused route surface.`;
+    return `${path.relative(repoRoot, filePath)} imports runner route constants from ${JSON.stringify(specifier)}; apps/cloudflare must use @murphai/hosted-execution/routes so runtime route construction stays on the focused route surface.`;
   }
 
   if (

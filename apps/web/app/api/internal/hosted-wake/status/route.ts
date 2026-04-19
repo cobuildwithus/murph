@@ -1,3 +1,5 @@
+import { parseHostedWakeStatusRequest } from "@murphai/hosted-execution/parsers";
+
 import {
   readHostedWakeLifecycle,
 } from "@/src/lib/hosted-wake/lifecycle";
@@ -10,14 +12,25 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   countPendingHostedWakes,
   readHostedExecutionCursor,
+  validateHostedWakeFetchProofCurrent,
 } from "@/src/lib/hosted-wake/store";
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
-  const body = await readOptionalJsonObject(request);
-  const eventId = readOptionalEventId(body.eventId);
+  const body = parseHostedWakeStatusRequest(await readOptionalJsonObject(request));
+  const eventId = body.eventId ?? body.wakeEventId ?? null;
   const prisma = getPrisma();
-  const cursor = await readHostedExecutionCursor({
+  const fetchProofStatus = body.fetchProof && body.wakeEventId && body.wakeId && body.wakeSeq
+    ? await validateHostedWakeFetchProofCurrent({
+      fetchProof: body.fetchProof,
+      prisma,
+      userId,
+      wakeEventId: body.wakeEventId,
+      wakeId: body.wakeId,
+      wakeSeq: BigInt(body.wakeSeq),
+    })
+    : null;
+  const cursor = fetchProofStatus?.cursor ?? await readHostedExecutionCursor({
     prisma,
     userId,
   });
@@ -35,6 +48,9 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     cursor,
+    ...(fetchProofStatus === null ? {} : {
+      fetchProofCurrent: fetchProofStatus.fetchProofCurrent,
+    }),
     ...(wakeLifecycle?.replacedByEventId
       ? {
           replacedByEventId: wakeLifecycle.replacedByEventId,
@@ -44,16 +60,3 @@ export const POST = withJsonError(async (request: Request) => {
     pendingWakeCount,
   });
 });
-
-function readOptionalEventId(value: unknown): string | null {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError("eventId must be a string.");
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}

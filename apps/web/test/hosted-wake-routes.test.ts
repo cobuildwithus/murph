@@ -728,6 +728,7 @@ describe("hosted wake internal routes", () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       eventId: "evt_old",
       fetchProof: "proof_24",
+      wakeEventId: "evt_old",
       wakeId: "wake_24",
       wakeSeq: "24",
     });
@@ -772,6 +773,7 @@ describe("hosted wake internal routes", () => {
       fetchProof: "proof_24",
       prisma: expect.anything(),
       userId: "member_123",
+      wakeEventId: "evt_old",
       wakeId: "wake_24",
       wakeSeq: 24n,
     });

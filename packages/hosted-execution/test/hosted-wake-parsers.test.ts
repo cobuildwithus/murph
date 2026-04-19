@@ -573,11 +573,13 @@ describe("hosted wake parser contracts", () => {
     expect(parseHostedWakeStatusRequest({
       eventId: "evt_old",
       fetchProof: "proof_24",
+      wakeEventId: "evt_old",
       wakeId: "wake_24",
       wakeSeq: "24",
     })).toEqual({
       eventId: "evt_old",
       fetchProof: "proof_24",
+      wakeEventId: "evt_old",
       wakeId: "wake_24",
       wakeSeq: "24",
     });
@@ -587,7 +589,7 @@ describe("hosted wake parser contracts", () => {
     expect(() => parseHostedWakeStatusRequest({
       fetchProof: "proof_24",
       wakeId: "wake_24",
-    })).toThrow(/must be provided together/i);
+    })).toThrow(/wakeEventId, wakeId, and wakeSeq must be provided together/i);
   });
 
   it("rejects the removed dispatchState input alias for wake status responses", () => {
