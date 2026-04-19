@@ -158,12 +158,7 @@ export async function resolveAssistantSession(
 
     const now = resolveTimestamp(input.now)
     const providerOptions = normalizeProviderOptions(input)
-    const target =
-      input.target ??
-      createAssistantModelTarget({
-        provider: input.provider,
-        ...providerOptions,
-      })
+    const target = input.target ?? createAssistantModelTarget(providerOptions)
     if (!target) {
       throw new VaultCliError(
         'ASSISTANT_TARGET_REQUIRED',

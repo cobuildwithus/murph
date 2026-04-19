@@ -124,7 +124,7 @@ describe('assistant CLI delivery contracts', () => {
         channel: null,
         identityId: null,
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
         deliveryTarget: null,
       },
       createdAt: '2026-04-12T00:00:00.000Z',
@@ -182,7 +182,7 @@ describe('assistant CLI delivery contracts', () => {
           channel: 'telegram',
           identityId: null,
           participantId: 'user_123',
-          sourceThreadId: 'thread_123',
+          threadId: 'thread_123',
           deliveryTarget: null,
           deliverResponse: true,
         },
@@ -277,17 +277,25 @@ describe('assistant CLI automation shape ownership', () => {
       deliveryTarget: 'chat:123',
       identityId: null,
       participantId: 'participant_123',
-      sourceThreadId: null,
+      threadId: null,
       alias: 'personal',
       sessionId: null,
     })
 
-    const { alias, sessionId, ...route } = target
+    const { alias, sessionId, threadId, ...route } = target
     expect({ alias, sessionId }).toEqual({
       alias: 'personal',
       sessionId: null,
     })
-    expect(route).toEqual(automationRouteSchema.parse(route))
+    expect({
+      ...route,
+      sourceThreadId: threadId,
+    }).toEqual(
+      automationRouteSchema.parse({
+        ...route,
+        sourceThreadId: threadId,
+      }),
+    )
   })
 
   it('keeps route-less cron targets valid for local-only jobs', () => {
@@ -297,7 +305,7 @@ describe('assistant CLI automation shape ownership', () => {
         deliveryTarget: null,
         identityId: null,
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
         alias: null,
         sessionId: null,
       }),
@@ -306,7 +314,7 @@ describe('assistant CLI automation shape ownership', () => {
       deliveryTarget: null,
       identityId: null,
       participantId: null,
-      sourceThreadId: null,
+      threadId: null,
       alias: null,
       sessionId: null,
     })

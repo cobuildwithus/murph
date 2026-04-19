@@ -129,7 +129,7 @@ export interface AssistantLocalService {
     job: string
     participantId?: string | null
     resetContinuity?: boolean
-    sourceThreadId?: string | null
+    threadId?: string | null
     vault?: string | null
   }): ReturnType<typeof setAssistantCronJobTarget>
   runAutomationOnce(
@@ -271,7 +271,7 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
           job: input.job,
           participantId: input.participantId ?? undefined,
           resetContinuity: input.resetContinuity,
-          sourceThreadId: input.sourceThreadId ?? undefined,
+          threadId: input.threadId ?? undefined,
           vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
         }),
       ),

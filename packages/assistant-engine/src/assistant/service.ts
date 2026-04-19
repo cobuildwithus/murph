@@ -35,6 +35,12 @@ export type {
   AssistantNotificationResult,
 } from './notification-turn.js'
 
+export type AssistantSessionOptionsPatch = Pick<
+  AssistantSession['providerOptions'],
+  'provider'
+> &
+  Partial<Omit<AssistantSession['providerOptions'], 'provider'>>
+
 export async function openAssistantConversation(
   input: AssistantSessionResolutionFields,
 ) {
@@ -66,7 +72,7 @@ export async function sendAssistantFirstContactWelcome(
 }
 
 export async function updateAssistantSessionOptions(input: {
-  providerOptions: Partial<AssistantSession['providerOptions']>
+  providerOptions: AssistantSessionOptionsPatch
   sessionId: string
   vault: string
 }): Promise<AssistantSession> {

@@ -332,7 +332,8 @@ export async function sendAssistantMessageLocal(
 }
 
 export async function updateAssistantSessionOptionsLocal(input: {
-  providerOptions: Partial<AssistantSession['providerOptions']>
+  providerOptions: Pick<AssistantSession['providerOptions'], 'provider'> &
+    Partial<Omit<AssistantSession['providerOptions'], 'provider'>>
   sessionId: string
   vault: string
 }): Promise<AssistantSession> {
@@ -345,15 +346,12 @@ export async function updateAssistantSessionOptionsLocal(input: {
   })
 
   const providerConfig = mergeAssistantProviderConfigsForProvider(
-    session.session.provider,
+    input.providerOptions.provider,
     // Persisted targets carry the full durable provider config. Session
     // providerOptions are a derived runtime projection and omit target-only
     // fields such as the Codex executable path.
     assistantBackendTargetToProviderConfigInput(session.session.target),
-    {
-      provider: session.session.provider,
-      ...input.providerOptions,
-    },
+    input.providerOptions,
   )
   const nextTarget =
     createAssistantModelTarget(providerConfig) ?? session.session.target

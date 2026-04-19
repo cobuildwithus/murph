@@ -93,14 +93,14 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
       baseUrl: ' https://api.example.test/v1 ',
       model: 'gpt-4.1',
     }),
-    'openai-compatible',
+    null,
   )
   assert.equal(
     inferAssistantProviderFromConfigInput({
       approvalPolicy: 'never',
       profile: ' default ',
     }),
-    'codex-cli',
+    null,
   )
 
   const mergedOpenAi = mergeAssistantProviderConfigs(
@@ -111,6 +111,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
       model: ' codex-model ',
     },
     {
+      provider: 'openai-compatible',
       apiKeyEnv: ' OPENAI_API_KEY ',
       baseUrl: ' https://api.openai.com/v1 ',
       headers: {
@@ -156,6 +157,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     model: 'codex-model',
     oss: false,
     profile: null,
+    provider: 'openai-compatible',
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     resumeKind: null,

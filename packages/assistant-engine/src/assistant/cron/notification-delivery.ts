@@ -25,7 +25,7 @@ export function buildAssistantCronNotificationDedupeToken(input: {
     input.job.target.channel ?? '',
     input.job.target.identityId ?? '',
     input.job.target.participantId ?? '',
-    input.job.target.sourceThreadId ?? '',
+    input.job.target.threadId ?? '',
     input.job.target.deliveryTarget ?? '',
   ].join('|')
 }

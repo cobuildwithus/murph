@@ -272,7 +272,7 @@ describe('assistant provider seam helpers', () => {
     expect(summarizeAssistantProviderActivityLabels([], 0)).toEqual([])
   })
 
-  it('normalizes resumable state and persists resume state from bindings when needed', () => {
+  it('normalizes resumable state and only persists explicit resume state', () => {
     expect(
       normalizeAssistantSessionResumeState({
         providerSessionId: '   ',
@@ -282,15 +282,18 @@ describe('assistant provider seam helpers', () => {
 
     const persisted = serializeAssistantSessionForPersistence({
       ...createAssistantSession(),
+      resumeState: {
+        providerSessionId: 'provider_session_resume',
+        resumeRouteId: 'route-resume',
+      },
       providerBinding: createProviderBinding({
         providerSessionId: 'provider_session_bound',
         resumeRouteId: 'route-bound',
       }),
-      resumeState: null,
     })
     expect(persisted.resumeState).toEqual({
-      providerSessionId: 'provider_session_bound',
-      resumeRouteId: 'route-bound',
+      providerSessionId: 'provider_session_resume',
+      resumeRouteId: 'route-resume',
     })
 
     expect(normalizeAssistantSessionResumeState(null)).toBeNull()
@@ -302,10 +305,7 @@ describe('assistant provider seam helpers', () => {
           resumeRouteId: 'route-from-binding',
         }),
       }),
-    ).toEqual({
-      providerSessionId: 'provider-session-from-binding',
-      resumeRouteId: 'route-from-binding',
-    })
+    ).toBeNull()
     expect(writeAssistantProviderResumeRouteId(null, null)).toBeNull()
     expect(writeAssistantSessionProviderSessionId(null, null)).toBeNull()
     expect(
@@ -331,6 +331,14 @@ describe('assistant provider seam helpers', () => {
     }
     mismatchedBindingSession.resumeState = null
     expect(serializeAssistantSessionForPersistence(mismatchedBindingSession).resumeState).toBeNull()
+
+    const bindingOnlySession = createAssistantSession()
+    bindingOnlySession.providerBinding = createProviderBinding({
+      providerSessionId: 'provider-session-binding-only',
+      resumeRouteId: 'route-binding-only',
+    })
+    bindingOnlySession.resumeState = null
+    expect(serializeAssistantSessionForPersistence(bindingOnlySession).resumeState).toBeNull()
   })
 
   it('classifies provider failure helpers', () => {

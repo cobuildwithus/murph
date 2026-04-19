@@ -48,7 +48,7 @@ const TEST_CRON_JOB = {
     channel: 'telegram',
     identityId: 'identity_123',
     participantId: 'participant_123',
-    sourceThreadId: 'thread_123',
+    threadId: 'thread_123',
     deliveryTarget: '@murph',
   },
   createdAt: '2026-04-01T00:00:00.000Z',
@@ -113,6 +113,7 @@ const TEST_SESSION = {
     profile: null,
     oss: false,
     executionDriver: 'codex-cli',
+    provider: 'codex-cli',
     resumeKind: 'codex-session',
   },
   providerBinding: null,
@@ -218,7 +219,7 @@ test('maybeSetAssistantCronTargetViaDaemon encodes the job id and serializes opt
       deliveryTarget: '@murph-backup',
       identityId: 'identity_123',
       participantId: 'participant_123',
-      sourceThreadId: 'thread_123',
+      threadId: 'thread_123',
       dryRun: false,
       resetContinuity: true,
     },
@@ -241,7 +242,7 @@ test('maybeSetAssistantCronTargetViaDaemon encodes the job id and serializes opt
     identityId: 'identity_123',
     participantId: 'participant_123',
     resetContinuity: true,
-    sourceThreadId: 'thread_123',
+    threadId: 'thread_123',
     vault: '/tmp/vault',
   })
 })
@@ -355,7 +356,7 @@ test('daemon client serializes open-conversation, session-options, and session l
       channel: 'telegram',
       identityId: 'identity_123',
       participantId: 'participant_123',
-      sourceThreadId: 'thread_123',
+      threadId: 'thread_123',
       vault: '/tmp/vault',
     },
     TEST_ENV,
@@ -363,6 +364,7 @@ test('daemon client serializes open-conversation, session-options, and session l
   const updatedSession = await maybeUpdateAssistantSessionOptionsViaDaemon(
     {
       providerOptions: {
+        provider: 'codex-cli',
         model: 'gpt-5.4',
       },
       sessionId: TEST_SESSION.sessionId,
@@ -391,12 +393,13 @@ test('daemon client serializes open-conversation, session-options, and session l
     channel: 'telegram',
     identityId: 'identity_123',
     participantId: 'participant_123',
-    sourceThreadId: 'thread_123',
+    threadId: 'thread_123',
     vault: '/tmp/vault',
   })
   assert.equal(String(fetchMock.mock.calls[1]?.[0]), 'http://127.0.0.1:50242/session-options')
   assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)), {
     providerOptions: {
+      provider: 'codex-cli',
       model: 'gpt-5.4',
     },
     sessionId: TEST_SESSION.sessionId,

@@ -6,6 +6,7 @@ export {
 } from '@murphai/runtime-state/node'
 import {
   type AssistantApprovalPolicy,
+  type AssistantChatProvider,
   type AssistantProviderSessionOptions,
   type AssistantSandbox,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -151,6 +152,7 @@ export function normalizeProviderOptions(input: {
   oss?: boolean
   presetId?: string | null
   profile?: string | null
+  provider?: AssistantChatProvider | null
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null

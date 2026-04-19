@@ -36,6 +36,8 @@ const assistantOperatorAuthorityValues = new Set([
   'direct-operator',
   'accepted-inbound-message',
 ])
+const assistantChatProviderValues = ['codex-cli', 'openai-compatible'] as const
+const assistantChatProviderValueSet = new Set(assistantChatProviderValues)
 const assistantCanonicalConversationFields = new Set([
   'alias',
   'channel',
@@ -121,8 +123,27 @@ function parseAssistantMessageRequestBody(payload: unknown): AssistantMessageReq
 function parseAssistantSessionOptionsRequestBody(payload: unknown): AssistantSessionOptionsRequest {
   const record = asAssistantRequestRecord(payload, 'session-options')
   const providerOptions = readRequiredRecordField(record, 'providerOptions', 'session-options')
-  return {
+  const provider = readOptionalNullableStringField(
     providerOptions,
+    'provider',
+    'session-options.providerOptions',
+  )
+  if (
+    !provider ||
+    !assistantChatProviderValueSet.has(
+      provider as (typeof assistantChatProviderValues)[number],
+    )
+  ) {
+    throw new AssistantHttpRequestError(
+      `Assistant session-options provider must be one of ${assistantChatProviderValues.join(', ')}.`,
+      400,
+    )
+  }
+  return {
+    providerOptions: {
+      ...providerOptions,
+      provider,
+    } as AssistantSessionOptionsRequest['providerOptions'],
     sessionId: parseAssistantSessionIdField(record.sessionId, 'session-options'),
     vault: readOptionalNullableStringField(record, 'vault', 'session-options'),
   }
@@ -467,7 +488,8 @@ function parseAssistantCronTargetSetRequestBody(
   assertOptionalNullableStringField(record, 'channel', 'cron target')
   assertOptionalNullableStringField(record, 'identityId', 'cron target')
   assertOptionalNullableStringField(record, 'participantId', 'cron target')
-  assertOptionalNullableStringField(record, 'sourceThreadId', 'cron target')
+  assertUnsupportedAssistantLegacyThreadField(record, 'cron target')
+  assertOptionalNullableStringField(record, 'threadId', 'cron target')
   assertOptionalNullableStringField(record, 'deliveryTarget', 'cron target')
   assertOptionalBooleanField(record, 'dryRun', 'cron target')
   assertOptionalBooleanField(record, 'resetContinuity', 'cron target')
@@ -482,11 +504,7 @@ function parseAssistantCronTargetSetRequestBody(
       'participantId',
       'cron target',
     ),
-    sourceThreadId: readOptionalNullableStringField(
-      record,
-      'sourceThreadId',
-      'cron target',
-    ),
+    threadId: readOptionalNullableStringField(record, 'threadId', 'cron target'),
     deliveryTarget: readOptionalNullableStringField(
       record,
       'deliveryTarget',
@@ -580,7 +598,7 @@ function validateAssistantSessionResolutionRecord(
   assertOptionalNullableStringField(record, 'channel', context)
   assertOptionalNullableStringField(record, 'identityId', context)
   assertOptionalNullableStringField(record, 'participantId', context)
-  assertOptionalNullableStringField(record, 'sourceThreadId', context)
+  assertUnsupportedAssistantLegacyThreadField(record, context)
   assertOptionalNullableStringField(record, 'threadId', context)
   assertOptionalNullableStringField(record, 'provider', context)
   assertOptionalNullableStringField(record, 'model', context)
@@ -600,6 +618,20 @@ function validateAssistantSessionResolutionRecord(
     const conversationRecord = readRequiredRecordField(record, 'conversation', context)
     validateAssistantConversationRecord(conversationRecord, context)
   }
+}
+
+function assertUnsupportedAssistantLegacyThreadField(
+  record: Record<string, unknown>,
+  context: string,
+): void {
+  if (!('sourceThreadId' in record)) {
+    return
+  }
+
+  throw new AssistantHttpRequestError(
+    `Assistant ${context} field sourceThreadId is no longer supported. Use threadId or the canonical conversation field instead.`,
+    400,
+  )
 }
 
 function validateAssistantConversationRecord(

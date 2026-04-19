@@ -381,7 +381,6 @@ async function resolveAssistantRouteTurnPlan(input: {
     sessionBinding: input.session.providerBinding ?? null,
   })
   const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
-    provider: input.route.provider,
     ...input.route.providerOptions,
   })
   const nativeResumeEnabled = input.profile.nativeResumePolicy !== 'disabled'

@@ -125,6 +125,7 @@ const TEST_SESSION: AssistantSession = {
   provider: 'openai-compatible',
   providerOptions: {
     continuityFingerprint: 'fingerprint-ui-ink',
+    provider: 'openai-compatible',
     model: 'gpt-5.4',
     reasoningEffort: 'medium',
     sandbox: null,
@@ -483,6 +484,7 @@ test(
       provider: 'codex-cli' as const,
       providerOptions: {
         continuityFingerprint: 'fingerprint-ui-ink-codex',
+        provider: 'codex-cli',
         model: null,
         reasoningEffort: null,
         sandbox: null,

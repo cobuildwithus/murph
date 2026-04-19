@@ -45,6 +45,12 @@ export interface AssistantDaemonOpenConversationResult {
   session: AssistantSession
 }
 
+type AssistantSessionOptionsPatch = Pick<
+  AssistantSession['providerOptions'],
+  'provider'
+> &
+  Partial<Omit<AssistantSession['providerOptions'], 'provider'>>
+
 export type AssistantDaemonAutomationInput = Omit<
   RunAssistantAutomationInput,
   'inboxServices' | 'onEvent' | 'onInboxEvent' | 'signal' | 'vaultServices'
@@ -93,14 +99,14 @@ export async function maybeOpenAssistantConversationViaDaemon(
   const payload = await assistantDaemonFetchJson('/open-conversation', {
     env,
     method: 'POST',
-    body: input,
+    body: serializeAssistantSessionResolutionFields(input),
   })
   return parseAssistantDaemonOpenConversationPayload(payload)
 }
 
 export async function maybeUpdateAssistantSessionOptionsViaDaemon(
   input: {
-    providerOptions: Partial<AssistantSession['providerOptions']>
+    providerOptions: AssistantSessionOptionsPatch
     sessionId: string
     vault: string
   },
@@ -345,7 +351,7 @@ export async function maybeSetAssistantCronTargetViaDaemon(
     dryRun: input.dryRun ?? false,
     identityId: input.identityId ?? null,
     participantId: input.participantId ?? null,
-    sourceThreadId: input.sourceThreadId ?? null,
+    threadId: input.threadId ?? null,
     vault: input.vault,
   } as {
     channel: string | null
@@ -354,7 +360,7 @@ export async function maybeSetAssistantCronTargetViaDaemon(
     identityId: string | null
     participantId: string | null
     resetContinuity?: boolean
-    sourceThreadId: string | null
+    threadId: string | null
     vault: string
   }
   if (input.resetContinuity !== undefined) {
@@ -582,9 +588,32 @@ function serializeAssistantMessageInput(
     abortSignal: _abortSignal,
     onProviderEvent: _onProviderEvent,
     onTraceEvent: _onTraceEvent,
+    sourceThreadId,
+    threadId,
     ...serializableInput
   } = input
-  return serializableInput
+  return {
+    ...serializableInput,
+    ...(threadId === undefined && sourceThreadId === undefined
+      ? {}
+      : {
+          threadId: threadId ?? sourceThreadId ?? null,
+        }),
+  }
+}
+
+function serializeAssistantSessionResolutionFields(
+  input: AssistantSessionResolutionFields,
+): AssistantSessionResolutionFields {
+  const { sourceThreadId, threadId, ...serializableInput } = input
+  return {
+    ...serializableInput,
+    ...(threadId === undefined && sourceThreadId === undefined
+      ? {}
+      : {
+          threadId: threadId ?? sourceThreadId ?? null,
+        }),
+  }
 }
 
 function parseAssistantDaemonOpenConversationPayload(

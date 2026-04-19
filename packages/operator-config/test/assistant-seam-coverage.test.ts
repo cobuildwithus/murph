@@ -294,7 +294,10 @@ test('assistant provider helpers cover null inference and empty header canonical
     },
   )
   assert.deepEqual(
-    mergeAssistantProviderConfigs(null, { model: ' gpt-5 ' }),
+    mergeAssistantProviderConfigs(null, {
+      provider: 'codex-cli',
+      model: ' gpt-5 ',
+    }),
     {
       approvalPolicy: null,
       apiKeyEnv: null,
@@ -349,6 +352,7 @@ test('assistant provider helpers cover null inference and empty header canonical
       model: 'gpt-5',
       oss: false,
       profile: null,
+      provider: 'codex-cli',
       reasoningEffort: 'medium',
       resumeKind: 'codex-session',
       sandbox: null,

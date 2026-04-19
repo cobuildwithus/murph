@@ -306,10 +306,9 @@ function normalizeAssistantSessionForWrite(
     'provider' in session
       ? {
           ...session,
-          providerOptions: serializeAssistantProviderSessionOptions({
-            provider: session.provider,
-            ...session.providerOptions,
-          }),
+          providerOptions: serializeAssistantProviderSessionOptions(
+            session.providerOptions,
+          ),
         }
       : parseAssistantSessionRecord(session),
   )

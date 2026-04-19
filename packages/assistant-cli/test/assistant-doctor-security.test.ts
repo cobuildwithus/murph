@@ -51,6 +51,7 @@ const BASE_SESSION: AssistantSession = {
   provider: 'openai-compatible',
   providerOptions: {
     continuityFingerprint: 'fingerprint-doctor-security',
+    provider: 'openai-compatible',
     model: null,
     reasoningEffort: null,
     sandbox: null,

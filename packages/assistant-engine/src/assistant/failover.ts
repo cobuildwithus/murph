@@ -377,8 +377,8 @@ function resolveAssistantFailoverRouteProviderConfig(input: {
   const providerDefaults = resolveAssistantProviderDefaults(input.defaults, input.provider)
   return mergeAssistantProviderConfigsForProvider(
     input.provider,
-    providerDefaults ? { provider: input.provider, ...providerDefaults } : null,
-    { provider: input.provider, ...input.providerOptions },
+    providerDefaults ? { ...providerDefaults, provider: input.provider } : null,
+    input.providerOptions,
     input.provider === 'codex-cli'
       ? { provider: input.provider, codexCommand: input.codexCommand }
       : { provider: input.provider },

@@ -15,6 +15,12 @@ import {
 
 export * from '@murphai/assistant-engine/assistant-service'
 
+type AssistantSessionOptionsPatch = Pick<
+  AssistantSession['providerOptions'],
+  'provider'
+> &
+  Partial<Omit<AssistantSession['providerOptions'], 'provider'>>
+
 export async function openAssistantConversation(
   input: AssistantSessionResolutionFields,
 ) {
@@ -38,7 +44,7 @@ export async function sendAssistantMessage(
 }
 
 export async function updateAssistantSessionOptions(input: {
-  providerOptions: Partial<AssistantSession['providerOptions']>
+  providerOptions: AssistantSessionOptionsPatch
   sessionId: string
   vault: string
 }): Promise<AssistantSession> {
