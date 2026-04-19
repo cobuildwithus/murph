@@ -11,6 +11,10 @@ export const hostedRunnerBundleOnlyDependencyNames = [
   "@murphai/murph",
 ] as const;
 
+export interface HostedRunnerBundleContractOptions {
+  includeBundleOnlyDependencies?: boolean;
+}
+
 interface RunnerBundlePackageManifest {
   bundleDependencies?: unknown;
   dependencies?: Record<string, string>;
@@ -38,18 +42,49 @@ const murphNonBundledWorkspaceDependencyNames = listNonBundledWorkspaceDependenc
   publishedMurphBundledWorkspacePackageNames,
 );
 
-export const hostedRunnerWorkspacePackageNames = sortPackageNames([
-  ...resolveWorkspaceDependencyClosure([
-    ...listWorkspaceDependencyNames(hostedRunnerRuntimePackageManifest),
-    ...murphNonBundledWorkspaceDependencyNames,
-  ]),
-  ...hostedRunnerBundleOnlyDependencyNames,
-]);
+export const hostedRunnerWorkspacePackageNames =
+  resolveHostedRunnerWorkspacePackageNames();
 
-export const hostedRunnerBuildPackageNames = sortPackageNames([
-  ...hostedRunnerWorkspacePackageNames,
-  ...resolveWorkspaceDependencyClosure(publishedMurphBundledWorkspacePackageNames),
-]);
+export const hostedRunnerBuildPackageNames = resolveHostedRunnerBuildPackageNames();
+
+export function resolveHostedRunnerWorkspacePackageNames(
+  input: HostedRunnerBundleContractOptions = {},
+): readonly string[] {
+  const includeBundleOnlyDependencies =
+    input.includeBundleOnlyDependencies ?? true;
+  const runtimeSeedPackageNames = [
+    ...listWorkspaceDependencyNames(hostedRunnerRuntimePackageManifest),
+    ...(includeBundleOnlyDependencies
+      ? murphNonBundledWorkspaceDependencyNames
+      : []),
+  ];
+
+  return sortPackageNames([
+    ...resolveWorkspaceDependencyClosure(runtimeSeedPackageNames),
+    ...(includeBundleOnlyDependencies
+      ? hostedRunnerBundleOnlyDependencyNames
+      : []),
+  ]);
+}
+
+export function resolveHostedRunnerBuildPackageNames(
+  input: HostedRunnerBundleContractOptions = {},
+): readonly string[] {
+  const includeBundleOnlyDependencies =
+    input.includeBundleOnlyDependencies ?? true;
+  const workspacePackageNames = resolveHostedRunnerWorkspacePackageNames({
+    includeBundleOnlyDependencies,
+  });
+
+  if (!includeBundleOnlyDependencies) {
+    return workspacePackageNames;
+  }
+
+  return sortPackageNames([
+    ...workspacePackageNames,
+    ...resolveWorkspaceDependencyClosure(publishedMurphBundledWorkspacePackageNames),
+  ]);
+}
 
 export function buildHostedRunnerRuntimeArtifactPackageJson(input: {
   dependencies: Record<string, string>;

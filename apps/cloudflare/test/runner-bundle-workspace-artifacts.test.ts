@@ -79,4 +79,46 @@ describe("runner bundle runtime artifact staging", () => {
       "export const ok = true;\n",
     );
   });
+
+  it("can stage the runtime artifact without bundle-only workspace dependencies", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-stage-"));
+    const appDir = path.join(rootDir, "app");
+    const bundleDir = path.join(rootDir, "bundle");
+
+    temporaryDirectories.push(rootDir);
+    await mkdir(path.join(appDir, "dist"), { recursive: true });
+    await writeFile(path.join(appDir, "dist", "index.js"), "export const ok = true;\n");
+    await writeFile(
+      path.join(appDir, "package.json"),
+      `${JSON.stringify(
+        {
+          dependencies: {
+            "@murphai/runtime-state": "workspace:*",
+            jose: "^6.2.2",
+          },
+          name: "@murphai/cloudflare-runner",
+          version: "1.2.3",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await stageHostedRunnerRuntimeArtifact(bundleDir, {
+      appDir,
+      bundleOnlyDependencyNames: [],
+    });
+
+    const stagedPackageJson = JSON.parse(
+      await readFile(path.join(bundleDir, "package.json"), "utf8"),
+    ) as {
+      dependencies?: Record<string, string>;
+    };
+
+    expect(stagedPackageJson.dependencies).toEqual({
+      "@murphai/runtime-state": "workspace:*",
+      jose: "^6.2.2",
+    });
+  });
 });
