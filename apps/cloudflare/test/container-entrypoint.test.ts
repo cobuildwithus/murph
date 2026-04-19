@@ -215,8 +215,13 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
+      code: "syntax_error",
+      details: {
+        errorDetail: expect.stringContaining("Expected property name or '}'"),
+      },
       error: "Invalid JSON.",
+      errorName: "SyntaxError",
     });
   });
 
@@ -321,8 +326,68 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
+      code: "type_error",
+      details: {
+        errorDetail: "Hosted container runner request must be an object.",
+      },
       error: "Invalid request.",
+      errorName: "TypeError",
+    });
+  });
+
+  it("surfaces the failing nested request field when the hosted runtime job payload is malformed", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      body: JSON.stringify({
+        internalWorkerProxyToken: "proxy-token",
+        job: {
+          request: {
+            bundle: null,
+            wake: {
+              eventId: "evt_bad_nested_field",
+              kind: "member.activated",
+              memberChannels: {
+                email: false,
+                linq: false,
+                telegram: false,
+              },
+              occurredAt: "2026-04-01T00:00:00.000Z",
+              userId: "member_123",
+            },
+          },
+          runtime: {
+            userEnv: {
+              OPENAI_API_KEY: 123,
+            },
+          },
+        },
+      }),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "type_error",
+      details: {
+        errorDetail: expect.stringContaining("config.userEnv.OPENAI_API_KEY must be a string"),
+      },
+      error: "Invalid request.",
+      errorName: "TypeError",
     });
   });
 
@@ -607,8 +672,13 @@ describe("startHostedContainerEntrypoint", () => {
     firstRequest.finish();
     const firstResponse = await firstRequest.responsePromise;
     expect(firstResponse.status).toBe(400);
-    expect(firstResponse.json).toEqual({
+    expect(firstResponse.json).toMatchObject({
+      code: "syntax_error",
+      details: {
+        errorDetail: expect.stringContaining("Expected property name or '}'"),
+      },
       error: "Invalid JSON.",
+      errorName: "SyntaxError",
     });
   });
 
