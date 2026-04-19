@@ -103,8 +103,8 @@ import {
   setAssistantCronJobTarget,
 } from '../src/assistant-cron.ts'
 import {
-  readAssistantCronAutomationRuntimeStore,
-  writeAssistantCronAutomationRuntimeStore,
+  readAssistantCronCanonicalRuntimeStore,
+  writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
 import {
   readAssistantCronStore,
@@ -315,7 +315,7 @@ describe('assistant cron runtime orchestration', () => {
       ...record,
       state: {
         ...record.state,
-        nextRunAt: '2026-04-08T10:00:00.000Z',
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
         runningAt: '2026-04-08T10:05:00.000Z',
         runningPid: 42,
       },
@@ -526,7 +526,7 @@ describe('assistant cron runtime orchestration', () => {
       ...record,
       state: {
         ...record.state,
-        nextRunAt: '2026-04-08T08:00:00.000Z',
+        pendingOccurrenceAt: '2026-04-08T08:00:00.000Z',
       },
     }))
     cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
@@ -584,7 +584,7 @@ describe('assistant cron runtime orchestration', () => {
       ...record,
       state: {
         ...record.state,
-        nextRunAt: '2026-04-08T08:00:00.000Z',
+        pendingOccurrenceAt: '2026-04-08T08:00:00.000Z',
       },
     }))
 
@@ -605,7 +605,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryDedupeToken: expect.stringContaining(
-          'assistant-cron|automation-1|2026-04-08T10:00:00.000Z',
+          'assistant-cron|automation-1|2026-04-08T08:00:00.000Z',
         ),
         turnTrigger: 'automation-cron',
       }),
@@ -701,21 +701,19 @@ async function updateLocalJob(
 
 async function updateCanonicalRuntimeState(
   vaultRoot: string,
-  automationId: string,
+  jobId: string,
   update: (
     record: Awaited<
-      ReturnType<typeof readAssistantCronAutomationRuntimeStore>
-    >['automations'][number],
+      ReturnType<typeof readAssistantCronCanonicalRuntimeStore>
+    >['jobs'][number],
   ) => Awaited<
-    ReturnType<typeof readAssistantCronAutomationRuntimeStore>
-  >['automations'][number],
+    ReturnType<typeof readAssistantCronCanonicalRuntimeStore>
+  >['jobs'][number],
 ): Promise<void> {
   const paths = resolveAssistantStatePaths(vaultRoot)
-  const store = await readAssistantCronAutomationRuntimeStore(paths)
-  const index = store.automations.findIndex(
-    (record) => record.automationId === automationId,
-  )
+  const store = await readAssistantCronCanonicalRuntimeStore(paths)
+  const index = store.jobs.findIndex((record) => record.jobId === jobId)
   expect(index).toBeGreaterThanOrEqual(0)
-  store.automations[index] = update(store.automations[index]!)
-  await writeAssistantCronAutomationRuntimeStore(paths, store)
+  store.jobs[index] = update(store.jobs[index]!)
+  await writeAssistantCronCanonicalRuntimeStore(paths, store)
 }

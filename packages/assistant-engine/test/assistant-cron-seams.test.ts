@@ -10,12 +10,12 @@ import {
   renderAssistantCronPreset,
 } from '../src/assistant/cron/presets.ts'
 import {
-  createAssistantCronAutomationRuntimeRecord,
-  findAssistantCronAutomationRuntimeRecord,
-  readAssistantCronAutomationRuntimeStore,
-  removeAssistantCronAutomationRuntimeRecord,
-  upsertAssistantCronAutomationRuntimeRecord,
-  writeAssistantCronAutomationRuntimeStore,
+  createAssistantCronCanonicalRuntimeRecord,
+  findAssistantCronCanonicalRuntimeRecord,
+  readAssistantCronCanonicalRuntimeStore,
+  removeAssistantCronCanonicalRuntimeRecord,
+  upsertAssistantCronCanonicalRuntimeRecord,
+  writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
 import { listAssistantQuarantineEntriesAtPaths } from '../src/assistant/quarantine.ts'
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
@@ -127,37 +127,32 @@ describe('assistant cron preset seams', () => {
   })
 })
 
-describe('assistant cron automation runtime store seams', () => {
-  it('returns an empty store when the automation runtime file is missing', async () => {
+describe('assistant cron canonical runtime store seams', () => {
+  it('returns an empty store when the runtime file is missing', async () => {
     const paths = await createAssistantPaths('murph-assistant-cron-store-missing-')
 
-    await expect(readAssistantCronAutomationRuntimeStore(paths)).resolves.toEqual({
-      automations: [],
-      version: 1,
+    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
+      jobs: [],
+      version: 2,
     })
     expect(
-      findAssistantCronAutomationRuntimeRecord(
-        { automations: [], version: 1 },
-        'a-1',
-      ),
+      findAssistantCronCanonicalRuntimeRecord({ jobs: [], version: 2 }, 'job-a'),
     ).toBeNull()
   })
 
-  it('creates records, upserts them in sorted order, and removes entries by automation id', () => {
-    const store: Awaited<ReturnType<typeof readAssistantCronAutomationRuntimeStore>> = {
-      automations: [],
-      version: 1 as const,
+  it('creates records, upserts them in sorted order, and removes entries by job id', () => {
+    const store: Awaited<ReturnType<typeof readAssistantCronCanonicalRuntimeStore>> = {
+      jobs: [],
+      version: 2 as const,
     }
-    const betaRecord = createAssistantCronAutomationRuntimeRecord({
+    const betaRecord = createAssistantCronCanonicalRuntimeRecord({
       alias: 'beta-alias',
-      automationId: 'beta',
-      nextRunAt: '2026-04-09T09:00:00.000Z',
+      jobId: 'beta',
       now: '2026-04-08T12:00:00.000Z',
       sessionId: 'session-beta',
     })
-    const alphaRecord = createAssistantCronAutomationRuntimeRecord({
-      automationId: 'alpha',
-      nextRunAt: null,
+    const alphaRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: 'alpha',
       now: '2026-04-08T11:00:00.000Z',
     })
     const updatedBetaRecord = {
@@ -167,23 +162,26 @@ describe('assistant cron automation runtime store seams', () => {
         consecutiveFailures: 2,
         lastError: 'rate limited',
         lastFailedAt: '2026-04-08T12:30:00.000Z',
-        nextRunAt: '2026-04-09T10:00:00.000Z',
+        pendingOccurrenceAt: '2026-04-09T10:00:00.000Z',
+        retryAfterAt: '2026-04-09T10:00:00.000Z',
       },
       updatedAt: '2026-04-08T12:30:00.000Z',
     }
 
     expect(betaRecord).toMatchObject({
       alias: 'beta-alias',
-      automationId: 'beta',
       createdAt: '2026-04-08T12:00:00.000Z',
+      jobId: 'beta',
       sessionId: 'session-beta',
       state: {
+        activatedAt: '2026-04-08T12:00:00.000Z',
         consecutiveFailures: 0,
         lastError: null,
         lastFailedAt: null,
         lastRunAt: null,
         lastSucceededAt: null,
-        nextRunAt: '2026-04-09T09:00:00.000Z',
+        pendingOccurrenceAt: null,
+        retryAfterAt: null,
         runningAt: null,
         runningPid: null,
       },
@@ -191,94 +189,56 @@ describe('assistant cron automation runtime store seams', () => {
     })
     expect(alphaRecord).toMatchObject({
       alias: null,
-      automationId: 'alpha',
+      jobId: 'alpha',
       sessionId: null,
       state: {
-        nextRunAt: null,
+        activatedAt: '2026-04-08T11:00:00.000Z',
+        pendingOccurrenceAt: null,
       },
     })
 
-    expect(upsertAssistantCronAutomationRuntimeRecord(store, betaRecord)).toBe(store)
-    upsertAssistantCronAutomationRuntimeRecord(store, alphaRecord)
-    upsertAssistantCronAutomationRuntimeRecord(store, updatedBetaRecord)
+    expect(upsertAssistantCronCanonicalRuntimeRecord(store, betaRecord)).toBe(store)
+    upsertAssistantCronCanonicalRuntimeRecord(store, alphaRecord)
+    upsertAssistantCronCanonicalRuntimeRecord(store, updatedBetaRecord)
 
-    expect(store.automations.map((record) => record.automationId)).toEqual([
+    expect(store.jobs.map((record) => record.jobId)).toEqual([
       'alpha',
       'beta',
     ])
-    expect(findAssistantCronAutomationRuntimeRecord(store, 'beta')).toEqual(
-      updatedBetaRecord,
-    )
-    expect(findAssistantCronAutomationRuntimeRecord(store, 'missing')).toBeNull()
+    expect(findAssistantCronCanonicalRuntimeRecord(store, 'beta')).toEqual(updatedBetaRecord)
+    expect(findAssistantCronCanonicalRuntimeRecord(store, 'missing')).toBeNull()
 
-    expect(removeAssistantCronAutomationRuntimeRecord(store, 'alpha')).toBe(true)
-    expect(removeAssistantCronAutomationRuntimeRecord(store, 'alpha')).toBe(false)
-    expect(store.automations).toEqual([updatedBetaRecord])
+    expect(removeAssistantCronCanonicalRuntimeRecord(store, 'alpha')).toBe(true)
+    expect(removeAssistantCronCanonicalRuntimeRecord(store, 'alpha')).toBe(false)
+    expect(store.jobs).toEqual([updatedBetaRecord])
   })
 
-  it('writes stores to disk and reads them back in normalized automation-id order', async () => {
+  it('writes stores to disk and reads them back in normalized job-id order', async () => {
     const paths = await createAssistantPaths('murph-assistant-cron-store-roundtrip-')
-    const betaRecord = createAssistantCronAutomationRuntimeRecord({
-      automationId: 'beta',
-      nextRunAt: '2026-04-09T09:00:00.000Z',
+    const betaRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: 'beta',
       now: '2026-04-08T12:00:00.000Z',
     })
-    const alphaRecord = createAssistantCronAutomationRuntimeRecord({
-      automationId: 'alpha',
-      nextRunAt: '2026-04-09T08:00:00.000Z',
+    const alphaRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: 'alpha',
       now: '2026-04-08T11:00:00.000Z',
     })
 
-    await writeAssistantCronAutomationRuntimeStore(paths, {
-      automations: [betaRecord, alphaRecord],
-      version: 1,
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [betaRecord, alphaRecord],
+      version: 2,
     })
 
     expect(JSON.parse(await readFile(paths.cronAutomationStatePath, 'utf8'))).toEqual({
       jobs: [
-        expect.objectContaining({
-          createdAt: alphaRecord.createdAt,
-          jobId: 'alpha',
-          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
-          state: expect.objectContaining({
-            activatedAt: alphaRecord.createdAt,
-            pendingOccurrenceAt: null,
-            retryAfterAt: null,
-          }),
-          updatedAt: alphaRecord.updatedAt,
-        }),
-        expect.objectContaining({
-          createdAt: betaRecord.createdAt,
-          jobId: 'beta',
-          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
-          state: expect.objectContaining({
-            activatedAt: betaRecord.createdAt,
-            pendingOccurrenceAt: null,
-            retryAfterAt: null,
-          }),
-          updatedAt: betaRecord.updatedAt,
-        }),
+        alphaRecord,
+        betaRecord,
       ],
       version: 2,
     })
-    await expect(readAssistantCronAutomationRuntimeStore(paths)).resolves.toEqual({
-      automations: [
-        {
-          ...alphaRecord,
-          state: {
-            ...alphaRecord.state,
-            nextRunAt: null,
-          },
-        },
-        {
-          ...betaRecord,
-          state: {
-            ...betaRecord.state,
-            nextRunAt: null,
-          },
-        },
-      ],
-      version: 1,
+    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
+      jobs: [alphaRecord, betaRecord],
+      version: 2,
     })
   })
 
@@ -290,9 +250,9 @@ describe('assistant cron automation runtime store seams', () => {
     })
     await writeFile(paths.cronAutomationStatePath, '{not-valid-json', 'utf8')
 
-    await expect(readAssistantCronAutomationRuntimeStore(paths)).resolves.toEqual({
-      automations: [],
-      version: 1,
+    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
+      jobs: [],
+      version: 2,
     })
     await expect(readFile(paths.cronAutomationStatePath, 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
@@ -319,6 +279,49 @@ describe('assistant cron automation runtime store seams', () => {
       entityType: 'cron-store',
       kind: 'cron.store.quarantined',
       level: 'warn',
+    })
+  })
+
+  it('quarantines unsupported legacy runtime store shapes instead of migrating them', async () => {
+    const paths = await createAssistantPaths('murph-assistant-cron-store-legacy-')
+
+    await mkdir(path.dirname(paths.cronAutomationStatePath), {
+      recursive: true,
+    })
+    await writeFile(
+      paths.cronAutomationStatePath,
+      JSON.stringify({
+        automations: [
+          {
+            alias: null,
+            automationId: 'legacy-job',
+            createdAt: '2026-04-08T11:00:00.000Z',
+            schema: 'murph.assistant-automation-runtime-state.v1',
+            sessionId: null,
+            state: {
+              consecutiveFailures: 0,
+              lastError: null,
+              lastFailedAt: null,
+              lastRunAt: null,
+              lastSucceededAt: null,
+              nextRunAt: '2026-04-09T08:00:00.000Z',
+              runningAt: null,
+              runningPid: null,
+            },
+            updatedAt: '2026-04-08T11:00:00.000Z',
+          },
+        ],
+        version: 1,
+      }),
+      'utf8',
+    )
+
+    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
+      jobs: [],
+      version: 2,
+    })
+    await expect(readFile(paths.cronAutomationStatePath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
     })
   })
 })
