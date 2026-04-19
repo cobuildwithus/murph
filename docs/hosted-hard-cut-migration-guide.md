@@ -80,6 +80,16 @@ The production hosted path should only treat these wake kinds as canonical:
 Top-level wake kinds model execution lanes and wake behavior, not transport
 brands.
 
+Hosted wake behavior classes in the hard-cut shape are:
+
+- `ordered`
+- `coalescing`
+
+The old `edge_triggered` / `parser.drain` follow-up seam is not part of the
+shipped hosted contract. Hosted parser work remains inline on
+`conversation.message` ingestion rather than materializing a separate hosted
+drain wake.
+
 Inbound conversation traffic uses one canonical persisted message wake kind:
 `conversation.message`.
 
@@ -116,6 +126,8 @@ The runtime hard cut is landed:
 - conversation wakes do not force `runHostedMaintenanceLoop(...)`
 - system wakes keep explicit maintenance ownership
 - wake summaries and wake logs are wake-native
+- parser follow-up remains inline on `conversation.message`; there is no hosted
+  `parser.drain` wake lane
 
 Provider-specific helpers that remain in the conversation lane are now just
 message normalization helpers from canonical wake payloads into inbox runtime
