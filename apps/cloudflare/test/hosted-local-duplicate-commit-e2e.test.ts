@@ -10,7 +10,6 @@ import {
   type HostedLocalTestWorkerFixture,
 } from "./helpers/hosted-local-test-worker-fixture.js";
 
-const workerPort = 8912;
 const userId = "member_duplicate_commit_local_e2e";
 const stabilityUserId = "member_duplicate_commit_local_smoke_stability";
 const overlapUserId = "member_overlap_claim_local_e2e";
@@ -54,7 +53,6 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
   beforeAll(async () => {
     workerFixture = await startHostedLocalTestWorkerFixture({
       persistDirPrefix: "murph-hosted-duplicate-commit-e2e-",
-      port: workerPort,
     });
   });
 
