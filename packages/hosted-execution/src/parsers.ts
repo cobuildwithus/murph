@@ -33,6 +33,7 @@ import type {
   HostedExecutionShareReference,
   HostedExecutionUserStatus,
   HostedExecutionWakeDrainResult,
+  HostedExecutionWakeNudgeResult,
   HostedExecutionVaultShareAcceptedEvent,
   HostedFetchedWakeRecord,
   HostedWakeBehavior,
@@ -483,6 +484,27 @@ export function parseHostedExecutionWakeDrainResult(
     targetReached: requireBoolean(
       record.targetReached,
       "Hosted execution wake drain result targetReached",
+    ),
+  };
+}
+
+export function parseHostedExecutionWakeNudgeResult(
+  value: unknown,
+): HostedExecutionWakeNudgeResult {
+  const record = requireObject(value, "Hosted execution wake nudge result");
+
+  return {
+    accepted: requireBoolean(
+      record.accepted,
+      "Hosted execution wake nudge result accepted",
+    ),
+    alarmScheduled: requireBoolean(
+      record.alarmScheduled,
+      "Hosted execution wake nudge result alarmScheduled",
+    ),
+    alreadyRunning: requireBoolean(
+      record.alreadyRunning,
+      "Hosted execution wake nudge result alreadyRunning",
     ),
   };
 }

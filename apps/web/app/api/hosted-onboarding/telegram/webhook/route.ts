@@ -3,8 +3,6 @@ import { after } from "next/server";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
-const TELEGRAM_WEBHOOK_INLINE_DRAIN_TIMEOUT_MS = 8_000;
-
 export async function GET() {
   return jsonOk({
     ok: true,
@@ -29,7 +27,6 @@ export const POST = withJsonError(async (request: Request) => {
           }
         });
       },
-      maxInlineDrainMs: TELEGRAM_WEBHOOK_INLINE_DRAIN_TIMEOUT_MS,
       rawBody,
       secretToken: request.headers.get("x-telegram-bot-api-secret-token"),
       signal: request.signal,

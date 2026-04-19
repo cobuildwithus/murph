@@ -19,7 +19,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
       "getStatus",
-      "wakeUser",
+      "nudgeUserRunner",
     ]);
   });
 
@@ -201,16 +201,15 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("posts wake requests with an optional target sequence hint", async () => {
+  it("posts wake requests without a synchronous drain contract", async () => {
     let observedRequest: ObservedRequest | null = null;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
         observedRequest = { init, url: String(url) };
-        return createJsonResponse(createWakeDrainResult({
-          committedSeq: "42",
-          requestedTargetSeq: "42",
-          targetReached: true,
+        return createJsonResponse(createWakeNudgeResult({
+          accepted: true,
+          alreadyRunning: true,
         }));
       }) as typeof fetch,
       getBearerToken: async () => "Bearer token-123",
@@ -218,11 +217,10 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     await expect(
-      client.wakeUser("user_123", { targetSeqHint: "42" }),
-    ).resolves.toEqual(createWakeDrainResult({
-      committedSeq: "42",
-      requestedTargetSeq: "42",
-      targetReached: true,
+      client.nudgeUserRunner("user_123"),
+    ).resolves.toEqual(createWakeNudgeResult({
+      accepted: true,
+      alreadyRunning: true,
     }));
 
     const request = requireObservedRequest(observedRequest);
@@ -230,9 +228,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.method).toBe("POST");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
-    expect(request.init?.body).toBe(JSON.stringify({
-      targetSeqHint: "42",
-    }));
+    expect(request.init?.body).toBe("{}");
   });
 
 });
@@ -331,16 +327,16 @@ function createUserStatus(
   };
 }
 
-function createWakeDrainResult(
+function createWakeNudgeResult(
   input: Partial<{
-    committedSeq: string;
-    requestedTargetSeq: string | null;
-    targetReached: boolean;
+    accepted: boolean;
+    alarmScheduled: boolean;
+    alreadyRunning: boolean;
   }> = {},
 ) {
   return {
-    committedSeq: input.committedSeq ?? "0",
-    requestedTargetSeq: input.requestedTargetSeq ?? null,
-    targetReached: input.targetReached ?? true,
+    accepted: input.accepted ?? true,
+    alarmScheduled: input.alarmScheduled ?? false,
+    alreadyRunning: input.alreadyRunning ?? false,
   };
 }

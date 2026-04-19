@@ -38,7 +38,6 @@ export type {
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
-  maxInlineDrainMs?: number;
   rawBody: string;
   signature: string | null;
   timestamp: string | null;
@@ -102,8 +101,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     await maybeHandoffHostedExecutionWebhookWake({
       defer: input.defer,
       eventId: event.event_id,
-      maxInlineDrainMs: input.maxInlineDrainMs,
-      prisma,
       response: plan.response,
       source: "linq",
       userId: plan.wakeUserId,
@@ -130,7 +127,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
-  maxInlineDrainMs?: number;
   rawBody: string;
   secretToken: string | null;
   prisma?: PrismaClient;
@@ -160,8 +156,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   await maybeHandoffHostedExecutionWebhookWake({
     defer: input.defer,
     eventId,
-    maxInlineDrainMs: input.maxInlineDrainMs,
-    prisma,
     response: plan.response,
     source: "telegram",
     userId: plan.wakeUserId,

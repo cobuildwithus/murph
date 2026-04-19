@@ -12,9 +12,8 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   materializeHostedExecutionWakeTx: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-  readHostedWakeTarget: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
-  triggerHostedWakeUserBestEffort: vi.fn(),
+  nudgeHostedWakeUserBestEffort: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
@@ -22,7 +21,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
-  readHostedWakeTarget: mocks.readHostedWakeTarget,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -30,7 +28,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-wake/control", () => ({
-  triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
+  nudgeHostedWakeUserBestEffort: mocks.nudgeHostedWakeUserBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -100,13 +98,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(undefined);
     mocks.materializeHostedExecutionWakeTx.mockResolvedValue({ eventId: "evt_123" });
-    mocks.readHostedWakeTarget.mockResolvedValue({
-      eventId: "evt_123",
-      seq: "31",
-      userId: "member_123",
-    });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
-    mocks.triggerHostedWakeUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedWakeUserBestEffort.mockResolvedValue(true);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });
@@ -131,7 +124,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.materializeHostedExecutionWakeTx).not.toHaveBeenCalled();
-    expect(mocks.triggerHostedWakeUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
@@ -198,7 +191,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
     });
     expect(mocks.materializeHostedExecutionWakeTx).not.toHaveBeenCalled();
-    expect(mocks.triggerHostedWakeUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("appends and hands off the active-member wake without any direct Linq send", async () => {
@@ -220,11 +213,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
-        maxInlineDrainMs: 250,
-        rawBody: buildLinqMessageWebhookBody(),
-        signature: null,
-        timestamp: null,
-      });
+      rawBody: buildLinqMessageWebhookBody(),
+      signature: null,
+      timestamp: null,
+    });
 
     expect(response).toMatchObject({
       ignored: false,
@@ -254,15 +246,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         }),
       }),
     });
-    expect(mocks.readHostedWakeTarget).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      prisma,
-      userId: "member_123",
-    });
-    expect(mocks.triggerHostedWakeUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
-      targetSeqHint: "31",
-      timeoutMs: 250,
       userId: "member_123",
     });
     expect(response).not.toHaveProperty("wakeUserId");

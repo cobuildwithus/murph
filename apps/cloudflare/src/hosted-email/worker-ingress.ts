@@ -1,3 +1,4 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { readHostedEmailCapabilities } from "@murphai/hosted-execution/hosted-email";
 import {
   parseRawEmailMessage,
@@ -26,11 +27,24 @@ import { appendHostedEmailIngressWakeInWeb } from "../web-control-plane-email-in
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
+  runtime: {
+    waitUntil?: (promise: Promise<unknown>) => void;
+  } = {},
 ): Promise<void> {
   const stringEnv = asWorkerStringEnvironment(env);
   const environment = readHostedExecutionEnvironment(stringEnv);
   const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        ingressReady: false,
+        to: message.to,
+      }),
+      level: "warn",
+      message: "Hosted email ingress rejected a message because ingress is not configured.",
+      phase: "failed",
+    });
     message.setReject?.("Hosted email ingress is not configured.");
     return;
   }
@@ -44,6 +58,18 @@ export async function handleHostedEmailIngress(
     });
   } catch (error) {
     if (error instanceof RangeError) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.email",
+        details: buildHostedEmailIngressLogDetails({
+          rawSize: typeof message.rawSize === "number" ? String(message.rawSize) : null,
+          reason: "raw-message-too-large",
+          to: message.to,
+        }),
+        error,
+        level: "warn",
+        message: "Hosted email ingress rejected an oversized raw message.",
+        phase: "failed",
+      });
       message.setReject?.("Hosted email message exceeded the maximum accepted size.");
       return;
     }
@@ -76,6 +102,20 @@ export async function handleHostedEmailIngress(
   });
 
   if (!route) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        from: message.from,
+        headerFrom: resolvedHeaderFrom,
+        reason: shouldRejectOnIngressFailure ? "ingress-route-miss-rejected" : "ingress-route-miss-accepted-drop",
+        to: message.to,
+      }),
+      level: "warn",
+      message: shouldRejectOnIngressFailure
+        ? "Hosted email ingress rejected a message because no authorized ingress route matched."
+        : "Hosted email ingress dropped a message because no authorized ingress route matched.",
+      phase: "failed",
+    });
     rejectIngressFailure();
     return;
   }
@@ -113,15 +153,94 @@ export async function handleHostedEmailIngress(
 
   try {
     const stub = await resolveUserRunnerStub(env, route.userId);
-    await stub.wakeHostedWakes({
-      targetSeqHint: append.wake.seq,
+    const nudgeResult = await stub.nudgeHostedWakes();
+    const drainPromise = stub.wakeHostedWakes().catch((error) => {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.email",
+        details: buildHostedEmailIngressLogDetails({
+          eventId,
+          identityId: route.identityId,
+          reason: "wake-drain-after-nudge-failed",
+          routeAddress: route.routeAddress,
+          to: message.to,
+        }),
+        error,
+        level: "warn",
+        message: "Hosted email wake drain failed after the canonical wake nudge was accepted.",
+        phase: "wake.running",
+        userId: route.userId,
+      });
     });
+
+    if (runtime.waitUntil) {
+      runtime.waitUntil(drainPromise);
+    } else {
+      await drainPromise;
+    }
+
+    if (!nudgeResult.accepted) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.email",
+        details: buildHostedEmailIngressLogDetails({
+          alreadyRunning: String(nudgeResult.alreadyRunning),
+          alarmScheduled: String(nudgeResult.alarmScheduled),
+          eventId,
+          identityId: route.identityId,
+          reason: "wake-nudge-not-accepted",
+          routeAddress: route.routeAddress,
+          to: message.to,
+        }),
+        level: "warn",
+        message: "Hosted email wake nudge was not accepted after appending the canonical wake.",
+        phase: "wake.running",
+        userId: route.userId,
+      });
+    }
   } catch (error) {
-    console.error("Hosted email wake nudge failed after appending the canonical wake.", {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        eventId,
+        identityId: route.identityId,
+        reason: "wake-nudge-failed",
+        routeAddress: route.routeAddress,
+        to: message.to,
+      }),
       error,
-      eventId,
+      level: "warn",
+      message: "Hosted email wake nudge failed after appending the canonical wake.",
+      phase: "wake.running",
       userId: route.userId,
-      wakeSeq: append.wake.seq,
     });
   }
+}
+
+function buildHostedEmailIngressLogDetails(input: {
+  alreadyRunning?: string | null;
+  alarmScheduled?: string | null;
+  eventId?: string | null;
+  from?: string | null;
+  headerFrom?: string | null;
+  identityId?: string | null;
+  ingressReady?: boolean | null;
+  rawSize?: string | null;
+  reason?: string | null;
+  routeAddress?: string | null;
+  to: string;
+}): Record<string, string> {
+  return {
+    ...(input.alreadyRunning ? { alreadyRunning: input.alreadyRunning } : {}),
+    ...(input.alarmScheduled ? { alarmScheduled: input.alarmScheduled } : {}),
+    ...(input.eventId ? { eventId: input.eventId } : {}),
+    ...(input.from ? { envelopeFrom: input.from } : {}),
+    ...(input.headerFrom ? { headerFrom: input.headerFrom } : {}),
+    ...(input.identityId ? { identityId: input.identityId } : {}),
+    ...(input.ingressReady === null || input.ingressReady === undefined
+      ? {}
+      : { ingressReady: String(input.ingressReady) }),
+    ...(input.rawSize ? { rawSize: input.rawSize } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.routeAddress ? { routeAddress: input.routeAddress } : {}),
+    to: input.to,
+  };
 }

@@ -412,6 +412,48 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("accepts wake nudges immediately and drains in waitUntil", async () => {
+    const stub = createUserRunnerStub({
+      nudgeHostedWakes: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: true,
+      })),
+      wakeHostedWakes: vi.fn(async () => ({
+        committedSeq: "0",
+        requestedTargetSeq: null,
+        targetReached: true,
+      })),
+    });
+    const backgroundTasks: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      backgroundTasks.push(promise);
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/wake", {
+        body: JSON.stringify({ ignored: true }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      createWorkerEnv(stub),
+      { waitUntil } as unknown as ExecutionContext,
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: true,
+    });
+    expect(stub.nudgeHostedWakes).toHaveBeenCalledTimes(1);
+    expect(stub.wakeHostedWakes).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    await Promise.all(backgroundTasks);
+  });
+
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
     const env = createWorkerEnv();
     const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
@@ -876,6 +918,11 @@ async function resolveHostedUserCryptoContextForTest(
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
     bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
+    nudgeHostedWakes: vi.fn(async () => ({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+    })),
     status: vi.fn(async () => ({
       bundleRef: null,
       inFlight: false,

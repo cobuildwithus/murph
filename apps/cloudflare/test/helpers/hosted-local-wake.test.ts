@@ -2,18 +2,17 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import type {
   HostedExecutionCursorState,
-  HostedExecutionWakeDrainResult,
   HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
 
 import type { HostedLocalDevHarness } from "./hosted-local-dev-harness.js";
 
-const wakeUser = vi.hoisted(() => vi.fn());
+const nudgeUserRunner = vi.hoisted(() => vi.fn());
 const readHostedWakeStatusFromWeb = vi.hoisted(() => vi.fn());
 
 vi.mock("@murphai/cloudflare-hosted-control/client", () => ({
   createCloudflareHostedControlClient: vi.fn(() => ({
-    wakeUser,
+    nudgeUserRunner,
   })),
 }));
 
@@ -39,15 +38,13 @@ it("targets the latest pending wake sequence when draining hosted wakes", async 
       pendingWakeCount: 1,
     } satisfies HostedWakeStatusResponse)
     .mockResolvedValueOnce({
-      cursor: buildCursorState("4"),
+      cursor: buildCursorState("4", "3"),
+      pendingWakeCount: 0,
+    } satisfies HostedWakeStatusResponse)
+    .mockResolvedValueOnce({
+      cursor: buildCursorState("4", "3"),
       pendingWakeCount: 0,
     } satisfies HostedWakeStatusResponse);
-  wakeUser.mockResolvedValue({
-    committedSeq: "4",
-    requestedTargetSeq: "3",
-    targetReached: true,
-  } satisfies HostedExecutionWakeDrainResult);
-
   const resultPromise = wakeHostedWorkerForLatestPendingWake({
     harness: {
       oidcToken: "token",
@@ -60,21 +57,16 @@ it("targets the latest pending wake sequence when draining hosted wakes", async 
   await vi.advanceTimersByTimeAsync(100);
 
   await expect(resultPromise).resolves.toEqual({
-    committedSeq: "4",
+    committedSeq: "3",
     requestedTargetSeq: "3",
     targetReached: true,
   });
-  expect(wakeUser).toHaveBeenCalledWith(
-    "member_local_telegram_reply_123",
-    {
-      targetSeqHint: "3",
-    },
-  );
+  expect(nudgeUserRunner).toHaveBeenCalledWith("member_local_telegram_reply_123");
 });
 
-function buildCursorState(nextSeq: string): HostedExecutionCursorState {
+function buildCursorState(nextSeq: string, committedSeq = "2"): HostedExecutionCursorState {
   return {
-    committedSeq: "2",
+    committedSeq,
     createdAt: "2026-04-19T08:00:00.000Z",
     nextSeq,
     snapshotRef: null,

@@ -2,6 +2,7 @@ import type {
   HostedExecutionBundleRef,
   HostedExecutionCursorState,
   HostedExecutionWakeDrainResult,
+  HostedExecutionWakeNudgeResult,
   HostedExecutionWake,
   HostedExecutionUserStatus,
   HostedWakeMaterializationHints,
@@ -314,11 +315,18 @@ export class HostedUserRunner {
         } catch (error) {
           emitHostedExecutionStructuredLog({
             component: "hosted.runner",
+            details: {
+              fallbackStatus: "current-runner-status",
+              pendingCommitEventId: pendingCommit.eventId,
+              pendingCommitFinalizedAt: pendingCommit.finalizedAt ?? null,
+              pendingCommitUserId: pendingCommit.userId,
+              pendingCommitWakeSeq: pendingCommit.wake.seq,
+            },
             error,
             eventId: pendingCommit.eventId,
             level: "warn",
             message:
-              "Hosted runner status probe could not resume a pending committed cleanup; returning current runner status.",
+              "Hosted runner status probe could not resume a fenced pending commit cleanup; returning current runner status.",
             phase: "completed",
             userId: pendingCommit.userId,
           });
@@ -327,6 +335,14 @@ export class HostedUserRunner {
     }
 
     return this.composeUserStatus(record);
+  }
+
+  async nudgeHostedWakes(): Promise<HostedExecutionWakeNudgeResult> {
+    return {
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: this.wakeDrainLock !== null,
+    };
   }
 
   async wakeHostedWakes(input: {
@@ -640,11 +656,19 @@ export class HostedUserRunner {
         payloadSchema: wake.payloadSchema,
         userId,
       });
-    } catch {
+    } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
+        details: {
+          quarantineCode: HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD,
+          wakeId: wake.id,
+          wakeKind: wake.kind,
+          wakePayloadSchema: wake.payloadSchema,
+          wakeSeq: wake.seq,
+        },
+        error,
         level: "warn",
-        message: `Hosted wake seq ${wake.seq} has an invalid wake payload and cannot be executed.`,
+        message: `Hosted wake seq ${wake.seq} has an invalid wake payload and will be quarantined.`,
         phase: "wake.running",
         userId,
       });
@@ -676,6 +700,12 @@ export class HostedUserRunner {
     if (hostedWake.userId !== userId) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
+        details: {
+          quarantineCode: HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
+          wakeId: wake.id,
+          wakeSeq: wake.seq,
+          wakeUserId: hostedWake.userId,
+        },
         level: "warn",
         message: `Hosted wake seq ${wake.seq} is bound to ${hostedWake.userId}, not ${userId}.`,
         phase: "wake.running",
@@ -831,6 +861,11 @@ export class HostedUserRunner {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         error,
+        details: {
+          quarantineCode,
+          wakeId,
+          wakeSeq,
+        },
         level: "warn",
         message: `Failed to quarantine hosted wake ${wakeId}.`,
         phase: "wake.running",

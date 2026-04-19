@@ -8,12 +8,12 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionWakeDrainResult,
+  parseHostedExecutionWakeNudgeResult,
+  type HostedExecutionWakeNudgeResult,
   type HostedExecutionUserStatus,
-} from "@murphai/hosted-execution/contracts";
+} from "@murphai/hosted-execution";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
-  parseHostedExecutionWakeDrainResult,
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution/parsers";
 
@@ -47,12 +47,7 @@ export interface CloudflareHostedControlClient {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk,
   ): Promise<CloudflareHostedControlBrowserVaultSession>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
-  wakeUser(
-    userId: string,
-    options?: {
-      targetSeqHint?: string | null;
-    },
-  ): Promise<HostedExecutionWakeDrainResult>;
+  nudgeUserRunner(userId: string): Promise<HostedExecutionWakeNudgeResult>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -110,21 +105,17 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    wakeUser(userId, wakeOptions = {}) {
-      const body = JSON.stringify({
-        ...(wakeOptions.targetSeqHint === undefined ? {} : { targetSeqHint: wakeOptions.targetSeqHint }),
-      });
-
+    nudgeUserRunner(userId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
         boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "wake",
-        parse: parseHostedExecutionWakeDrainResult,
+        parse: parseHostedExecutionWakeNudgeResult,
         path: buildCloudflareHostedControlUserWakePath(userId),
         request: {
-          body,
+          body: "{}",
           headers: {
             "content-type": "application/json; charset=utf-8",
           },

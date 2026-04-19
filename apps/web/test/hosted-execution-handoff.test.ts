@@ -11,10 +11,6 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
-  readHostedWakeTarget: vi.fn(),
-}));
-
 vi.mock("@/src/lib/hosted-execution/logging", () => ({
   formatHostedExecutionSafeLogError: (error: unknown) => ({
     message: error instanceof Error ? error.message : String(error),
@@ -22,22 +18,25 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { readHostedWakeTarget } from "@/src/lib/hosted-wake/lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "@/src/lib/hosted-wake/control";
 import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
 
 describe("handoffHostedExecutionWakeBestEffort", () => {
   beforeEach(() => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
-    vi.mocked(readHostedWakeTarget).mockReset();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("swallows lookup failures because the handoff is best-effort", async () => {
-    vi.mocked(readHostedWakeTarget).mockRejectedValue(new Error("lookup failed"));
+  it("swallows nudge failures because the handoff is best-effort", async () => {
+    const nudgeUserRunner = vi.fn().mockRejectedValue(new Error("nudge failed"));
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+      getStatus: vi.fn(),
+      nudgeUserRunner,
+    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
@@ -49,26 +48,21 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
 
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted wake handoff failed.",
-      expect.objectContaining({ message: "lookup failed" }),
+      expect.objectContaining({ message: "nudge failed" }),
     );
   });
 
-  it("nudges the scheduled wake target through the deferred callback when present", async () => {
-    const wakeUser = vi.fn().mockResolvedValue({
-      committedSeq: "42",
-      requestedTargetSeq: "42",
-      targetReached: true,
+  it("nudges the user through the deferred callback when present", async () => {
+    const nudgeUserRunner = vi.fn().mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       getStatus: vi.fn(),
-      wakeUser,
+      nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    vi.mocked(readHostedWakeTarget).mockResolvedValue({
-      eventId: "member.activated:test-event",
-      seq: "42",
-      userId: "user-123",
-    });
 
     const defer = vi.fn(async (run: () => Promise<void>) => {
       await run();
@@ -83,49 +77,28 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
     });
 
     expect(defer).toHaveBeenCalledTimes(1);
-    expect(readHostedWakeTarget).toHaveBeenCalledWith({
-      eventId: "member.activated:test-event",
-      prisma: expect.anything(),
-      userId: "user-123",
-    });
-    expect(wakeUser).toHaveBeenCalledWith("user-123", {
-      targetSeqHint: "42",
-    });
+    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
   });
 
-  it("treats an incomplete 200 wake response as inline failure and schedules deferred drain", async () => {
-    const wakeUser = vi.fn()
-      .mockResolvedValueOnce({
-        committedSeq: "41",
-        requestedTargetSeq: "42",
-        targetReached: false,
-      })
-      .mockResolvedValueOnce({
-        committedSeq: "42",
-        requestedTargetSeq: "42",
-        targetReached: true,
-      });
+  it("schedules a deferred webhook nudge without an inline drain wait contract", async () => {
+    const nudgeUserRunner = vi.fn().mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+    });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       getStatus: vi.fn(),
-      wakeUser,
+      nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    vi.mocked(readHostedWakeTarget).mockResolvedValue({
-      eventId: "evt_inline_gap",
-      seq: "42",
-      userId: "user-123",
-    });
 
     const deferred: Array<() => Promise<void>> = [];
-    const prisma = {} as Parameters<typeof maybeHandoffHostedExecutionWebhookWake>[0]["prisma"];
 
     await maybeHandoffHostedExecutionWebhookWake({
       defer: async (drain) => {
         deferred.push(drain);
       },
       eventId: "evt_inline_gap",
-      maxInlineDrainMs: 25,
-      prisma,
       response: {
         ok: true,
         reason: "wake-appended-active-member",
@@ -134,17 +107,12 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
       userId: "user-123",
     });
 
-    expect(wakeUser).toHaveBeenCalledTimes(1);
-    expect(wakeUser).toHaveBeenNthCalledWith(1, "user-123", {
-      targetSeqHint: "42",
-    });
+    expect(nudgeUserRunner).not.toHaveBeenCalled();
     expect(deferred).toHaveLength(1);
 
     await deferred[0]?.();
 
-    expect(wakeUser).toHaveBeenCalledTimes(2);
-    expect(wakeUser).toHaveBeenNthCalledWith(2, "user-123", {
-      targetSeqHint: "42",
-    });
+    expect(nudgeUserRunner).toHaveBeenCalledTimes(1);
+    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
   });
 });
