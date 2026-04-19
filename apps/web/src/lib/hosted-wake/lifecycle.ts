@@ -98,19 +98,19 @@ export async function readHostedWakeTarget(input: {
 export async function findHostedWakeByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeClient;
-  userId?: string;
+  userId: string;
 }): Promise<string | null> {
   return findHostedExecutionWakeEventIdTx({
     eventId: input.eventId,
     tx: input.tx,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
 }
 
 export async function readHostedWakeLifecycleState(input: {
   eventId: string;
   prisma?: HostedWakeClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeLifecycleState | null> {
   const lifecycle = await readHostedWakeLifecycle(input);
 
@@ -120,13 +120,13 @@ export async function readHostedWakeLifecycleState(input: {
 export async function readHostedWakeLifecycle(input: {
   eventId: string;
   prisma?: HostedWakeClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeLifecycleRecord | null> {
   const prisma = input.prisma ?? getPrisma();
   const lifecycle = await readHostedWakeLifecycleByEventIdTx({
     eventId: input.eventId,
     tx: prisma,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
 
   return lifecycle ?? null;

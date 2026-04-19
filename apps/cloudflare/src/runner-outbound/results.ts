@@ -1,11 +1,5 @@
 import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
-  deriveHostedExecutionErrorCode,
-  emitHostedExecutionStructuredLog,
-  isHostedExecutionRunPhase,
-  type HostedExecutionRunPhase,
-} from "@murphai/hosted-execution";
-import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -18,11 +12,6 @@ import {
   sendHostedEmailMessage,
 } from "../hosted-email.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
-import {
-  readNullableString,
-  requireRecord,
-  requireString,
-} from "./codec.ts";
 import {
   decodeRouteParam,
   resolveRunnerOutboundUserCryptoContext,
@@ -143,34 +132,4 @@ function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return copy.buffer;
-}
-
-function parseRunnerContainerDebugRequest(value: Record<string, unknown>): {
-  details: Record<string, unknown> | null;
-  eventId: string | null;
-  level: "error" | "info" | "warn" | null;
-  message: string;
-  phase: HostedExecutionRunPhase | null;
-  runId: string | null;
-} {
-  const detailsValue = readOptionalObject(value.details);
-  const level = readNullableString(value.level, "level");
-  const phase = readNullableString(value.phase, "phase");
-
-  return {
-    details: detailsValue,
-    eventId: readNullableString(value.eventId, "eventId"),
-    level: level === "error" || level === "info" || level === "warn" ? level : null,
-    message: requireString(value.message, "message"),
-    phase: isHostedExecutionRunPhase(phase) ? phase : null,
-    runId: readNullableString(value.runId, "runId"),
-  };
-}
-
-function readOptionalObject(value: unknown): Record<string, unknown> | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  return requireRecord(value, "details");
 }

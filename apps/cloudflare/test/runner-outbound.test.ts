@@ -15,6 +15,32 @@ import type {
 const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
+const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      connectionId: "conn_123",
+      userId: "member_123",
+    },
+    name: "device-sync runtime snapshot",
+    path: "/api/internal/device-sync/runtime/snapshot",
+  },
+  {
+    body: {
+      bytes: 17,
+      eventId: "evt_123",
+    },
+    name: "hosted execution usage recording",
+    path: "/api/internal/hosted-execution/usage/record",
+  },
+  {
+    body: {
+      provider: "google",
+      returnPath: "/settings/sync",
+    },
+    name: "device-sync provider connect-link",
+    path: "/api/internal/device-sync/providers/google/connect-link",
+  },
+] as const;
 
 describe("handleRunnerOutboundRequest", () => {
   beforeEach(() => {
@@ -134,6 +160,85 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://device-sync.worker/api/internal/device-sync/providers/whoop/connect-link", {
         headers: createRunnerProxyHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(ALLOWLISTED_WEB_CONTROL_CASES)(
+    "proxies allowlisted hosted web-control path: $name",
+    async ({ body, path }) => {
+      const fetchMock = vi.fn(async (
+        ..._args: Parameters<typeof fetch>
+      ): Promise<Response> => new Response(JSON.stringify({
+        ok: true,
+        path,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await handleRunnerOutboundRequest(
+        new Request(`http://web-control.worker${path}`, {
+          body: JSON.stringify(body),
+          headers: createRunnerProxyHeaders({
+            "content-type": "application/json; charset=utf-8",
+          }),
+          method: "POST",
+        }),
+        createRunnerOutboundEnv({
+          HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+        }),
+        "member_123",
+        RUNNER_PROXY_TOKEN,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        path,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const firstCall = fetchMock.mock.calls[0];
+      if (!firstCall) {
+        throw new Error("Expected the allowlisted web-control fetch to run.");
+      }
+      const [url, init] = firstCall;
+      expect(String(url)).toBe(`https://web.example.test${path}`);
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBe(JSON.stringify(body));
+      const headers = new Headers(init?.headers);
+      expect(headers.get("content-type")).toBe("application/json");
+      expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    },
+  );
+
+  it("returns 404 for non-allowlisted web-control proxy paths", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-wake/status", {
+        body: JSON.stringify({
+          eventId: "evt_123",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
         method: "POST",
       }),
       createRunnerOutboundEnv({
