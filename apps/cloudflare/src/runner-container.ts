@@ -17,14 +17,13 @@ import { methodNotAllowed } from "./json.ts";
 import {
   buildLocalInternalProxyRouteBaseUrl,
 } from "./local-internal-proxy-route.ts";
+import { buildHostedRunnerOperatorEnv } from "./runner-env.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
-// Local proxy-everything ingress has proven flaky for POSTs under "__internal",
-// so keep the runner invoke path on a normal internal route while preserving the
-// old container entrypoint alias for compatibility.
+// Keep one canonical invoke path between the worker and the container runtime.
 const RUNNER_EXECUTE_URL = "http://container/internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
@@ -310,6 +309,7 @@ export class RunnerContainer extends Container {
       startOptions: {
         enableInternet: true,
         envVars: {
+          ...buildHostedRunnerOperatorEnv(this.environment),
           HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: runnerControlToken,
           PORT: String(RUNNER_PORT),
         },

@@ -231,7 +231,7 @@ function createStorage() {
     const url = new URL(request.url);
 
     if (url.pathname === "/internal/invoke") {
-      return globalThis.fetch("https://runner-container.internal/__internal/run", {
+      return globalThis.fetch("https://runner-container.internal/internal/run", {
         body: await request.clone().text(),
         headers: {
           authorization: request.headers.get("authorization") ?? "",

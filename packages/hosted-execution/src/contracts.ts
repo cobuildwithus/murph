@@ -354,9 +354,6 @@ export type HostedWakeBehavior =
   (typeof HOSTED_WAKE_BEHAVIORS)[number];
 
 export const HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA = "murph.hosted-wake-execution.v1";
-export const HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA =
-  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
-export const HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA = HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
 
 export const HOSTED_WAKE_PAYLOAD_SCHEMAS = [
   HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
@@ -414,7 +411,6 @@ export type HostedFetchedWakeRecord =
     });
 
 export interface HostedWakeFetchRequest {
-  afterSeq?: string | null;
   limit?: number | null;
 }
 
@@ -424,6 +420,7 @@ export interface HostedWakeFetchResponse {
 }
 
 export interface HostedWakeCommitRequest {
+  assistantNextWakeAt?: string | null;
   committedSeq: string;
   expectedVersion: string;
   snapshotRef?: HostedWakeSnapshotRef;
@@ -431,6 +428,18 @@ export interface HostedWakeCommitRequest {
 
 export interface HostedWakeCommitResponse {
   committed: boolean;
+  cursor: HostedExecutionCursorState;
+  finalizeToken?: string | null;
+}
+
+export interface HostedWakeFinalizeRequest {
+  assistantNextWakeAt?: string | null;
+  finalizeToken: string;
+  snapshotRef: HostedWakeSnapshotRef;
+}
+
+export interface HostedWakeFinalizeResponse {
+  finalized: boolean;
   cursor: HostedExecutionCursorState;
 }
 
@@ -450,7 +459,6 @@ export interface HostedWakeAppendResponse {
 export const HOSTED_WAKE_TERMINAL_STATES = [
   "completed",
   "quarantined",
-  "replaced",
 ] as const;
 
 export type HostedWakeTerminalState =
@@ -467,9 +475,7 @@ export interface HostedWakeTerminalResponse {
   recorded: boolean;
 }
 
-export interface HostedWakeMaterializeRequest {
-  wakeMaterializationHints?: HostedWakeMaterializationHints | null;
-}
+export interface HostedWakeMaterializeRequest {}
 
 export interface HostedWakeMaterializeResponse {
   targetSeqHint: string | null;
@@ -501,6 +507,8 @@ export interface HostedWakeStatusResponse {
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
+
+export const HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE = "HOSTED_WAKE_FETCH_PROOF_STALE";
 
 export type HostedExecutionDeviceSyncJobHint =
   DeviceSyncHostedExecutionDeviceSyncJobHint;

@@ -154,27 +154,13 @@ function projectHostedWakeWithValidatedType(
     throw new TypeError(`Hosted wake payload schema is invalid: ${record.payloadSchema}`);
   }
 
-  if (record.kind === "conversation.message") {
-    if (record.payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
-      throw new TypeError(
-        `Hosted conversation wake payload schema is invalid: ${record.payloadSchema}`,
-      );
-    }
-
-    return {
-      ...base,
-      kind: record.kind,
-      payloadSchema: record.payloadSchema,
-    };
-  }
-
   if (record.payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
-    throw new TypeError(`Hosted system wake payload schema is invalid: ${record.payloadSchema}`);
+    throw new TypeError(`Hosted wake payload schema is invalid: ${record.payloadSchema}`);
   }
 
   return {
     ...base,
-    kind: record.kind as Exclude<HostedExecutionWakeKind, "conversation.message">,
+    kind: record.kind as HostedExecutionWakeKind,
     payloadSchema: record.payloadSchema,
   };
 }
@@ -236,7 +222,6 @@ function parseHostedWakeTerminalState(value: string): HostedWakeTerminalState {
   switch (value) {
     case "completed":
     case "quarantined":
-    case "replaced":
       return value;
     default:
       throw new TypeError(`Hosted wake terminal state is invalid: ${value}`);

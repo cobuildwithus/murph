@@ -36,6 +36,8 @@ import {
 import {
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
+  finalizeHostedWakeCursorInWeb,
+  HostedWakeTerminalStaleFetchProofError,
   materializeHostedDueWakesInWeb,
   quarantineHostedWakeInWeb,
   readHostedWakeStatusFromWeb,
@@ -73,12 +75,25 @@ const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
 interface HostedWakeDrainOutcome {
+  assistantNextWakeAt?: string | null;
   cursorSnapshotRef: HostedExecutionBundleRef | null;
   refetchBeforeAdvance: boolean;
   postCursorAction: "cleanup-only" | "finalize-after-commit";
   wake: HostedExecutionWake | null;
   seq: bigint;
   state: HostedWakeDrainState;
+}
+
+interface HostedWakeDrainInternalResult extends HostedExecutionWakeDrainResult {
+  retryableExit: boolean;
+  stoppingState: HostedWakeDrainState | null;
+}
+
+class HostedWakeDrainRetryableExitError extends Error {
+  constructor(message = "Hosted wake drain exited in a retryable state before cleanup could finish.") {
+    super(message);
+    this.name = "HostedWakeDrainRetryableExitError";
+  }
 }
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
@@ -257,9 +272,12 @@ export class HostedUserRunner {
         preferredWakeAt: null,
         wakeMaterializationHints: materialization.wakeMaterializationHints,
       });
-      await this.wakeHostedWakes({
+      const drainResult = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal({
         targetSeqHint: materialization.targetSeqHint,
-      });
+      }));
+      if (shouldRetryAlarmDrivenHostedWakeDrain(drainResult)) {
+        throw new HostedWakeDrainRetryableExitError();
+      }
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -282,7 +300,8 @@ export class HostedUserRunner {
   async wakeHostedWakes(input: {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedExecutionWakeDrainResult> {
-    return this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
+    const result = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
+    return toHostedExecutionWakeDrainResult(result);
   }
 
   private async materializeDueHostedWakesInWeb(
@@ -302,9 +321,6 @@ export class HostedUserRunner {
 
     return materializeHostedDueWakesInWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
-      body: {
-        wakeMaterializationHints,
-      },
       boundUserId: userId,
       callbackSigning: this.env.webCallbackSigning,
       timeoutMs: this.env.runnerTimeoutMs,
@@ -313,25 +329,26 @@ export class HostedUserRunner {
 
   private async wakeHostedWakesInternal(input: {
     targetSeqHint?: string | null;
-  }): Promise<HostedExecutionWakeDrainResult> {
+  }): Promise<HostedWakeDrainInternalResult> {
     const userId = await this.requireBoundUserId();
     await this.stateStore.bootstrapUser(userId);
     const targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
     const requestedTargetSeq = targetSeqHint?.toString() ?? null;
     await this.resumePendingCommittedCleanupIfNeeded();
-    let afterSeq: string | null = null;
+    let committedSeq: string | null = null;
     let expectedVersion: string | null = null;
+    let retryableExit = false;
+    let stoppingState: HostedWakeDrainState | null = null;
 
     for (let round = 0; round < MAX_HOSTED_WAKE_DRAIN_ROUNDS; round += 1) {
       const batch = await fetchHostedWakeBatchFromWeb({
-        afterSeq,
         baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: userId,
         callbackSigning: this.env.webCallbackSigning,
         limit: DEFAULT_HOSTED_WAKE_BATCH_LIMIT,
         timeoutMs: this.env.runnerTimeoutMs,
       });
-      afterSeq = batch.cursor.committedSeq;
+      committedSeq = batch.cursor.committedSeq;
       expectedVersion = batch.cursor.version;
       await this.syncHostedWakeBundleCacheToCursor(batch.cursor.snapshotRef);
 
@@ -350,7 +367,7 @@ export class HostedUserRunner {
       }
 
       let refetchAfterCommittedWake = false;
-      let stoppingState: HostedWakeDrainState | null = null;
+      stoppingState = null;
 
       for (const wake of batch.wakes) {
         const outcome = await this.executeHostedWakeRecord(wake);
@@ -373,7 +390,6 @@ export class HostedUserRunner {
         if (
           outcome.state === "completed"
           || outcome.state === "quarantined"
-          || outcome.state === "replaced"
         ) {
           try {
             const terminal = await recordHostedWakeTerminalInWeb({
@@ -390,10 +406,22 @@ export class HostedUserRunner {
             });
 
             if (!terminal.recorded) {
+              retryableExit = true;
               stoppingState = "backpressured";
               break;
             }
           } catch (error) {
+            if (error instanceof HostedWakeTerminalStaleFetchProofError) {
+              const staleCursor = await this.recoverAfterStaleHostedWakeTerminalReceipt({
+                outcome,
+                wake,
+              });
+              committedSeq = staleCursor?.committedSeq ?? committedSeq;
+              expectedVersion = staleCursor?.version ?? expectedVersion;
+              refetchAfterCommittedWake = true;
+              break;
+            }
+
             emitHostedExecutionStructuredLog({
               component: "hosted.runner",
               error,
@@ -403,6 +431,7 @@ export class HostedUserRunner {
               phase: "wake.running",
               userId,
             });
+            retryableExit = true;
             stoppingState = "backpressured";
             break;
           }
@@ -411,6 +440,7 @@ export class HostedUserRunner {
         const commit = await commitHostedWakeCursorToWeb({
           baseUrl: this.env.hostedWebBaseUrl,
           body: {
+            assistantNextWakeAt: outcome.assistantNextWakeAt,
             committedSeq: wake.seq,
             expectedVersion,
             snapshotRef: outcome.cursorSnapshotRef,
@@ -424,14 +454,34 @@ export class HostedUserRunner {
         await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
         if (commit.committed) {
           if (outcome.postCursorAction === "finalize-after-commit") {
+            if (!commit.finalizeToken) {
+              emitHostedExecutionStructuredLog({
+                component: "hosted.runner",
+                eventId: outcome.wake?.eventId ?? wake.id,
+                level: "warn",
+                message:
+                  "Hosted wake cursor commit succeeded without a finalize token; refusing to publish the finalized snapshot.",
+                phase: "completed",
+                userId,
+              });
+              committedSeq = cursor.committedSeq;
+              expectedVersion = cursor.version;
+              stoppingState = "backpressured";
+              break;
+            }
+            await this.persistPendingCommitFinalizeToken({
+              eventId: outcome.wake?.eventId ?? null,
+              finalizeToken: commit.finalizeToken,
+            });
             const finalized = await this.finalizeCommittedHostedWakeIfNeeded({
               cursor,
               wake: outcome.wake,
             });
             cursor = finalized.cursor;
             if (finalized.state !== "completed") {
-              afterSeq = cursor.committedSeq;
+              committedSeq = cursor.committedSeq;
               expectedVersion = cursor.version;
+              retryableExit = finalized.state === "backpressured";
               stoppingState = finalized.state;
               break;
             }
@@ -453,13 +503,14 @@ export class HostedUserRunner {
             phase: "wake.running",
             userId,
           });
-          afterSeq = cursor.committedSeq;
+          committedSeq = cursor.committedSeq;
           expectedVersion = cursor.version;
+          retryableExit = true;
           stoppingState = "backpressured";
           break;
         }
 
-        afterSeq = cursor.committedSeq;
+        committedSeq = cursor.committedSeq;
         expectedVersion = cursor.version;
         refetchAfterCommittedWake = true;
         break;
@@ -479,20 +530,22 @@ export class HostedUserRunner {
 
       if (
         batch.wakes.length < DEFAULT_HOSTED_WAKE_BATCH_LIMIT
-        && afterSeq
-        && (!targetSeqHint || BigInt(afterSeq) >= targetSeqHint)
+        && committedSeq
+        && (!targetSeqHint || BigInt(committedSeq) >= targetSeqHint)
       ) {
         break;
       }
     }
 
-    const committedSeq = afterSeq ?? await this.readCommittedWakeSeqFromWeb(userId);
+    const finalCommittedSeq = committedSeq ?? await this.readCommittedWakeSeqFromWeb(userId);
     await this.scheduleHostedWakeMaterializationRevalidationIfNeeded();
 
     return {
-      committedSeq,
+      committedSeq: finalCommittedSeq,
       requestedTargetSeq,
-      targetReached: targetSeqHint === null || BigInt(committedSeq) >= targetSeqHint,
+      retryableExit,
+      stoppingState,
+      targetReached: targetSeqHint === null || BigInt(finalCommittedSeq) >= targetSeqHint,
     };
   }
 
@@ -622,6 +675,7 @@ export class HostedUserRunner {
     });
 
     return {
+      assistantNextWakeAt: execution.assistantNextWakeAt,
       cursorSnapshotRef: execution.cursorSnapshotRef,
       refetchBeforeAdvance: false,
       postCursorAction: execution.postCursorAction,
@@ -678,6 +732,60 @@ export class HostedUserRunner {
         userId,
       });
       return false;
+    }
+  }
+
+  private async recoverAfterStaleHostedWakeTerminalReceipt(input: {
+    outcome: HostedWakeDrainOutcome;
+    wake: HostedFetchedWakeRecord;
+  }): Promise<HostedExecutionCursorState | null> {
+    if (input.outcome.wake) {
+      await this.wakeProcessor.discardWakeAfterLostCursorRace({
+        wake: input.outcome.wake,
+      });
+    }
+
+    try {
+      const status = await readHostedWakeStatusFromWeb({
+        baseUrl: this.readHostedWebControlBaseUrl(),
+        body: input.outcome.wake
+          ? { eventId: input.outcome.wake.eventId }
+          : undefined,
+        boundUserId: input.wake.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+      await this.syncHostedWakeBundleCacheToCursor(status.cursor.snapshotRef);
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          committedSeq: status.cursor.committedSeq,
+          replacedByEventId: status.replacedByEventId ?? null,
+          version: status.cursor.version,
+          wakeEventId: input.outcome.wake?.eventId ?? null,
+          wakeSeq: input.wake.seq,
+          wakeState: status.wakeState ?? null,
+        },
+        eventId: input.outcome.wake?.eventId ?? input.wake.id,
+        level: "info",
+        message:
+          "Hosted wake terminal receipt lost its fetch fence; discarded stale local wake state and will refetch from the current web cursor.",
+        phase: "wake.running",
+        userId: input.wake.userId,
+      });
+      return status.cursor;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        eventId: input.outcome.wake?.eventId ?? input.wake.id,
+        level: "warn",
+        message:
+          "Hosted wake terminal receipt lost its fetch fence and stale local wake state was discarded, but the current web cursor snapshot could not be reloaded yet.",
+        phase: "wake.running",
+        userId: input.wake.userId,
+      });
+      return null;
     }
   }
 
@@ -748,11 +856,27 @@ export class HostedUserRunner {
       };
     }
 
-    const published = await commitHostedWakeCursorToWeb({
+    if (!pendingCommit.finalizeToken) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        eventId: pendingCommit.eventId,
+        level: "warn",
+        message:
+          "Hosted wake finalized snapshot publish is missing its web-issued finalize token; deferring cleanup until the pending commit is reconciled.",
+        phase: "completed",
+        userId: pendingCommit.userId,
+      });
+      return {
+        cursor: input.cursor,
+        state: "backpressured",
+      };
+    }
+
+    const published = await finalizeHostedWakeCursorInWeb({
       baseUrl: this.env.hostedWebBaseUrl,
       body: {
-        committedSeq: input.cursor.committedSeq,
-        expectedVersion: input.cursor.version,
+        assistantNextWakeAt: pendingCommit.result.wakeMaterializationHints?.assistantWakeAt,
+        finalizeToken: pendingCommit.finalizeToken,
         snapshotRef: pendingCommit.bundleRef,
       },
       boundUserId: pendingCommit.userId,
@@ -762,7 +886,7 @@ export class HostedUserRunner {
 
     await this.syncHostedWakeBundleCacheToCursor(published.cursor.snapshotRef);
     if (
-      published.committed
+      published.finalized
       || sameHostedWakeCursorSnapshotRef(published.cursor.snapshotRef, pendingCommit.bundleRef)
     ) {
       return {
@@ -819,6 +943,24 @@ export class HostedUserRunner {
       wake: null,
     });
     await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
+  }
+
+  private async persistPendingCommitFinalizeToken(input: {
+    eventId: string | null;
+    finalizeToken: string;
+  }): Promise<void> {
+    const pendingCommit = input.eventId
+      ? await this.stateStore.readPendingCommit(input.eventId)
+      : await this.stateStore.readPendingCommit();
+
+    if (!pendingCommit || pendingCommit.finalizeToken === input.finalizeToken) {
+      return;
+    }
+
+    await this.stateStore.writePendingCommit({
+      ...pendingCommit,
+      finalizeToken: input.finalizeToken,
+    });
   }
 
   private async syncHostedWakeBundleCacheToCursor(
@@ -1080,6 +1222,22 @@ function hostedWakeMaterializationDueNow(
 
   return hostedWakeHintDueNow(wakeMaterializationHints.assistantWakeAt)
     || hostedWakeHintDueNow(wakeMaterializationHints.deviceSyncWakeAt);
+}
+
+function toHostedExecutionWakeDrainResult(
+  input: HostedWakeDrainInternalResult,
+): HostedExecutionWakeDrainResult {
+  return {
+    committedSeq: input.committedSeq,
+    requestedTargetSeq: input.requestedTargetSeq,
+    targetReached: input.targetReached,
+  };
+}
+
+function shouldRetryAlarmDrivenHostedWakeDrain(
+  input: HostedWakeDrainInternalResult,
+): boolean {
+  return input.retryableExit && input.stoppingState === "backpressured";
 }
 
 function shouldRefreshHostedWakeMaterialization(

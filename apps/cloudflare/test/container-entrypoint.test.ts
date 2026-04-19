@@ -130,6 +130,37 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("rejects the removed legacy internal run alias", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          eventId: "evt_removed_alias",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toBe("Not found");
+  });
+
   it("fails closed when the runner control token is missing", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: null,
@@ -142,7 +173,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
@@ -174,7 +205,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: "{]",
       headers: {
         authorization: "Bearer runner-token",
@@ -201,7 +232,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: "{]",
       headers: {
         authorization: "Bearer runner-tokez",
@@ -241,7 +272,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
@@ -280,7 +311,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify(["not-an-object"]),
       headers: {
         authorization: "Bearer runner-token",
@@ -312,7 +343,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
@@ -360,7 +391,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
@@ -411,7 +442,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
@@ -467,7 +498,7 @@ describe("startHostedContainerEntrypoint", () => {
         runId: "run_trace",
         startedAt: "2026-03-26T12:00:00.000Z",
       };
-      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
@@ -529,7 +560,7 @@ describe("startHostedContainerEntrypoint", () => {
           },
           host: "127.0.0.1",
           method: "POST",
-          path: "/__internal/run",
+          path: "/internal/run",
           port: address.port,
         }, (response) => {
           const chunks: Buffer[] = [];
@@ -565,7 +596,7 @@ describe("startHostedContainerEntrypoint", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
-      path: "/__internal/run",
+      path: "/internal/run",
       port: address.port,
     });
     expect(secondResponse.status).toBe(409);
@@ -623,7 +654,7 @@ describe("startHostedContainerEntrypoint", () => {
         },
         host: "127.0.0.1",
         method: "POST",
-        path: "/__internal/run",
+        path: "/internal/run",
         port: address.port,
       });
       request.on("error", () => {});
@@ -695,7 +726,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
@@ -760,7 +791,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },

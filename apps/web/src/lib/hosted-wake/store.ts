@@ -1,9 +1,11 @@
 import { Prisma } from "@prisma/client";
+import { HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE } from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionCursorState,
   HostedWakeCommitResponse,
   HostedWakeFetchResponse,
+  HostedWakeFinalizeResponse,
   HostedWakeSnapshotRef,
   HostedWakeTerminalState,
 } from "@murphai/hosted-execution/contracts";
@@ -25,6 +27,8 @@ import {
 } from "./store-projections";
 import {
   issueHostedWakeFetchProof,
+  issueHostedWakeFinalizeProof,
+  verifyHostedWakeFinalizeProof,
   verifyHostedWakeFetchProof,
 } from "./fetch-proof";
 import type {
@@ -35,7 +39,7 @@ import type {
   HostedWakeRow,
   HostedWakeStoreClient,
   HostedWakeTerminalRow,
-  ListHostedWakesInput,
+  ListHostedExecutableWakesInput,
 } from "./store.types";
 
 export type {
@@ -43,7 +47,7 @@ export type {
   AppendHostedWakeResult,
   HostedWakeLifecycleRecord,
   HostedWakeRepairCandidate,
-  ListHostedWakesInput,
+  ListHostedExecutableWakesInput,
 } from "./store.types";
 export {
   appendHostedCoalescingWakeTx,
@@ -55,6 +59,15 @@ export {
   projectHostedExecutionCursorRecord,
   projectHostedWakeRecord,
 } from "./store-projections";
+
+export class HostedWakeFetchProofStaleError extends TypeError {
+  readonly code = HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "HostedWakeFetchProofStaleError";
+  }
+}
 
 export async function readHostedExecutionCursor(input: {
   prisma?: HostedWakeStoreClient;
@@ -138,22 +151,19 @@ export async function countPendingHostedWakes(input: {
   return wakes.filter((wake) => !wake.quarantinedAt && !terminalWakeIds.has(wake.id)).length;
 }
 
-export async function listHostedWakesAfterSeq(
-  input: ListHostedWakesInput,
+export async function listHostedExecutableWakes(
+  input: ListHostedExecutableWakesInput,
 ): Promise<HostedWakeFetchResponse> {
   const prisma = input.prisma ?? getPrisma();
   const cursor = await ensureHostedExecutionCursorRowTx({
     tx: prisma,
     userId: input.userId,
   });
-  const requestedAfterSeq = input.afterSeq ?? cursor.committedSeq;
-  const afterSeq = requestedAfterSeq > cursor.committedSeq
-    ? requestedAfterSeq
-    : cursor.committedSeq;
+  const projectedCursor = projectHostedExecutionCursorRecord(cursor);
   const wakes = await prisma.hostedWake.findMany({
     where: {
       seq: {
-        gt: afterSeq,
+        gt: cursor.committedSeq,
       },
       userId: input.userId,
     },
@@ -164,7 +174,7 @@ export async function listHostedWakesAfterSeq(
   });
 
   return {
-    cursor: projectHostedExecutionCursorRecord(cursor),
+    cursor: projectedCursor,
     wakes: await Promise.all((await hydrateHostedWakeRecordsTx({
       records: wakes,
       tx: prisma,
@@ -250,6 +260,7 @@ export async function recordHostedWakeTerminalTx(input: {
 }
 
 export async function commitHostedExecutionCursorTx(input: {
+  assistantNextWakeAt?: string | null;
   committedSeq: bigint;
   expectedVersion: bigint;
   snapshotRef?: HostedWakeSnapshotRef;
@@ -262,12 +273,10 @@ export async function commitHostedExecutionCursorTx(input: {
   });
 
   if (input.committedSeq <= cursor.committedSeq) {
-    if (input.committedSeq < cursor.committedSeq) {
-      return {
-        committed: false,
-        cursor: projectHostedExecutionCursorRecord(cursor),
-      };
-    }
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
   }
 
   let nextSnapshotRef: Prisma.InputJsonObject | typeof Prisma.DbNull;
@@ -289,80 +298,87 @@ export async function commitHostedExecutionCursorTx(input: {
   } else {
     nextSnapshotRef = serializeHostedWakeSnapshotRef(input.snapshotRef);
   }
+  const nextAssistantNextWakeAt = input.assistantNextWakeAt === undefined
+    ? cursor.assistantNextWakeAt
+    : normalizeHostedCursorWakeAt(input.assistantNextWakeAt);
   const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
   const snapshotRefChanged = input.snapshotRef !== undefined
     && JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotJson);
-  const shouldAdvanceCommittedSeq = input.committedSeq > cursor.committedSeq;
+  const assistantNextWakeAtChanged = input.assistantNextWakeAt !== undefined
+    && (
+      cursor.assistantNextWakeAt?.toISOString() ?? null
+    ) !== (
+      nextAssistantNextWakeAt?.toISOString() ?? null
+    );
+  const shouldAdvanceCommittedSeq = true;
   const canAdvanceSingleWake = shouldAdvanceCommittedSeq
     && input.committedSeq === cursor.committedSeq + 1n
     && input.committedSeq < cursor.nextSeq;
 
-  if (!shouldAdvanceCommittedSeq && !snapshotRefChanged) {
+  if (!canAdvanceSingleWake) {
     return {
       committed: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
     };
   }
 
-  if (shouldAdvanceCommittedSeq && !canAdvanceSingleWake) {
+  const wake = await input.tx.hostedWake.findFirst({
+    where: {
+      seq: input.committedSeq,
+      userId: input.userId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!wake) {
     return {
       committed: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
     };
   }
 
-  if (shouldAdvanceCommittedSeq) {
-    const wake = await input.tx.hostedWake.findFirst({
-      where: {
-        seq: input.committedSeq,
-        userId: input.userId,
-      },
-      select: {
-        id: true,
-      },
-    });
+  const receipt = await input.tx.hostedWakeTerminal.findUnique({
+    where: {
+      wakeId: wake.id,
+    },
+  });
+  const currentReceipt = {
+    cursor,
+    receipt: receipt === null ? null : {
+      ...receipt,
+      state: parseHostedWakeTerminalState(receipt.state),
+    },
+    wake: {
+      id: wake.id,
+      seq: input.committedSeq,
+      userId: input.userId,
+    },
+  };
 
-    if (!wake) {
-      return {
-        committed: false,
-        cursor: projectHostedExecutionCursorRecord(cursor),
-      };
-    }
-
-    const receipt = await input.tx.hostedWakeTerminal.findUnique({
-      where: {
-        wakeId: wake.id,
-      },
-    });
-    const currentReceipt = {
-      cursor,
-      receipt: receipt === null ? null : {
-        ...receipt,
-        state: parseHostedWakeTerminalState(receipt.state),
-      },
-      wake: {
-        id: wake.id,
-        seq: input.committedSeq,
-        userId: input.userId,
-      },
+  if (!isCurrentHostedWakeTerminalReceipt(currentReceipt)) {
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
     };
+  }
 
-    if (!isCurrentHostedWakeTerminalReceipt(currentReceipt)) {
-      return {
-        committed: false,
-        cursor: projectHostedExecutionCursorRecord(cursor),
-      };
-    }
+  if (
+    currentReceipt.receipt.state !== "completed"
+    && currentReceipt.receipt.state !== "quarantined"
+  ) {
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
+  }
 
-    if (
-      currentReceipt.receipt.state !== "completed"
-      && currentReceipt.receipt.state !== "quarantined"
-    ) {
-      return {
-        committed: false,
-        cursor: projectHostedExecutionCursorRecord(cursor),
-      };
-    }
+  if (!assistantNextWakeAtChanged && !snapshotRefChanged) {
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
   }
 
   const updated = await input.tx.hostedExecutionCursor.updateMany({
@@ -372,7 +388,106 @@ export async function commitHostedExecutionCursorTx(input: {
       committedSeq: cursor.committedSeq,
     },
     data: {
+      assistantNextWakeAt: nextAssistantNextWakeAt,
       committedSeq: input.committedSeq,
+      snapshotRef: nextSnapshotRef,
+      version: {
+        increment: 1,
+      },
+    },
+  });
+  const current = await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+  const committed = updated.count === 1;
+  const projectedCursor = projectHostedExecutionCursorRecord(current);
+
+  return {
+    committed,
+    cursor: projectedCursor,
+    ...(committed
+      ? {
+          finalizeToken: issueHostedWakeFinalizeProof({
+            committedCursorVersion: current.version,
+            committedSeq: input.committedSeq,
+            previousSnapshotRef: nextSnapshotJson,
+            userId: input.userId,
+            wakeId: wake.id,
+            wakeSeq: input.committedSeq,
+          }),
+        }
+      : {}),
+  };
+}
+
+export async function finalizeHostedExecutionCursorTx(input: {
+  assistantNextWakeAt?: string | null;
+  finalizeToken: string;
+  snapshotRef: HostedWakeSnapshotRef;
+  tx: HostedWakeMutationTx;
+  userId: string;
+}): Promise<HostedWakeFinalizeResponse> {
+  const claims = verifyHostedWakeFinalizeProof({
+    proof: input.finalizeToken,
+    userId: input.userId,
+  });
+  const committedSeq = BigInt(claims.committedSeq);
+  const committedCursorVersion = BigInt(claims.committedCursorVersion);
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+  const nextAssistantNextWakeAt = input.assistantNextWakeAt === undefined
+    ? cursor.assistantNextWakeAt
+    : normalizeHostedCursorWakeAt(input.assistantNextWakeAt);
+
+  if (
+    cursor.committedSeq !== committedSeq
+    || cursor.version !== committedCursorVersion
+    || JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(claims.previousSnapshotRef ?? null)
+  ) {
+    return {
+      finalized: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
+  }
+
+  const nextSnapshotRef = serializeHostedWakeSnapshotRef(input.snapshotRef);
+  const nextSnapshotJson = nextSnapshotRef;
+  if (JSON.stringify(cursor.snapshotRef ?? null) === JSON.stringify(nextSnapshotJson)) {
+    return {
+      finalized: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
+  }
+
+  const wake = await input.tx.hostedWake.findFirst({
+    where: {
+      id: claims.wakeId,
+      seq: committedSeq,
+      userId: input.userId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!wake) {
+    return {
+      finalized: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+    };
+  }
+
+  const updated = await input.tx.hostedExecutionCursor.updateMany({
+    where: {
+      userId: input.userId,
+      version: committedCursorVersion,
+      committedSeq,
+    },
+    data: {
+      assistantNextWakeAt: nextAssistantNextWakeAt,
       snapshotRef: nextSnapshotRef,
       version: {
         increment: 1,
@@ -385,7 +500,7 @@ export async function commitHostedExecutionCursorTx(input: {
   });
 
   return {
-    committed: updated.count === 1,
+    finalized: updated.count === 1,
     cursor: projectHostedExecutionCursorRecord(current),
   };
 }
@@ -399,6 +514,19 @@ function serializeHostedWakeSnapshotRef(
     size: snapshotRef.size,
     updatedAt: snapshotRef.updatedAt,
   };
+}
+
+function normalizeHostedCursorWakeAt(value: string | null): Date | null {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new TypeError("assistantNextWakeAt must be a valid ISO-8601 timestamp or null.");
+  }
+
+  return parsed;
 }
 
 function shouldRefreshTerminalFetchFence(
@@ -760,14 +888,16 @@ function assertCurrentHostedWakeFetchFence(
     cursor.committedSeq !== input.fetchedCommittedSeq
     || cursor.version !== input.fetchedCursorVersion
   ) {
-    throw new TypeError("Hosted wake fetch proof is stale for the current cursor.");
+    throw new HostedWakeFetchProofStaleError(
+      "Hosted wake fetch proof is stale for the current cursor.",
+    );
   }
 }
 
 async function upsertHostedWakeTerminalTx(input: {
   fetchedCommittedSeq: bigint;
   fetchedCursorVersion: bigint;
-  state: "completed" | "quarantined" | "replaced";
+  state: "completed" | "quarantined";
   tx: HostedWakeMutationTx;
   userId: string;
   wakeId: string;
@@ -853,7 +983,9 @@ function assertCurrentHostedWakeFetchIdentity(
   currentEventId: string,
 ): void {
   if (claims.wakeEventId !== currentEventId) {
-    throw new TypeError("Hosted wake fetch proof is stale for the current wake identity.");
+    throw new HostedWakeFetchProofStaleError(
+      "Hosted wake fetch proof is stale for the current wake identity.",
+    );
   }
 }
 
@@ -861,7 +993,6 @@ function parseHostedWakeTerminalState(value: string): HostedWakeTerminalState {
   switch (value) {
     case "completed":
     case "quarantined":
-    case "replaced":
       return value;
     default:
       throw new TypeError(`Hosted wake terminal state is invalid: ${value}`);
