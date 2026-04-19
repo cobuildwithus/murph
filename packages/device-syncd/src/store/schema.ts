@@ -5,19 +5,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-import { tableExists } from "@murphai/runtime-state/node";
-
 export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 1;
-
-export function assertNoLegacyDeviceSyncStore(database: DatabaseSync): void {
-  if (!tableExists(database, "device_account")) {
-    return;
-  }
-
-  throw new Error(
-    "Unsupported legacy device-sync runtime schema detected. Remove the local device-sync database and reconnect devices.",
-  );
-}
 
 export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   database.exec(`

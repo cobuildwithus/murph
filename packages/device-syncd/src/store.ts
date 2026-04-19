@@ -30,7 +30,6 @@ import {
   deleteExpiredOAuthStates,
 } from "./store/oauth-states.ts";
 import {
-  assertNoLegacyDeviceSyncStore,
   DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION,
   ensureDeviceSyncStoreSchema,
 } from "./store/schema.ts";
@@ -247,7 +246,6 @@ export class SqliteDeviceSyncStore {
     this.database = database;
 
     try {
-      assertNoLegacyDeviceSyncStore(database);
       applySqliteRuntimeMigrations(database, {
         migrations: [
           {

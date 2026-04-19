@@ -155,6 +155,39 @@ describe('assistant outbox runtime', () => {
     expect(await readAssistantOutboxIntent(vaultRoot, 'broken')).toBeNull()
   })
 
+  it('quarantines stale outbox intents with removed legacy fields instead of normalizing them', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T12:05:00.000Z'))
+
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-field-quarantine-',
+    )
+    const seeded = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:05:00.000Z',
+      message: 'legacy field should quarantine',
+      sessionId: 'session-legacy-field',
+      turnId: 'turn-legacy-field',
+    })
+
+    await writeFile(
+      path.join(paths.outboxDirectory, `${seeded.intentId}.json`),
+      JSON.stringify({
+        ...seeded,
+        deliveryStateAuthority: 'legacy-local-runtime',
+      }),
+      'utf8',
+    )
+
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
+    await expect(readAssistantOutboxIntent(vaultRoot, seeded.intentId)).resolves.toBeNull()
+
+    const quarantined = await readdir(paths.outboxQuarantineDirectory)
+    expect(quarantined).toHaveLength(1)
+    expect(quarantined[0]).toMatch(
+      new RegExp(`^${seeded.intentId}\\.\\d+\\.invalid\\.json$`, 'u'),
+    )
+  })
+
   it('reconciles confirmation-pending deliveries or reschedules them for retry', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-reconcile-')
     vi.useFakeTimers()
