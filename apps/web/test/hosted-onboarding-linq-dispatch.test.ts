@@ -277,7 +277,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           kind: "conversation.message",
           message: expect.objectContaining({
             channel: "linq",
-            linqMessageId: "msg_123",
+            linqMessage: expect.objectContaining({
+              messageId: "msg_123",
+            }),
           }),
           userId: "member_123",
         }),
@@ -480,7 +482,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
           message: expect.objectContaining({
             channel: "linq",
-            linqMessageId: "msg_123",
+            linqMessage: expect.objectContaining({
+              messageId: "msg_123",
+            }),
           }),
           userId: "member_123",
         }),

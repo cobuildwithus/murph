@@ -7,6 +7,8 @@ import type {
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
+  HostedExecutionLinqConversationMessage,
+  HostedExecutionLinqConversationMessagePart,
   HostedExecutionMemberActivatedEvent,
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
@@ -17,8 +19,21 @@ import type {
   HostedExecutionVaultShareAcceptedWake,
 } from "./contracts.ts";
 
-function cloneLinqEvent(value: Record<string, unknown>): Record<string, unknown> {
-  return { ...value };
+function cloneLinqMessagePart(
+  value: HostedExecutionLinqConversationMessagePart,
+): HostedExecutionLinqConversationMessagePart {
+  return {
+    ...value,
+  };
+}
+
+function cloneLinqMessage(
+  value: HostedExecutionLinqConversationMessage,
+): HostedExecutionLinqConversationMessage {
+  return {
+    ...value,
+    parts: value.parts.map((part) => cloneLinqMessagePart(part)),
+  };
 }
 
 function cloneTelegramMessage(value: HostedExecutionTelegramMessage): HostedExecutionTelegramMessage {
@@ -39,7 +54,7 @@ function cloneConversationMessagePayload(
     case "linq":
       return {
         ...value,
-        linqEvent: cloneLinqEvent(value.linqEvent),
+        linqMessage: cloneLinqMessage(value.linqMessage),
       };
     case "telegram":
       return {
@@ -70,8 +85,7 @@ export function buildHostedExecutionConversationMessageWake(input: {
 
 export function buildHostedExecutionLinqConversationMessageWake(input: {
   eventId: string;
-  linqEvent: Record<string, unknown>;
-  linqMessageId?: string | null;
+  linqMessage: HostedExecutionLinqConversationMessage;
   occurredAt: string;
   phoneLookupKey: string;
   userId: string;
@@ -83,8 +97,7 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
     kind: "conversation.message",
     message: {
       channel: "linq",
-      linqEvent: cloneLinqEvent(input.linqEvent),
-      ...(input.linqMessageId === undefined ? {} : { linqMessageId: input.linqMessageId }),
+      linqMessage: cloneLinqMessage(input.linqMessage),
       phoneLookupKey: input.phoneLookupKey,
     },
     occurredAt: input.occurredAt,

@@ -83,8 +83,8 @@ async function normalizeHostedConversationMessageWake(input: {
       accountId: input.wake.message.phoneLookupKey,
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
       downloadDriver: createHostedLinqAttachmentDownloadDriver(),
-      linqEvent: input.wake.message.linqEvent,
-      linqMessageId: input.wake.message.linqMessageId ?? null,
+      linqMessage: input.wake.message.linqMessage,
+      occurredAt: input.wake.occurredAt,
     });
   }
 

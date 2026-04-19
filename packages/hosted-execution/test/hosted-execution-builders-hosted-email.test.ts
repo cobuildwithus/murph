@@ -77,32 +77,53 @@ describe("hosted execution wake builders", () => {
     expect(wake.memberChannels).not.toBe(memberChannels);
   });
 
-  it("copies linq event objects and preserves explicit null message ids", () => {
-    const linqEvent = {
-      delivery: "incoming",
-      nested: { traceId: "trace_123" },
+  it("copies typed Linq message payloads without mutating caller-owned parts", () => {
+    const linqMessage = {
+      chatId: "chat_123",
+      from: "+15551234567",
+      isFromMe: false,
+      messageId: "msg_123",
+      parts: [
+        {
+          type: "text" as const,
+          value: "hello",
+        },
+      ],
+      replyToMessageId: null,
+      service: "SMS",
     };
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-1",
-      linqEvent,
-      linqMessageId: null,
+      linqMessage,
       occurredAt,
       phoneLookupKey: "phone_lookup_123",
       userId: "user_123",
     });
 
-    linqEvent.delivery = "mutated";
+    linqMessage.parts[0]!.value = "mutated";
 
     expect(wake.message).toEqual({
       channel: "linq",
-      linqEvent: {
-        delivery: "incoming",
-        nested: { traceId: "trace_123" },
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+        replyToMessageId: null,
+        service: "SMS",
       },
-      linqMessageId: null,
       phoneLookupKey: "phone_lookup_123",
     });
-    expect(wake.message.linqEvent).not.toBe(linqEvent);
+    expect(wake.message).not.toHaveProperty("linqEvent");
+    expect(wake.message).not.toHaveProperty("linqMessageId");
+    expect(wake.message.linqMessage).not.toBe(linqMessage);
+    expect(wake.message.linqMessage.parts).not.toBe(linqMessage.parts);
   });
 
   it("deep-copies telegram attachment arrays and attachment entries", () => {
@@ -232,38 +253,48 @@ describe("hosted execution wake builders", () => {
   });
 
   it("builds generic conversation wakes without mutating caller-owned data", () => {
-    const linqEvent = {
-      delivery: "incoming",
-      nested: {
-        traceId: "trace_123",
-      },
+    const linqMessage = {
+      chatId: "chat_123",
+      from: "+15551234567",
+      isFromMe: false,
+      messageId: "msg_123",
+      parts: [
+        {
+          type: "text" as const,
+          value: "hello",
+        },
+      ],
     };
     const wake = buildHostedExecutionConversationMessageWake({
       eventId: "conversation-linq-1",
       message: {
         channel: "linq",
-        linqEvent,
-        linqMessageId: null,
+        linqMessage,
         phoneLookupKey: "phone_lookup_123",
       },
       occurredAt,
       userId: "user_123",
     });
 
-    linqEvent.delivery = "mutated";
+    linqMessage.parts[0]!.value = "mutated";
 
     expect(wake).toEqual({
       eventId: "conversation-linq-1",
       kind: "conversation.message",
       message: {
         channel: "linq",
-        linqEvent: {
-          delivery: "incoming",
-          nested: {
-            traceId: "trace_123",
-          },
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+          ],
         },
-        linqMessageId: null,
         phoneLookupKey: "phone_lookup_123",
       },
       occurredAt,

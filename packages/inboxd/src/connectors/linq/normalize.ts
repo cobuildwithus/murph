@@ -35,8 +35,30 @@ export interface NormalizeLinqWebhookEventInput {
 
 export interface NormalizeHostedLinqConversationMessageInput {
   accountId: string;
-  linqEvent: Record<string, unknown>;
-  linqMessageId?: string | null;
+  linqMessage: {
+    chatId: string;
+    from: string;
+    isFromMe: boolean;
+    messageId: string;
+    parts: Array<
+      | {
+          type: "text" | "link";
+          value: string;
+        }
+      | {
+          attachmentId?: string | null;
+          fileName?: string | null;
+          mimeType?: string | null;
+          size?: number | null;
+          type: "media" | "voice_memo";
+          url?: string | null;
+        }
+    >;
+    replyToMessageId?: string | null;
+    replyToPartIndex?: number | null;
+    service?: string | null;
+  };
+  occurredAt: string;
   source?: string;
   downloadDriver?: LinqAttachmentDownloadDriver | null;
   signal?: AbortSignal;
@@ -66,26 +88,22 @@ export async function normalizeLinqWebhookEvent({
 
 export async function normalizeHostedLinqConversationMessage({
   accountId,
-  linqEvent,
-  linqMessageId = null,
+  linqMessage,
+  occurredAt,
   source = "linq",
   downloadDriver = null,
   signal,
   attachmentDownloadTimeoutMs = null,
 }: NormalizeHostedLinqConversationMessageInput): Promise<InboundCapture> {
-  if (!isCanonicalLinqWebhookEvent(linqEvent)) {
-    throw new TypeError("Hosted Linq conversation wake is missing a canonical webhook event.");
-  }
-
-  const messageEvent = parseCanonicalLinqMessageReceivedEvent(linqEvent);
-  const normalizedLinqMessageId = normalizeTextValue(linqMessageId);
-  return normalizeLinqMessageReceivedEvent({
+  return createInboundCaptureFromChatMessage({
     accountId,
-    attachmentDownloadTimeoutMs,
-    downloadDriver,
-    externalIdOverride: normalizedLinqMessageId ? `linq:${normalizedLinqMessageId}` : null,
-    messageEvent,
-    signal,
+    message: await toHostedLinqChatMessage({
+      attachmentDownloadTimeoutMs,
+      downloadDriver,
+      message: linqMessage,
+      occurredAt,
+      signal,
+    }),
     source,
   });
 }
@@ -183,6 +201,71 @@ function isCanonicalLinqWebhookEvent(value: unknown): value is LinqWebhookEvent 
     && typeof record.data === "object"
     && record.data !== null
   );
+}
+
+async function toHostedLinqChatMessage(input: {
+  attachmentDownloadTimeoutMs?: number | null;
+  downloadDriver?: LinqAttachmentDownloadDriver | null;
+  message: NormalizeHostedLinqConversationMessageInput["linqMessage"];
+  occurredAt: string;
+  signal?: AbortSignal;
+}): Promise<ChatMessage> {
+  const { message, downloadDriver = null, occurredAt, signal, attachmentDownloadTimeoutMs = null } = input;
+  const messageId = normalizeTextValue(message.messageId);
+  if (!messageId) {
+    throw new TypeError("Hosted Linq conversation wake is missing a stable message id.");
+  }
+
+  const chatId = normalizeTextValue(message.chatId);
+  if (!chatId) {
+    throw new TypeError("Hosted Linq conversation wake is missing a stable chat id.");
+  }
+
+  const parts = message.parts.map((part) => {
+    if (part.type === "text" || part.type === "link") {
+      return {
+        type: part.type,
+        value: part.value,
+      };
+    }
+
+    if (part.type === "media" || part.type === "voice_memo") {
+      return {
+        attachment_id: part.attachmentId,
+        filename: part.fileName,
+        mime_type: part.mimeType,
+        size: part.size,
+        type: part.type,
+        url: part.url,
+      };
+    }
+
+    throw new TypeError(`Unsupported hosted Linq part type: ${String((part as { type: unknown }).type)}`);
+  }) as LinqMessagePart[];
+
+  return {
+    externalId: `linq:${messageId}`,
+    thread: {
+      id: chatId,
+      title: buildHostedLinqThreadTitle(message),
+      isDirect: true,
+    },
+    actor: {
+      id: normalizeTextValue(message.from),
+      displayName: null,
+      isSelf: message.isFromMe,
+    },
+    occurredAt: toIsoTimestamp(occurredAt),
+    receivedAt: toIsoTimestamp(occurredAt),
+    text: buildLinqMessageText(parts),
+    attachments: await buildLinqAttachments(
+      parts,
+      downloadDriver,
+      signal,
+      attachmentDownloadTimeoutMs,
+    ),
+    raw: buildHostedLinqRaw(message, parts),
+  };
 }
 
 async function buildLinqAttachments(
@@ -301,6 +384,38 @@ function buildLinqThreadTitle(data: LinqMessageReceivedData): string | null {
 
   const base = participants.join(" ↔ ");
   return service ? (base ? `${base} (${service})` : service) : base;
+}
+
+function buildHostedLinqThreadTitle(
+  message: NormalizeHostedLinqConversationMessageInput["linqMessage"],
+): string | null {
+  const from = normalizeTextValue(message.from);
+  const service = normalizeTextValue(message.service ?? null);
+  if (!from && !service) {
+    return null;
+  }
+
+  return service ? (from ? `${from} (${service})` : service) : from;
+}
+
+function buildHostedLinqRaw(
+  message: NormalizeHostedLinqConversationMessageInput["linqMessage"],
+  parts: LinqMessagePart[],
+): Record<string, unknown> {
+  return {
+    chatId: message.chatId,
+    from: message.from,
+    isFromMe: message.isFromMe,
+    messageId: message.messageId,
+    parts,
+    ...(message.replyToMessageId === undefined
+      ? {}
+      : { replyToMessageId: message.replyToMessageId }),
+    ...(message.replyToPartIndex === undefined
+      ? {}
+      : { replyToPartIndex: message.replyToPartIndex }),
+    ...(message.service === undefined ? {} : { service: message.service }),
+  };
 }
 
 function inferAttachmentFileName(part: LinqMediaPart): string | null {

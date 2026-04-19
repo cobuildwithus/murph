@@ -14,15 +14,13 @@ const mocks = vi.hoisted(() => ({
   createHostedLinqAttachmentDownloadDriver: vi.fn(),
   createHostedTelegramAttachmentDownloadDriver: vi.fn(),
   createParsedInboxPipeline: vi.fn(),
+  normalizeHostedLinqConversationMessage: vi.fn(),
   normalizeHostedTelegramMessage: vi.fn(),
-  normalizeLinqWebhookEvent: vi.fn(),
   normalizeParsedEmailMessage: vi.fn(),
   openInboxRuntime: vi.fn(),
-  parseLinqWebhookEvent: vi.fn(),
   parseRawEmailMessage: vi.fn(),
   readHostedRawEmailMessage: vi.fn(),
   resolveHostedEmailSelfAddresses: vi.fn(),
-  resolveHostedLinqCaptureExternalId: vi.fn(),
 }));
 
 vi.mock("@murphai/inboxd", () => ({
@@ -39,15 +37,11 @@ vi.mock("@murphai/inboxd/connectors/email/parsed", () => ({
 }));
 
 vi.mock("@murphai/inboxd/connectors/linq/normalize", () => ({
-  normalizeLinqWebhookEvent: mocks.normalizeLinqWebhookEvent,
+  normalizeHostedLinqConversationMessage: mocks.normalizeHostedLinqConversationMessage,
 }));
 
 vi.mock("@murphai/inboxd/connectors/telegram/normalize", () => ({
   normalizeHostedTelegramMessage: mocks.normalizeHostedTelegramMessage,
-}));
-
-vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
-  parseLinqWebhookEvent: mocks.parseLinqWebhookEvent,
 }));
 
 vi.mock("@murphai/parsers", () => ({
@@ -61,7 +55,6 @@ vi.mock("../src/hosted-runtime/events/email.ts", () => ({
 vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
   createHostedLinqAttachmentDownloadDriver: mocks.createHostedLinqAttachmentDownloadDriver,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS: 5_000,
-  resolveHostedLinqCaptureExternalId: mocks.resolveHostedLinqCaptureExternalId,
 }));
 
 vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
@@ -151,27 +144,32 @@ describe("ingestHostedConversationMessageWake", () => {
 
     const linqWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
-      linqEvent: {
-        event_type: "message.received",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_real_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
       },
-      linqMessageId: "msg_real_123",
       occurredAt: "2026-04-08T00:00:00.000Z",
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    const parsedLinqEvent = {
-      parsed: true,
-    };
     const linqDriver = {
       downloadUrl: vi.fn(),
     };
-    const linqNormalizedCapture = {
-      accountId: "ignored",
+    const linqCapture = {
+      accountId: "15551234567",
       attachments: [],
       actor: {
         isSelf: false,
       },
-      externalId: "linq:raw",
+      externalId: "linq:msg_real_123",
       occurredAt: "2026-04-08T00:00:00.000Z",
       raw: {},
       source: "linq",
@@ -180,15 +178,8 @@ describe("ingestHostedConversationMessageWake", () => {
         id: "chat_123",
       },
     };
-    const linqCapture = {
-      ...linqNormalizedCapture,
-      accountId: "15551234567",
-      externalId: "linq:msg_real_123",
-    };
-    mocks.parseLinqWebhookEvent.mockReturnValueOnce(parsedLinqEvent);
     mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValueOnce(linqDriver);
-    mocks.normalizeLinqWebhookEvent.mockResolvedValueOnce(linqNormalizedCapture);
-    mocks.resolveHostedLinqCaptureExternalId.mockReturnValueOnce("linq:msg_real_123");
+    mocks.normalizeHostedLinqConversationMessage.mockResolvedValueOnce(linqCapture);
     const linqMetrics = await ingestHostedConversationMessageWake({
       runtime,
       vaultRoot,
@@ -246,17 +237,13 @@ describe("ingestHostedConversationMessageWake", () => {
       wake: emailWake,
     });
 
-    expect(mocks.parseLinqWebhookEvent).toHaveBeenCalledWith(JSON.stringify(linqWake.message.linqEvent));
     expect(mocks.createHostedLinqAttachmentDownloadDriver).toHaveBeenCalledTimes(1);
-    expect(mocks.normalizeLinqWebhookEvent).toHaveBeenCalledWith({
+    expect(mocks.normalizeHostedLinqConversationMessage).toHaveBeenCalledWith({
+      accountId: "15551234567",
       attachmentDownloadTimeoutMs: 5_000,
-      defaultAccountId: "15551234567",
       downloadDriver: linqDriver,
-      event: parsedLinqEvent,
-    });
-    expect(mocks.resolveHostedLinqCaptureExternalId).toHaveBeenCalledWith({
-      fallbackExternalId: "linq:raw",
-      linqMessageId: "msg_real_123",
+      linqMessage: linqWake.message.linqMessage,
+      occurredAt: "2026-04-08T00:00:00.000Z",
     });
     expect(mocks.createHostedTelegramAttachmentDownloadDriver).toHaveBeenCalledTimes(1);
     expect(mocks.normalizeHostedTelegramMessage).toHaveBeenCalledWith({
@@ -303,10 +290,7 @@ describe("ingestHostedConversationMessageWake", () => {
       close: runtimeClose,
     });
     mocks.createParsedInboxPipeline.mockRejectedValue(new Error("pipeline failed"));
-    mocks.parseLinqWebhookEvent.mockReturnValue({
-      parsed: true,
-    });
-    mocks.normalizeLinqWebhookEvent.mockResolvedValue({
+    mocks.normalizeHostedLinqConversationMessage.mockResolvedValue({
       source: "linq",
     });
 
@@ -316,8 +300,12 @@ describe("ingestHostedConversationMessageWake", () => {
         vaultRoot: "/tmp/assistant-runtime-conversation",
         wake: buildHostedExecutionLinqConversationMessageWake({
           eventId: "evt_linq",
-          linqEvent: {
-            event_type: "message.received",
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "msg_123",
+            parts: [],
           },
           occurredAt: "2026-04-08T00:00:00.000Z",
           phoneLookupKey: "15551234567",
