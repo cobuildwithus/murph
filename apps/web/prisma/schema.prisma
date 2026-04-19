@@ -207,8 +207,10 @@ model HostedMember {
   billingRef      HostedMemberBillingRef?
   emailAuthorization HostedMemberEmailAuthorization?
   executionCursor HostedExecutionCursor?
-  hostedWakes     HostedWake[]
+  hostedWakes        HostedWake[]
+  hostedWakeEvents   HostedWakeEvent[]
   hostedWakePayloads HostedWakePayload[]
+  hostedWakeTerminals HostedWakeTerminal[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -320,13 +322,31 @@ model HostedWake {
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
   member                HostedMember       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events                HostedWakeEvent[]
   payload               HostedWakePayload?
+  terminal              HostedWakeTerminal?
 
   @@unique([userId, seq])
   @@index([userId, seq])
   @@index([userId, coalescingKey, seq])
   @@index([userId, kind, seq])
   @@map("hosted_wake")
+}
+
+model HostedWakeEvent {
+  eventId           String       @id @map("event_id")
+  wakeId            String       @map("wake_id")
+  userId            String       @map("user_id")
+  replacedByEventId String?      @map("replaced_by_event_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wake              HostedWake   @relation(fields: [wakeId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, replacedByEventId])
+  @@index([wakeId])
+  @@map("hosted_wake_event")
 }
 
 model HostedWakePayload {
@@ -342,6 +362,23 @@ model HostedWakePayload {
 
   @@index([userId])
   @@map("hosted_wake_payload")
+}
+
+model HostedWakeTerminal {
+  wakeId              String       @id @map("wake_id")
+  userId              String       @map("user_id")
+  wakeSeq             BigInt       @map("wake_seq")
+  state               String
+  fetchedCommittedSeq BigInt       @map("fetched_committed_seq")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  member              HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wake                HostedWake   @relation(fields: [wakeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, wakeSeq])
+  @@index([userId])
+  @@index([userId, wakeSeq])
+  @@map("hosted_wake_terminal")
 }
 
 model HostedInvite {

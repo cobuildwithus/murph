@@ -37,6 +37,15 @@ export interface HostedWakeRow {
   userId: string;
 }
 
+export interface HostedWakeEventRow {
+  createdAt: Date;
+  eventId: string;
+  replacedByEventId: string | null;
+  updatedAt: Date;
+  userId: string;
+  wakeId: string;
+}
+
 export interface HostedWakePayloadRow {
   createdAt: Date;
   payloadBytes: number;
@@ -47,10 +56,21 @@ export interface HostedWakePayloadRow {
   wakeId: string;
 }
 
+export interface HostedWakeTerminalRow {
+  createdAt: Date;
+  fetchedCommittedSeq: bigint;
+  state: string;
+  updatedAt: Date;
+  userId: string;
+  wakeId: string;
+  wakeSeq: bigint;
+}
+
 export interface AppendHostedWakeInput {
   behavior: HostedWakeBehavior;
   coalescingKey?: string | null;
   dedupeKey?: string | null;
+  eventId?: string | null;
   kind: string;
   occurredAt: string;
   payload: unknown;
@@ -68,6 +88,7 @@ export interface AppendHostedWakeResult {
 
 export interface HostedWakeLifecycleRecord {
   eventId: string;
+  replacedByEventId?: string | null;
   state: HostedWakeLifecycleState;
 }
 

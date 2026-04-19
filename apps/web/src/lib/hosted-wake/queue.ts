@@ -14,7 +14,7 @@ import {
   appendHostedCoalescingWakeTx,
   appendHostedOrderedWakeTx,
   findHostedWakeEventIdByEventIdTx,
-  readHostedWakeLifecycleByDedupeKeyTx,
+  readHostedWakeLifecycleByEventIdTx,
   readHostedWakeScheduleByEventIdTx,
   type AppendHostedWakeResult,
 } from "./store";
@@ -26,6 +26,7 @@ export async function appendHostedOrderedExecutionWakeTx(input: {
   const { wake } = input;
   return appendHostedOrderedWakeTx({
     dedupeKey: buildHostedExecutionWakeDedupeKey(wake),
+    eventId: wake.eventId,
     kind: wake.kind,
     occurredAt: wake.occurredAt,
     payload: buildHostedWakePayloadValue(wake),
@@ -66,6 +67,7 @@ async function appendHostedCoalescingExecutionWakeTx(input: {
   return appendHostedCoalescingWakeTx({
     coalescingKey: input.coalescingKey,
     dedupeKey: buildHostedExecutionWakeDedupeKey(input.wake),
+    eventId: input.wake.eventId,
     kind: input.wake.kind,
     occurredAt: input.wake.occurredAt,
     payload: buildHostedWakePayloadValue(input.wake),
@@ -78,16 +80,19 @@ async function appendHostedCoalescingExecutionWakeTx(input: {
 export async function findHostedExecutionWakeEventIdTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
+  userId?: string;
 }): Promise<string | null> {
   return findHostedWakeEventIdByEventIdTx({
     eventId: input.eventId,
     tx: input.tx,
+    ...(input.userId ? { userId: input.userId } : {}),
   });
 }
 
 export async function readHostedExecutionWakeTargetTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
+  userId?: string;
 }): Promise<{
   eventId: string;
   seq: string;
@@ -96,16 +101,19 @@ export async function readHostedExecutionWakeTargetTx(input: {
   return readHostedWakeScheduleByEventIdTx({
     eventId: input.eventId,
     tx: input.tx,
+    ...(input.userId ? { userId: input.userId } : {}),
   });
 }
 
 export async function readHostedExecutionWakeLifecycleStateTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
+  userId?: string;
 }): Promise<HostedWakeLifecycleState | null> {
-  const lifecycle = await readHostedWakeLifecycleByDedupeKeyTx({
-    dedupeKey: buildHostedWakeDedupeKeyFromEventId(input.eventId),
+  const lifecycle = await readHostedWakeLifecycleByEventIdTx({
+    eventId: buildHostedWakeDedupeKeyFromEventId(input.eventId),
     tx: input.tx,
+    ...(input.userId ? { userId: input.userId } : {}),
   });
 
   return lifecycle?.state ?? null;

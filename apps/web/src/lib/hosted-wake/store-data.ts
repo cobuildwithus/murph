@@ -1,6 +1,7 @@
 import { encodeHostedWakeStoredPayload } from "./payload";
 import type {
   HostedExecutionCursorRow,
+  HostedWakeEventRow,
   HostedWakeMutationTx,
   HostedWakePayloadRow,
   HostedWakeRow,
@@ -169,16 +170,116 @@ export async function findHostedWakeByDedupeKeyTx(input: {
 export async function findHostedWakeByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
+  userId?: string;
 }): Promise<HostedWakeRow | null> {
-  if (!input.eventId.trim()) {
+  const eventId = input.eventId.trim();
+
+  if (!eventId) {
+    return null;
+  }
+
+  const event = await findHostedWakeEventByEventIdTx({
+    eventId,
+    tx: input.tx,
+    ...(input.userId ? { userId: input.userId } : {}),
+  });
+
+  if (!event) {
     return null;
   }
 
   return input.tx.hostedWake.findUnique({
     where: {
-      dedupeKey: input.eventId,
+      id: event.wakeId,
     },
   });
+}
+
+export async function createHostedWakeEventTx(input: {
+  eventId: string;
+  replacedByEventId?: string | null;
+  tx: HostedWakeMutationTx;
+  userId: string;
+  wakeId: string;
+}): Promise<HostedWakeEventRow> {
+  const eventId = input.eventId.trim();
+
+  if (!eventId) {
+    throw new TypeError("Hosted wake eventId must not be blank.");
+  }
+
+  return input.tx.hostedWakeEvent.create({
+    data: {
+      eventId,
+      replacedByEventId: input.replacedByEventId ?? null,
+      userId: input.userId,
+      wakeId: input.wakeId,
+    },
+  });
+}
+
+export async function findHostedWakeEventByEventIdTx(input: {
+  eventId: string;
+  tx: HostedWakeStoreClient;
+  userId?: string;
+}): Promise<HostedWakeEventRow | null> {
+  const eventId = input.eventId.trim();
+
+  if (!eventId) {
+    return null;
+  }
+
+  if (input.userId) {
+    return input.tx.hostedWakeEvent.findFirst({
+      where: {
+        eventId,
+        userId: input.userId,
+      },
+    });
+  }
+
+  return input.tx.hostedWakeEvent.findUnique({
+    where: {
+      eventId,
+    },
+  });
+}
+
+export async function findCurrentHostedWakeEventByWakeIdTx(input: {
+  tx: HostedWakeStoreClient;
+  userId: string;
+  wakeId: string;
+}): Promise<HostedWakeEventRow | null> {
+  return input.tx.hostedWakeEvent.findFirst({
+    where: {
+      replacedByEventId: null,
+      userId: input.userId,
+      wakeId: input.wakeId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+export async function replaceHostedWakeEventTx(input: {
+  eventId: string;
+  replacedByEventId: string;
+  tx: HostedWakeMutationTx;
+  userId: string;
+}): Promise<boolean> {
+  const updated = await input.tx.hostedWakeEvent.updateMany({
+    where: {
+      eventId: input.eventId,
+      replacedByEventId: null,
+      userId: input.userId,
+    },
+    data: {
+      replacedByEventId: input.replacedByEventId,
+    },
+  });
+
+  return updated.count === 1;
 }
 
 export async function findUncommittedWakeByCoalescingKeyTx(input: {
