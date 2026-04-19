@@ -27,8 +27,8 @@ Options:
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: output-packages)
   --name <prefix>            Output filename prefix (default: murph-data-bundle)
-  --docs / --no-docs         Accepted as no-op compatibility flags
-  --tests / --no-tests       Accepted as no-op compatibility flags
+  --no-docs                  Accepted for backward compatibility; no effect.
+  --no-tests                 Accepted for backward compatibility; no effect.
   -h, --help                 Show this help message
 USAGE
   exit "$exit_code"
@@ -202,6 +202,9 @@ while [[ $# -gt 0 ]]; do
     --zip)
       shift
       ;;
+    --no-docs|--no-tests)
+      shift
+      ;;
     --out-dir)
       [[ $# -ge 2 ]] || {
         echo "Error: --out-dir requires a value." >&2
@@ -217,10 +220,6 @@ while [[ $# -gt 0 ]]; do
       }
       prefix="$2"
       shift 2
-      ;;
-    --docs|--no-docs|--with-docs|--no-tests|--tests|--with-tests)
-      # review-gpt forwards docs/tests packaging toggles; data bundles do not use them.
-      shift
       ;;
     -h|--help)
       usage 0

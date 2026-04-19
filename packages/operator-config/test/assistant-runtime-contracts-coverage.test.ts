@@ -213,7 +213,6 @@ test('assistant session parsing resolves runtime options from explicit target id
   })
 
   assert.equal(parsedSession.resumeState, null)
-  assert.equal(parsedSession.providerBinding, null)
   assert.equal(parsedSession.providerOptions.continuityFingerprint, runtimeTarget.continuityFingerprint)
   assert.equal(parsedSession.providerOptions.executionDriver, 'responses')
   assert.equal(parsedSession.providerOptions.resumeKind, 'openai-response-id')
@@ -287,14 +286,13 @@ test('assistant session parsing resolves runtime options from explicit target id
     reasoningEffort: 'high',
   })
 
+  assert.equal(preservedResumeContract.resumeState?.providerSessionId, 'resp_456')
+  assert.equal(preservedResumeContract.resumeState?.resumeRouteId, 'route-stored')
   assert.equal(
-    preservedResumeContract.providerBinding?.providerOptions.continuityFingerprint,
+    preservedResumeContract.providerOptions.continuityFingerprint,
     preservedRuntimeTarget.continuityFingerprint,
   )
-  assert.equal(
-    preservedResumeContract.providerBinding?.providerOptions.resumeKind,
-    'openai-response-id',
-  )
+  assert.equal(preservedResumeContract.providerOptions.resumeKind, 'openai-response-id')
 })
 
 test('assistant session parsing handles null resume state and resolves codex resume metadata from the target', () => {
@@ -338,7 +336,6 @@ test('assistant session parsing handles null resume state and resolves codex res
   })
 
   assert.equal(sessionWithoutResumeState.resumeState, null)
-  assert.equal(sessionWithoutResumeState.providerBinding, null)
   assert.equal(
     sessionWithoutResumeState.providerOptions.continuityFingerprint,
     codexRuntimeTarget.continuityFingerprint,
@@ -388,10 +385,10 @@ test('assistant session parsing handles null resume state and resolves codex res
     sandbox: 'danger-full-access',
   })
 
+  assert.equal(codexResumeContract.resumeState?.providerSessionId, 'codex-session-123')
   assert.equal(
-    codexResumeContract.providerBinding?.providerOptions.continuityFingerprint,
+    codexResumeContract.providerOptions.continuityFingerprint,
     codexResumeRuntimeTarget.continuityFingerprint,
   )
-  assert.equal(codexResumeContract.providerBinding?.providerOptions.resumeKind, 'codex-session')
-  assert.equal(codexResumeContract.providerBinding?.providerSessionId, 'codex-session-123')
+  assert.equal(codexResumeContract.providerOptions.resumeKind, 'codex-session')
 })

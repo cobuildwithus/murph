@@ -28,7 +28,6 @@ export interface ConversationRefLocatorInput {
   identityId?: string | null
   participantId?: string | null
   sessionId?: string | null
-  sourceThreadId?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
 }
@@ -99,7 +98,7 @@ export function resolveConversationLocator(
     channel: input.channel,
     identityId: input.identityId,
     participantId: input.actorId ?? input.participantId,
-    threadId: input.threadId ?? input.sourceThreadId,
+    threadId: input.threadId,
     directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
   })
   const bindingFields = conversationRefToBindingFields(conversation)
@@ -123,7 +122,6 @@ export function resolveConversationLocator(
   }
   if (
     'threadId' in input ||
-    'sourceThreadId' in input ||
     hasConversationRefField(nestedConversation, 'threadId')
   ) {
     bindingPatch.threadId = conversation.threadId ?? null

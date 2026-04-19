@@ -48,7 +48,6 @@ describe('assistant session resume state normalization', () => {
     )
 
     expect(session.resumeState).toBeNull()
-    expect(session.providerBinding).toBeNull()
   })
 
   it('retains complete resumable state', () => {
@@ -64,13 +63,6 @@ describe('assistant session resume state normalization', () => {
     expect(session.resumeState).toEqual({
       providerSessionId: 'provider-session-123',
       resumeRouteId: 'route-new',
-    })
-    expect(session.providerBinding).toMatchObject({
-      provider: 'codex-cli',
-      providerSessionId: 'provider-session-123',
-      providerState: {
-        resumeRouteId: 'route-new',
-      },
     })
   })
 })

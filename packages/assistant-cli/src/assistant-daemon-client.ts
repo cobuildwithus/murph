@@ -588,32 +588,15 @@ function serializeAssistantMessageInput(
     abortSignal: _abortSignal,
     onProviderEvent: _onProviderEvent,
     onTraceEvent: _onTraceEvent,
-    sourceThreadId,
-    threadId,
     ...serializableInput
   } = input
-  return {
-    ...serializableInput,
-    ...(threadId === undefined && sourceThreadId === undefined
-      ? {}
-      : {
-          threadId: threadId ?? sourceThreadId ?? null,
-        }),
-  }
+  return serializableInput
 }
 
 function serializeAssistantSessionResolutionFields(
   input: AssistantSessionResolutionFields,
 ): AssistantSessionResolutionFields {
-  const { sourceThreadId, threadId, ...serializableInput } = input
-  return {
-    ...serializableInput,
-    ...(threadId === undefined && sourceThreadId === undefined
-      ? {}
-      : {
-          threadId: threadId ?? sourceThreadId ?? null,
-        }),
-  }
+  return input
 }
 
 function parseAssistantDaemonOpenConversationPayload(

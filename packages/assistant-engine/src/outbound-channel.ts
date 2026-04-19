@@ -53,7 +53,6 @@ export interface DeliverAssistantMessageInput {
   participantId?: string | null
   replyToMessageId?: string | null
   sessionId?: string | null
-  sourceThreadId?: string | null
   target?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
@@ -174,9 +173,6 @@ function buildDeliverAssistantSessionInput(
   }
   if ('threadId' in input) {
     sessionInput.threadId = input.threadId
-  }
-  if ('sourceThreadId' in input) {
-    sessionInput.sourceThreadId = input.sourceThreadId
   }
   if ('threadIsDirect' in input) {
     sessionInput.threadIsDirect = input.threadIsDirect

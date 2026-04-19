@@ -279,6 +279,7 @@ describe("assistant service wrapper seam", () => {
     await expect(
       assistantService.updateAssistantSessionOptions({
         providerOptions: {
+          provider: "openai-compatible",
           model: "gpt-5-mini",
         },
         sessionId: "session-1",
@@ -296,6 +297,7 @@ describe("assistant service wrapper seam", () => {
       seamMocks.local.updateAssistantSessionOptionsLocal
     ).toHaveBeenCalledWith({
       providerOptions: {
+        provider: "openai-compatible",
         model: "gpt-5-mini",
       },
       sessionId: "session-1",
@@ -1354,22 +1356,18 @@ describe("assistant turn finalizer seam", () => {
       expect.objectContaining({
         lastTurnAt: "2026-04-08T14:00:00.000Z",
         provider: "openai-compatible",
-        providerBinding: expect.objectContaining({
-          providerSessionId: "provider-session-existing",
-          providerState: {
-            resumeRouteId: "route-backup",
-          },
-        }),
         providerOptions: expect.objectContaining({
           model: "gpt-5-mini",
+        }),
+        resumeState: expect.objectContaining({
+          providerSessionId: "provider-session-existing",
+          resumeRouteId: "route-backup",
         }),
         turnCount: 3,
         updatedAt: "2026-04-08T14:00:00.000Z",
       })
     );
-    expect(saved.providerBinding?.providerState?.resumeRouteId).toBe(
-      "route-backup"
-    );
+    expect(saved.resumeState?.resumeRouteId).toBe("route-backup");
   });
 
   it("clears provider resume state when requested and only persists the assistant transcript", async () => {
@@ -1423,13 +1421,11 @@ describe("assistant turn finalizer seam", () => {
     expect(runtimeState.sessions.save).toHaveBeenCalledWith(
       expect.objectContaining({
         lastTurnAt: "2026-04-08T15:30:00.000Z",
-        providerBinding: null,
         resumeState: null,
         turnCount: 3,
         updatedAt: "2026-04-08T15:30:00.000Z",
       })
     );
-    expect(saved.providerBinding).toBeNull();
     expect(saved.resumeState).toBeNull();
   });
 
@@ -1467,12 +1463,8 @@ describe("assistant turn finalizer seam", () => {
 
     expect(runtimeState.turns.appendEvent).not.toHaveBeenCalled();
     expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
-    expect(saved.providerBinding?.providerSessionId).toBe(
-      "provider-session-new"
-    );
-    expect(saved.providerBinding?.providerState?.resumeRouteId).toBe(
-      "route-new"
-    );
+    expect(saved.resumeState?.providerSessionId).toBe("provider-session-new");
+    expect(saved.resumeState?.resumeRouteId).toBe("route-new");
   });
 
   it("falls back to the existing session target when the merged provider config cannot build a new target", async () => {
@@ -1640,20 +1632,6 @@ function createAssistantSession(input?: {
     createdAt: "2026-04-08T00:00:00.000Z",
     lastTurnAt: null,
     provider: target.adapter,
-    providerBinding:
-      input?.resumeState !== undefined && input.resumeState !== null
-        ? {
-            provider: target.adapter,
-            providerOptions,
-            providerSessionId: input.resumeState.providerSessionId,
-            providerState:
-              input.resumeState.resumeRouteId === null
-                ? null
-                : {
-                    resumeRouteId: input.resumeState.resumeRouteId,
-                  },
-          }
-        : null,
     providerOptions,
     resumeState: input?.resumeState ?? null,
     schema: "murph.assistant-session.v1",

@@ -363,7 +363,6 @@ export async function updateAssistantSessionOptionsLocal(input: {
   return saveAssistantSession(input.vault, {
     ...session.session,
     provider: nextTarget.adapter,
-    providerBinding: continuityChanged ? null : session.session.providerBinding,
     providerOptions: nextProviderOptions,
     resumeState: continuityChanged ? null : session.session.resumeState,
     target: nextTarget,

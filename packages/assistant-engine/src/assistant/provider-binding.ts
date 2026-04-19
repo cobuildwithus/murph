@@ -1,47 +1,43 @@
 import type {
   AssistantChatProvider,
-  AssistantProviderBinding,
+  AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
 import type { ResolvedAssistantFailoverRoute } from './failover.js'
 
 export function resolveAssistantProviderResumeKey(input: {
-  binding: AssistantProviderBinding | null
+  resumeState: AssistantSessionResumeState | null
   provider: AssistantChatProvider
 }): string | null {
-  if (!input.binding || input.binding.provider !== input.provider) {
+  if (!input.resumeState) {
     return null
   }
 
-  return input.binding.providerSessionId
+  return input.resumeState.providerSessionId
 }
 
 export function resolveAssistantRouteResumeBinding(input: {
   route: ResolvedAssistantFailoverRoute
-  sessionBinding: AssistantProviderBinding | null
-}): AssistantProviderBinding | null {
+  sessionResumeState: AssistantSessionResumeState | null
+}): AssistantSessionResumeState | null {
   if (
     doesAssistantResumeBindingMatchRoute({
-      binding: input.sessionBinding,
+      resumeState: input.sessionResumeState,
       route: input.route,
     })
   ) {
-    return input.sessionBinding
+    return input.sessionResumeState
   }
 
   return null
 }
 
 export function doesAssistantResumeBindingMatchRoute(input: {
-  binding: AssistantProviderBinding | null
+  resumeState: AssistantSessionResumeState | null
   route: ResolvedAssistantFailoverRoute
 }): boolean {
-  if (input.binding?.provider !== input.route.provider) {
-    return false
-  }
-
   const storedRouteId = normalizeNullableString(
-    input.binding.providerState?.resumeRouteId,
+    input.resumeState?.resumeRouteId,
   )
   if (storedRouteId === null) {
     return false

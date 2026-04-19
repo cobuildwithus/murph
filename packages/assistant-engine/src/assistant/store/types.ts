@@ -19,7 +19,6 @@ export interface AssistantSessionLocator {
   identityId?: string | null
   participantId?: string | null
   sessionId?: string | null
-  sourceThreadId?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
 }

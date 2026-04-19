@@ -98,6 +98,7 @@ describe('assistant redaction helpers', () => {
 
   it('redacts provider and session headers only on supported target shapes', () => {
     const providerOptions = redactAssistantProviderOptionsForDisplay({
+      provider: 'openai-compatible',
       approvalPolicy: 'never',
       continuityFingerprint: 'fingerprint-provider',
       executionDriver: 'openai-compatible',
@@ -133,28 +134,8 @@ describe('assistant redaction helpers', () => {
       createdAt: '2026-04-08T00:00:00.000Z',
       lastTurnAt: null,
       provider: 'openai-compatible',
-      providerBinding: {
-        provider: 'openai-compatible',
-        providerOptions: {
-          approvalPolicy: 'never',
-          continuityFingerprint: 'fingerprint-bound',
-          executionDriver: 'openai-compatible',
-          headers: {
-            Authorization: 'Bearer bound-secret',
-            'X-Trace': 'trace-456',
-          },
-          model: 'gpt-5.4',
-          oss: false,
-          profile: null,
-          providerName: 'murph-openai',
-          reasoningEffort: 'medium',
-          resumeKind: null,
-          sandbox: 'workspace-write',
-        },
-        providerSessionId: 'provider-session',
-        providerState: null,
-      },
       providerOptions: {
+        provider: 'openai-compatible',
         approvalPolicy: 'never',
         continuityFingerprint: 'fingerprint-session',
         executionDriver: 'openai-compatible',
@@ -200,10 +181,7 @@ describe('assistant redaction helpers', () => {
       Authorization: '[REDACTED]',
       'X-Trace': 'trace-789',
     })
-    expect(session.providerBinding?.providerOptions.headers).toEqual({
-      Authorization: '[REDACTED]',
-      'X-Trace': 'trace-456',
-    })
+    expect(session.resumeState).toBeNull()
 
     const codexSession = redactAssistantSessionForDisplay({
       ...session,

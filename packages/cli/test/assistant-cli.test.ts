@@ -302,7 +302,7 @@ test.sequential(
       channel: 'telegram',
       identityId: 'assistant:primary',
       participantId: 'contact:bob',
-      sourceThreadId: 'thread-42',
+      threadId: 'thread-42',
       model: 'gpt-oss:20b',
     })
     const statePaths = resolveAssistantStatePaths(vaultRoot)
@@ -511,7 +511,7 @@ test.sequential(
         target: {
           channel: string
           participantId: string | null
-          sourceThreadId: string | null
+          threadId: string | null
           deliveryTarget: string | null
           identityId: string | null
         }
@@ -522,7 +522,7 @@ test.sequential(
         'telegram',
         '--participant',
         'saved-chat',
-        '--sourceThread',
+        '--thread',
         'saved-chat',
       ], {
         env,
@@ -532,7 +532,7 @@ test.sequential(
     assert.equal(setResult.configPath, '~/.murph/config.json')
     assert.equal(setResult.target.channel, 'telegram')
     assert.equal(setResult.target.participantId, 'saved-chat')
-    assert.equal(setResult.target.sourceThreadId, 'saved-chat')
+    assert.equal(setResult.target.threadId, 'saved-chat')
 
     const listed = requireData(
       await runCli<{
@@ -559,7 +559,7 @@ test.sequential(
     assert.equal(shown.target?.participantId, 'saved-chat')
 
     const config = await readOperatorConfig(homeRoot)
-    assert.equal(config?.assistant?.selfDeliveryTargets?.telegram?.sourceThreadId, 'saved-chat')
+    assert.equal(config?.assistant?.selfDeliveryTargets?.telegram?.threadId, 'saved-chat')
     assert.equal(resolveOperatorConfigPath(homeRoot).endsWith(path.join('.murph', 'config.json')), true)
 
     const cleared = requireData(
@@ -1464,7 +1464,7 @@ test('root chat prints only a resume hint after a human TTY session exits', asyn
         channel: undefined,
         identityId: undefined,
         participantId: undefined,
-        sourceThreadId: undefined,
+        threadId: undefined,
         provider: undefined,
         codexCommand: undefined,
         model: undefined,

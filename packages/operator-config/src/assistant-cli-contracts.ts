@@ -220,12 +220,6 @@ export const assistantModelTargetSchema = z.discriminatedUnion('adapter', [
   assistantOpenAiCompatibleModelTargetSchema,
 ])
 
-export const assistantSessionProviderStateSchema = z
-  .object({
-    resumeRouteId: z.string().min(1).nullable().default(null),
-  })
-  .strict()
-
 export const assistantSessionResumeStateSchema = z
   .object({
     providerSessionId: z.string().min(1).nullable().default(null),
@@ -322,15 +316,6 @@ export const assistantSessionBindingSchema = z.object({
   delivery: assistantBindingDeliverySchema.nullable(),
 })
 
-export const assistantProviderBindingSchema = z
-  .object({
-    provider: z.enum(assistantChatProviderValues),
-    providerSessionId: z.string().min(1).nullable(),
-    providerState: assistantSessionProviderStateSchema.nullable().optional(),
-    providerOptions: assistantProviderSessionOptionsSchema,
-  })
-  .strict()
-
 export const assistantPersistedSessionSchema = z
   .object({
     schema: z.literal('murph.assistant-session.v1'),
@@ -358,7 +343,6 @@ const assistantSessionOutputSchema = assistantPersistedSessionSchema
   .extend({
     provider: z.enum(assistantChatProviderValues),
     providerOptions: assistantProviderSessionOptionsSchema,
-    providerBinding: assistantProviderBindingSchema.nullable().default(null),
   })
   .strict()
 
@@ -439,27 +423,9 @@ function buildAssistantRuntimeSession(
           oss: value.target.oss,
           ...(value.target.codexHome ? { codexHome: value.target.codexHome } : {}),
         })
-  const providerBinding =
-    value.resumeState &&
-    (value.resumeState.providerSessionId !== null ||
-      value.resumeState.resumeRouteId !== null)
-      ? assistantProviderBindingSchema.parse({
-          provider,
-          providerOptions,
-          providerSessionId: value.resumeState.providerSessionId,
-          providerState:
-            value.resumeState.resumeRouteId !== null
-              ? {
-                  resumeRouteId: value.resumeState.resumeRouteId,
-                }
-              : null,
-        })
-      : null
-
   return {
     ...value,
     provider,
-    providerBinding,
     providerOptions,
   }
 }
@@ -859,7 +825,7 @@ export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
 ])
 
 const assistantCronRouteSchema = automationRouteSchema
-  .omit({ channel: true, sourceThreadId: true })
+  .omit({ channel: true, threadId: true })
   .extend({
     channel: z.string().min(1).nullable(),
     threadId: z.string().min(1).nullable(),
@@ -1181,14 +1147,10 @@ export type AssistantModelTarget = z.infer<typeof assistantModelTargetSchema>
 export type AssistantSessionResumeState = z.infer<
   typeof assistantSessionResumeStateSchema
 >
-export type AssistantProviderBinding = z.infer<
-  typeof assistantProviderBindingSchema
->
 type AssistantPersistedSessionRecord = z.infer<typeof assistantPersistedSessionSchema>
 export type AssistantSession = AssistantPersistedSessionRecord & {
   provider: AssistantChatProvider
   providerOptions: z.infer<typeof assistantProviderSessionOptionsSchema>
-  providerBinding?: AssistantProviderBinding | null
 }
 export type AssistantTranscriptEntry = z.infer<
   typeof assistantTranscriptEntrySchema
@@ -1265,7 +1227,7 @@ export type AssistantSessionShowResult = z.infer<
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
-export type AssistantCronTarget = Omit<AutomationRoute, 'channel' | 'sourceThreadId'> & {
+export type AssistantCronTarget = Omit<AutomationRoute, 'channel' | 'threadId'> & {
   alias: string | null
   channel: string | null
   sessionId: string | null
@@ -1400,7 +1362,3 @@ export type AssistantDoctorCheckStatus =
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >
-type AssistantSessionProviderStateRecord = z.infer<
-  typeof assistantSessionProviderStateSchema
->
-export type AssistantSessionProviderState = AssistantSessionProviderStateRecord

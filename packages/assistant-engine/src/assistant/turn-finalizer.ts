@@ -3,7 +3,6 @@ import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
-  assistantProviderBindingSchema,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -94,26 +93,11 @@ export async function persistAssistantTurnAndSession(input: {
           providerSessionId: input.providerResult.providerSessionId,
           routeId: input.providerResult.route.routeId,
         })
-  const nextProviderBinding =
-    nextResumeState !== null
-      ? assistantProviderBindingSchema.parse({
-          provider: nextTarget.adapter,
-          providerSessionId: nextResumeState.providerSessionId,
-          providerState:
-            nextResumeState.resumeRouteId !== null
-              ? {
-                  resumeRouteId: nextResumeState.resumeRouteId,
-                }
-              : null,
-          providerOptions: nextProviderOptions,
-        })
-      : null
 
   const savedSession = await state.sessions.save({
     ...input.session,
     provider: nextTarget.adapter,
     providerOptions: nextProviderOptions,
-    providerBinding: nextProviderBinding,
     target: nextTarget,
     resumeState: nextResumeState,
     updatedAt,

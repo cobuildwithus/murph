@@ -1536,7 +1536,7 @@ test('process, shell, and toolchain helpers exercise installation and download f
   const shellProfilePath = path.join(homeDirectory, '.zshrc')
   const murphShimPath = path.join(userBinDirectory, 'murph')
   assert.equal(steps[0]?.status, 'completed')
-  assert.match(notes[0] ?? '', /source ~\/\.zshrc/)
+  assert.match(notes[0] ?? '', /source ~\/\.zshrc/u)
   assert.equal(await hasNonEmptyFile(murphShimPath, fileExists), true)
   assert.match(await readFile(shellProfilePath, 'utf8'), /# >>> Murph PATH >>>/)
   assert.equal(
@@ -1547,6 +1547,8 @@ test('process, shell, and toolchain helpers exercise installation and download f
     resolveShellProfilePath(homeDirectory, { SHELL: '/bin/fish' }),
     path.join(homeDirectory, '.profile'),
   )
+  assert.doesNotMatch(await readFile(murphShimPath, 'utf8'), /MURPH_REPO_ROOT/u)
+  assert.doesNotMatch(await readFile(murphShimPath, 'utf8'), /resolve_repo_root/u)
 
   const reusedSteps: SetupStepResult[] = []
   await ensureCliShims({

@@ -24,7 +24,6 @@ export async function resolveAssistantTurnSharedPlan(
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       deliveryTarget: input.deliveryTarget,
       operatorAuthority: input.operatorAuthority,
-      sourceThreadId: input.sourceThreadId,
       threadId: input.threadId,
       threadIsDirect: input.threadIsDirect,
     },

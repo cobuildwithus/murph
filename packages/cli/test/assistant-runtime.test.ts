@@ -386,24 +386,6 @@ function createMockCodexRuntimeSession(input: {
   }
   createdAt: string
   lastTurnAt: string | null
-  providerBinding?: {
-    provider: 'codex-cli'
-    providerSessionId: string | null
-    providerState: {
-      resumeRouteId: string
-    } | null
-    providerOptions: {
-      approvalPolicy: 'never' | 'on-request' | 'on-failure' | 'untrusted' | null
-      continuityFingerprint?: string
-      executionDriver?: 'codex-cli'
-      model: string | null
-      oss: boolean
-      profile: string | null
-      reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh' | null
-      resumeKind?: 'codex-session'
-      sandbox: 'read-only' | 'workspace-write' | 'danger-full-access' | null
-    }
-  } | null
   providerOptions?: {
     approvalPolicy?: 'never' | 'on-request' | 'on-failure' | 'untrusted' | null
     continuityFingerprint?: string
@@ -424,6 +406,7 @@ function createMockCodexRuntimeSession(input: {
   updatedAt: string
 }) {
   const defaultCodexProviderOptions = {
+    provider: 'codex-cli' as const,
     continuityFingerprint: 'fingerprint-cli-runtime-codex',
     executionDriver: 'codex-cli' as const,
     model: null,
@@ -438,23 +421,6 @@ function createMockCodexRuntimeSession(input: {
     ...defaultCodexProviderOptions,
     ...input.providerOptions,
   }
-  const providerBinding = input.providerBinding
-    ? {
-        ...input.providerBinding,
-        providerOptions: {
-          ...defaultCodexProviderOptions,
-          ...input.providerBinding.providerOptions,
-        },
-      }
-    : null
-  const resumeState =
-    input.resumeState ??
-    (providerBinding
-      ? {
-          providerSessionId: providerBinding.providerSessionId,
-          resumeRouteId: providerBinding.providerState?.resumeRouteId ?? null,
-        }
-      : null)
 
   return {
     alias: input.alias ?? null,
@@ -462,9 +428,8 @@ function createMockCodexRuntimeSession(input: {
     createdAt: input.createdAt,
     lastTurnAt: input.lastTurnAt,
     provider: 'codex-cli' as const,
-    providerBinding,
     providerOptions,
-    resumeState,
+    resumeState: input.resumeState ?? null,
     schema: 'murph.assistant-session.v1' as const,
     sessionId: input.sessionId,
     target: {
@@ -798,7 +763,7 @@ test('sendAssistantMessage keeps older local history in raw transcript files whi
       channel: 'telegram',
       identityId: 'assistant:primary',
       participantId: 'contact:distill',
-      sourceThreadId: 'chat-distill',
+      threadId: 'chat-distill',
       provider: 'codex-cli',
       prompt: `What changed on day ${index + 1}?`,
       sandbox: 'read-only',
@@ -871,7 +836,7 @@ test('sendAssistantMessage chains official OpenAI responses without replaying lo
       channel: 'telegram',
       identityId: 'assistant:primary',
       participantId: 'contact:openai',
-      sourceThreadId: 'chat-openai',
+      threadId: 'chat-openai',
       provider: 'openai-compatible',
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
@@ -992,7 +957,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-123',
+    threadId: 'chat-123',
     provider: 'codex-cli',
     prompt: 'What did Bob eat?',
     reasoningEffort: 'xhigh',
@@ -1007,7 +972,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   })
 
   assert.equal(first.session.turnCount, 1)
-  assert.equal(first.session.providerBinding?.providerSessionId, 'thread-123')
+  assert.equal(first.session.resumeState?.providerSessionId, 'thread-123')
   assert.equal(first.session.alias, 'telegram:bob')
   assert.equal(first.delivery, null)
   assert.equal(first.deliveryError, null)
@@ -1016,10 +981,12 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(first.session.binding.threadId, 'chat-123')
   assert.equal('vault' in first.session, false)
   assert.equal('stateRoot' in first.session, false)
+  assert.equal('providerBinding' in first.session, false)
   assert.equal(second.session.sessionId, first.session.sessionId)
   assert.equal(second.session.turnCount, 2)
   assert.equal('lastUserMessage' in second.session, false)
   assert.equal('lastAssistantMessage' in second.session, false)
+  assert.equal('providerBinding' in second.session, false)
 
   const firstCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
@@ -1074,7 +1041,7 @@ test('sendAssistantMessage does not persist hosted usage records without hosted 
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-123',
+    threadId: 'chat-123',
     provider: 'codex-cli',
     prompt: 'Count my tokens.',
   })
@@ -1107,7 +1074,7 @@ test('sendAssistantMessage defaults Codex reasoning to the Murph-owned default',
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-123',
+    threadId: 'chat-123',
     provider: 'codex-cli',
     prompt: 'Use the normal default.',
   })
@@ -1169,7 +1136,7 @@ test('sendAssistantMessage freezes hosted usage credential ownership from the pr
     },
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-123',
+    threadId: 'chat-123',
     provider: 'codex-cli',
     prompt: 'Count my tokens.',
   })
@@ -1214,7 +1181,7 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
       assert.equal(isAssistantProviderInterruptedError(error), true)
       const recoveredSession = extractRecoveredAssistantSession(error)
       assert.equal(
-        recoveredSession?.providerBinding?.providerSessionId,
+        recoveredSession?.resumeState?.providerSessionId,
         'thread-pause-1',
       )
       return true
@@ -1238,7 +1205,7 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
   })
 
   assert.equal(
-    resolved.session.providerBinding?.providerSessionId ?? null,
+    resolved.session.resumeState?.providerSessionId ?? null,
     'thread-pause-1',
   )
   assert.equal(resolved.session.turnCount, 0)
@@ -1354,7 +1321,7 @@ test('sendAssistantMessage keeps provider success and session updates even when 
     code: 'ASSISTANT_CHANNEL_DELIVERY_FAILED',
     message: 'delivery exploded',
   })
-  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-500')
+  assert.equal(result.session.resumeState?.providerSessionId, 'thread-500')
   assert.equal('lastAssistantMessage' in result.session, false)
 })
 
@@ -1894,7 +1861,7 @@ test('assistant operator config keeps nested provider defaults across unrelated 
           channel: 'telegram',
           identityId: null,
           participantId: 'contact:alice',
-          sourceThreadId: 'chat-1',
+          threadId: 'chat-1',
           deliveryTarget: 'chat-1',
         },
       },
@@ -4515,21 +4482,9 @@ test('scanAssistantAutoReplyOnce anchors grouped linq replies to the newest grou
       },
       createdAt: '2026-03-18T00:00:00.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
-      providerBinding: {
-        provider: 'codex-cli',
+      resumeState: {
         providerSessionId: 'thread-linq-batch',
-        providerState: null,
-        providerOptions: {
-          continuityFingerprint: 'fingerprint-cli-runtime-binding',
-          executionDriver: 'codex-cli',
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-          resumeKind: 'codex-session',
-        },
+        resumeRouteId: null,
       },
       sessionId: input.sessionId,
       turnCount: 1,
@@ -5854,21 +5809,9 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
       },
       createdAt: '2026-03-18T00:00:00.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
-      providerBinding: {
-        provider: 'codex-cli',
+      resumeState: {
         providerSessionId: 'thread-telegram-scope',
-        providerState: null,
-        providerOptions: {
-          continuityFingerprint: 'fingerprint-cli-runtime-binding',
-          executionDriver: 'codex-cli',
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-          resumeKind: 'codex-session',
-        },
+        resumeRouteId: null,
       },
       sessionId: input.sessionId,
       turnCount: 1,
@@ -6086,21 +6029,9 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
       },
       createdAt: '2026-03-18T00:00:00.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
-      providerBinding: {
-        provider: 'codex-cli',
+      resumeState: {
         providerSessionId: 'thread-stall-1',
-        providerState: null,
-        providerOptions: {
-          continuityFingerprint: 'fingerprint-cli-runtime-binding',
-          executionDriver: 'codex-cli',
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-          resumeKind: 'codex-session',
-        },
+        resumeRouteId: null,
       },
       sessionId: input.sessionId,
       turnCount: 1,
@@ -6289,7 +6220,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerBinding?.providerSessionId, 'thread-stall-1')
+  assert.equal(resolved.session.resumeState?.providerSessionId, 'thread-stall-1')
 })
 
 test('scanAssistantAutoReplyOnce keeps long-running deepthink commands past the default stall window before retrying', async () => {
@@ -6620,7 +6551,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
   })
 
   assert.equal(
-    resolved.session.providerBinding?.providerSessionId ?? null,
+    resolved.session.resumeState?.providerSessionId ?? null,
     'thread-retry-1',
   )
   assert.equal(resolved.session.turnCount, 0)
@@ -6691,21 +6622,9 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
         },
         createdAt: '2026-03-18T00:00:00.000Z',
         lastTurnAt: '2026-03-18T00:00:01.000Z',
-        providerBinding: {
-          provider: 'codex-cli',
+        resumeState: {
           providerSessionId: 'thread-telegram-failure',
-          providerState: null,
-          providerOptions: {
-            continuityFingerprint: 'fingerprint-cli-runtime-binding',
-            executionDriver: 'codex-cli',
-            model: null,
-            reasoningEffort: null,
-            sandbox: 'read-only',
-            approvalPolicy: 'never',
-            profile: null,
-            oss: false,
-            resumeKind: 'codex-session',
-          },
+          resumeRouteId: null,
         },
         sessionId: input.sessionId,
         turnCount: 1,
@@ -7180,21 +7099,9 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
       },
       createdAt: '2026-03-18T00:00:00.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
-      providerBinding: {
-        provider: 'codex-cli',
+      resumeState: {
         providerSessionId: 'thread-telegram-album',
-        providerState: null,
-        providerOptions: {
-          continuityFingerprint: 'fingerprint-cli-runtime-binding',
-          executionDriver: 'codex-cli',
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-          resumeKind: 'codex-session',
-        },
+        resumeRouteId: null,
       },
       sessionId: input.sessionId,
       turnCount: 1,
@@ -7400,21 +7307,9 @@ test('scanAssistantAutoReplyOnce does not group Telegram media albums across acc
       },
       createdAt: '2026-03-18T00:00:00.000Z',
       lastTurnAt: '2026-03-18T00:00:01.000Z',
-      providerBinding: {
-        provider: 'codex-cli',
+      resumeState: {
         providerSessionId: 'thread-telegram-album-accounts',
-        providerState: null,
-        providerOptions: {
-          continuityFingerprint: 'fingerprint-cli-runtime-binding',
-          executionDriver: 'codex-cli',
-          model: null,
-          reasoningEffort: null,
-          sandbox: 'read-only',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-          resumeKind: 'codex-session',
-        },
+        resumeRouteId: null,
       },
       sessionId: input.sessionId,
       turnCount: 1,
@@ -8075,6 +7970,7 @@ test('assistant Ink resyncs the next turn selection after a failover-updated ses
     },
     provider: 'codex-cli',
     providerOptions: {
+      provider: 'codex-cli',
       continuityFingerprint: 'fingerprint-cli-runtime-failover',
       model: 'gpt-5.4',
       reasoningEffort: 'high',
@@ -8163,6 +8059,7 @@ test('assistant Ink preserves explicit selections when unrelated same-provider s
     resumeState: null,
     provider: 'openai-compatible',
     providerOptions: {
+      provider: 'openai-compatible',
       continuityFingerprint: 'fingerprint-cli-runtime-openai',
       model: null,
       reasoningEffort: null,
@@ -8454,6 +8351,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     resumeState: null,
     provider: 'codex-cli',
     providerOptions: {
+      provider: 'codex-cli',
       continuityFingerprint: 'fingerprint-cli-runtime-view',
       model: 'gpt-5.4',
       reasoningEffort: null,
@@ -8994,6 +8892,7 @@ test('assistant Ink view-model falls back to default model labels when needed', 
     resumeState: null,
     provider: 'codex-cli',
     providerOptions: {
+      provider: 'codex-cli',
       continuityFingerprint: 'fingerprint-cli-runtime-oss',
       model: null,
       reasoningEffort: null,

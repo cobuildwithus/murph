@@ -44,7 +44,6 @@ export function resolveAssistantConversationPolicy(input: {
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
     | 'operatorAuthority'
-    | 'sourceThreadId'
     | 'threadId'
     | 'threadIsDirect'
   >
@@ -73,7 +72,6 @@ export function resolveAssistantConversationAudience(input: {
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
     | 'operatorAuthority'
-    | 'sourceThreadId'
     | 'threadId'
     | 'threadIsDirect'
   >
@@ -95,7 +93,6 @@ export function resolveAssistantConversationAudience(input: {
     normalizeNullableString(conversation?.participantId)
   const threadId =
     normalizeNullableString(input.message.threadId) ??
-    normalizeNullableString(input.message.sourceThreadId) ??
     normalizeNullableString(conversation?.threadId) ??
     normalizeNullableString(binding.threadId)
   const explicitTarget = normalizeNullableString(input.message.deliveryTarget)

@@ -149,9 +149,6 @@ function readAssistantSessionResolutionThread(
   if ('threadId' in input) {
     return input.threadId
   }
-  if ('sourceThreadId' in input) {
-    return input.sourceThreadId
-  }
   return undefined
 }
 

@@ -4,13 +4,11 @@ import {
   assistantSessionResumeStateSchema,
   parseAssistantSessionRecord,
   type AssistantSession,
-  type AssistantProviderBinding,
   type AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
 
 export function readAssistantProviderResumeRouteId(input: {
-  providerBinding?: AssistantProviderBinding | null
   resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
   const resumeState = readAssistantSessionResumeState(input)
@@ -18,7 +16,6 @@ export function readAssistantProviderResumeRouteId(input: {
 }
 
 export function readAssistantProviderSessionId(input: {
-  providerBinding?: AssistantProviderBinding | null
   resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
   const resumeState = readAssistantSessionResumeState(input)
@@ -28,7 +25,6 @@ export function readAssistantProviderSessionId(input: {
 export function readAssistantSessionResumeState(
   input:
     | {
-        providerBinding?: AssistantProviderBinding | null
         resumeState?: AssistantSessionResumeState | null
       }
     | AssistantSession

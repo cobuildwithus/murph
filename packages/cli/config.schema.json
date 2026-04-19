@@ -219,11 +219,11 @@
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
-                        "sourceThread": {
+                        "thread": {
                           "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
@@ -346,11 +346,11 @@
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
-                        "sourceThread": {
+                        "thread": {
                           "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
@@ -464,11 +464,11 @@
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
-                        "sourceThread": {
+                        "thread": {
                           "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
@@ -620,11 +620,11 @@
                                   "minLength": 1
                                 },
                                 "participant": {
-                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
                                   "type": "string",
                                   "minLength": 1
                                 },
-                                "sourceThread": {
+                                "thread": {
                                   "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                                   "type": "string",
                                   "minLength": 1
@@ -848,11 +848,11 @@
                   "minLength": 1
                 },
                 "participant": {
-                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
                   "type": "string",
                   "minLength": 1
                 },
-                "sourceThread": {
+                "thread": {
                   "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                   "type": "string",
                   "minLength": 1

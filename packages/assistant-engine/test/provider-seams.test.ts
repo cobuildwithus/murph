@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   parseAssistantSessionRecord,
-  type AssistantProviderBinding,
   type AssistantProviderSessionOptions,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -56,18 +55,10 @@ afterEach(async () => {
 
 describe('assistant provider seam helpers', () => {
   it('matches resume bindings only when the stored route id matches exactly', () => {
-    const previousBinding = createProviderBinding({
-      providerOptions: {
-        codexHome: null,
-        continuityFingerprint: 'fingerprint-shared',
-        headers: {
-          Authorization: 'Bearer token',
-          'X-Trace': '1',
-        },
-      },
+    const previousResumeState = {
       providerSessionId: 'provider_session_alpha',
       resumeRouteId: 'route-primary',
-    })
+    }
     const rotatedRoute = createRoute({
       providerOptions: {
         codexHome: '/tmp/local-codex-home',
@@ -82,15 +73,8 @@ describe('assistant provider seam helpers', () => {
 
     expect(
       doesAssistantResumeBindingMatchRoute({
-        binding: previousBinding,
+        resumeState: previousResumeState,
         route: createRoute({
-          providerOptions: {
-            ...previousBinding.providerOptions,
-            headers: {
-              Authorization: 'Bearer token',
-              'X-Trace': '1',
-            },
-          },
           routeId: 'route-primary',
         }),
       }),
@@ -98,29 +82,22 @@ describe('assistant provider seam helpers', () => {
     expect(
       resolveAssistantRouteResumeBinding({
         route: createRoute({
-          providerOptions: {
-            ...previousBinding.providerOptions,
-            headers: {
-              Authorization: 'Bearer token',
-              'X-Trace': '1',
-            },
-          },
           routeId: 'route-primary',
         }),
-        sessionBinding: previousBinding,
+        sessionResumeState: previousResumeState,
       }),
-    ).toEqual(previousBinding)
+    ).toEqual(previousResumeState)
 
     expect(
       doesAssistantResumeBindingMatchRoute({
-        binding: previousBinding,
+        resumeState: previousResumeState,
         route: rotatedRoute,
       }),
     ).toBe(false)
     expect(
       resolveAssistantRouteResumeBinding({
         route: rotatedRoute,
-        sessionBinding: previousBinding,
+        sessionResumeState: previousResumeState,
       }),
     ).toBeNull()
   })
@@ -159,9 +136,9 @@ describe('assistant provider seam helpers', () => {
     )
     expect(readAssistantProviderSessionId(persisted)).toBe('provider_session_new')
     expect(readAssistantProviderResumeRouteId(persisted)).toBe('route-recovered')
-    expect(persisted?.providerBinding).toMatchObject({
-      provider: 'openai-compatible',
+    expect(persisted?.resumeState).toEqual({
       providerSessionId: 'provider_session_new',
+      resumeRouteId: 'route-recovered',
     })
   })
 
@@ -286,10 +263,6 @@ describe('assistant provider seam helpers', () => {
         providerSessionId: 'provider_session_resume',
         resumeRouteId: 'route-resume',
       },
-      providerBinding: createProviderBinding({
-        providerSessionId: 'provider_session_bound',
-        resumeRouteId: 'route-bound',
-      }),
     })
     expect(persisted.resumeState).toEqual({
       providerSessionId: 'provider_session_resume',
@@ -298,14 +271,7 @@ describe('assistant provider seam helpers', () => {
 
     expect(normalizeAssistantSessionResumeState(null)).toBeNull()
     expect(readAssistantSessionResumeState(null)).toBeNull()
-    expect(
-      readAssistantSessionResumeState({
-        providerBinding: createProviderBinding({
-          providerSessionId: 'provider-session-from-binding',
-          resumeRouteId: 'route-from-binding',
-        }),
-      }),
-    ).toBeNull()
+    expect(readAssistantSessionResumeState({})).toBeNull()
     expect(writeAssistantProviderResumeRouteId(null, null)).toBeNull()
     expect(writeAssistantSessionProviderSessionId(null, null)).toBeNull()
     expect(
@@ -320,25 +286,6 @@ describe('assistant provider seam helpers', () => {
     expect(() => serializeAssistantSessionForPersistence(missingTargetSession)).toThrow(
       'Assistant session target is required.',
     )
-
-    const mismatchedBindingSession = createAssistantSession()
-    mismatchedBindingSession.providerBinding = {
-      ...createProviderBinding({
-        providerSessionId: 'provider-session-mismatch',
-        resumeRouteId: 'route-mismatch',
-      }),
-      provider: 'codex-cli',
-    }
-    mismatchedBindingSession.resumeState = null
-    expect(serializeAssistantSessionForPersistence(mismatchedBindingSession).resumeState).toBeNull()
-
-    const bindingOnlySession = createAssistantSession()
-    bindingOnlySession.providerBinding = createProviderBinding({
-      providerSessionId: 'provider-session-binding-only',
-      resumeRouteId: 'route-binding-only',
-    })
-    bindingOnlySession.resumeState = null
-    expect(serializeAssistantSessionForPersistence(bindingOnlySession).resumeState).toBeNull()
   })
 
   it('classifies provider failure helpers', () => {
@@ -370,38 +317,32 @@ describe('assistant provider seam helpers', () => {
   })
 
   it('rejects route drift even when unrelated provider options stay compatible', () => {
-    const binding = createProviderBinding({
-      providerOptions: {
-        codexHome: '/tmp/codex-home-a',
-        continuityFingerprint: 'fingerprint-shared',
-        headers: {},
-      },
+    const resumeState = {
       providerSessionId: 'provider_session_alpha',
       resumeRouteId: 'route-primary',
-    })
+    }
 
     expect(
       resolveAssistantProviderResumeKey({
-        binding,
+        resumeState,
         provider: 'openai-compatible',
       }),
     ).toBe('provider_session_alpha')
     expect(
       resolveAssistantProviderResumeKey({
-        binding,
+        resumeState,
         provider: 'codex-cli',
       }),
-    ).toBeNull()
+    ).toBe('provider_session_alpha')
 
     expect(
       doesAssistantResumeBindingMatchRoute({
-        binding,
+        resumeState,
         route: createRoute({
           providerOptions: {
-            ...binding.providerOptions,
             codexHome: '/tmp/codex-home-b',
-            headers: null,
             continuityFingerprint: 'fingerprint-rotated',
+            headers: null,
           },
           routeId: 'route-rotated',
         }),
@@ -410,14 +351,10 @@ describe('assistant provider seam helpers', () => {
 
     expect(
       doesAssistantResumeBindingMatchRoute({
-        binding: createProviderBinding({
-          providerOptions: {
-            continuityFingerprint: 'fingerprint-shared',
-            headers: {},
-          },
+        resumeState: {
           providerSessionId: 'provider_session_beta',
           resumeRouteId: 'route-primary',
-        }),
+        },
         route: createRoute({
           providerOptions: {
             continuityFingerprint: 'fingerprint-shared',
@@ -444,32 +381,11 @@ function createRoute(input?: {
   }
 }
 
-function createProviderBinding(input?: {
-  providerOptions?: Partial<AssistantProviderSessionOptions>
-  providerSessionId?: string | null
-  resumeRouteId?: string | null
-}): AssistantProviderBinding {
-  return {
-    provider: 'openai-compatible',
-    providerOptions: createProviderOptions(input?.providerOptions),
-    providerSessionId: input?.providerSessionId ?? null,
-    providerState:
-      input?.resumeRouteId === undefined
-        ? {
-            resumeRouteId: 'route-primary',
-          }
-        : input.resumeRouteId
-          ? {
-              resumeRouteId: input.resumeRouteId,
-            }
-          : null,
-  }
-}
-
 function createProviderOptions(
   overrides?: Partial<AssistantProviderSessionOptions>,
 ): AssistantProviderSessionOptions {
   return {
+    provider: 'openai-compatible',
     continuityFingerprint: 'fingerprint-default',
     executionDriver: 'openai-compatible',
     model: 'gpt-4.1',
@@ -536,22 +452,6 @@ function createAssistantSession(input?: {
         Authorization: 'Bearer token',
       },
     }),
-    providerBinding: resumeState
-      ? {
-          provider: 'openai-compatible',
-          providerOptions: createProviderOptions({
-            headers: {
-              Authorization: 'Bearer token',
-            },
-          }),
-          providerSessionId: resumeState.providerSessionId,
-          providerState: resumeState.resumeRouteId
-            ? {
-                resumeRouteId: resumeState.resumeRouteId,
-              }
-            : null,
-        }
-      : null,
   }
 }
 

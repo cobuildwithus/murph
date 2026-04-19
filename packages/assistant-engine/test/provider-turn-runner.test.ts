@@ -466,7 +466,7 @@ describe('executeProviderTurnWithRecovery', () => {
       supportsToolRuntime: true,
     })
     runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
-      session.providerBinding,
+      session.resumeState,
     )
     runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
       createSuccessfulAttemptResult({
@@ -646,7 +646,7 @@ describe('executeProviderTurnWithRecovery', () => {
       supportsToolRuntime: false,
     })
     runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
-      session.providerBinding,
+      session.resumeState,
     )
     runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue(
       'provider-session-primary',
@@ -727,7 +727,7 @@ describe('executeProviderTurnWithRecovery', () => {
       supportsToolRuntime: false,
     })
     runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
-      session.providerBinding,
+      session.resumeState,
     )
     runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue(
       'provider-session-primary',
@@ -1266,6 +1266,7 @@ function createProviderOptions(
   overrides?: Partial<AssistantProviderSessionOptions>,
 ): AssistantProviderSessionOptions {
   return {
+    provider: 'openai-compatible',
     continuityFingerprint: 'fingerprint-default',
     executionDriver: 'openai-compatible',
     model: 'gpt-4.1',
@@ -1334,21 +1335,5 @@ function createAssistantSession(input?: {
         Authorization: 'Bearer token',
       },
     }),
-    providerBinding: resumeState
-      ? {
-          provider: 'openai-compatible',
-          providerOptions: createProviderOptions({
-            headers: {
-              Authorization: 'Bearer token',
-            },
-          }),
-          providerSessionId: resumeState.providerSessionId,
-          providerState: resumeState.resumeRouteId
-            ? {
-                resumeRouteId: resumeState.resumeRouteId,
-              }
-            : null,
-        }
-      : null,
   }
 }

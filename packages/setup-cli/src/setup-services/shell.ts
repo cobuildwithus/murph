@@ -268,86 +268,17 @@ ${PATH_BLOCK_END}
 }
 
 function buildCliShimScript(cliBinPath: string, shimName: string): string {
-  const generatedRepoRoot = resolveRepoRootFromCliBinPath(cliBinPath)
-
   return `#!/usr/bin/env bash
 set -euo pipefail
 
-repo_root_exists() {
-  local candidate="\${1:-}"
-  if [ -z "$candidate" ] || [ ! -d "$candidate" ]; then
-    return 1
-  fi
-
-  if [ -f "$candidate/packages/cli/src/bin.ts" ]; then
-    return 0
-  fi
-
-  if [ -f "$candidate/packages/cli/dist/bin.js" ]; then
-    return 0
-  fi
-
-  return 1
-}
-
-canonicalize_repo_root() {
-  (
-    cd "\${1:-}" >/dev/null 2>&1 && pwd -P
-  )
-}
-
-find_repo_root_from_pwd() {
-  local candidate
-  if ! candidate="$(pwd -P 2>/dev/null)"; then
-    return 1
-  fi
-
-  while true; do
-    if repo_root_exists "$candidate"; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-
-    if [ "$candidate" = "/" ]; then
-      return 1
-    fi
-
-    candidate="$(dirname "$candidate")"
-  done
-}
-
-resolve_repo_root() {
-  if repo_root_exists "\${MURPH_REPO_ROOT:-}"; then
-    canonicalize_repo_root "\${MURPH_REPO_ROOT}"
-    return 0
-  fi
-
-  if repo_root_exists ${quoteShellArgument(generatedRepoRoot)}; then
-    canonicalize_repo_root ${quoteShellArgument(generatedRepoRoot)}
-    return 0
-  fi
-
-  find_repo_root_from_pwd
-}
-
-repo_root="$(resolve_repo_root || true)"
-if [ -z "$repo_root" ]; then
-  printf '%s\n' 'Murph CLI shim could not locate the repo checkout. Run \`pnpm exec tsx packages/cli/src/bin.ts setup\` or \`./scripts/setup-host.sh\` from the repo checkout to refresh the shims, or set \`MURPH_REPO_ROOT\`.' >&2
-  exit 1
-fi
-
-cli_bin_path="$repo_root/packages/cli/dist/bin.js"
+cli_bin_path=${quoteShellArgument(cliBinPath)}
 if [ ! -f "$cli_bin_path" ]; then
-  printf '%s\n' 'Murph CLI build output is unavailable. Run \`pnpm --dir <repo> build:test-runtime:prepared\` (preferred) or \`pnpm --dir <repo> build\` from the repo checkout.' >&2
+  printf '%s\n' 'Murph CLI build output is unavailable. Re-run setup from the current checkout to refresh the shims.' >&2
   exit 1
 fi
 
 exec env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} node "$cli_bin_path" "$@"
 `
-}
-
-function resolveRepoRootFromCliBinPath(cliBinPath: string): string {
-  return path.resolve(path.dirname(cliBinPath), '..', '..', '..')
 }
 
 function quoteShellArgument(value: string): string {

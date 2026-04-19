@@ -813,20 +813,6 @@ function createAssistantSession(input?: {
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     provider: target.adapter,
-    providerBinding:
-      input?.resumeState !== undefined && input.resumeState !== null
-        ? {
-            provider: target.adapter,
-            providerOptions,
-            providerSessionId: input.resumeState.providerSessionId,
-            providerState:
-              input.resumeState.resumeRouteId === null
-                ? null
-                : {
-                    resumeRouteId: input.resumeState.resumeRouteId,
-                  },
-          }
-        : null,
     providerOptions,
     resumeState: input?.resumeState ?? null,
     schema: 'murph.assistant-session.v1',

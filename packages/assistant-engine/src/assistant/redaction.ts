@@ -102,14 +102,6 @@ export function redactAssistantSessionForDisplay(
           }
         : session.target,
     providerOptions: redactAssistantProviderOptionsForDisplay(session.providerOptions),
-    providerBinding: session.providerBinding
-      ? {
-          ...session.providerBinding,
-          providerOptions: redactAssistantProviderOptionsForDisplay(
-            session.providerBinding.providerOptions,
-          ),
-        }
-      : null,
   }
 }
 

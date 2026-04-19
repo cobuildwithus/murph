@@ -25,7 +25,7 @@ describe('assistant conversation references', () => {
         participantId: ' participant-123 ',
         threadId: ' nested-thread ',
       },
-      sourceThreadId: 'source-thread',
+      threadId: 'source-thread',
       threadIsDirect: null,
     })
 

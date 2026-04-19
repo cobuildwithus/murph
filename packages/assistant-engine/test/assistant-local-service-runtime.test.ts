@@ -579,26 +579,6 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
   mocks.resolveAssistantSession.mockResolvedValueOnce({
     session: createAssistantSession({
       sessionId: 'session-updated',
-      providerBinding: {
-        provider: 'openai-compatible',
-        providerOptions: {
-          apiKeyEnv: 'OPENAI_API_KEY',
-          continuityFingerprint: 'fingerprint-openai',
-          executionDriver: 'openai-compatible',
-          model: 'gpt-5.4',
-          oss: false,
-          profile: null,
-          providerName: 'OpenAI',
-          reasoningEffort: null,
-          resumeKind: null,
-          sandbox: null,
-          approvalPolicy: null,
-        },
-        providerSessionId: 'provider-session-1',
-        providerState: {
-          resumeRouteId: 'route-1',
-        },
-      },
       resumeState: {
         providerSessionId: 'provider-session-1',
         resumeRouteId: 'route-1',
@@ -628,13 +608,13 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
   assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.provider, 'openai-compatible')
   assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.adapter, 'openai-compatible')
   assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.resumeState, null)
-  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.providerBinding, null)
 })
 
 test('updateAssistantSessionOptionsLocal preserves codex target-only fields', async () => {
   const updatedSession = createAssistantSession({
     provider: 'codex-cli',
     providerOptions: {
+      provider: 'codex-cli',
       approvalPolicy: 'never',
       apiKeyEnv: undefined,
       baseUrl: undefined,
@@ -672,6 +652,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
     session: createAssistantSession({
       provider: 'codex-cli',
       providerOptions: {
+        provider: 'codex-cli',
         approvalPolicy: 'never',
         apiKeyEnv: undefined,
         baseUrl: undefined,
@@ -708,6 +689,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
 
   const result = await updateAssistantSessionOptionsLocal({
     providerOptions: {
+      provider: 'codex-cli',
       model: 'gpt-5.5',
     },
     sessionId: 'session-codex-updated',
@@ -1079,7 +1061,6 @@ async function loadLocalServiceModule(input?: {
 
 function createAssistantSession(input?: {
   provider?: AssistantSession['provider']
-  providerBinding?: AssistantSession['providerBinding']
   providerOptions?: Partial<AssistantSession['providerOptions']>
   resumeState?: AssistantSession['resumeState']
   sessionId?: string
@@ -1102,8 +1083,8 @@ function createAssistantSession(input?: {
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     provider: input?.provider ?? 'openai-compatible',
-    providerBinding: input?.providerBinding ?? null,
     providerOptions: {
+      provider: input?.provider ?? 'openai-compatible',
       apiKeyEnv: 'OPENAI_API_KEY',
       continuityFingerprint: 'fingerprint-openai',
       executionDriver: 'openai-compatible',
