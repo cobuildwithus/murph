@@ -10,6 +10,9 @@ CREATE TYPE "HostedStripeEventStatus" AS ENUM ('pending', 'processing', 'complet
 -- CreateEnum
 CREATE TYPE "HostedRevnetIssuanceStatus" AS ENUM ('pending', 'submitting', 'submitted', 'confirmed', 'failed');
 
+-- CreateEnum
+CREATE TYPE "HostedWakeBehavior" AS ENUM ('ordered', 'coalescing');
+
 -- CreateTable
 CREATE TABLE "device_connection" (
     "id" TEXT NOT NULL,
@@ -17,6 +20,15 @@ CREATE TABLE "device_connection" (
     "provider" TEXT NOT NULL,
     "provider_account_blind_index" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'active',
+    "display_name" TEXT,
+    "scopes_json" JSONB,
+    "metadata_json" JSONB,
+    "external_account_id_encrypted" TEXT,
+    "access_token_encrypted" TEXT,
+    "refresh_token_encrypted" TEXT,
+    "access_token_expires_at" TIMESTAMP(3),
+    "token_version" INTEGER,
+    "key_version" TEXT,
     "connected_at" TIMESTAMP(3) NOT NULL,
     "last_webhook_at" TIMESTAMP(3),
     "last_sync_started_at" TIMESTAMP(3),
@@ -153,8 +165,8 @@ CREATE TABLE "hosted_member" (
 -- CreateTable
 CREATE TABLE "hosted_member_identity" (
     "member_id" TEXT NOT NULL,
-    "masked_phone_number_hint" TEXT NOT NULL,
-    "phone_lookup_key" TEXT NOT NULL,
+    "masked_phone_number_hint" TEXT,
+    "phone_lookup_key" TEXT,
     "phone_number_encrypted" TEXT,
     "phone_number_verified_at" TIMESTAMP(3),
     "privy_user_lookup_key" TEXT,
@@ -198,6 +210,93 @@ CREATE TABLE "hosted_member_billing_ref" (
     "stripe_subscription_id_encrypted" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "hosted_member_email_authorization" (
+    "member_id" TEXT NOT NULL,
+    "verified_email_lookup_key" TEXT,
+    "verified_email_address_encrypted" TEXT,
+    "verified_email_verified_at" TIMESTAMP(3),
+    "direct_public_sender_lookup_key" TEXT,
+    "direct_public_sender_address_encrypted" TEXT,
+    "direct_public_sender_authorized_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "hosted_execution_cursor" (
+    "user_id" TEXT NOT NULL,
+    "next_seq" BIGINT NOT NULL DEFAULT 1,
+    "committed_seq" BIGINT NOT NULL DEFAULT 0,
+    "snapshot_ref" JSONB,
+    "version" BIGINT NOT NULL DEFAULT 0,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_execution_cursor_pkey" PRIMARY KEY ("user_id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_wake" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "seq" BIGINT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "behavior" "HostedWakeBehavior" NOT NULL,
+    "dedupe_key" TEXT,
+    "coalescing_key" TEXT,
+    "occurred_at" TIMESTAMP(3) NOT NULL,
+    "payload_schema" TEXT NOT NULL,
+    "payload_inline_ciphertext" TEXT,
+    "payload_ref" TEXT,
+    "payload_bytes" INTEGER,
+    "quarantined_at" TIMESTAMP(3),
+    "quarantine_code" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_wake_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_wake_event" (
+    "event_id" TEXT NOT NULL,
+    "wake_id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "replaced_by_event_id" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id","event_id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_wake_payload" (
+    "wake_id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "payload_ciphertext" TEXT NOT NULL,
+    "payload_schema" TEXT NOT NULL,
+    "payload_bytes" INTEGER NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_wake_payload_pkey" PRIMARY KEY ("wake_id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_wake_terminal" (
+    "wake_id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "wake_seq" BIGINT NOT NULL,
+    "state" TEXT NOT NULL,
+    "fetched_committed_seq" BIGINT NOT NULL,
+    "fetched_cursor_version" BIGINT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_wake_terminal_pkey" PRIMARY KEY ("wake_id")
 );
 
 -- CreateTable
@@ -279,6 +378,15 @@ CREATE TABLE "hosted_share_link" (
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "hosted_share_link_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_share_payload" (
+    "share_id" TEXT NOT NULL,
+    "payload_schema" TEXT NOT NULL DEFAULT 'murph.hosted-share-payload.v1',
+    "payload_encrypted" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL
 );
 
 -- CreateTable
@@ -463,6 +571,54 @@ CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_customer_lookup_key_key" O
 CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_subscription_lookup_key_key" ON "hosted_member_billing_ref"("stripe_subscription_lookup_key");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_email_authorization_member_id_key" ON "hosted_member_email_authorization"("member_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_email_authorization_verified_email_lookup_key_key" ON "hosted_member_email_authorization"("verified_email_lookup_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_email_authorization_direct_public_sender_look_key" ON "hosted_member_email_authorization"("direct_public_sender_lookup_key");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_user_id_seq_idx" ON "hosted_wake"("user_id", "seq");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_user_id_coalescing_key_seq_idx" ON "hosted_wake"("user_id", "coalescing_key", "seq");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_user_id_kind_seq_idx" ON "hosted_wake"("user_id", "kind", "seq");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_wake_user_id_seq_key" ON "hosted_wake"("user_id", "seq");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_event_user_id_idx" ON "hosted_wake_event"("user_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_event_user_id_replaced_by_event_id_idx" ON "hosted_wake_event"("user_id", "replaced_by_event_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_event_wake_id_idx" ON "hosted_wake_event"("wake_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_payload_user_id_idx" ON "hosted_wake_payload"("user_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_terminal_user_id_idx" ON "hosted_wake_terminal"("user_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_terminal_user_id_wake_seq_idx" ON "hosted_wake_terminal"("user_id", "wake_seq");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_wake_terminal_user_id_wake_seq_key" ON "hosted_wake_terminal"("user_id", "wake_seq");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "hosted_invite_invite_code_key" ON "hosted_invite"("invite_code");
 
 -- CreateIndex
@@ -520,6 +676,9 @@ CREATE INDEX "hosted_share_link_accepted_by_member_id_accepted_at_idx" ON "hoste
 CREATE INDEX "hosted_share_link_consumed_by_member_id_consumed_at_idx" ON "hosted_share_link"("consumed_by_member_id", "consumed_at");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "hosted_share_payload_share_id_key" ON "hosted_share_payload"("share_id");
+
+-- CreateIndex
 CREATE INDEX "hosted_ai_usage_member_id_occurred_at_idx" ON "hosted_ai_usage"("member_id", "occurred_at");
 
 -- CreateIndex
@@ -541,7 +700,7 @@ CREATE INDEX "linq_recipient_binding_user_id_recipient_phone_mask_idx" ON "linq_
 CREATE UNIQUE INDEX "linq_recipient_binding_recipient_phone_key" ON "linq_recipient_binding"("recipient_phone");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "linq_webhook_event_event_id_key" ON "linq_webhook_event"("event_id");
+CREATE INDEX "linq_webhook_event_event_id_idx" ON "linq_webhook_event"("event_id");
 
 -- CreateIndex
 CREATE INDEX "linq_webhook_event_user_id_id_idx" ON "linq_webhook_event"("user_id", "id");
@@ -554,6 +713,9 @@ CREATE INDEX "linq_webhook_event_recipient_phone_id_idx" ON "linq_webhook_event"
 
 -- CreateIndex
 CREATE INDEX "linq_webhook_event_received_at_idx" ON "linq_webhook_event"("received_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "linq_webhook_event_user_id_event_id_key" ON "linq_webhook_event"("user_id", "event_id");
 
 -- AddForeignKey
 ALTER TABLE "device_token_audit" ADD CONSTRAINT "device_token_audit_connection_id_fkey" FOREIGN KEY ("connection_id") REFERENCES "device_connection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -571,10 +733,40 @@ ALTER TABLE "hosted_member_routing" ADD CONSTRAINT "hosted_member_routing_member
 ALTER TABLE "hosted_member_billing_ref" ADD CONSTRAINT "hosted_member_billing_ref_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "hosted_member_email_authorization" ADD CONSTRAINT "hosted_member_email_authorization_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_execution_cursor" ADD CONSTRAINT "hosted_execution_cursor_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "hosted_invite" ADD CONSTRAINT "hosted_invite_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_revnet_issuance" ADD CONSTRAINT "hosted_revnet_issuance_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_share_payload" ADD CONSTRAINT "hosted_share_payload_share_id_fkey" FOREIGN KEY ("share_id") REFERENCES "hosted_share_link"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_ai_usage" ADD CONSTRAINT "hosted_ai_usage_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
