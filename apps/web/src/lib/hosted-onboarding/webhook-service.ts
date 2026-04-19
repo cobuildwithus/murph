@@ -106,6 +106,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       prisma,
       response: plan.response,
       source: "linq",
+      userId: plan.wakeUserId,
     });
     finishHostedOnboardingTiming(timing, "completed", {
       duplicate: Boolean(plan.response.duplicate),
@@ -163,6 +164,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     prisma,
     response: plan.response,
     source: "telegram",
+    userId: plan.wakeUserId,
   });
   return plan.response;
 }

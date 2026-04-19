@@ -58,6 +58,7 @@ export const POST = withJsonError(async (request: Request) => {
   await handoffHostedExecutionWakeBestEffort({
     context: "settings.email.sync",
     eventId: channelSyncDispatch.eventId,
+    userId: auth.member.id,
   });
 
   return jsonOk({

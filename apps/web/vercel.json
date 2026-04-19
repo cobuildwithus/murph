@@ -2,10 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/internal/hosted-onboarding/webhook-receipts/cron",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/internal/hosted-onboarding/stripe/cron",
       "schedule": "* * * * *"
     },

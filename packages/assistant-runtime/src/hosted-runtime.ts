@@ -193,55 +193,14 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
               runtimeEnv,
             });
 
-            try {
-              const finalResult = await completeHostedExecutionAfterCommit({
-                includeCommittedCompatibility: true,
-                materializedArtifactPaths,
-                run: input.request.run ?? null,
-                runtime,
-                restored,
-                committedExecution,
-                wake,
-              });
-
-              emitHostedExecutionStructuredLog({
-                component: "runtime",
-                wake,
-                details: {
-                  runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-                },
-                message: "Hosted runtime completed.",
-                phase: "completed",
-                run: input.request.run ?? null,
-              });
-
-              return finalResult;
-            } catch (error) {
-              emitHostedExecutionStructuredLog({
-                component: "runtime",
-                wake,
-                error,
-                level: "warn",
-                details: {
-                  assistantDeliveryEffectCount:
-                    String(committedExecution.committedAssistantDeliveryEffects.length),
-                  runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-                },
-                message:
-                  "Hosted runtime could not complete the critical post-commit finalization path; returning the committed compatibility result.",
-                phase: "commit.recorded",
-                run: input.request.run ?? null,
-              });
-
-              return {
-                committedAssistantDeliveryEffects:
-                  committedExecution.committedAssistantDeliveryEffects,
-                committedGatewayProjectionSnapshot:
-                  committedExecution.committedGatewayProjectionSnapshot ?? null,
-                phase: "committed",
-                result: committedExecution.committedResult,
-              };
-            }
+            return {
+              committedAssistantDeliveryEffects:
+                committedExecution.committedAssistantDeliveryEffects,
+              committedGatewayProjectionSnapshot:
+                committedExecution.committedGatewayProjectionSnapshot ?? null,
+              phase: "committed",
+              result: committedExecution.committedResult,
+            };
           }
 
           const finalResult = await completeHostedExecutionAfterCommit({

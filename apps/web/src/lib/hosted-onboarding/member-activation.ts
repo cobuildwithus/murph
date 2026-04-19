@@ -171,6 +171,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   const existingWakeEventId = await findHostedWakeByEventIdTx({
     eventId: activationEventId,
     tx: input.prisma,
+    userId: currentMember.core.id,
   });
 
   if (

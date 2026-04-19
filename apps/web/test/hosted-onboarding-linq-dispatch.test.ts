@@ -292,6 +292,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       limit: 1,
       prisma,
     });
+    expect(mocks.readHostedWakeTarget).toHaveBeenCalledWith({
+      eventId: "evt_123",
+      prisma,
+      userId: "member_123",
+    });
+    expect(response).not.toHaveProperty("wakeUserId");
     expect(
       (prisma as unknown as {
         hostedWebhookReceipt: {

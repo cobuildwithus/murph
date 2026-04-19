@@ -11,6 +11,7 @@ import type {
   HostedWakeFetchRequest,
   HostedWakeQuarantineRequest,
   HostedWakeStatusRequest,
+  HostedWakeTerminalRequest,
 } from "@murphai/hosted-execution";
 import {
   parseHostedWakeAppendRequest,
@@ -25,6 +26,7 @@ import {
   fetchTestHostedWakeBatch,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
+  recordTestHostedWakeTerminal,
 } from "../workers/test-hosted-wake-control.js";
 import {
   sleep,
@@ -370,6 +372,16 @@ async function handleHostedWakeControlRequest(
   if (method === "POST" && url.pathname === "/api/internal/hosted-wake/commit") {
     const body = await readJsonBody<HostedWakeCommitRequest>(request);
     response.end(JSON.stringify(await commitTestHostedWakeCursor({
+      body,
+      bucket,
+      userId,
+    })));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/terminal") {
+    const body = await readJsonBody<HostedWakeTerminalRequest>(request);
+    response.end(JSON.stringify(await recordTestHostedWakeTerminal({
       body,
       bucket,
       userId,

@@ -168,7 +168,6 @@ function InviteStatusRefreshProbe(input: {
 
 function createStatusPayload(): HostedInviteStatusPayload {
   return {
-    activationPending: false,
     billing: {
       defaultPlanCode: "launch_monthly",
       plans: [],

@@ -229,6 +229,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       limit: 1,
       prisma,
     });
+    expect(mocks.readHostedWakeTarget).toHaveBeenCalledWith({
+      eventId: "telegram:update:321",
+      prisma,
+      userId: "member_telegram_123",
+    });
+    expect(response).not.toHaveProperty("wakeUserId");
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);

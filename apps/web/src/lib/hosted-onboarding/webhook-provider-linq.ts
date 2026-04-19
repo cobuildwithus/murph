@@ -205,6 +205,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         ignored: false,
         reason: "wake-appended-active-member",
       },
+      wakeUserId: existingMember.id,
     });
   }
 

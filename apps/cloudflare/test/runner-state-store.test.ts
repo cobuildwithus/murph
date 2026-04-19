@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "@murphai/hosted-execution";
 
-import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
+import {
+  RunnerPendingCommitCorruptionError,
+  RunnerStateStore,
+} from "../src/user-runner/runner-state-store.js";
 import type { RunnerPendingCommitRecord } from "../src/user-runner/types.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
@@ -29,7 +33,7 @@ function createPendingCommit(): RunnerPendingCommitRecord {
       kind: "assistant.cron.tick",
       occurredAt: "2026-04-18T11:59:59.000Z",
       payloadCiphertext: "ciphertext",
-      payloadSchema: "murph.hosted-wake-system.v1",
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq: "1",
       userId: "member_123",
     },
@@ -226,6 +230,38 @@ describe("RunnerStateStore", () => {
     expect(finalized.lastRunAt).toBe("2026-04-18T12:00:01.000Z");
     expect(finalized.pendingWakeCount).toBe(0);
     await expect(store.readPendingCommit("evt_committed")).resolves.toBeNull();
+  });
+
+  it("fails closed when raw pending commit JSON is malformed", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    state.storage.sql.exec(
+      "UPDATE runner_meta SET pending_commit_json = ? WHERE singleton = 1",
+      "{",
+    );
+
+    await expect(store.readPendingCommit("evt_committed")).rejects.toThrow(
+      RunnerPendingCommitCorruptionError,
+    );
+    await expect(store.writePendingCommit({
+      ...createPendingCommit(),
+      eventId: "evt_replacement",
+      wake: {
+        ...createPendingCommit().wake,
+        eventId: "evt_replacement",
+      },
+    })).rejects.toThrow(/pending_commit_json is corrupted/u);
+    await expect(store.clearPendingCommit("evt_committed")).rejects.toThrow(
+      RunnerPendingCommitCorruptionError,
+    );
+    await expect(store.readPendingCommit()).rejects.toThrow(
+      RunnerPendingCommitCorruptionError,
+    );
+
+    const repaired = await store.clearPendingCommit();
+    expect(repaired.lastEventId).toBeNull();
+    await expect(store.readPendingCommit()).resolves.toBeNull();
   });
 });
 

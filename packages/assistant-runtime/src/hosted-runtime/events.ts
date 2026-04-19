@@ -127,18 +127,22 @@ async function executeHostedSystemWake(input: {
       }
       return createNoopWakeEffect({
         conversationMetrics: null,
-        followupExecution: "system-maintenance",
+        followupExecution: "member-activated",
       });
     case "member.channels.updated":
       return createNoopWakeEffect({
         conversationMetrics: null,
-        followupExecution: "system-maintenance",
+        followupExecution: "member-channels-updated",
       });
     case "assistant.cron.tick":
+      return createNoopWakeEffect({
+        conversationMetrics: null,
+        followupExecution: "assistant-cron",
+      });
     case "device-sync.wake":
       return createNoopWakeEffect({
         conversationMetrics: null,
-        followupExecution: "system-maintenance",
+        followupExecution: "device-sync",
       });
     case "vault.share.accepted":
       if (!input.sharePack) {
@@ -151,7 +155,7 @@ async function executeHostedSystemWake(input: {
           vaultRoot: input.vaultRoot,
         })),
         conversationMetrics: null,
-        followupExecution: "system-maintenance",
+        followupExecution: "vault-share-accepted",
       };
   }
 

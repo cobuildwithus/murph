@@ -9,6 +9,7 @@ import {
 import {
   type HostedMemberBillingSnapshot,
   readHostedMemberBillingSnapshot,
+  readHostedMemberCoreState,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
@@ -67,7 +68,7 @@ export async function updateHostedMemberStripeBillingIfFreshTx(input: {
 }): Promise<HostedMemberBillingSnapshot | null> {
   await lockHostedMemberRow(input.tx, input.member.core.id);
 
-  const currentMember = await readHostedMemberBillingSnapshot({
+  const currentMember = await readHostedMemberCoreState({
     memberId: input.member.core.id,
     prisma: input.tx,
   });
@@ -79,26 +80,26 @@ export async function updateHostedMemberStripeBillingIfFreshTx(input: {
   const nextBillingStatus = resolveHostedStripeBillingStatusForWrite({
     billingStatus: input.billingStatus,
     canonicalBillingStatus: input.canonicalBillingStatus,
-    currentBillingStatus: currentMember.core.billingStatus,
+    currentBillingStatus: currentMember.billingStatus,
     sourceType: input.dispatchContext.sourceType,
   });
 
   await updateHostedMemberCoreState({
     billingStatus: nextBillingStatus,
-    memberId: currentMember.core.id,
+    memberId: currentMember.id,
     prisma: input.tx,
     suspendedAt: input.suspendedAtOverride,
   });
 
   await writeHostedMemberStripeBillingRefTx({
-    memberId: currentMember.core.id,
+    memberId: currentMember.id,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
     tx: input.tx,
   });
 
   return readHostedMemberBillingSnapshot({
-    memberId: currentMember.core.id,
+    memberId: currentMember.id,
     prisma: input.tx,
   });
 }

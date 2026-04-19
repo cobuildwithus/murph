@@ -72,6 +72,7 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
       context: "billing-success.redirect",
       eventId: hostedExecutionEventId,
       prisma,
+      userId: invite.memberId,
     });
   }
 

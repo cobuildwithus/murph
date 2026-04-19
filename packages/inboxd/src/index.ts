@@ -107,11 +107,13 @@ export type {
   LinqWebhookConnectorOptions,
 } from "./connectors/linq/connector.ts";
 export {
+  normalizeHostedLinqConversationMessage,
   normalizeLinqWebhookEvent,
   toLinqChatMessage,
 } from "./connectors/linq/normalize.ts";
 export type {
   LinqAttachmentDownloadDriver,
+  NormalizeHostedLinqConversationMessageInput,
   NormalizeLinqWebhookEventInput,
 } from "./connectors/linq/normalize.ts";
 export {

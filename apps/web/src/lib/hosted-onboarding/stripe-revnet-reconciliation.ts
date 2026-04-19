@@ -108,6 +108,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         context: "stripe-revnet-reconciliation",
         eventId: activationEventId,
         prisma: input.prisma,
+        userId: issuance.memberId,
       });
     }
 
