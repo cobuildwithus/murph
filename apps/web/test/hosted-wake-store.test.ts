@@ -321,7 +321,7 @@ describe("hosted wake store", () => {
     })).rejects.toThrow(/wakeId/i);
   });
 
-  it("accepts a legacy fetch proof that predates wakeEventId binding", async () => {
+  it("rejects a legacy fetch proof that omits wakeEventId binding", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
         committedSeq: 1n,
@@ -366,7 +366,7 @@ describe("hosted wake store", () => {
       userId: "member_123",
       wakeId: "wake_1",
       wakeSeq: 2n,
-    })).resolves.toBe(true);
+    })).rejects.toThrow(/required claims/i);
   });
 
   it("rejects recording terminal state from a stale fetch proof before cursor advancement", async () => {

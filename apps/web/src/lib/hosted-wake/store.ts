@@ -852,11 +852,6 @@ function assertCurrentHostedWakeFetchIdentity(
   claims: ReturnType<typeof verifyHostedWakeFetchProof>,
   currentEventId: string,
 ): void {
-  // Rollout compatibility: older web instances minted proofs before wakeEventId existed.
-  if (claims.wakeEventId === undefined) {
-    return;
-  }
-
   if (claims.wakeEventId !== currentEventId) {
     throw new TypeError("Hosted wake fetch proof is stale for the current wake identity.");
   }
