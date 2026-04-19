@@ -54,9 +54,7 @@ export interface RunnerStoredBundleState {
 }
 
 export interface RunnerStateProjection {
-  changed: boolean;
   record: RunnerStateRecord;
-  sanitizedBundleState: RunnerStoredBundleState;
 }
 
 export function appendBoundedRunnerTimelineEntry(
@@ -71,8 +69,9 @@ export function assignRunnerBundleRefs(
   bundleState: RunnerStoredBundleState,
   nextBundleRef: RunnerStateRecord["bundleRef"],
 ): void {
-  const currentRef = parseHostedBundleRefJson(bundleState.bundleRefJson);
-  if (sameHostedBundlePayloadRef(currentRef, nextBundleRef)) {
+  const currentRef = tryParseHostedBundleRefJson(bundleState.bundleRefJson);
+  const repairingCorruptedRef = bundleState.bundleRefJson !== null && currentRef === null;
+  if (!repairingCorruptedRef && sameHostedBundlePayloadRef(currentRef, nextBundleRef)) {
     return;
   }
 
@@ -112,8 +111,8 @@ export function projectRunnerStateRecord(input: {
   run: HostedExecutionRunStatus | null;
   timeline: readonly HostedExecutionTimelineEntry[];
 }): RunnerStateProjection {
-  const bundleRefState = sanitizeStoredBundleRef(input.bundleState);
-  const nextLastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code) ?? bundleRefState.warning;
+  const bundleRef = parseHostedBundleRefJson(input.bundleState.bundleRefJson);
+  const nextLastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
   const hasPersistedRunLease = input.meta.active_run_event_id !== null
     && input.meta.active_run_id !== null
     && typeof input.meta.active_run_attempt === "number"
@@ -124,11 +123,10 @@ export function projectRunnerStateRecord(input: {
     ?? null;
 
   return {
-    changed: bundleRefState.changed,
     record: {
       runtimeBootstrapped: input.meta.runtime_bootstrapped === 1,
-      bundleRef: bundleRefState.bundleRef,
-      bundleVersion: bundleRefState.sanitizedBundleState.bundleVersion,
+      bundleRef,
+      bundleVersion: input.bundleState.bundleVersion,
       inFlight: input.meta.in_flight === 1 || hasPersistedRunLease,
       lastError: nextLastError,
       lastErrorAt: input.meta.last_error_at,
@@ -141,7 +139,6 @@ export function projectRunnerStateRecord(input: {
       timeline: [...input.timeline],
       userId: input.meta.user_id,
     },
-    sanitizedBundleState: bundleRefState.sanitizedBundleState,
   };
 }
 
@@ -183,28 +180,14 @@ function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRe
   try {
     return parseHostedExecutionBundleRef(JSON.parse(value) as unknown, "Hosted runner bundle ref");
   } catch {
-    return null;
+    throw new Error("Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.");
   }
 }
 
-function sanitizeStoredBundleRef(bundleState: RunnerStoredBundleState): {
-  bundleRef: RunnerStateRecord["bundleRef"];
-  changed: boolean;
-  sanitizedBundleState: RunnerStoredBundleState;
-  warning: string | null;
-} {
-  const parsedRef = parseHostedBundleRefJson(bundleState.bundleRefJson);
-  const changed = Boolean(bundleState.bundleRefJson && !parsedRef);
-  const sanitizedBundleState = createDefaultRunnerBundleState();
-  sanitizedBundleState.bundleRefJson = serializeHostedExecutionBundleRef(parsedRef);
-  sanitizedBundleState.bundleVersion = bundleState.bundleVersion;
-
-  return {
-    bundleRef: parsedRef,
-    changed,
-    sanitizedBundleState,
-    warning: changed
-      ? "Hosted runner cleared malformed bundle ref(s): vault."
-      : null,
-  };
+function tryParseHostedBundleRefJson(value: string | null): HostedExecutionBundleRef | null {
+  try {
+    return parseHostedBundleRefJson(value);
+  } catch {
+    return null;
+  }
 }

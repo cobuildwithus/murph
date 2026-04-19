@@ -248,32 +248,57 @@ describe("RunnerStateStore bundle metadata", () => {
     });
   });
 
-  it("repairs malformed bundle refs without dropping their version", async () => {
+  it("fails closed on malformed bundle refs without rewriting them", async () => {
     const vaultRef = makeBundleRef("vault/current");
     const { db, store } = createRunnerStateStoreHarness();
     await store.bootstrapUser("user-malformed");
+    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
 
     db.prepare(`
       UPDATE runner_meta
       SET bundle_ref_json = ?, bundle_version = ?
       WHERE singleton = 1
-    `).run(JSON.stringify({ key: "missing-required-fields" }), 7);
+    `).run(malformedBundleRefJson, 7);
 
-    const state = await store.readState();
-    expect(state.bundleRef).toBeNull();
-    expect(state.bundleVersion).toBe(7);
-    expect(state.lastError).toContain("Hosted runner cleared malformed bundle ref(s): vault.");
+    await expect(store.readState()).rejects.toThrow(
+      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
+    );
     expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: null,
+      bundle_ref_json: malformedBundleRefJson,
       bundle_version: 7,
     });
 
     const repaired = await store.compareAndSwapBundleRefs({
-      expectedVersion: state.bundleVersion,
+      expectedVersion: 7,
       nextBundleRef: vaultRef,
     });
     expect(repaired.applied).toBe(true);
     expect(repaired.record.bundleRef).toEqual(vaultRef);
     expect(repaired.record.bundleVersion).toBe(8);
+  });
+
+  it("can explicitly repair a malformed bundle ref back to null", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bootstrapUser("user-malformed-null");
+    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
+
+    db.prepare(`
+      UPDATE runner_meta
+      SET bundle_ref_json = ?, bundle_version = ?
+      WHERE singleton = 1
+    `).run(malformedBundleRefJson, 7);
+
+    const repaired = await store.compareAndSwapBundleRefs({
+      expectedVersion: 7,
+      nextBundleRef: null,
+    });
+
+    expect(repaired.applied).toBe(true);
+    expect(repaired.record.bundleRef).toBeNull();
+    expect(repaired.record.bundleVersion).toBe(8);
+    expect(readRunnerMetaBundleState(db)).toEqual({
+      bundle_ref_json: null,
+      bundle_version: 8,
+    });
   });
 });

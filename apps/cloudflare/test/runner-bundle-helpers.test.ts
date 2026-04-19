@@ -170,6 +170,98 @@ describe("RunnerBundleSync", () => {
       `Hosted vault bundle ${missingRef.key} is missing from R2.`,
     );
   });
+
+  it("fails closed on malformed durable bundle refs without clearing them", async () => {
+    const bucket = createBucketStore();
+    const sql = createTestSqlStorage();
+    const state = {
+      storage: {
+        sql,
+      },
+    };
+    const stateStore = new RunnerStateStore(state as never);
+    await stateStore.bootstrapUser("member_123");
+    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
+
+    sql.exec(
+      `UPDATE runner_meta
+        SET bundle_ref_json = ?, bundle_version = ?
+        WHERE singleton = 1`,
+      malformedBundleRefJson,
+      7,
+    );
+
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+      stateStore,
+    );
+
+    await expect(bundleSync.readBundlesForRunner()).rejects.toThrow(
+      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
+    );
+
+    expect(sql.exec<{ bundle_ref_json: string | null; bundle_version: number }>(
+      `SELECT bundle_ref_json, bundle_version
+         FROM runner_meta
+        WHERE singleton = 1`,
+    ).one()).toEqual({
+      bundle_ref_json: malformedBundleRefJson,
+      bundle_version: 7,
+    });
+  });
+
+  it("can clear a malformed durable bundle ref when the runner result bundle is null", async () => {
+    const bucket = createBucketStore();
+    const sql = createTestSqlStorage();
+    const state = {
+      storage: {
+        sql,
+      },
+    };
+    const stateStore = new RunnerStateStore(state as never);
+    await stateStore.bootstrapUser("member_123");
+    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
+
+    sql.exec(
+      `UPDATE runner_meta
+        SET bundle_ref_json = ?, bundle_version = ?
+        WHERE singleton = 1`,
+      malformedBundleRefJson,
+      7,
+    );
+
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+      stateStore,
+    );
+
+    const record = await bundleSync.applyRunnerResultBundles(
+      "member_123",
+      7,
+      null,
+    );
+
+    expect(record.bundleRef).toBeNull();
+    expect(record.bundleVersion).toBe(8);
+    expect(sql.exec<{ bundle_ref_json: string | null; bundle_version: number }>(
+      `SELECT bundle_ref_json, bundle_version
+         FROM runner_meta
+        WHERE singleton = 1`,
+    ).one()).toEqual({
+      bundle_ref_json: null,
+      bundle_version: 8,
+    });
+  });
 });
 
 function createBucketStore() {
