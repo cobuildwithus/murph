@@ -14,7 +14,7 @@ import {
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
-import { addWorkoutMeasurementRecord, addWorkoutRecord } from '@murphai/vault-usecases/workouts'
+import { addMeasurementRecord, addWorkoutRecord } from '@murphai/vault-usecases/workouts'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
@@ -1488,7 +1488,7 @@ test(
 )
 
 test(
-  'workout measurements reject structured payload attachments that bypass canonical staging',
+  'measurement payloads reject structured attachments that bypass canonical staging',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-measurement-attachments-'))
     const payloadPath = path.join(vaultRoot, 'measurement.json')
@@ -1500,7 +1500,7 @@ test(
         JSON.stringify({
           title: 'Weight check-in',
           measurements: [{
-            type: 'weight',
+            metric: 'weight',
             value: 180,
             unit: 'lb',
           }],
@@ -1518,7 +1518,7 @@ test(
 
       await assert.rejects(
         () =>
-          addWorkoutMeasurementRecord({
+          addMeasurementRecord({
             vault: vaultRoot,
             inputFile: payloadPath,
           }),
@@ -1729,9 +1729,9 @@ test(
 
       await assert.rejects(
         () =>
-          addWorkoutMeasurementRecord({
+          addMeasurementRecord({
             vault: vaultRoot,
-            type: 'waist',
+            metric: 'waist',
             value: 33.5,
             unit: 'in',
             occurredAt: 'not-a-timestamp',

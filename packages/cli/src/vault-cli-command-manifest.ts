@@ -61,7 +61,6 @@ import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
 import {
   registerWorkoutCommands,
-  workoutMeasurementCommandDescriptions,
 } from './commands/workout.js'
 import {
   registerWearablesCommands,
@@ -488,22 +487,6 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'delete'],
         description: 'Delete one workout activity event.',
-      },
-      {
-        path: ['workout', 'measurement', 'add'],
-        description: workoutMeasurementCommandDescriptions.add,
-      },
-      {
-        path: ['workout', 'measurement', 'show'],
-        description: workoutMeasurementCommandDescriptions.show,
-      },
-      {
-        path: ['workout', 'measurement', 'list'],
-        description: workoutMeasurementCommandDescriptions.list,
-      },
-      {
-        path: ['workout', 'measurement', 'manifest'],
-        description: workoutMeasurementCommandDescriptions.manifest,
       },
       {
         path: ['workout', 'units', 'show'],

@@ -10,7 +10,6 @@ import {
   occurredAtOptionSchema,
   isoTimestampSchema,
   listResultSchema,
-  measurementAddResultSchema,
   pathSchema,
   showResultSchema,
   workoutAddResultSchema,
@@ -23,12 +22,7 @@ import {
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
   listWorkoutRecords,
-  listWorkoutMeasurementRecords,
-  measurementLookupSchema,
-  measurementImportManifestResultSchema,
   showWorkoutManifest,
-  showWorkoutMeasurementManifest,
-  showWorkoutMeasurementRecord,
   showWorkoutRecord,
   workoutImportManifestResultSchema,
   workoutLookupSchema,
@@ -49,7 +43,6 @@ import {
   inspectWorkoutCsvImport,
 } from '@murphai/vault-usecases/workouts'
 import {
-  addWorkoutMeasurementRecord,
   setWorkoutUnitPreferences,
   showWorkoutUnitPreferences,
 } from '@murphai/vault-usecases/workouts'
@@ -63,24 +56,13 @@ import {
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
-export const workoutMeasurementCommandDescriptions = {
-  root: 'Legacy anthropometric alias over `measurement` with workout unit defaults and progress-photo affordances.',
-  add: 'Compatibility alias for weight, body-fat, and circumference check-ins that writes canonical measurement events.',
-  addHint:
-    'Prefer `measurement add` for new metrics such as grip strength or resting-heart-rate. Use this alias when you want closed anthropometric types plus saved workout unit defaults.',
-  show: 'Show one measurement event by canonical event id through the workout compatibility alias.',
-  list: 'List measurement events with optional date bounds through the workout compatibility alias.',
-  manifest:
-    'Show the immutable raw import manifest for one imported measurement event through the workout compatibility alias.',
-} as const
-
 export function registerWorkoutCommands(
   cli: Cli.Cli,
   _services: VaultServices,
 ) {
   const workout = Cli.create('workout', {
     description:
-      'Workout façade commands over activity sessions, compatibility measurement capture with workout unit defaults, workout-format docs, CSV import, and saved unit preferences.',
+      'Workout façade commands over activity sessions, workout-format docs, CSV import, and saved unit preferences.',
   })
 
   workout.command('add', {
@@ -271,146 +253,6 @@ export function registerWorkoutCommands(
       })
     },
   }))
-
-  const measurement = Cli.create('measurement', {
-    description: workoutMeasurementCommandDescriptions.root,
-  })
-
-  measurement.command('add', {
-    description: workoutMeasurementCommandDescriptions.add,
-    args: z.object({}),
-    hint: workoutMeasurementCommandDescriptions.addHint,
-    options: withBaseOptions({
-      input: inputFileOptionSchema
-        .optional()
-        .describe('Optional structured body-measurement payload in @file.json form or - for stdin.'),
-      type: z
-        .enum([
-          'weight',
-          'body_fat_pct',
-          'waist',
-          'neck',
-          'shoulders',
-          'chest',
-          'biceps',
-          'forearms',
-          'abdomen',
-          'hips',
-          'thighs',
-          'calves',
-        ])
-        .optional()
-        .describe('Single measurement type to record when --input is not provided.'),
-      value: z
-        .number()
-        .nonnegative()
-        .optional()
-        .describe('Single measurement numeric value when --input is not provided.'),
-      unit: z
-        .enum(['lb', 'kg', 'percent', 'cm', 'in'])
-        .optional()
-        .describe('Optional measurement unit. When omitted, Murph falls back to saved workout unit preferences where possible.'),
-      note: z
-        .string()
-        .min(1)
-        .max(4000)
-        .optional()
-        .describe('Optional measurement note.'),
-      title: z
-        .string()
-        .min(1)
-        .max(160)
-        .optional()
-        .describe('Optional measurement title override.'),
-      occurredAt: occurredAtOptionSchema
-        .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
-      source: eventSourceSchema
-        .optional()
-        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
-      media: z
-        .array(pathSchema)
-        .optional()
-        .describe('Optional progress photo or video file paths to copy into raw/measurements/** and attach to the measurement event.'),
-    }),
-    output: measurementAddResultSchema,
-    async run({ options }) {
-      return addWorkoutMeasurementRecord({
-        vault: options.vault,
-        inputFile:
-          typeof options.input === 'string'
-            ? normalizeInputFileOption(options.input)
-            : undefined,
-        type: typeof options.type === 'string' ? options.type : undefined,
-        value: typeof options.value === 'number' ? options.value : undefined,
-        unit: typeof options.unit === 'string' ? options.unit : undefined,
-        note: typeof options.note === 'string' ? options.note : undefined,
-        title: typeof options.title === 'string' ? options.title : undefined,
-        occurredAt: await normalizeOccurredAtOption({
-          vault: options.vault,
-          occurredAt:
-            typeof options.occurredAt === 'string'
-              ? options.occurredAt
-              : undefined,
-        }),
-        source: typeof options.source === 'string' ? options.source : undefined,
-        mediaPaths: Array.isArray(options.media)
-          ? options.media.filter((entry): entry is string => typeof entry === 'string')
-          : undefined,
-      })
-    },
-  })
-
-  measurement.command('show', {
-    description: workoutMeasurementCommandDescriptions.show,
-    args: z.object({
-      id: measurementLookupSchema,
-    }),
-    options: withBaseOptions(),
-    output: showResultSchema,
-    async run({ args, options }) {
-      return showWorkoutMeasurementRecord(options.vault, args.id)
-    },
-  })
-
-  measurement.command('list', {
-    description: workoutMeasurementCommandDescriptions.list,
-    args: z.object({}),
-    options: withBaseOptions({
-      from: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.from),
-      to: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.to),
-      limit: commonListLimitOptionSchema,
-    }),
-    output: listResultSchema,
-    async run({ options }) {
-      return listWorkoutMeasurementRecords({
-        vault: options.vault,
-        from: typeof options.from === 'string' ? options.from : undefined,
-        to: typeof options.to === 'string' ? options.to : undefined,
-        limit: typeof options.limit === 'number' ? options.limit : undefined,
-      })
-    },
-  })
-
-  measurement.command('manifest', {
-    description: workoutMeasurementCommandDescriptions.manifest,
-    args: z.object({
-      id: measurementLookupSchema,
-    }),
-    options: withBaseOptions(),
-    output: measurementImportManifestResultSchema,
-    async run({ args, options }) {
-      return showWorkoutMeasurementManifest(options.vault, args.id)
-    },
-  })
 
   const units = Cli.create('units', {
     description:
@@ -756,7 +598,6 @@ export function registerWorkoutCommands(
     },
   })
 
-  workout.command(measurement)
   workout.command(units)
   workout.command(importGroup)
   workout.command(format)
