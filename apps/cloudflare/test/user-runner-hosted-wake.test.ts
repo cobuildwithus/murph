@@ -514,7 +514,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
   });
 
-  it("clears pending cleanup when a duplicate finalize already published the same final snapshot", async () => {
+  it("keeps pending cleanup when a duplicate finalize already published the same final snapshot", async () => {
     const runner = new HostedUserRunner(
       storage.state,
       environment,
@@ -620,6 +620,23 @@ describe("HostedUserRunner hosted wake drain", () => {
       snapshotRef: finalBundleRef,
       version: "cursor_v3",
     });
+    await expect(readPendingCommit.call(stateStore)).resolves.toMatchObject({
+      bundleRef: finalBundleRef,
+      eventId: "evt_cleanup_duplicate_snapshot",
+      finalizedAt: "2026-03-26T12:00:01.000Z",
+    });
+
+    const reconciledCursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
+      cursor: conflictedCursor,
+      wake: null,
+    });
+
+    expect(reconciledCursor).toMatchObject({
+      committedSeq: "1",
+      snapshotRef: finalBundleRef,
+      version: "cursor_v3",
+    });
+    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
     await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
   });
 

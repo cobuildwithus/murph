@@ -212,7 +212,18 @@ export class HostedUserRunner {
     let record: RunnerStateRecord;
     try {
       record = await this.stateStore.readState();
-    } catch {
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted wake nudge could not read runner state; scheduling a retry.",
+        phase: "wake.running",
+        userId: null,
+      });
+      await this.wakeScheduler.syncNextWake({
+        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
+      });
       return;
     }
 

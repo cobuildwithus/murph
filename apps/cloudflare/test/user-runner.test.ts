@@ -2622,6 +2622,38 @@ describe("HostedUserRunner", () => {
     expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:05:00.000Z"));
   });
 
+  it("logs and reschedules when alarm state reads fail", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.bootstrapUser("member_123");
+    vi.spyOn(RunnerStateStore.prototype, "readState").mockRejectedValueOnce(
+      new Error("corrupt runner state"),
+    );
+
+    await runner.alarm();
+
+    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:00:05.000Z"));
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const loggedRecord = JSON.parse(String(warnSpy.mock.calls[0]?.[0])) as {
+      component: string;
+      level: string;
+      message: string;
+      phase: string;
+      userId: string | null;
+    };
+    expect(loggedRecord).toMatchObject({
+      component: "hosted.runner",
+      level: "warn",
+      phase: "wake.running",
+      userId: null,
+    });
+    expect(loggedRecord.message).toContain(
+      "Hosted wake nudge could not read runner state; scheduling a retry.",
+    );
+  });
+
 });
 
 function normalizeHostedWakeMaterializationHintsForTest(
