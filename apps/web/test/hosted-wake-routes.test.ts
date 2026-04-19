@@ -354,6 +354,33 @@ describe("hosted wake internal routes", () => {
     });
   });
 
+  it("accepts quarantined hosted wake terminal receipt requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      fetchProof: "proof_24",
+      state: "quarantined",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/terminal/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      recorded: true,
+    });
+    expect(mocks.recordHostedWakeTerminalTx).toHaveBeenCalledWith({
+      fetchProof: "proof_24",
+      state: "quarantined",
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      userId: "member_123",
+      wakeId: "wake_24",
+      wakeSeq: 24n,
+    });
+  });
+
   it("parses and forwards wake cursor commit requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       committedSeq: "24",
