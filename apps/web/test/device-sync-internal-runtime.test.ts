@@ -119,6 +119,7 @@ describe("device-sync hosted runtime helpers", () => {
             lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
           },
           observedUpdatedAt: "2026-03-26T12:00:00+00:00",
+          observedTokenVersion: null,
           tokenBundle: {
             accessToken: "new-access-token",
             accessTokenExpiresAt: "2026-03-30T01:30:00+01:30",
@@ -138,6 +139,7 @@ describe("device-sync hosted runtime helpers", () => {
             lastSyncStartedAt: "2026-03-26T12:00:00.000Z",
           },
           observedUpdatedAt: "2026-03-26T12:00:00.000Z",
+          observedTokenVersion: null,
           tokenBundle: {
             accessToken: "new-access-token",
             accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
@@ -165,6 +167,7 @@ describe("device-sync hosted runtime helpers", () => {
           localState: {
             lastErrorCode: "oauth_expired",
           },
+          observedUpdatedAt: null,
         },
       ],
       userId: "user-123",
@@ -179,6 +182,7 @@ describe("device-sync hosted runtime helpers", () => {
           localState: {
             lastErrorCode: "oauth_expired",
           },
+          observedUpdatedAt: null,
         },
       ],
       userId: "user-123",
@@ -217,6 +221,7 @@ describe("device-sync hosted runtime helpers", () => {
             lastErrorCode: "access_token=apply-secret",
             lastErrorMessage: errorText,
           },
+          observedUpdatedAt: null,
         },
       ],
       userId: "user-123",
@@ -228,6 +233,7 @@ describe("device-sync hosted runtime helpers", () => {
             lastErrorCode: "access_token=[redacted]",
             lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
           },
+          observedUpdatedAt: null,
         },
       ],
       userId: "user-123",

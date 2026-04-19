@@ -146,6 +146,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorMessage: "Refresh token expired",
             lastSyncErrorAt: "2026-04-07T00:00:00.000Z",
           },
+          observedUpdatedAt: null,
         },
       ],
       userId: "user_123",
@@ -160,6 +161,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorMessage: "Refresh token expired",
             lastSyncErrorAt: "2026-04-07T00:00:00.000Z",
           },
+          observedUpdatedAt: null,
         },
       ],
       userId: "user_123",
@@ -179,6 +181,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
               lastSyncErrorAt: "2026-04-12T10:20:00+10:00",
             },
             observedTokenVersion: 1,
+            observedUpdatedAt: null,
             seed: {
               connection: {
                 accessTokenExpiresAt: null,
@@ -222,6 +225,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastSyncErrorAt: "2026-04-12T00:20:00.000Z",
           },
           observedTokenVersion: 1,
+          observedUpdatedAt: null,
           seed: {
             connection: {
               accessTokenExpiresAt: null,
@@ -282,6 +286,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorMessage:
               "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
           },
+          observedUpdatedAt: null,
           seed: {
             connection: {
               accessTokenExpiresAt: null,
@@ -320,6 +325,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorCode: "access_token=[redacted]",
             lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
           },
+          observedUpdatedAt: null,
           seed: {
             localState: {
               lastErrorCode: "refresh_token=[redacted]",
@@ -349,6 +355,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             },
           },
           connectionId: "conn_123",
+          observedUpdatedAt: null,
         },
       ],
       userId: "user_123",
@@ -529,7 +536,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_123",
           },
           {
+            connection: {
+              status: "active",
+            },
             connectionId: "conn_123",
+            observedUpdatedAt: null,
           },
         ],
         userId: "user_123",
@@ -542,6 +553,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           updates: [
             {
               connectionId: "conn_123",
+              localState: {
+                clearError: true,
+              },
+              observedUpdatedAt: null,
             },
           ],
           userId: "user_123",
@@ -623,6 +638,38 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         userId: "user_123",
       }),
     ).toThrowError(/observedTokenVersion must be a positive integer/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_123",
+            localState: {
+              clearError: true,
+            },
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/observedUpdatedAt is required when connection or localState mutations are present/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_123",
+            tokenBundle: {
+              accessToken: "access-token",
+              accessTokenExpiresAt: null,
+              keyVersion: "kv_1",
+              refreshToken: null,
+              tokenVersion: 1,
+            },
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/observedTokenVersion is required when tokenBundle mutations are present/u);
 
     expect(() =>
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
