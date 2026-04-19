@@ -222,10 +222,6 @@ declare module 'incur' {
       'workout import inspect': { args: { file: string }; options: { vault: string; requestId?: string; source?: string; delimiter?: string } }
       'workout list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'workout manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'workout measurement add': { args: {}; options: { vault: string; requestId?: string; input?: string; type?: "weight" | "body_fat_pct" | "waist" | "neck" | "shoulders" | "chest" | "biceps" | "forearms" | "abdomen" | "hips" | "thighs" | "calves"; value?: number; unit?: "lb" | "kg" | "percent" | "cm" | "in"; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
-      'workout measurement list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
-      'workout measurement manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'workout measurement show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout units set': { args: {}; options: { vault: string; requestId?: string; weight?: "lb" | "kg"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }
       'workout units show': { args: {}; options: { vault: string; requestId?: string } }

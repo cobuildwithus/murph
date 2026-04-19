@@ -61,7 +61,7 @@ async function runWorkoutCli<TData>(
   })
 }
 
-test('workout measurement capture and unit preferences round-trip through the registered CLI', async () => {
+test('canonical measurement capture and workout unit preferences round-trip through the registered CLI', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-coverage-')
   cleanupPaths.push(parentRoot)
   const cli = createWorkoutSliceCli()
@@ -148,18 +148,17 @@ test('workout measurement capture and unit preferences round-trip through the re
         manifestFile: string | null
         occurredAt: string
         measurements: Array<{
-          type: string
+          metric: string
           unit: string
           value: number
         }>
         note: string | null
       }>(cli, [
-        'workout',
         'measurement',
         'add',
         '--vault',
         vaultRoot,
-        '--type',
+        '--metric',
         'waist',
         '--value',
         '32',
@@ -203,7 +202,6 @@ test('workout measurement capture and unit preferences round-trip through the re
           title: string | null
         }
       }>(cli, [
-        'workout',
         'measurement',
         'show',
         measurement.eventId,
@@ -224,7 +222,6 @@ test('workout measurement capture and unit preferences round-trip through the re
           id: string
         }>
       }>(cli, [
-        'workout',
         'measurement',
         'list',
         '--vault',
@@ -243,7 +240,6 @@ test('workout measurement capture and unit preferences round-trip through the re
     }
     manifestFile: string
   }>(cli, [
-    'workout',
     'measurement',
     'manifest',
     measurement.eventId,
@@ -266,11 +262,11 @@ test('workout measurement capture and unit preferences round-trip through the re
       {
         occurredAt: '2026-03-13T07:30:00.000Z',
         source: 'import',
-        title: 'Structured body measurement',
+        title: 'Structured measurement',
         note: 'Imported structured payload.',
         measurements: [
           {
-            type: 'weight',
+            metric: 'weight',
             value: 182,
             unit: 'lb',
             note: 'Structured payload.',
@@ -291,7 +287,6 @@ test('workout measurement capture and unit preferences round-trip through the re
         manifestFile: string | null
         note: string | null
       }>(cli, [
-        'workout',
         'measurement',
         'add',
         '--input',
@@ -312,7 +307,6 @@ test('workout measurement capture and unit preferences round-trip through the re
           id: string
         }>
       }>(cli, [
-        'workout',
         'measurement',
         'list',
         '--vault',
@@ -342,12 +336,11 @@ test('workout measurement capture and unit preferences round-trip through the re
         }>
         note: string | null
       }>(cli, [
-        'workout',
         'measurement',
         'add',
         '--vault',
         vaultRoot,
-        '--type',
+        '--metric',
         'weight',
         '--value',
         '181',
@@ -463,12 +456,6 @@ test('top-level measurement commands accept open metrics and normalize qualifier
 
 test('measurement help surfaces steer agents toward the canonical command path', async () => {
   const measurementHelp = await runRawCli(['measurement', 'add', '--help'])
-  const workoutMeasurementHelp = await runRawCli([
-    'workout',
-    'measurement',
-    'add',
-    '--help',
-  ])
 
   assert.match(
     measurementHelp,
@@ -477,14 +464,6 @@ test('measurement help surfaces steer agents toward the canonical command path',
   assert.match(
     measurementHelp,
     /Prefer this command for all new metrics\./u,
-  )
-  assert.match(
-    workoutMeasurementHelp,
-    /Compatibility alias for weight, body-fat, and circumference check-ins/u,
-  )
-  assert.match(
-    workoutMeasurementHelp,
-    /Prefer `measurement add` for new metrics such as grip strength or resting-heart-rate\./u,
   )
 })
 

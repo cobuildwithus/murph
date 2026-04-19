@@ -732,8 +732,8 @@ describe("workout-format", () => {
   });
 });
 
-describe("workout-measurement", () => {
-  test("adds measurements and manages unit preferences", async () => {
+describe("workout-unit-preferences", () => {
+  test("manages unit preferences", async () => {
     const readPreferencesDocument = vi
       .fn()
       .mockResolvedValue({
@@ -759,24 +759,6 @@ describe("workout-measurement", () => {
         },
       },
     }));
-    const addMeasurement = vi.fn(async (_input: { draft: { title: string } }) => ({
-      eventId: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      ledgerFile: "journal/body-measurement.md",
-      created: true,
-      manifestPath: "bank/raw/body-measurement/manifest.json",
-      event: {
-        occurredAt: "2026-04-08T10:00:00.000Z",
-        title: "Weight check-in",
-        measurements: [
-          { type: "weight", value: 180, unit: "lb" },
-        ],
-        media: [],
-        note: "Morning weigh-in",
-      },
-    }));
-    const loadWorkoutCoreRuntime = vi.fn(async () => ({
-      addMeasurement,
-    }));
 
     const workoutMeasurementModule = (await importWithMocks(
       "../src/usecases/workout-measurement.ts",
@@ -786,26 +768,8 @@ describe("workout-measurement", () => {
           readPreferencesDocument,
           updateWorkoutUnitPreferences,
         }),
-        "../src/usecases/workout-core.js": () => ({
-          loadWorkoutCoreRuntime,
-        }),
       },
     )) as typeof import("../src/usecases/workout-measurement.ts");
-
-    const added = await workoutMeasurementModule.addWorkoutMeasurementRecord({
-      vault: "./vault",
-      type: "weight",
-      value: 180,
-      unit: "lb",
-      mediaPaths: [" /tmp/photo.jpg ", "", " /tmp/photo-2.jpg "],
-    });
-    assert.equal(added.eventId, "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    assert.equal(addMeasurement.mock.calls.length, 1);
-    const addMeasurementFirstCall = addMeasurement.mock.calls.at(0);
-    assert.ok(addMeasurementFirstCall);
-    const [addMeasurementInput] = addMeasurementFirstCall;
-    assert.ok(addMeasurementInput);
-    assert.equal(addMeasurementInput.draft.title, "Weight");
 
     const shown = await workoutMeasurementModule.showWorkoutUnitPreferences("./vault");
     assert.equal(shown.unitPreferences.weight, "lb");
