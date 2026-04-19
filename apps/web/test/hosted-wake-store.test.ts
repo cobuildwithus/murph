@@ -15,8 +15,12 @@ import {
   projectHostedWakeRecord,
   readLatestHostedWakeLifecycleByKind,
   readHostedExecutionCursor,
+  readHostedWakeLifecycleByEventIdTx,
   recordHostedWakeTerminalTx,
 } from "@/src/lib/hosted-wake/store";
+import {
+  findHostedWakeByEventIdTx,
+} from "@/src/lib/hosted-wake/store-data";
 import {
   findHostedExecutionWakeEventIdTx,
   readHostedExecutionWakeLifecycleStateTx,
@@ -505,6 +509,70 @@ describe("hosted wake store", () => {
     });
   });
 
+  it("returns null from event-id wake lookup when a scoped event points at another user's wake", async () => {
+    const tx = createHostedWakeStoreHarness({
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 1n,
+          userId: "member_a",
+        }),
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_b",
+        }),
+      ],
+    });
+
+    tx.hostedWakeEvent.create({
+      data: {
+        eventId: "corrupt-event",
+        replacedByEventId: null,
+        userId: "member_a",
+        wakeId: "wake_2",
+      },
+    });
+
+    await expect(findHostedWakeByEventIdTx({
+      eventId: "corrupt-event",
+      tx,
+      userId: "member_a",
+    })).resolves.toBeNull();
+  });
+
+  it("fails closed when lifecycle resolution finds an owner-mismatched wake for the scoped event", async () => {
+    const tx = createHostedWakeStoreHarness({
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 1n,
+          userId: "member_a",
+        }),
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_b",
+        }),
+      ],
+    });
+
+    tx.hostedWakeEvent.create({
+      data: {
+        eventId: "corrupt-event",
+        replacedByEventId: null,
+        userId: "member_a",
+        wakeId: "wake_2",
+      },
+    });
+
+    await expect(readHostedWakeLifecycleByEventIdTx({
+      eventId: "corrupt-event",
+      tx,
+      userId: "member_a",
+    })).rejects.toThrow(/not owned by member_a/i);
+  });
+
   it("treats already-committed cursor seqs as stale no-op commits when the snapshot is unchanged", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
@@ -722,6 +790,102 @@ describe("hosted wake store", () => {
       tx,
       userId: "member_123",
     })).resolves.toBeNull();
+  });
+
+  it("resolves the same hosted wake event id separately for each owner", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 2n,
+        userId: "member_123",
+      },
+      wakes: [
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "evt_shared",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload: {
+            revision: 1,
+          },
+          seq: 1n,
+          userId: "member_123",
+        },
+        {
+          behavior: "ordered",
+          coalescingKey: null,
+          dedupeKey: "evt_shared",
+          kind: "assistant.cron.tick",
+          occurredAt: "2026-04-17T00:01:00.000Z",
+          payload: {
+            revision: 2,
+          },
+          seq: 2n,
+          userId: "member_456",
+        },
+      ],
+    });
+
+    await expect(readHostedExecutionWakeTargetTx({
+      eventId: "evt_shared",
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      eventId: "evt_shared",
+      seq: "1",
+      userId: "member_123",
+    });
+
+    await expect(readHostedExecutionWakeTargetTx({
+      eventId: "evt_shared",
+      tx,
+      userId: "member_456",
+    })).resolves.toEqual({
+      eventId: "evt_shared",
+      seq: "2",
+      userId: "member_456",
+    });
+  });
+
+  it("allows different users to append the same wake dedupe key", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 2n,
+        userId: "member_123",
+      },
+    });
+
+    const first = await appendHostedOrderedWakeTx({
+      dedupeKey: "shared-provider-event",
+      kind: "assistant.cron.tick",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      payload: {
+        revision: 1,
+      },
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      tx,
+      userId: "member_123",
+    });
+    const second = await appendHostedOrderedWakeTx({
+      dedupeKey: "shared-provider-event",
+      kind: "assistant.cron.tick",
+      occurredAt: "2026-04-17T00:01:00.000Z",
+      payload: {
+        revision: 2,
+      },
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      tx,
+      userId: "member_456",
+    });
+
+    expect(first.inserted).toBe(true);
+    expect(second.inserted).toBe(true);
+    expect(second.duplicate).toBe(false);
+    expect(first.wake.userId).toBe("member_123");
+    expect(second.wake.userId).toBe("member_456");
+    expect(second.wake.seq).toBe("1");
   });
 
   it("keeps rejecting a stale coalesced wake receipt even after the caller learns the rewritten cursor version", async () => {
@@ -1513,10 +1677,15 @@ function createHostedWakeStoreHarness(input?: {
       },
       findUnique(args: {
         where: {
-          eventId: string;
+          userId_eventId: {
+            eventId: string;
+            userId: string;
+          };
         };
       }): TestWakeEventState | null {
-        const event = state.wakeEvents.find((candidate) => candidate.eventId === args.where.eventId);
+        const event = state.wakeEvents.find((candidate) =>
+          candidate.eventId === args.where.userId_eventId.eventId
+          && candidate.userId === args.where.userId_eventId.userId);
         return event ? cloneWakeEvent(event) : null;
       },
       updateMany(args: {
@@ -1828,7 +1997,12 @@ function createHostedWakeStoreHarness(input?: {
       },
       findUnique(args: {
         where:
-          | { dedupeKey: string }
+          | {
+            userId_dedupeKey: {
+              dedupeKey: string;
+              userId: string;
+            };
+          }
           | { id: string };
       }): TestWakeState | null {
         const where = args.where;
@@ -1838,7 +2012,9 @@ function createHostedWakeStoreHarness(input?: {
           return wake ? cloneWake(wake) : null;
         }
 
-        const wake = state.wakes.find((candidate) => candidate.dedupeKey === where.dedupeKey);
+        const wake = state.wakes.find((candidate) =>
+          candidate.dedupeKey === where.userId_dedupeKey.dedupeKey
+          && candidate.userId === where.userId_dedupeKey.userId);
         return wake ? cloneWake(wake) : null;
       },
       update(args: {

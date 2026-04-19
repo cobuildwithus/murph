@@ -426,7 +426,7 @@ export async function quarantineHostedWakeTx(input: {
 export async function findHostedWakeEventIdByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<string | null> {
   const event = await findHostedWakeEventByEventIdTx(input);
 
@@ -440,7 +440,7 @@ export async function findHostedWakeEventIdByEventIdTx(input: {
 export async function readHostedWakeLifecycleByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeLifecycleRecord | null> {
   const resolved = await resolveHostedWakeEventResolutionTx(input);
 
@@ -468,19 +468,19 @@ export async function readHostedWakeLifecycleByEventIdTx(input: {
 export async function readHostedWakeLifecycleByDedupeKeyTx(input: {
   dedupeKey: string;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeLifecycleRecord | null> {
   return readHostedWakeLifecycleByEventIdTx({
     eventId: input.dedupeKey,
     tx: input.tx,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
 }
 
 export async function readHostedWakeScheduleByEventIdTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<{
   eventId: string;
   seq: string;
@@ -572,7 +572,7 @@ export async function listHostedWakeRepairCandidates(input: {
 async function resolveHostedWakeEventResolutionTx(input: {
   eventId: string;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<{
   activeEvent: HostedWakeEventRow;
   event: HostedWakeEventRow;
@@ -587,7 +587,7 @@ async function resolveHostedWakeEventResolutionTx(input: {
   const activeEvent = await resolveHostedWakeActiveEventTx({
     event,
     tx: input.tx,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
   const wake = await input.tx.hostedWake.findUnique({
     where: {
@@ -597,6 +597,12 @@ async function resolveHostedWakeEventResolutionTx(input: {
 
   if (!wake) {
     throw new Error(`Hosted wake ${activeEvent.wakeId} missing for event ${activeEvent.eventId}.`);
+  }
+
+  if (input.userId && wake.userId !== input.userId) {
+    throw new Error(
+      `Hosted wake ${activeEvent.wakeId} is not owned by ${input.userId} for event ${activeEvent.eventId}.`,
+    );
   }
 
   return {
@@ -609,7 +615,7 @@ async function resolveHostedWakeEventResolutionTx(input: {
 async function resolveHostedWakeActiveEventTx(input: {
   event: HostedWakeEventRow;
   tx: HostedWakeStoreClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeEventRow> {
   const seen = new Set<string>();
   let current = input.event;
@@ -623,7 +629,7 @@ async function resolveHostedWakeActiveEventTx(input: {
     const replacement = await findHostedWakeEventByEventIdTx({
       eventId: current.replacedByEventId,
       tx: input.tx,
-      ...(input.userId ? { userId: input.userId } : { userId: current.userId }),
+      userId: input.userId,
     });
 
     if (!replacement) {

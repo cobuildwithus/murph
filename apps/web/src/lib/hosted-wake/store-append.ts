@@ -71,6 +71,7 @@ export async function appendHostedWakeTx(
         ? await findHostedWakeByDedupeKeyTx({
           dedupeKey: input.dedupeKey,
           tx: input.tx,
+          userId: input.userId,
         })
         : null;
 
@@ -252,6 +253,7 @@ async function createHostedWakeTx(
           ? await findHostedWakeByDedupeKeyTx({
             dedupeKey: input.dedupeKey,
             tx: input.tx,
+            userId: input.userId,
           })
           : null;
 
