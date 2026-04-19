@@ -51,6 +51,7 @@ import { RunnerWakeScheduler } from "./runner-wake-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
+  readHostedWakeStatusFromWeb,
 } from "../web-control-plane.ts";
 
 export type HostedExecutionWakeProgressRecord =
@@ -161,7 +162,10 @@ export class RunnerWakeProcessor {
   ): Promise<RunnerWakeExecutionResult> {
     const userId = wake.userId;
     const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
-    const startMode = await this.resolveWakeStartMode(wake.eventId);
+    const startMode = await this.resolveWakeStartMode({
+      eventId: wake.eventId,
+      wakeSeq: options.wakeRecord.seq,
+    });
     if (startMode.kind === "alreadyFinalized") {
       await this.restorePendingCommitState(startMode.pendingCommit);
       emitHostedExecutionStructuredLog({
@@ -979,9 +983,17 @@ export class RunnerWakeProcessor {
     }
   }
 
-  private async resolveWakeStartMode(eventId: string): Promise<RunnerWakeStartMode> {
+  private async resolveWakeStartMode(input: {
+    eventId: string;
+    wakeSeq: string;
+  }): Promise<RunnerWakeStartMode> {
+    const eventId = input.eventId;
     const pendingCommit = await this.dependencies.stateStore.readPendingCommit(eventId);
     if (!pendingCommit) {
+      await this.discardReplacedPendingCommitIfStale({
+        nextEventId: eventId,
+        nextWakeSeq: input.wakeSeq,
+      });
       return {
         kind: "directRun",
       };
@@ -996,6 +1008,64 @@ export class RunnerWakeProcessor {
         kind: "resumePendingCommit",
         pendingCommit,
       };
+  }
+
+  private async discardReplacedPendingCommitIfStale(input: {
+    nextEventId: string;
+    nextWakeSeq: string;
+  }): Promise<void> {
+    const pendingCommit = await this.dependencies.stateStore.readPendingCommit();
+    if (!pendingCommit || pendingCommit.eventId === input.nextEventId) {
+      return;
+    }
+
+    if (pendingCommit.wake.seq !== input.nextWakeSeq) {
+      return;
+    }
+
+    const status = await readHostedWakeStatusFromWeb({
+      baseUrl: this.dependencies.env.hostedWebBaseUrl,
+      body: {
+        eventId: pendingCommit.eventId,
+      },
+      boundUserId: pendingCommit.userId,
+      callbackSigning: this.dependencies.env.webCallbackSigning,
+      timeoutMs: this.dependencies.env.runnerTimeoutMs,
+    });
+
+    await this.dependencies.stateStore.syncBundleRefCache(
+      parseHostedExecutionBundleRef(
+        status.cursor.snapshotRef === undefined ? null : status.cursor.snapshotRef,
+        "Hosted wake replacement cursor snapshotRef",
+      ),
+    );
+
+    if (status.wakeState !== "replaced" && !status.replacedByEventId) {
+      return;
+    }
+
+    await this.dependencies.stateStore.discardPendingCommitRecoveryState(pendingCommit.eventId);
+    await this.dependencies.wakeScheduler.syncNextWake({
+      preferredWakeAt: null,
+      wakeMaterializationHints: null,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        nextEventId: input.nextEventId,
+        pendingEventId: pendingCommit.eventId,
+        replacedByEventId: status.replacedByEventId ?? null,
+        version: status.cursor.version,
+        wakeSeq: pendingCommit.wake.seq,
+        wakeState: status.wakeState ?? null,
+      },
+      eventId: pendingCommit.eventId,
+      level: "info",
+      message:
+        "Hosted wake execution discarded a stale DO-local pending commit after web replaced that wake before terminal cleanup.",
+      phase: "wake.running",
+      userId: pendingCommit.userId,
+    });
   }
 
   private resolveRunContext(

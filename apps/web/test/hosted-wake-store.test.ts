@@ -11,6 +11,7 @@ import {
 } from "@/src/lib/hosted-wake/payload";
 import {
   issueHostedWakeFetchProof,
+  issueHostedWakeFinalizeProof,
   verifyHostedWakeFinalizeProof,
 } from "@/src/lib/hosted-wake/fetch-proof";
 import {
@@ -37,7 +38,7 @@ import {
   readHostedExecutionWakeTargetTx,
 } from "@/src/lib/hosted-wake/queue";
 
-function makeSnapshotRef(label: string): HostedWakeSnapshotRef {
+function makeSnapshotRef(label: string): NonNullable<HostedWakeSnapshotRef> {
   return {
     hash: `hash_${label}`,
     key: `bundles/vault/${label}`,
@@ -250,6 +251,66 @@ describe("hosted wake store", () => {
         committedSeq: "2",
         nextSeq: "3",
         snapshotRef: makeSnapshotRef("wake_2"),
+        userId: "member_123",
+        version: "5",
+      }),
+      finalizeToken: expect.any(String),
+    });
+  });
+
+  it("advances the committed seq even when the projected cursor state is otherwise unchanged", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        snapshotRef: makeSnapshotRef("wake_1"),
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    const listed = await listHostedExecutableWakes({
+      prisma: tx,
+      userId: "member_123",
+    });
+    const wake = listed.wakes[0];
+
+    expect(wake).toEqual(expect.objectContaining({
+      fetchProof: expect.any(String),
+      id: expect.any(String),
+      seq: "2",
+    }));
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: wake!.fetchProof,
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: wake!.id,
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
+
+    const result = await commitHostedExecutionCursorTx({
+      committedSeq: 2n,
+      expectedVersion: 4n,
+      snapshotRef: makeSnapshotRef("wake_1"),
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      committed: true,
+      cursor: expect.objectContaining({
+        committedSeq: "2",
+        nextSeq: "3",
+        snapshotRef: makeSnapshotRef("wake_1"),
         userId: "member_123",
         version: "5",
       }),
@@ -775,6 +836,103 @@ describe("hosted wake store", () => {
     });
   });
 
+  it("finalizes assistant schedule updates when the snapshot ref is unchanged", async () => {
+    const committedSnapshot = makeSnapshotRef("wake_2_committed");
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 2n,
+        nextSeq: 3n,
+        snapshotRef: committedSnapshot,
+        userId: "member_123",
+        version: 5n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    const finalize = await finalizeHostedExecutionCursorTx({
+      assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      finalizeToken: issueHostedWakeFinalizeProof({
+        committedCursorVersion: 5n,
+        committedSeq: 2n,
+        previousSnapshotRef: committedSnapshot,
+        userId: "member_123",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      snapshotRef: committedSnapshot,
+      tx,
+      userId: "member_123",
+    });
+
+    expect(finalize).toEqual({
+      finalized: true,
+      cursor: expect.objectContaining({
+        committedSeq: "2",
+        nextSeq: "3",
+        snapshotRef: committedSnapshot,
+        userId: "member_123",
+        version: "6",
+      }),
+    });
+    expect(readHarnessCursorState(tx).assistantNextWakeAt?.toISOString()).toBe(
+      "2026-04-17T03:00:00.000Z",
+    );
+  });
+
+  it("finalizes assistant schedule clear-to-null updates when the snapshot ref is unchanged", async () => {
+    const committedSnapshot = makeSnapshotRef("wake_2_committed");
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        assistantNextWakeAt: new Date("2026-04-17T03:00:00.000Z"),
+        committedSeq: 2n,
+        nextSeq: 3n,
+        snapshotRef: committedSnapshot,
+        userId: "member_123",
+        version: 5n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    const finalize = await finalizeHostedExecutionCursorTx({
+      assistantNextWakeAt: null,
+      finalizeToken: issueHostedWakeFinalizeProof({
+        committedCursorVersion: 5n,
+        committedSeq: 2n,
+        previousSnapshotRef: committedSnapshot,
+        userId: "member_123",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      snapshotRef: committedSnapshot,
+      tx,
+      userId: "member_123",
+    });
+
+    expect(finalize).toEqual({
+      finalized: true,
+      cursor: expect.objectContaining({
+        committedSeq: "2",
+        nextSeq: "3",
+        snapshotRef: committedSnapshot,
+        userId: "member_123",
+        version: "6",
+      }),
+    });
+    expect(readHarnessCursorState(tx).assistantNextWakeAt).toBeNull();
+  });
+
   it("finalizes a committed cursor snapshot only with the web-issued finalize proof", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
@@ -818,6 +976,56 @@ describe("hosted wake store", () => {
 
     const finalize = await finalizeHostedExecutionCursorTx({
       finalizeToken: String(commit.finalizeToken),
+      snapshotRef: makeSnapshotRef("wake_2_finalized"),
+      tx,
+      userId: "member_123",
+    });
+
+    expect(finalize).toEqual({
+      finalized: true,
+      cursor: expect.objectContaining({
+        committedSeq: "2",
+        nextSeq: "3",
+        snapshotRef: makeSnapshotRef("wake_2_finalized"),
+        userId: "member_123",
+        version: "6",
+      }),
+    });
+  });
+
+  it("treats reordered snapshot-ref JSON as the same finalize precondition", async () => {
+    const committedSnapshot = makeSnapshotRef("wake_2_committed");
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 2n,
+        nextSeq: 3n,
+        snapshotRef: {
+          key: committedSnapshot.key,
+          hash: committedSnapshot.hash,
+          size: committedSnapshot.size,
+          updatedAt: committedSnapshot.updatedAt,
+        },
+        userId: "member_123",
+        version: 5n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    const finalize = await finalizeHostedExecutionCursorTx({
+      finalizeToken: issueHostedWakeFinalizeProof({
+        committedCursorVersion: 5n,
+        committedSeq: 2n,
+        previousSnapshotRef: committedSnapshot,
+        userId: "member_123",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
       snapshotRef: makeSnapshotRef("wake_2_finalized"),
       tx,
       userId: "member_123",
@@ -1951,6 +2159,9 @@ function createHostedWakeStoreHarness(input?: {
   };
 
   const tx = {
+    __getCursorState(): TestCursorState {
+      return cloneCursor(state.cursor);
+    },
     $queryRaw(strings: TemplateStringsArray): Array<{ seq: bigint } | { user_id: string }> {
       const sql = strings.join(" ");
 
@@ -2042,7 +2253,9 @@ function createHostedWakeStoreHarness(input?: {
             "Hosted execution cursor snapshotRef",
           );
         }
-        state.cursor.assistantNextWakeAt = args.data.assistantNextWakeAt ?? state.cursor.assistantNextWakeAt;
+        if ("assistantNextWakeAt" in args.data) {
+          state.cursor.assistantNextWakeAt = args.data.assistantNextWakeAt ?? null;
+        }
         state.cursor.version += BigInt(args.data.version.increment);
         state.cursor.updatedAt = new Date(state.cursor.updatedAt.getTime() + 1);
         return { count: 1 };
@@ -2538,6 +2751,12 @@ function createHostedWakeStoreHarness(input?: {
   };
 
   return tx as unknown as Prisma.TransactionClient;
+}
+
+function readHarnessCursorState(tx: Prisma.TransactionClient): TestCursorState {
+  return (tx as Prisma.TransactionClient & {
+    __getCursorState: () => TestCursorState;
+  }).__getCursorState();
 }
 
 function createHarnessWake(input: {

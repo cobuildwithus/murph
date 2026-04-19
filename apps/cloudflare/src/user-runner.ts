@@ -9,6 +9,7 @@ import type {
 import type {
   HostedFetchedWakeRecord,
   HostedWakeRecord,
+  HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
@@ -60,6 +61,7 @@ import {
 import {
   toUserStatus,
   type DurableObjectStateLike,
+  type RunnerPendingCommitRecord,
   type RunnerStateRecord,
 } from "./user-runner/types.js";
 
@@ -86,6 +88,12 @@ interface HostedWakeDrainOutcome {
 
 interface HostedWakeDrainInternalResult extends HostedExecutionWakeDrainResult {
   exitState: HostedWakeDrainState | null;
+}
+
+interface PendingCommitCurrencyResult {
+  pendingCommit: RunnerPendingCommitRecord | null;
+  proofValidated: boolean;
+  status: HostedWakeStatusResponse;
 }
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
@@ -738,6 +746,17 @@ export class HostedUserRunner {
       };
     }
 
+    if (!(await this.allowWakeExecutionPastPendingCommit(hostedWake.eventId))) {
+      return {
+        cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+        refetchBeforeAdvance: false,
+        postCursorAction: "cleanup-only",
+        wake: null,
+        seq,
+        state: "backpressured",
+      };
+    }
+
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
     const payloadCiphertext = wake.payloadCiphertext;
     if (typeof payloadCiphertext !== "string" || payloadCiphertext.length === 0) {
@@ -747,12 +766,14 @@ export class HostedUserRunner {
       holdLeaseUntilCleanup: true,
       wakeRecord: {
         eventId: hostedWake.eventId,
+        fetchProof: wake.fetchProof,
         kind: wake.kind,
         occurredAt: wake.occurredAt,
         payloadCiphertext,
         payloadSchema: wake.payloadSchema,
         seq: wake.seq,
         userId,
+        wakeId: wake.id,
       },
     });
 
@@ -935,7 +956,10 @@ export class HostedUserRunner {
       };
     }
 
-    if (sameHostedWakeCursorSnapshotRef(input.cursor.snapshotRef, pendingCommit.bundleRef)) {
+    if (
+      sameHostedWakeCursorSnapshotRef(input.cursor.snapshotRef, pendingCommit.bundleRef)
+      && !pendingCommitPublishesAssistantSchedule(pendingCommit)
+    ) {
       return {
         cleanupApplied: false,
         cursor: input.cursor,
@@ -1010,14 +1034,13 @@ export class HostedUserRunner {
       return;
     }
 
-    const status = await readHostedWakeStatusFromWeb({
-      baseUrl: this.readHostedWebControlBaseUrl(),
-      boundUserId: pendingCommit.userId,
-      callbackSigning: this.env.webCallbackSigning,
-      timeoutMs: this.env.runnerTimeoutMs,
-    });
+    const reconciliation = await this.reconcilePendingCommitCurrency(pendingCommit, "resume");
+    if (!reconciliation.pendingCommit) {
+      return;
+    }
+    const status = reconciliation.status;
 
-    if (BigInt(status.cursor.committedSeq) < BigInt(pendingCommit.wake.seq)) {
+    if (BigInt(status.cursor.committedSeq) < BigInt(reconciliation.pendingCommit.wake.seq)) {
       await this.syncHostedWakeBundleCacheToCursor(status.cursor.snapshotRef);
       return;
     }
@@ -1039,6 +1062,191 @@ export class HostedUserRunner {
       });
     }
     await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
+  }
+
+  private async allowWakeExecutionPastPendingCommit(
+    wakeEventId: string,
+  ): Promise<boolean> {
+    const pendingCommit = await this.stateStore.readPendingCommit();
+    if (!pendingCommit) {
+      return true;
+    }
+
+    const reconciliation = await this.reconcilePendingCommitCurrency(
+      pendingCommit,
+      "execution-start",
+    );
+    if (!reconciliation.pendingCommit) {
+      return true;
+    }
+
+    if (reconciliation.pendingCommit.eventId === wakeEventId) {
+      return true;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        pendingCommitEventId: reconciliation.pendingCommit.eventId,
+        pendingWakeSeq: reconciliation.pendingCommit.wake.seq,
+        proofValidated: reconciliation.proofValidated,
+        replacementWakeEventId: wakeEventId,
+      },
+      eventId: wakeEventId,
+      level: "info",
+      message:
+        "Hosted wake execution deferred because another current pending commit still owns recovery for this user.",
+      phase: "wake.running",
+      userId: reconciliation.pendingCommit.userId,
+    });
+    return false;
+  }
+
+  private async reconcilePendingCommitCurrency(
+    pendingCommit: RunnerPendingCommitRecord,
+    reason: "execution-start" | "resume",
+  ): Promise<PendingCommitCurrencyResult> {
+    const hasFetchFence = hasPendingCommitFetchFence(pendingCommit);
+
+    if (hasFetchFence) {
+      try {
+        const status = await readHostedWakeStatusFromWeb({
+          baseUrl: this.readHostedWebControlBaseUrl(),
+          body: {
+            eventId: pendingCommit.eventId,
+            fetchProof: pendingCommit.wake.fetchProof,
+            wakeEventId: pendingCommit.wake.eventId,
+            wakeId: pendingCommit.wake.wakeId,
+            wakeSeq: pendingCommit.wake.seq,
+          },
+          boundUserId: pendingCommit.userId,
+          callbackSigning: this.env.webCallbackSigning,
+          timeoutMs: this.env.runnerTimeoutMs,
+        });
+        if (status.fetchProofCurrent === false) {
+          if (
+            status.wakeState === "replaced"
+            || status.replacedByEventId
+            || BigInt(status.cursor.committedSeq) > BigInt(pendingCommit.wake.seq)
+          ) {
+            await this.clearPendingCommitAsStale(pendingCommit, reason, status, "stale-proof");
+            return {
+              pendingCommit: null,
+              proofValidated: true,
+              status,
+            };
+          }
+
+          return {
+            pendingCommit,
+            proofValidated: true,
+            status,
+          };
+        }
+
+        return {
+          pendingCommit,
+          proofValidated: true,
+          status,
+        };
+      } catch {
+        const status = await this.readHostedWakeStatusForPendingCommit(pendingCommit);
+        if (
+          status.wakeState === "replaced"
+          || status.replacedByEventId
+          || BigInt(status.cursor.committedSeq) > BigInt(pendingCommit.wake.seq)
+        ) {
+          await this.clearPendingCommitAsStale(pendingCommit, reason, status, "proof-unavailable");
+          return {
+            pendingCommit: null,
+            proofValidated: false,
+            status,
+          };
+        }
+
+        return {
+          pendingCommit,
+          proofValidated: false,
+          status,
+        };
+      }
+    }
+
+    const status = await this.readHostedWakeStatusForPendingCommit(pendingCommit);
+    if (
+      status.wakeState === "replaced"
+      || status.replacedByEventId
+      || BigInt(status.cursor.committedSeq) > BigInt(pendingCommit.wake.seq)
+    ) {
+      await this.clearPendingCommitAsStale(pendingCommit, reason, status, "event-replaced");
+      return {
+        pendingCommit: null,
+        proofValidated: false,
+        status,
+      };
+    }
+
+    return {
+      pendingCommit,
+      proofValidated: false,
+      status,
+    };
+  }
+
+  private async readHostedWakeStatusForPendingCommit(
+    pendingCommit: RunnerPendingCommitRecord,
+  ): Promise<HostedWakeStatusResponse> {
+    return await readHostedWakeStatusFromWeb({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      body: {
+        eventId: pendingCommit.eventId,
+      },
+      boundUserId: pendingCommit.userId,
+      callbackSigning: this.env.webCallbackSigning,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
+  }
+
+  private async clearPendingCommitAsStale(
+    pendingCommit: RunnerPendingCommitRecord,
+    reason: "execution-start" | "resume",
+    status: HostedWakeStatusResponse,
+    staleReason: "event-replaced" | "proof-unavailable" | "stale-proof",
+  ): Promise<void> {
+    await this.stateStore.discardPendingCommitRecoveryState(pendingCommit.eventId);
+    await this.wakeScheduler.syncNextWake({
+      preferredWakeAt: null,
+      wakeMaterializationHints: null,
+    });
+    await this.stateStore.completeWakeRun({
+      eventId: pendingCommit.eventId,
+      finishedAt: new Date().toISOString(),
+      leaseOwner: {
+        eventId: pendingCommit.eventId,
+        policy: "same-event",
+        run: null,
+      },
+    });
+    await this.syncHostedWakeBundleCacheToCursor(status.cursor.snapshotRef);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        committedSeq: status.cursor.committedSeq,
+        pendingCommitEventId: pendingCommit.eventId,
+        pendingWakeSeq: pendingCommit.wake.seq,
+        replacedByEventId: status.replacedByEventId ?? null,
+        staleReason,
+        statusReason: reason,
+        version: status.cursor.version,
+        wakeState: status.wakeState ?? null,
+      },
+      eventId: pendingCommit.eventId,
+      level: "info",
+      message:
+        "Hosted runner discarded a stale DO-local pending commit and reconciled the bundle cache to the canonical hosted cursor.",
+      phase: "completed",
+      userId: pendingCommit.userId,
+    });
   }
 
   private async syncHostedWakeBundleCacheToCursor(
@@ -1311,6 +1519,29 @@ function shouldScheduleHostedWakeRetryAlarm(
   input: HostedWakeDrainInternalResult,
 ): boolean {
   return input.exitState === "backpressured";
+}
+
+function hasPendingCommitFetchFence(
+  pendingCommit: RunnerPendingCommitRecord,
+): pendingCommit is RunnerPendingCommitRecord & {
+  wake: RunnerPendingCommitRecord["wake"] & {
+    fetchProof: string;
+    wakeId: string;
+  };
+} {
+  return typeof pendingCommit.wake.fetchProof === "string"
+    && pendingCommit.wake.fetchProof.length > 0
+    && typeof pendingCommit.wake.wakeId === "string"
+    && pendingCommit.wake.wakeId.length > 0;
+}
+
+function pendingCommitPublishesAssistantSchedule(
+  pendingCommit: RunnerPendingCommitRecord,
+): boolean {
+  return Boolean(
+    pendingCommit.result.wakeMaterializationHints
+    && "assistantWakeAt" in pendingCommit.result.wakeMaterializationHints,
+  );
 }
 
 function hostedWakeHintDueNow(value: string | null | undefined): boolean {

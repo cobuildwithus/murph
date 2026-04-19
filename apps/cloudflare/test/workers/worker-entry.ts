@@ -443,12 +443,14 @@ function createPendingCommitWakeRecord(
 
   return {
     eventId: wake.eventId,
+    fetchProof: null,
     kind: wake.kind,
     occurredAt: wake.occurredAt,
     payloadCiphertext,
     payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
     seq: "1",
     userId: wake.userId,
+    wakeId: null,
   };
 }
 

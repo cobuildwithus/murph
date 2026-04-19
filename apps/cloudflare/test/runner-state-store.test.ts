@@ -31,12 +31,14 @@ function createPendingCommit(): RunnerPendingCommitRecord {
     userId: "member_123",
     wake: {
       eventId: "evt_committed",
+      fetchProof: null,
       kind: "assistant.cron.tick",
       occurredAt: "2026-04-18T11:59:59.000Z",
       payloadCiphertext: "ciphertext",
       payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq: "1",
       userId: "member_123",
+      wakeId: null,
     },
   };
 }
@@ -222,6 +224,35 @@ describe("RunnerStateStore", () => {
     expect(finalized.lastRunAt).toBe("2026-04-18T12:00:01.000Z");
     expect(finalized.pendingWakeCount).toBe(0);
     await expect(store.readPendingCommit("evt_committed")).resolves.toBeNull();
+  });
+
+  it("clears stale pending-commit wake hints together with recovery state", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    await store.beginWakeRun({
+      eventId: "evt_committed",
+      run: {
+        attempt: 1,
+        runId: "run_committed",
+        startedAt: "2026-04-18T11:00:00.000Z",
+      },
+      userId: "member_123",
+    });
+    await store.syncNextWake({
+      preferredWakeAt: "2026-04-18T12:30:00.000Z",
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-04-18T12:30:00.000Z",
+      },
+    });
+    await store.writePendingCommit(createPendingCommit());
+
+    const cleared = await store.discardPendingCommitRecoveryState("evt_committed");
+
+    expect(cleared.inFlight).toBe(false);
+    expect(cleared.nextWakeAt).toBeNull();
+    await expect(store.readPendingCommit("evt_committed")).resolves.toBeNull();
+    await expect(store.readWakeMaterializationHints()).resolves.toBeNull();
   });
 
   it("fails closed when raw pending commit JSON is malformed", async () => {

@@ -40,6 +40,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
+    'replyAliasLookupKey String? @unique @map("reply_alias_lookup_key")',
     'telegramUserLookupKey String? @unique @map("telegram_user_lookup_key")',
     'telegramUserIdEncrypted String? @map("telegram_user_id_encrypted")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -65,6 +66,169 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
+} as const;
+
+const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
+  HostedExecutionCursor: [
+    'userId String @id @map("user_id")',
+    'nextSeq BigInt @default(1) @map("next_seq")',
+    'committedSeq BigInt @default(0) @map("committed_seq")',
+    'assistantNextWakeAt DateTime? @map("assistant_next_wake_at")',
+    'snapshotRef Json? @map("snapshot_ref")',
+    'version BigInt @default(0) @map("version")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedWake: [
+    "id String @id",
+    'userId String @map("user_id")',
+    'seq BigInt @map("seq")',
+    "kind String",
+    "behavior HostedWakeBehavior",
+    'dedupeKey String? @map("dedupe_key")',
+    'coalescingKey String? @map("coalescing_key")',
+    'occurredAt DateTime @map("occurred_at")',
+    'payloadSchema String @map("payload_schema")',
+    'payloadInlineCiphertext String? @map("payload_inline_ciphertext")',
+    'payloadRef String? @map("payload_ref")',
+    'payloadBytes Int? @map("payload_bytes")',
+    'quarantinedAt DateTime? @map("quarantined_at")',
+    'quarantineCode String? @map("quarantine_code")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedWakeEvent: [
+    'eventId String @map("event_id")',
+    'wakeId String @map("wake_id")',
+    'userId String @map("user_id")',
+    'replacedByEventId String? @map("replaced_by_event_id")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedWakePayload: [
+    'wakeId String @id @map("wake_id")',
+    'userId String @map("user_id")',
+    'payloadCiphertext String @map("payload_ciphertext")',
+    'payloadSchema String @map("payload_schema")',
+    'payloadBytes Int @map("payload_bytes")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedWakeTerminal: [
+    'wakeId String @id @map("wake_id")',
+    'userId String @map("user_id")',
+    'wakeSeq BigInt @map("wake_seq")',
+    "state String",
+    'fetchedCommittedSeq BigInt @map("fetched_committed_seq")',
+    'fetchedCursorVersion BigInt @map("fetched_cursor_version")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+} as const;
+
+const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
+  hosted_execution_cursor: {
+    columns: [
+      '"user_id" TEXT NOT NULL',
+      '"next_seq" BIGINT NOT NULL DEFAULT 1',
+      '"committed_seq" BIGINT NOT NULL DEFAULT 0',
+      '"assistant_next_wake_at" TIMESTAMP(3)',
+      '"snapshot_ref" JSONB',
+      '"version" BIGINT NOT NULL DEFAULT 0',
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+      '"updated_at" TIMESTAMP(3) NOT NULL',
+    ],
+    constraints: [
+      'CONSTRAINT "hosted_execution_cursor_pkey" PRIMARY KEY ("user_id")',
+    ],
+    indexes: [],
+  },
+  hosted_wake: {
+    columns: [
+      '"id" TEXT NOT NULL',
+      '"user_id" TEXT NOT NULL',
+      '"seq" BIGINT NOT NULL',
+      '"kind" TEXT NOT NULL',
+      '"behavior" "HostedWakeBehavior" NOT NULL',
+      '"dedupe_key" TEXT',
+      '"coalescing_key" TEXT',
+      '"occurred_at" TIMESTAMP(3) NOT NULL',
+      '"payload_schema" TEXT NOT NULL',
+      '"payload_inline_ciphertext" TEXT',
+      '"payload_ref" TEXT',
+      '"payload_bytes" INTEGER',
+      '"quarantined_at" TIMESTAMP(3)',
+      '"quarantine_code" TEXT',
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+      '"updated_at" TIMESTAMP(3) NOT NULL',
+    ],
+    constraints: [
+      'CONSTRAINT "hosted_wake_pkey" PRIMARY KEY ("id")',
+    ],
+    indexes: [
+      'CREATE INDEX "hosted_wake_user_id_seq_idx" ON "hosted_wake"("user_id", "seq")',
+      'CREATE INDEX "hosted_wake_user_id_coalescing_key_seq_idx" ON "hosted_wake"("user_id", "coalescing_key", "seq")',
+      'CREATE INDEX "hosted_wake_user_id_kind_seq_idx" ON "hosted_wake"("user_id", "kind", "seq")',
+      'CREATE UNIQUE INDEX "hosted_wake_user_id_seq_key" ON "hosted_wake"("user_id", "seq")',
+      'CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key")',
+    ],
+  },
+  hosted_wake_event: {
+    columns: [
+      '"event_id" TEXT NOT NULL',
+      '"wake_id" TEXT NOT NULL',
+      '"user_id" TEXT NOT NULL',
+      '"replaced_by_event_id" TEXT',
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+      '"updated_at" TIMESTAMP(3) NOT NULL',
+    ],
+    constraints: [
+      'CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id","event_id")',
+    ],
+    indexes: [
+      'CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id")',
+      'CREATE INDEX "hosted_wake_event_user_id_idx" ON "hosted_wake_event"("user_id")',
+      'CREATE INDEX "hosted_wake_event_user_id_replaced_by_event_id_idx" ON "hosted_wake_event"("user_id", "replaced_by_event_id")',
+      'CREATE INDEX "hosted_wake_event_wake_id_idx" ON "hosted_wake_event"("wake_id")',
+    ],
+  },
+  hosted_wake_payload: {
+    columns: [
+      '"wake_id" TEXT NOT NULL',
+      '"user_id" TEXT NOT NULL',
+      '"payload_ciphertext" TEXT NOT NULL',
+      '"payload_schema" TEXT NOT NULL',
+      '"payload_bytes" INTEGER NOT NULL',
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+      '"updated_at" TIMESTAMP(3) NOT NULL',
+    ],
+    constraints: [
+      'CONSTRAINT "hosted_wake_payload_pkey" PRIMARY KEY ("wake_id")',
+    ],
+    indexes: [
+      'CREATE INDEX "hosted_wake_payload_user_id_idx" ON "hosted_wake_payload"("user_id")',
+    ],
+  },
+  hosted_wake_terminal: {
+    columns: [
+      '"wake_id" TEXT NOT NULL',
+      '"user_id" TEXT NOT NULL',
+      '"wake_seq" BIGINT NOT NULL',
+      '"state" TEXT NOT NULL',
+      '"fetched_committed_seq" BIGINT NOT NULL',
+      '"fetched_cursor_version" BIGINT NOT NULL',
+      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+      '"updated_at" TIMESTAMP(3) NOT NULL',
+    ],
+    constraints: [
+      'CONSTRAINT "hosted_wake_terminal_pkey" PRIMARY KEY ("wake_id")',
+    ],
+    indexes: [
+      'CREATE INDEX "hosted_wake_terminal_user_id_idx" ON "hosted_wake_terminal"("user_id")',
+      'CREATE INDEX "hosted_wake_terminal_user_id_wake_seq_idx" ON "hosted_wake_terminal"("user_id", "wake_seq")',
+      'CREATE UNIQUE INDEX "hosted_wake_terminal_user_id_wake_seq_key" ON "hosted_wake_terminal"("user_id", "wake_seq")',
+    ],
+  },
 } as const;
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
@@ -103,6 +267,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_email_authorization"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_share_payload"');
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
+    expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_reply_alias_lookup_key_key"');
+    expect(baselineMigrationSql).toContain('"assistant_next_wake_at" TIMESTAMP(3)');
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT');
     expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('"masked_phone_number_hint" TEXT NOT NULL');
@@ -198,6 +364,39 @@ describe("hosted Prisma baseline migration", () => {
     );
   });
 
+  it("keeps hosted-wake runtime storage aligned between the Prisma schema and baseline migration", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const baselineMigrationSql = readFileSync(
+      new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
+      "utf8",
+    );
+
+    for (const [modelName, expectedFields] of Object.entries(HOSTED_WAKE_RUNTIME_SCHEMA_GUARD)) {
+      expect(
+        readPrismaScalarFieldSpecs(schema, modelName).sort(),
+        `${modelName} changed. Review hosted-wake runtime persistence explicitly before changing greenfield wake/cursor storage.`,
+      ).toEqual([...expectedFields].sort());
+    }
+
+    for (const [tableName, guard] of Object.entries(HOSTED_WAKE_RUNTIME_MIGRATION_GUARD)) {
+      expect(
+        readSqlTableColumns(baselineMigrationSql, tableName),
+        `${tableName} column set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+      ).toEqual(new Set(guard.columns));
+      expect(
+        readSqlTableConstraints(baselineMigrationSql, tableName),
+        `${tableName} constraint set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+      ).toEqual(new Set(guard.constraints));
+      expect(
+        readSqlTableIndexes(baselineMigrationSql, tableName),
+        `${tableName} index set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+      ).toEqual(new Set(guard.indexes));
+    }
+  });
+
   it("keeps hosted-member data on the reviewed scalar schema contract", () => {
     const schema = readFileSync(
       new URL("../prisma/schema.prisma", import.meta.url),
@@ -276,4 +475,46 @@ function readPrismaModelBlock(schema: string, modelName: string): string {
   }
 
   return match[0];
+}
+
+function readSqlCreateTableBlock(sql: string, tableName: string): string {
+  const match = sql.match(
+    new RegExp(String.raw`CREATE TABLE "${tableName}" \(([\s\S]*?)\n\);`, "u"),
+  );
+
+  if (!match) {
+    throw new Error(`Expected migration table ${tableName} to exist.`);
+  }
+
+  return match[0];
+}
+
+function readSqlTableColumns(sql: string, tableName: string): Set<string> {
+  return new Set(
+    readSqlCreateTableBlock(sql, tableName)
+      .split("\n")
+      .map((line) => line.trim().replace(/,$/u, ""))
+      .filter((line) => line.startsWith('"')),
+  );
+}
+
+function readSqlTableConstraints(sql: string, tableName: string): Set<string> {
+  return new Set(
+    readSqlCreateTableBlock(sql, tableName)
+      .split("\n")
+      .map((line) => line.trim().replace(/,$/u, ""))
+      .filter((line) => line.startsWith("CONSTRAINT ")),
+  );
+}
+
+function readSqlTableIndexes(sql: string, tableName: string): Set<string> {
+  return new Set(
+    [...sql.matchAll(
+      new RegExp(
+        String.raw`^CREATE (?:UNIQUE )?INDEX "[^"]+" ON "${tableName}"\([^\n]+\);$`,
+        "gmu",
+      ),
+    )]
+      .map((match) => match[0].trim().replace(/;$/u, "")),
+  );
 }

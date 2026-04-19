@@ -424,8 +424,20 @@ describe("HostedUserRunner hosted wake drain", () => {
           updatedAt: `2026-03-26T12:01:${body.committedSeq.padStart(2, "0")}.000Z`,
           version: `cursor_v${(BigInt(body.committedSeq) + 1n).toString()}`,
         }),
+        finalizeToken: `finalize_token_${body.committedSeq}`,
       };
     });
+    const finalizeHostedWakeCursorInWeb = vi.spyOn(webControlPlane, "finalizeHostedWakeCursorInWeb");
+    finalizeHostedWakeCursorInWeb.mockImplementation(async ({ body }) => ({
+      cursor: createCursorState({
+        committedSeq,
+        nextSeq: String(totalWakes + 1),
+        snapshotRef: readSnapshotRef(body.snapshotRef),
+        updatedAt: `2026-03-26T12:02:${committedSeq.padStart(2, "0")}.000Z`,
+        version: `cursor_v${(BigInt(committedSeq) + 2n).toString()}`,
+      }),
+      finalized: true,
+    }));
     const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
     recordHostedWakeTerminalInWeb.mockResolvedValue({
       recorded: true,
@@ -554,7 +566,6 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1"]);
     expect(recordHostedWakeTerminalInWeb).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_stale_commit"]);
     expect(cleanupWakeAfterCursorCommit).not.toHaveBeenCalled();
     await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
@@ -1183,6 +1194,14 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("refetches after each successful cursor advance before executing a later wake from the same fetched batch", async () => {
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockResolvedValue({
+      targetSeqHint: "1",
+      wakeMaterializationHints: null,
+    });
     const initialCursor = createCursorState({
       committedSeq: "0",
       nextSeq: "3",
@@ -1319,6 +1338,14 @@ describe("HostedUserRunner hosted wake drain", () => {
   it("publishes a finalized snapshot only after the seq commit succeeds", async () => {
     const commitBodies: HostedWakeCommitRequest[] = [];
     const finalizeBodies: HostedWakeFinalizeRequest[] = [];
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockResolvedValue({
+      targetSeqHint: "1",
+      wakeMaterializationHints: null,
+    });
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
       .mockResolvedValueOnce({
@@ -1493,6 +1520,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       committedSeq: "1",
       expectedVersion: "cursor_v1",
     });
+    expect(runnerRequests[1]?.currentBundleRef).toEqual(commitBodies[0]?.snapshotRef);
     expect(finalizeBodies).toHaveLength(1);
     expect(finalizeBodies[0]).toMatchObject({
       finalizeToken: "finalize_token_1",
@@ -1503,6 +1531,14 @@ describe("HostedUserRunner hosted wake drain", () => {
   it("treats a same-seq finalized snapshot publish lost race as success when the cursor already matches", async () => {
     const commitBodies: HostedWakeCommitRequest[] = [];
     const finalizeBodies: HostedWakeFinalizeRequest[] = [];
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockResolvedValue({
+      targetSeqHint: "1",
+      wakeMaterializationHints: null,
+    });
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
       .mockResolvedValueOnce({
@@ -1686,6 +1722,14 @@ describe("HostedUserRunner hosted wake drain", () => {
     const commitBodies: HostedWakeCommitRequest[] = [];
     const finalizeBodies: HostedWakeFinalizeRequest[] = [];
     const winnerBundleRef = createBundleRef("winner-conflict");
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockResolvedValue({
+      targetSeqHint: "1",
+      wakeMaterializationHints: null,
+    });
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb.mockResolvedValueOnce({
       cursor: createCursorState({
@@ -1961,12 +2005,14 @@ describe("HostedUserRunner hosted wake drain", () => {
       userId: "member_123",
       wake: {
         eventId: "evt_alarm_finalize_retry",
+        fetchProof: null,
         kind: "assistant.cron.tick",
         occurredAt: "2026-03-26T12:00:00.000Z",
         payloadCiphertext,
         payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         seq: "1",
         userId: "member_123",
+        wakeId: null,
       },
     });
 
@@ -1997,6 +2043,123 @@ describe("HostedUserRunner hosted wake drain", () => {
       committedSeq: "1",
       nextSeq: "2",
       snapshotRef: stalePublishedBundleRef,
+      updatedAt: "2026-03-26T12:00:03.000Z",
+      version: "cursor_v3",
+    });
+    const finalizedCursor = createCursorState({
+      committedSeq: "1",
+      nextSeq: "2",
+      snapshotRef: finalizedPendingBundleRef,
+      updatedAt: "2026-03-26T12:00:05.000Z",
+      version: "cursor_v4",
+    });
+    const finalizeHostedWakeCursorInWeb = vi.spyOn(webControlPlane, "finalizeHostedWakeCursorInWeb");
+    finalizeHostedWakeCursorInWeb.mockResolvedValueOnce({
+      cursor: finalizedCursor,
+      finalized: true,
+    });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb
+      .mockResolvedValueOnce({
+        cursor: committedCursor,
+        fetchProofCurrent: false,
+        pendingWakeCount: 0,
+      })
+      .mockResolvedValueOnce({
+        cursor: finalizedCursor,
+        pendingWakeCount: 0,
+      });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await runner.bootstrapUser("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const stateStore = Reflect.get(runner, "stateStore");
+
+    if (!stateStore || typeof stateStore !== "object") {
+      throw new Error("Expected HostedUserRunner state store test internals to be available.");
+    }
+
+    const beginWakeRun = Reflect.get(stateStore, "beginWakeRun");
+    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
+    const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
+    if (
+      typeof beginWakeRun !== "function"
+      || typeof writePendingCommit !== "function"
+      || typeof readPendingCommit !== "function"
+    ) {
+      throw new Error(
+        "Expected HostedUserRunner state store wake-run and pending commit helpers.",
+      );
+    }
+
+    const { payloadCiphertext } = encryptTestHostedWakePayload({
+      userId: "member_123",
+      value: createWake("evt_status_finalize_retry"),
+    });
+    await beginWakeRun.call(stateStore, {
+      eventId: "evt_status_finalize_retry",
+      run: {
+        attempt: 1,
+        runId: "run_status_finalize_retry",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      userId: "member_123",
+    });
+    await writePendingCommit.call(stateStore, {
+      assistantDeliveryEffects: [],
+      bundleRef: finalizedPendingBundleRef,
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: "evt_status_finalize_retry",
+      finalizeToken: "finalize_token_status",
+      finalizedAt: "2026-03-26T12:00:01.000Z",
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "handled",
+      },
+      schemaVersion: 1,
+      userId: "member_123",
+      wake: {
+        eventId: "evt_status_finalize_retry",
+        fetchProof: null,
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        payloadCiphertext,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        seq: "1",
+        userId: "member_123",
+        wakeId: null,
+      },
+    });
+
+    const status = await runner.status();
+
+    expect(finalizeHostedWakeCursorInWeb).toHaveBeenCalledOnce();
+    expect(finalizeHostedWakeCursorInWeb.mock.calls[0]?.[0].body).toMatchObject({
+      finalizeToken: "finalize_token_status",
+      snapshotRef: finalizedPendingBundleRef,
+    });
+    expect(readHostedWakeStatusFromWeb).toHaveBeenCalledTimes(2);
+    expect(status.bundleRef).toEqual(finalizedPendingBundleRef);
+    expect(status.inFlight).toBe(false);
+    expect(status.lastError).toBeNull();
+    expect(status.pendingWakeCount).toBe(0);
+    await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
+  });
+
+  it("publishes assistant schedule updates during status recovery even when the finalized snapshot already matches", async () => {
+    const finalizedPendingBundleRef = createBundleRef("finalized-from-status-schedule-only");
+    const committedCursor = createCursorState({
+      committedSeq: "1",
+      nextSeq: "2",
+      snapshotRef: finalizedPendingBundleRef,
       updatedAt: "2026-03-26T12:00:03.000Z",
       version: "cursor_v3",
     });
@@ -2053,13 +2216,13 @@ describe("HostedUserRunner hosted wake drain", () => {
 
     const { payloadCiphertext } = encryptTestHostedWakePayload({
       userId: "member_123",
-      value: createWake("evt_status_finalize_retry"),
+      value: createWake("evt_status_finalize_schedule_only"),
     });
     await beginWakeRun.call(stateStore, {
-      eventId: "evt_status_finalize_retry",
+      eventId: "evt_status_finalize_schedule_only",
       run: {
         attempt: 1,
-        runId: "run_status_finalize_retry",
+        runId: "run_status_finalize_schedule_only",
         startedAt: "2026-03-26T12:00:00.000Z",
       },
       userId: "member_123",
@@ -2068,9 +2231,245 @@ describe("HostedUserRunner hosted wake drain", () => {
       assistantDeliveryEffects: [],
       bundleRef: finalizedPendingBundleRef,
       committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: "evt_status_finalize_retry",
-      finalizeToken: "finalize_token_status",
+      eventId: "evt_status_finalize_schedule_only",
+      finalizeToken: "finalize_token_status_schedule_only",
       finalizedAt: "2026-03-26T12:00:01.000Z",
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "handled",
+        wakeMaterializationHints: {
+          assistantWakeAt: "2026-03-26T12:30:00.000Z",
+        },
+      },
+      schemaVersion: 1,
+      userId: "member_123",
+      wake: {
+        eventId: "evt_status_finalize_schedule_only",
+        fetchProof: "fetch_proof_status_finalize_schedule_only",
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        payloadCiphertext,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        seq: "1",
+        userId: "member_123",
+        wakeId: "wake_1",
+      },
+    });
+
+    const status = await runner.status();
+
+    expect(readHostedWakeStatusFromWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventId: "evt_status_finalize_schedule_only",
+        fetchProof: "fetch_proof_status_finalize_schedule_only",
+        wakeEventId: "evt_status_finalize_schedule_only",
+        wakeId: "wake_1",
+        wakeSeq: "1",
+      },
+      boundUserId: "member_123",
+    });
+    expect(finalizeHostedWakeCursorInWeb).toHaveBeenCalledOnce();
+    expect(finalizeHostedWakeCursorInWeb.mock.calls[0]?.[0].body).toMatchObject({
+      assistantNextWakeAt: "2026-03-26T12:30:00.000Z",
+      finalizeToken: "finalize_token_status_schedule_only",
+      snapshotRef: finalizedPendingBundleRef,
+    });
+    expect(status.bundleRef).toEqual(finalizedPendingBundleRef);
+    expect(status.inFlight).toBe(false);
+    await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
+  });
+
+  it("clears a replaced pending commit during status recovery before terminal cleanup", async () => {
+    const rewrittenBundleRef = createBundleRef("replaced-before-terminal-status");
+    const rewrittenCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "2",
+      snapshotRef: rewrittenBundleRef,
+      updatedAt: "2026-03-26T12:00:03.000Z",
+      version: "cursor_v2",
+    });
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await runner.bootstrapUser("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const stateStore = Reflect.get(runner, "stateStore");
+
+    if (!stateStore || typeof stateStore !== "object") {
+      throw new Error("Expected HostedUserRunner state store test internals to be available.");
+    }
+
+    const beginWakeRun = Reflect.get(stateStore, "beginWakeRun");
+    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
+    const syncNextWake = Reflect.get(stateStore, "syncNextWake");
+    const readActiveRunLease = Reflect.get(stateStore, "readActiveRunLease");
+    const readBundleMetaState = Reflect.get(stateStore, "readBundleMetaState");
+    const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
+    const readWakeMaterializationHints = Reflect.get(stateStore, "readWakeMaterializationHints");
+    if (
+      typeof beginWakeRun !== "function"
+      || typeof writePendingCommit !== "function"
+      || typeof syncNextWake !== "function"
+      || typeof readActiveRunLease !== "function"
+      || typeof readBundleMetaState !== "function"
+      || typeof readPendingCommit !== "function"
+      || typeof readWakeMaterializationHints !== "function"
+    ) {
+      throw new Error(
+        "Expected HostedUserRunner stale cleanup helpers to be available.",
+      );
+    }
+
+    const { payloadCiphertext } = encryptTestHostedWakePayload({
+      userId: "member_123",
+      value: createWake("evt_status_stale_pending_a"),
+    });
+    await beginWakeRun.call(stateStore, {
+      eventId: "evt_status_stale_pending_a",
+      run: {
+        attempt: 1,
+        runId: "run_status_stale_pending_a",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      userId: "member_123",
+    });
+    await syncNextWake.call(stateStore, {
+      preferredWakeAt: "2026-03-26T12:45:00.000Z",
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-03-26T12:45:00.000Z",
+      },
+    });
+    await storage.state.storage.setAlarm(new Date("2026-03-26T12:45:00.000Z"));
+    await expect(storage.state.storage.getAlarm()).resolves.toBe(
+      Date.parse("2026-03-26T12:45:00.000Z"),
+    );
+    await writePendingCommit.call(stateStore, {
+      assistantDeliveryEffects: [],
+      bundleRef: createBundleRef("stale-before-terminal-status"),
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: "evt_status_stale_pending_a",
+      finalizeToken: null,
+      finalizedAt: null,
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: "2026-03-26T12:45:00.000Z",
+        summary: "handled",
+        wakeMaterializationHints: {
+          assistantWakeAt: "2026-03-26T12:45:00.000Z",
+        },
+      },
+      schemaVersion: 1,
+      userId: "member_123",
+      wake: {
+        eventId: "evt_status_stale_pending_a",
+        fetchProof: null,
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        payloadCiphertext,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        seq: "1",
+        userId: "member_123",
+        wakeId: null,
+      },
+    });
+
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb
+      .mockResolvedValueOnce({
+        cursor: rewrittenCursor,
+        pendingWakeCount: 1,
+        replacedByEventId: "evt_status_stale_pending_b",
+        wakeState: "replaced",
+      })
+      .mockResolvedValueOnce({
+        cursor: rewrittenCursor,
+        pendingWakeCount: 1,
+      });
+
+    const status = await runner.status();
+
+    expect(readHostedWakeStatusFromWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventId: "evt_status_stale_pending_a",
+      },
+      boundUserId: "member_123",
+    });
+    expect(status.bundleRef).toEqual(rewrittenBundleRef);
+    expect(status.inFlight).toBe(false);
+    expect(status.nextWakeAt).toBeNull();
+    await expect(storage.state.storage.getAlarm()).resolves.toBeNull();
+    await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
+    await expect(readActiveRunLease.call(stateStore)).resolves.toBeNull();
+    await expect(readWakeMaterializationHints.call(stateStore)).resolves.toBeNull();
+    await expect(readBundleMetaState.call(stateStore)).resolves.toMatchObject({
+      bundleRef: rewrittenBundleRef,
+    });
+  });
+
+  it("keeps a current pending commit when proof-aware status recovery falls back to an unchanged cursor", async () => {
+    const currentCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "2",
+      snapshotRef: createBundleRef("current-pending-status"),
+      updatedAt: "2026-03-26T12:00:03.000Z",
+      version: "cursor_v1",
+    });
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await runner.bootstrapUser("member_123");
+    const stateStore = Reflect.get(runner, "stateStore");
+
+    if (!stateStore || typeof stateStore !== "object") {
+      throw new Error("Expected HostedUserRunner state store test internals to be available.");
+    }
+
+    const beginWakeRun = Reflect.get(stateStore, "beginWakeRun");
+    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
+    const readActiveRunLease = Reflect.get(stateStore, "readActiveRunLease");
+    const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
+    if (
+      typeof beginWakeRun !== "function"
+      || typeof writePendingCommit !== "function"
+      || typeof readActiveRunLease !== "function"
+      || typeof readPendingCommit !== "function"
+    ) {
+      throw new Error(
+        "Expected HostedUserRunner state store wake-run and pending commit helpers.",
+      );
+    }
+
+    const { payloadCiphertext } = encryptTestHostedWakePayload({
+      userId: "member_123",
+      value: createWake("evt_status_pending_current"),
+    });
+    await beginWakeRun.call(stateStore, {
+      eventId: "evt_status_pending_current",
+      run: {
+        attempt: 1,
+        runId: "run_status_pending_current",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      userId: "member_123",
+    });
+    await writePendingCommit.call(stateStore, {
+      assistantDeliveryEffects: [],
+      bundleRef: createBundleRef("current-pending-bundle"),
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: "evt_status_pending_current",
+      finalizeToken: null,
+      finalizedAt: null,
       result: {
         eventsHandled: 1,
         nextWakeAt: null,
@@ -2079,29 +2478,57 @@ describe("HostedUserRunner hosted wake drain", () => {
       schemaVersion: 1,
       userId: "member_123",
       wake: {
-        eventId: "evt_status_finalize_retry",
+        eventId: "evt_status_pending_current",
+        fetchProof: "fetch_proof_current_pending_commit",
         kind: "assistant.cron.tick",
         occurredAt: "2026-03-26T12:00:00.000Z",
         payloadCiphertext,
         payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         seq: "1",
         userId: "member_123",
+        wakeId: "wake_1",
       },
     });
 
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb
+      .mockRejectedValueOnce(new Error("proof-aware status temporarily unavailable"))
+      .mockResolvedValueOnce({
+        cursor: currentCursor,
+        pendingWakeCount: 1,
+        wakeState: "queued",
+      })
+      .mockResolvedValueOnce({
+        cursor: currentCursor,
+        pendingWakeCount: 1,
+      });
+
     const status = await runner.status();
 
-    expect(finalizeHostedWakeCursorInWeb).toHaveBeenCalledOnce();
-    expect(finalizeHostedWakeCursorInWeb.mock.calls[0]?.[0].body).toMatchObject({
-      finalizeToken: "finalize_token_status",
-      snapshotRef: finalizedPendingBundleRef,
+    expect(readHostedWakeStatusFromWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventId: "evt_status_pending_current",
+        fetchProof: "fetch_proof_current_pending_commit",
+        wakeEventId: "evt_status_pending_current",
+        wakeId: "wake_1",
+        wakeSeq: "1",
+      },
+      boundUserId: "member_123",
     });
-    expect(readHostedWakeStatusFromWeb).toHaveBeenCalledTimes(2);
-    expect(status.bundleRef).toEqual(finalizedPendingBundleRef);
-    expect(status.inFlight).toBe(false);
-    expect(status.lastError).toBeNull();
-    expect(status.pendingWakeCount).toBe(0);
-    await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
+    expect(readHostedWakeStatusFromWeb.mock.calls[1]?.[0]).toMatchObject({
+      body: {
+        eventId: "evt_status_pending_current",
+      },
+      boundUserId: "member_123",
+    });
+    expect(status.inFlight).toBe(true);
+    expect(status.pendingWakeCount).toBe(1);
+    await expect(readPendingCommit.call(stateStore)).resolves.toMatchObject({
+      eventId: "evt_status_pending_current",
+    });
+    await expect(readActiveRunLease.call(stateStore)).resolves.toMatchObject({
+      eventId: "evt_status_pending_current",
+    });
   });
 
   it("commits a direct final runtime snapshot once and skips post-cursor finalize", async () => {
@@ -2387,12 +2814,14 @@ describe("HostedUserRunner hosted wake drain", () => {
       userId: "member_123",
       wake: {
         eventId: "evt_stale_cleanup_snapshot",
+        fetchProof: null,
         kind: "assistant.cron.tick",
         occurredAt: "2026-03-26T12:00:00.000Z",
         payloadCiphertext,
         payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         seq: "1",
         userId: "member_123",
+        wakeId: null,
       },
     });
 
@@ -2418,6 +2847,175 @@ describe("HostedUserRunner hosted wake drain", () => {
     await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
     await expect(readBundleMetaState.call(stateStore)).resolves.toMatchObject({
       bundleRef: newerBundleRef,
+    });
+  });
+
+  it("clears a replaced stale pending commit before running the replacement wake", async () => {
+    const stalePendingCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "2",
+      snapshotRef: createBundleRef("replacement-stale-cursor"),
+      updatedAt: "2026-03-26T12:00:00.000Z",
+      version: "cursor_v1",
+    });
+    const rewrittenCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "2",
+      snapshotRef: null,
+      updatedAt: "2026-03-26T12:00:02.000Z",
+      version: "cursor_v2",
+    });
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockResolvedValue({
+      targetSeqHint: "1",
+      wakeMaterializationHints: null,
+    });
+    const stalePendingWake = createHostedWakeRecord({
+      cursor: stalePendingCursor,
+      payload: createWake("evt_replacement_pending_a"),
+      seq: "1",
+      wakeEventId: "evt_replacement_pending_a",
+    });
+    const replacementWake = createHostedWakeRecord({
+      cursor: rewrittenCursor,
+      payload: createWake("evt_replacement_pending_b"),
+      seq: "1",
+      wakeEventId: "evt_replacement_pending_b",
+    });
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb.mockResolvedValueOnce({
+      cursor: rewrittenCursor,
+      wakes: [replacementWake],
+    });
+    const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
+    recordHostedWakeTerminalInWeb.mockResolvedValueOnce({
+      recorded: true,
+    });
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    commitHostedWakeCursorToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: "1",
+        nextSeq: "2",
+        snapshotRef: null,
+        updatedAt: "2026-03-26T12:00:03.000Z",
+        version: "cursor_v3",
+      }),
+    });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb
+      .mockResolvedValueOnce({
+        cursor: rewrittenCursor,
+        fetchProofCurrent: false,
+        pendingWakeCount: 1,
+        replacedByEventId: "evt_replacement_pending_b",
+        wakeState: "replaced",
+      })
+      .mockResolvedValueOnce({
+        cursor: rewrittenCursor,
+        fetchProofCurrent: true,
+        pendingWakeCount: 1,
+        wakeState: "queued",
+      });
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await runner.bootstrapUser("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const stateStore = Reflect.get(runner, "stateStore");
+
+    if (!stateStore || typeof stateStore !== "object") {
+      throw new Error("Expected HostedUserRunner state store test internals to be available.");
+    }
+
+    const beginWakeRun = Reflect.get(stateStore, "beginWakeRun");
+    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
+    const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
+    if (
+      typeof beginWakeRun !== "function"
+      || typeof writePendingCommit !== "function"
+      || typeof readPendingCommit !== "function"
+    ) {
+      throw new Error(
+        "Expected HostedUserRunner state store wake-run and pending commit helpers.",
+      );
+    }
+
+    const { payloadCiphertext } = encryptTestHostedWakePayload({
+      userId: "member_123",
+      value: createWake("evt_replacement_pending_a"),
+    });
+    await beginWakeRun.call(stateStore, {
+      eventId: "evt_replacement_pending_a",
+      run: {
+        attempt: 1,
+        runId: "run_replacement_pending_a",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      userId: "member_123",
+    });
+    await writePendingCommit.call(stateStore, {
+      assistantDeliveryEffects: [],
+      bundleRef: createBundleRef("replacement-stale-bundle"),
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: "evt_replacement_pending_a",
+      finalizeToken: null,
+      finalizedAt: null,
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "handled",
+      },
+      schemaVersion: 1,
+      userId: "member_123",
+      wake: {
+        eventId: "evt_replacement_pending_a",
+        fetchProof: stalePendingWake.fetchProof,
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        payloadCiphertext,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        seq: "1",
+        userId: "member_123",
+        wakeId: stalePendingWake.id,
+      },
+    });
+
+    await runner.wakeHostedWakes();
+
+    expect(readHostedWakeStatusFromWeb).toHaveBeenCalledTimes(2);
+    expect(readHostedWakeStatusFromWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventId: "evt_replacement_pending_a",
+        fetchProof: stalePendingWake.fetchProof,
+        wakeEventId: "evt_replacement_pending_a",
+        wakeId: stalePendingWake.id,
+        wakeSeq: "1",
+      },
+      boundUserId: "member_123",
+    });
+    expect(readDispatchedEventIds(fetchMock)).toEqual([
+      "evt_replacement_pending_b",
+    ]);
+    await expect(readPendingCommit.call(stateStore)).resolves.toMatchObject({
+      eventId: "evt_replacement_pending_b",
+      wake: expect.objectContaining({
+        eventId: "evt_replacement_pending_b",
+        seq: "1",
+      }),
     });
   });
 
@@ -2801,7 +3399,10 @@ function resolveTestWakeEventId(input: {
 async function createCommittedRunnerSuccessResponse(input: {
   init?: RequestInit;
 }): Promise<Response> {
-  const requestBody = JSON.parse(String(input.init?.body));
+  const requestBody = parseJsonBody(input.init?.body);
+  if (requestBody === null) {
+    return Response.json({ ok: true });
+  }
   const request = maybeReadRunnerJobRequest(requestBody);
 
   if (!request) {
@@ -2863,7 +3464,10 @@ async function createCompletedRunnerSuccessResponse(input: {
   init?: RequestInit;
   omitPhase?: boolean;
 }): Promise<Response> {
-  const requestBody = JSON.parse(String(input.init?.body));
+  const requestBody = parseJsonBody(input.init?.body);
+  if (requestBody === null) {
+    return Response.json({ ok: true });
+  }
   const request = readRunnerJobRequest(requestBody);
 
   return new Response(JSON.stringify({
@@ -2884,11 +3488,23 @@ async function createCompletedRunnerSuccessResponse(input: {
 
 function readDispatchedEventIds(fetchMock: ReturnType<typeof vi.fn>): string[] {
   return fetchMock.mock.calls.flatMap(([, init]) => {
-    const body = typeof init?.body === "string" ? init.body : "";
-    const request = maybeReadRunnerJobRequest(JSON.parse(body));
+    const requestBody = parseJsonBody(init?.body);
+    const request = requestBody ? maybeReadRunnerJobRequest(requestBody) : null;
 
     return !request || request.resume ? [] : [request.wake.eventId];
   });
+}
+
+function parseJsonBody(body: RequestInit["body"] | null | undefined): unknown | null {
+  if (typeof body !== "string" || body.length === 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
 }
 
 function readDispatchEventIdsFromSpy(
@@ -2927,6 +3543,7 @@ function maybeReadRunnerJobRequest(value: unknown): ReturnType<typeof readRunner
 }
 
 function readRunnerJobRequest(value: unknown): {
+  currentBundleRef?: unknown;
   wake: {
     userId: string;
     eventId: string;
@@ -2964,6 +3581,9 @@ function readRunnerJobRequest(value: unknown): {
   }
 
   return {
+    currentBundleRef: "currentBundleRef" in requestRecord
+      ? requestRecord.currentBundleRef
+      : undefined,
     resume: requestRecord.resume,
     wake: {
       eventId: wake.eventId,

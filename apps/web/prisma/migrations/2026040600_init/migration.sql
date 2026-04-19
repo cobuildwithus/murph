@@ -195,6 +195,7 @@ CREATE TABLE "hosted_member_routing" (
     "pending_linq_chat_id_encrypted" TEXT,
     "pending_linq_recipient_phone_lookup_key" TEXT,
     "pending_linq_recipient_phone_encrypted" TEXT,
+    "reply_alias_lookup_key" TEXT,
     "telegram_user_lookup_key" TEXT,
     "telegram_user_id_encrypted" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -230,6 +231,7 @@ CREATE TABLE "hosted_execution_cursor" (
     "user_id" TEXT NOT NULL,
     "next_seq" BIGINT NOT NULL DEFAULT 1,
     "committed_seq" BIGINT NOT NULL DEFAULT 0,
+    "assistant_next_wake_at" TIMESTAMP(3),
     "snapshot_ref" JSONB,
     "version" BIGINT NOT NULL DEFAULT 0,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -551,6 +553,9 @@ CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key" ON "hosted_
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_routing_pending_linq_chat_lookup_key_key" ON "hosted_member_routing"("pending_linq_chat_lookup_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_routing_reply_alias_lookup_key_key" ON "hosted_member_routing"("reply_alias_lookup_key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_lookup_key_key" ON "hosted_member_routing"("telegram_user_lookup_key");
