@@ -15,8 +15,8 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  isLocalLoopbackProxyProtocol,
   proxyLocalLoopbackRequest,
-  readLocalLoopbackProxyBaseUrl,
 } from "../src/local-loopback-proxy.ts";
 
 describe("proxyLocalLoopbackRequest", () => {
@@ -58,9 +58,9 @@ describe("proxyLocalLoopbackRequest", () => {
     expect(String(startLog?.details?.upstreamPathname)).not.toContain("member_123");
   });
 
-  it("accepts IPv6 loopback proxy base URLs", () => {
-    expect(readLocalLoopbackProxyBaseUrl("http://[::1]:8788")).toEqual(
-      new URL("http://[::1]:8788/"),
-    );
+  it("only accepts http(s) protocols for the surviving local internal proxy shim", () => {
+    expect(isLocalLoopbackProxyProtocol("http:")).toBe(true);
+    expect(isLocalLoopbackProxyProtocol("https:")).toBe(true);
+    expect(isLocalLoopbackProxyProtocol("ws:")).toBe(false);
   });
 });

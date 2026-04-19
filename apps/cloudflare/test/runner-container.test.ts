@@ -125,7 +125,7 @@ describe("RunnerContainer", () => {
     expect(outboundAssignments).toEqual([expectedOutboundAssignments]);
   });
 
-  it("forwards protected hosted execution config into the container supervisor env without reviving deprecated proxy vars", async () => {
+  it("starts the container without forwarding hosted supervisor secrets", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
@@ -134,6 +134,9 @@ describe("RunnerContainer", () => {
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
+        HOSTED_WAKE_ENCRYPTION_KEY: "hosted-wake-key",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "web:v3",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
       },
     });
@@ -147,16 +150,10 @@ describe("RunnerContainer", () => {
     });
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toMatchObject({
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toEqual({
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
+      PORT: "8080",
     });
-    expect(
-      startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars
-        ?.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL,
-    ).toBeUndefined();
   });
 
   it("passes the local internal bridge config through each runner request when configured", async () => {
@@ -216,12 +213,8 @@ describe("RunnerContainer", () => {
     ]);
   });
 
-  it("does not route generic loopback hosts through the outbound handler even when local loopback proxying is enabled", async () => {
-    const { container, setOutboundByHosts } = createContainerDouble({
-      env: {
-        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
-      },
-    });
+  it("does not route generic loopback hosts through the outbound handler", async () => {
+    const { container, setOutboundByHosts } = createContainerDouble();
 
     await expect(container.invoke({
       job: {
@@ -808,6 +801,9 @@ describe("RunnerContainer", () => {
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
       async destroyInstance() {},
       invoke,
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
     }));
 
     await invokeHostedExecutionContainerRunner({
@@ -916,6 +912,7 @@ describe("RunnerContainer", () => {
           return {
             destroyInstance,
             invoke: vi.fn(async () => createRunnerResult()),
+            ownsInternalWorkerProxyToken: vi.fn(async () => false),
           } satisfies HostedExecutionContainerStubLike;
         },
       },

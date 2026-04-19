@@ -70,21 +70,22 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     expect(processKillSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
   });
 
-  it("passes protected hosted execution worker secrets into the isolated child env", async () => {
+  it("only passes explicit forwarded env into the isolated child env", async () => {
     vi.stubEnv("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK", '{"kty":"EC"}');
-    vi.stubEnv("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL", "http://127.0.0.1:8787");
     vi.stubEnv("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY", "platform-key");
-    vi.stubEnv("HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG", "cobuildwithus");
     vi.stubEnv("HOSTED_WAKE_ENCRYPTION_KEY", Buffer.alloc(32, 5).toString("base64url"));
+    vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK", '{"kty":"EC","d":"secret"}');
+    vi.stubEnv("HOSTED_WEB_BASE_URL", "https://ambient.example.test");
     const module = await import("../src/node-runner-isolated.ts");
 
     spawnMock.mockImplementation((_command, _args, options) => {
       expect(options?.env).toMatchObject({
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
+        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+        OPENAI_API_KEY: "openai-key",
       });
+      expect(options?.env?.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY).toBeUndefined();
       expect(options?.env?.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
       expect(options?.env?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
 
@@ -127,7 +128,11 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
           }),
         },
         runtime: {
-          forwardedEnv: {},
+          forwardedEnv: {
+            HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+            HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+            OPENAI_API_KEY: "openai-key",
+          },
           userEnv: {},
         },
       },

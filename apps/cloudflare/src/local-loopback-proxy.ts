@@ -6,30 +6,12 @@ import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
 import { HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER } from "./internal-hosts.ts";
 
-const LOCAL_LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1"]);
-
 interface LocalLoopbackProxyRequestInit extends RequestInit {
   duplex?: "half";
 }
 
-export function isLocalLoopbackProxyHostname(value: string): boolean {
-  return LOCAL_LOOPBACK_HOSTNAMES.has(normalizeLocalLoopbackHostname(value));
-}
-
 export function isLocalLoopbackProxyProtocol(value: string): boolean {
   return value === "http:" || value === "https:";
-}
-
-export function readLocalLoopbackProxyBaseUrl(value: string): URL | null {
-  try {
-    const url = new URL(value);
-    if (!isLocalLoopbackProxyProtocol(url.protocol) || !isLocalLoopbackProxyHostname(url.hostname)) {
-      return null;
-    }
-    return new URL(`${url.origin}${url.pathname.replace(/\/?$/u, "/")}`);
-  } catch {
-    return null;
-  }
 }
 
 export async function proxyLocalLoopbackRequest(input: {
@@ -149,10 +131,7 @@ function shouldStripLocalLoopbackProxyHeader(name: string): boolean {
 }
 
 function redactTokenizedLocalProxyPathname(pathname: string): string {
-  const redacted =
-    redactLocalInternalProxyPathname(pathname)
-    ?? redactProxyPathToken(pathname, "/__murph/local-loopback-proxy/");
-  return redacted ?? pathname;
+  return redactLocalInternalProxyPathname(pathname) ?? pathname;
 }
 
 function redactLocalInternalProxyPathname(pathname: string): string | null {
@@ -162,28 +141,4 @@ function redactLocalInternalProxyPathname(pathname: string): string | null {
   }
 
   return `/__murph/local-internal-proxy/users/<redacted>${match.groups.suffix ?? ""}`;
-}
-
-function redactProxyPathToken(pathname: string, prefix: string): string | null {
-  if (!pathname.startsWith(prefix)) {
-    return null;
-  }
-
-  const suffix = pathname.slice(prefix.length);
-  if (suffix.length === 0) {
-    return `${prefix}<redacted>`;
-  }
-
-  const separatorIndex = suffix.indexOf("/");
-  if (separatorIndex < 0) {
-    return `${prefix}<redacted>`;
-  }
-
-  return `${prefix}<redacted>${suffix.slice(separatorIndex)}`;
-}
-
-function normalizeLocalLoopbackHostname(value: string): string {
-  return value.startsWith("[") && value.endsWith("]")
-    ? value.slice(1, -1)
-    : value;
 }

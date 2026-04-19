@@ -20,10 +20,7 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
-  isLocalLoopbackProxyHostname,
   isLocalLoopbackProxyProtocol,
-  proxyLocalLoopbackRequest,
-  readLocalLoopbackProxyBaseUrl,
 } from "./local-loopback-proxy.ts";
 import {
   verifyHostedExecutionVercelOidcRequest,
@@ -137,14 +134,6 @@ export default {
       );
       if (localInternalProxyResponse) {
         return localInternalProxyResponse;
-      }
-      const localLoopbackProxyResponse = await maybeHandleLocalLoopbackProxyRoute(
-        request,
-        url,
-        env,
-      );
-      if (localLoopbackProxyResponse) {
-        return localLoopbackProxyResponse;
       }
       const publicResponse = await handleDeclarativeRoute(workerPublicRoutes, { request, url });
       if (publicResponse) {
@@ -503,56 +492,6 @@ async function ownsLocalInternalProxyTokenForUser(input: {
   return typeof stub.ownsInternalWorkerProxyToken === "function"
     ? await stub.ownsInternalWorkerProxyToken({ token: input.token })
     : false;
-}
-
-async function maybeHandleLocalLoopbackProxyRoute(
-  request: Request,
-  url: URL,
-  env: WorkerEnvironmentSource,
-): Promise<Response | null> {
-  const configuredToken = readLocalLoopbackProxyToken(env);
-  if (!configuredToken) {
-    return null;
-  }
-
-  const match = /^\/__murph\/local-loopback-proxy\/(?<token>[^/]+)\/(?<origin>[^/]+)(?<path>\/.*)?$/u.exec(
-    url.pathname,
-  );
-  if (!match?.groups) {
-    return null;
-  }
-
-  if (match.groups.token !== configuredToken) {
-    return unauthorized();
-  }
-
-  const origin = decodeRouteParam(match.groups.origin);
-  const upstreamBaseUrl = readLocalLoopbackProxyBaseUrl(origin);
-  if (!upstreamBaseUrl) {
-    return json({
-      error: "Local loopback proxy only supports loopback http(s) targets.",
-    }, 400);
-  }
-
-  const upstreamUrl = new URL(
-    (match.groups.path ?? "/").replace(/^\//u, ""),
-    upstreamBaseUrl,
-  );
-  upstreamUrl.search = url.search;
-  return await proxyLocalLoopbackRequest({
-    completedMessage: "Hosted worker local loopback proxy request completed.",
-    component: "worker",
-    failedMessage: "Hosted worker local loopback proxy request failed.",
-    phase: "wake.running",
-    request,
-    startMessage: "Hosted worker local loopback proxy request started.",
-    upstreamUrl,
-  });
-}
-
-function readLocalLoopbackProxyToken(env: WorkerEnvironmentSource): string | null {
-  const value = env.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN;
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function isTrustedLocalHostedInternalProxyIngress(

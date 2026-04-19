@@ -88,14 +88,18 @@ export function createHostedExecutionJobRunner(
   ): Promise<HostedAssistantRuntimeJobResult> {
     onBeforeRun?.();
     const runtime = buildRuntime(input.runtime ?? {});
-    const environment = readEnvironment();
+    const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
+    const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
+    const directHostedEnvironment = internalWorkerProxyToken
+      ? null
+      : readEnvironment();
     const runtimePlatform = buildRuntimePlatform({
       boundUserId: input.request.wake.userId,
       commitTimeoutMs: runtime.commitTimeoutMs,
-      internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
-      localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: environment.hostedWebBaseUrl,
+      internalWorkerProxyToken,
+      localInternalProxyBaseUrl,
+      webCallbackSigning: directHostedEnvironment?.webCallbackSigning ?? null,
+      webControlBaseUrl: directHostedEnvironment?.hostedWebBaseUrl ?? null,
     });
 
     if (runMode === "in-process") {
