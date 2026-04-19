@@ -203,7 +203,7 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
-    sourceThreadId: normalizeNullableRouteString(object.sourceThreadId),
+    threadId: normalizeNullableRouteString(object.threadId),
   };
 }
 
@@ -283,7 +283,7 @@ function buildAutomationRouteFrontmatter(route: AutomationRoute): FrontmatterObj
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId,
     participantId: route.participantId,
-    sourceThreadId: route.sourceThreadId,
+    threadId: route.threadId,
   };
 }
 
@@ -420,7 +420,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
       deliveryTarget: null,
       identityId: null,
       participantId: null,
-      sourceThreadId: null,
+      threadId: null,
     },
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",

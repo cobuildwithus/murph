@@ -80,7 +80,7 @@ export const automationRouteSchema = z
     deliveryTarget: z.string().min(1).nullable(),
     identityId: z.string().min(1).nullable(),
     participantId: z.string().min(1).nullable(),
-    sourceThreadId: z.string().min(1).nullable(),
+    threadId: z.string().min(1).nullable(),
   })
   .strict();
 

@@ -30,7 +30,7 @@ describe("automation contract seams", () => {
         deliveryTarget: "thread_123",
         identityId: null,
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
       },
       schedule: {
         kind: "dailyLocal",

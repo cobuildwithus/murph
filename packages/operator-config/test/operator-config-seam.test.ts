@@ -295,7 +295,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
       deliveryTarget: ' chat-123 ',
       identityId: ' identity-1 ',
       participantId: ' person-1 ',
-      sourceThreadId: ' source-1 ',
+      threadId: ' source-1 ',
     },
     homeDirectory,
   )
@@ -305,7 +305,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
       deliveryTarget: 'person@example.test',
       identityId: null,
       participantId: null,
-      sourceThreadId: null,
+      threadId: null,
     },
     homeDirectory,
   )
@@ -320,7 +320,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
     deliveryTarget: 'chat-123',
     identityId: 'identity-1',
     participantId: 'person-1',
-    sourceThreadId: 'source-1',
+    threadId: 'source-1',
   })
   assert.equal(await resolveAssistantSelfDeliveryTarget('   ', homeDirectory), null)
 
@@ -331,7 +331,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
         deliveryTarget: '  explicit-target  ',
         identityId: '  ',
         participantId: undefined,
-        sourceThreadId: null,
+        threadId: null,
       },
       undefined,
       homeDirectory,
@@ -341,7 +341,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
       deliveryTarget: 'explicit-target',
       identityId: 'identity-1',
       participantId: 'person-1',
-      sourceThreadId: 'source-1',
+      threadId: 'source-1',
     },
   )
 
@@ -360,7 +360,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
         deliveryTarget: null,
         identityId: null,
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
       },
       {
         allowSingleSavedTargetFallback: true,
@@ -372,7 +372,7 @@ test('operator config saves, sorts, resolves, and clears assistant self-delivery
       deliveryTarget: 'person@example.test',
       identityId: null,
       participantId: null,
-      sourceThreadId: null,
+      threadId: null,
     },
   )
   assert.deepEqual(await clearAssistantSelfDeliveryTargets(undefined, homeDirectory), ['email'])
@@ -389,7 +389,7 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
         deliveryTarget: '  explicit-target  ',
         identityId: ' identity-2 ',
         participantId: ' participant-2 ',
-        sourceThreadId: ' source-2 ',
+        threadId: ' source-2 ',
       },
       {
         allowSingleSavedTargetFallback: false,
@@ -401,7 +401,7 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
       deliveryTarget: 'explicit-target',
       identityId: 'identity-2',
       participantId: 'participant-2',
-      sourceThreadId: 'source-2',
+      threadId: 'source-2',
     },
   )
   assert.deepEqual(await clearAssistantSelfDeliveryTargets(undefined, homeDirectory), [])
@@ -414,7 +414,7 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
           deliveryTarget: 'chat-123',
           identityId: null,
           participantId: null,
-          sourceThreadId: null,
+          threadId: null,
         },
         homeDirectory,
     ),
@@ -470,7 +470,7 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
             deliveryTarget: 'chat-123',
             identityId: 'identity-3',
             participantId: null,
-            sourceThreadId: null,
+            threadId: null,
           },
         },
       },
@@ -527,7 +527,7 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
         deliveryTarget: 'chat-123',
         identityId: 'identity-3',
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
       },
     },
   })
