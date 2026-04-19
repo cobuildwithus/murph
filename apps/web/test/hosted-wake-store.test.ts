@@ -438,7 +438,7 @@ describe("hosted wake store", () => {
     })).resolves.toBe(true);
   });
 
-  it("binds quarantine to the fetched wake identity before cursor advancement", async () => {
+  it("rolls the cursor fence when quarantine mutates a wake and requires a fresh quarantine receipt before commit", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
         committedSeq: 1n,
@@ -455,15 +455,17 @@ describe("hosted wake store", () => {
       ],
     });
 
+    const initialFetchProof = issueHostedWakeFetchProof({
+      fetchedCommittedSeq: 1n,
+      fetchedCursorVersion: 4n,
+      userId: "member_123",
+      wakeEventId: "assistant.cron.tick:2",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    });
+
     await expect(quarantineHostedWakeTx({
-      fetchProof: issueHostedWakeFetchProof({
-        fetchedCommittedSeq: 1n,
-        fetchedCursorVersion: 4n,
-        userId: "member_123",
-        wakeEventId: "assistant.cron.tick:2",
-        wakeId: "wake_1",
-        wakeSeq: 2n,
-      }),
+      fetchProof: initialFetchProof,
       quarantineCode: "invalid-wake-payload",
       tx,
       userId: "member_123",
@@ -471,9 +473,83 @@ describe("hosted wake store", () => {
       wakeSeq: 2n,
     })).resolves.toBe(true);
 
+    await expect(readHostedExecutionCursor({
+      prisma: tx,
+      userId: "member_123",
+    })).resolves.toEqual(expect.objectContaining({
+      committedSeq: "1",
+      nextSeq: "3",
+      userId: "member_123",
+      version: "5",
+    }));
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: initialFetchProof,
+      state: "quarantined",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).rejects.toThrow(/stale/i);
+
     await expect(commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 4n,
+      snapshotRef: makeSnapshotRef("wake_2_stale_version"),
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "1",
+        nextSeq: "3",
+        userId: "member_123",
+        version: "5",
+      }),
+    });
+
+    await expect(commitHostedExecutionCursorTx({
+      committedSeq: 2n,
+      expectedVersion: 5n,
+      snapshotRef: makeSnapshotRef("wake_2_without_refetch"),
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "1",
+        nextSeq: "3",
+        userId: "member_123",
+        version: "5",
+      }),
+    });
+
+    const latestFetch = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+    const latestWake = latestFetch.wakes[0];
+
+    expect(latestFetch.cursor.version).toBe("5");
+    expect(latestWake).toEqual(expect.objectContaining({
+      id: "wake_1",
+      quarantineCode: "invalid-wake-payload",
+      quarantinedAt: expect.any(String),
+      seq: "2",
+    }));
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: latestWake!.fetchProof,
+      state: "quarantined",
+      tx,
+      userId: "member_123",
+      wakeId: latestWake!.id,
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
+
+    await expect(commitHostedExecutionCursorTx({
+      committedSeq: 2n,
+      expectedVersion: 5n,
       snapshotRef: makeSnapshotRef("wake_2"),
       tx,
       userId: "member_123",
@@ -482,8 +558,9 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "3",
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
-        version: "5",
+        version: "6",
       }),
     });
   });
