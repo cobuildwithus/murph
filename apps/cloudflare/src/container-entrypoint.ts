@@ -178,9 +178,7 @@ export async function startHostedContainerEntrypoint(input: {
           phase: "failed",
         });
         const classified = classifyRequestDecodeError(error);
-        writeJsonResponse(response, classified.statusCode, {
-          error: classified.message,
-        });
+        writeJsonResponse(response, classified.statusCode, classified.payload);
         return;
       }
 
@@ -578,25 +576,43 @@ export function classifyRunnerJobError(error: unknown): {
 }
 
 function classifyRequestDecodeError(error: unknown): {
-  message: string;
+  payload: Record<string, unknown>;
   statusCode: number;
 } {
+  const details = buildHostedExecutionSafeErrorDetails(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
+
   if (error instanceof SyntaxError) {
     return {
-      message: "Invalid JSON.",
+      payload: {
+        code: deriveHostedExecutionErrorCode(error),
+        ...(details ? { details } : {}),
+        error: "Invalid JSON.",
+        ...(errorName ? { errorName } : {}),
+      },
       statusCode: 400,
     };
   }
 
   if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     return {
-      message: "Invalid request.",
+      payload: {
+        code: deriveHostedExecutionErrorCode(error),
+        ...(details ? { details } : {}),
+        error: "Invalid request.",
+        ...(errorName ? { errorName } : {}),
+      },
       statusCode: 400,
     };
   }
 
   return {
-    message: "Internal error.",
+    payload: {
+      code: deriveHostedExecutionErrorCode(error),
+      ...(details ? { details } : {}),
+      error: "Internal error.",
+      ...(errorName ? { errorName } : {}),
+    },
     statusCode: 500,
   };
 }

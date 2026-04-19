@@ -487,6 +487,55 @@ describe("RunnerContainer", () => {
     expect(String(thrown)).not.toContain("secret stack");
   });
 
+  it("preserves invalid-request diagnostics from runner shell responses", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "type_error",
+          details: {
+            errorDetail: "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
+          },
+          error: "Invalid request.",
+          errorName: "TypeError",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 400,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_invalid_request_diagnostics"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      code: "type_error",
+      details: {
+        errorDetail:
+          "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
+      },
+      message: "Invalid request.",
+      name: "TypeError",
+      status: 400,
+      statusCode: 400,
+    });
+  });
+
   it("keeps the canonical internal HTTP run route disabled", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
