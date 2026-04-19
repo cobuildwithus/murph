@@ -10,6 +10,7 @@ import {
   appendHostedCoalescingWakeTx,
   appendHostedOrderedWakeTx,
   commitHostedExecutionCursorTx,
+  countPendingHostedWakes,
   listHostedWakesAfterSeq,
   projectHostedWakeRecord,
   readLatestHostedWakeLifecycleByKind,
@@ -826,6 +827,15 @@ describe("hosted wake store", () => {
         version: "8",
       }),
     });
+    await expect(countPendingHostedWakes({
+      prisma: tx,
+      userId: "member_123",
+    })).resolves.toBe(1);
+    await expect(readHostedExecutionWakeLifecycleStateTx({
+      eventId: "second",
+      tx,
+      userId: "member_123",
+    })).resolves.toBe("queued");
 
     const latestFetch = await listHostedWakesAfterSeq({
       prisma: tx,
@@ -849,6 +859,15 @@ describe("hosted wake store", () => {
       wakeId: latestWake!.id,
       wakeSeq: 1n,
     })).resolves.toBe(true);
+    await expect(countPendingHostedWakes({
+      prisma: tx,
+      userId: "member_123",
+    })).resolves.toBe(0);
+    await expect(readHostedExecutionWakeLifecycleStateTx({
+      eventId: "second",
+      tx,
+      userId: "member_123",
+    })).resolves.toBe("completed");
 
     const latestCommit = await commitHostedExecutionCursorTx({
       committedSeq: 1n,
@@ -1581,18 +1600,42 @@ function createHostedWakeStoreHarness(input?: {
           wakeId: { in: string[] };
         };
         select: {
-          state: true;
-          wakeId: true;
+          fetchedCommittedSeq?: true;
+          fetchedCursorVersion?: true;
+          state?: true;
+          userId?: true;
+          wakeId?: true;
+          wakeSeq?: true;
         };
-      }): Array<Pick<TestWakeTerminalState, "state" | "wakeId">> {
+      }): Array<Partial<TestWakeTerminalState>> {
         return state.wakeTerminals
           .filter((terminal) =>
             terminal.userId === args.where.userId
             && args.where.wakeId.in.includes(terminal.wakeId))
-          .map((terminal) => ({
-            state: terminal.state,
-            wakeId: terminal.wakeId,
-          }));
+          .map((terminal) => {
+            const selected: Partial<TestWakeTerminalState> = {};
+
+            if (args.select.fetchedCommittedSeq) {
+              selected.fetchedCommittedSeq = terminal.fetchedCommittedSeq;
+            }
+            if (args.select.fetchedCursorVersion) {
+              selected.fetchedCursorVersion = terminal.fetchedCursorVersion;
+            }
+            if (args.select.state) {
+              selected.state = terminal.state;
+            }
+            if (args.select.userId) {
+              selected.userId = terminal.userId;
+            }
+            if (args.select.wakeId) {
+              selected.wakeId = terminal.wakeId;
+            }
+            if (args.select.wakeSeq) {
+              selected.wakeSeq = terminal.wakeSeq;
+            }
+
+            return selected;
+          });
       },
     },
     hostedWake: {
@@ -1725,6 +1768,12 @@ function createHostedWakeStoreHarness(input?: {
       },
       findMany(args: {
         orderBy?: { seq: "asc" };
+        select?: {
+          id?: true;
+          quarantinedAt?: true;
+          seq?: true;
+          userId?: true;
+        };
         take?: number;
         where:
           | {
@@ -1737,7 +1786,7 @@ function createHostedWakeStoreHarness(input?: {
               startsWith: string;
             };
           };
-      }): TestWakeState[] {
+      }): Array<TestWakeState | Partial<TestWakeState>> {
         const where = args.where;
 
         if ("dedupeKey" in where) {
@@ -1755,7 +1804,27 @@ function createHostedWakeStoreHarness(input?: {
             && wake.seq > where.seq.gt)
           .sort((left, right) => Number(left.seq - right.seq))
           .slice(0, args.take)
-          .map((wake) => cloneWake(wake));
+          .map((wake) => {
+            if (!args.select) {
+              return cloneWake(wake);
+            }
+
+            const selected: Partial<TestWakeState> = {};
+            if (args.select.id) {
+              selected.id = wake.id;
+            }
+            if (args.select.quarantinedAt) {
+              selected.quarantinedAt = wake.quarantinedAt;
+            }
+            if (args.select.seq) {
+              selected.seq = wake.seq;
+            }
+            if (args.select.userId) {
+              selected.userId = wake.userId;
+            }
+
+            return selected;
+          });
       },
       findUnique(args: {
         where:

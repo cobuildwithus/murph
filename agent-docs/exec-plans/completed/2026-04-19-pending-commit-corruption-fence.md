@@ -26,3 +26,6 @@ Preserve replay and overwrite fencing for Cloudflare hosted wakes by treating a 
 ## Notes
 
 - The required proof is explicit: seed invalid `pending_commit_json`, show the old path treated it as absent, and keep the new path fail-closed for both `readPendingCommit(...)`-driven replay and `writePendingCommit(...)` overwrite attempts.
+Status: completed
+Updated: 2026-04-19
+Completed: 2026-04-19

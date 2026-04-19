@@ -14,6 +14,7 @@ import {
 } from "./store-data";
 import {
   hydrateHostedWakeRecordsTx,
+  isCurrentHostedWakeTerminalReceipt,
   projectHostedExecutionCursorRecord,
   resolveHostedWakeLifecycleStateTx,
 } from "./store-projections";
@@ -82,6 +83,8 @@ export async function countPendingHostedWakes(input: {
     select: {
       id: true,
       quarantinedAt: true,
+      seq: true,
+      userId: true,
     },
   });
 
@@ -97,13 +100,29 @@ export async function countPendingHostedWakes(input: {
       },
     },
     select: {
+      fetchedCommittedSeq: true,
+      fetchedCursorVersion: true,
       state: true,
+      userId: true,
       wakeId: true,
+      wakeSeq: true,
     },
   });
+  const wakesById = new Map(wakes.map((wake) => [wake.id, wake] as const));
   const terminalWakeIds = new Set(
     terminals
-      .filter((terminal) => terminal.state === "completed" || terminal.state === "replaced")
+      .filter((terminal) => {
+        const wake = wakesById.get(terminal.wakeId);
+        return Boolean(
+          wake
+            && (terminal.state === "completed" || terminal.state === "replaced")
+            && isCurrentHostedWakeTerminalReceipt({
+              cursor,
+              receipt: terminal,
+              wake,
+            }),
+        );
+      })
       .map((terminal) => terminal.wakeId),
   );
 

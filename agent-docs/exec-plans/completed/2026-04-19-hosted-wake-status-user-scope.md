@@ -21,3 +21,6 @@ Fail closed for hosted wake event-id lookups by requiring the bound `userId` on 
 - `pnpm typecheck`
 - `pnpm test:diff apps/web`
 - Direct proof from focused hosted wake route/store tests that a callback bound to user A querying user B's `eventId` gets no lifecycle state.
+Status: completed
+Updated: 2026-04-19
+Completed: 2026-04-19

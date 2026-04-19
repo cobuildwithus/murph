@@ -59,6 +59,7 @@ export interface HostedWakePayloadRow {
 export interface HostedWakeTerminalRow {
   createdAt: Date;
   fetchedCommittedSeq: bigint;
+  fetchedCursorVersion: bigint;
   state: string;
   updatedAt: Date;
   userId: string;

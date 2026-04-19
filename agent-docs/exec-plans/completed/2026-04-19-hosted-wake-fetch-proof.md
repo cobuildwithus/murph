@@ -31,3 +31,6 @@ Move hosted wake advancement correctness fully back under `apps/web` ownership b
 
 - The architectural target is stateless per-wake fetch proof verification in web, not a second persisted queue lease.
 - The proof must bind the fetched wake identity tightly enough that Cloudflare cannot advance by supplying only `committedSeq`.
+Status: completed
+Updated: 2026-04-19
+Completed: 2026-04-19
