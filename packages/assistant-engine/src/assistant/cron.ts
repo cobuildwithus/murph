@@ -1,8 +1,4 @@
-import {
-  resolveSystemTimeZone,
-  type FoodNutrition,
-  type MealNutrition,
-} from '@murphai/contracts'
+import { resolveSystemTimeZone } from '@murphai/contracts'
 import { loadVault, upsertAutomation } from '@murphai/core'
 import {
   listAutomations as listCanonicalAutomations,
@@ -24,15 +20,10 @@ import {
   type AssistantCronTrigger,
   type AssistantBindingDelivery,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
 import {
-  buildDailyFoodCronJobId,
   buildDailyFoodCronJobName,
   buildDailyFoodCronPrompt,
-  buildDailyFoodSchedule,
-  renderAutoLoggedFoodMealNote,
 } from '@murphai/vault-usecases/records'
-import { loadImporterRuntime } from '@murphai/vault-usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { withAssistantCronWriteLock } from './cron/locking.ts'
 import {
@@ -74,6 +65,12 @@ import {
   type AssistantCronCanonicalRuntimeRecord,
   type AssistantCronCanonicalRuntimeState,
 } from './cron/runtime-state.ts'
+import {
+  clearCanonicalFoodAutoLogSchedule,
+  listCanonicalFoodAutoLogRecords,
+  runFoodAutoLogCronJob,
+  type CanonicalFoodAssistantCronJobRecord,
+} from './cron/food-auto-log.ts'
 import { sendAssistantNotificationLocal } from '../assistant-service.ts'
 import { getAssistantChannelAdapter } from './channel-adapters.ts'
 import { resolveAssistantBindingDelivery } from './bindings.ts'
@@ -91,67 +88,6 @@ export type { AssistantCronTargetSnapshot } from '@murphai/operator-config/assis
 const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
-
-interface FoodAutoLogRecord {
-  foodId: string
-  attachedProtocolIds?: string[]
-  aliases?: string[]
-  slug?: string
-  brand?: string
-  kind?: string
-  location?: string
-  status?: string
-  title: string
-  autoLogDaily?: {
-    time: string
-  } | null
-  summary?: string
-  tags?: string[]
-  vendor?: string
-  serving?: string
-  ingredients?: string[]
-  note?: string
-  nutrition?: FoodNutrition | null
-}
-
-interface FoodAutoLogCoreRuntime {
-  loadVault(input: {
-    vaultRoot: string
-  }): Promise<{
-    metadata: {
-      timezone?: string | null
-    }
-  }>
-  listFoods(vaultRoot: string): Promise<FoodAutoLogRecord[]>
-  readFood(input: {
-    vaultRoot: string
-    foodId?: string
-    slug?: string
-  }): Promise<FoodAutoLogRecord>
-  upsertFood(input: {
-    vaultRoot: string
-    foodId?: string
-    slug?: string
-    allowSlugRename?: boolean
-    title?: string
-    status?: string
-    summary?: string
-    kind?: string
-    brand?: string
-    vendor?: string
-    location?: string
-    serving?: string
-    nutrition?: FoodNutrition | null
-    aliases?: string[]
-    ingredients?: string[]
-    tags?: string[]
-    note?: string
-    attachedProtocolIds?: string[]
-    autoLogDaily?: {
-      time: string
-    } | null
-  }): Promise<unknown>
-}
 
 export interface AddAssistantCronJobInput extends AssistantCronTargetInput {
   enabled?: boolean
@@ -250,16 +186,6 @@ interface CanonicalAutomationAssistantCronJobRecord {
   timeZone: string | null
   title: string
   updatedAt: string
-}
-
-interface CanonicalFoodAssistantCronJobRecord {
-  kind: 'foodAutoLog'
-  foodId: string
-  jobId: string
-  schedule: Extract<AssistantCronSchedule, { kind: 'dailyLocal' }>
-  slug: string
-  timeZone: string
-  title: string
 }
 
 type CanonicalAssistantCronJobRecord =
@@ -546,39 +472,6 @@ function requireCanonicalAssistantCronRecord(
   return normalized
 }
 
-async function listCanonicalFoodAutoLogRecords(
-  vault: string,
-  timeZone: string,
-): Promise<CanonicalFoodAssistantCronJobRecord[]> {
-  const core = await loadFoodAutoLogCoreRuntime()
-  if (typeof core.listFoods !== 'function') {
-    return []
-  }
-
-  const foods = await core.listFoods(vault)
-
-  return foods.flatMap((food) => {
-    const localTime = normalizeNullableString(food.autoLogDaily?.time)
-    const slug = normalizeNullableString(food.slug)
-    if (!localTime || !slug) {
-      return []
-    }
-
-    return [{
-      kind: 'foodAutoLog',
-      foodId: food.foodId,
-      jobId: buildDailyFoodCronJobId(food.foodId),
-      schedule: buildDailyFoodSchedule(localTime) as Extract<
-        AssistantCronSchedule,
-        { kind: 'dailyLocal' }
-      >,
-      slug,
-      timeZone,
-      title: food.title,
-    }]
-  })
-}
-
 function resolveCanonicalAssistantCronJobLookupKeys(
   record: CanonicalAssistantCronJobRecord,
 ): string[] {
@@ -619,14 +512,12 @@ function createInitialCanonicalRuntimeState(
 function resolveCanonicalRuntimeState(
   source: CanonicalAssistantCronJobRecord,
   store: Awaited<ReturnType<typeof readAssistantCronCanonicalRuntimeStore>>,
-  legacyLocalJob?: AssistantCronJob | null,
 ): AssistantCronCanonicalRuntimeRecord {
   return (
     findAssistantCronCanonicalRuntimeRecord(
       store,
       resolveCanonicalAssistantCronJobId(source),
     ) ??
-    migrateLegacyLocalFoodRuntimeState(source, legacyLocalJob) ??
     createInitialCanonicalRuntimeState(source, new Date().toISOString())
   )
 }
@@ -852,11 +743,7 @@ async function projectResolvedAssistantCronJob(
     )
   }
 
-  const legacyFoodJob =
-    source.kind === 'foodAutoLog'
-      ? tryResolveLocalAssistantCronFoodJobByFoodId(localStore, source.foodId)
-      : null
-  const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore, legacyFoodJob)
+  const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
 
   return {
     kind: 'canonical',
@@ -886,13 +773,6 @@ function tryResolveLocalAssistantCronJob(
   } catch {
     return null
   }
-}
-
-function tryResolveLocalAssistantCronFoodJobByFoodId(
-  store: Awaited<ReturnType<typeof readAssistantCronStore>>,
-  foodId: string,
-): AssistantCronJob | null {
-  return store.jobs.find((job) => job.foodAutoLog?.foodId === foodId) ?? null
 }
 
 function buildCanonicalFoodIdSet(
@@ -938,13 +818,7 @@ export async function listAssistantCronJobs(
     ...canonicalRecords.map((source) =>
       projectCanonicalAssistantCronJob({
         source,
-        runtimeState: resolveCanonicalRuntimeState(
-          source,
-          runtimeStore,
-          source.kind === 'foodAutoLog'
-            ? tryResolveLocalAssistantCronFoodJobByFoodId(localStore, source.foodId)
-            : null,
-        ),
+        runtimeState: resolveCanonicalRuntimeState(source, runtimeStore),
       }),
     ),
   ])
@@ -1600,13 +1474,7 @@ async function claimNextDueAssistantCronJob(
       canonicalFoodIds,
     )
     const canonicalEntries = canonicalRecords.map((source) => {
-      const runtimeState = resolveCanonicalRuntimeState(
-        source,
-        runtimeStore,
-        source.kind === 'foodAutoLog'
-          ? tryResolveLocalAssistantCronFoodJobByFoodId(store, source.foodId)
-          : null,
-      )
+      const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
       return {
         source,
         runtimeState,
@@ -2128,43 +1996,6 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
   }
 }
 
-function migrateLegacyLocalFoodRuntimeState(
-  source: CanonicalAssistantCronJobRecord,
-  legacyLocalJob: AssistantCronJob | null | undefined,
-): AssistantCronCanonicalRuntimeRecord | null {
-  if (source.kind !== 'foodAutoLog' || !legacyLocalJob) {
-    return null
-  }
-
-  return {
-    schema: 'murph.assistant-canonical-cron-runtime-state.v2',
-    jobId: source.jobId,
-    alias: null,
-    sessionId: null,
-    createdAt: legacyLocalJob.createdAt,
-    updatedAt: legacyLocalJob.updatedAt,
-    state: {
-      activatedAt: legacyLocalJob.createdAt,
-      pendingOccurrenceAt:
-        legacyLocalJob.state.runningAt !== null ||
-        legacyLocalJob.state.consecutiveFailures > 0
-          ? legacyLocalJob.state.nextRunAt
-          : null,
-      retryAfterAt:
-        legacyLocalJob.state.consecutiveFailures > 0
-          ? legacyLocalJob.state.nextRunAt
-          : null,
-      lastRunAt: legacyLocalJob.state.lastRunAt,
-      lastSucceededAt: legacyLocalJob.state.lastSucceededAt,
-      lastFailedAt: legacyLocalJob.state.lastFailedAt,
-      consecutiveFailures: legacyLocalJob.state.consecutiveFailures,
-      lastError: legacyLocalJob.state.lastError,
-      runningAt: legacyLocalJob.state.runningAt,
-      runningPid: legacyLocalJob.state.runningPid,
-    },
-  }
-}
-
 async function resolveAssistantCronScheduleForVault(
   vault: string,
   schedule: AssistantCronScheduleInput,
@@ -2193,42 +2024,6 @@ async function resolveAssistantCronDefaultTimeZone(vault: string): Promise<strin
   } catch {
     return resolveSystemTimeZone()
   }
-}
-
-async function loadFoodAutoLogCoreRuntime(): Promise<FoodAutoLogCoreRuntime> {
-  return loadRuntimeModule<FoodAutoLogCoreRuntime>('@murphai/core')
-}
-
-async function clearCanonicalFoodAutoLogSchedule(
-  vault: string,
-  foodId: string,
-): Promise<void> {
-  const core = await loadFoodAutoLogCoreRuntime()
-  const existing = await core.readFood({
-    vaultRoot: vault,
-    foodId,
-  })
-
-  await core.upsertFood({
-    vaultRoot: vault,
-    foodId: existing.foodId,
-    slug: existing.slug,
-    title: existing.title,
-    status: existing.status,
-    summary: existing.summary,
-    kind: existing.kind,
-    brand: existing.brand,
-    vendor: existing.vendor,
-    location: existing.location,
-    serving: existing.serving,
-    nutrition: existing.nutrition,
-    aliases: existing.aliases,
-    ingredients: existing.ingredients,
-    tags: existing.tags,
-    note: existing.note,
-    attachedProtocolIds: existing.attachedProtocolIds,
-    autoLogDaily: null,
-  })
 }
 
 function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean {
@@ -2281,53 +2076,4 @@ function truncateAssistantCronResponse(response: string | null): string | null {
   }
 
   return response.slice(0, ASSISTANT_CRON_MAX_RESPONSE_LENGTH)
-}
-
-async function runFoodAutoLogCronJob(input: {
-  vault: string
-  foodId: string
-}) {
-  const [core, importers] = await Promise.all([
-    loadRuntimeModule<FoodAutoLogCoreRuntime>('@murphai/core'),
-    loadImporterRuntime(),
-  ])
-  const food = await core.readFood({
-    vaultRoot: input.vault,
-    foodId: input.foodId,
-  })
-  const note = renderAutoLoggedFoodMealNote(food)
-  const mealInput: Parameters<typeof importers.addMeal>[0] = {
-    vaultRoot: input.vault,
-    occurredAt: new Date().toISOString(),
-    note,
-    source: 'derived',
-  }
-  const inheritedNutrition = buildInheritedMealNutrition(food.nutrition, food.title)
-  if (inheritedNutrition != null) {
-    mealInput.nutrition = inheritedNutrition
-  }
-  const result = await importers.addMeal(mealInput)
-
-  return `Auto-logged recurring food "${food.title}" as meal ${result.mealId}.`
-}
-
-function buildInheritedMealNutrition(
-  foodNutrition: FoodNutrition | null | undefined,
-  title: string,
-): MealNutrition | undefined {
-  const totals = foodNutrition?.perServing
-  if (!totals) {
-    return undefined
-  }
-
-  return {
-    totals,
-    provenance: {
-      source: 'inherited',
-      ...(foodNutrition.provenance?.confidence
-        ? { confidence: foodNutrition.provenance.confidence }
-        : {}),
-      sourceDetail: `Copied from saved food "${title}".`,
-    },
-  }
 }
