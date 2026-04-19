@@ -113,6 +113,7 @@ export async function readHostedShareWakeLifecycleState(input: {
   return readHostedWakeLifecycleState({
     eventId: input.eventId,
     prisma: input.prisma,
+    userId: input.memberId,
   });
 }
 
@@ -135,7 +136,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
       prisma: input.prisma,
       shareId: input.shareId,
     });
-  } else if (state === "poisoned" || state === null) {
+  } else if (state === "poisoned" || state === "replaced" || state === null) {
     await releaseHostedShareAcceptance({
       eventId: input.eventId,
       memberId: input.memberId,

@@ -42,6 +42,19 @@ describe("hosted share acceptance lifecycle", () => {
     expectReleased(prisma.share);
   });
 
+  it("releases a claimed share when the wake-backed lifecycle is replaced", async () => {
+    const prisma = createHostedSharePrisma();
+    mocks.readHostedWakeLifecycleState.mockResolvedValue("replaced");
+
+    await expect(reconcileHostedShareAcceptanceLifecycle({
+      eventId: "evt_share",
+      memberId: "member_123",
+      prisma: prisma as never,
+      shareId: "share_123",
+    })).resolves.toBe("replaced");
+    expectReleased(prisma.share);
+  });
+
   it("releases a claimed share when the canonical wake row is absent", async () => {
     const prisma = createHostedSharePrisma();
     mocks.readHostedWakeLifecycleState.mockResolvedValue(null);

@@ -79,6 +79,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberRouting",
   "HostedRevnetIssuance",
   "HostedWake",
+  "HostedWakeEvent",
   "HostedWakePayload",
 ]);
 
@@ -119,12 +120,28 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedWakeEventIdentityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604191700_hosted_wake_event_identity/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedWakeTerminalReceiptsMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604191830_hosted_wake_terminal_receipts/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "202604141730_hosted_member_identity_optional_phone",
       "202604161130_hosted_web_owner_slices",
       "202604161430_device_sync_web_owner_runtime_state",
       "202604171900_hosted_wake_baseline",
+      "202604191700_hosted_wake_event_identity",
+      "202604191830_hosted_wake_terminal_receipts",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
@@ -168,6 +185,18 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedWakeBaselineMigrationSql).toContain(
       'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
+    );
+    expect(hostedWakeEventIdentityMigrationSql).toContain(
+      'CREATE TABLE "hosted_wake_event"',
+    );
+    expect(hostedWakeEventIdentityMigrationSql).toContain(
+      'INSERT INTO "hosted_wake_event"',
+    );
+    expect(hostedWakeEventIdentityMigrationSql).toContain(
+      'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
+    );
+    expect(hostedWakeTerminalReceiptsMigrationSql).toContain(
+      'CREATE TABLE "hosted_wake_terminal"',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
