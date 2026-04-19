@@ -342,7 +342,7 @@ Do not move hosted dispatch ids, event kinds, or transport policy into `device-s
 
 **Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{callbacks,platform}.ts`, `apps/cloudflare/src/{runtime-platform,runner-outbound/results,side-effect-journal}.ts`
 
-`HostedAssistantDeliverySideEffect` and `HostedAssistantDeliveryRecord` were still carrying both `effectId` and `intentId` even though the shared owner forced those fields to be identical. The hosted runtime also still exposed both assistant-delivery-specific journal methods and a second generic `*SideEffect` API for the same journal, while the Cloudflare runner still accepted both `/effects/:effectId` and `/intents/:effectId` for the same resource.
+`HostedAssistantDeliverySideEffect` and `HostedAssistantDeliveryRecord` were still carrying both `effectId` and `intentId` even though the shared owner forced those fields to be identical. The hosted runtime also still exposed both assistant-delivery-specific journal methods and a second generic `*SideEffect` API for the same journal, while the Cloudflare runner still accepted two route aliases for the same resource.
 
 This patch:
 
@@ -350,7 +350,7 @@ This patch:
 - keeps the parser tolerant of older payloads/records that still include `intentId`, but now requires it to match `effectId` when present
 - maps assistant outbox `intentId` to hosted `effectId` only at the assistant-runtime adapter edge instead of persisting both names through the hosted stack
 - removes the duplicate generic journal method names from `HostedRuntimeEffectsPort` and the matching duplicate Cloudflare runtime implementation branches
-- removes the dead `/intents/:effectId` alias from the runner outbound route so the hosted journal has one public path shape
+- removes the dead runner-outbound alias so the hosted journal has one public path shape
 
 **Why this is simpler:** one assistant-delivery effect now has one durable identity and one journal API. Adding another assistant-delivery field or changing journal behavior no longer requires keeping duplicated ids, duplicated method names, and duplicated route aliases aligned across hosted-execution, assistant-runtime, and Cloudflare.
 

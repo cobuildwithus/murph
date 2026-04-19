@@ -505,11 +505,11 @@ describe("cloudflare worker routes", () => {
     );
   });
 
-  it("hard-cuts the removed commit and finalize routes from the outbound results.worker handler", async () => {
+  it("hard-cuts removed callback routes from the outbound results.worker handler", async () => {
     const env = createWorkerEnv();
 
-    const commitResponse = await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_finalize/commit", {
+    const firstRemovedResponse = await callRunnerOutbound(
+      new Request("http://results.worker/removed-callbacks/evt_alpha", {
         body: JSON.stringify({}),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -518,8 +518,8 @@ describe("cloudflare worker routes", () => {
       }),
       env,
     );
-    const finalizeResponse = await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_finalize/finalize", {
+    const secondRemovedResponse = await callRunnerOutbound(
+      new Request("http://results.worker/removed-callbacks/evt_bravo", {
         body: JSON.stringify({
           bundle: Buffer.from("vault-final").toString("base64"),
         }),
@@ -531,15 +531,15 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(commitResponse.status).toBe(404);
-    expect(finalizeResponse.status).toBe(404);
+    expect(firstRemovedResponse.status).toBe(404);
+    expect(secondRemovedResponse.status).toBe(404);
   });
 
-  it("keeps removed outbound callback routes hidden from public and internal callers", async () => {
+  it("keeps removed outbound routes hidden from public and internal callers", async () => {
     const env = createWorkerEnv();
 
-    const removedFinalizeResponse = await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_finalize_auth/finalize", {
+    const removedFirstResponse = await callRunnerOutbound(
+      new Request("http://results.worker/removed-callbacks/evt_auth", {
         body: JSON.stringify({
           bundle: 42,
         }),
@@ -550,10 +550,10 @@ describe("cloudflare worker routes", () => {
       }),
       env,
     );
-    expect(removedFinalizeResponse.status).toBe(404);
+    expect(removedFirstResponse.status).toBe(404);
 
-    const removedCommitResponse = await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_bad_commit/commit", {
+    const removedSecondResponse = await callRunnerOutbound(
+      new Request("http://results.worker/removed-callbacks/evt_bad", {
         body: JSON.stringify({
           ignored: true,
         }),
@@ -564,15 +564,15 @@ describe("cloudflare worker routes", () => {
       }),
       env,
     );
-    expect(removedCommitResponse.status).toBe(404);
+    expect(removedSecondResponse.status).toBe(404);
 
-    const publicCommitResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
+    const publicRemovedResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/removed-callbacks/member_123/evt_removed", {
         method: "POST",
       }),
       env,
     );
-    expect(publicCommitResponse.status).toBe(404);
+    expect(publicRemovedResponse.status).toBe(404);
 
     const publicOutboxResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
@@ -583,17 +583,17 @@ describe("cloudflare worker routes", () => {
     expect(publicOutboxResponse.status).toBe(404);
   });
 
-  it("hard-cuts the removed assistant-delivery journal route from the outbound results.worker handler", async () => {
+  it("hard-cuts the removed outbound journal route from the results.worker handler", async () => {
     const env = createWorkerEnv();
 
     const getResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
+      new Request("http://results.worker/removed-journal/outbox_123?fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
     );
     const putResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
+      new Request("http://results.worker/removed-journal/outbox_123?fingerprint=dedupe_123", {
         body: JSON.stringify({ ignored: true }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -603,7 +603,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     const deleteResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
+      new Request("http://results.worker/removed-journal/outbox_123?fingerprint=dedupe_123", {
         method: "DELETE",
       }),
       env,
@@ -670,7 +670,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const runnerEventResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/%E0%A4%A/evt_commit/commit", {
+      new Request("https://runner.example.test/internal/removed-callbacks/%E0%A4%A/evt_removed", {
         method: "GET",
       }),
       createWorkerEnv(),

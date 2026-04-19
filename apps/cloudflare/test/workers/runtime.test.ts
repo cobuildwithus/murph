@@ -183,17 +183,17 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("hard-cuts the removed finalize route from the internal runner outbound handlers in the Workers runtime", async () => {
+  it("hard-cuts removed callback routes from the internal runner outbound handlers in the Workers runtime", async () => {
     const userId = "member_journal";
-    const eventId = "evt_finalize_runtime";
+    const eventId = "evt_removed_runtime";
     await resolveHostedUserCryptoContext(userId);
     await expect(getUserRunnerStub(userId).wake(createWake(eventId, userId))).resolves.toMatchObject({
       lastEventId: eventId,
       userId,
     });
 
-    const finalizeResponse = await callRunnerOutbound(
-      new Request(`http://results.worker/events/${eventId}/finalize`, {
+    const removedResponse = await callRunnerOutbound(
+      new Request(`http://results.worker/removed-callbacks/${eventId}`, {
         body: JSON.stringify({
           bundle: btoa("vault-final"),
         }),
@@ -205,7 +205,7 @@ describe("cloudflare worker runtime suite", () => {
       userId,
     );
 
-    expect(finalizeResponse.status).toBe(404);
+    expect(removedResponse.status).toBe(404);
   });
 });
 
