@@ -15,6 +15,7 @@ import {
 } from "../src/crypto-context.js";
 import { encryptHostedBundle } from "../src/crypto.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
+import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
@@ -260,6 +261,54 @@ describe("RunnerBundleSync", () => {
       bundle_ref_json: malformedBundleRefJson,
       bundle_version: 7,
     });
+  });
+
+  it("logs best-effort cleanup failures after a successful bundle swap", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const cleanupSpy = vi.spyOn(
+      HostedBundleGarbageCollector.prototype,
+      "cleanupBundleTransition",
+    ).mockRejectedValueOnce(new Error("cleanup failed"));
+    const bucket = createBucketStore();
+    const sql = createTestSqlStorage();
+    const state = {
+      storage: {
+        sql,
+      },
+    };
+    const stateStore = new RunnerStateStore(state as never);
+    await stateStore.bootstrapUser("member_123");
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+      stateStore,
+    );
+
+    await expect(bundleSync.applyRunnerResultBundles(
+      "member_123",
+      0,
+      null,
+    )).resolves.toMatchObject({
+      userId: "member_123",
+    });
+
+    expect(cleanupSpy).toHaveBeenCalledOnce();
+    const logRecords = warnSpy.mock.calls.map(([entry]) => JSON.parse(String(entry)) as {
+      details?: {
+        nextBundleRefKey?: string | null;
+        previousBundleRefKey?: string | null;
+        userId?: string;
+      };
+      message: string;
+    });
+    expect(logRecords.some((record) => record.message.includes("bundle cleanup failed")
+      && record.details?.userId === "member_123")).toBe(true);
+    cleanupSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 });
 

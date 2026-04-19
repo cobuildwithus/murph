@@ -85,6 +85,7 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("advances past quarantined hosted wake rows so later wakes still run", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const initialCursor = createCursorState({
       committedSeq: "0",
       nextSeq: "3",
@@ -216,6 +217,20 @@ describe("HostedUserRunner hosted wake drain", () => {
       wakeId: "wake_1",
       wakeSeq: "1",
     }));
+    const logRecords = warnSpy.mock.calls.map(([entry]) => JSON.parse(String(entry)) as {
+      details?: {
+        quarantineCode?: string;
+        wakeId?: string;
+        wakeKind?: string;
+        wakePayloadSchema?: string;
+        wakeSeq?: string;
+      };
+      message: string;
+    });
+    expect(logRecords.some((record) => record.message.includes("invalid wake payload")
+      && record.details?.quarantineCode === "invalid-wake-payload"
+      && record.details?.wakeId === invalidWake.id
+      && record.details?.wakeSeq === "1")).toBe(true);
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
     expect(recordHostedWakeTerminalInWeb.mock.calls.map(([input]) => input.body)).toEqual([
       {
@@ -2152,6 +2167,97 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(status.lastError).toBeNull();
     expect(status.pendingWakeCount).toBe(0);
     await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
+  });
+
+  it("logs pending-commit status fallback details when fenced status reads fail", async () => {
+    const finalizedPendingBundleRef = createBundleRef("finalized-from-status-fallback");
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb.mockRejectedValueOnce(new Error("status unavailable"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await runner.bootstrapUser("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    const stateStore = Reflect.get(runner, "stateStore");
+
+    if (!stateStore || typeof stateStore !== "object") {
+      throw new Error("Expected HostedUserRunner state store test internals to be available.");
+    }
+
+    const beginWakeRun = Reflect.get(stateStore, "beginWakeRun");
+    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
+    if (typeof beginWakeRun !== "function" || typeof writePendingCommit !== "function") {
+      throw new Error(
+        "Expected HostedUserRunner state store wake-run and pending commit helpers.",
+      );
+    }
+
+    const { payloadCiphertext } = encryptTestHostedWakePayload({
+      userId: "member_123",
+      value: createWake("evt_status_finalize_fallback"),
+    });
+    await beginWakeRun.call(stateStore, {
+      eventId: "evt_status_finalize_fallback",
+      run: {
+        attempt: 1,
+        runId: "run_status_finalize_fallback",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      userId: "member_123",
+    });
+    await writePendingCommit.call(stateStore, {
+      assistantDeliveryEffects: [],
+      bundleRef: finalizedPendingBundleRef,
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: "evt_status_finalize_fallback",
+      finalizeToken: "finalize_token_status_fallback",
+      finalizedAt: "2026-03-26T12:00:01.000Z",
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "handled",
+      },
+      schemaVersion: 1,
+      userId: "member_123",
+      wake: {
+        eventId: "evt_status_finalize_fallback",
+        fetchProof: null,
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        payloadCiphertext,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        seq: "1",
+        userId: "member_123",
+        wakeId: null,
+      },
+    });
+
+    const status = await runner.status();
+
+    expect(status.lastEventId).toBe("evt_status_finalize_fallback");
+    expect(status.pendingWakeCount).toBe(0);
+    const logRecords = warnSpy.mock.calls.map(([entry]) => JSON.parse(String(entry)) as {
+      details?: {
+        fallbackStatus?: string;
+        pendingCommitEventId?: string;
+        pendingCommitFinalizedAt?: string | null;
+        pendingCommitUserId?: string;
+        pendingCommitWakeSeq?: string;
+      };
+      message: string;
+    });
+    expect(logRecords.some((record) => record.message.includes("fenced pending commit cleanup")
+      && record.details?.fallbackStatus === "current-runner-status"
+      && record.details?.pendingCommitEventId === "evt_status_finalize_fallback"
+      && record.details?.pendingCommitUserId === "member_123"
+      && record.details?.pendingCommitWakeSeq === "1")).toBe(true);
   });
 
   it("publishes assistant schedule updates during status recovery even when the finalized snapshot already matches", async () => {

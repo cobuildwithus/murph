@@ -4,6 +4,7 @@ import {
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 import {
+  emitHostedExecutionStructuredLog,
   type HostedExecutionBundleRef,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
@@ -114,8 +115,22 @@ export class RunnerBundleSync {
   }): Promise<void> {
     try {
       await this.garbageCollector.cleanupBundleTransition(input);
-    } catch {
-      // Best-effort cleanup only; do not fail successful bundle swaps.
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          nextBundleRefKey: input.nextBundleRef?.key ?? null,
+          previousBundleRefKey: input.previousBundleRef?.key ?? null,
+          userId: input.userId,
+        },
+        error,
+        level: "warn",
+        message:
+          "Hosted bundle cleanup failed after a successful bundle swap; continuing without cleanup.",
+        phase: "completed",
+        run: null,
+        userId: input.userId,
+      });
     }
   }
 }

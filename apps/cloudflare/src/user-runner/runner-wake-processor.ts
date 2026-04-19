@@ -1187,8 +1187,22 @@ export class RunnerWakeProcessor {
         rawMessageKey: wake.message.rawMessageKey,
         userId: wake.userId,
       });
-    } catch {
-      // Best-effort cleanup only; lifecycle TTL still backstops raw message deletion.
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          rawMessageKey: wake.message.rawMessageKey,
+          wakeChannel: wake.message.channel,
+          wakeKind: wake.kind,
+        },
+        error,
+        eventId: wake.eventId,
+        level: "warn",
+        message: "Hosted wake best-effort raw email cleanup failed; lifecycle TTL will still backstop deletion.",
+        phase: "completed",
+        run: null,
+        userId: wake.userId,
+      });
     }
   }
 }
