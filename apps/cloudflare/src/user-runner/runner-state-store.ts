@@ -255,7 +255,7 @@ export class RunnerStateStore {
   >> {
     const meta = this.requireMetaRowSync();
     return {
-      bundleRef: tryParseStoredBundleRefJson(meta.bundle_ref_json),
+      bundleRef: parseStoredBundleRefJson(meta.bundle_ref_json),
       bundleVersion: meta.bundle_version ?? 0,
       userId: meta.user_id,
     };
@@ -648,7 +648,7 @@ function writeBundleStateToMeta(
   meta.bundle_version = bundleState.bundleVersion;
 }
 
-function tryParseStoredBundleRefJson(value: string | null): RunnerStateRecord["bundleRef"] {
+function parseStoredBundleRefJson(value: string | null): RunnerStateRecord["bundleRef"] {
   if (!value) {
     return null;
   }
@@ -659,7 +659,7 @@ function tryParseStoredBundleRefJson(value: string | null): RunnerStateRecord["b
       "Hosted runner bundle ref",
     );
   } catch {
-    return null;
+    throw new Error("Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.");
   }
 }
 

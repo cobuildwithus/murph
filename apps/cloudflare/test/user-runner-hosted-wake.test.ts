@@ -4,7 +4,11 @@ import {
   buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
-import type { HostedFetchedWakeRecord } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedWakeCommitRequest,
+  HostedExecutionCursorState,
+  HostedFetchedWakeRecord,
+} from "@murphai/hosted-execution/contracts";
 
 import { createHostedExecutionVercelOidcValidationEnvironment } from "../src/auth-adapter.ts";
 import type { HostedExecutionEnvironment } from "../src/env.ts";
@@ -369,7 +373,7 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("commits the last completed wake snapshot instead of a later mutable bundle cache read", async () => {
-    let committedSnapshotRef: unknown = null;
+    let committedSnapshotRef: ReturnType<typeof createBundleRef> | null = null;
     const finalizedBundleRef = createBundleRef("final");
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
@@ -401,14 +405,16 @@ describe("HostedUserRunner hosted wake drain", () => {
         wakes: [],
       });
     const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
-    commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }) => {
-      committedSnapshotRef = body.snapshotRef;
+    commitHostedWakeCursorToWeb.mockImplementationOnce(async ({ body }: {
+      body: HostedWakeCommitRequest;
+    }) => {
+      committedSnapshotRef = body.snapshotRef ?? null;
       return {
         committed: true,
         cursor: createCursorState({
           committedSeq: "1",
           nextSeq: "3",
-          snapshotRef: body.snapshotRef,
+          snapshotRef: body.snapshotRef ?? null,
           updatedAt: "2026-03-26T12:00:03.000Z",
           version: "cursor_v2",
         }),
@@ -532,11 +538,7 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("publishes a finalized snapshot only after the seq commit succeeds", async () => {
-    const commitBodies: Array<{
-      committedSeq: string;
-      expectedVersion: string;
-      snapshotRef?: unknown;
-    }> = [];
+    const commitBodies: HostedWakeCommitRequest[] = [];
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
       .mockResolvedValueOnce({
@@ -675,11 +677,7 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("treats a same-seq finalized snapshot publish lost race as success when the cursor already matches", async () => {
-    const commitBodies: Array<{
-      committedSeq: string;
-      expectedVersion: string;
-      snapshotRef?: unknown;
-    }> = [];
+    const commitBodies: HostedWakeCommitRequest[] = [];
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb
       .mockResolvedValueOnce({
@@ -830,11 +828,7 @@ describe("HostedUserRunner hosted wake drain", () => {
   });
 
   it("keeps the finalized pending commit when a same-seq snapshot publish loses CAS to a different snapshot", async () => {
-    const commitBodies: Array<{
-      committedSeq: string;
-      expectedVersion: string;
-      snapshotRef?: unknown;
-    }> = [];
+    const commitBodies: HostedWakeCommitRequest[] = [];
     const winnerBundleRef = createBundleRef("winner-conflict");
     const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
     fetchHostedWakeBatchFromWeb.mockResolvedValueOnce({
@@ -1013,7 +1007,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       cursor: createCursorState({
         committedSeq: "1",
         nextSeq: "2",
-        snapshotRef: body.snapshotRef,
+        snapshotRef: body.snapshotRef ?? null,
         updatedAt: "2026-03-26T12:00:02.000Z",
         version: "cursor_v2",
       }),
@@ -1137,7 +1131,7 @@ describe("HostedUserRunner hosted wake drain", () => {
       cursor: createCursorState({
         committedSeq: body.committedSeq,
         nextSeq: "2",
-        snapshotRef: body.snapshotRef,
+        snapshotRef: body.snapshotRef ?? null,
         updatedAt: "2026-03-26T12:00:02.000Z",
         version: "cursor_v3",
       }),
@@ -1540,10 +1534,10 @@ function createWake(eventId: string) {
 function createCursorState(overrides: Partial<{
   committedSeq: string;
   nextSeq: string;
-  snapshotRef: unknown;
+  snapshotRef: HostedExecutionCursorState["snapshotRef"];
   updatedAt: string;
   version: string;
-}> = {}) {
+}> = {}): HostedExecutionCursorState {
   return {
     committedSeq: overrides.committedSeq ?? "0",
     createdAt: "2026-03-26T12:00:00.000Z",
@@ -1555,7 +1549,7 @@ function createCursorState(overrides: Partial<{
   };
 }
 
-function createBundleRef(id: string) {
+function createBundleRef(id: string): NonNullable<HostedExecutionCursorState["snapshotRef"]> {
   return {
     hash: `hash-${id}`,
     key: `bundles/vault/${id}.bundle.json`,

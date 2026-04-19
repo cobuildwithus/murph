@@ -215,7 +215,7 @@ describe("RunnerBundleSync", () => {
     });
   });
 
-  it("can clear a malformed durable bundle ref when the runner result bundle is null", async () => {
+  it("fails closed when applying runner result bundles against a malformed durable bundle ref", async () => {
     const bucket = createBucketStore();
     const sql = createTestSqlStorage();
     const state = {
@@ -245,21 +245,20 @@ describe("RunnerBundleSync", () => {
       stateStore,
     );
 
-    const record = await bundleSync.applyRunnerResultBundles(
+    await expect(bundleSync.applyRunnerResultBundles(
       "member_123",
       7,
       null,
+    )).rejects.toThrow(
+      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
     );
-
-    expect(record.bundleRef).toBeNull();
-    expect(record.bundleVersion).toBe(8);
     expect(sql.exec<{ bundle_ref_json: string | null; bundle_version: number }>(
       `SELECT bundle_ref_json, bundle_version
          FROM runner_meta
         WHERE singleton = 1`,
     ).one()).toEqual({
-      bundle_ref_json: null,
-      bundle_version: 8,
+      bundle_ref_json: malformedBundleRefJson,
+      bundle_version: 7,
     });
   });
 });

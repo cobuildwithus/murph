@@ -66,6 +66,16 @@ describe("materializeHostedDueWakesTx", () => {
     });
 
     const result = await materializeHostedDueWakesTx({
+      appendAssistantCronWake: ({ occurredAt, reason, userId }) => mocks.materializeHostedAssistantCronWakeTx({
+        occurredAt,
+        reason,
+        tx,
+        userId,
+      }),
+      appendWakePayload: ({ wake }) => mocks.appendHostedExecutionWakePayloadTx({
+        tx,
+        wake,
+      }),
       now: new Date("2026-04-17T01:00:00.000Z"),
       tx,
       userId: "member_123",
@@ -110,6 +120,16 @@ describe("materializeHostedDueWakesTx", () => {
     });
 
     const result = await materializeHostedDueWakesTx({
+      appendAssistantCronWake: ({ occurredAt, reason, userId }) => mocks.materializeHostedAssistantCronWakeTx({
+        occurredAt,
+        reason,
+        tx,
+        userId,
+      }),
+      appendWakePayload: ({ wake }) => mocks.appendHostedExecutionWakePayloadTx({
+        tx,
+        wake,
+      }),
       now: new Date("2026-04-17T01:00:00.000Z"),
       tx,
       userId: "member_123",
@@ -146,6 +166,16 @@ describe("materializeHostedDueWakesTx", () => {
     });
 
     const result = await materializeHostedDueWakesTx({
+      appendAssistantCronWake: ({ occurredAt, reason, userId }) => mocks.materializeHostedAssistantCronWakeTx({
+        occurredAt,
+        reason,
+        tx,
+        userId,
+      }),
+      appendWakePayload: ({ wake }) => mocks.appendHostedExecutionWakePayloadTx({
+        tx,
+        wake,
+      }),
       now: new Date("2026-04-17T01:00:00.000Z"),
       tx,
       userId: "member_123",

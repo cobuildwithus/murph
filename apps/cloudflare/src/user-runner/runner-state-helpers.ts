@@ -69,9 +69,8 @@ export function assignRunnerBundleRefs(
   bundleState: RunnerStoredBundleState,
   nextBundleRef: RunnerStateRecord["bundleRef"],
 ): void {
-  const currentRef = tryParseHostedBundleRefJson(bundleState.bundleRefJson);
-  const repairingCorruptedRef = bundleState.bundleRefJson !== null && currentRef === null;
-  if (!repairingCorruptedRef && sameHostedBundlePayloadRef(currentRef, nextBundleRef)) {
+  const currentRef = parseHostedBundleRefJson(bundleState.bundleRefJson);
+  if (sameHostedBundlePayloadRef(currentRef, nextBundleRef)) {
     return;
   }
 
@@ -181,13 +180,5 @@ function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRe
     return parseHostedExecutionBundleRef(JSON.parse(value) as unknown, "Hosted runner bundle ref");
   } catch {
     throw new Error("Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.");
-  }
-}
-
-function tryParseHostedBundleRefJson(value: string | null): HostedExecutionBundleRef | null {
-  try {
-    return parseHostedBundleRefJson(value);
-  } catch {
-    return null;
   }
 }

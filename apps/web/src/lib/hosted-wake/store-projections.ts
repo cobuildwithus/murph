@@ -5,12 +5,15 @@ import type {
   HostedWakeLifecycleState,
   HostedWakePayloadSchema,
   HostedWakeRecord,
+  HostedWakeSnapshotRef,
+  HostedWakeTerminalState,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   HOSTED_WAKE_PAYLOAD_SCHEMAS,
   isHostedExecutionWakeKind,
 } from "@murphai/hosted-execution/contracts";
+import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
 
 import {
   ensureHostedExecutionCursorRowTx,
@@ -43,7 +46,10 @@ export async function resolveHostedWakeLifecycleStateTx(input: {
     },
   });
 
-  const receipt = terminal;
+  const receipt = terminal === null ? null : {
+    ...terminal,
+    state: parseHostedWakeTerminalState(terminal.state),
+  };
   if (
     receipt
     && isCurrentHostedWakeTerminalReceipt({
@@ -93,7 +99,7 @@ export function projectHostedExecutionCursorRecord(
     committedSeq: record.committedSeq.toString(),
     createdAt: record.createdAt.toISOString(),
     nextSeq: record.nextSeq.toString(),
-    snapshotRef: record.snapshotRef,
+    snapshotRef: parseHostedWakeSnapshotRef(record.snapshotRef),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
     version: record.version.toString(),
@@ -220,4 +226,19 @@ export async function hydrateHostedWakeRecordsTx(input: {
     );
     return projectHostedWakeRecord(record, payloadCiphertext);
   });
+}
+
+function parseHostedWakeSnapshotRef(value: HostedExecutionCursorRow["snapshotRef"]): HostedWakeSnapshotRef {
+  return value === null ? null : parseHostedExecutionCursorSnapshotRef(value);
+}
+
+function parseHostedWakeTerminalState(value: string): HostedWakeTerminalState {
+  switch (value) {
+    case "completed":
+    case "quarantined":
+    case "replaced":
+      return value;
+    default:
+      throw new TypeError(`Hosted wake terminal state is invalid: ${value}`);
+  }
 }

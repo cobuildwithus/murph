@@ -1,5 +1,6 @@
-import type { Prisma } from "@prisma/client";
 import type {
+  HostedExecutionAssistantCronTickEvent,
+  HostedExecutionWake,
   HostedWakeMaterializationHints,
   HostedWakeMaterializeResponse,
 } from "@murphai/hosted-execution/contracts";
@@ -7,10 +8,7 @@ import type {
 import { buildHostedDeviceSyncWake } from "../device-sync/wake";
 import { materializeHostedAssistantCronWakeTx, appendHostedExecutionWakePayloadTx } from "./queue";
 
-type HostedWakeMaterializeTx = Pick<
-  Prisma.TransactionClient,
-  "$executeRaw" | "$executeRawUnsafe" | "$queryRaw" | "$queryRawUnsafe" | "$transaction"
-> & {
+type HostedWakeMaterializeTx = {
   deviceConnection: {
     findFirst(args: {
       orderBy: Array<
@@ -57,7 +55,17 @@ type HostedWakeMaterializeTx = Pick<
   };
 };
 
+type HostedWakeAppendResult = Awaited<ReturnType<typeof appendHostedExecutionWakePayloadTx>>;
+
 export async function materializeHostedDueWakesTx(input: {
+  appendAssistantCronWake: (input: {
+    occurredAt: string;
+    reason: HostedExecutionAssistantCronTickEvent["reason"];
+    userId: string;
+  }) => Promise<HostedWakeAppendResult>;
+  appendWakePayload: (input: {
+    wake: HostedExecutionWake;
+  }) => Promise<HostedWakeAppendResult>;
   now?: Date;
   tx: HostedWakeMaterializeTx;
   userId: string;
@@ -69,10 +77,9 @@ export async function materializeHostedDueWakesTx(input: {
   let targetSeqHint: bigint | null = null;
 
   if (isRunnableWakeHint(nextHints?.assistantWakeAt ?? null, now)) {
-    const appended = await materializeHostedAssistantCronWakeTx({
+    const appended = await input.appendAssistantCronWake({
       occurredAt: nowIso,
       reason: "alarm",
-      tx: asHostedWakeQueueTx(input.tx),
       userId: input.userId,
     });
     targetSeqHint = maxHostedWakeSeq(targetSeqHint, appended.wake.seq);
@@ -99,8 +106,7 @@ export async function materializeHostedDueWakesTx(input: {
   });
 
   for (const connection of dueConnections) {
-    const appended = await appendHostedExecutionWakePayloadTx({
-      tx: asHostedWakeQueueTx(input.tx),
+    const appended = await input.appendWakePayload({
       wake: buildHostedDeviceSyncWake({
         connectionId: connection.id,
         hint: {
@@ -195,10 +201,4 @@ function isRunnableWakeHint(value: string | null, now: Date): boolean {
 function maxHostedWakeSeq(current: bigint | null, candidate: string): bigint {
   const parsed = BigInt(candidate);
   return current === null || parsed > current ? parsed : current;
-}
-
-function asHostedWakeQueueTx(tx: HostedWakeMaterializeTx): Prisma.TransactionClient {
-  // Production callers always provide a Prisma transaction client. Tests inject a structural
-  // subset because materialization only reads deviceConnection and passes the tx through mocks.
-  return tx as unknown as Prisma.TransactionClient;
 }
