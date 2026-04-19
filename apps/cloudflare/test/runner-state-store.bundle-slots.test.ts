@@ -268,37 +268,27 @@ describe("RunnerStateStore bundle metadata", () => {
       bundle_version: 7,
     });
 
-    const repaired = await store.compareAndSwapBundleRefs({
+    await expect(store.readBundleMetaStateForMutation()).rejects.toThrow(
+      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
+    );
+    await expect(store.compareAndSwapBundleRefs({
       expectedVersion: 7,
       nextBundleRef: vaultRef,
-    });
-    expect(repaired.applied).toBe(true);
-    expect(repaired.record.bundleRef).toEqual(vaultRef);
-    expect(repaired.record.bundleVersion).toBe(8);
-  });
-
-  it("can explicitly repair a malformed bundle ref back to null", async () => {
-    const { db, store } = createRunnerStateStoreHarness();
-    await store.bootstrapUser("user-malformed-null");
-    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
-
-    db.prepare(`
-      UPDATE runner_meta
-      SET bundle_ref_json = ?, bundle_version = ?
-      WHERE singleton = 1
-    `).run(malformedBundleRefJson, 7);
-
-    const repaired = await store.compareAndSwapBundleRefs({
+    })).rejects.toThrow(
+      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
+    );
+    await expect(store.compareAndSwapBundleRefs({
       expectedVersion: 7,
       nextBundleRef: null,
-    });
-
-    expect(repaired.applied).toBe(true);
-    expect(repaired.record.bundleRef).toBeNull();
-    expect(repaired.record.bundleVersion).toBe(8);
+    })).rejects.toThrow(
+      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
+    );
+    await expect(store.syncBundleRefCache(vaultRef)).rejects.toThrow(
+      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
+    );
     expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: null,
-      bundle_version: 8,
+      bundle_ref_json: malformedBundleRefJson,
+      bundle_version: 7,
     });
   });
 });

@@ -124,7 +124,8 @@ repo/
   `HostedWake` / `HostedExecutionCursor` wake and cursor lifecycle.
 - `apps/cloudflare` owns execution coordination only: authenticated control wakes,
   per-user lease and stale-result fencing, encrypted hosted workspace snapshots,
-  encrypted artifact blobs, encrypted runner-secret blobs, execution journals,
+  encrypted artifact blobs, encrypted runner-secret blobs, DO-local
+  pending-commit state,
   and other opaque runtime blobs needed to execute one hosted job safely.
 - Cloudflare is not the canonical owner of hosted share payloads, device-sync
   control-plane state, pending usage, or gateway product truth.
@@ -133,8 +134,9 @@ repo/
   or CRUD seam, and no Cloudflare-owned share-pack or pending-usage durable
   seam.
 - Narrow Cloudflare-to-web signed callbacks remain only where the execution
-  runtime still needs them, such as execution-time device connect-link starts,
-  canonical hosted share payload reads, and direct hosted usage recording.
+  runtime still needs them, such as execution-time device-sync runtime
+  snapshot/apply, device connect-link starts, canonical hosted share payload
+  reads, and direct hosted usage recording.
 
 ## Explicit Non-Goals
 

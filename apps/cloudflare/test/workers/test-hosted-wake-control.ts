@@ -228,12 +228,18 @@ export async function recordTestHostedWakeTerminal(input: {
     };
   }
 
-  wake.wakeState = input.body.state;
+  wake.wakeState = toStoredWakeLifecycleState(input.body.state);
   wake.updatedAt = new Date().toISOString();
   await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
   return {
     recorded: true,
   };
+}
+
+function toStoredWakeLifecycleState(
+  state: HostedWakeTerminalRequest["state"],
+): HostedWakeLifecycleState {
+  return state === "quarantined" ? "poisoned" : state;
 }
 
 export async function quarantineTestHostedWake(input: {

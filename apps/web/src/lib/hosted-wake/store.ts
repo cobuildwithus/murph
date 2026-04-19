@@ -11,6 +11,7 @@ import {
   ensureHostedExecutionCursorRowTx,
   findCurrentHostedWakeEventByWakeIdTx,
   findHostedWakeEventByEventIdTx,
+  lockHostedExecutionCursorRowTx,
   resolveHostedWakeEventId,
 } from "./store-data";
 import {
@@ -173,6 +174,7 @@ export async function listHostedWakesAfterSeq(
         wakeEventId: await resolveHostedWakeCurrentEventIdTx({
           tx: prisma,
           wake: {
+            dedupeKey: wake.dedupeKey ?? null,
             id: wake.id,
             seq: BigInt(wake.seq),
             userId: wake.userId,
@@ -198,6 +200,14 @@ export async function recordHostedWakeTerminalTx(input: {
     userId: input.userId,
     wakeId: input.wakeId,
     wakeSeq: input.wakeSeq,
+  });
+  await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+  await lockHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
   });
   const cursor = await ensureHostedExecutionCursorRowTx({
     tx: input.tx,
@@ -395,6 +405,14 @@ export async function quarantineHostedWakeTx(input: {
     userId: input.userId,
     wakeId: input.wakeId,
     wakeSeq: input.wakeSeq,
+  });
+  await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+  await lockHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.userId,
   });
   const cursor = await ensureHostedExecutionCursorRowTx({
     tx: input.tx,

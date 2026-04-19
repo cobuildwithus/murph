@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   parseHostedExecutionCursorState,
   parseHostedWakeAppendResponse,
+  parseHostedWakeCommitRequest,
   parseHostedWakeCommitResponse,
   parseHostedWakeExecutionPayload,
   parseHostedWakeFetchResponse,
+  parseHostedWakeQuarantineRequest,
   parseHostedWakeTerminalResponse,
 } from "../src/parsers.ts";
 import {
@@ -27,6 +29,13 @@ import {
   parseHostedWakeStatusResponse,
 } from "../src/parsers.ts";
 
+const TEST_SNAPSHOT_REF = {
+  hash: "hash-1",
+  key: "bundles/vault/hash-1.bundle.json",
+  size: 128,
+  updatedAt: "2026-04-17T00:00:01.000Z",
+} as const;
+
 describe("hosted wake parser contracts", () => {
   it("parses hosted wake batch responses with bigint-string cursor fields", () => {
     const parsed = parseHostedWakeFetchResponse({
@@ -34,10 +43,7 @@ describe("hosted wake parser contracts", () => {
         committedSeq: "12",
         createdAt: "2026-04-17T00:00:00.000Z",
         nextSeq: "13",
-        snapshotRef: {
-          kind: "bundle",
-          ref: "bundle-1",
-        },
+        snapshotRef: TEST_SNAPSHOT_REF,
         updatedAt: "2026-04-17T00:00:01.000Z",
         userId: "member-1",
         version: "4",
@@ -202,6 +208,20 @@ describe("hosted wake parser contracts", () => {
     })).toThrow(/committedSeq/i);
   });
 
+  it("rejects invalid snapshotRef shapes in hosted wake cursor contracts", () => {
+    expect(() => parseHostedExecutionCursorState({
+      committedSeq: "12",
+      createdAt: "2026-04-17T00:00:00.000Z",
+      nextSeq: "13",
+      snapshotRef: {
+        checkpoint: "wake_12",
+      },
+      updatedAt: "2026-04-17T00:00:01.000Z",
+      userId: "member-1",
+      version: "4",
+    })).toThrow(/snapshotRef/i);
+  });
+
   it("rejects fetched wake records that omit fetch proofs", () => {
     expect(() => parseHostedWakeFetchResponse({
       cursor: {
@@ -255,6 +275,40 @@ describe("hosted wake parser contracts", () => {
         version: "8",
       },
     });
+  });
+
+  it("parses hosted wake commit requests and quarantine requests", () => {
+    expect(parseHostedWakeCommitRequest({
+      committedSeq: "24",
+      expectedVersion: "8",
+      snapshotRef: TEST_SNAPSHOT_REF,
+    })).toEqual({
+      committedSeq: "24",
+      expectedVersion: "8",
+      snapshotRef: TEST_SNAPSHOT_REF,
+    });
+
+    expect(parseHostedWakeQuarantineRequest({
+      fetchProof: "proof_24",
+      quarantineCode: "invalid-wake-payload",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    })).toEqual({
+      fetchProof: "proof_24",
+      quarantineCode: "invalid-wake-payload",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    });
+  });
+
+  it("rejects invalid hosted wake commit request snapshot refs", () => {
+    expect(() => parseHostedWakeCommitRequest({
+      committedSeq: "24",
+      expectedVersion: "8",
+      snapshotRef: {
+        checkpoint: "wake_24",
+      },
+    })).toThrow(/snapshotRef/i);
   });
 
   it("parses hosted wake terminal responses", () => {

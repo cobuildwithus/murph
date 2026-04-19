@@ -255,6 +255,9 @@ pnpm --dir apps/web prisma:migrate:deploy
 The hosted schema now includes the canonical member slices, hosted email
 authorization, hosted share payload ownership, device-sync web ownership
 models, plus the canonical `HostedWake` / `HostedExecutionCursor` fence.
+The checked-in Prisma migration chain is intentionally incremental for now; do
+not collapse it back to a single hosted baseline unless an explicit reset lands
+in the repo.
 
 ## Local dev aids
 
@@ -274,14 +277,17 @@ Notes:
 
 - For local dev with hosted secrets, run `cd apps/web && pnpm dev` so Vercel
   injects the linked project's development env without writing a local env file.
+- Hosted local cross-app startup probes `GET /api/internal/health` instead of
+  the homepage so E2E readiness depends on the web process being alive, not on
+  landing-page-only imports.
 - `apps/web/prisma.config.ts` reads `DATABASE_URL` from the process environment only.
 - `pnpm --dir apps/web dev` keeps interactive Next dev artifacts under
   `apps/web/.next-dev`.
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` use `apps/web/.next`.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as
   generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted wake repair, usage metering, Stripe recovery, and webhook
-  receipt recovery accept only Vercel cron bearer auth via `CRON_SECRET`.
+- Hosted wake repair, usage metering, and Stripe recovery accept only Vercel
+  cron bearer auth via `CRON_SECRET`.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` HostedWake facts first, then performs post-commit managed-user
   crypto provisioning in the activation path.
@@ -329,13 +335,13 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-execution/share/:shareId/payload`
 - `GET /api/internal/hosted-execution/usage/cron`
 - `POST /api/internal/hosted-execution/usage/record`
+- `GET /api/internal/hosted-wake/repair`
 - `GET /api/internal/hosted-onboarding/stripe/cron`
-- `GET /api/internal/hosted-onboarding/webhook-receipts/cron`
 
 The old staged-payload and share-import completion/release callback routes are
 gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
 share-pack CRUD, or an outbox drain route. It still uses narrow signed
-hosted-web callbacks for execution-time device-sync authority reads/writes,
+hosted-web callbacks for execution-time device-sync runtime snapshot/apply,
 device connect-link starts, canonical hosted share payload reads, direct
 hosted usage recording, and canonical HostedWake append/fetch/commit calls.
 
