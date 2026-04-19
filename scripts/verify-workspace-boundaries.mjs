@@ -864,7 +864,6 @@ function verifyWorkspaceImportPolicy({
       "parseHostedExecutionDispatchRequest",
       "parseHostedExecutionDispatchResult",
       "parseHostedExecutionEventDispatchStatus",
-      "parseHostedExecutionOutboxPayload",
       "parseHostedExecutionUserStatus",
       "parseHostedExecutionSharePack",
       "parseHostedExecutionBundlePayload",
@@ -873,42 +872,6 @@ function verifyWorkspaceImportPolicy({
     ])
   ) {
     return `${path.relative(repoRoot, filePath)} imports hosted execution parsers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/parsers so parse helpers stay on the dedicated parser surface instead of the hosted-execution root barrel.`;
-  }
-
-  if (
-    (
-      sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HostedExecutionOutboxPayload",
-      "HostedExecutionOutboxPayloadStorage",
-      "HostedExecutionReferenceOutboxPayload",
-      "buildHostedExecutionOutboxPayload",
-      "readHostedExecutionOutboxPayload",
-      "readHostedExecutionStagedPayloadId",
-      "resolveHostedExecutionOutboxPayloadEventId",
-      "resolveHostedExecutionOutboxPayloadStorage",
-      "resolveHostedExecutionOutboxPayloadUserId",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted execution outbox payload helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/outbox-payload so staged payload envelopes stay on their dedicated owner surface.`;
-  }
-
-  if (
-    (
-      sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HostedExecutionDispatchRef",
-      "buildHostedExecutionDispatchRef",
-      "readHostedExecutionDispatchRef",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted execution dispatch-ref helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/dispatch-ref so stored-dispatch identity stays on the focused ref surface.`;
   }
 
   if (
@@ -1050,9 +1013,7 @@ function verifyWorkspaceImportPolicy({
     && specifier === "@murphai/hosted-execution"
     && importsNamedBindingsFromSpecifier(source, specifier, [
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
-      "buildHostedExecutionRunnerCommitPath",
       "buildHostedExecutionRunnerEmailMessagePath",
-      "buildHostedExecutionRunnerSideEffectPath",
     ])
   ) {
     return `${path.relative(repoRoot, filePath)} imports runner route helpers from ${JSON.stringify(specifier)}; apps/cloudflare must use @murphai/hosted-execution/routes so runtime route construction stays on the focused route surface.`;

@@ -10,13 +10,19 @@ export type HostedStorageScope =
   | "artifact"
   | "browser-vault-snapshot"
   | "bundle"
-  | "device-sync-runtime"
   | "email-raw"
   | "email-route"
-  | "gateway-store"
   | "root-key-envelope"
   | "root-key-recipient"
   | "runner-secrets";
+
+export type HostedLegacyCipherEnvelopeScope =
+  | "device-sync-runtime"
+  | "gateway-store";
+
+export type HostedCipherEnvelopeScope =
+  | HostedStorageScope
+  | HostedLegacyCipherEnvelopeScope;
 
 export interface HostedCipherEnvelope {
   algorithm: "AES-GCM";
@@ -24,12 +30,12 @@ export interface HostedCipherEnvelope {
   iv: string;
   keyId: string;
   schema: HostedCipherEnvelopeSchema;
-  scope: HostedStorageScope;
+  scope: HostedCipherEnvelopeScope;
 }
 
 export async function deriveHostedStorageKey(
   rootKey: Uint8Array,
-  scope: HostedStorageScope | `id:${string}` | "",
+  scope: HostedCipherEnvelopeScope | `id:${string}` | "",
 ): Promise<Uint8Array> {
   const hkdfKey = await crypto.subtle.importKey(
     "raw",
@@ -109,7 +115,7 @@ export function parseHostedCipherEnvelope(
     throw new TypeError(`${label}.schema must be ${HOSTED_CIPHER_ENVELOPE_SCHEMA}.`);
   }
 
-  if (!isHostedStorageScope(scope)) {
+  if (!isHostedCipherEnvelopeScope(scope)) {
     throw new TypeError(`${label}.scope must be a supported hosted storage scope.`);
   }
 
@@ -165,7 +171,7 @@ export async function decryptHostedStoragePayload(input: {
   expectedKeyId?: string;
   key: Uint8Array;
   keysById?: Readonly<Record<string, Uint8Array>>;
-  scope: HostedStorageScope;
+  scope: HostedCipherEnvelopeScope;
 }): Promise<Uint8Array> {
   if (input.envelope.scope !== input.scope) {
     throw new Error(
@@ -241,6 +247,18 @@ function isHostedStorageScope(value: string): value is HostedStorageScope {
   return HOSTED_STORAGE_SCOPES.has(value as HostedStorageScope);
 }
 
+function isHostedLegacyCipherEnvelopeScope(
+  value: string,
+): value is HostedLegacyCipherEnvelopeScope {
+  return HOSTED_LEGACY_CIPHER_ENVELOPE_SCOPES.has(value as HostedLegacyCipherEnvelopeScope);
+}
+
+function isHostedCipherEnvelopeScope(
+  value: string,
+): value is HostedCipherEnvelopeScope {
+  return isHostedStorageScope(value) || isHostedLegacyCipherEnvelopeScope(value);
+}
+
 async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", toArrayBuffer(keyBytes), "AES-GCM", false, ["encrypt", "decrypt"]);
 }
@@ -275,11 +293,14 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "artifact",
   "browser-vault-snapshot",
   "bundle",
-  "device-sync-runtime",
   "email-raw",
   "email-route",
-  "gateway-store",
   "root-key-envelope",
   "root-key-recipient",
   "runner-secrets",
+]);
+
+const HOSTED_LEGACY_CIPHER_ENVELOPE_SCOPES = new Set<HostedLegacyCipherEnvelopeScope>([
+  "device-sync-runtime",
+  "gateway-store",
 ]);
