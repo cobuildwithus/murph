@@ -80,19 +80,19 @@ async function appendHostedCoalescingExecutionWakeTx(input: {
 export async function findHostedExecutionWakeEventIdTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
-  userId?: string;
+  userId: string;
 }): Promise<string | null> {
   return findHostedWakeEventIdByEventIdTx({
     eventId: input.eventId,
     tx: input.tx,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
 }
 
 export async function readHostedExecutionWakeTargetTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
-  userId?: string;
+  userId: string;
 }): Promise<{
   eventId: string;
   seq: string;
@@ -101,19 +101,19 @@ export async function readHostedExecutionWakeTargetTx(input: {
   return readHostedWakeScheduleByEventIdTx({
     eventId: input.eventId,
     tx: input.tx,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
 }
 
 export async function readHostedExecutionWakeLifecycleStateTx(input: {
   eventId: string;
   tx: Prisma.TransactionClient | PrismaClient;
-  userId?: string;
+  userId: string;
 }): Promise<HostedWakeLifecycleState | null> {
   const lifecycle = await readHostedWakeLifecycleByEventIdTx({
     eventId: buildHostedWakeDedupeKeyFromEventId(input.eventId),
     tx: input.tx,
-    ...(input.userId ? { userId: input.userId } : {}),
+    userId: input.userId,
   });
 
   return lifecycle?.state ?? null;

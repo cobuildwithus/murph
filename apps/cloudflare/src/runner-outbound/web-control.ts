@@ -1,6 +1,15 @@
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+} from "@murphai/device-syncd/hosted-runtime";
+
 import { type readHostedExecutionEnvironment } from "../env.ts";
-import { methodNotAllowed } from "../json.ts";
+import { methodNotAllowed, notFound } from "../json.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
+
+const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
+const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
+  /^\/api\/internal\/device-sync\/providers\/[^/]+\/connect-link$/u;
 
 export async function handleRunnerWebControlRequest(input: {
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
@@ -10,6 +19,10 @@ export async function handleRunnerWebControlRequest(input: {
 }): Promise<Response> {
   if (input.request.method !== "GET" && input.request.method !== "POST") {
     return methodNotAllowed();
+  }
+
+  if (!isAllowedRunnerWebControlRoute(input.request.method, input.url.pathname)) {
+    return notFound();
   }
 
   const bodyText = input.request.method === "GET"
@@ -27,4 +40,15 @@ export async function handleRunnerWebControlRequest(input: {
     search: input.url.search || null,
     timeoutMs: input.environment.runnerTimeoutMs,
   });
+}
+
+function isAllowedRunnerWebControlRoute(method: "GET" | "POST", path: string): boolean {
+  if (method !== "POST") {
+    return false;
+  }
+
+  return path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH
+    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
+    || path === HOSTED_WEB_USAGE_RECORD_PATH
+    || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
 }
