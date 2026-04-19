@@ -22,6 +22,7 @@ import type {
   HostedExecutionCursorRow,
   HostedWakeRow,
   HostedWakeStoreClient,
+  HostedWakeTerminalRow,
 } from "./store.types";
 
 export async function resolveHostedWakeLifecycleStateTx(input: {
@@ -32,22 +33,57 @@ export async function resolveHostedWakeLifecycleStateTx(input: {
     return "poisoned";
   }
 
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: input.tx,
+    userId: input.record.userId,
+  });
   const terminal = await input.tx.hostedWakeTerminal.findUnique({
     where: {
       wakeId: input.record.id,
     },
   });
 
-  if (terminal?.state === "completed" || terminal?.state === "replaced") {
-    return terminal.state;
+  const receipt = terminal;
+  if (
+    receipt
+    && isCurrentHostedWakeTerminalReceipt({
+      cursor,
+      receipt,
+      wake: input.record,
+    })
+    && (receipt.state === "completed" || receipt.state === "replaced")
+  ) {
+    return receipt.state;
   }
 
-  const cursor = await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.record.userId,
-  });
-
   return input.record.seq > cursor.committedSeq ? "queued" : "completed";
+}
+
+export function isCurrentHostedWakeTerminalReceipt(input: {
+  cursor: Pick<HostedExecutionCursorRow, "committedSeq" | "version">;
+  receipt: Pick<
+    HostedWakeTerminalRow,
+    "fetchedCommittedSeq" | "fetchedCursorVersion" | "state" | "userId" | "wakeId" | "wakeSeq"
+  > | null;
+  wake: Pick<HostedWakeRow, "id" | "seq" | "userId">;
+}): input is {
+  cursor: Pick<HostedExecutionCursorRow, "committedSeq" | "version">;
+  receipt: Pick<
+    HostedWakeTerminalRow,
+    "fetchedCommittedSeq" | "fetchedCursorVersion" | "state" | "userId" | "wakeId" | "wakeSeq"
+  >;
+  wake: Pick<HostedWakeRow, "id" | "seq" | "userId">;
+} {
+  const { receipt, wake } = input;
+
+  return Boolean(
+    receipt
+      && receipt.userId === wake.userId
+      && receipt.wakeId === wake.id
+      && receipt.wakeSeq === wake.seq
+      && receipt.fetchedCommittedSeq === input.cursor.committedSeq
+      && receipt.fetchedCursorVersion === input.cursor.version,
+  );
 }
 
 export function projectHostedExecutionCursorRecord(

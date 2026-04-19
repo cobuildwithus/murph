@@ -134,6 +134,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedWakeTerminalFetchCursorVersionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604191915_hosted_wake_terminal_fetch_cursor_version/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "202604141730_hosted_member_identity_optional_phone",
@@ -142,6 +149,7 @@ describe("hosted Prisma baseline migration", () => {
       "202604171900_hosted_wake_baseline",
       "202604191700_hosted_wake_event_identity",
       "202604191830_hosted_wake_terminal_receipts",
+      "202604191915_hosted_wake_terminal_fetch_cursor_version",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
@@ -197,6 +205,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedWakeTerminalReceiptsMigrationSql).toContain(
       'CREATE TABLE "hosted_wake_terminal"',
+    );
+    expect(hostedWakeTerminalFetchCursorVersionMigrationSql).toContain(
+      'ADD COLUMN "fetched_cursor_version" BIGINT NOT NULL DEFAULT -1',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');

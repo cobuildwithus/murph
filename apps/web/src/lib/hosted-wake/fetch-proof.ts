@@ -13,6 +13,7 @@ const HOSTED_WAKE_FETCH_PROOF_CLOCK_SKEW_SECONDS = 60;
 interface HostedWakeFetchProofClaims {
   exp: number;
   fetchedCommittedSeq: string;
+  fetchedCursorVersion: string;
   iat: number;
   kind: "hosted-wake-fetch-proof";
   userId: string;
@@ -30,6 +31,7 @@ type HostedWakeFetchProofEnvSource = Readonly<Record<string, string | undefined>
 
 export function issueHostedWakeFetchProof(input: {
   fetchedCommittedSeq: bigint;
+  fetchedCursorVersion: bigint;
   now?: Date;
   userId: string;
   wakeId: string;
@@ -40,6 +42,7 @@ export function issueHostedWakeFetchProof(input: {
   const claims: HostedWakeFetchProofClaims = {
     exp: nowSeconds + HOSTED_WAKE_FETCH_PROOF_MAX_TTL_SECONDS,
     fetchedCommittedSeq: input.fetchedCommittedSeq.toString(),
+    fetchedCursorVersion: input.fetchedCursorVersion.toString(),
     iat: nowSeconds,
     kind: "hosted-wake-fetch-proof",
     userId: input.userId,
@@ -147,6 +150,7 @@ function parseHostedWakeFetchProofClaims(encodedClaims: string): HostedWakeFetch
   const {
     exp,
     fetchedCommittedSeq,
+    fetchedCursorVersion,
     iat,
     kind,
     userId,
@@ -160,6 +164,7 @@ function parseHostedWakeFetchProofClaims(encodedClaims: string): HostedWakeFetch
     || typeof wakeId !== "string"
     || typeof wakeSeq !== "string"
     || typeof fetchedCommittedSeq !== "string"
+    || typeof fetchedCursorVersion !== "string"
     || typeof iat !== "number"
     || typeof exp !== "number"
   ) {
@@ -169,6 +174,7 @@ function parseHostedWakeFetchProofClaims(encodedClaims: string): HostedWakeFetch
   return {
     exp,
     fetchedCommittedSeq,
+    fetchedCursorVersion,
     iat,
     kind,
     userId,
