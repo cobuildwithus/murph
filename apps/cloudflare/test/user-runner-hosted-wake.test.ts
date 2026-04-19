@@ -89,17 +89,23 @@ describe("HostedUserRunner hosted wake drain", () => {
       nextSeq: "3",
       version: "cursor_v1",
     });
+    const cursorAfterQuarantine = createCursorState({
+      committedSeq: "0",
+      nextSeq: "3",
+      updatedAt: "2026-03-26T12:00:00.500Z",
+      version: "cursor_v2",
+    });
     const cursorAfterFirstCommit = createCursorState({
       committedSeq: "1",
       nextSeq: "3",
       updatedAt: "2026-03-26T12:00:01.000Z",
-      version: "cursor_v2",
+      version: "cursor_v3",
     });
     const finalCursor = createCursorState({
       committedSeq: "2",
       nextSeq: "3",
       updatedAt: "2026-03-26T12:00:02.000Z",
-      version: "cursor_v3",
+      version: "cursor_v4",
     });
     const poisonedWake = createHostedWakeRecord({
       cursor: initialCursor,
@@ -112,6 +118,12 @@ describe("HostedUserRunner hosted wake drain", () => {
       cursor: initialCursor,
       payload: createWake("evt_after_poison"),
       seq: "2",
+    });
+    const quarantinedWake = createHostedWakeRecord({
+      cursor: cursorAfterQuarantine,
+      quarantineCode: "invalid-wake-payload",
+      quarantinedAt: "2026-03-26T12:00:00.500Z",
+      seq: "1",
     });
     const followingWake = createHostedWakeRecord({
       cursor: cursorAfterFirstCommit,
@@ -128,6 +140,13 @@ describe("HostedUserRunner hosted wake drain", () => {
         cursor: initialCursor,
         wakes: [
           poisonedWake,
+          staleFollowingWake,
+        ],
+      })
+      .mockResolvedValueOnce({
+        cursor: cursorAfterQuarantine,
+        wakes: [
+          quarantinedWake,
           staleFollowingWake,
         ],
       })
@@ -182,7 +201,7 @@ describe("HostedUserRunner hosted wake drain", () => {
     expect(commitHostedWakeCursorToWeb.mock.calls.map(([input]) => input.body.committedSeq)).toEqual(["1", "2"]);
     expect(recordHostedWakeTerminalInWeb.mock.calls.map(([input]) => input.body)).toEqual([
       {
-        fetchProof: poisonedWake.fetchProof,
+        fetchProof: quarantinedWake.fetchProof,
         state: "quarantined",
         wakeId: "wake_1",
         wakeSeq: "1",
