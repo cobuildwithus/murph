@@ -142,8 +142,7 @@ import {
   validateAssistantCronExpression,
 } from '../src/assistant/cron/schedule.ts'
 import {
-  readAssistantCronAutomationRuntimeStore,
-  writeAssistantCronAutomationRuntimeStore,
+  readAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
 import {
   appendAssistantCronRun,
@@ -1073,8 +1072,8 @@ describe('assistant cron helpers and wrappers', () => {
       runs: [],
     })
 
-    const runtimeStore = await readAssistantCronAutomationRuntimeStore(paths)
-    expect(runtimeStore.automations.some((record) => record.automationId === installed.job.jobId)).toBe(
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(runtimeStore.jobs.some((record) => record.jobId === installed.job.jobId)).toBe(
       true,
     )
 
@@ -1084,10 +1083,10 @@ describe('assistant cron helpers and wrappers', () => {
       'archived',
     )
 
-    const updatedRuntimeStore = await readAssistantCronAutomationRuntimeStore(paths)
+    const updatedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     expect(
-      updatedRuntimeStore.automations.some(
-        (record) => record.automationId === installed.job.jobId,
+      updatedRuntimeStore.jobs.some(
+        (record) => record.jobId === installed.job.jobId,
       ),
     ).toBe(false)
   })
