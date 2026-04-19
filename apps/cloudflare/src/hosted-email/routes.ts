@@ -39,6 +39,13 @@ export interface HostedEmailInboundRoute {
   userId: string;
 }
 
+export class HostedEmailIngressRouteResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostedEmailIngressRouteResolutionError";
+  }
+}
+
 interface HostedEmailRouteStoreContext {
   bucket: R2BucketLike;
   fetchImpl?: typeof fetch;
@@ -162,12 +169,20 @@ async function resolveHostedEmailPublicSenderIngressRoute(
   },
 ): Promise<HostedEmailInboundRoute | null> {
   const configuredSender = normalizeHostedEmailAddress(input.config.fromAddress);
-  if (!configuredSender || !input.webCallbackSigning || !input.webControlBaseUrl) {
-    return null;
+  if (!configuredSender) {
+    throw new HostedEmailIngressRouteResolutionError(
+      "Hosted email public-sender routing is not configured.",
+    );
+  }
+  if (!input.webCallbackSigning || !input.webControlBaseUrl) {
+    throw new HostedEmailIngressRouteResolutionError(
+      "Hosted email public-sender authorization callback is not configured.",
+    );
   }
 
+  let response: Response;
   try {
-    const response = await fetchHostedExecutionWebControlPlaneResponse({
+    response = await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: input.webControlBaseUrl,
       body: JSON.stringify({
         envelopeFrom: input.envelopeFrom ?? null,
@@ -181,29 +196,46 @@ async function resolveHostedEmailPublicSenderIngressRoute(
       path: HOSTED_WEB_EMAIL_PUBLIC_ROUTE_PATH,
       timeoutMs: HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS,
     });
+  } catch (error) {
+    throw new HostedEmailIngressRouteResolutionError(
+      `Hosted email public-sender authorization lookup failed: ${formatHostedEmailRouteErrorDetails(error)}`,
+    );
+  }
 
-    if (!response.ok) {
-      return null;
-    }
+  if (!response.ok) {
+    throw new HostedEmailIngressRouteResolutionError(
+      `Hosted email public-sender authorization lookup failed with HTTP ${response.status}.`,
+    );
+  }
 
-    const payload = await response.json() as { userId?: unknown };
-    const userId = typeof payload.userId === "string" && payload.userId.trim()
-      ? payload.userId.trim()
-      : null;
+  let payload: { userId?: unknown };
+  try {
+    payload = await response.json() as { userId?: unknown };
+  } catch (error) {
+    throw new HostedEmailIngressRouteResolutionError(
+      `Hosted email public-sender authorization lookup returned invalid JSON: ${formatHostedEmailRouteErrorDetails(error)}`,
+    );
+  }
 
-    if (!userId) {
-      return null;
-    }
-
-    return {
-      authorization: "direct-public-sender",
-      identityId: configuredSender,
-      routeAddress: input.to,
-      userId,
-    };
-  } catch {
+  if (payload.userId === null) {
     return null;
   }
+
+  const userId = typeof payload.userId === "string" && payload.userId.trim()
+    ? payload.userId.trim()
+    : null;
+  if (!userId) {
+    throw new HostedEmailIngressRouteResolutionError(
+      "Hosted email public-sender authorization lookup returned an invalid payload.",
+    );
+  }
+
+  return {
+    authorization: "direct-public-sender",
+    identityId: configuredSender,
+    routeAddress: input.to,
+    userId,
+  };
 }
 
 function createHostedEmailRoutingStore(input: HostedEmailRouteStoreContext): HostedEmailRouteStore {
@@ -213,4 +245,16 @@ function createHostedEmailRoutingStore(input: HostedEmailRouteStoreContext): Hos
     cryptoKeyId: input.keyId,
     cryptoKeysById: input.keysById,
   });
+}
+
+function formatHostedEmailRouteErrorDetails(error: unknown): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    return message.length > 0 ? message : error.name;
+  }
+  if (typeof error === "string") {
+    const message = error.trim();
+    return message.length > 0 ? message : "Unknown error";
+  }
+  return "Unknown error";
 }
