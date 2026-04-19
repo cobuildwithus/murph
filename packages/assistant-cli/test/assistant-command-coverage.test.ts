@@ -12,6 +12,7 @@ import type { InboxServices } from '@murphai/inbox-services'
 const test = baseTest.sequential
 
 const commandMocks = vi.hoisted(() => ({
+  assertAssistantInkInteractiveInputAvailable: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   clearAssistantSelfDeliveryTargets: vi.fn(),
   deliverAssistantMessage: vi.fn(),
@@ -43,6 +44,11 @@ vi.mock('../src/assistant/runtime.js', () => ({
   runAssistantChat: commandMocks.runAssistantChat,
   sendAssistantMessage: commandMocks.sendAssistantMessage,
   stopAssistantAutomation: commandMocks.stopAssistantAutomation,
+}))
+
+vi.mock('../src/assistant-chat-ink.js', () => ({
+  assertAssistantInkInteractiveInputAvailable:
+    commandMocks.assertAssistantInkInteractiveInputAvailable,
 }))
 
 vi.mock('../src/assistant/doctor.js', () => ({
@@ -401,11 +407,45 @@ test('assistant chat writes a resume hint only for human non-explicit output', a
   })
 
   assert.equal(commandMocks.runAssistantChat.mock.calls.length, 2)
+  assert.equal(
+    commandMocks.assertAssistantInkInteractiveInputAvailable.mock.calls.length,
+    2,
+  )
   assert.equal(stderrWrite.mock.calls.length, 1)
   assert.equal(
     String(stderrWrite.mock.calls[0]?.[0]),
     'Resume chat by typing: murph chat --session "session-command-coverage"\n',
   )
+})
+
+test('assistant chat fails before delegating to the runtime when interactive input is unavailable', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const chat = readCommand(assistant.commands, 'chat')
+  const inputError = new Error('interactive input unavailable')
+
+  commandMocks.assertAssistantInkInteractiveInputAvailable.mockImplementationOnce(
+    () => {
+      throw inputError
+    },
+  )
+
+  await assert.rejects(
+    () =>
+      chat.run({
+        agent: false,
+        args: {
+          prompt: 'hello',
+        },
+        formatExplicit: false,
+        options: {
+          vault: '/tmp/vault',
+        },
+      }),
+    inputError,
+  )
+
+  assert.equal(commandMocks.runAssistantChat.mock.calls.length, 0)
 })
 
 test('assistant deliver resolves saved routes unless a session is provided', async () => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -1425,6 +1426,32 @@ function commandSchemaShapeKeys(
   return Object.keys(shape).sort()
 }
 
+test('root chat fails closed when the terminal cannot provide interactive raw-mode input', async () => {
+  const result = await runInProcessCliWithTty(['chat', '--vault', '/tmp/mock-vault'])
+
+  assert.equal(result.stderr, '')
+  assert.equal(
+    result.stdout,
+    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
+  )
+})
+
+test('root chat surfaces the interactive-input failure before any json result can be emitted', async () => {
+  const result = await runInProcessCliWithTty([
+    'chat',
+    '--vault',
+    '/tmp/mock-vault',
+    '--format',
+    'json',
+  ])
+
+  assert.equal(result.stderr, '')
+  assert.equal(
+    result.stdout,
+    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
+  )
+})
+
 test.sequential(
   'assistant model defaults persist in operator config without disturbing the default vault',
   async () => {
@@ -1516,6 +1543,79 @@ async function runRegisteredCliJson<TData>(
       }
     },
     exitCode,
+  }
+}
+
+async function runInProcessCliWithTty(args: string[]): Promise<{
+  stderr: string
+  stdout: string
+}> {
+  const cli = createVaultCli(
+    createUnwiredVaultServices(),
+    createIntegratedInboxServices(),
+  )
+  const stdout: string[] = []
+  const stderr: string[] = []
+  const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+  const stdinRawModeDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'setRawMode')
+  const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
+  const openSyncSpy = vi.spyOn(fs, 'openSync').mockImplementation(() => {
+    throw new Error('tty unavailable')
+  })
+  const stderrWriteSpy = vi
+    .spyOn(process.stderr, 'write')
+    .mockImplementation(((chunk: string | Uint8Array) => {
+      stderr.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
+      return true
+    }) as typeof process.stderr.write)
+
+  Object.defineProperty(process.stdin, 'isTTY', {
+    configurable: true,
+    value: false,
+  })
+  Object.defineProperty(process.stdin, 'setRawMode', {
+    configurable: true,
+    value: undefined,
+  })
+  Object.defineProperty(process.stdout, 'isTTY', {
+    configurable: true,
+    value: true,
+  })
+
+  try {
+    await cli.serve(args, {
+      env: process.env,
+      exit: () => {},
+      stdout(chunk) {
+        stdout.push(chunk)
+      },
+    })
+  } finally {
+    openSyncSpy.mockRestore()
+    stderrWriteSpy.mockRestore()
+
+    if (stdinTtyDescriptor) {
+      Object.defineProperty(process.stdin, 'isTTY', stdinTtyDescriptor)
+    } else {
+      delete (process.stdin as { isTTY?: boolean }).isTTY
+    }
+
+    if (stdinRawModeDescriptor) {
+      Object.defineProperty(process.stdin, 'setRawMode', stdinRawModeDescriptor)
+    } else {
+      delete (process.stdin as { setRawMode?: unknown }).setRawMode
+    }
+
+    if (stdoutTtyDescriptor) {
+      Object.defineProperty(process.stdout, 'isTTY', stdoutTtyDescriptor)
+    } else {
+      delete (process.stdout as { isTTY?: boolean }).isTTY
+    }
+  }
+
+  return {
+    stderr: stderr.join(''),
+    stdout: stdout.join(''),
   }
 }
 
