@@ -1,6 +1,6 @@
 # Stabilize current dirty-tree verification failures
 
-Status: active
+Status: completed
 Created: 2026-04-19
 Updated: 2026-04-19
 
@@ -62,3 +62,4 @@ Updated: 2026-04-19
 - Targeted local e2e under `apps/cloudflare` for the affected hosted-local flows
 - Expected outcomes:
 - Current dirty-tree verification surfaces pass without new regressions.
+Completed: 2026-04-19

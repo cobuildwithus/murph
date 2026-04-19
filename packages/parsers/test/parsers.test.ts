@@ -11,6 +11,7 @@ import {
   createParsedInboxPipeline,
   createInboxPipeline,
   type EmitCapture,
+  type FailAttachmentParseJobInput,
   openInboxRuntime,
   type PollConnector,
   rebuildRuntimeFromVault,
@@ -1173,7 +1174,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     completeAttachmentParseJob() {
       throw new Error("worker should not complete malformed attachment IDs");
     },
-    failAttachmentParseJob(input: Parameters<InboxRuntimeStore["failAttachmentParseJob"]>[0]) {
+    failAttachmentParseJob(input: FailAttachmentParseJobInput) {
       job = {
         ...job,
         state: "failed",

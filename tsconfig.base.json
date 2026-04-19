@@ -85,11 +85,20 @@
       "@murphai/importers": [
         "packages/importers/src/index.ts"
       ],
+      "@murphai/importers/device-providers/provider-descriptors": [
+        "packages/importers/src/device-providers/provider-descriptors.ts"
+      ],
       "@murphai/importers/*": [
         "packages/importers/src/*"
       ],
       "@murphai/query": [
         "packages/query/src/index.ts"
+      ],
+      "@murphai/query/entity-families": [
+        "packages/query/src/entity-families.ts"
+      ],
+      "@murphai/query/id-families": [
+        "packages/query/src/id-families.ts"
       ],
       "@murphai/query/*": [
         "packages/query/src/*"
@@ -165,6 +174,12 @@
       ],
       "@murphai/assistant-engine/*": [
         "packages/assistant-engine/src/*"
+      ],
+      "@murphai/inbox-services": [
+        "packages/inbox-services/src/index.ts"
+      ],
+      "@murphai/inbox-services/linq-endpoint": [
+        "packages/inbox-services/src/linq-endpoint.ts"
       ],
       "@murphai/inbox-services/testing": [
         "packages/inbox-services/src/testing.ts"

@@ -128,11 +128,9 @@ test('cli and split owner packages publish the expected owner dependencies', asy
       cliTsconfig.references?.some((reference) => reference.path === referencePath),
       true,
     )
-    assert.equal(
-      cliTypecheckTsconfig.references?.some((reference) => reference.path === referencePath),
-      true,
-    )
   }
+
+  assert.equal(cliTypecheckTsconfig.references, undefined)
 
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-engine/*'], [
     'packages/assistant-engine/src/*',

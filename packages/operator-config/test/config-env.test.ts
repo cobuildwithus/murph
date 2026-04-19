@@ -43,7 +43,10 @@ import {
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
 } from '../src/setup-runtime-env.ts'
-import { normalizeSetupWearables } from '../src/setup-cli-contracts.ts'
+import {
+  normalizeSetupWearables,
+  setupCommandOptionsSchema,
+} from '../src/setup-cli-contracts.ts'
 import {
   timeZoneSchema,
   workoutFormatListResultSchema,
@@ -166,6 +169,36 @@ test('applySetupRuntimeEnvOverridesToProcess only writes trimmed non-empty overr
       assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_KEEP, 'keep-me')
       assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_NEW, 'new-value')
       assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_SET, '  updated  ')
+    },
+  )
+})
+
+test('setup command options prefer explicit vault, then VAULT env, then ./vault', async () => {
+  await withTemporaryProcessEnv(
+    {
+      VAULT: '  /env-vault  ',
+    },
+    async () => {
+      assert.equal(
+        setupCommandOptionsSchema.parse({ vault: '/explicit-vault' }).vault,
+        '/explicit-vault',
+      )
+      assert.equal(
+        setupCommandOptionsSchema.parse({}).vault,
+        '/env-vault',
+      )
+    },
+  )
+
+  await withTemporaryProcessEnv(
+    {
+      VAULT: '   ',
+    },
+    async () => {
+      assert.equal(
+        setupCommandOptionsSchema.parse({}).vault,
+        './vault',
+      )
     },
   )
 })

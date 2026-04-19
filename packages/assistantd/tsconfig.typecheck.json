@@ -7,26 +7,6 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../assistant-engine"
-    },
-    {
-      "path": "../inbox-services"
-    },
-    {
-      "path": "../vault-usecases"
-    },
-    {
-      "path": "../gateway-core"
-    },
-    {
-      "path": "../gateway-local"
-    },
-    {
-      "path": "../runtime-state"
-    }
-  ],
   "include": [
     "*.ts",
     "test/**/*.ts",

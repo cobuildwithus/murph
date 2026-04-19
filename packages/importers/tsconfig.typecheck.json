@@ -7,14 +7,6 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../core/tsconfig.build.json"
-    }
-  ],
   "include": [
     "*.ts",
     "src/**/*.ts",

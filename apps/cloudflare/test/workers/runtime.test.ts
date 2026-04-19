@@ -45,6 +45,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  type HostedWakeAppendResponse,
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedWakeCommitRequest,
   type HostedWakeFetchRequest,
@@ -54,6 +55,7 @@ import {
   type HostedWakeTerminalRequest,
 } from "@murphai/hosted-execution/contracts";
 import {
+  appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
   finalizeTestHostedWakeCursor,
@@ -305,6 +307,17 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
       bucket,
       userId,
     }));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/test-append") {
+    const body = await request.clone().json() as HostedExecutionWake;
+    return Response.json(await appendTestHostedWake({
+      bucket,
+      wake: body,
+    } satisfies {
+      bucket: import("../../src/bundle-store.js").R2BucketLike;
+      wake: HostedExecutionWake;
+    }) satisfies HostedWakeAppendResponse);
   }
 
   if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/commit") {

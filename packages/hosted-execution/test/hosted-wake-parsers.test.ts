@@ -442,6 +442,58 @@ describe("hosted wake parser contracts", () => {
       }),
     ).toThrow(/channel is invalid/i);
 
+    expect(parseHostedExecutionConversationMessagePayload({
+      channel: "linq",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [
+          {
+            attachmentId: "att_123",
+            fileName: "photo.jpg",
+            mimeType: "image/jpeg",
+            size: 42,
+            type: "media",
+            url: "https://example.test/photo.jpg",
+          },
+          {
+            type: "voice_memo",
+          },
+        ],
+        replyToMessageId: "msg_122",
+        replyToPartIndex: 0,
+        service: "SMS",
+      },
+      phoneLookupKey: "phone_lookup_123",
+    })).toEqual({
+      channel: "linq",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [
+          {
+            attachmentId: "att_123",
+            fileName: "photo.jpg",
+            mimeType: "image/jpeg",
+            size: 42,
+            type: "media",
+            url: "https://example.test/photo.jpg",
+          },
+          {
+            type: "voice_memo",
+          },
+        ],
+        replyToMessageId: "msg_122",
+        replyToPartIndex: 0,
+        service: "SMS",
+      },
+      phoneLookupKey: "phone_lookup_123",
+    });
+
     const telegramWake = buildHostedExecutionTelegramConversationMessageWake({
       eventId: "evt_telegram_payload",
       occurredAt: "2026-04-17T00:00:00.000Z",
@@ -582,6 +634,14 @@ describe("hosted wake parser contracts", () => {
       wakeEventId: "evt_old",
       wakeId: "wake_24",
       wakeSeq: "24",
+    });
+  });
+
+  it("parses hosted wake status requests that only carry an event id", () => {
+    expect(parseHostedWakeStatusRequest({
+      eventId: "evt_old",
+    })).toEqual({
+      eventId: "evt_old",
     });
   });
 

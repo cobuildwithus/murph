@@ -86,7 +86,11 @@ describe("hosted runner container image contract", () => {
       "await runPnpmCommand([\"build\"], { cwd: appDir });",
     );
     expect(bundleAssemblyScript).toContain(
-      "await stageHostedRunnerRuntimeArtifact(stagingBundleDir, { appDir });",
+      "await stageHostedRunnerRuntimeArtifact(stagingBundleDir, {",
+    );
+    expect(bundleAssemblyScript).toContain("appDir,");
+    expect(bundleAssemblyScript).toContain(
+      "bundleOnlyDependencyNames: includeBundleOnlyDependencies",
     );
     expect(bundleAssemblyScript).toContain(
       "await packWorkspacePackageArtifacts(",
@@ -350,9 +354,13 @@ describe("hosted runner container image contract", () => {
       "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
     );
     expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain("pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only &&");
-    expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain("pnpm runner:bundle &&");
+    expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain(
+      "pnpm runner:bundle:hosted-local &&",
+    );
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
-    expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain("pnpm runner:bundle &&");
+    expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain(
+      "pnpm runner:bundle:hosted-local &&",
+    );
     expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");

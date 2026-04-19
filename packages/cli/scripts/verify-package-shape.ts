@@ -240,32 +240,16 @@ assert(
   'tsconfig.json must reference ../setup-cli so the published shell can build against the onboarding package.',
 )
 assert(
-  tsconfigTypecheck.references?.some((reference) => reference.path === '../operator-config') === true,
-  'tsconfig.typecheck.json must reference ../operator-config so package-local typecheck follows the operator-config owner dependency.',
-)
-assert(
-  tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-engine') === true,
-  'tsconfig.typecheck.json must reference ../assistant-engine so package-local typecheck follows the canonical assistant/vault/inbox owner dependency.',
-)
-assert(
-  tsconfigTypecheck.references?.some((reference) => reference.path === '../vault-inbox') !== true,
-  'tsconfig.typecheck.json must not keep a ../vault-inbox reference after collapsing to the assistant-engine owner.',
-)
-assert(
-  tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-cli') === true,
-  'tsconfig.typecheck.json must reference ../assistant-cli so package-local typecheck follows the assistant transport split.',
-)
-assert(
-  tsconfigTypecheck.references?.some((reference) => reference.path === '../setup-cli') === true,
-  'tsconfig.typecheck.json must reference ../setup-cli so package-local typecheck follows the onboarding transport split.',
+  tsconfigTypecheck.references === undefined,
+  'tsconfig.typecheck.json must stay source-resolved and avoid project references that require prebuilt workspace artifacts.',
 )
 assert(
   tsconfigTypecheck.extends === '../../tsconfig.base.json',
   'tsconfig.typecheck.json must extend ../../tsconfig.base.json.',
 )
 assert(
-  tsconfigTypecheck.compilerOptions?.rootDir === '.',
-  'tsconfig.typecheck.json must typecheck from the package root.',
+  tsconfigTypecheck.compilerOptions?.rootDir === '../..',
+  'tsconfig.typecheck.json must widen rootDir to the repo root so source-resolved workspace owner imports typecheck without TS6059.',
 )
 assert(
   tsconfigTypecheck.compilerOptions?.noEmit === true,

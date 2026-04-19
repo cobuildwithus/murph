@@ -45,35 +45,6 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../core/tsconfig.build.json"
-    },
-    {
-      "path": "../operator-config"
-    },
-    {
-      "path": "../runtime-state"
-    },
-    {
-      "path": "../inboxd"
-    },
-    {
-      "path": "../vault-usecases"
-    },
-    {
-      "path": "../importers"
-    },
-    {
-      "path": "../query"
-    },
-    {
-      "path": "../parsers"
-    }
-  ],
   "include": [
     "*.ts",
     "test/**/*.ts",

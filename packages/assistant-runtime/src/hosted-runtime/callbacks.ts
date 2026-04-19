@@ -816,18 +816,6 @@ function readHostedAssistantDeliveryRetryableFlag(error: unknown): boolean | nul
   return null;
 }
 
-function readStringProperty(error: unknown, property: string): string | null {
-  if (!error || typeof error !== "object") {
-    return null;
-  }
-
-  if (!(property in error) || typeof error[property as keyof typeof error] !== "string") {
-    return null;
-  }
-
-  return error[property as keyof typeof error] as string;
-}
-
 function buildHostedAssistantDeliveryDetails(input: {
   effectFingerprint?: string;
   effectId: string;

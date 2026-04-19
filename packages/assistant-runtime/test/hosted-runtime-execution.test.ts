@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -680,6 +681,176 @@ describe("executeHostedWakeForCommit", () => {
     expect(result.committedResult.result.summary).toBe("Processed member channel sync.");
   });
 
+  it("routes device-sync wakes through the dedicated system maintenance lane", async () => {
+    mocks.executeHostedWakeEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      followupExecution: "device-sync",
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+
+    const wake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "conn_123",
+      eventId: "evt_device_sync_wake",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      provider: "oura",
+      reason: "connected",
+      userId: "member_123",
+    });
+
+    await executeHostedWakeForCommit({
+      artifactMaterializer: vi.fn(),
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        wake,
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          deviceSyncPort: {
+            async applyUpdates() {
+              return {
+                appliedAt: "2026-04-08T00:00:00.000Z",
+                updates: [],
+                userId: "member_123",
+              };
+            },
+            async createConnectLink() {
+              return {
+                authorizationUrl: "https://device-sync.example.test/connect",
+                expiresAt: "2026-04-08T01:00:00.000Z",
+                provider: "oura",
+                providerLabel: "Oura",
+              };
+            },
+            async fetchSnapshot() {
+              return {
+                connections: [],
+                generatedAt: "2026-04-08T00:00:00.000Z",
+                userId: "member_123",
+              };
+            },
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutMs: 45_000,
+        vaultRoot: "/tmp/vault-root",
+        wake,
+      }),
+    );
+    expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a conversation wake is misrouted into system follow-up", async () => {
+    mocks.executeHostedWakeEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      followupExecution: "assistant-cron",
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+
+    await expect(
+      executeHostedWakeForCommit({
+        artifactMaterializer: vi.fn(),
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        request: {
+          bundle: "incoming-bundle",
+          wake: buildHostedExecutionTelegramConversationMessageWake({
+            eventId: "evt_misrouted_conversation_wake",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            telegramMessage: {
+              messageId: "telegram_message_123",
+              schema: "murph.hosted-telegram-message.v1",
+              threadId: "telegram_thread_123",
+            },
+            userId: "member_123",
+          }),
+        },
+        restored: {
+          assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+          operatorHomeRoot: "/tmp/operator-home",
+          vaultRoot: "/tmp/vault-root",
+        },
+        runtime: {
+          commitTimeoutMs: 45_000,
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            effectsPort: {
+              async deletePreparedAssistantDelivery() {},
+              async readRawEmailMessage() {
+                return null;
+              },
+              async readAssistantDeliveryRecord() {
+                return null;
+              },
+              async sendEmail() {},
+              async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
+                return record;
+              },
+            },
+            usageExportPort: null,
+          },
+          resolvedConfig: createHostedRuntimeResolvedConfig(),
+          userEnv: {},
+        },
+        runtimeEnv: {},
+      }),
+    ).rejects.toThrow("Hosted system wake follow-up does not support conversation wakes.");
+  });
+
   it("schedules the assistant lane immediately when the conversation lane stays on wake follow-up", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
@@ -1294,6 +1465,181 @@ describe("executeHostedWakeForCommit", () => {
         level: "warn",
         message:
           "Hosted runtime could not resolve the preserved device-sync wake after conversation wake handling; continuing without it.",
+      }),
+    );
+  });
+
+  it("ignores invalid preserved device-sync wake timestamps", async () => {
+    mocks.executeHostedWakeEvent.mockResolvedValue({
+      bootstrapResult: null,
+      conversationMetrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
+      followupExecution: "conversation-message",
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+    const close = vi.fn();
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue([
+      {
+        provider: "oura",
+      },
+    ]);
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list() {
+        return [{ provider: "oura" }];
+      },
+    });
+    mocks.createDeviceSyncService.mockReturnValue({
+      close,
+      getNextWakeAt() {
+        return "not-a-date";
+      },
+    });
+
+    const result = await executeHostedWakeForCommit({
+      artifactMaterializer: vi.fn(),
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        wake: buildHostedExecutionLinqConversationMessageWake({
+          eventId: "evt_linq_message_invalid_device_sync_wake",
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "linq_message_invalid_device_sync_wake",
+            parts: [
+              {
+                value: "hello",
+                type: "text",
+              },
+            ],
+          },
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          phoneLookupKey: "15551234567",
+          userId: "member_123",
+        }),
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig({
+          deviceSync: {
+            providerConfigs: {},
+            publicBaseUrl: "https://device-sync.example.test",
+            secret: "device-sync-secret",
+          },
+        }),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
+      assistantWakeAt: result.committedResult.result.nextWakeAt,
+      deviceSyncWakeAt: null,
+    });
+  });
+
+  it("reports null run elapsed time when the run timestamp is invalid", async () => {
+    await executeHostedWakeForCommit({
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      request: {
+        bundle: "incoming-bundle",
+        run: {
+          attempt: 1,
+          runId: "run_invalid_started_at",
+          startedAt: "not-a-date",
+        },
+        wake: buildHostedExecutionAssistantCronTickWake({
+          eventId: "evt_invalid_started_at",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "manual",
+          userId: "member_123",
+        }),
+      },
+      restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
+        operatorHomeRoot: "/tmp/operator-home",
+        vaultRoot: "/tmp/vault-root",
+      },
+      runtime: {
+        commitTimeoutMs: 45_000,
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: {
+            async deletePreparedAssistantDelivery() {},
+            async readRawEmailMessage() {
+              return null;
+            },
+            async readAssistantDeliveryRecord() {
+              return null;
+            },
+            async sendEmail() {},
+            async writeAssistantDeliveryRecord(record: HostedAssistantDeliveryRecord) {
+              return record;
+            },
+          },
+          usageExportPort: null,
+        },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+        userEnv: {},
+      },
+      runtimeEnv: {},
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runElapsedMs: null,
+        }),
+        message: "Hosted runtime executing wake handlers.",
       }),
     );
   });

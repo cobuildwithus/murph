@@ -7,14 +7,6 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../runtime-state"
-    },
-    {
-      "path": "../importers"
-    }
-  ],
   "include": [
     "*.ts",
     "test/**/*.ts",

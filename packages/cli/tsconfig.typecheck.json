@@ -2,58 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "composite": false,
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../runtime-state"
-    },
-    {
-      "path": "../hosted-execution"
-    },
-    {
-      "path": "../assistant-engine"
-    },
-    {
-      "path": "../inbox-services"
-    },
-    {
-      "path": "../vault-usecases"
-    },
-    {
-      "path": "../operator-config"
-    },
-    {
-      "path": "../assistant-cli"
-    },
-    {
-      "path": "../setup-cli"
-    },
-    {
-      "path": "../core/tsconfig.build.json"
-    },
-    {
-      "path": "../importers"
-    },
-    {
-      "path": "../inboxd"
-    },
-    {
-      "path": "../query"
-    },
-    {
-      "path": "../gateway-core"
-    },
-    {
-      "path": "../assistantd"
-    }
-  ],
   "include": [
     "src/**/*.ts",
     "scripts/**/*.ts",

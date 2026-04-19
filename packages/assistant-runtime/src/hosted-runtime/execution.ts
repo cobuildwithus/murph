@@ -16,8 +16,6 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  getAssistantCronStatus,
-  getAssistantStatus,
   refreshAssistantStatusSnapshot,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
@@ -55,18 +53,6 @@ import { summarizeWake } from "./summary.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
 import { resolveHostedWake } from "./utils.ts";
-
-const HOSTED_ASSISTANT_RECOVERY_RECEIPT_LIMIT = 200;
-const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = "autoReplyCaptureId";
-const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = "autoReplyCaptureIds";
-const AUTO_REPLY_RECEIPT_RETRY_AT_KEY = "autoReplyRetryAt";
-const HOSTED_UNSAFE_ASSISTANT_DELIVERY_TIMELINE_KINDS: ReadonlySet<string> = new Set([
-  "delivery.attempt.started",
-  "delivery.failed",
-  "delivery.queued",
-  "delivery.retry-scheduled",
-  "delivery.sent",
-]);
 
 export async function executeHostedWakeForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
@@ -312,7 +298,6 @@ async function runHostedSystemWakeFollowupExecution(input: {
 
 async function resolveHostedPreservedWakeMetrics(input: {
   deviceSyncConfig: NormalizedHostedAssistantRuntimeConfig["resolvedConfig"]["deviceSync"];
-  includeAssistant?: boolean;
   includeDeviceSync?: boolean;
   referenceMs?: number;
   run?: HostedExecutionRunContext | null;
@@ -320,33 +305,22 @@ async function resolveHostedPreservedWakeMetrics(input: {
   wake: HostedExecutionWake;
 }): Promise<HostedMaintenanceMetrics> {
   const referenceMs = input.referenceMs ?? Date.now();
-  const [assistantWakeAt, deviceSyncWakeAt] = await Promise.all([
-    input.includeAssistant === false
-      ? Promise.resolve<string | null>(null)
-      : resolveHostedAssistantWakeAt({
-          wake: input.wake,
-          referenceMs,
-          run: input.run ?? null,
-          vaultRoot: input.vaultRoot,
-        }),
-    input.includeDeviceSync === false
-      ? Promise.resolve<string | null>(null)
-      : resolveHostedDeviceSyncWakeAt({
-          deviceSyncConfig: input.deviceSyncConfig,
-          wake: input.wake,
-          referenceMs,
-          run: input.run ?? null,
-          vaultRoot: input.vaultRoot,
-        }),
-  ]);
+  const deviceSyncWakeAt = input.includeDeviceSync === false
+    ? null
+    : await resolveHostedDeviceSyncWakeAt({
+        deviceSyncConfig: input.deviceSyncConfig,
+        wake: input.wake,
+        referenceMs,
+        run: input.run ?? null,
+        vaultRoot: input.vaultRoot,
+      });
 
   return {
     deviceSyncProcessed: 0,
     deviceSyncSkipped: input.includeDeviceSync === false,
-    nextWakeAt: earliestHostedWakeAt(assistantWakeAt, deviceSyncWakeAt),
+    nextWakeAt: deviceSyncWakeAt,
     parserProcessed: 0,
     wakeMaterializationHints: createHostedWakeMaterializationHints({
-      assistantWakeAt,
       deviceSyncWakeAt,
     }),
   };
@@ -360,7 +334,6 @@ async function resolveHostedConversationPreservedWakeMetrics(input: {
 }): Promise<HostedMaintenanceMetrics> {
   const preservedMetrics = await resolveHostedPreservedWakeMetrics({
     deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
-    includeAssistant: false,
     run: input.run ?? null,
     vaultRoot: input.vaultRoot,
     wake: input.wake,
@@ -415,44 +388,6 @@ async function runHostedConversationWakeFollowupExecution(input: {
         ?? preservedMetrics.nextWakeAt,
     }),
   };
-}
-
-async function resolveHostedAssistantWakeAt(input: {
-  wake: HostedExecutionWake;
-  referenceMs: number;
-  run?: HostedExecutionRunContext | null;
-  vaultRoot: string;
-}): Promise<string | null> {
-  try {
-    const [status, cronStatus] = await Promise.all([
-      getAssistantStatus({
-        limit: HOSTED_ASSISTANT_RECOVERY_RECEIPT_LIMIT,
-        vault: input.vaultRoot,
-      }),
-      getAssistantCronStatus(input.vaultRoot),
-    ]);
-
-    return earliestHostedWakeAt(
-      normalizeHostedWakeAt(status.outbox.nextAttemptAt, input.referenceMs),
-      normalizeHostedWakeAt(cronStatus.nextRunAt, input.referenceMs),
-      resolveHostedAssistantRecoveryWakeAt({
-        receipts: status.recentTurns,
-        referenceMs: input.referenceMs,
-      }),
-    );
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      wake: input.wake,
-      error,
-        level: "warn",
-        message:
-          "Hosted runtime could not resolve the preserved assistant wake after conversation wake handling; continuing without it.",
-        phase: "wake.running",
-        run: input.run ?? null,
-      });
-    return null;
-  }
 }
 
 async function resolveHostedDeviceSyncWakeAt(input: {
@@ -516,86 +451,6 @@ function createHostedWakeMaterializationHints(input: {
   };
 
   return Object.keys(hints).length > 0 ? hints : null;
-}
-
-function resolveHostedAssistantRecoveryWakeAt(input: {
-  receipts: Awaited<ReturnType<typeof getAssistantStatus>>["recentTurns"];
-  referenceMs: number;
-}): string | null {
-  let dueRecovery = false;
-  let nextWakeAt: string | null = null;
-
-  for (const receipt of input.receipts) {
-    if (!isHostedAssistantRecoveryReceiptCandidate(receipt)) {
-      continue;
-    }
-
-    const retryAt = readHostedAssistantAutoReplyRetryAt(receipt);
-    if (!retryAt) {
-      dueRecovery = true;
-      continue;
-    }
-
-    const parsedMs = Date.parse(retryAt);
-    if (!Number.isFinite(parsedMs) || parsedMs <= input.referenceMs) {
-      dueRecovery = true;
-      continue;
-    }
-
-    nextWakeAt = earliestHostedWakeAt(nextWakeAt, new Date(parsedMs).toISOString());
-  }
-
-  if (dueRecovery) {
-    return new Date(input.referenceMs).toISOString();
-  }
-
-  return nextWakeAt;
-}
-
-function isHostedAssistantRecoveryReceiptCandidate(
-  receipt: Awaited<ReturnType<typeof getAssistantStatus>>["recentTurns"][number],
-): boolean {
-  if (receipt.status !== "failed" || receipt.responsePreview !== null) {
-    return false;
-  }
-
-  if (
-    receipt.timeline.some((event) =>
-      HOSTED_UNSAFE_ASSISTANT_DELIVERY_TIMELINE_KINDS.has(event.kind)
-    )
-  ) {
-    return false;
-  }
-
-  const startedEvent = receipt.timeline.find((event) => event.kind === "turn.started");
-  if (!startedEvent) {
-    return false;
-  }
-
-  const groupedCaptureIds = startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
-    ?.split(",")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0) ?? [];
-  const primaryCaptureId =
-    startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]?.trim()
-    || groupedCaptureIds[0]
-    || null;
-
-  return primaryCaptureId !== null;
-}
-
-function readHostedAssistantAutoReplyRetryAt(
-  receipt: Awaited<ReturnType<typeof getAssistantStatus>>["recentTurns"][number],
-): string | null {
-  for (let index = receipt.timeline.length - 1; index >= 0; index -= 1) {
-    const retryAt = receipt.timeline[index]?.metadata[AUTO_REPLY_RECEIPT_RETRY_AT_KEY];
-    const normalizedRetryAt = normalizeHostedWakeAt(retryAt ?? null);
-    if (normalizedRetryAt) {
-      return normalizedRetryAt;
-    }
-  }
-
-  return null;
 }
 
 function earliestHostedWakeAt(...values: Array<string | null | undefined>): string | null {
