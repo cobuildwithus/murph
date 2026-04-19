@@ -7,23 +7,6 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../messaging-ingress"
-    },
-    {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../core/tsconfig.build.json"
-    },
-    {
-      "path": "../parsers"
-    },
-    {
-      "path": "../runtime-state"
-    }
-  ],
   "include": [
     "*.ts",
     "test/**/*.ts",
