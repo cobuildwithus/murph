@@ -6,9 +6,10 @@ import {
 } from "@murphai/assistant-runtime";
 
 import {
-  buildHostedRunnerContainerEnv,
+  buildHostedRunnerAmbientEnv,
   buildHostedRunnerJobRuntime,
 } from "./runner-env.ts";
+import { isHostedRunnerProcessControlEnvKey } from "./hosted-env-policy.ts";
 import {
   runHostedExecutionJobIsolatedDetailed,
   type HostedExecutionIsolatedRunnerInput,
@@ -49,7 +50,7 @@ export function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
 ): HostedAssistantRuntimeConfig {
   const forwardedEnv = requestedRuntime.forwardedEnv === undefined
-    ? buildHostedRunnerContainerEnv(process.env)
+    ? buildHostedRunnerAmbientEnv(process.env)
     : stripChildProcessControlEnvKeys(requestedRuntime.forwardedEnv);
   const configSource = requestedRuntime.resolvedConfig
     ? undefined
@@ -87,9 +88,9 @@ export function createHostedExecutionJobRunner(
     options?: HostedExecutionJobOptions,
   ): Promise<HostedAssistantRuntimeJobResult> {
     onBeforeRun?.();
-    const runtime = buildRuntime(input.runtime ?? {});
     const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
     const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
+    const runtime = buildRuntime(input.runtime ?? {});
     const directHostedEnvironment = internalWorkerProxyToken
       ? null
       : readEnvironment();
@@ -133,7 +134,10 @@ function stripChildProcessControlEnvKeys(
   const filtered: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
-    if (hostedExecutionChildControlEnvKeys.has(key)) {
+    if (
+      hostedExecutionChildControlEnvKeys.has(key)
+      || isHostedRunnerProcessControlEnvKey(key)
+    ) {
       continue;
     }
     filtered[key] = value;
