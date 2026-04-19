@@ -35,6 +35,7 @@ export function parseHostedExecutionDeviceSyncReason(
     || reason === "webhook_hint"
     || reason === "disconnected"
     || reason === "reauthorization_required"
+    || reason === "reconcile_due"
   ) {
     return reason;
   }

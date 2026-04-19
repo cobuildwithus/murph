@@ -9,6 +9,7 @@ import {
   parseHostedExecutionSharePack,
   parseHostedExecutionTimelineEntries,
   parseHostedExecutionUserStatus,
+  parseHostedWakeMaterializeResponse,
 } from "../src/parsers.ts";
 
 const TEST_BUNDLE_REF = {
@@ -127,6 +128,22 @@ describe("hosted execution parsers coverage", () => {
           eventsHandled: 3,
           nextWakeAt: "2026-04-08T01:00:00.000Z",
           summary: "Processed queued work.",
+        },
+      });
+    });
+
+    it("parses hosted wake materialize responses", () => {
+      expect(parseHostedWakeMaterializeResponse({
+        targetSeqHint: "24",
+        wakeMaterializationHints: {
+          assistantWakeAt: null,
+          deviceSyncWakeAt: "2026-04-08T01:00:00.000Z",
+        },
+      })).toEqual({
+        targetSeqHint: "24",
+        wakeMaterializationHints: {
+          assistantWakeAt: null,
+          deviceSyncWakeAt: "2026-04-08T01:00:00.000Z",
         },
       });
     });
@@ -343,10 +360,13 @@ describe("hosted execution parsers coverage", () => {
     it("rejects removed provider message event payloads", () => {
       expect(() => parseHostedExecutionEvent({
         kind: "linq.message.received",
-        linqEvent: {
-          eventId: "linq_evt_123",
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
         },
-        linqMessageId: null,
         phoneLookupKey: "phone_lookup_123",
         userId: "user_123",
       })).toThrow(/Unsupported hosted execution event kind/i);

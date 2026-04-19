@@ -2,6 +2,7 @@ import type {
   HostedExecutionCursorState,
   HostedConversationMessageWakeRecord,
   HostedExecutionWake,
+  HostedFetchedWakeRecord,
   HostedSystemWakeRecord,
   HostedWakeAppendResponse,
   HostedWakeCommitRequest,
@@ -16,9 +17,7 @@ import type {
   HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
-  isHostedConversationMessageWake,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution";
 import {
   encryptTestHostedWakePayload,
@@ -62,7 +61,7 @@ export async function appendTestHostedWake(input: {
 
   const seq = String(state.nextSeq + 1);
   const now = new Date().toISOString();
-  const storedWake: StoredHostedWakeRecord = isHostedConversationMessageWake(wake)
+  const storedWake: StoredHostedWakeRecord = wake.kind === "conversation.message"
     ? {
       behavior: "ordered",
       createdAt: now,
@@ -75,12 +74,9 @@ export async function appendTestHostedWake(input: {
       ...encryptTestHostedWakePayload({
         field: "hosted-wake-inline-payload",
         userId: wake.userId,
-        value: {
-          eventId: wake.eventId,
-          ...wake.message,
-        },
+        value: wake,
       }),
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq,
       updatedAt: now,
       userId: wake.userId,
@@ -102,7 +98,7 @@ export async function appendTestHostedWake(input: {
         userId: wake.userId,
         value: wake,
       }),
-      payloadSchema: HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       seq,
       updatedAt: now,
       userId: wake.userId,
@@ -141,7 +137,7 @@ export async function fetchTestHostedWakeBatch(input: {
     .filter((wake) => parseSeq(wake.seq) > afterSeq)
     .sort((left, right) => compareSeq(left.seq, right.seq))
     .slice(0, limit)
-    .map(toHostedWakeRecord);
+    .map(toHostedFetchedWakeRecord);
 
   return {
     cursor: state.cursor,
@@ -176,9 +172,13 @@ export async function commitTestHostedWakeCursor(input: {
   if (
     (shouldAdvanceCommittedSeq
       && (
-        committedSeq !== currentCommittedSeq + 1n
+        !input.body.advance
+        || input.body.advance.wakeId !== `wake_${committedSeq}`
+        || input.body.advance.proof !== `${input.body.advance.wakeId}:${committedSeq}:2026-03-26T12:00:00.000Z`
+        || committedSeq !== currentCommittedSeq + 1n
         || committedSeq >= state.nextSeq
       ))
+    || (!shouldAdvanceCommittedSeq && input.body.advance)
     || (!shouldAdvanceCommittedSeq && committedSeq !== currentCommittedSeq)
     || (!shouldAdvanceCommittedSeq && (!hasSnapshotRef || !snapshotRefChanged))
   ) {
@@ -340,6 +340,13 @@ function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {
     seq: wake.seq,
     updatedAt: wake.updatedAt,
     userId: wake.userId,
+  };
+}
+
+function toHostedFetchedWakeRecord(wake: StoredHostedWakeRecord): HostedFetchedWakeRecord {
+  return {
+    ...toHostedWakeRecord(wake),
+    commitProof: `${wake.id}:${wake.seq}:${wake.updatedAt}`,
   };
 }
 

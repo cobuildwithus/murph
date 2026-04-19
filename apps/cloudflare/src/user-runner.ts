@@ -1,6 +1,7 @@
 import type {
   HostedExecutionWake,
   HostedExecutionUserStatus,
+  HostedWakeMaterializationHints,
   HostedWakeExecutionResult,
   HostedWakeStatus,
 } from "@murphai/hosted-execution";
@@ -24,7 +25,7 @@ import {
 } from "./user-key-store.js";
 import {
   decryptHostedWakePayloadCiphertext,
-} from "./hosted-web-encryption.ts";
+} from "./hosted-wake-encryption.ts";
 import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -32,6 +33,7 @@ import {
   appendHostedWakeInWeb,
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
+  materializeHostedDueWakesInWeb,
   quarantineHostedWakeInWeb,
   readHostedWakeStatusFromWeb,
 } from "./web-control-plane.ts";
@@ -227,14 +229,21 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId ?? null,
       });
-      await this.wakeScheduler.syncNextWake(
-        new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
-      );
+      await this.wakeScheduler.syncNextWake({
+        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
+      });
       return;
     }
 
     try {
-      await this.wakeHostedWakes();
+      const materialization = await this.materializeDueHostedWakesInWeb(record.userId);
+      await this.wakeScheduler.syncNextWake({
+        preferredWakeAt: null,
+        wakeMaterializationHints: materialization.wakeMaterializationHints,
+      });
+      await this.wakeHostedWakes({
+        targetSeqHint: materialization.targetSeqHint,
+      });
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -244,9 +253,9 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId,
       });
-      await this.wakeScheduler.syncNextWake(
-        new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
-      );
+      await this.wakeScheduler.syncNextWake({
+        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
+      });
     }
   }
 
@@ -293,6 +302,32 @@ export class HostedUserRunner {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedExecutionUserStatus> {
     return this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
+  }
+
+  private async materializeDueHostedWakesInWeb(
+    userId: string,
+  ): Promise<{
+    targetSeqHint: string | null;
+    wakeMaterializationHints: HostedWakeMaterializationHints | null;
+  }> {
+    const wakeMaterializationHints = await this.stateStore.readWakeMaterializationHints();
+
+    if (!hostedWakeMaterializationDueNow(wakeMaterializationHints)) {
+      return {
+        targetSeqHint: null,
+        wakeMaterializationHints,
+      };
+    }
+
+    return materializeHostedDueWakesInWeb({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      body: {
+        wakeMaterializationHints,
+      },
+      boundUserId: userId,
+      callbackSigning: this.env.webCallbackSigning,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
   }
 
   private async wakeHostedWakesInternal(input: {
@@ -351,6 +386,10 @@ export class HostedUserRunner {
         const commit = await commitHostedWakeCursorToWeb({
           baseUrl: this.env.hostedWebBaseUrl,
           body: {
+            advance: {
+              proof: wake.commitProof,
+              wakeId: wake.id,
+            },
             committedSeq: wake.seq,
             expectedVersion,
             snapshotRef: bundleState.bundleRef ?? null,
@@ -519,7 +558,7 @@ export class HostedUserRunner {
 
     return await decryptHostedWakePayloadCiphertext({
       ciphertext: payloadCiphertext,
-      environment: this.env.hostedWebEncryption,
+      environment: this.env.hostedWakeEncryption,
       userId,
     });
   }
@@ -845,6 +884,26 @@ export class HostedUserRunner {
       }
     }
   }
+}
+
+function hostedWakeMaterializationDueNow(
+  wakeMaterializationHints: HostedWakeMaterializationHints | null,
+): boolean {
+  if (!wakeMaterializationHints) {
+    return false;
+  }
+
+  return hostedWakeHintDueNow(wakeMaterializationHints.assistantWakeAt)
+    || hostedWakeHintDueNow(wakeMaterializationHints.deviceSyncWakeAt);
+}
+
+function hostedWakeHintDueNow(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const parsedMs = Date.parse(value);
+  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
 }
 
 function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | null {

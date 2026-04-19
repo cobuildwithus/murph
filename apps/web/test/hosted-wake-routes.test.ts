@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionAssistantCronTickWake,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   listHostedWakeRepairCandidates: vi.fn(),
   listHostedWakesAfterSeq: vi.fn(),
+  materializeHostedDueWakesTx: vi.fn(),
   readHostedWakeLifecycleState: vi.fn(),
   readHostedExecutionCursor: vi.fn(),
   readOptionalJsonObject: vi.fn(),
@@ -51,6 +53,10 @@ vi.mock("@/src/lib/hosted-wake/control", () => ({
   triggerHostedWakeUserBestEffort: mocks.triggerHostedWakeUserBestEffort,
 }));
 
+vi.mock("@/src/lib/hosted-wake/materialize", () => ({
+  materializeHostedDueWakesTx: mocks.materializeHostedDueWakesTx,
+}));
+
 vi.mock("@/src/lib/hosted-wake/queue", () => ({
   appendHostedExecutionWakePayloadTx: mocks.appendHostedExecutionWakePayloadTx,
 }));
@@ -86,12 +92,18 @@ describe("hosted wake internal routes", () => {
         occurredAt: "2026-04-17T00:00:00.000Z",
         payloadBytes: 128,
         payloadCiphertext: "ciphertext_inline_123",
-        payloadSchema: "murph.hosted-wake-system.v1",
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "24",
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "member_123",
+      },
+    });
+    mocks.materializeHostedDueWakesTx.mockResolvedValue({
+      targetSeqHint: "24",
+      wakeMaterializationHints: {
+        deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
       },
     });
     mocks.listHostedWakesAfterSeq.mockResolvedValue({
@@ -107,6 +119,7 @@ describe("hosted wake internal routes", () => {
       wakes: [
         {
           behavior: "ordered",
+          commitProof: "proof_24",
           createdAt: "2026-04-17T00:00:00.000Z",
           dedupeKey: "evt_tick",
           id: "wake_24",
@@ -114,7 +127,7 @@ describe("hosted wake internal routes", () => {
           occurredAt: "2026-04-17T00:00:00.000Z",
           payloadBytes: 128,
           payloadCiphertext: "ciphertext_inline_123",
-          payloadSchema: "murph.hosted-wake-system.v1",
+          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
           quarantineCode: null,
           quarantinedAt: null,
           seq: "24",
@@ -235,6 +248,7 @@ describe("hosted wake internal routes", () => {
       wakes: [
         {
           behavior: "ordered",
+          commitProof: "proof_24",
           createdAt: "2026-04-17T00:00:00.000Z",
           dedupeKey: "evt_tick",
           id: "wake_24",
@@ -242,7 +256,7 @@ describe("hosted wake internal routes", () => {
           occurredAt: "2026-04-17T00:00:00.000Z",
           payloadBytes: 128,
           payloadCiphertext: "ciphertext_inline_123",
-          payloadSchema: "murph.hosted-wake-system.v1",
+          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
           quarantineCode: null,
           quarantinedAt: null,
           seq: "24",
@@ -262,6 +276,10 @@ describe("hosted wake internal routes", () => {
 
   it("parses and forwards wake cursor commit requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
+      advance: {
+        proof: "proof_24",
+        wakeId: "wake_24",
+      },
       committedSeq: "24",
       expectedVersion: "3",
       snapshotRef: {
@@ -290,6 +308,10 @@ describe("hosted wake internal routes", () => {
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
     expect(mocks.getPrisma).toHaveBeenCalledOnce();
     expect(mocks.commitHostedExecutionCursorTx).toHaveBeenCalledWith({
+      advance: {
+        proof: "proof_24",
+        wakeId: "wake_24",
+      },
       committedSeq: 24n,
       expectedVersion: 3n,
       snapshotRef: {
@@ -299,6 +321,36 @@ describe("hosted wake internal routes", () => {
         label: "wake-route-tx",
       }),
       userId: "member_123",
+    });
+  });
+
+  it("parses and forwards hosted wake materialization requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-04-17T00:00:00.000Z",
+        deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
+      },
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/materialize/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      targetSeqHint: "24",
+      wakeMaterializationHints: {
+        deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
+      },
+    });
+    expect(mocks.materializeHostedDueWakesTx).toHaveBeenCalledWith({
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      userId: "member_123",
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-04-17T00:00:00.000Z",
+        deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
+      },
     });
   });
 

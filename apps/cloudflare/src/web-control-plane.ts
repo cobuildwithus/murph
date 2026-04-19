@@ -7,6 +7,8 @@ import {
   type HostedWakeCommitResponse,
   type HostedWakeFetchRequest,
   type HostedWakeFetchResponse,
+  type HostedWakeMaterializeRequest,
+  type HostedWakeMaterializeResponse,
   type HostedWakeQuarantineRequest,
   type HostedWakeQuarantineResponse,
   type HostedWakeStatusRequest,
@@ -16,6 +18,7 @@ import {
   parseHostedWakeAppendResponse,
   parseHostedWakeCommitResponse,
   parseHostedWakeFetchResponse,
+  parseHostedWakeMaterializeResponse,
   parseHostedWakeQuarantineResponse,
   parseHostedWakeStatusResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -97,6 +100,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
 
 const HOSTED_WEB_HOSTED_WAKE_APPEND_PATH = "/api/internal/hosted-wake/append";
 const HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH = "/api/internal/hosted-wake/commit";
+const HOSTED_WEB_HOSTED_WAKE_MATERIALIZE_PATH = "/api/internal/hosted-wake/materialize";
 const HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH = "/api/internal/hosted-wake/quarantine";
 const HOSTED_WEB_HOSTED_WAKE_STATUS_PATH = "/api/internal/hosted-wake/status";
 const HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH = "/api/internal/hosted-wake/unseen";
@@ -185,6 +189,32 @@ export async function commitHostedWakeCursorToWeb(input: {
   }
 
   return parseHostedWakeCommitResponse(await response.json());
+}
+
+export async function materializeHostedDueWakesInWeb(input: {
+  baseUrl: string;
+  body: HostedWakeMaterializeRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedWakeMaterializeResponse> {
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.baseUrl,
+    body: JSON.stringify(input.body),
+    boundUserId: input.boundUserId,
+    callbackSigning: input.callbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_HOSTED_WAKE_MATERIALIZE_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted wake materialize failed with HTTP ${response.status}.`);
+  }
+
+  return parseHostedWakeMaterializeResponse(await response.json());
 }
 
 export async function quarantineHostedWakeInWeb(input: {
