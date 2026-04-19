@@ -1,5 +1,6 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE,
   type HostedExecutionWake,
   type HostedWakeAppendRequest,
   type HostedWakeAppendResponse,
@@ -33,6 +34,20 @@ import {
   createHostedWebCallbackSignatureHeaders,
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
+
+interface JsonErrorBody {
+  error?: {
+    code?: unknown;
+    message?: unknown;
+  };
+}
+
+export class HostedWakeTerminalStaleFetchProofError extends Error {
+  constructor(message = "Hosted wake terminal receipt lost the current fetch fence.") {
+    super(message);
+    this.name = "HostedWakeTerminalStaleFetchProofError";
+  }
+}
 
 export function normalizeHostedWebControlBaseUrl(
   value: string | null | undefined,
@@ -215,6 +230,19 @@ export async function recordHostedWakeTerminalInWeb(input: {
   });
 
   if (!response.ok) {
+    const errorBody = await readJsonErrorBody(response);
+
+    if (
+      response.status === 409
+      && errorBody?.error?.code === HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE
+    ) {
+      throw new HostedWakeTerminalStaleFetchProofError(
+        typeof errorBody.error.message === "string" && errorBody.error.message.length > 0
+          ? errorBody.error.message
+          : undefined,
+      );
+    }
+
     throw new Error(`Hosted wake terminal record failed with HTTP ${response.status}.`);
   }
 
@@ -316,4 +344,18 @@ function requireHostedWebControlBaseUrl(value: string): string {
   }
 
   return normalized;
+}
+
+async function readJsonErrorBody(response: Response): Promise<JsonErrorBody | null> {
+  const contentType = response.headers.get("content-type");
+  if (!contentType?.toLowerCase().includes("application/json")) {
+    return null;
+  }
+
+  try {
+    const body = await response.json();
+    return body && typeof body === "object" ? body as JsonErrorBody : null;
+  } catch {
+    return null;
+  }
 }
