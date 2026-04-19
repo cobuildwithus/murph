@@ -20,6 +20,16 @@ afterEach(() => {
   vi.resetModules();
 });
 
+function parseJsoncObject(rawConfig: string): Record<string, unknown> {
+  return JSON.parse(
+    rawConfig
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("//"))
+      .join("\n")
+      .replace(/,\s*([}\]])/gu, "$1"),
+  ) as Record<string, unknown>;
+}
+
 async function importRenderWorkerSecretsWithMockedAccess(
   blockedPath: string,
 ): Promise<typeof import("../scripts/render-worker-secrets.ts")> {
@@ -139,8 +149,12 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.migrations).toEqual([
       {
-        new_sqlite_classes: ["UserRunnerDurableObject", "RunnerContainer"],
+        new_sqlite_classes: ["UserRunnerDurableObject"],
         tag: "v1",
+      },
+      {
+        new_sqlite_classes: ["RunnerContainer"],
+        tag: "v2",
       },
     ]);
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
@@ -182,6 +196,43 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
+  });
+
+  it("keeps the checked-in wrangler scaffold aligned with generated durable object config", async () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+    });
+    const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
+      durable_objects: {
+        bindings: Array<{
+          class_name: string;
+          name: string;
+        }>;
+      };
+      migrations: Array<{
+        new_sqlite_classes: string[];
+        tag: string;
+      }>;
+    };
+    const checkedInConfig = parseJsoncObject(
+      await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+    ) as {
+      durable_objects: {
+        bindings: Array<{
+          class_name: string;
+          name: string;
+        }>;
+      };
+      migrations: Array<{
+        new_sqlite_classes: string[];
+        tag: string;
+      }>;
+    };
+
+    expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
+    expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
   });
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {
