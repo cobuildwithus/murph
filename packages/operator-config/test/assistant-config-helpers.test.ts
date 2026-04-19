@@ -261,6 +261,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
   )
   assert.equal(
     shouldUseAssistantOpenAIResponsesApi({
+      provider: 'openai-compatible',
       baseUrl: 'https://example.test/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
       presetId: 'openai',
@@ -283,6 +284,7 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
   const memberProfile = createHostedAssistantProfile({
     id: ' member-openai ',
     providerConfig: {
+      provider: 'openai-compatible',
       apiKeyEnv: ' OPENAI_API_KEY ',
       baseUrl: ' https://api.openai.com/v1 ',
       headers: {
@@ -297,6 +299,7 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
     label: '  Team Hosted Endpoint  ',
     managedBy: 'platform',
     providerConfig: {
+      provider: 'openai-compatible',
       apiKeyEnv: ' TEAM_API_KEY ',
       baseUrl: ' https://gateway.example.test/v1 ',
       headers: {
@@ -363,6 +366,7 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
         label: 'Team Hosted Endpoint',
         managedBy: 'platform',
         providerConfig: {
+          provider: 'openai-compatible',
           apiKeyEnv: 'TEAM_API_KEY',
           baseUrl: 'https://gateway.example.test/v1',
           headers: {
