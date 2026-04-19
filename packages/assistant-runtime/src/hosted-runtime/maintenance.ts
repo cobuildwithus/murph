@@ -2,14 +2,6 @@ import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
-  openInboxRuntime,
-  rebuildRuntimeFromVault,
-} from "@murphai/inboxd/runtime";
-import {
-  createConfiguredParserRegistry,
-  createInboxParserService,
-} from "@murphai/parsers";
-import {
   type AssistantExecutionContext,
   createAssistantFoodAutoLogHooks,
   readAssistantAutomationState,
@@ -21,7 +13,6 @@ import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-ser
 import type {
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
-  HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
@@ -40,8 +31,6 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
-const HOSTED_MAX_MAINTENANCE_PASSES = 10;
-const HOSTED_MAX_PARSER_JOBS = 50;
 
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
@@ -141,107 +130,6 @@ export async function runHostedAssistantCronWakeLane(input: {
   };
 }
 
-export async function drainHostedParserQueue(input: {
-  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
-  vaultRoot: string;
-}): Promise<{ nextWakeAt: string | null; processedJobs: number }> {
-  const runtime = await openInboxRuntime({
-    vaultRoot: input.vaultRoot,
-  });
-
-  try {
-    await rebuildRuntimeFromVault({
-      runtime,
-      vaultRoot: input.vaultRoot,
-    });
-    if (input.artifactMaterializer) {
-      await hydratePendingHostedParserArtifacts({
-        artifactMaterializer: input.artifactMaterializer,
-        runtime,
-      });
-    }
-    const configured = await createConfiguredParserRegistry({
-      vaultRoot: input.vaultRoot,
-    });
-    const parserService = createInboxParserService({
-      ffmpeg: configured.ffmpeg,
-      registry: configured.registry,
-      runtime,
-      vaultRoot: input.vaultRoot,
-    });
-    const results = await parserService.drain({
-      maxJobs: HOSTED_MAX_PARSER_JOBS,
-    });
-
-    return {
-      nextWakeAt: null,
-      processedJobs: results.length,
-    };
-  } finally {
-    runtime.close();
-  }
-}
-
-export async function drainHostedParserQueueUntilSettled(input: {
-  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
-  vaultRoot: string;
-}): Promise<{ nextWakeAt: string | null; processedJobs: number }> {
-  let processedJobs = 0;
-
-  for (let pass = 0; pass < HOSTED_MAX_MAINTENANCE_PASSES; pass += 1) {
-    const passResult = await drainHostedParserQueue(input);
-    processedJobs += passResult.processedJobs;
-
-    if (passResult.processedJobs === 0) {
-      return {
-        nextWakeAt: passResult.nextWakeAt,
-        processedJobs,
-      };
-    }
-
-    if (pass === HOSTED_MAX_MAINTENANCE_PASSES - 1) {
-      return {
-        nextWakeAt: earliestHostedWakeAt(
-          new Date().toISOString(),
-          passResult.nextWakeAt,
-        ),
-        processedJobs,
-      };
-    }
-  }
-
-  return {
-    nextWakeAt: null,
-    processedJobs,
-  };
-}
-
-async function hydratePendingHostedParserArtifacts(input: {
-  artifactMaterializer: HostedWorkspaceArtifactMaterializer;
-  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
-}): Promise<void> {
-  const relativePaths = new Set<string>();
-
-  for (const job of input.runtime.listAttachmentParseJobs({
-    limit: HOSTED_MAX_PARSER_JOBS,
-    state: "pending",
-  })) {
-    const capture = input.runtime.getCapture(job.captureId);
-    const attachment = capture?.attachments.find((candidate) => candidate.attachmentId === job.attachmentId);
-    if (!attachment?.storedPath) {
-      continue;
-    }
-
-    relativePaths.add(attachment.storedPath);
-  }
-
-  if (relativePaths.size === 0) {
-    return;
-  }
-
-  await input.artifactMaterializer([...relativePaths]);
-}
-
 export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
@@ -334,32 +222,6 @@ export async function runHostedAssistantAutomation(
 
     throw error;
   }
-}
-
-export async function runHostedConversationAssistantAutomation(input: {
-  executionContext: AssistantExecutionContext;
-  requestId: string;
-  vaultRoot: string;
-  wake: HostedExecutionWake;
-}): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
-  const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
-    skipAssistantAutomation: false,
-  });
-
-  if (!assistantAutomation.shouldRun) {
-    reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation);
-    return {
-      nextWakeAt: null,
-      progressed: false,
-    };
-  }
-
-  return runHostedAssistantAutomation(
-    input.vaultRoot,
-    input.requestId,
-    input.executionContext,
-    input.wake,
-  );
 }
 
 export async function runHostedDeviceSyncPass(
@@ -517,12 +379,6 @@ function createHostedDeviceSyncRuntime(input: {
     },
     registry,
   });
-}
-
-function earliestHostedWakeAt(...values: Array<string | null | undefined>): string | null {
-  return values
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
 }
 
 function createAssistantWakeMaterializationHints(nextWakeAt: string | null): HostedMaintenanceMetrics["wakeMaterializationHints"] {
