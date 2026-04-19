@@ -14,6 +14,12 @@ import {
   buildHostedExecutionVaultShareAcceptedWake,
 } from "../src/builders.ts";
 import {
+  HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+  HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+  HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+  parseHostedEmailReplyAliasRegistrationCallbackRequest,
+  parseHostedEmailRouteResolutionCallbackRequest,
+  parseHostedEmailRouteResolutionCallbackResponse,
   readHostedEmailCapabilities,
   resolveHostedEmailSelfAddresses,
   resolveHostedEmailSenderIdentity,
@@ -358,5 +364,41 @@ describe("hosted email helpers", () => {
       "assistant@example.com",
       "assistant+route@example.com",
     ]);
+  });
+
+  it("exposes the hosted email callback contract from one shared surface", () => {
+    expect(HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID).toBe(
+      "hosted-email-route-resolution",
+    );
+    expect(HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH).toBe(
+      "/api/internal/hosted-execution/email/register-reply-alias",
+    );
+    expect(HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH).toBe(
+      "/api/internal/hosted-execution/email/resolve-route",
+    );
+    expect(parseHostedEmailReplyAliasRegistrationCallbackRequest({
+      aliasKey: " replyalias1234 ",
+    })).toEqual({
+      aliasKey: "replyalias1234",
+    });
+    expect(parseHostedEmailRouteResolutionCallbackRequest({
+      aliasKey: " replyalias1234 ",
+      envelopeFrom: "owner@example.test",
+      hasRepeatedHeaderFrom: true,
+      headerFrom: "Owner <owner@example.test>",
+    })).toEqual({
+      aliasKey: "replyalias1234",
+      envelopeFrom: "owner@example.test",
+      hasRepeatedHeaderFrom: true,
+      headerFrom: "Owner <owner@example.test>",
+    });
+    expect(parseHostedEmailRouteResolutionCallbackResponse({
+      userId: "member_123",
+    })).toEqual({
+      userId: "member_123",
+    });
+    expect(() => parseHostedEmailRouteResolutionCallbackResponse({})).toThrow(
+      /userId must be present/u,
+    );
   });
 });

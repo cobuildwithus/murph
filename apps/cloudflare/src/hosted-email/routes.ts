@@ -5,7 +5,10 @@
  */
 
 import {
-  HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+  HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+  HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+  HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+  parseHostedEmailRouteResolutionCallbackResponse,
 } from "@murphai/hosted-execution/hosted-email";
 import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
@@ -50,11 +53,6 @@ interface HostedEmailRouteCallbackContext {
 }
 
 const HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS = 1_500;
-const HOSTED_WEB_EMAIL_REGISTER_REPLY_ALIAS_PATH =
-  "/api/internal/hosted-execution/email/register-reply-alias";
-const HOSTED_WEB_EMAIL_RESOLVE_ROUTE_PATH =
-  "/api/internal/hosted-execution/email/resolve-route";
-
 export async function resolveHostedEmailIngressRoute(input: HostedEmailRouteCallbackContext & {
   config: HostedEmailConfig;
   envelopeFrom?: string | null;
@@ -94,7 +92,7 @@ export async function createHostedEmailUserAddress(input: {
     callbackSigning: input.webCallbackSigning,
     fetchImpl: input.fetchImpl,
     method: "POST",
-    path: HOSTED_WEB_EMAIL_REGISTER_REPLY_ALIAS_PATH,
+    path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
     timeoutMs: HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS,
   }).catch((error: unknown) => {
     throw new Error(
@@ -210,11 +208,11 @@ async function resolveHostedEmailRouteUserId(input: {
         hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
         headerFrom: input.context.headerFrom ?? null,
       }),
-      boundUserId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+      boundUserId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
       callbackSigning: input.context.webCallbackSigning,
       fetchImpl: input.context.fetchImpl,
       method: "POST",
-      path: HOSTED_WEB_EMAIL_RESOLVE_ROUTE_PATH,
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
       timeoutMs: HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS,
     });
   } catch (error) {
@@ -229,9 +227,9 @@ async function resolveHostedEmailRouteUserId(input: {
     );
   }
 
-  let payload: { userId?: unknown };
+  let payload: { userId: string | null };
   try {
-    payload = await response.json() as { userId?: unknown };
+    payload = parseHostedEmailRouteResolutionCallbackResponse(await response.json());
   } catch (error) {
     throw new HostedEmailIngressRouteResolutionError(
       `Hosted email route resolution returned invalid JSON: ${formatHostedEmailRouteErrorDetails(error)}`,

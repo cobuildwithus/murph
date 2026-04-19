@@ -199,7 +199,6 @@ async function prepareHostedEmailSend(input: {
       existingThreadTarget?.lastMessageId,
       messageId,
     ].filter((value): value is string => Boolean(value && value.trim())),
-    replyAliasAddress: input.replyAddress,
     subject,
     to,
   });

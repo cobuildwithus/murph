@@ -1,3 +1,5 @@
+import { parseHostedEmailReplyAliasRegistrationCallbackRequest } from "@murphai/hosted-execution/hosted-email";
+
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -11,8 +13,10 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   const memberId = await requireHostedCloudflareCallbackRequest(request);
-  const body = await readOptionalJsonObject(request);
-  const aliasKey = typeof body.aliasKey === "string" ? body.aliasKey.trim() : "";
+  const body = parseHostedEmailReplyAliasRegistrationCallbackRequest(
+    await readOptionalJsonObject(request),
+  );
+  const aliasKey = body.aliasKey?.trim() ?? "";
 
   if (!aliasKey) {
     throw hostedOnboardingError({

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH } from "@murphai/hosted-execution/hosted-email";
 
 import { parseHostedEmailRouteCandidate } from "../src/hosted-email/route-addressing.ts";
 import { parseHostedEmailRouteToken } from "../src/hosted-email/route-crypto.ts";
@@ -78,7 +79,7 @@ describe("hosted email route callbacks", () => {
         baseUrl: "https://web.example.test",
         boundUserId: "user-123",
         method: "POST",
-        path: "/api/internal/hosted-execution/email/register-reply-alias",
+        path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
       }),
     );
   });

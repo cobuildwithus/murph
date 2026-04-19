@@ -1,3 +1,7 @@
+import {
+  requireObject,
+  readNullableStringValue,
+} from "./parsers/assertions.ts";
 import { normalizeHostedExecutionString } from "./env.ts";
 
 type EnvSource = Readonly<Record<string, unknown>>;
@@ -8,7 +12,26 @@ export interface HostedEmailCapabilities {
   senderIdentity: string | null;
 }
 
-export const HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID = "hosted-email-public-route";
+export const HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID = "hosted-email-route-resolution";
+export const HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH =
+  "/api/internal/hosted-execution/email/register-reply-alias";
+export const HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH =
+  "/api/internal/hosted-execution/email/resolve-route";
+
+export interface HostedEmailReplyAliasRegistrationCallbackRequest {
+  aliasKey: string | null;
+}
+
+export interface HostedEmailRouteResolutionCallbackRequest {
+  aliasKey: string | null;
+  envelopeFrom: string | null;
+  hasRepeatedHeaderFrom: boolean;
+  headerFrom: string | null;
+}
+
+export interface HostedEmailRouteResolutionCallbackResponse {
+  userId: string | null;
+}
 
 export function readHostedEmailCapabilities(
   source: EnvSource = process.env,
@@ -83,6 +106,48 @@ export function resolveHostedEmailSelfAddresses(input: {
   return addresses;
 }
 
+export function parseHostedEmailReplyAliasRegistrationCallbackRequest(
+  value: unknown,
+): HostedEmailReplyAliasRegistrationCallbackRequest {
+  const record = requireObject(value, "Hosted email reply alias registration callback request");
+
+  return {
+    aliasKey: normalizeHostedEmailCallbackString(record.aliasKey),
+  };
+}
+
+export function parseHostedEmailRouteResolutionCallbackRequest(
+  value: unknown,
+): HostedEmailRouteResolutionCallbackRequest {
+  const record = requireObject(value, "Hosted email route resolution callback request");
+
+  return {
+    aliasKey: normalizeHostedEmailCallbackString(record.aliasKey),
+    envelopeFrom: normalizeHostedEmailCallbackString(record.envelopeFrom),
+    hasRepeatedHeaderFrom: readHostedEmailCallbackBoolean(
+      record.hasRepeatedHeaderFrom,
+      "Hosted email route resolution callback request hasRepeatedHeaderFrom",
+    ) ?? false,
+    headerFrom: normalizeHostedEmailCallbackString(record.headerFrom),
+  };
+}
+
+export function parseHostedEmailRouteResolutionCallbackResponse(
+  value: unknown,
+): HostedEmailRouteResolutionCallbackResponse {
+  const record = requireObject(value, "Hosted email route resolution callback response");
+  if (!("userId" in record)) {
+    throw new TypeError("Hosted email route resolution callback response userId must be present.");
+  }
+
+  return {
+    userId: readNullableStringValue(
+      record.userId,
+      "Hosted email route resolution callback response userId",
+    ),
+  };
+}
+
 function hasHostedEmailSendBindingValue(value: unknown): boolean {
   return Boolean(
     value
@@ -124,4 +189,23 @@ function parseHostedEmailCapabilityFlag(value: string | null | undefined): boole
 function readHostedEmailEnvString(source: EnvSource, key: string): string | null {
   const value = source[key];
   return normalizeHostedExecutionString(typeof value === "string" ? value : null);
+}
+
+function normalizeHostedEmailCallbackString(value: unknown): string | null {
+  return normalizeHostedExecutionString(typeof value === "string" ? value : null);
+}
+
+function readHostedEmailCallbackBoolean(
+  value: unknown,
+  label: string,
+): boolean | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+
+  return value;
 }

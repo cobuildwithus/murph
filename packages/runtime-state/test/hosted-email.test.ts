@@ -46,7 +46,6 @@ test("hosted email thread targets serialize, normalize, and parse deterministica
     cc: [" Owner@example.test ", "owner@example.test"],
     lastMessageId: " <last@example.test> ",
     references: ["<older@example.test>", " ", "<older@example.test>"],
-    replyAliasAddress: "Murph <reply@example.test>",
     subject: "  Status update ",
     to: ["Friend@example.test", "Friend@example.test", "Team <team@example.test>"],
   });
@@ -55,7 +54,6 @@ test("hosted email thread targets serialize, normalize, and parse deterministica
     cc: ["owner@example.test"],
     lastMessageId: "<last@example.test>",
     references: ["<older@example.test>", "<last@example.test>"],
-    replyAliasAddress: "reply@example.test",
     subject: "Status update",
     to: ["friend@example.test", "team@example.test"],
   }));

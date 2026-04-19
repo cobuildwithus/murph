@@ -219,7 +219,7 @@ describe("hosted email routing and transport", () => {
 
   it("surfaces malformed public-sender callback payloads instead of treating them as clean misses", async () => {
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({}),
+      JSON.stringify({ userId: 7 }),
       {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -236,7 +236,7 @@ describe("hosted email routing and transport", () => {
       to: TEST_CONFIG.fromAddress!,
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
-    })).rejects.toThrow(/invalid payload/u);
+    })).rejects.toThrow(/invalid payload|invalid json|must be present/u);
   });
 
   it("uses deterministic opaque ids for identical hosted raw-email retries", async () => {
@@ -317,7 +317,6 @@ describe("hosted email routing and transport", () => {
 
     const threadTarget = parseHostedEmailThreadTarget(response.target);
     expect(threadTarget).not.toBeNull();
-    expect(threadTarget?.replyAliasAddress).toMatch(/@mail\.example\.test$/u);
 
     expect(emailBinding.send).toHaveBeenCalledTimes(1);
     const sentMessage = emailBinding.send.mock.calls[0]?.[0];
@@ -326,7 +325,8 @@ describe("hosted email routing and transport", () => {
       from: "assistant@mail.example.test",
       to: "owner@example.com",
     });
-    expect((sentMessage as { raw: string }).raw).toContain(threadTarget?.replyAliasAddress ?? "");
+    expect((sentMessage as { raw: string }).raw).toContain("Reply-To: ");
+    expect((sentMessage as { raw: string }).raw).toMatch(/Reply-To: assistant\+[A-Za-z0-9-]+@mail\.example\.test/u);
   });
 
   it("rejects thread subject overrides on the hosted email bridge", async () => {
@@ -334,7 +334,6 @@ describe("hosted email routing and transport", () => {
       cc: [],
       lastMessageId: "<thread@example.test>",
       references: ["<thread@example.test>"],
-      replyAliasAddress: "reply@mail.example.test",
       subject: "Existing subject",
       to: ["owner@example.com"],
     }));
@@ -391,7 +390,6 @@ describe("hosted email routing and transport", () => {
       cc: ["carol@example.com"],
       lastMessageId: initialThreadTarget?.lastMessageId ?? "<prev@example.test>",
       references: [initialThreadTarget?.lastMessageId ?? "<prev@example.test>"],
-      replyAliasAddress: initialThreadTarget?.replyAliasAddress ?? "assistant+reply@mail.example.test",
       subject: initialThreadTarget?.subject ?? "Murph update",
       to: ["owner@example.com", "bob@example.com"],
     }));
@@ -416,7 +414,7 @@ describe("hosted email routing and transport", () => {
       to: string;
     };
     expect(followUpMessage.to).toBe("owner@example.com");
-    expect(followUpMessage.raw).toContain(`Reply-To: ${initialThreadTarget?.replyAliasAddress}`);
+    expect(followUpMessage.raw).toMatch(/Reply-To: assistant\+[A-Za-z0-9-]+@mail\.example\.test/u);
     expect(followUpMessage.raw).toContain("In-Reply-To: ");
     expect(followUpMessage.raw).toContain("References: ");
     expect(followUpMessage.raw).not.toContain("Cc:");
@@ -479,7 +477,6 @@ describe("hosted email routing and transport", () => {
       cc: ["carol@example.com"],
       lastMessageId: "<prev@example.test>",
       references: ["<older@example.test>"],
-      replyAliasAddress: "assistant+reply@mail.example.test",
       subject: "Murph update",
       to: ["owner@example.com", "bob@example.com"],
     });
