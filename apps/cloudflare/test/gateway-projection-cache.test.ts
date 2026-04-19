@@ -12,64 +12,19 @@ import {
   readGatewayPermissionOverrides,
   sameGatewayPermissionResolutionOverrides,
   type GatewayPermissionResolutionOverride,
-} from "../src/gateway-store-permissions.js";
-import { HostedGatewayProjectionStore } from "../src/gateway-store.ts";
-import type { DurableObjectStateLike } from "../src/user-runner/types.js";
+} from "../src/gateway-projection-cache-permissions.js";
+import { HostedGatewayProjectionCache } from "../src/gateway-projection-cache.ts";
 
 const EMAIL_THREAD_SESSION_KEY =
   "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoxfQ";
-const TEST_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
-const TEST_CRYPTO = {
-  key: TEST_KEY,
-  keyId: "v1",
-  keysById: {
-    v1: TEST_KEY,
-  },
-};
 
-function createState(options?: {
-  initialValues?: Record<string, unknown>;
-  onPut?: (key: string, value: unknown) => Promise<void> | void;
-}) {
-  const values = new Map<string, unknown>(
-    Object.entries(options?.initialValues ?? {}),
-  );
-
-  const state: DurableObjectStateLike = {
-    storage: {
-      async get<T>(key: string): Promise<T | undefined> {
-        return values.get(key) as T | undefined;
-      },
-      async getAlarm(): Promise<number | null> {
-        return null;
-      },
-      async put<T>(key: string, value: T): Promise<void> {
-        await options?.onPut?.(key, value);
-        values.set(key, value);
-      },
-      async setAlarm(): Promise<void> {},
-    },
-  };
-
-  return {
-    state,
-    values,
-  };
+function createCache(): HostedGatewayProjectionCache {
+  return new HostedGatewayProjectionCache();
 }
 
-function createStore(options?: Parameters<typeof createState>[0]) {
-  const { state, values } = createState(options);
-
-  return {
-    state,
-    store: new HostedGatewayProjectionStore(state, TEST_CRYPTO),
-    values,
-  };
-}
-
-describe("HostedGatewayProjectionStore", () => {
+describe("HostedGatewayProjectionCache", () => {
   it("resolves permission requests and emits permission events through the shared event-log helper", async () => {
-    const { store } = createStore();
+    const store = createCache();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -120,8 +75,8 @@ describe("HostedGatewayProjectionStore", () => {
     });
   });
 
-  it("keeps gateway projections transient and round-trips conversation and message reads", async () => {
-    const { store, values } = createStore();
+  it("round-trips conversation and message reads from the DO-local projection cache", async () => {
+    const store = createCache();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -170,12 +125,6 @@ describe("HostedGatewayProjectionStore", () => {
       }],
     });
 
-    expect(values.has("gateway.snapshot")).toBe(false);
-    expect(values.has("gateway.events")).toBe(false);
-    expect(values.has("gateway.next-cursor")).toBe(false);
-    expect(values.has("gateway.permission-overrides")).toBe(false);
-    expect(values.has("gateway.state")).toBe(false);
-
     const conversations = await store.listConversations();
     expect(conversations.conversations).toHaveLength(1);
     expect(conversations.conversations[0]?.title).toBe("Sensitive thread");
@@ -190,7 +139,7 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("ignores replayed older snapshots after a newer projection was already stored", async () => {
-    const { store } = createStore();
+    const store = createCache();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -295,7 +244,7 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("keeps operator permission decisions applied across later runtime snapshots", async () => {
-    const { store } = createStore();
+    const store = createCache();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -360,7 +309,7 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("treats identical permission retries as idempotent and preserves the original resolved timestamp", async () => {
-    const { store } = createStore();
+    const store = createCache();
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -402,39 +351,8 @@ describe("HostedGatewayProjectionStore", () => {
     expect(events.events).toHaveLength(1);
   });
 
-  it("ignores legacy persisted gateway-state residue because the cache is DO-local only", async () => {
-    const { store, values } = createStore({
-      initialValues: {
-        "gateway.state": { stale: true },
-        "gateway.permission-overrides": [{ requestId: "old" }],
-      },
-    });
-
-    await store.applySnapshot({
-      schema: "murph.gateway-projection-snapshot.v1",
-      generatedAt: "2026-04-06T00:00:00.000Z",
-      conversations: [],
-      messages: [],
-      permissions: [{
-        schema: "murph.gateway-permission-request.v1",
-        requestId: "perm_fresh",
-        sessionKey: EMAIL_THREAD_SESSION_KEY,
-        action: "send-message",
-        description: "Need operator approval",
-        status: "open",
-        requestedAt: "2026-04-06T00:00:00.000Z",
-        resolvedAt: null,
-        note: null,
-      }],
-    });
-
-    expect(await store.listOpenPermissions()).toHaveLength(1);
-    expect(values.get("gateway.state")).toEqual({ stale: true });
-  });
-
-  it("keeps permission decisions local to the live store instead of persisting a second authority", async () => {
-    const { state } = createState();
-    const store = new HostedGatewayProjectionStore(state, TEST_CRYPTO);
+  it("keeps permission decisions local to the live cache instance instead of persisting a second authority", async () => {
+    const store = createCache();
     const baseSnapshot = gatewayProjectionSnapshotSchema.parse({
       schema: "murph.gateway-projection-snapshot.v1",
       generatedAt: "2026-04-06T00:04:00.000Z",
@@ -476,19 +394,14 @@ describe("HostedGatewayProjectionStore", () => {
 
     expect(await store.listOpenPermissions()).toHaveLength(1);
 
-    const restartedStore = new HostedGatewayProjectionStore(state, TEST_CRYPTO);
+    const restartedStore = createCache();
     await restartedStore.applySnapshot(baseSnapshot);
 
     expect(await restartedStore.listOpenPermissions()).toHaveLength(2);
   });
 
-  it("does not touch Durable Object storage when an equivalent snapshot is replayed with reordered keys", async () => {
-    const writes: string[] = [];
-    const { store } = createStore({
-      onPut(key) {
-        writes.push(key);
-      },
-    });
+  it("treats equivalent snapshots as no-op cache updates even when keys are reordered", async () => {
+    const store = createCache();
     const baseSnapshot = gatewayProjectionSnapshotSchema.parse({
       schema: "murph.gateway-projection-snapshot.v1",
       generatedAt: "2026-04-07T00:00:00.000Z",
@@ -527,7 +440,6 @@ describe("HostedGatewayProjectionStore", () => {
     });
 
     await store.applySnapshot(baseSnapshot);
-    writes.length = 0;
 
     await store.applySnapshot({
       schema: "murph.gateway-projection-snapshot.v1",
@@ -566,7 +478,17 @@ describe("HostedGatewayProjectionStore", () => {
       permissions: [],
     });
 
-    expect(writes).toEqual([]);
+    const conversations = await store.listConversations();
+    const messages = await store.readMessages({
+      sessionKey: EMAIL_THREAD_SESSION_KEY,
+      oldestFirst: true,
+      limit: 10,
+    });
+
+    expect(conversations.conversations).toHaveLength(1);
+    expect(conversations.conversations[0]?.lastMessagePreview).toBe("hello");
+    expect(messages.messages).toHaveLength(1);
+    expect(messages.messages[0]?.text).toBe("hello");
   });
 });
 
@@ -640,6 +562,12 @@ describe("gateway permission overrides", () => {
         parsed[1]!,
       ]),
     ).toBe(false);
+  });
+
+  it("fails closed on malformed cache-state input with the renamed error text", () => {
+    expect(() => readGatewayPermissionOverrides({})).toThrow(
+      "gateway projection cache state is invalid.",
+    );
   });
 });
 

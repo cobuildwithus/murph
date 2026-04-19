@@ -33,13 +33,12 @@ import {
   sameGatewayPermissionResolutionOverrides,
   upsertGatewayPermissionOverride,
   type GatewayPermissionResolutionOverride,
-} from "./gateway-store-permissions.js";
+} from "./gateway-projection-cache-permissions.js";
 import { sameStructuredJsonValue } from "./structured-json.js";
-import type { DurableObjectStateLike } from "./user-runner/types.js";
 
-// Gateway projection state is a transient DO-local cache. Durable truth comes
-// from committed runtime snapshots, not a separate Cloudflare-owned record.
-interface StoredGatewayState {
+// Gateway projection state is a transient DO-local cache. Durable truth still
+// comes from committed runtime snapshots, not a separate Cloudflare-owned record.
+interface GatewayProjectionCacheState {
   baseSnapshot: GatewayProjectionSnapshot | null;
   events: GatewayEvent[];
   nextCursor: number;
@@ -47,14 +46,8 @@ interface StoredGatewayState {
   projectedSnapshot: GatewayProjectionSnapshot | null;
 }
 
-interface HostedGatewayProjectionStoreCrypto {
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-}
-
-export class HostedGatewayProjectionStore {
-  private cachedState: StoredGatewayState = {
+export class HostedGatewayProjectionCache {
+  private cacheState: GatewayProjectionCacheState = {
     baseSnapshot: null,
     events: [],
     nextCursor: 0,
@@ -63,14 +56,6 @@ export class HostedGatewayProjectionStore {
   };
   private stateLock: Promise<void> | null = null;
 
-  constructor(
-    _state: DurableObjectStateLike,
-    _crypto: HostedGatewayProjectionStoreCrypto,
-  ) {
-    void _state;
-    void _crypto;
-  }
-
   async applySnapshot(snapshot: GatewayProjectionSnapshot | null): Promise<void> {
     if (!snapshot) {
       return;
@@ -78,7 +63,7 @@ export class HostedGatewayProjectionStore {
 
     const parsed = gatewayProjectionSnapshotSchema.parse(snapshot);
     await this.withStateLock(async () => {
-      const current = await this.readStoredState();
+      const current = await this.readCacheState();
       if (
         current.baseSnapshot &&
         current.baseSnapshot.generatedAt.localeCompare(parsed.generatedAt) > 0
@@ -106,7 +91,7 @@ export class HostedGatewayProjectionStore {
         return;
       }
 
-      await this.writeStoredState({
+      await this.writeCacheState({
         baseSnapshot: parsed,
         events: nextState.events,
         nextCursor: nextState.nextCursor,
@@ -153,7 +138,7 @@ export class HostedGatewayProjectionStore {
   ): Promise<GatewayPermissionRequest | null> {
     const parsed = gatewayRespondToPermissionInputSchema.parse(input);
     return this.withStateLock(async () => {
-      const current = await this.readStoredState();
+      const current = await this.readCacheState();
       const snapshot = current.projectedSnapshot ?? createEmptyGatewaySnapshot();
       const index = snapshot.permissions.findIndex(
         (permission) => permission.requestId === parsed.requestId,
@@ -192,7 +177,7 @@ export class HostedGatewayProjectionStore {
         nextState !== currentState
         || !sameGatewayPermissionResolutionOverrides(current.permissionOverrides, nextOverrides)
       ) {
-        await this.writeStoredState({
+        await this.writeCacheState({
           baseSnapshot: current.baseSnapshot,
           events: nextState.events,
           nextCursor: nextState.nextCursor,
@@ -216,20 +201,20 @@ export class HostedGatewayProjectionStore {
   }
 
   private async readState(): Promise<GatewayEventLogState> {
-    return toGatewayEventLogState(await this.readStoredState());
+    return toGatewayEventLogState(await this.readCacheState());
   }
 
-  private async readStoredState(): Promise<StoredGatewayState> {
-    return this.cachedState;
+  private async readCacheState(): Promise<GatewayProjectionCacheState> {
+    return this.cacheState;
   }
 
-  private async writeStoredState(state: {
+  private async writeCacheState(state: {
     baseSnapshot: GatewayProjectionSnapshot | null;
     events: GatewayEvent[];
     nextCursor: number;
     permissionOverrides: GatewayPermissionResolutionOverride[];
   }): Promise<void> {
-    this.cachedState = {
+    this.cacheState = {
       baseSnapshot: state.baseSnapshot,
       events: state.events,
       nextCursor: state.nextCursor,
@@ -262,7 +247,7 @@ export class HostedGatewayProjectionStore {
   }
 }
 
-function toGatewayEventLogState(state: StoredGatewayState): GatewayEventLogState {
+function toGatewayEventLogState(state: GatewayProjectionCacheState): GatewayEventLogState {
   return {
     events: state.events,
     nextCursor: state.nextCursor,
