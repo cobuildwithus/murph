@@ -26,7 +26,7 @@ Canonical owner of:
 
 - wake ordering
 - wake lifecycle state
-- quarantine / poison truth
+- terminal and quarantine truth
 - committed high-water
 - snapshot pointer truth
 - payload spillover and encrypted wake storage
@@ -138,8 +138,8 @@ captures. They are no longer a dispatch-era ownership seam.
 The production Durable Object is a thin runner:
 
 - no production `dispatch` / `dispatchWithOutcome` RPC surface
-- no `pending_events`, `consumed_events`, `backpressured_events`, or
-  `poisoned_events` queue-truth tables
+- no legacy queue-truth tables such as `pending_events`,
+  `consumed_events`, or `backpressured_events`
 - no staged dispatch-payload control plane in the live hosted path
 - canonical status reads come from web-owned wake state
 
