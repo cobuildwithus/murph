@@ -19,10 +19,12 @@ import {
 } from "../hosted-email.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  decodeRouteParam,
-  readOptionalString,
+  readNullableString,
   requireRecord,
   requireString,
+} from "./codec.ts";
+import {
+  decodeRouteParam,
   resolveRunnerOutboundUserCryptoContext,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
@@ -152,16 +154,16 @@ function parseRunnerContainerDebugRequest(value: Record<string, unknown>): {
   runId: string | null;
 } {
   const detailsValue = readOptionalObject(value.details);
-  const level = readOptionalString(value.level, "level");
-  const phase = readOptionalString(value.phase, "phase");
+  const level = readNullableString(value.level, "level");
+  const phase = readNullableString(value.phase, "phase");
 
   return {
     details: detailsValue,
-    eventId: readOptionalString(value.eventId, "eventId"),
+    eventId: readNullableString(value.eventId, "eventId"),
     level: level === "error" || level === "info" || level === "warn" ? level : null,
     message: requireString(value.message, "message"),
     phase: isHostedExecutionRunPhase(phase) ? phase : null,
-    runId: readOptionalString(value.runId, "runId"),
+    runId: readNullableString(value.runId, "runId"),
   };
 }
 
