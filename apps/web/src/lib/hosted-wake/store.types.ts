@@ -3,6 +3,7 @@ import type {
   HostedWakeBehavior,
   HostedWakeLifecycleState,
   HostedWakeRecord,
+  HostedWakeTerminalState,
 } from "@murphai/hosted-execution/contracts";
 
 export type HostedWakeStoreClient = PrismaClient | Prisma.TransactionClient;
@@ -60,7 +61,7 @@ export interface HostedWakeTerminalRow {
   createdAt: Date;
   fetchedCommittedSeq: bigint;
   fetchedCursorVersion: bigint;
-  state: string;
+  state: HostedWakeTerminalState;
   updatedAt: Date;
   userId: string;
   wakeId: string;
