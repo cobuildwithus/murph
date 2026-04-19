@@ -141,6 +141,9 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     constraints: [
       'CONSTRAINT "hosted_execution_cursor_pkey" PRIMARY KEY ("user_id")',
     ],
+    foreignKeys: [
+      'ALTER TABLE "hosted_execution_cursor" ADD CONSTRAINT "hosted_execution_cursor_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+    ],
     indexes: [],
   },
   hosted_wake: {
@@ -165,6 +168,9 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     constraints: [
       'CONSTRAINT "hosted_wake_pkey" PRIMARY KEY ("id")',
     ],
+    foreignKeys: [
+      'ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+    ],
     indexes: [
       'CREATE INDEX "hosted_wake_user_id_seq_idx" ON "hosted_wake"("user_id", "seq")',
       'CREATE INDEX "hosted_wake_user_id_coalescing_key_seq_idx" ON "hosted_wake"("user_id", "coalescing_key", "seq")',
@@ -184,6 +190,10 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     ],
     constraints: [
       'CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id","event_id")',
+    ],
+    foreignKeys: [
+      'ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE',
     ],
     indexes: [
       'CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id")',
@@ -205,6 +215,10 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     constraints: [
       'CONSTRAINT "hosted_wake_payload_pkey" PRIMARY KEY ("wake_id")',
     ],
+    foreignKeys: [
+      'ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+    ],
     indexes: [
       'CREATE INDEX "hosted_wake_payload_user_id_idx" ON "hosted_wake_payload"("user_id")',
     ],
@@ -222,6 +236,10 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     ],
     constraints: [
       'CONSTRAINT "hosted_wake_terminal_pkey" PRIMARY KEY ("wake_id")',
+    ],
+    foreignKeys: [
+      'ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE',
     ],
     indexes: [
       'CREATE INDEX "hosted_wake_terminal_user_id_idx" ON "hosted_wake_terminal"("user_id")',
@@ -391,6 +409,10 @@ describe("hosted Prisma baseline migration", () => {
         `${tableName} constraint set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
       ).toEqual(new Set(guard.constraints));
       expect(
+        readSqlTableForeignKeys(baselineMigrationSql, tableName),
+        `${tableName} foreign-key set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+      ).toEqual(new Set(guard.foreignKeys));
+      expect(
         readSqlTableIndexes(baselineMigrationSql, tableName),
         `${tableName} index set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
       ).toEqual(new Set(guard.indexes));
@@ -516,5 +538,18 @@ function readSqlTableIndexes(sql: string, tableName: string): Set<string> {
       ),
     )]
       .map((match) => match[0].trim().replace(/;$/u, "")),
+  );
+}
+
+function readSqlTableForeignKeys(sql: string, tableName: string): Set<string> {
+  return new Set(
+    sql
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => (
+        line.startsWith(`ALTER TABLE "${tableName}" ADD CONSTRAINT `)
+        && line.includes(" FOREIGN KEY ")
+      ))
+      .map((line) => line.replace(/;$/u, "")),
   );
 }
