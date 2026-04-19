@@ -478,6 +478,17 @@ export async function quarantineHostedWakeTx(input: {
     return false;
   }
 
+  await input.tx.hostedExecutionCursor.update({
+    where: {
+      userId: input.userId,
+    },
+    data: {
+      version: {
+        increment: 1,
+      },
+    },
+  });
+
   await upsertHostedWakeTerminalTx({
     fetchedCommittedSeq: fetchFence.fetchedCommittedSeq,
     fetchedCursorVersion: fetchFence.fetchedCursorVersion,
