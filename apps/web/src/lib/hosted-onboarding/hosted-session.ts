@@ -5,22 +5,18 @@ import { cache } from "react";
 
 import { hostedOnboardingError } from "./errors";
 import {
-  readHostedPrivyIdentityTokenFromCookieStore,
-  readHostedPrivyIdentityTokenFromRequestCookies,
-  readHostedPrivyMemberIdFromVerifiedUser,
-  resolveHostedPrivyIdentityFromVerifiedUser,
-  type HostedPrivyIdentity,
-  type HostedPrivyUser,
   verifyHostedPrivyIdentityToken,
 } from "./privy";
-import { type PrivyLinkedAccountLike, resolveHostedPrivyLinkedAccounts } from "./privy-shared";
+import {
+  readHostedPrivyIdentityTokenFromCookieStore,
+  readHostedPrivyIdentityTokenFromRequestCookies,
+} from "./privy-token";
+import {
+  buildHostedPrivySessionState,
+  type HostedPrivySessionState,
+} from "./privy-user";
 
-export interface HostedPrivySession {
-  identity: HostedPrivyIdentity;
-  linkedAccounts: PrivyLinkedAccountLike[];
-  memberId: string | null;
-  verifiedPrivyUser: HostedPrivyUser;
-}
+export type HostedPrivySession = HostedPrivySessionState;
 
 const resolveHostedPrivySessionFromCookies = cache(async (): Promise<HostedPrivySession | null> => {
   const cookieStore = await cookies();
@@ -30,7 +26,7 @@ const resolveHostedPrivySessionFromCookies = cache(async (): Promise<HostedPrivy
     return null;
   }
 
-  return buildHostedPrivySession(identityToken);
+  return resolveHostedPrivySessionFromIdentityToken(identityToken);
 });
 
 export async function getHostedPrivySession(): Promise<HostedPrivySession | null> {
@@ -60,16 +56,9 @@ export async function resolveHostedPrivySessionFromRequest(
     return null;
   }
 
-  return buildHostedPrivySession(identityToken);
+  return resolveHostedPrivySessionFromIdentityToken(identityToken);
 }
 
-async function buildHostedPrivySession(identityToken: string): Promise<HostedPrivySession> {
-  const verifiedPrivyUser = await verifyHostedPrivyIdentityToken(identityToken);
-
-  return {
-    identity: resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser),
-    linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
-    memberId: readHostedPrivyMemberIdFromVerifiedUser(verifiedPrivyUser),
-    verifiedPrivyUser,
-  };
+async function resolveHostedPrivySessionFromIdentityToken(identityToken: string): Promise<HostedPrivySession> {
+  return buildHostedPrivySessionState(await verifyHostedPrivyIdentityToken(identityToken));
 }

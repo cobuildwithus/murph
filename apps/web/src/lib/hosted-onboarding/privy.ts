@@ -1,107 +1,42 @@
 import {
   PrivyClient,
-  type User as PrivyUser,
   verifyIdentityToken,
 } from "@privy-io/node";
-import { cookies } from "next/headers";
 
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { requireHostedPrivyIdentityToken } from "./privy-token";
 import {
-  HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
-  type HostedPrivyLinkedAccountContainer,
-  type HostedPrivyPhoneAccount,
-  type HostedPrivyTelegramAccount,
-  type HostedPrivyWalletAccount,
-  extractHostedPrivyPreferredEmailAccount,
-  resolveHostedPrivyLinkedAccountState,
-  resolveHostedPrivyTelegramAccountSelection,
-} from "./privy-shared";
-import { isHostedOnboardingRevnetEnabled } from "./revnet";
+  HOSTED_PRIVY_MEMBER_ID_METADATA_KEY,
+  readHostedPrivyMemberIdFromVerifiedUser,
+  resolveHostedPrivyIdentityFromVerifiedUser,
+  type HostedPrivyIdentity,
+  type HostedPrivyUser,
+} from "./privy-user";
 import { getHostedOnboardingEnvironment } from "./runtime";
 
 const globalForHostedPrivy = globalThis as typeof globalThis & {
   __murphHostedPrivyManagementClient?: PrivyClient | null;
 };
 
-export const HOSTED_PRIVY_MEMBER_ID_METADATA_KEY = "murph_member_id";
-
-export type HostedPrivyUser = PrivyUser & HostedPrivyLinkedAccountContainer;
 type HostedPrivyCustomMetadata = NonNullable<HostedPrivyUser["custom_metadata"]>;
 
-export interface HostedPrivyCookieStore {
-  get(name: string): { value?: string } | undefined;
-}
-
-export const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
-
-export interface HostedPrivyIdentity {
-  phone: HostedPrivyPhoneAccount | null;
-  telegram: HostedPrivyTelegramAccount | null;
-  userId: string;
-  wallet: HostedPrivyWalletAccount | null;
-}
+export {
+  HOSTED_PRIVY_MEMBER_ID_METADATA_KEY,
+  resolveHostedPrivyIdentityFromVerifiedUser,
+} from "./privy-user";
+export type {
+  HostedPrivyIdentity,
+  HostedPrivyUser,
+} from "./privy-user";
 
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
-  const user = await verifyHostedPrivyIdentityToken(identityToken);
-  return resolveHostedPrivyIdentityFromVerifiedUser(user);
-}
-
-export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPrivyIdentity> {
-  const cookieStore = await cookies();
-  const identityToken = readHostedPrivyIdentityTokenFromCookieStore(cookieStore);
-
-  if (!identityToken) {
-    throw hostedOnboardingError({
-      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity cookie is required to continue. Refresh and sign in again.",
-      httpStatus: 401,
-    });
-  }
-
-  return requireHostedPrivyIdentity(identityToken);
-}
-
-export async function requireHostedPrivyCompletionIdentityFromCookies(): Promise<HostedPrivyIdentity> {
-  try {
-    return await requireHostedPrivyIdentityFromCookies();
-  } catch (error) {
-    throw remapHostedPrivyCompletionLagError(error);
-  }
-}
-
-export async function requireHostedPrivyIdentityFromRequest(request: Request): Promise<HostedPrivyIdentity> {
-  const identityToken = readHostedPrivyIdentityTokenFromRequestCookies(request);
-
-  if (!identityToken) {
-    throw hostedOnboardingError({
-      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity cookie is required to continue. Refresh and sign in again.",
-      httpStatus: 401,
-    });
-  }
-
-  return requireHostedPrivyIdentity(identityToken);
-}
-
-export async function requireHostedPrivyCompletionIdentityFromRequest(request: Request): Promise<HostedPrivyIdentity> {
-  try {
-    return await requireHostedPrivyIdentityFromRequest(request);
-  } catch (error) {
-    throw remapHostedPrivyCompletionLagError(error);
-  }
+  return resolveHostedPrivyIdentityFromVerifiedUser(
+    await verifyHostedPrivyIdentityToken(identityToken),
+  );
 }
 
 export async function verifyHostedPrivyIdentityToken(identityToken: string): Promise<HostedPrivyUser> {
-  const token = identityToken.trim();
-
-  if (!token) {
-    throw hostedOnboardingError({
-      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity token is required to continue.",
-      httpStatus: 401,
-    });
-  }
-
+  const token = requireHostedPrivyIdentityToken(identityToken);
   const { appId, verificationKey } = requireHostedPrivyPhoneAuthConfig();
 
   try {
@@ -126,12 +61,6 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
       },
     });
   }
-}
-
-export function readHostedPrivyMemberIdFromVerifiedUser(user: HostedPrivyUser): string | null {
-  const memberId = user.custom_metadata?.[HOSTED_PRIVY_MEMBER_ID_METADATA_KEY];
-
-  return typeof memberId === "string" ? normalizeEnvValue(memberId) : null;
 }
 
 export async function syncHostedPrivyMemberIdMetadata(input: {
@@ -159,81 +88,6 @@ export async function syncHostedPrivyMemberIdMetadata(input: {
   });
 
   return true;
-}
-
-export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
-  const linkedAccountState = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
-  const { phone, wallet } = linkedAccountState;
-  const email = extractHostedPrivyPreferredEmailAccount(linkedAccountState.linkedAccounts);
-  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
-
-  if (telegramSelection.ambiguous) {
-    throw hostedOnboardingError({
-      code: "PRIVY_TELEGRAM_AMBIGUOUS",
-      message: "Reconnect Telegram in Privy before continuing.",
-      httpStatus: 409,
-    });
-  }
-
-  if (!phone && !telegramSelection.account && !email) {
-    throw hostedOnboardingError({
-      code: "PRIVY_ACCOUNT_REQUIRED",
-      message: "Finish email, phone, or Telegram verification before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  if (!wallet && isHostedOnboardingRevnetEnabled()) {
-    throw hostedOnboardingError({
-      code: "PRIVY_WALLET_REQUIRED",
-      message: "Finish setup before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  return {
-    phone,
-    telegram: telegramSelection.account,
-    userId: user.id,
-    wallet: wallet ?? null,
-  };
-}
-
-export function readHostedPrivyIdentityTokenFromCookieStore(cookieStore: HostedPrivyCookieStore): string | null {
-  const value = cookieStore.get(HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME)?.value;
-  return normalizeEnvValue(value);
-}
-
-export function readHostedPrivyIdentityTokenFromCookieHeader(value: string | null | undefined): string | null {
-  if (typeof value !== "string" || !value.trim()) {
-    return null;
-  }
-
-  for (const entry of value.split(/;\s*/u)) {
-    const separatorIndex = entry.indexOf("=");
-
-    if (separatorIndex <= 0) {
-      continue;
-    }
-
-    if (entry.slice(0, separatorIndex).trim() !== HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME) {
-      continue;
-    }
-
-    const rawCookieValue = entry.slice(separatorIndex + 1);
-
-    try {
-      return normalizeEnvValue(decodeURIComponent(rawCookieValue));
-    } catch {
-      return normalizeEnvValue(rawCookieValue);
-    }
-  }
-
-  return null;
-}
-
-export function readHostedPrivyIdentityTokenFromRequestCookies(request: Request): string | null {
-  return readHostedPrivyIdentityTokenFromCookieHeader(request.headers.get("cookie"));
 }
 
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
