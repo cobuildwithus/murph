@@ -7,6 +7,7 @@ import type {
   HostedWakeRecord,
 } from "@murphai/hosted-execution/contracts";
 import {
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
   HOSTED_WAKE_PAYLOAD_SCHEMAS,
   isHostedExecutionWakeKind,
 } from "@murphai/hosted-execution/contracts";
@@ -102,7 +103,7 @@ function projectHostedWakeWithValidatedType(
   }
 
   if (record.kind === "conversation.message") {
-    if (record.payloadSchema !== "murph.hosted-wake-conversation-message.v1") {
+    if (record.payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
       throw new TypeError(
         `Hosted conversation wake payload schema is invalid: ${record.payloadSchema}`,
       );
@@ -115,7 +116,7 @@ function projectHostedWakeWithValidatedType(
     };
   }
 
-  if (record.payloadSchema !== "murph.hosted-wake-system.v1") {
+  if (record.payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
     throw new TypeError(`Hosted system wake payload schema is invalid: ${record.payloadSchema}`);
   }
 
