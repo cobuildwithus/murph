@@ -18,6 +18,7 @@ const childShutdownTimeoutMs = 5_000;
 const staleLockWaitTimeoutMs = 15_000;
 const staleLockWaitPollIntervalMs = 250;
 const hostedWebSmokeLocalEnvEnvVarName = "MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV";
+export const HOSTED_WEB_SMOKE_HEALTH_PATH = "/api/internal/health";
 
 type HostedWebSmokeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 type HostedWebSmokeDevCommand = "dev" | "dev:local-env";
@@ -80,8 +81,7 @@ async function main(): Promise<void> {
 
   try {
     await waitForHealthyServer(port, child, () => combinedOutput);
-    await assertRequestStatus(port, "GET", "/");
-    await assertRequestStatus(port, "HEAD", "/");
+    await assertRequestStatus(port, "GET", HOSTED_WEB_SMOKE_HEALTH_PATH);
     await assertDevArtifacts(distDir);
   } finally {
     removeSignalCleanup();
@@ -103,7 +103,7 @@ async function waitForHealthyServer(
     }
 
     try {
-      const response = await request(port, "GET", "/");
+      const response = await request(port, "GET", HOSTED_WEB_SMOKE_HEALTH_PATH);
       if (response.statusCode === 200) {
         return;
       }

@@ -152,8 +152,8 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
 }
 
 describe("RunnerStateStore bundle metadata", () => {
-  it("hard-cuts the old bundle slot table and stores the vault bundle ref on runner_meta", async () => {
-    const { db, store } = createRunnerStateStoreHarness((database) => {
+  it("fails closed when the legacy split runner bundle schema is still present", async () => {
+    const setupLegacyBundleSchema = (database: DatabaseSync) => {
       database.exec(`
         DROP TABLE IF EXISTS runner_meta;
         DROP TABLE IF EXISTS runner_bundle_slots;
@@ -174,16 +174,15 @@ describe("RunnerStateStore bundle metadata", () => {
           bundle_version INTEGER NOT NULL DEFAULT 0
         );
       `);
-    });
-    await store.bootstrapUser("user-fresh");
+    };
+    const db = new DatabaseSync(":memory:");
+    setupLegacyBundleSchema(db);
 
-    expect(readRunnerMetaColumns(db)).toContain("bundle_ref_json");
-    expect(readRunnerMetaColumns(db)).toContain("bundle_version");
-    expect(runnerBundleSlotsTableExists(db)).toBe(false);
-    expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: null,
-      bundle_version: 0,
-    });
+    expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
+    expect(runnerBundleSlotsTableExists(db)).toBe(true);
+    expect(() => createRunnerStateStoreHarness(setupLegacyBundleSchema)).toThrow(
+      /runner_meta schema is unsupported; missing bundle_ref_json, bundle_version, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at, pending_commit_json, wake_materialization_hints_json/u,
+    );
   });
 
   it("keeps compare-and-swap bundle versions on runner_meta", async () => {

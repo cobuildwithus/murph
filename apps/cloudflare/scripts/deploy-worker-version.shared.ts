@@ -1,19 +1,13 @@
 import path from "node:path";
 
 import {
-  formatHostedWorkerDeploymentVersionSpecs,
-  resolveHostedWorkerGradualDeploymentSupport,
-  resolveHostedWorkerDeploymentTraffic,
-} from "./deploy-automation/deployment-traffic.ts";
-import {
   normalizeOptionalString,
-  parseOptionalStrictInteger,
   readBooleanEnv,
 } from "./deploy-automation/shared.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
-export type DeploymentMode = "direct" | "gradual";
+export type DeploymentMode = "direct";
 
 export interface DeploymentStatusPayload {
   created_on: string;
@@ -49,25 +43,10 @@ export interface HostedWorkerDeploymentDependencies {
     versionTag: string;
     workerName: string;
   }): Promise<void>;
-  deployVersions(input: {
-    configPath: string;
-    deploymentMessage: string;
-    versionSpecs: string[];
-    workerName: string;
-  }): Promise<void>;
   mkdir(target: string, options: {
     recursive: boolean;
   }): Promise<unknown>;
   readCurrentDeployment(workerName: string, configPath: string): Promise<DeploymentStatusPayload | null>;
-  readRenderedDeployConfig(configPath: string): Promise<Record<string, unknown>>;
-  uploadVersion(input: {
-    configPath: string;
-    includeSecrets: boolean;
-    message: string;
-    secretsFilePath: string;
-    tag: string;
-    workerName: string;
-  }): Promise<string>;
   writeFile(
     target: string,
     content: string,
@@ -88,16 +67,7 @@ interface HostedWorkerDirectDeploymentSettings extends HostedWorkerDeploymentSet
   mode: "direct";
 }
 
-interface HostedWorkerGradualDeploymentSettings extends HostedWorkerDeploymentSettingsBase {
-  existingVersionId: string | null;
-  mode: "gradual";
-  rolloutPercentage: number;
-  versionMessage: string;
-}
-
-type HostedWorkerDeploymentSettings =
-  | HostedWorkerDirectDeploymentSettings
-  | HostedWorkerGradualDeploymentSettings;
+type HostedWorkerDeploymentSettings = HostedWorkerDirectDeploymentSettings;
 
 export async function runHostedWorkerDeployment(input: {
   configPath: string;
@@ -112,28 +82,15 @@ export async function runHostedWorkerDeployment(input: {
 
   await input.dependencies.mkdir(path.dirname(input.resultPath), { recursive: true });
 
-  const result = deploymentSettings.mode === "direct"
-    ? await runDirectDeployment({
-        configPath: input.configPath,
-        dependencies: input.dependencies,
-        deploymentMessage: deploymentSettings.deploymentMessage,
-        includeSecrets: deploymentSettings.includeSecrets,
-        secretsFilePath: input.secretsFilePath,
-        versionTag: deploymentSettings.versionTag,
-        workerName: input.workerName,
-      })
-    : await runGradualDeployment({
-        configPath: input.configPath,
-        dependencies: input.dependencies,
-        deploymentMessage: deploymentSettings.deploymentMessage,
-        existingVersionId: deploymentSettings.existingVersionId,
-        includeSecrets: deploymentSettings.includeSecrets,
-        rolloutPercentage: deploymentSettings.rolloutPercentage,
-        secretsFilePath: input.secretsFilePath,
-        versionMessage: deploymentSettings.versionMessage,
-        versionTag: deploymentSettings.versionTag,
-        workerName: input.workerName,
-      });
+  const result = await runDirectDeployment({
+    configPath: input.configPath,
+    dependencies: input.dependencies,
+    deploymentMessage: deploymentSettings.deploymentMessage,
+    includeSecrets: deploymentSettings.includeSecrets,
+    secretsFilePath: input.secretsFilePath,
+    versionTag: deploymentSettings.versionTag,
+    workerName: input.workerName,
+  });
 
   await input.dependencies.writeFile(
     input.resultPath,
@@ -181,99 +138,10 @@ async function runDirectDeployment(input: {
   };
 }
 
-async function runGradualDeployment(input: {
-  configPath: string;
-  dependencies: HostedWorkerDeploymentDependencies;
-  deploymentMessage: string;
-  existingVersionId: string | null;
-  includeSecrets: boolean;
-  rolloutPercentage: number;
-  secretsFilePath: string;
-  versionMessage: string;
-  versionTag: string;
-  workerName: string;
-}): Promise<HostedWorkerDeploymentResult> {
-  const deploymentConfig = await input.dependencies.readRenderedDeployConfig(input.configPath);
-  const gradualDeploymentSupport = resolveHostedWorkerGradualDeploymentSupport(deploymentConfig);
-
-  if (!gradualDeploymentSupport.gradualDeploymentsSupported) {
-    throw new Error(
-      gradualDeploymentSupport.directDeployRequiredReason
-      ?? "The rendered Wrangler config requires a direct deploy.",
-    );
-  }
-
-  const currentDeployment = await input.dependencies.readCurrentDeployment(
-    input.workerName,
-    input.configPath,
-  );
-
-  if (!currentDeployment) {
-    throw new Error(
-      "No current Cloudflare deployment exists yet. Use HOSTED_EXECUTION_DEPLOYMENT_MODE=direct for the first deploy or for Durable Object migration rollouts.",
-    );
-  }
-
-  if (input.existingVersionId && input.includeSecrets) {
-    console.warn(
-      "HOSTED_EXECUTION_INCLUDE_SECRETS is ignored when HOSTED_EXECUTION_DEPLOY_VERSION_ID is provided because no new version upload is created.",
-    );
-  }
-
-  const uploadedVersionId = input.existingVersionId
-    ? null
-    : await input.dependencies.uploadVersion({
-        configPath: input.configPath,
-        includeSecrets: input.includeSecrets,
-        message: input.versionMessage,
-        secretsFilePath: input.secretsFilePath,
-        tag: input.versionTag,
-        workerName: input.workerName,
-      });
-  const candidateVersionId = input.existingVersionId ?? uploadedVersionId;
-
-  if (!candidateVersionId) {
-    throw new Error("Expected a candidate version id after upload or explicit version selection.");
-  }
-
-  const currentDeploymentVersions = mapDeploymentVersions(currentDeployment);
-  const versionTraffic = resolveHostedWorkerDeploymentTraffic({
-    candidateVersionId,
-    currentDeploymentVersions,
-    rolloutPercentage: input.rolloutPercentage,
-  });
-
-  await input.dependencies.deployVersions({
-    configPath: input.configPath,
-    deploymentMessage: input.deploymentMessage,
-    versionSpecs: formatHostedWorkerDeploymentVersionSpecs(versionTraffic),
-    workerName: input.workerName,
-  });
-
-  const finalDeployment = await requireCurrentDeployment(
-    input.dependencies,
-    input.workerName,
-    input.configPath,
-  );
-
-  return {
-    candidateVersionId,
-    currentDeploymentVersions,
-    finalDeploymentVersions: mapDeploymentVersions(finalDeployment),
-    mode: "gradual",
-    rolloutPercentage: input.rolloutPercentage,
-    smokeVersionId: candidateVersionId,
-    uploadedVersionId,
-    workerName: input.workerName,
-  };
-}
-
 function resolveHostedWorkerDeploymentSettings(
   env: EnvSource,
   now: () => Date,
 ): HostedWorkerDeploymentSettings {
-  // Direct deploy is the default operator path. Gradual version/deployment splits
-  // remain available only through the lower-level helper env contract.
   const mode = readDeploymentMode(env.HOSTED_EXECUTION_DEPLOYMENT_MODE);
   const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
   const deployContext = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
@@ -283,26 +151,10 @@ function resolveHostedWorkerDeploymentSettings(
     ?? buildDefaultVersionTag(env, now);
   const deploymentMessageOverride = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE);
 
-  if (mode === "direct") {
-    return {
-      deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
-      includeSecrets,
-      mode,
-      versionTag,
-    };
-  }
-
-  const rolloutPercentage = readRolloutPercentage(env.HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE);
-  const versionMessage = normalizeOptionalString(env.HOSTED_EXECUTION_VERSION_MESSAGE)
-    ?? `${deployContext} version ${versionTag}`;
-
   return {
-    deploymentMessage: deploymentMessageOverride ?? `${deployContext} rollout ${rolloutPercentage}% ${versionTag}`,
-    existingVersionId: normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_VERSION_ID),
+    deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
     includeSecrets,
     mode,
-    rolloutPercentage,
-    versionMessage,
     versionTag,
   };
 }
@@ -337,24 +189,11 @@ function readDeploymentMode(value: string | undefined): DeploymentMode {
     return "direct";
   }
 
-  if (normalized === "direct" || normalized === "gradual") {
+  if (normalized === "direct") {
     return normalized;
   }
 
-  throw new Error("HOSTED_EXECUTION_DEPLOYMENT_MODE must be 'direct' or 'gradual'.");
-}
-
-function readRolloutPercentage(value: string | undefined): number {
-  const parsed = parseOptionalStrictInteger(
-    value,
-    "HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.",
-  ) ?? 10;
-
-  if (parsed < 0 || parsed > 100) {
-    throw new Error("HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.");
-  }
-
-  return parsed;
+  throw new Error("HOSTED_EXECUTION_DEPLOYMENT_MODE must be 'direct'.");
 }
 
 function buildDefaultVersionTag(

@@ -67,7 +67,7 @@ beforeEach(() => {
 
 const testCronDeliveryTarget = {
   channel: 'telegram' as const,
-  sourceThreadId: '123456789',
+  threadId: '123456789',
 }
 
 test('assistant cron presets stay separate from scheduler state until installed', async () => {
@@ -162,7 +162,7 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   assert.equal(installed.job.enabled, true)
   assert.equal(installed.job.target.channel, 'telegram')
   assert.equal(installed.job.target.alias, 'routine:mindfulness')
-  assert.equal(installed.job.target.sourceThreadId, '123456789')
+  assert.equal(installed.job.target.threadId, '123456789')
   assert.equal(
     installed.resolvedVariables.practice_window,
     'a 10 minute seated meditation before work',
@@ -184,7 +184,7 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   assert.equal(automation?.title, 'morning-mindfulness-text')
   assert.equal(automation?.status, 'active')
   assert.equal(automation?.route.channel, 'telegram')
-  assert.equal(automation?.route.sourceThreadId, '123456789')
+  assert.equal(automation?.route.threadId, '123456789')
   assert.match(automation?.instructions ?? '', /10 minute seated meditation before work/u)
 })
 
@@ -205,7 +205,7 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
       {
         channel: 'telegram',
         participantId: 'saved-chat',
-        sourceThreadId: 'saved-chat',
+        threadId: 'saved-chat',
         deliveryTarget: null,
         identityId: null,
       },
@@ -220,7 +220,7 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
 
     assert.equal(installed.job.target.channel, 'telegram')
     assert.equal(installed.job.target.participantId, 'saved-chat')
-    assert.equal(installed.job.target.sourceThreadId, 'saved-chat')
+    assert.equal(installed.job.target.threadId, 'saved-chat')
   } finally {
     process.env.HOME = originalHome
   }
@@ -389,7 +389,7 @@ test('assistant cron targets can be inspected and updated in place', async () =>
       every: '1d',
     }),
     channel: 'telegram',
-    sourceThreadId: 'chat-123',
+    threadId: 'chat-123',
     sessionId: 'session-target-test',
     alias: 'routine:weekly-health-snapshot',
   })
@@ -398,7 +398,7 @@ test('assistant cron targets can be inspected and updated in place', async () =>
   assert.equal(shown.jobId, job.jobId)
   assert.equal(shown.jobName, 'weekly-health-snapshot')
   assert.equal(shown.target.channel, 'telegram')
-  assert.equal(shown.target.sourceThreadId, 'chat-123')
+  assert.equal(shown.target.threadId, 'chat-123')
   assert.equal(shown.bindingDelivery?.kind, 'thread')
   assert.equal(shown.bindingDelivery?.target, 'chat-123')
 

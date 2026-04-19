@@ -10,6 +10,7 @@ import {
   occurredAtOptionSchema,
   isoTimestampSchema,
   listResultSchema,
+  measurementAddResultSchema,
   pathSchema,
   showResultSchema,
   workoutAddResultSchema,
@@ -17,13 +18,14 @@ import {
   workoutFormatSaveResultSchema,
   workoutImportCsvResultSchema,
   workoutImportInspectResultSchema,
-  workoutMeasurementAddResultSchema,
   workoutUnitPreferencesResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
   listWorkoutRecords,
   listWorkoutMeasurementRecords,
+  measurementLookupSchema,
+  measurementImportManifestResultSchema,
   showWorkoutManifest,
   showWorkoutMeasurementManifest,
   showWorkoutMeasurementRecord,
@@ -61,13 +63,24 @@ import {
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
+export const workoutMeasurementCommandDescriptions = {
+  root: 'Legacy anthropometric alias over `measurement` with workout unit defaults and progress-photo affordances.',
+  add: 'Compatibility alias for weight, body-fat, and circumference check-ins that writes canonical measurement events.',
+  addHint:
+    'Prefer `measurement add` for new metrics such as grip strength or resting-heart-rate. Use this alias when you want closed anthropometric types plus saved workout unit defaults.',
+  show: 'Show one measurement event by canonical event id through the workout compatibility alias.',
+  list: 'List measurement events with optional date bounds through the workout compatibility alias.',
+  manifest:
+    'Show the immutable raw import manifest for one imported measurement event through the workout compatibility alias.',
+} as const
+
 export function registerWorkoutCommands(
   cli: Cli.Cli,
   _services: VaultServices,
 ) {
   const workout = Cli.create('workout', {
     description:
-      'Workout façade commands over core activity-session writes, body-measurement writes, workout-format docs, CSV import, and saved unit preferences.',
+      'Workout façade commands over activity sessions, compatibility measurement capture with workout unit defaults, workout-format docs, CSV import, and saved unit preferences.',
   })
 
   workout.command('add', {
@@ -260,14 +273,13 @@ export function registerWorkoutCommands(
   }))
 
   const measurement = Cli.create('measurement', {
-    description:
-      'Body-measurement capture routed through the core body_measurement write seam with optional progress photos under raw/measurements/**.',
+    description: workoutMeasurementCommandDescriptions.root,
   })
 
   measurement.command('add', {
-    description:
-      'Record one body-measurement check-in either from a structured JSON payload or a single typed measurement.',
+    description: workoutMeasurementCommandDescriptions.add,
     args: z.object({}),
+    hint: workoutMeasurementCommandDescriptions.addHint,
     options: withBaseOptions({
       input: inputFileOptionSchema
         .optional()
@@ -321,7 +333,7 @@ export function registerWorkoutCommands(
         .optional()
         .describe('Optional progress photo or video file paths to copy into raw/measurements/** and attach to the measurement event.'),
     }),
-    output: workoutMeasurementAddResultSchema,
+    output: measurementAddResultSchema,
     async run({ options }) {
       return addWorkoutMeasurementRecord({
         vault: options.vault,
@@ -350,9 +362,9 @@ export function registerWorkoutCommands(
   })
 
   measurement.command('show', {
-    description: 'Show one body-measurement event by canonical event id.',
+    description: workoutMeasurementCommandDescriptions.show,
     args: z.object({
-      id: workoutLookupSchema,
+      id: measurementLookupSchema,
     }),
     options: withBaseOptions(),
     output: showResultSchema,
@@ -362,12 +374,20 @@ export function registerWorkoutCommands(
   })
 
   measurement.command('list', {
-    description: 'List body-measurement events with optional date bounds.',
+    description: workoutMeasurementCommandDescriptions.list,
     args: z.object({}),
     options: withBaseOptions({
-      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-      limit: z.number().int().positive().max(200).default(50),
+      from: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/u)
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.from),
+      to: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/u)
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.to),
+      limit: commonListLimitOptionSchema,
     }),
     output: listResultSchema,
     async run({ options }) {
@@ -381,12 +401,12 @@ export function registerWorkoutCommands(
   })
 
   measurement.command('manifest', {
-    description: 'Show the immutable raw import manifest for an imported body-measurement event.',
+    description: workoutMeasurementCommandDescriptions.manifest,
     args: z.object({
-      id: workoutLookupSchema,
+      id: measurementLookupSchema,
     }),
     options: withBaseOptions(),
-    output: workoutImportManifestResultSchema,
+    output: measurementImportManifestResultSchema,
     async run({ args, options }) {
       return showWorkoutMeasurementManifest(options.vault, args.id)
     },

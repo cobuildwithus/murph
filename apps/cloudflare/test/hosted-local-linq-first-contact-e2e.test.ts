@@ -1,7 +1,7 @@
+import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
@@ -26,6 +26,7 @@ import {
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
+const linqWebhookSecret = "linq-local-webhook-secret";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -47,6 +48,7 @@ describe("hosted local Linq first-contact e2e", () => {
       additionalEnv: {
         LINQ_API_BASE_URL: requireLinqStub().baseUrl,
         LINQ_API_TOKEN: "linq-local-test-token",
+        LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       },
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
@@ -125,15 +127,21 @@ describe("hosted local Linq first-contact e2e", () => {
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
-    const inboundWake = buildHostedExecutionLinqConversationMessageWake({
-      eventId: `linq.message.received:local:${directReplyUserId}:evt_direct_reply`,
-      linqMessage: buildHostedLinqInboundMessage(directReplyUserId, materializedChatId),
-      occurredAt: new Date().toISOString(),
-      phoneLookupKey: requireLinqPhoneLookupKey(directReplyUserId),
-      userId: directReplyUserId,
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      directReplyUserId,
+      materializedChatId,
+      {
+        eventId: `evt_direct_reply_${directReplyUserId}`,
+        messageId: `msg_direct_reply_${directReplyUserId}`,
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
     });
-    await requireScenario().runWake(inboundWake, directReplyUserId);
 
+    await requireScenario().waitForLatestPendingWake(directReplyUserId);
     await requireScenario().waitForHostedCompletion(directReplyUserId);
     const replySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
@@ -165,31 +173,37 @@ describe("hosted local Linq first-contact e2e", () => {
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
 
-    const firstInboundWake = buildHostedExecutionLinqConversationMessageWake({
-      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_name`,
-      linqMessage: buildHostedLinqInboundMessage(fastReplyUserId, materializedChatId, {
+    const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      fastReplyUserId,
+      materializedChatId,
+      {
+        eventId: `evt_fast_reply_name_${fastReplyUserId}`,
         messageId: `msg_fast_name_${fastReplyUserId}`,
         text: "U can call me Rocket Man",
-      }),
-      occurredAt: new Date().toISOString(),
-      phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
-      userId: fastReplyUserId,
-    });
-    await requireScenario().runWake(firstInboundWake, fastReplyUserId);
-
-    const secondInboundWake = buildHostedExecutionLinqConversationMessageWake({
-      eventId: `linq.message.received:local:${fastReplyUserId}:evt_fast_reply_goals`,
-      linqMessage: buildHostedLinqInboundMessage(fastReplyUserId, materializedChatId, {
+      },
+    ));
+    const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      fastReplyUserId,
+      materializedChatId,
+      {
+        eventId: `evt_fast_reply_goals_${fastReplyUserId}`,
         messageId: `msg_fast_goals_${fastReplyUserId}`,
         text: "I want to build more strength, improve endurance, and get fitter overall.",
-      }),
-      occurredAt: new Date().toISOString(),
-      phoneLookupKey: requireLinqPhoneLookupKey(fastReplyUserId),
-      userId: fastReplyUserId,
+      },
+    ));
+    expect(firstWebhookResponse.status).toBe(202);
+    await expect(firstWebhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
     });
-    await requireScenario().runWake(secondInboundWake, fastReplyUserId);
+    expect(secondWebhookResponse.status).toBe(202);
+    await expect(secondWebhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
 
     const statusBeforeWait = await requireScenario().harness.readUserStatus(fastReplyUserId);
+    await requireScenario().waitForLatestPendingWake(fastReplyUserId);
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
     const statusAfterWait = await requireScenario().harness.readUserStatus(fastReplyUserId);
 
@@ -261,34 +275,28 @@ function buildActivationWake(userId: string) {
   });
 }
 
-function buildHostedLinqInboundMessage(
-  userId: string,
-  chatId: string,
-  input: {
-    messageId?: string;
-    text?: string;
-  } = {},
-) {
-  const event = buildHostedLinqInboundEvent(userId, chatId, input);
-  const data = event.data as {
-    chat_id: string;
-    from: string;
-    is_from_me: boolean;
-    message: {
-      id: string;
-      parts: Array<{ type: "text"; value: string }>;
-    };
-    service: string;
-  };
+async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
+  const rawBody = JSON.stringify(event);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = signLinqWebhook(linqWebhookSecret, rawBody, timestamp);
 
-  return {
-    chatId: data.chat_id,
-    from: data.from,
-    isFromMe: data.is_from_me,
-    messageId: data.message.id,
-    parts: data.message.parts,
-    service: data.service,
-  };
+  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
+    body: rawBody,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-webhook-signature": signature,
+      "x-webhook-timestamp": timestamp,
+    },
+    method: "POST",
+  });
+}
+
+function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
+  const signature = createHmac("sha256", secret)
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+
+  return `sha256=${signature}`;
 }
 
 function requireLinqStub(): HostedLocalLinqStub {

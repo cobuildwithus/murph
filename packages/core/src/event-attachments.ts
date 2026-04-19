@@ -69,18 +69,9 @@ export interface StagedEventAttachments {
   rawRefs: string[];
 }
 
-export interface AttachmentCompatibilityProjections {
-  audioPaths: string[];
-  documentPath: string | null;
+export interface EventAttachmentProjections {
   media: StoredMedia[];
-  photoPaths: string[];
   rawRefs: string[];
-}
-
-export interface AttachmentPathProjectionSource {
-  role: string;
-  kind: EventAttachmentKind;
-  relativePath: string;
 }
 
 function toStoredMediaKind(kind: EventAttachmentKind): StoredMedia["kind"] {
@@ -164,9 +155,7 @@ export function prepareEventAttachments(
 
 export function buildAttachmentCompatibilityProjections(
   attachments: readonly EventAttachment[],
-): AttachmentCompatibilityProjections {
-  const { audioPaths, documentPath, photoPaths, rawRefs } =
-    buildAttachmentPathCompatibilityProjections(attachments);
+): EventAttachmentProjections {
   const media = attachments.map((attachment) =>
     storedMediaSchema.parse({
       kind: toStoredMediaKind(attachment.kind),
@@ -176,41 +165,8 @@ export function buildAttachmentCompatibilityProjections(
   );
 
   return {
-    audioPaths,
-    documentPath,
     media,
-    photoPaths,
-    rawRefs,
-  };
-}
-
-export function buildAttachmentPathCompatibilityProjections(
-  attachments: readonly AttachmentPathProjectionSource[],
-): Omit<AttachmentCompatibilityProjections, "media"> {
-  const rawRefs = [...new Set(attachments.map((attachment) => attachment.relativePath))];
-  const documentPath =
-    attachments.find((attachment) => attachment.kind === "document")?.relativePath
-    ?? null;
-  const photoPaths = [
-    ...new Set(
-      attachments
-        .filter((attachment) => attachment.role === "photo" || attachment.kind === "photo")
-        .map((attachment) => attachment.relativePath),
-    ),
-  ];
-  const audioPaths = [
-    ...new Set(
-      attachments
-        .filter((attachment) => attachment.role === "audio" || attachment.kind === "audio")
-        .map((attachment) => attachment.relativePath),
-    ),
-  ];
-
-  return {
-    audioPaths,
-    documentPath,
-    photoPaths,
-    rawRefs,
+    rawRefs: [...new Set(attachments.map((attachment) => attachment.relativePath))],
   };
 }
 

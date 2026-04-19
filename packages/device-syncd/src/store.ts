@@ -252,7 +252,7 @@ export class SqliteDeviceSyncStore {
         migrations: [
           {
             version: DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION,
-            migrate(candidateDatabase) {
+            migrate(candidateDatabase: DatabaseSync) {
               ensureDeviceSyncStoreSchema(candidateDatabase);
             },
           },

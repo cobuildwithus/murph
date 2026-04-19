@@ -116,7 +116,6 @@ describe('assistant product small seams', () => {
         deliveryTarget: 'actor-1',
         operatorAuthority: 'accepted-inbound-message',
         threadId: null,
-        threadId: null,
         threadIsDirect: null,
       },
       session: {
@@ -155,7 +154,6 @@ describe('assistant product small seams', () => {
         deliveryTarget: 'group-thread',
         operatorAuthority: 'accepted-inbound-message',
         threadId: 'group-thread',
-        threadId: null,
         threadIsDirect: false,
       },
       session: {
@@ -216,7 +214,6 @@ describe('assistant product small seams', () => {
         deliveryTarget: null,
         operatorAuthority: 'accepted-inbound-message',
         threadId: null,
-        threadId: null,
         threadIsDirect: null,
       },
       session: {
@@ -247,7 +244,6 @@ describe('assistant product small seams', () => {
         deliveryReplyToMessageId: null,
         deliveryTarget: null,
         operatorAuthority: 'accepted-inbound-message',
-        threadId: null,
         threadId: null,
         threadIsDirect: null,
       },
@@ -281,7 +277,6 @@ describe('assistant product small seams', () => {
         deliveryReplyToMessageId: null,
         deliveryTarget: null,
         operatorAuthority: 'accepted-inbound-message',
-        threadId: null,
         threadId: null,
         threadIsDirect: null,
       },

@@ -15,11 +15,14 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   compactObject,
   normalizeOptionalText,
-  toEventUpsertVaultCliError,
 } from './vault-usecase-helpers.js'
-import { type BodyMeasurementDraftInput, loadWorkoutCoreRuntime } from './workout-core.js'
+import {
+  addMeasurementDraftRecord,
+  buildMeasurementEventDraft,
+  normalizeMetricSlug,
+} from './measurement.js'
 
-interface MeasurementPayloadInput {
+interface LegacyMeasurementPayloadInput {
   occurredAt?: string
   title?: string
   note?: string
@@ -109,7 +112,7 @@ function resolveMeasurementUnit(input: {
   )
 }
 
-function normalizeMeasurementEntry(value: unknown, fieldName = 'measurement'): BodyMeasurementEntry {
+function normalizeLegacyMeasurementEntry(value: unknown, fieldName = 'measurement'): BodyMeasurementEntry {
   const parsed = bodyMeasurementEntrySchema.safeParse(value)
   if (!parsed.success) {
     throw new VaultCliError(
@@ -121,40 +124,27 @@ function normalizeMeasurementEntry(value: unknown, fieldName = 'measurement'): B
   return parsed.data
 }
 
-function buildMeasurementTitle(measurements: readonly BodyMeasurementEntry[]): string {
-  if (measurements.length === 1) {
-    const entry = measurements[0]!
-    switch (entry.type) {
-      case 'weight':
-        return 'Weight check-in'
-      case 'body_fat_pct':
-        return 'Body-fat check-in'
-      default:
-        return 'Body measurement check-in'
-    }
-  }
-
-  return 'Body measurement check-in'
+function convertLegacyEntryToMeasurementEntry(entry: BodyMeasurementEntry) {
+  return compactObject({
+    metric: normalizeMetricSlug(entry.type.replace(/_/gu, '-')),
+    value: entry.value,
+    unit: entry.unit,
+    note: normalizeOptionalText(entry.note) ?? undefined,
+  })
 }
 
-async function loadStructuredMeasurementPayload(inputFile: string): Promise<MeasurementPayloadInput> {
+async function loadStructuredMeasurementPayload(inputFile: string): Promise<LegacyMeasurementPayloadInput> {
   const payload = await loadJsonInputObject(inputFile, 'body measurement payload')
 
   if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
     throw new VaultCliError(
       'invalid_payload',
-      'Structured body-measurement payloads cannot set attachments[]. Use --media <path> to stage body-measurement files.',
+      'Structured body-measurement payloads cannot set attachments[]. Use --media <path> to stage measurement files.',
     )
   }
 
   const measurements = Array.isArray(payload.measurements)
-    ? payload.measurements.map((entry, index) => normalizeMeasurementEntry(entry, `measurements[${index}]`))
-    : undefined
-  const media = Array.isArray(payload.media)
-    ? payload.media.filter((entry): entry is StoredMedia => {
-        const candidate = asJsonObject(entry)
-        return Boolean(candidate && typeof candidate.relativePath === 'string')
-      })
+    ? payload.measurements.map((entry, index) => normalizeLegacyMeasurementEntry(entry, `measurements[${index}]`))
     : undefined
 
   return {
@@ -162,11 +152,16 @@ async function loadStructuredMeasurementPayload(inputFile: string): Promise<Meas
     title: normalizeOptionalText(valueAsString(payload.title)) ?? undefined,
     note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
     measurements,
-    media,
+    media: Array.isArray(payload.media)
+      ? payload.media.filter((entry): entry is StoredMedia => {
+          const candidate = asJsonObject(entry)
+          return Boolean(candidate && typeof candidate.relativePath === 'string')
+        })
+      : undefined,
     rawRefs: Array.isArray(payload.rawRefs)
       ? payload.rawRefs.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       : undefined,
-    source: valueAsString(payload.source) as MeasurementPayloadInput['source'] | undefined,
+    source: valueAsString(payload.source) as LegacyMeasurementPayloadInput['source'] | undefined,
     tags: Array.isArray(payload.tags)
       ? payload.tags.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       : undefined,
@@ -179,38 +174,13 @@ async function loadStructuredMeasurementPayload(inputFile: string): Promise<Meas
   }
 }
 
-function buildMeasurementEventDraft(input: {
-  payload?: MeasurementPayloadInput
-  occurredAt?: string
-  title?: string
-  note?: string
-  measurements: BodyMeasurementEntry[]
-  source?: AddWorkoutMeasurementInput['source']
-}): BodyMeasurementDraftInput {
-  const payload = input.payload
-  return compactObject({
-    occurredAt: payload?.occurredAt ?? input.occurredAt ?? new Date().toISOString(),
-    source: input.source ?? payload?.source ?? 'manual',
-    title: normalizeOptionalText(input.title) ?? payload?.title ?? buildMeasurementTitle(input.measurements),
-    note: normalizeOptionalText(input.note) ?? payload?.note,
-    measurements: input.measurements,
-    media: payload?.media,
-    rawRefs: payload?.rawRefs,
-    tags: payload?.tags,
-    links: payload?.links,
-    relatedIds: payload?.relatedIds,
-    externalRef: payload?.externalRef,
-    timeZone: payload?.timeZone,
-  }) as BodyMeasurementDraftInput
-}
-
 export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementInput) {
   const preferencesDocument = await readPreferencesDocument(input.vault)
   const structuredPayload = typeof input.inputFile === 'string'
     ? await loadStructuredMeasurementPayload(input.inputFile)
     : undefined
 
-  const measurements = structuredPayload?.measurements ?? (() => {
+  const measurements = structuredPayload?.measurements?.map(convertLegacyEntryToMeasurementEntry) ?? (() => {
     if (!input.type) {
       throw new VaultCliError(
         'invalid_option',
@@ -222,7 +192,7 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
       throw new VaultCliError('invalid_option', 'Measurement value must be a finite number.')
     }
 
-    return [normalizeMeasurementEntry({
+    return [convertLegacyEntryToMeasurementEntry(normalizeLegacyMeasurementEntry({
       type: input.type,
       value: input.value,
       unit: resolveMeasurementUnit({
@@ -231,11 +201,16 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
         preferences: preferencesDocument.workoutUnitPreferences,
       }),
       note: normalizeOptionalText(input.note) ?? undefined,
-    })]
+    }))]
   })()
 
   const draft = buildMeasurementEventDraft({
-    payload: structuredPayload,
+    payload: structuredPayload
+      ? compactObject({
+          ...structuredPayload,
+          measurements,
+        })
+      : undefined,
     occurredAt: input.occurredAt,
     title: input.title,
     note: input.note,
@@ -243,42 +218,11 @@ export async function addWorkoutMeasurementRecord(input: AddWorkoutMeasurementIn
     source: input.source,
   })
 
-  const mediaPaths = Array.isArray(input.mediaPaths)
-    ? input.mediaPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-    : []
-  const core = await loadWorkoutCoreRuntime()
-
-  try {
-    const result = await core.addBodyMeasurement({
-      vaultRoot: input.vault,
-      draft,
-      ...(mediaPaths.length > 0
-        ? {
-            attachments: mediaPaths.map((sourcePath, index) => ({
-              role: `media_${index + 1}`,
-              sourcePath,
-            })),
-          }
-        : {}),
-    })
-
-    return {
-      vault: input.vault,
-      eventId: result.eventId,
-      lookupId: result.eventId,
-      ledgerFile: result.ledgerFile,
-      created: result.created,
-      occurredAt: result.event.occurredAt,
-      kind: 'body_measurement' as const,
-      title: result.event.title,
-      measurements: result.event.measurements,
-      media: result.event.media ?? [],
-      manifestFile: result.manifestPath,
-      note: normalizeOptionalText(result.event.note) ?? null,
-    }
-  } catch (error) {
-    throw toEventUpsertVaultCliError(error)
-  }
+  return addMeasurementDraftRecord({
+    vault: input.vault,
+    draft,
+    mediaPaths: input.mediaPaths,
+  })
 }
 
 export async function showWorkoutUnitPreferences(vault: string) {

@@ -6,7 +6,7 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 
 import { buildHostedDeviceSyncWake } from "../device-sync/wake";
-import { materializeHostedAssistantCronWakeTx, appendHostedExecutionWakePayloadTx } from "./queue";
+import { appendHostedExecutionWakePayloadTx } from "./queue";
 
 type HostedWakeMaterializeTx = {
   deviceConnection: {
@@ -53,6 +53,26 @@ type HostedWakeMaterializeTx = {
       provider: string;
     }>>;
   };
+  hostedExecutionCursor: {
+    upsert(args: {
+      create: {
+        userId: string;
+      };
+      update: Record<string, never>;
+      where: {
+        userId: string;
+      };
+    }): Promise<{
+      assistantNextWakeAt: Date | null;
+      committedSeq: bigint;
+      createdAt: Date;
+      nextSeq: bigint;
+      snapshotRef: unknown;
+      updatedAt: Date;
+      userId: string;
+      version: bigint;
+    }>;
+  };
 };
 
 type HostedWakeAppendResult = Awaited<ReturnType<typeof appendHostedExecutionWakePayloadTx>>;
@@ -69,14 +89,22 @@ export async function materializeHostedDueWakesTx(input: {
   now?: Date;
   tx: HostedWakeMaterializeTx;
   userId: string;
-  wakeMaterializationHints?: HostedWakeMaterializationHints | null;
 }): Promise<HostedWakeMaterializeResponse> {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
-  const nextHints = normalizeHostedWakeMaterializationHints(input.wakeMaterializationHints ?? null);
+  const cursor = await input.tx.hostedExecutionCursor.upsert({
+    where: {
+      userId: input.userId,
+    },
+    create: {
+      userId: input.userId,
+    },
+    update: {},
+  });
+  const assistantNextWakeAt = cursor.assistantNextWakeAt?.toISOString() ?? null;
   let targetSeqHint: bigint | null = null;
 
-  if (isRunnableWakeHint(nextHints?.assistantWakeAt ?? null, now)) {
+  if (isRunnableWakeHint(assistantNextWakeAt, now)) {
     const appended = await input.appendAssistantCronWake({
       occurredAt: nowIso,
       reason: "alarm",
@@ -145,9 +173,9 @@ export async function materializeHostedDueWakesTx(input: {
   return {
     targetSeqHint: targetSeqHint?.toString() ?? null,
     wakeMaterializationHints: normalizeHostedWakeMaterializationHints({
-      assistantWakeAt: isRunnableWakeHint(nextHints?.assistantWakeAt ?? null, now)
+      assistantWakeAt: isRunnableWakeHint(assistantNextWakeAt, now)
         ? null
-        : nextHints?.assistantWakeAt ?? null,
+        : assistantNextWakeAt,
       deviceSyncWakeAt: nextDeviceSyncWakeAt?.nextReconcileAt?.toISOString() ?? null,
     }),
   };

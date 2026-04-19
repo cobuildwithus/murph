@@ -508,7 +508,7 @@ export async function prepareHostedLocalRuntime(
 ): Promise<void> {
   const inboxServices = createIntegratedInboxServices();
   await inboxServices.init({
-    rebuild: false,
+    rebuild: true,
     requestId,
     vault: vaultRoot,
   });

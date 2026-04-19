@@ -8,7 +8,10 @@ const HKDF_HASH = "SHA-256";
 const GCM_IV_BYTES = 12;
 const GCM_AUTH_TAG_BYTES = 16;
 const HOSTED_WAKE_ENCRYPTION_KEY_BYTES = 32;
-const HOSTED_WAKE_SCOPE_SALT = new TextEncoder().encode("murph.hosted.wake.payload.v1");
+// Keep this salt aligned with the web-owned hosted secret codec until the wake codec
+// is extracted into a shared package. A mismatch here makes every hosted wake payload
+// undecryptable across the web/worker boundary.
+const HOSTED_WAKE_SCOPE_SALT = new TextEncoder().encode("murph.hosted.device-sync.secret.v1");
 const BASE64_CANONICAL_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const BASE64URL_CANONICAL_PATTERN = /^[A-Za-z0-9_-]*$/u;

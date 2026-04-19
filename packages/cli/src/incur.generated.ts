@@ -54,7 +54,7 @@ declare module 'incur' {
       'event delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'event edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'event list': { args: {}; options: { vault: string; requestId?: string; kind?: string; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
-      'event scaffold': { args: {}; options: { vault: string; requestId?: string; kind: "symptom" | "note" | "observation" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" } }
+      'event scaffold': { args: {}; options: { vault: string; requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" } }
       'event show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'event upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'experiment checkpoint': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -150,6 +150,10 @@ declare module 'incur' {
       'meal manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal totals': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
+      'measurement add': { args: {}; options: { vault: string; requestId?: string; input?: string; metric?: string; value?: number; unit?: string; qualifier?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
+      'measurement list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
+      'measurement manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'measurement show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'memory forget': { args: { memoryId: string }; options: { vault: string } }
       'memory show': { args: { memoryId?: string }; options: { vault: string } }
       'memory update': { args: { memoryId: string; text: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }

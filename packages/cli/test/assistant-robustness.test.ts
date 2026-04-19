@@ -147,7 +147,7 @@ test('sendAssistantMessage defers retryable delivery failures into the durable o
       vault: vaultRoot,
       channel: 'telegram',
       participantId: 'contact:alice',
-      sourceThreadId: 'chat-1',
+      threadId: 'chat-1',
       threadIsDirect: true,
       prompt: 'hello there',
       deliverResponse: true,
@@ -231,7 +231,7 @@ test('sendAssistantMessage can queue outbound delivery without attempting a pre-
       vault: vaultRoot,
       channel: 'telegram',
       participantId: 'contact:alice',
-      sourceThreadId: 'chat-1',
+      threadId: 'chat-1',
       threadIsDirect: true,
       prompt: 'hello there',
       deliverResponse: true,
@@ -288,7 +288,7 @@ test('drainAssistantOutbox reconciles a journaled delivery without re-sending it
       vault: vaultRoot,
       channel: 'telegram',
       participantId: 'contact:alice',
-      sourceThreadId: 'chat-1',
+      threadId: 'chat-1',
       threadIsDirect: true,
       prompt: 'hello there',
       deliverResponse: true,
@@ -362,7 +362,7 @@ test('drainAssistantOutbox keeps hosted journal failures retryable', async () =>
       vault: vaultRoot,
       channel: 'telegram',
       participantId: 'contact:alice',
-      sourceThreadId: 'chat-1',
+      threadId: 'chat-1',
       threadIsDirect: true,
       prompt: 'hello there',
       deliverResponse: true,
@@ -448,7 +448,7 @@ test('drainAssistantOutbox only keeps post-send journal persistence failures ret
       vault: vaultRoot,
       channel: 'telegram',
       participantId: 'contact:alice',
-      sourceThreadId: 'chat-1',
+      threadId: 'chat-1',
       threadIsDirect: true,
       prompt: 'hello there',
       deliverResponse: true,
@@ -531,6 +531,7 @@ test('buildAssistantFailoverRoutes dedupes routes that only differ by null versu
   const routes = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: {
+      provider: 'codex-cli',
       continuityFingerprint: 'fingerprint-robustness-codex',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
@@ -583,6 +584,7 @@ test('buildAssistantFailoverRoutes dedupes identical routes even when their name
   const routes = buildAssistantFailoverRoutes({
     provider: 'openai-compatible',
     providerOptions: {
+      provider: 'openai-compatible',
       continuityFingerprint: 'fingerprint-robustness-openai',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
@@ -774,6 +776,7 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
     const cooldownRoutes = buildAssistantFailoverRoutes({
       provider: 'codex-cli',
       providerOptions: {
+        provider: 'codex-cli',
         continuityFingerprint: 'fingerprint-robustness-cooldown-route',
         model: 'gpt-oss:20b',
         reasoningEffort: null,
@@ -1102,6 +1105,7 @@ test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the
   const routes = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: {
+      provider: 'codex-cli',
       continuityFingerprint: 'fingerprint-robustness-cooldown',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
@@ -1435,7 +1439,7 @@ test('delivery fault injection queues the outbox without performing a real outbo
       vault: vaultRoot,
       channel: 'telegram',
       participantId: 'contact:bob',
-      sourceThreadId: 'chat-fault',
+      threadId: 'chat-fault',
       threadIsDirect: true,
       prompt: 'check the injected delivery path',
       deliverResponse: true,

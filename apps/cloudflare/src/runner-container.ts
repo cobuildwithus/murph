@@ -763,11 +763,30 @@ function isTransientOutboundHandlerInstallError(error: unknown): boolean {
 }
 
 function isMissingRunnerContainerError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
+  const message = readErrorMessage(error);
+  return message !== null && message.includes("No such container");
+}
+
+function readErrorMessage(error: unknown): string | null {
+  if (typeof error === "string") {
+    const message = error.trim();
+    return message.length > 0 ? message : null;
   }
 
-  return error.message.includes("No such container");
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") {
+      const normalized = message.trim();
+      return normalized.length > 0 ? normalized : null;
+    }
+  }
+
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    return message.length > 0 ? message : null;
+  }
+
+  return null;
 }
 
 function computeHostedRunElapsedMs(

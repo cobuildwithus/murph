@@ -1,11 +1,10 @@
 import { createHmac } from "node:crypto";
 
-const TEST_HOSTED_PRIVACY_VERSION = "v1";
-const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
-const TEST_HOSTED_PRIVACY_ROOT_KEY = Buffer.from(
-  "vitest-hosted-contact-privacy-root-key",
-  "utf8",
-);
+const hostedBlindIndexPrefix = "hbidx";
+const hostedPhonePurpose = "blind-index:phone";
+const hostedPrivacyVersionPattern = /^v[0-9]+$/u;
+const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 
 export function createHostedPhoneLookupKey(value: string | null | undefined): string | null {
   const normalized = normalizePhoneNumber(value);
@@ -14,18 +13,94 @@ export function createHostedPhoneLookupKey(value: string | null | undefined): st
     return null;
   }
 
-  const version = TEST_HOSTED_PRIVACY_VERSION;
-  const digest = createHmac("sha256", deriveHostedPrivacyKey(`blind-index:phone`, version))
+  const keyring = readHostedContactPrivacyKeyring();
+  const digest = createHmac(
+    "sha256",
+    deriveHostedPrivacyKey(keyring.currentVersion, keyring.currentKey, hostedPhonePurpose),
+  )
     .update(normalized)
     .digest("hex");
 
-  return `${HOSTED_BLIND_INDEX_PREFIX}:phone:${version}:${digest}`;
+  return `${hostedBlindIndexPrefix}:phone:${keyring.currentVersion}:${digest}`;
 }
 
-function deriveHostedPrivacyKey(purpose: string, version: string): Buffer {
-  return createHmac("sha256", TEST_HOSTED_PRIVACY_ROOT_KEY)
+function readHostedContactPrivacyKeyring(): {
+  currentKey: Buffer;
+  currentVersion: string;
+} {
+  const keyringValue =
+    process.env.HOSTED_CONTACT_PRIVACY_KEYS
+    ?? `${hostedWebSmokeDefaultEncryptionKeyVersion}:${hostedWebSmokeDefaultEncryptionKey}`;
+  const entries = keyringValue
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (entries.length === 0) {
+    throw new TypeError("HOSTED_CONTACT_PRIVACY_KEYS must include at least one version:key entry.");
+  }
+
+  const keysByVersion = new Map<string, Buffer>();
+  for (const entry of entries) {
+    const separatorIndex = entry.indexOf(":");
+
+    if (separatorIndex < 1 || separatorIndex === entry.length - 1) {
+      throw new TypeError("HOSTED_CONTACT_PRIVACY_KEYS entries must use the format vN:base64key.");
+    }
+
+    const version = entry.slice(0, separatorIndex).trim();
+    const encodedKey = entry.slice(separatorIndex + 1).trim();
+
+    if (!hostedPrivacyVersionPattern.test(version)) {
+      throw new TypeError(
+        `Hosted contact privacy key version ${JSON.stringify(version)} must match /^v[0-9]+$/.`,
+      );
+    }
+
+    if (keysByVersion.has(version)) {
+      throw new TypeError(`HOSTED_CONTACT_PRIVACY_KEYS must not repeat ${version}.`);
+    }
+
+    keysByVersion.set(version, decodeHostedEncryptionKey(encodedKey));
+  }
+
+  const configuredCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION?.trim();
+  const currentVersion = configuredCurrentVersion
+    || (keysByVersion.size === 1 ? keysByVersion.keys().next().value ?? null : null);
+
+  if (!currentVersion) {
+    throw new TypeError(
+      "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION is required when HOSTED_CONTACT_PRIVACY_KEYS defines multiple versions.",
+    );
+  }
+
+  const currentKey = keysByVersion.get(currentVersion);
+  if (!currentKey) {
+    throw new TypeError(
+      `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION ${JSON.stringify(currentVersion)} is not present in HOSTED_CONTACT_PRIVACY_KEYS.`,
+    );
+  }
+
+  return {
+    currentKey,
+    currentVersion,
+  };
+}
+
+function deriveHostedPrivacyKey(version: string, rootKey: Buffer, purpose: string): Buffer {
+  return createHmac("sha256", rootKey)
     .update(`hosted-contact-privacy:${version}:${purpose}`)
     .digest();
+}
+
+function decodeHostedEncryptionKey(value: string): Buffer {
+  const decoded = Buffer.from(value, "base64");
+
+  if (decoded.byteLength !== 32) {
+    throw new TypeError("Hosted contact privacy keys must decode to exactly 32 bytes.");
+  }
+
+  return decoded;
 }
 
 function normalizePhoneNumber(value: string | null | undefined): string | null {

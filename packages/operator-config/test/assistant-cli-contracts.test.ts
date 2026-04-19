@@ -263,7 +263,7 @@ describe('assistant CLI automation shape ownership', () => {
       deliveryTarget: 'channel:alerts',
       identityId: 'idn_123',
       participantId: 'user_123',
-      sourceThreadId: 'thread_123',
+      threadId: 'thread_123',
     }
 
     expect(assistantSelfDeliveryTargetSchema.parse(route)).toEqual(
@@ -289,11 +289,11 @@ describe('assistant CLI automation shape ownership', () => {
     })
     expect({
       ...route,
-      sourceThreadId: threadId,
+      threadId: threadId,
     }).toEqual(
       automationRouteSchema.parse({
         ...route,
-        sourceThreadId: threadId,
+        threadId: threadId,
       }),
     )
   })

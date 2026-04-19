@@ -47,6 +47,8 @@ import {
   resolveVercelOidcToken,
 } from "./vercel.ts";
 
+const HOSTED_WEB_HEALTH_PATH = "/api/internal/health";
+
 export interface HostedLocalDevStack {
   config: HostedLocalDevConfig;
   oidcIdentity: HostedExecutionOidcIdentity;
@@ -219,14 +221,14 @@ export async function startHostedLocalDevStack(input: {
     });
 
     if (!config.skipPrismaMigrate) {
-      await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
-        cwd: repoRoot,
-        env: runtimeEnv,
-        name: "setup",
-      });
-
       if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
         await runCommand("pnpm", ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"], {
+          cwd: repoRoot,
+          env: runtimeEnv,
+          name: "setup",
+        });
+      } else {
+        await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
           cwd: repoRoot,
           env: runtimeEnv,
           name: "setup",
@@ -346,7 +348,7 @@ export async function startHostedLocalDevStack(input: {
             waitForHealthyHttpEndpoint({
               host: config.webHost,
               label: "web",
-              path: "/",
+              path: HOSTED_WEB_HEALTH_PATH,
               port: config.webPort,
               protocol: "http",
             }),

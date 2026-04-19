@@ -129,6 +129,7 @@ const EVENT_WRITE_KINDS = [
   'symptom',
   'note',
   'observation',
+  'measurement',
   'medication_intake',
   'supplement_intake',
   'activity_session',
@@ -223,6 +224,27 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     metric: 'glucose',
     value: 88,
     unit: 'mg_dL',
+  },
+  measurement: {
+    kind: 'measurement',
+    occurredAt: '2026-03-12T07:00:00.000Z',
+    title: 'Weekly check-in',
+    attachments: [
+      {
+        role: 'media_1',
+        kind: 'photo',
+        relativePath: 'raw/measurements/2026/03/evt_01JNV422Y2M5ZBV64ZP4N1DRB1/front.jpg',
+        mediaType: 'image/jpeg',
+        sha256: '4444444444444444444444444444444444444444444444444444444444444444',
+        originalFileName: 'front.jpg',
+      },
+    ],
+    rawRefs: ['raw/measurements/2026/03/evt_01JNV422Y2M5ZBV64ZP4N1DRB1/front.jpg'],
+    measurements: [
+      { metric: 'weight', value: 182.4, unit: 'lb' },
+      { metric: 'waist', value: 33.5, unit: 'in' },
+      { metric: 'grip-strength', value: 97.2, unit: 'lb', qualifiers: { side: 'right' } },
+    ],
   },
   experiment_event: {
     kind: 'experiment_event',

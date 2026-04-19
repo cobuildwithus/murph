@@ -166,10 +166,18 @@ export const setupVaultSelectionResultSchema = z.object({
   vault: pathSchema,
 })
 
+const setupCommandVaultSchema = z.preprocess((value) => {
+  if (value !== undefined) {
+    return value
+  }
+
+  const configuredVault = process.env.VAULT?.trim()
+  return configuredVault && configuredVault.length > 0 ? configuredVault : './vault'
+}, pathSchema)
+
 export const setupCommandOptionsSchema = z.object({
-  vault: pathSchema
-    .default('./vault')
-    .describe('Vault root to initialize and bootstrap. Defaults to ./vault.'),
+  vault: setupCommandVaultSchema
+    .describe('Vault root to initialize and bootstrap. Defaults to VAULT when set, otherwise ./vault.'),
   requestId: requestIdSchema,
   dryRun: z
     .boolean()

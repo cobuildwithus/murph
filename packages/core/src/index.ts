@@ -44,6 +44,7 @@ export { loadVault } from "./vault.ts";
 export {
   addActivitySession,
   addBodyMeasurement,
+  addMeasurement,
   addMeal,
   applyCanonicalWriteBatch,
   appendBloodTest,
@@ -175,6 +176,7 @@ export * from "./shares.ts";
 export {
   buildActivitySessionEventDraft,
   buildBodyMeasurementEventDraft,
+  buildMeasurementEventDraft,
   buildInterventionSessionEventDraft,
   buildMedicationIntakeEventDraft,
   buildNoteEventDraft,
@@ -189,6 +191,8 @@ export type {
   AddActivitySessionResult,
   AddBodyMeasurementInput,
   AddBodyMeasurementResult,
+  AddMeasurementInput,
+  AddMeasurementResult,
   EventDraftByKind,
   PublicEventDraft,
   PublicWritableEventKind,

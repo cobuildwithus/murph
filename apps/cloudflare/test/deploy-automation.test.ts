@@ -7,13 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
-  formatHostedWorkerDeploymentVersionSpecs,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   parseHostedContainerImageListOutput,
   readHostedDeployAutomationEnvironment,
   resolveCloudflareDeployPaths,
-  resolveHostedWorkerGradualDeploymentSupport,
-  resolveHostedWorkerDeploymentTraffic,
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
@@ -142,12 +139,8 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.migrations).toEqual([
       {
-        new_sqlite_classes: ["UserRunnerDurableObject"],
+        new_sqlite_classes: ["UserRunnerDurableObject", "RunnerContainer"],
         tag: "v1",
-      },
-      {
-        new_sqlite_classes: ["RunnerContainer"],
-        tag: "v2",
       },
     ]);
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
@@ -401,118 +394,6 @@ describe("hosted deploy automation helpers", () => {
       }),
     ).rejects.toMatchObject({
       code: "EACCES",
-    });
-  });
-
-  it("builds a gradual canary split against the current stable version", () => {
-    expect(resolveHostedWorkerDeploymentTraffic({
-      candidateVersionId: "version-b",
-      currentDeploymentVersions: [
-        {
-          percentage: 100,
-          versionId: "version-a",
-        },
-      ],
-      rolloutPercentage: 10,
-    })).toEqual([
-      {
-        percentage: 90,
-        versionId: "version-a",
-      },
-      {
-        percentage: 10,
-        versionId: "version-b",
-      },
-    ]);
-  });
-
-  it("preserves deployment order when promoting an already-active canary", () => {
-    const traffic = resolveHostedWorkerDeploymentTraffic({
-      candidateVersionId: "version-b",
-      currentDeploymentVersions: [
-        {
-          percentage: 80,
-          versionId: "version-a",
-        },
-        {
-          percentage: 20,
-          versionId: "version-b",
-        },
-      ],
-      rolloutPercentage: 50,
-    });
-
-    expect(traffic).toEqual([
-      {
-        percentage: 50,
-        versionId: "version-a",
-      },
-      {
-        percentage: 50,
-        versionId: "version-b",
-      },
-    ]);
-    expect(formatHostedWorkerDeploymentVersionSpecs(traffic)).toEqual([
-      "version-a@50",
-      "version-b@50",
-    ]);
-  });
-
-  it("rejects introducing a third version into an already gradual deployment", () => {
-    expect(() =>
-      resolveHostedWorkerDeploymentTraffic({
-        candidateVersionId: "version-c",
-        currentDeploymentVersions: [
-          {
-            percentage: 80,
-            versionId: "version-a",
-          },
-          {
-            percentage: 20,
-            versionId: "version-b",
-          },
-        ],
-        rolloutPercentage: 10,
-      }),
-    ).toThrowError(/already splits traffic between two versions/u);
-  });
-
-  it("allows gradual deployments for the current checked-in Durable Object migration set", () => {
-    const config = buildHostedWranglerDeployConfig(readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-    })) as Record<string, unknown>;
-
-    expect(resolveHostedWorkerGradualDeploymentSupport(config)).toEqual({
-      directDeployRequiredReason: null,
-      gradualDeploymentsSupported: true,
-      migrationTags: ["v1", "v2"],
-    });
-  });
-
-  it("requires a direct deploy when the rendered config introduces a new Durable Object migration tag", () => {
-    const config = buildHostedWranglerDeployConfig(readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-    })) as {
-      migrations: Array<Record<string, unknown>>;
-    };
-
-    config.migrations = [
-      ...config.migrations,
-      {
-        new_sqlite_classes: ["FutureRunnerDurableObject"],
-        tag: "v3",
-      },
-    ];
-
-    expect(resolveHostedWorkerGradualDeploymentSupport(config)).toEqual({
-      directDeployRequiredReason:
-        "Rendered Wrangler config includes unsupported Durable Object migration tag(s) `v3` for gradual versions/deployments. Use HOSTED_EXECUTION_DEPLOYMENT_MODE=direct for the migration rollout first.",
-      gradualDeploymentsSupported: false,
-      migrationTags: ["v1", "v2", "v3"],
     });
   });
 

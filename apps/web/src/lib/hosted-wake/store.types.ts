@@ -10,6 +10,7 @@ export type HostedWakeStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWakeMutationTx = Prisma.TransactionClient;
 
 export interface HostedExecutionCursorRow {
+  assistantNextWakeAt: Date | null;
   committedSeq: bigint;
   createdAt: Date;
   nextSeq: bigint;
@@ -102,8 +103,7 @@ export interface HostedWakeRepairCandidate {
   userId: string;
 }
 
-export interface ListHostedWakesInput {
-  afterSeq?: bigint | null;
+export interface ListHostedExecutableWakesInput {
   limit?: number;
   prisma?: HostedWakeStoreClient;
   userId: string;

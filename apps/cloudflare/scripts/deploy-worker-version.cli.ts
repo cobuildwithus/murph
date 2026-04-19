@@ -1,5 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -8,7 +7,6 @@ import {
   type HostedWorkerDeploymentResult,
 } from "./deploy-worker-version.shared.js";
 import {
-  isObjectRecord,
   parseJsonValue,
   requireConfiguredString,
 } from "./deploy-automation/shared.ts";
@@ -47,58 +45,8 @@ export async function runDeployWorkerVersionCli(
           ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
         ]);
       },
-      async deployVersions(input) {
-        await runWranglerLogged([
-          "versions",
-          "deploy",
-          ...input.versionSpecs,
-          "--config",
-          input.configPath,
-          "--message",
-          input.deploymentMessage,
-          "--name",
-          input.workerName,
-          "--yes",
-        ]);
-      },
       mkdir,
       readCurrentDeployment,
-      readRenderedDeployConfig,
-      async uploadVersion(input) {
-        const outputFilePath = path.join(
-          await mkdtemp(path.join(tmpdir(), "hosted-cloudflare-upload-")),
-          "wrangler-output.jsonl",
-        );
-
-        await runWranglerLogged(
-          [
-            "versions",
-            "upload",
-            "--config",
-            input.configPath,
-            "--message",
-            input.message,
-            "--name",
-            input.workerName,
-            "--tag",
-            input.tag,
-            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-          ],
-          {
-            envOverrides: {
-              WRANGLER_OUTPUT_FILE_PATH: outputFilePath,
-            },
-          },
-        );
-
-        const output = await readWranglerOutputFile(outputFilePath, "version-upload");
-
-        if (!output || typeof output.version_id !== "string" || output.version_id.length === 0) {
-          throw new Error("Wrangler did not report a version_id after versions upload.");
-        }
-
-        return output.version_id;
-      },
       writeFile,
     },
     env,
@@ -145,51 +93,6 @@ async function readCurrentDeployment(
   }
 }
 
-async function readWranglerOutputFile(
-  outputFilePath: string,
-  entryType: string,
-): Promise<Record<string, unknown> | null> {
-  const lines = (await readFile(outputFilePath, "utf8")).split("\n");
-
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]?.trim();
-
-    if (!line) {
-      continue;
-    }
-
-    const entry = parseJsonRecord(
-      line,
-      `Wrangler output entry in ${outputFilePath} at line ${index + 1}`,
-    );
-
-    if (entry.type === entryType) {
-      return entry;
-    }
-  }
-
-  return null;
-}
-
-async function readRenderedDeployConfig(configFilePath: string): Promise<Record<string, unknown>> {
-  const content = await readFile(configFilePath, "utf8");
-
-  return parseJsonRecord(
-    content,
-    `Rendered deploy config ${configFilePath}`,
-  );
-}
-
 function isWranglerNoDeploymentsError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("has no deployments");
-}
-
-function parseJsonRecord(value: string, label: string): Record<string, unknown> {
-  const parsed = parseJsonValue<unknown>(value, label);
-
-  if (!isObjectRecord(parsed)) {
-    throw new Error(`${label} must be a JSON object.`);
-  }
-
-  return parsed;
 }

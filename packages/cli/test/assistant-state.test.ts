@@ -71,7 +71,7 @@ test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a st
       channel: 'telegram',
       identityId: 'assistant:primary',
       participantId: 'contact:bob',
-      sourceThreadId: 'thread/1',
+      threadId: 'thread/1',
     }),
     'channel:telegram|identity:assistant%3Aprimary|thread:thread%2F1',
   )
@@ -100,7 +100,7 @@ test('resolveAssistantAliasKey only derives actor-scoped fallback keys when the 
         threadId: 'chat-base',
         directness: 'group',
       },
-      sourceThreadId: 'chat-override',
+      threadId: 'chat-override',
       threadIsDirect: true,
     }),
     'channel:telegram|identity:assistant%3Aprimary|thread:chat-override',
@@ -156,7 +156,7 @@ test('assistant sessions live under the vault runtime area, omit redundant path 
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     model: 'gpt-oss:20b',
     reasoningEffort: 'high',
     sandbox: 'read-only',
@@ -232,7 +232,7 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:conversation',
-    sourceThreadId: 'thread-conversation',
+    threadId: 'thread-conversation',
   })
 
   assert.notEqual(
@@ -246,7 +246,7 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:conversation',
-    sourceThreadId: 'thread-conversation',
+    threadId: 'thread-conversation',
     createIfMissing: false,
   })
 
@@ -268,7 +268,7 @@ test('resolveAssistantSession does not clear bindings when conversation only car
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     threadIsDirect: true,
   })
 
@@ -304,7 +304,7 @@ test('resolveAssistantSession ignores primitive conversation payloads when patch
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     threadIsDirect: true,
   })
 
@@ -364,7 +364,7 @@ test('resolveAssistantSession ignores alias-only nested conversation payloads wh
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     threadIsDirect: true,
   })
 
@@ -504,7 +504,7 @@ test('resolveAssistantSession can explicitly rebind a saved session to a new del
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     threadIsDirect: false,
   })
 
@@ -516,7 +516,7 @@ test('resolveAssistantSession can explicitly rebind a saved session to a new del
         channel: 'email',
         identityId: 'sender@example.com',
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
         threadIsDirect: null,
         createIfMissing: false,
       }),
@@ -536,7 +536,7 @@ test('resolveAssistantSession can explicitly rebind a saved session to a new del
     channel: 'email',
     identityId: 'sender@example.com',
     participantId: null,
-    sourceThreadId: null,
+    threadId: null,
     threadIsDirect: null,
     createIfMissing: false,
   })
@@ -570,7 +570,7 @@ test('resolveAssistantSession rejects alias reuse when the supplied routing meta
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:alias',
-    sourceThreadId: 'thread-alias',
+    threadId: 'thread-alias',
   })
   const conversationMatch = await resolveAssistantSession({
     vault: vaultRoot,
@@ -578,7 +578,7 @@ test('resolveAssistantSession rejects alias reuse when the supplied routing meta
     channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:conversation',
-    sourceThreadId: 'thread-conversation',
+    threadId: 'thread-conversation',
   })
 
   assert.notEqual(
@@ -594,7 +594,7 @@ test('resolveAssistantSession rejects alias reuse when the supplied routing meta
         channel: 'telegram',
         identityId: 'assistant:primary',
         participantId: 'contact:conversation',
-        sourceThreadId: 'thread-conversation',
+        threadId: 'thread-conversation',
         createIfMissing: false,
       }),
     (error: unknown) => {
@@ -618,7 +618,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     now: new Date('2026-03-16T00:00:00.000Z'),
   })
 
@@ -633,7 +633,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     now: new Date('2026-03-19T00:00:00.000Z'),
     maxSessionAgeMs: 48 * 60 * 60 * 1000,
   })
@@ -649,7 +649,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
+    threadId: 'chat-1',
     now: new Date('2026-03-19T01:00:00.000Z'),
     maxSessionAgeMs: 48 * 60 * 60 * 1000,
   })
@@ -674,7 +674,7 @@ test('resolveAssistantSession merges conversation refs with explicit locator ove
       directness: 'group',
     },
     actorId: 'contact:override',
-    sourceThreadId: 'chat-override',
+    threadId: 'chat-override',
     threadIsDirect: true,
   })
 
@@ -1384,6 +1384,10 @@ test('assistant session secrets persist in private sidecars with private permiss
   const updatedSession = await saveAssistantSession(vaultRoot, {
     ...resolved.session,
     target,
+    resumeState: {
+      providerSessionId: 'provider-session-1',
+      resumeRouteId: null,
+    },
     provider: 'openai-compatible',
     providerOptions: {
       ...resolved.session.providerOptions,
@@ -1394,22 +1398,6 @@ test('assistant session secrets persist in private sidecars with private permiss
       headers: {
         Authorization: 'Bearer session-secret-token',
         'X-Visible': 'public-header',
-      },
-    },
-    providerBinding: {
-      provider: 'openai-compatible',
-      providerSessionId: 'provider-session-1',
-      providerState: null,
-      providerOptions: {
-        ...resolved.session.providerOptions,
-        model: 'gpt-4.1-mini',
-        baseUrl: 'https://api.example.test/v1',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        providerName: 'example',
-        headers: {
-          Authorization: 'Bearer binding-secret-token',
-          'X-Binding-Visible': 'binding-public',
-        },
       },
     },
     updatedAt: '2026-03-29T12:00:00.000Z',

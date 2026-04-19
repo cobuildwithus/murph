@@ -364,6 +364,16 @@ export const bodyMeasurementTypeSchema = z.enum([
   "calves",
 ]);
 export const bodyMeasurementUnitSchema = z.enum(["lb", "kg", "percent", "cm", "in"]);
+export const measurementQualifierValueSchema = z.union([
+  patternedString(SLUG_PATTERN),
+  boundedString(1, 160),
+  numberSchema(),
+  z.boolean(),
+]);
+export const measurementQualifiersSchema = z.record(
+  patternedString(SLUG_PATTERN),
+  measurementQualifierValueSchema,
+);
 export const workoutWeightUnitPreferenceValueSchema = z.enum(["lb", "kg"]);
 export const workoutBodyMeasurementUnitPreferenceValueSchema = z.enum(["cm", "in"]);
 
@@ -476,6 +486,16 @@ export const bodyMeasurementEntrySchema = z
       });
     }
   });
+
+export const measurementEntrySchema = z
+  .object({
+    metric: patternedString(SLUG_PATTERN),
+    value: numberSchema(),
+    unit: patternedString(UNIT_PATTERN),
+    qualifiers: measurementQualifiersSchema.optional(),
+    note: boundedString(1, 4000).optional(),
+  })
+  .strict();
 
 export const workoutUnitPreferenceValuesSchema = z
   .object({
@@ -676,6 +696,10 @@ export const eventRecordSchema = withContractMetadata(
       metric: patternedString(SLUG_PATTERN),
       value: numberSchema(),
       unit: patternedString(UNIT_PATTERN),
+    }),
+    eventSchema("measurement", {
+      measurements: z.array(measurementEntrySchema).min(1).max(25),
+      media: z.array(storedMediaSchema).max(10).optional(),
     }),
     eventSchema("experiment_event", {
       experimentId: idSchema(ID_PREFIXES.experiment),
@@ -1302,6 +1326,9 @@ export type RawAssetOwner = z.infer<typeof rawAssetOwnerSchema>;
 export type BodyMeasurementType = z.infer<typeof bodyMeasurementTypeSchema>;
 export type BodyMeasurementUnit = z.infer<typeof bodyMeasurementUnitSchema>;
 export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;
+export type MeasurementQualifierValue = z.infer<typeof measurementQualifierValueSchema>;
+export type MeasurementQualifiers = z.infer<typeof measurementQualifiersSchema>;
+export type MeasurementEntry = z.infer<typeof measurementEntrySchema>;
 export type WorkoutWeightUnitPreferenceValue = z.infer<typeof workoutWeightUnitPreferenceValueSchema>;
 export type WorkoutBodyMeasurementUnitPreferenceValue = z.infer<
   typeof workoutBodyMeasurementUnitPreferenceValueSchema
@@ -1321,6 +1348,7 @@ export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind:
 export type SymptomEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "symptom" }>;
 export type NoteEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "note" }>;
 export type ObservationEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "observation" }>;
+export type MeasurementEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "measurement" }>;
 export type ExperimentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "experiment_event" }>;
 export type MedicationIntakeEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "medication_intake" }>;
 export type SupplementIntakeEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "supplement_intake" }>;

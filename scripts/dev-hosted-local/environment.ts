@@ -41,6 +41,26 @@ export async function resolveCloudflareLocalEnv(input: {
   });
 }
 
+export async function loadHostedLocalBaseEnvironment(
+  input: {
+    source?: NodeJS.ProcessEnv;
+  } = {},
+): Promise<NodeJS.ProcessEnv> {
+  const source = input.source ?? process.env;
+  const [repoEnv, webEnv, webLocalEnv] = await Promise.all([
+    readOptionalSimpleEnvFile(path.join(repoRoot, ".env")),
+    readOptionalSimpleEnvFile(path.join(repoRoot, "apps/web/.env")),
+    readOptionalSimpleEnvFile(path.join(repoRoot, "apps/web/.env.local")),
+  ]);
+
+  return normalizeHostedLocalBaseEnvironment({
+    ...repoEnv,
+    ...webEnv,
+    ...webLocalEnv,
+    ...source,
+  });
+}
+
 export function mergeCloudflareLocalEnv(input: {
   config: HostedLocalDevConfig;
   existing: Record<string, string>;
@@ -133,6 +153,25 @@ function normalizeOptionalEnvOverrides(
   }
 
   return values;
+}
+
+function normalizeHostedLocalBaseEnvironment(
+  input: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment = {
+    ...input,
+  };
+  const teeAutomationKeyId =
+    environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID?.trim() ?? "";
+  const teeAutomationPublicJwk =
+    environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK?.trim() ?? "";
+
+  if (Boolean(teeAutomationKeyId) !== Boolean(teeAutomationPublicJwk)) {
+    delete environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID;
+    delete environment.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK;
+  }
+
+  return environment;
 }
 
 export function buildHostedLocalDevOverrides(

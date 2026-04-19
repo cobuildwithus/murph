@@ -11,10 +11,12 @@ import {
   createTempVaultContext,
   repoRoot,
   requireData,
+  runRawCli,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
+import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 
@@ -44,6 +46,7 @@ function createWorkoutSliceCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
+  registerMeasurementCommands(cli, services)
   registerWorkoutCommands(cli, services)
 
   return cli
@@ -175,7 +178,7 @@ test('workout measurement capture and unit preferences round-trip through the re
       ])
     ).envelope,
   )
-  assert.equal(measurement.kind, 'body_measurement')
+  assert.equal(measurement.kind, 'measurement')
   assert.equal(measurement.occurredAt, '2026-03-12T19:00:00.000Z')
   assert.match(
     measurement.manifestFile ?? '',
@@ -185,7 +188,7 @@ test('workout measurement capture and unit preferences round-trip through the re
   assert.deepEqual(measurement.measurements, [
     {
       note: 'Post-cut check-in.',
-      type: 'waist',
+      metric: 'waist',
       unit: 'in',
       value: 32,
     },
@@ -210,7 +213,7 @@ test('workout measurement capture and unit preferences round-trip through the re
     ).envelope,
   )
   assert.equal(shownMeasurement.entity.id, measurement.eventId)
-  assert.equal(shownMeasurement.entity.kind, 'body_measurement')
+  assert.equal(shownMeasurement.entity.kind, 'measurement')
   assert.equal(shownMeasurement.entity.title, 'Waist check-in')
 
   const listedMeasurements = requireData(
@@ -298,7 +301,7 @@ test('workout measurement capture and unit preferences round-trip through the re
       ])
     ).envelope,
   )
-  assert.equal(structuredMeasurement.kind, 'body_measurement')
+  assert.equal(structuredMeasurement.kind, 'measurement')
   assert.equal(structuredMeasurement.note, 'Imported structured payload.')
 
   const defaultListedMeasurements = requireData(
@@ -333,7 +336,7 @@ test('workout measurement capture and unit preferences round-trip through the re
         eventId: string
         kind: string
         measurements: Array<{
-          type: string
+          metric: string
           unit: string
           value: number
         }>
@@ -355,8 +358,134 @@ test('workout measurement capture and unit preferences round-trip through the re
       ])
     ).envelope,
   )
-  assert.equal(minimalMeasurement.kind, 'body_measurement')
+  assert.equal(minimalMeasurement.kind, 'measurement')
   assert.equal(minimalMeasurement.note, null)
+})
+
+test('top-level measurement commands accept open metrics and normalize qualifier-backed slugs', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-command-')
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutSliceCli()
+
+  const initResult = await runWorkoutCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
+  ])
+  assert.equal(requireData(initResult.envelope).created, true)
+
+  const measurement = requireData(
+    (
+      await runWorkoutCli<{
+        eventId: string
+        kind: string
+        measurements: Array<{
+          metric: string
+          qualifiers?: Record<string, string | number | boolean>
+          unit: string
+          value: number
+        }>
+      }>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'Grip strength',
+        '--value',
+        '97.2',
+        '--unit',
+        'lb',
+        '--qualifier',
+        'side=right',
+        '--qualifier',
+        'attempt=2',
+        '--occurred-at',
+        '2026-03-14T07:30:00.000Z',
+      ])
+    ).envelope,
+  )
+
+  assert.equal(measurement.kind, 'measurement')
+  assert.deepEqual(measurement.measurements, [
+    {
+      metric: 'grip-strength',
+      qualifiers: {
+        side: 'right',
+        attempt: 2,
+      },
+      unit: 'lb',
+      value: 97.2,
+    },
+  ])
+
+  const shownMeasurement = requireData(
+    (
+      await runWorkoutCli<{
+        entity: {
+          id: string
+          kind: string
+          title: string | null
+        }
+      }>(cli, [
+        'measurement',
+        'show',
+        measurement.eventId,
+        '--vault',
+        vaultRoot,
+      ])
+    ).envelope,
+  )
+  assert.equal(shownMeasurement.entity.id, measurement.eventId)
+  assert.equal(shownMeasurement.entity.kind, 'measurement')
+  assert.equal(shownMeasurement.entity.title, 'Grip Strength (right)')
+
+  const listedMeasurements = requireData(
+    (
+      await runWorkoutCli<{
+        count: number
+        items: Array<{
+          id: string
+        }>
+      }>(cli, [
+        'measurement',
+        'list',
+        '--vault',
+        vaultRoot,
+      ])
+    ).envelope,
+  )
+  assert.equal(listedMeasurements.count, 1)
+  assert.equal(listedMeasurements.items[0]?.id, measurement.eventId)
+})
+
+test('measurement help surfaces steer agents toward the canonical command path', async () => {
+  const measurementHelp = await runRawCli(['measurement', 'add', '--help'])
+  const workoutMeasurementHelp = await runRawCli([
+    'workout',
+    'measurement',
+    'add',
+    '--help',
+  ])
+
+  assert.match(
+    measurementHelp,
+    /Primary write path for scalar measurements\./u,
+  )
+  assert.match(
+    measurementHelp,
+    /Prefer this command for all new metrics\./u,
+  )
+  assert.match(
+    workoutMeasurementHelp,
+    /Compatibility alias for weight, body-fat, and circumference check-ins/u,
+  )
+  assert.match(
+    workoutMeasurementHelp,
+    /Prefer `measurement add` for new metrics such as grip strength or resting-heart-rate\./u,
+  )
 })
 
 test('workout import inspect and raw-only csv import expose the raw batch surfaces', async () => {

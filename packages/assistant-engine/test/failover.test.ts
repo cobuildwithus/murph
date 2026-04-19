@@ -30,6 +30,7 @@ describe('assistant failover helpers', () => {
       provider: 'codex-cli',
       codexCommand: 'codex-primary',
       providerOptions: {
+        provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
         executionDriver: 'codex-cli',
         model: 'gpt-oss:20b',
@@ -93,6 +94,7 @@ describe('assistant failover helpers', () => {
     const [route] = buildAssistantFailoverRoutes({
       provider: 'codex-cli',
       providerOptions: {
+        provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
         executionDriver: 'codex-cli',
         model: 'gpt-oss:20b',
@@ -126,6 +128,7 @@ describe('assistant failover helpers', () => {
     const [route] = buildAssistantFailoverRoutes({
       provider: 'codex-cli',
       providerOptions: {
+        provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
         executionDriver: 'codex-cli',
         model: 'gpt-oss:20b',
@@ -205,6 +208,7 @@ describe('assistant failover helpers', () => {
     const [route] = buildAssistantFailoverRoutes({
       provider: 'codex-cli',
       providerOptions: {
+        provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
         executionDriver: 'codex-cli',
         model: 'gpt-oss:20b',

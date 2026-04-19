@@ -64,6 +64,7 @@ const TEST_SESSION = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
+    provider: 'codex-cli',
     continuityFingerprint: 'codex-fingerprint',
     executionDriver: 'codex-cli',
     model: null,
@@ -74,7 +75,6 @@ const TEST_SESSION = {
     oss: false,
     resumeKind: 'codex-session',
   },
-  providerBinding: null,
   alias: 'chat:test',
   binding: {
     conversationKey: 'chat:test',
@@ -142,7 +142,7 @@ const TEST_CRON_JOB = {
     channel: 'telegram',
     identityId: null,
     participantId: 'chat-123',
-    sourceThreadId: 'chat-123',
+    threadId: 'chat-123',
     deliveryTarget: null,
   },
   createdAt: '2026-03-28T00:00:00.000Z',
@@ -540,7 +540,7 @@ test('assistant daemon client routes serializable assistant operations through t
                   channel: body.channel ?? TEST_CRON_JOB.target.channel,
                   identityId: body.identityId ?? null,
                   participantId: null,
-                  sourceThreadId: null,
+                  threadId: null,
                   deliveryTarget: body.deliveryTarget ?? null,
                 },
               },
@@ -563,7 +563,7 @@ test('assistant daemon client routes serializable assistant operations through t
                   channel: body.channel ?? TEST_CRON_JOB.target.channel,
                   identityId: body.identityId ?? null,
                   participantId: null,
-                  sourceThreadId: null,
+                  threadId: null,
                   deliveryTarget: body.deliveryTarget ?? null,
                 },
                 bindingDelivery: null,
@@ -672,14 +672,17 @@ test('assistant daemon client routes serializable assistant operations through t
     )
     assert.equal(conversation?.created, true)
     assert.equal(conversation?.session.sessionId, TEST_SESSION.sessionId)
-    assert.equal(conversation?.session.providerBinding?.providerSessionId ?? null, null)
-    assert.equal(conversation?.session.providerBinding?.providerState ?? null, null)
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(conversation?.session ?? {}, 'providerBinding'),
+      false,
+    )
 
     const updated = await maybeUpdateAssistantSessionOptionsViaDaemon(
       {
         vault: '/tmp/vault',
         sessionId: TEST_SESSION.sessionId,
         providerOptions: {
+          provider: 'codex-cli',
           model: 'gpt-5.4-mini',
         },
       },

@@ -75,16 +75,16 @@ function summarizeCanonicalCoverage(
   vault: VaultReadModel,
   eventKindCounts: ReadonlyMap<string, number>,
 ): string | null {
+  const measurementCount =
+    (eventKindCounts.get('measurement') ?? 0)
+    + (eventKindCounts.get('body_measurement') ?? 0)
   const parts = [
     summarizePositiveCount(eventKindCounts.get('meal') ?? 0, 'meal event'),
     summarizePositiveCount(
       eventKindCounts.get('activity_session') ?? 0,
       'workout/activity session',
     ),
-    summarizePositiveCount(
-      eventKindCounts.get('body_measurement') ?? 0,
-      'body measurement',
-    ),
+    summarizePositiveCount(measurementCount, 'measurement'),
     summarizePositiveCount(vault.experiments.length, 'experiment'),
   ].filter((value): value is string => Boolean(value))
 

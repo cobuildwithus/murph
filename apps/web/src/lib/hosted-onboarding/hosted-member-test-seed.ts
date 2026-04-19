@@ -15,6 +15,8 @@ interface HostedMemberSeedModules {
   createHostedPhoneLookupKey: typeof import("./contact-privacy").createHostedPhoneLookupKey;
   getPrisma: typeof import("../prisma").getPrisma;
   readHostedPhoneHint: typeof import("./contact-privacy").readHostedPhoneHint;
+  upsertHostedMemberHomeLinqBindingTx:
+    typeof import("./hosted-member-routing-store").upsertHostedMemberHomeLinqBindingTx;
   upsertHostedMemberHomeLinqRecipientPhoneTx:
     typeof import("./hosted-member-routing-store").upsertHostedMemberHomeLinqRecipientPhoneTx;
   upsertHostedMemberIdentity:
@@ -99,6 +101,38 @@ export async function seedHostedActiveLinqMember(
   }
 }
 
+export async function bindHostedActiveLinqHomeChat(input: {
+  chatId: string;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  recipientPhone: string;
+}): Promise<void> {
+  if (!input.memberId.trim() || !input.chatId.trim() || !input.recipientPhone.trim()) {
+    throw new Error(
+      "Hosted Linq home chat binding requires member id, chat id, and recipient phone.",
+    );
+  }
+
+  const modules = await loadHostedMemberSeedModules(
+    applyHostedMemberSeedEnvironment(input.environment),
+  );
+  const prisma = modules.getPrisma();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await modules.upsertHostedMemberHomeLinqBindingTx({
+        clearPending: true,
+        linqChatId: input.chatId,
+        memberId: input.memberId,
+        prisma: tx,
+        recipientPhone: input.recipientPhone,
+      });
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 function applyHostedMemberSeedEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -134,6 +168,8 @@ async function loadHostedMemberSeedModules(
     createHostedPhoneLookupKey: contactPrivacyModule.createHostedPhoneLookupKey,
     getPrisma: prismaModule.getPrisma,
     readHostedPhoneHint: contactPrivacyModule.readHostedPhoneHint,
+    upsertHostedMemberHomeLinqBindingTx:
+      hostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqBindingTx,
     upsertHostedMemberHomeLinqRecipientPhoneTx:
       hostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqRecipientPhoneTx,
     upsertHostedMemberIdentity: hostedMemberIdentityStoreModule.upsertHostedMemberIdentity,

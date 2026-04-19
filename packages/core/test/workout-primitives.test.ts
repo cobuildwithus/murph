@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   addActivitySession,
+  addMeasurement,
   addBodyMeasurement,
   initializeVault,
   readJsonlRecords,
@@ -256,5 +257,75 @@ describe('workout primitive core mutations', () => {
         }),
       ]),
     )
+  })
+
+  it('adds canonical measurements through the open core seam and preserves qualifiers', async () => {
+    const vaultRoot = await createTempVault('murph-core-canonical-measurement-')
+    const sourcePath = await createSourceFile(vaultRoot, 'grip-strength.jpg', 'grip-strength-photo')
+    const existingRawRef = 'raw/imports/device/grip-strength-001.json'
+
+    const result = await addMeasurement({
+      vaultRoot,
+      draft: {
+        occurredAt: '2026-04-08T07:00:00.000Z',
+        source: 'manual',
+        title: 'Grip strength',
+        note: 'Weekly performance check-in.',
+        rawRefs: [existingRawRef],
+        measurements: [{
+          metric: 'grip-strength',
+          value: 97.2,
+          unit: 'lb',
+          qualifiers: {
+            side: 'right',
+          },
+        }],
+      },
+      attachments: [{
+        role: 'media_1',
+        sourcePath,
+      }],
+    })
+
+    expect(result.created).toBe(true)
+    expect(result.event.kind).toBe('measurement')
+    expect(result.event.measurements).toEqual([
+      expect.objectContaining({
+        metric: 'grip-strength',
+        qualifiers: {
+          side: 'right',
+        },
+        unit: 'lb',
+        value: 97.2,
+      }),
+    ])
+    expect(result.event.attachments).toHaveLength(1)
+    expect(result.event.media).toHaveLength(1)
+    expect(result.event.rawRefs).toEqual(
+      expect.arrayContaining([
+        existingRawRef,
+        expect.stringContaining('raw/measurements/'),
+      ]),
+    )
+
+    const ledgerRecords = await readJsonlRecords({
+      vaultRoot,
+      relativePath: result.ledgerFile,
+    })
+    expect(ledgerRecords).toHaveLength(1)
+    expect(ledgerRecords[0]).toMatchObject({
+      id: result.eventId,
+      kind: 'measurement',
+      measurements: [
+        {
+          metric: 'grip-strength',
+          unit: 'lb',
+          value: 97.2,
+          qualifiers: {
+            side: 'right',
+          },
+        },
+      ],
+    })
   })
 })

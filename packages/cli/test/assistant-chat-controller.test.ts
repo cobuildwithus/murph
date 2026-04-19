@@ -29,6 +29,7 @@ function createSession(
     resumeState: null,
     provider: 'openai-compatible',
     providerOptions: {
+      provider: 'openai-compatible',
       continuityFingerprint: 'fingerprint-chat-controller',
       model: null,
       reasoningEffort: null,

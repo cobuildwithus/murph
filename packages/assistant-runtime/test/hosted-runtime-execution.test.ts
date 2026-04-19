@@ -680,7 +680,7 @@ describe("executeHostedWakeForCommit", () => {
     expect(result.committedResult.result.summary).toBe("Processed member channel sync.");
   });
 
-  it("skips the generic maintenance loop when the conversation lane stays on wake follow-up", async () => {
+  it("schedules the assistant lane immediately when the conversation lane stays on wake follow-up", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
       conversationMetrics: {
@@ -760,7 +760,11 @@ describe("executeHostedWakeForCommit", () => {
     expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
-    assert.equal(result.committedResult.result.nextWakeAt, null);
+    expect(result.committedResult.result.nextWakeAt).toEqual(expect.any(String));
+    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
+      assistantWakeAt: result.committedResult.result.nextWakeAt,
+      deviceSyncWakeAt: null,
+    });
     assert.equal(
       result.committedResult.result.summary,
       "Persisted Linq capture on the hosted conversation lane.",
@@ -838,12 +842,16 @@ describe("executeHostedWakeForCommit", () => {
     });
 
     expect(result.committedResult.result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
+    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
+      assistantWakeAt: expect.any(String),
+      deviceSyncWakeAt: null,
+    });
     expect(result.committedResult.result.summary).toBe(
       "Persisted Telegram capture on the hosted conversation lane.",
     );
   });
 
-  it("preserves a pending assistant wake when the conversation lane skips generic maintenance", async () => {
+  it("schedules an immediate assistant wake instead of preserving assistant wake state on the conversation lane", async () => {
     vi.useFakeTimers();
 
     try {
@@ -929,11 +937,12 @@ describe("executeHostedWakeForCommit", () => {
       expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
       expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
       expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
-      expect(mocks.getAssistantStatus).toHaveBeenCalledWith({
-        limit: 200,
-        vault: "/tmp/vault-root",
+      expect(mocks.getAssistantStatus).not.toHaveBeenCalled();
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
+      expect(result.committedResult.result.wakeMaterializationHints).toEqual({
+        assistantWakeAt: "2026-04-08T00:10:00.000Z",
+        deviceSyncWakeAt: null,
       });
-      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:20:00.000Z");
       assert.equal(
         result.committedResult.result.summary,
         "Persisted Telegram capture on the hosted conversation lane.",
@@ -943,7 +952,7 @@ describe("executeHostedWakeForCommit", () => {
     }
   });
 
-  it("promotes due assistant recovery work to an immediate preserved wake when maintenance is skipped", async () => {
+  it("does not rely on preserved assistant recovery wake state after conversation wake handling", async () => {
     vi.useFakeTimers();
 
     try {
@@ -1055,6 +1064,7 @@ describe("executeHostedWakeForCommit", () => {
         runtimeEnv: {},
       });
 
+      expect(mocks.getAssistantStatus).not.toHaveBeenCalled();
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
       expect(result.committedResult.result.wakeMaterializationHints).toEqual({
         assistantWakeAt: "2026-04-08T00:10:00.000Z",
@@ -1069,7 +1079,7 @@ describe("executeHostedWakeForCommit", () => {
     }
   });
 
-  it("preserves a device-sync wake without running the generic maintenance loop", async () => {
+  it("preserves a device-sync wake while scheduling the assistant lane immediately", async () => {
     vi.useFakeTimers();
 
     try {
@@ -1178,9 +1188,9 @@ describe("executeHostedWakeForCommit", () => {
       expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
       expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
       expect(close).toHaveBeenCalledTimes(1);
-      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:25:00.000Z");
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
       expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-        assistantWakeAt: null,
+        assistantWakeAt: "2026-04-08T00:10:00.000Z",
         deviceSyncWakeAt: "2026-04-08T00:25:00.000Z",
       });
     } finally {
@@ -1188,7 +1198,7 @@ describe("executeHostedWakeForCommit", () => {
     }
   });
 
-  it("falls back to a null preserved wake when assistant and device-sync wake lookups fail", async () => {
+  it("keeps the immediate assistant wake even when device-sync preserved wake lookup fails", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValue({
       bootstrapResult: null,
       conversationMetrics: {
@@ -1199,7 +1209,6 @@ describe("executeHostedWakeForCommit", () => {
       shareImportResult: null,
       shareImportTitle: null,
     });
-    mocks.getAssistantStatus.mockRejectedValue(new Error("status read failed"));
     mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockImplementation(() => {
       throw new Error("device sync init failed");
     });
@@ -1275,14 +1284,11 @@ describe("executeHostedWakeForCommit", () => {
       runtimeEnv: {},
     });
 
-    assert.equal(result.committedResult.result.nextWakeAt, null);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        level: "warn",
-        message:
-          "Hosted runtime could not resolve the preserved assistant wake after conversation wake handling; continuing without it.",
-      }),
-    );
+    expect(result.committedResult.result.nextWakeAt).toEqual(expect.any(String));
+    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
+      assistantWakeAt: result.committedResult.result.nextWakeAt,
+      deviceSyncWakeAt: null,
+    });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
