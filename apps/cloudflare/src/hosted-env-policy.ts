@@ -182,40 +182,6 @@ export function buildHostedRunnerAmbientEnv(
   });
 }
 
-export function normalizeHostedRunnerEnvForHostExecution(
-  forwardedEnv: Readonly<Record<string, string>>,
-  source: UnknownEnvSource,
-): Record<string, string> {
-  const normalized = { ...forwardedEnv };
-  const rewriteHostnames = new Set<string>(["host.docker.internal"]);
-  const containerReachableHost = readContainerReachableHost(source);
-
-  if (containerReachableHost) {
-    rewriteHostnames.add(containerReachableHost);
-  }
-
-  for (const [key, forwardedValue] of Object.entries(forwardedEnv)) {
-    const ambientValue = normalizeHostedRunnerLoopbackUrlForHostExecution(
-      key,
-      source[key],
-    );
-    if (!ambientValue || typeof forwardedValue !== "string") {
-      continue;
-    }
-
-    try {
-      const forwardedUrl = new URL(forwardedValue);
-      if (rewriteHostnames.has(forwardedUrl.hostname)) {
-        normalized[key] = ambientValue;
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return normalized;
-}
-
 function buildHostedRunnerEnv(
   source: UnknownEnvSource,
   options: {
@@ -287,22 +253,6 @@ function rewriteHostedRunnerLoopbackUrlForContainer(
     return url.toString();
   } catch {
     return value;
-  }
-}
-
-function normalizeHostedRunnerLoopbackUrlForHostExecution(
-  key: string,
-  value: unknown,
-): string | null {
-  if (!CONTAINER_REWRITABLE_RUNNER_URL_KEYS.has(key) || typeof value !== "string") {
-    return null;
-  }
-
-  try {
-    const url = new URL(value);
-    return isLoopbackHostname(url.hostname) ? value : null;
-  } catch {
-    return null;
   }
 }
 

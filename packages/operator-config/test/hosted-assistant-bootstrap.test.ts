@@ -469,6 +469,54 @@ test('hosted assistant bootstrap seeds or updates platform profiles from hosted 
   assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 1)
 })
 
+test('hosted assistant bootstrap normalizes container-rewritten local bridge base urls before persisting platform profiles', async () => {
+  const hostedConfigModule = await loadHostedAssistantModule({
+    readOperatorConfigResult: null,
+  })
+
+  const seeded = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'openai',
+      HOSTED_ASSISTANT_MODEL: 'gpt-5',
+      HOSTED_ASSISTANT_BASE_URL: 'http://host.docker.internal:4111/v1',
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: 'http://host.docker.internal:8787',
+    },
+  })
+
+  assert.deepEqual(seeded, {
+    configured: true,
+    provider: 'openai-compatible',
+    seeded: true,
+    source: 'hosted-env',
+  })
+  assert.equal(
+    hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]?.profiles?.[0]?.target
+      ?.endpoint,
+    'http://127.0.0.1:4111/v1',
+  )
+
+  const customBridgeHostModule = await loadHostedAssistantModule({
+    readOperatorConfigResult: null,
+  })
+
+  await customBridgeHostModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'openai',
+      HOSTED_ASSISTANT_MODEL: 'gpt-5',
+      HOSTED_ASSISTANT_BASE_URL: 'http://172.17.0.1:4111/v1',
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: 'http://172.17.0.1:8787',
+    },
+  })
+
+  assert.equal(
+    customBridgeHostModule.saveHostedAssistantConfig.mock.calls[0]?.[0]?.profiles?.[0]?.target
+      ?.endpoint,
+    'http://127.0.0.1:4111/v1',
+  )
+})
+
 test('hosted assistant bootstrap validates env combinations and unsupported provider settings', async () => {
   const existingIncompletePlatformProfile = createHostedAssistantProfile({
     id: 'platform-default',

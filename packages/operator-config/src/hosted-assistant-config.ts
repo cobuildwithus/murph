@@ -43,6 +43,8 @@ export const HOSTED_ASSISTANT_REASONING_EFFORT_ENV = 'HOSTED_ASSISTANT_REASONING
 export const HOSTED_ASSISTANT_OSS_ENV = 'HOSTED_ASSISTANT_OSS'
 export const HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV =
   'HOSTED_ASSISTANT_ZERO_DATA_RETENTION'
+const HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV =
+  'HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL'
 
 export const HOSTED_ASSISTANT_CONFIG_ENV_NAMES = [
   HOSTED_ASSISTANT_PROVIDER_ENV,
@@ -532,7 +534,10 @@ function readHostedAssistantRawEnvConfig(
       HOSTED_ASSISTANT_APPROVAL_POLICY_ENV,
       assistantApprovalPolicyValues,
     ),
-    baseUrl: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_BASE_URL_ENV]),
+    baseUrl: normalizeHostedAssistantSeedBaseUrl(
+      source,
+      normalizeHostedAssistantString(source[HOSTED_ASSISTANT_BASE_URL_ENV]),
+    ),
     codexCommand: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_CODEX_COMMAND_ENV]),
     model: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_MODEL_ENV]),
     oss: parseHostedAssistantBoolean(rawOss, HOSTED_ASSISTANT_OSS_ENV),
@@ -571,6 +576,49 @@ function readHostedAssistantRawEnvConfig(
       rawOss,
       rawZeroDataRetention,
     ].some((value) => value !== null),
+  }
+}
+
+function normalizeHostedAssistantSeedBaseUrl(
+  source: Readonly<Record<string, string | undefined>>,
+  baseUrl: string | null,
+): string | null {
+  if (!baseUrl) {
+    return null
+  }
+
+  const bridgeHost = readHostedAssistantContainerReachableHost(source)
+  if (!bridgeHost) {
+    return baseUrl
+  }
+
+  try {
+    const url = new URL(baseUrl)
+    if (url.hostname !== 'host.docker.internal' && url.hostname !== bridgeHost) {
+      return baseUrl
+    }
+
+    url.hostname = '127.0.0.1'
+    return url.toString()
+  } catch {
+    return baseUrl
+  }
+}
+
+function readHostedAssistantContainerReachableHost(
+  source: Readonly<Record<string, string | undefined>>,
+): string | null {
+  const localInternalProxyBaseUrl = normalizeHostedAssistantString(
+    source[HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV],
+  )
+  if (!localInternalProxyBaseUrl) {
+    return null
+  }
+
+  try {
+    return new URL(localInternalProxyBaseUrl).hostname
+  } catch {
+    return null
   }
 }
 

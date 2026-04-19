@@ -71,7 +71,6 @@ export {
   buildHostedRunnerAmbientEnv,
   buildHostedRunnerContainerEnv,
   filterHostedRunnerSecrets,
-  normalizeHostedRunnerEnvForHostExecution,
 } from "./hosted-env-policy.ts";
 
 export function buildHostedRunnerOperatorEnv(
