@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   listHostedWakeRepairCandidates: vi.fn(),
   listHostedWakesAfterSeq: vi.fn(),
+  materializeHostedAssistantCronWakeTx: vi.fn(),
   materializeHostedDueWakesTx: vi.fn(),
   recordHostedWakeTerminalTx: vi.fn(),
   readHostedWakeLifecycle: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock("@/src/lib/hosted-wake/materialize", () => ({
 
 vi.mock("@/src/lib/hosted-wake/queue", () => ({
   appendHostedExecutionWakePayloadTx: mocks.appendHostedExecutionWakePayloadTx,
+  materializeHostedAssistantCronWakeTx: mocks.materializeHostedAssistantCronWakeTx,
 }));
 
 vi.mock("@/src/lib/hosted-wake/store", () => ({
@@ -381,6 +383,27 @@ describe("hosted wake internal routes", () => {
     });
   });
 
+  it("rejects replaced hosted wake terminal receipt requests", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      fetchProof: "proof_24",
+      state: "replaced",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    });
+
+    const { POST } = await import("../app/api/internal/hosted-wake/terminal/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.recordHostedWakeTerminalTx).not.toHaveBeenCalled();
+  });
+
   it("parses and forwards wake cursor commit requests", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       committedSeq: "24",
@@ -470,6 +493,8 @@ describe("hosted wake internal routes", () => {
       },
     });
     expect(mocks.materializeHostedDueWakesTx).toHaveBeenCalledWith(expect.objectContaining({
+      appendAssistantCronWake: expect.any(Function),
+      appendWakePayload: expect.any(Function),
       tx: expect.objectContaining({
         label: "wake-route-tx",
       }),
@@ -479,6 +504,45 @@ describe("hosted wake internal routes", () => {
         deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
       },
     }));
+
+    const materializeCall = mocks.materializeHostedDueWakesTx.mock.calls[0]?.[0];
+    expect(materializeCall).toBeDefined();
+
+    await materializeCall!.appendAssistantCronWake({
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      reason: "alarm",
+      userId: "member_123",
+    });
+    expect(mocks.materializeHostedAssistantCronWakeTx).toHaveBeenCalledWith({
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      reason: "alarm",
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      userId: "member_123",
+    });
+
+    await materializeCall!.appendWakePayload({
+      wake: {
+        eventId: "evt_materialized",
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+        reason: "alarm",
+        userId: "member_123",
+      },
+    });
+    expect(mocks.appendHostedExecutionWakePayloadTx).toHaveBeenCalledWith({
+      tx: expect.objectContaining({
+        label: "wake-route-tx",
+      }),
+      wake: {
+        eventId: "evt_materialized",
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+        reason: "alarm",
+        userId: "member_123",
+      },
+    });
   });
 
   it("parses and forwards wake quarantine requests", async () => {

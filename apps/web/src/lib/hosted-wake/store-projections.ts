@@ -57,7 +57,7 @@ export async function resolveHostedWakeLifecycleStateTx(input: {
       receipt,
       wake: input.record,
     })
-    && (receipt.state === "completed" || receipt.state === "replaced")
+    && receipt.state === "completed"
   ) {
     return receipt.state;
   }
