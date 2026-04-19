@@ -2531,6 +2531,167 @@ describe("HostedUserRunner hosted wake drain", () => {
     });
   });
 
+  it("defers a later wake when execution-start fallback confirms another pending commit is still current", async () => {
+    const currentCursor = createCursorState({
+      committedSeq: "0",
+      nextSeq: "2",
+      snapshotRef: createBundleRef("current-pending-execution"),
+      updatedAt: "2026-03-26T12:00:03.000Z",
+      version: "cursor_v1",
+    });
+    const materializeHostedDueWakesInWeb = vi.spyOn(
+      webControlPlane,
+      "materializeHostedDueWakesInWeb",
+    );
+    materializeHostedDueWakesInWeb.mockResolvedValue({
+      targetSeqHint: "1",
+      wakeMaterializationHints: null,
+    });
+    const replacementWake = createHostedWakeRecord({
+      cursor: currentCursor,
+      payload: createWake("evt_execution_pending_replacement"),
+      seq: "1",
+      wakeEventId: "evt_execution_pending_replacement",
+    });
+    const fetchHostedWakeBatchFromWeb = vi.spyOn(webControlPlane, "fetchHostedWakeBatchFromWeb");
+    fetchHostedWakeBatchFromWeb
+      .mockResolvedValueOnce({
+        cursor: currentCursor,
+        wakes: [replacementWake],
+      })
+      .mockResolvedValueOnce({
+        cursor: currentCursor,
+        wakes: [],
+      });
+    const readHostedWakeStatusFromWeb = vi.spyOn(webControlPlane, "readHostedWakeStatusFromWeb");
+    readHostedWakeStatusFromWeb
+      .mockRejectedValueOnce(new Error("proof-aware status temporarily unavailable"))
+      .mockResolvedValueOnce({
+        cursor: currentCursor,
+        pendingWakeCount: 1,
+        wakeState: "queued",
+      })
+      .mockResolvedValueOnce({
+        cursor: currentCursor,
+        fetchProofCurrent: true,
+        pendingWakeCount: 1,
+        wakeState: "queued",
+      })
+      .mockRejectedValueOnce(new Error("proof-aware status temporarily unavailable"))
+      .mockResolvedValueOnce({
+        cursor: currentCursor,
+        pendingWakeCount: 1,
+        wakeState: "queued",
+      });
+    const recordHostedWakeTerminalInWeb = vi.spyOn(webControlPlane, "recordHostedWakeTerminalInWeb");
+    const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+    );
+    await runner.bootstrapUser("member_123");
+    const stateStore = Reflect.get(runner, "stateStore");
+
+    if (!stateStore || typeof stateStore !== "object") {
+      throw new Error("Expected HostedUserRunner state store test internals to be available.");
+    }
+
+    const beginWakeRun = Reflect.get(stateStore, "beginWakeRun");
+    const writePendingCommit = Reflect.get(stateStore, "writePendingCommit");
+    const readPendingCommit = Reflect.get(stateStore, "readPendingCommit");
+    if (
+      typeof beginWakeRun !== "function"
+      || typeof writePendingCommit !== "function"
+      || typeof readPendingCommit !== "function"
+    ) {
+      throw new Error(
+        "Expected HostedUserRunner state store wake-run and pending commit helpers.",
+      );
+    }
+
+    const { payloadCiphertext } = encryptTestHostedWakePayload({
+      userId: "member_123",
+      value: createWake("evt_execution_pending_current"),
+    });
+    await beginWakeRun.call(stateStore, {
+      eventId: "evt_execution_pending_current",
+      run: {
+        attempt: 1,
+        runId: "run_execution_pending_current",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      userId: "member_123",
+    });
+    await writePendingCommit.call(stateStore, {
+      assistantDeliveryEffects: [],
+      bundleRef: createBundleRef("current-pending-execution-bundle"),
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: "evt_execution_pending_current",
+      finalizeToken: null,
+      finalizedAt: null,
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "handled",
+      },
+      schemaVersion: 1,
+      userId: "member_123",
+      wake: {
+        eventId: "evt_execution_pending_current",
+        fetchProof: "fetch_proof_execution_pending_current",
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        payloadCiphertext,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        seq: "1",
+        userId: "member_123",
+        wakeId: "wake_1",
+      },
+    });
+
+    await expect(runner.wakeHostedWakes()).resolves.toMatchObject({
+      committedSeq: "0",
+      requestedTargetSeq: "1",
+      targetReached: false,
+    });
+
+    expect(readHostedWakeStatusFromWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventId: "evt_execution_pending_current",
+        fetchProof: "fetch_proof_execution_pending_current",
+        wakeEventId: "evt_execution_pending_current",
+        wakeId: "wake_1",
+        wakeSeq: "1",
+      },
+      boundUserId: "member_123",
+    });
+    expect(readHostedWakeStatusFromWeb.mock.calls[3]?.[0]).toMatchObject({
+      body: {
+        eventId: "evt_execution_pending_current",
+        fetchProof: "fetch_proof_execution_pending_current",
+        wakeEventId: "evt_execution_pending_current",
+        wakeId: "wake_1",
+        wakeSeq: "1",
+      },
+      boundUserId: "member_123",
+    });
+    expect(readDispatchedEventIds(fetchMock)).toEqual([]);
+    expect(recordHostedWakeTerminalInWeb).not.toHaveBeenCalled();
+    expect(commitHostedWakeCursorToWeb).not.toHaveBeenCalled();
+    await expect(readPendingCommit.call(stateStore)).resolves.toMatchObject({
+      eventId: "evt_execution_pending_current",
+    });
+  });
+
   it("commits a direct final runtime snapshot once and skips post-cursor finalize", async () => {
     const finalizedBundleRef = createBundleRef("final");
     const fetchMock = vi.fn(async (_url, init) => createCompletedRunnerSuccessResponse({
