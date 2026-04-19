@@ -1,10 +1,13 @@
 import { Prisma } from "@prisma/client";
 import type {
+  HostedExecutionBundleRef,
   HostedExecutionCursorState,
   HostedWakeCommitResponse,
   HostedWakeFetchResponse,
+  HostedWakeSnapshotRef,
   HostedWakeTerminalState,
 } from "@murphai/hosted-execution/contracts";
+import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
 
 import { getPrisma } from "../prisma";
 import {
@@ -249,7 +252,7 @@ export async function recordHostedWakeTerminalTx(input: {
 export async function commitHostedExecutionCursorTx(input: {
   committedSeq: bigint;
   expectedVersion: bigint;
-  snapshotRef?: Prisma.InputJsonValue | null;
+  snapshotRef?: HostedWakeSnapshotRef;
   tx: HostedWakeMutationTx;
   userId: string;
 }): Promise<HostedWakeCommitResponse> {
@@ -267,11 +270,25 @@ export async function commitHostedExecutionCursorTx(input: {
     }
   }
 
-  const nextSnapshotRef: Prisma.InputJsonValue | typeof Prisma.DbNull = input.snapshotRef === undefined
-    ? cursor.snapshotRef === null
-      ? Prisma.DbNull
-      : cursor.snapshotRef as Prisma.InputJsonValue
-    : input.snapshotRef ?? Prisma.DbNull;
+  let nextSnapshotRef: Prisma.InputJsonObject | typeof Prisma.DbNull;
+  if (input.snapshotRef === undefined) {
+    if (cursor.snapshotRef === null) {
+      nextSnapshotRef = Prisma.DbNull;
+    } else {
+      const currentSnapshotRef = parseHostedExecutionCursorSnapshotRef(
+        cursor.snapshotRef,
+        "Hosted execution cursor snapshotRef",
+      );
+      if (currentSnapshotRef === null) {
+        throw new Error("Hosted execution cursor snapshotRef must be present when stored.");
+      }
+      nextSnapshotRef = serializeHostedWakeSnapshotRef(currentSnapshotRef);
+    }
+  } else if (input.snapshotRef === null) {
+    nextSnapshotRef = Prisma.DbNull;
+  } else {
+    nextSnapshotRef = serializeHostedWakeSnapshotRef(input.snapshotRef);
+  }
   const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
   const snapshotRefChanged = input.snapshotRef !== undefined
     && JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotJson);
@@ -370,6 +387,17 @@ export async function commitHostedExecutionCursorTx(input: {
   return {
     committed: updated.count === 1,
     cursor: projectHostedExecutionCursorRecord(current),
+  };
+}
+
+function serializeHostedWakeSnapshotRef(
+  snapshotRef: HostedExecutionBundleRef,
+): Prisma.InputJsonObject {
+  return {
+    hash: snapshotRef.hash,
+    key: snapshotRef.key,
+    size: snapshotRef.size,
+    updatedAt: snapshotRef.updatedAt,
   };
 }
 
@@ -813,6 +841,11 @@ function assertCurrentHostedWakeFetchIdentity(
   claims: ReturnType<typeof verifyHostedWakeFetchProof>,
   currentEventId: string,
 ): void {
+  // Rollout compatibility: older web instances minted proofs before wakeEventId existed.
+  if (claims.wakeEventId === undefined) {
+    return;
+  }
+
   if (claims.wakeEventId !== currentEventId) {
     throw new TypeError("Hosted wake fetch proof is stale for the current wake identity.");
   }
