@@ -77,8 +77,20 @@ The production hosted path should only treat these wake kinds as canonical:
 - `device-sync.wake`
 - `assistant.cron.tick`
 
+Top-level wake kinds model execution lanes and wake behavior, not transport
+brands.
+
+Inbound conversation traffic uses one canonical persisted message wake kind:
+`conversation.message`.
+
 Channel-specific detail for Linq, Telegram, and email belongs inside the
-`conversation.message` payload, not in top-level provider-specific wake kinds.
+`conversation.message` payload via `message.channel`, not in top-level
+provider-specific wake kinds.
+
+Provider-specific normalization happens at ingress and runtime edges. The
+canonical queue contract should stay transport-agnostic as long as email, Linq,
+and Telegram all share the same ordering, session-binding, retry, and
+quarantine semantics on the conversation lane.
 
 ## Producer status
 
