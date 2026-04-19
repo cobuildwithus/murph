@@ -65,14 +65,14 @@ const environment: HostedExecutionEnvironment = {
   },
 };
 
-describe("HostedUserRunner finalize cleanup CAS conflicts", () => {
+describe("HostedUserRunner cleanup after cursor commit", () => {
   beforeEach(() => {
     storage.clear();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
-  it("keeps a finalized DO-local pending commit when a duplicate finalize already won the snapshot-only CAS", async () => {
+  it("clears a finalized DO-local pending commit without publishing another snapshot", async () => {
     const runner = new HostedUserRunner(
       storage.state,
       environment,
@@ -105,27 +105,21 @@ describe("HostedUserRunner finalize cleanup CAS conflicts", () => {
     }
 
     const finalBundleRef = {
-      hash: "final-duplicate-hash",
-      key: "bundles/vault/final-duplicate.bundle.json",
+      hash: "final-bundle-hash",
+      key: "bundles/vault/final.bundle.json",
       size: 144,
       updatedAt: "2026-03-26T12:00:01.000Z",
     };
-    const committedBundleRef = {
-      hash: "committed-duplicate-hash",
-      key: "bundles/vault/committed-duplicate.bundle.json",
-      size: 96,
-      updatedAt: "2026-03-26T12:00:00.500Z",
-    };
-    const duplicateFinalizeWake = createWake("evt_cleanup_duplicate_snapshot");
+    const finalizedWake = createWake("evt_cleanup_final_bundle");
     const { payloadCiphertext } = encryptTestHostedWakePayload({
       userId: "member_123",
-      value: duplicateFinalizeWake,
+      value: finalizedWake,
     });
     await writePendingCommit.call(stateStore, {
       assistantDeliveryEffects: [],
       bundleRef: finalBundleRef,
       committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: "evt_cleanup_duplicate_snapshot",
+      eventId: "evt_cleanup_final_bundle",
       finalizedAt: "2026-03-26T12:00:01.000Z",
       result: {
         eventsHandled: 1,
@@ -135,7 +129,7 @@ describe("HostedUserRunner finalize cleanup CAS conflicts", () => {
       schemaVersion: 1,
       userId: "member_123",
       wake: {
-        eventId: "evt_cleanup_duplicate_snapshot",
+        eventId: "evt_cleanup_final_bundle",
         kind: "assistant.cron.tick",
         occurredAt: "2026-03-26T12:00:00.000Z",
         payloadCiphertext,
@@ -146,55 +140,23 @@ describe("HostedUserRunner finalize cleanup CAS conflicts", () => {
     });
 
     const commitHostedWakeCursorToWeb = vi.spyOn(webControlPlane, "commitHostedWakeCursorToWeb");
-    commitHostedWakeCursorToWeb.mockResolvedValueOnce({
-      committed: false,
+    const cleanupCursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
       cursor: createCursorState({
         committedSeq: "1",
         nextSeq: "2",
         snapshotRef: finalBundleRef,
-        updatedAt: "2026-03-26T12:00:02.000Z",
-        version: "cursor_v3",
-      }),
-    });
-
-    const conflictedCursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
-      cursor: createCursorState({
-        committedSeq: "1",
-        nextSeq: "2",
-        snapshotRef: committedBundleRef,
         updatedAt: "2026-03-26T12:00:01.500Z",
         version: "cursor_v2",
       }),
-      wake: duplicateFinalizeWake,
+      wake: finalizedWake,
     });
 
-    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
-    expect(commitHostedWakeCursorToWeb.mock.calls[0]?.[0].body).toEqual({
-      committedSeq: "1",
-      expectedVersion: "cursor_v2",
-      snapshotRef: finalBundleRef,
-    });
-    expect(conflictedCursor).toMatchObject({
+    expect(commitHostedWakeCursorToWeb).not.toHaveBeenCalled();
+    expect(cleanupCursor).toMatchObject({
       committedSeq: "1",
       snapshotRef: finalBundleRef,
-      version: "cursor_v3",
+      version: "cursor_v2",
     });
-    await expect(readPendingCommit.call(stateStore)).resolves.toMatchObject({
-      eventId: "evt_cleanup_duplicate_snapshot",
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-    });
-
-    const reconciledCursor = await wakeProcessor.cleanupWakeAfterCursorCommit({
-      cursor: conflictedCursor,
-      wake: duplicateFinalizeWake,
-    });
-
-    expect(reconciledCursor).toMatchObject({
-      committedSeq: "1",
-      snapshotRef: finalBundleRef,
-      version: "cursor_v3",
-    });
-    expect(commitHostedWakeCursorToWeb).toHaveBeenCalledTimes(1);
     await expect(readPendingCommit.call(stateStore)).resolves.toBeNull();
   });
 });
