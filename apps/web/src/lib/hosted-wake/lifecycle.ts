@@ -14,7 +14,7 @@ import {
   findHostedExecutionWakeEventIdTx,
   readHostedExecutionWakeLifecycleStateTx,
   readHostedExecutionWakeTargetTx,
-} from "../hosted-wake/queue";
+} from "./queue";
 
 const HOSTED_WAKE_LIFECYCLE_STATE_SET = new Set<HostedWakeLifecycleState>(
   HOSTED_WAKE_LIFECYCLE_STATES,

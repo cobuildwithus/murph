@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   readHostedWakeLifecycleState: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   readHostedWakeLifecycleState: mocks.readHostedWakeLifecycleState,
 }));
 

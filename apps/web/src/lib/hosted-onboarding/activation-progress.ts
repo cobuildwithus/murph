@@ -6,7 +6,7 @@ import {
 
 import {
   isHostedWakeLifecycleTerminal,
-} from "../hosted-execution/wake-lifecycle";
+} from "../hosted-wake/lifecycle";
 import {
   readLatestHostedWakeLifecycleByKind,
 } from "../hosted-wake/store";

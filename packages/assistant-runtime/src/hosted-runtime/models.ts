@@ -6,6 +6,7 @@ import type {
 import type {
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
+  HostedWakeMaterializationHints,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import type { HostedExecutionBundleRefState } from "@murphai/hosted-execution/bundles";
@@ -125,8 +126,6 @@ export interface HostedAssistantRuntimeCommittedJobResult {
 export interface HostedAssistantRuntimeCompletedJobResult {
   assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
   browserVaultSnapshot?: BrowserVaultSnapshot | null;
-  committedAssistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
-  committedGatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   phase?: "completed";
   result: HostedExecutionRunnerResult;
@@ -167,6 +166,7 @@ export interface HostedMaintenanceMetrics {
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;
   parserProcessed: number;
+  wakeMaterializationHints: HostedWakeMaterializationHints | null;
 }
 
 export type HostedWorkspaceArtifactMaterializer = (

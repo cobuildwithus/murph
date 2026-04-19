@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
   readHostedWakeTarget: mocks.readHostedWakeTarget,
 }));

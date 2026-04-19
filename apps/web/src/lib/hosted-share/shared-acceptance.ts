@@ -6,7 +6,7 @@ import type {
 import {
   readHostedWakeLifecycleState,
   type HostedWakeLifecycleState,
-} from "../hosted-execution/wake-lifecycle";
+} from "../hosted-wake/lifecycle";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import { hashHostedShareCode, normalizeOptionalString } from "./shared-identifiers";

@@ -112,9 +112,9 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
-    const hostedWakePayloadSpillMigrationSql = readFileSync(
+    const hostedWakeBaselineMigrationSql = readFileSync(
       new URL(
-        "../prisma/migrations/202604172330_hosted_wake_payload_spill/migration.sql",
+        "../prisma/migrations/202604171900_hosted_wake_baseline/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -124,8 +124,7 @@ describe("hosted Prisma baseline migration", () => {
       "202604141730_hosted_member_identity_optional_phone",
       "202604161130_hosted_web_owner_slices",
       "202604161430_device_sync_web_owner_runtime_state",
-      "202604171900_hosted_wake_substrate",
-      "202604172330_hosted_wake_payload_spill",
+      "202604171900_hosted_wake_baseline",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
@@ -155,11 +154,20 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceSyncRuntimeStateMigrationSql).toContain(
       'ADD COLUMN "refresh_token_encrypted" TEXT',
     );
-    expect(hostedWakePayloadSpillMigrationSql).toContain(
+    expect(hostedWakeBaselineMigrationSql).toContain(
       'CREATE TABLE "hosted_wake_payload"',
     );
-    expect(hostedWakePayloadSpillMigrationSql).toContain(
+    expect(hostedWakeBaselineMigrationSql).toContain(
       'CREATE INDEX "hosted_wake_payload_user_id_idx"',
+    );
+    expect(hostedWakeBaselineMigrationSql).toContain(
+      'CREATE TABLE "hosted_execution_cursor"',
+    );
+    expect(hostedWakeBaselineMigrationSql).toContain(
+      'CREATE TABLE "hosted_wake"',
+    );
+    expect(hostedWakeBaselineMigrationSql).toContain(
+      'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');

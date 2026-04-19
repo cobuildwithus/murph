@@ -65,7 +65,7 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
 }));
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
 }));
 

@@ -9,6 +9,7 @@ import {
 import type {
   HostedExecutionRunContext,
   HostedExecutionRunnerResult,
+  HostedWakeMaterializationHints,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -36,7 +37,9 @@ import {
 } from "./context.ts";
 import { executeHostedWakeEvent } from "./events.ts";
 import {
-  runHostedMaintenanceLoop,
+  runHostedAssistantCronWakeLane,
+  runHostedDeviceSyncWakeLane,
+  runHostedNoopSystemWakeLane,
 } from "./maintenance.ts";
 import type {
   HostedAssistantRuntimeCompletedJobResult,
@@ -192,6 +195,9 @@ export async function executeHostedWakeForCommit(input: {
       result: {
         eventsHandled: 1,
         nextWakeAt: maintenanceMetrics.nextWakeAt,
+        ...(maintenanceMetrics.wakeMaterializationHints
+          ? { wakeMaterializationHints: maintenanceMetrics.wakeMaterializationHints }
+          : {}),
         summary: summarizeWake(wake, {
           ...wakeMetrics,
           ...maintenanceMetrics,
@@ -238,8 +244,6 @@ async function runHostedWakeFollowupExecution(input: {
     case "member-channels-updated":
     case "vault-share-accepted":
       return runHostedSystemWakeFollowupExecution({
-        artifactMaterializer: input.artifactMaterializer,
-        bootstrapResult: input.bootstrapResult,
         executionContext: input.executionContext,
         requestId: input.requestId,
         run: input.run ?? null,
@@ -251,8 +255,6 @@ async function runHostedWakeFollowupExecution(input: {
 }
 
 async function runHostedSystemWakeFollowupExecution(input: {
-  artifactMaterializer: HostedWorkspaceArtifactMaterializer | null;
-  bootstrapResult: Awaited<ReturnType<typeof executeHostedWakeEvent>>["bootstrapResult"];
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   requestId: string;
@@ -264,24 +266,39 @@ async function runHostedSystemWakeFollowupExecution(input: {
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const maintenanceStartedAtMs = Date.now();
-  const maintenanceMetrics = await runHostedMaintenanceLoop({
-    artifactMaterializer: input.artifactMaterializer,
-    deviceSyncPort: input.runtime.platform.deviceSyncPort,
-    wake: input.wake,
-    executionContext: await resolveHostedWakeExecutionContext(
-      input.executionContext,
-    ),
-    requestId: input.requestId,
-    resolvedConfig: input.runtime.resolvedConfig,
-    skipAssistantAutomation: input.wake.kind === "member.activated"
-      && input.bootstrapResult?.assistantConfigured === false,
-    timeoutMs: input.runtime.commitTimeoutMs,
-    vaultRoot: input.vaultRoot,
-  });
+  const wakeExecutionContext = await resolveHostedWakeExecutionContext(
+    input.executionContext,
+  );
+  const maintenanceMetrics = await (() => {
+    switch (input.wake.kind) {
+      case "assistant.cron.tick":
+        return runHostedAssistantCronWakeLane({
+          executionContext: wakeExecutionContext,
+          requestId: input.requestId,
+          vaultRoot: input.vaultRoot,
+          wake: input.wake,
+        });
+      case "device-sync.wake":
+        return runHostedDeviceSyncWakeLane({
+          deviceSyncPort: input.runtime.platform.deviceSyncPort,
+          resolvedConfig: input.runtime.resolvedConfig,
+          timeoutMs: input.runtime.commitTimeoutMs,
+          vaultRoot: input.vaultRoot,
+          wake: input.wake,
+        });
+      case "member.activated":
+      case "member.channels.updated":
+      case "vault.share.accepted":
+        return Promise.resolve(runHostedNoopSystemWakeLane());
+      case "conversation.message":
+        throw new TypeError("Hosted system wake follow-up does not support conversation wakes.");
+    }
+  })();
   emitHostedExecutionStructuredLog({
     component: "runtime",
     wake: input.wake,
     details: {
+      lane: input.wake.kind,
       maintenanceLatencyMs: Date.now() - maintenanceStartedAtMs,
       nextWakeAt: maintenanceMetrics.nextWakeAt,
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
@@ -328,6 +345,10 @@ async function resolveHostedPreservedWakeMetrics(input: {
     deviceSyncSkipped: input.includeDeviceSync === false,
     nextWakeAt: earliestHostedWakeAt(assistantWakeAt, deviceSyncWakeAt),
     parserProcessed: 0,
+    wakeMaterializationHints: createHostedWakeMaterializationHints({
+      assistantWakeAt,
+      deviceSyncWakeAt,
+    }),
   };
 }
 
@@ -476,6 +497,18 @@ async function resolveHostedDeviceSyncWakeAt(input: {
   }
 }
 
+function createHostedWakeMaterializationHints(input: {
+  assistantWakeAt?: string | null;
+  deviceSyncWakeAt?: string | null;
+}): HostedWakeMaterializationHints | null {
+  const hints: HostedWakeMaterializationHints = {
+    ...(input.assistantWakeAt === undefined ? {} : { assistantWakeAt: input.assistantWakeAt }),
+    ...(input.deviceSyncWakeAt === undefined ? {} : { deviceSyncWakeAt: input.deviceSyncWakeAt }),
+  };
+
+  return Object.keys(hints).length > 0 ? hints : null;
+}
+
 function resolveHostedAssistantRecoveryWakeAt(input: {
   receipts: Awaited<ReturnType<typeof getAssistantStatus>>["recentTurns"];
   referenceMs: number;
@@ -579,7 +612,6 @@ function normalizeHostedWakeAt(
 }
 
 export async function completeHostedExecutionAfterCommit(input: {
-  includeCommittedCompatibility?: boolean;
   materializedArtifactPaths?: ReadonlySet<string>;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
@@ -732,14 +764,6 @@ export async function completeHostedExecutionAfterCommit(input: {
   return {
     assistantDeliveryOutcomes,
     browserVaultSnapshot,
-    ...(input.includeCommittedCompatibility
-      ? {
-          committedAssistantDeliveryEffects:
-            input.committedExecution.committedAssistantDeliveryEffects,
-          committedGatewayProjectionSnapshot:
-            input.committedExecution.committedGatewayProjectionSnapshot,
-        }
-      : {}),
     finalGatewayProjectionSnapshot,
     phase: "completed",
     result: finalResult,

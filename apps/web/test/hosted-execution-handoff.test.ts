@@ -11,7 +11,7 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   readHostedWakeTarget: vi.fn(),
 }));
 
@@ -22,7 +22,7 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { readHostedWakeTarget } from "@/src/lib/hosted-execution/wake-lifecycle";
+import { readHostedWakeTarget } from "@/src/lib/hosted-wake/lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "@/src/lib/hosted-wake/control";
 
 describe("handoffHostedExecutionWakeBestEffort", () => {

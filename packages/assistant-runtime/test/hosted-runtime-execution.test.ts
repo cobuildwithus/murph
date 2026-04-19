@@ -36,9 +36,10 @@ const mocks = vi.hoisted(() => ({
   listHostedBundleArtifacts: vi.fn(),
   readHostedAssistantExecutionDefaultTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
+  runHostedAssistantCronWakeLane: vi.fn(),
   runHostedConversationAssistantAutomation: vi.fn(),
-  runHostedDeviceSyncPass: vi.fn(),
-  runHostedMaintenanceLoop: vi.fn(),
+  runHostedDeviceSyncWakeLane: vi.fn(),
+  runHostedNoopSystemWakeLane: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
 }));
 
@@ -109,11 +110,12 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
+  runHostedAssistantCronWakeLane: mocks.runHostedAssistantCronWakeLane,
   drainHostedParserQueueUntilSettled: mocks.drainHostedParserQueueUntilSettled,
   runHostedConversationAssistantAutomation:
     mocks.runHostedConversationAssistantAutomation,
-  runHostedDeviceSyncPass: mocks.runHostedDeviceSyncPass,
-  runHostedMaintenanceLoop: mocks.runHostedMaintenanceLoop,
+  runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+  runHostedNoopSystemWakeLane: mocks.runHostedNoopSystemWakeLane,
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -216,11 +218,26 @@ beforeEach(() => {
     shareImportResult: null,
     shareImportTitle: null,
   });
-  mocks.runHostedMaintenanceLoop.mockResolvedValue({
+  mocks.runHostedAssistantCronWakeLane.mockResolvedValue({
     deviceSyncProcessed: 2,
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 3,
+    wakeMaterializationHints: null,
+  });
+  mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
+    deviceSyncProcessed: 2,
+    deviceSyncSkipped: false,
+    nextWakeAt: "2026-04-08T00:30:00.000Z",
+    parserProcessed: 0,
+    wakeMaterializationHints: null,
+  });
+  mocks.runHostedNoopSystemWakeLane.mockReturnValue({
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
+    nextWakeAt: null,
+    parserProcessed: 0,
+    wakeMaterializationHints: null,
   });
   mocks.runHostedConversationAssistantAutomation.mockResolvedValue({
     nextWakeAt: null,
@@ -422,30 +439,8 @@ describe("executeHostedWakeForCommit", () => {
       sharePack: null,
       vaultRoot: "/tmp/vault-root",
     });
-    expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
-      expect.objectContaining({
-        executionContext: {
-          hosted: {
-            defaultTarget: {
-              adapter: "openai-compatible",
-              apiKeyEnv: "OPENAI_API_KEY",
-              endpoint: "https://api.openai.com/v1",
-              headers: null,
-              model: "gpt-4.1-mini",
-              presetId: null,
-              providerName: "OpenAI",
-              reasoningEffort: null,
-              webSearch: null,
-            },
-            issueDeviceConnectLink: expect.any(Function),
-            memberId: "member_123",
-            userEnvKeys: [],
-          },
-        },
-        skipAssistantAutomation: true,
-        timeoutMs: 45_000,
-      }),
-    );
+    expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
     expect(mocks.createHostedArtifactUploadSink).toHaveBeenCalledWith({
       artifactStore: expect.any(Object),
       knownArtifactHashes: new Set(["sha_existing"]),
@@ -461,7 +456,7 @@ describe("executeHostedWakeForCommit", () => {
       hostedDeliveryEffect,
     ]);
     assert.equal(result.committedResult.result.eventsHandled, 1);
-    assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
+    assert.equal(result.committedResult.result.nextWakeAt, null);
     assert.match(result.committedResult.result.summary, /Processed member activation/u);
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -613,18 +608,19 @@ describe("executeHostedWakeForCommit", () => {
       },
     });
 
-    expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
+    expect(mocks.runHostedAssistantCronWakeLane).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext: {
           hosted: expect.objectContaining({
             defaultTarget: existingDefaultTarget,
           }),
         },
+        requestId: "evt_existing_default_target",
       }),
     );
   });
 
-  it("runs the maintenance loop for member channel updates", async () => {
+  it("keeps member channel updates on the explicit no-op system lane", async () => {
     mocks.executeHostedWakeEvent.mockResolvedValueOnce({
       bootstrapResult: null,
       conversationMetrics: null,
@@ -690,14 +686,11 @@ describe("executeHostedWakeForCommit", () => {
       runtimeEnv: {},
     });
 
-    expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
-      expect.objectContaining({
-        skipAssistantAutomation: false,
-        timeoutMs: 45_000,
-      }),
-    );
-    expect(result.committedResult.result.nextWakeAt).toBe("2026-04-08T00:30:00.000Z");
-    expect(result.committedResult.result.summary).toMatch(/channel sync/u);
+    expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(result.committedResult.result.nextWakeAt).toBe(null);
+    expect(result.committedResult.result.summary).toBe("Processed member channel sync.");
   });
 
   it("skips the generic maintenance loop when the conversation lane stays on wake follow-up", async () => {
@@ -725,8 +718,17 @@ describe("executeHostedWakeForCommit", () => {
         bundle: "incoming-bundle",
         wake: buildHostedExecutionLinqConversationMessageWake({
           eventId: "evt_linq_message",
-          linqEvent: {
-            event_type: "message.received",
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "linq_message_123",
+            parts: [
+              {
+                value: "hello",
+                type: "text",
+              },
+            ],
           },
           occurredAt: "2026-04-08T00:00:00.000Z",
           phoneLookupKey: "15551234567",
@@ -768,7 +770,9 @@ describe("executeHostedWakeForCommit", () => {
       runtimeEnv: {},
     });
 
-    expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
     expect(mocks.drainHostedParserQueueUntilSettled).not.toHaveBeenCalled();
     expect(mocks.runHostedConversationAssistantAutomation).not.toHaveBeenCalled();
     assert.equal(result.committedResult.result.nextWakeAt, null);
@@ -939,7 +943,9 @@ describe("executeHostedWakeForCommit", () => {
         runtimeEnv: {},
       });
 
-      expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
+      expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
       expect(mocks.getAssistantStatus).toHaveBeenCalledWith({
         limit: 200,
         vault: "/tmp/vault-root",
@@ -1122,8 +1128,17 @@ describe("executeHostedWakeForCommit", () => {
           bundle: "incoming-bundle",
           wake: buildHostedExecutionLinqConversationMessageWake({
             eventId: "evt_linq_message_device_sync",
-            linqEvent: {
-              event_type: "message.received",
+            linqMessage: {
+              chatId: "chat_123",
+              from: "+15551234567",
+              isFromMe: false,
+              messageId: "linq_message_device_sync",
+              parts: [
+                {
+                  value: "hello",
+                  type: "text",
+                },
+              ],
             },
             occurredAt: "2026-04-08T00:00:00.000Z",
             phoneLookupKey: "15551234567",
@@ -1171,7 +1186,9 @@ describe("executeHostedWakeForCommit", () => {
         runtimeEnv: {},
       });
 
-      expect(mocks.runHostedMaintenanceLoop).not.toHaveBeenCalled();
+      expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
       expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
       expect(close).toHaveBeenCalledTimes(1);
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:25:00.000Z");
@@ -1209,8 +1226,17 @@ describe("executeHostedWakeForCommit", () => {
         bundle: "incoming-bundle",
         wake: buildHostedExecutionLinqConversationMessageWake({
           eventId: "evt_linq_message_error",
-          linqEvent: {
-            event_type: "message.received",
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "linq_message_error",
+            parts: [
+              {
+                value: "hello",
+                type: "text",
+              },
+            ],
           },
           occurredAt: "2026-04-08T00:00:00.000Z",
           phoneLookupKey: "15551234567",
@@ -1314,7 +1340,6 @@ describe("completeHostedExecutionAfterCommit", () => {
           hostedDeliveryEffect,
         ],
       },
-      includeCommittedCompatibility: true,
       wake: buildHostedExecutionAssistantCronTickWake({
         eventId: "evt_123",
         occurredAt: "2026-04-08T00:00:00.000Z",
@@ -1422,16 +1447,6 @@ describe("completeHostedExecutionAfterCommit", () => {
         },
       ],
       browserVaultSnapshot: undefined,
-      committedAssistantDeliveryEffects: [
-        hostedDeliveryEffect,
-      ],
-      committedGatewayProjectionSnapshot: {
-        schema: "murph.gateway-projection-snapshot.v1",
-        generatedAt: "2026-04-08T00:00:00.000Z",
-        conversations: [],
-        messages: [],
-        permissions: [],
-      },
       finalGatewayProjectionSnapshot: {
         schema: "murph.gateway-projection-snapshot.v1",
         generatedAt: "2026-04-08T00:10:00.000Z",

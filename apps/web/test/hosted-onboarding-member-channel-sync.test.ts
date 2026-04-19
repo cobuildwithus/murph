@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   materializeHostedExecutionWakeTx: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
 }));
 
