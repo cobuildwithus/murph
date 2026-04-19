@@ -276,14 +276,7 @@ export class HostedUserRunner {
     }
 
     try {
-      const materialization = await this.materializeDueHostedWakesInWeb(record.userId);
-      await this.wakeScheduler.syncNextWake({
-        preferredWakeAt: null,
-        wakeMaterializationHints: materialization.wakeMaterializationHints,
-      });
-      const drainResult = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal({
-        targetSeqHint: materialization.targetSeqHint,
-      }));
+      const drainResult = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal());
       if (shouldScheduleHostedWakeRetryAlarm(drainResult)) {
         await this.scheduleHostedWakeRetryAlarm();
       }
@@ -341,31 +334,47 @@ export class HostedUserRunner {
     targetSeqHint: string | null;
     wakeMaterializationHints: HostedWakeMaterializationHints | null;
   }> {
-    const wakeMaterializationHints = await this.stateStore.readWakeMaterializationHints();
-
-    if (!shouldRefreshHostedWakeMaterialization(wakeMaterializationHints)) {
-      return {
-        targetSeqHint: null,
-        wakeMaterializationHints,
-      };
-    }
-
-    return materializeHostedDueWakesInWeb({
+    const materialization = await materializeHostedDueWakesInWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: userId,
       callbackSigning: this.env.webCallbackSigning,
       timeoutMs: this.env.runnerTimeoutMs,
     });
+
+    if (materialization) {
+      return materialization;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      level: "warn",
+      message:
+        "Hosted wake materialization returned no response body; continuing with an empty hint set.",
+      phase: "wake.running",
+      userId,
+    });
+    return {
+      targetSeqHint: null,
+      wakeMaterializationHints: null,
+    };
   }
 
   private async wakeHostedWakesInternal(input: {
     targetSeqHint?: string | null;
-  }): Promise<HostedWakeDrainInternalResult> {
+  } = {}): Promise<HostedWakeDrainInternalResult> {
     const userId = await this.requireBoundUserId();
     await this.stateStore.bootstrapUser(userId);
-    const targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
-    const requestedTargetSeq = targetSeqHint?.toString() ?? null;
     await this.resumePendingCommittedCleanupIfNeeded();
+    const materialization = await this.materializeDueHostedWakesInWeb(userId);
+    await this.wakeScheduler.syncNextWake({
+      preferredWakeAt: null,
+      wakeMaterializationHints: materialization.wakeMaterializationHints,
+    });
+    const targetSeqHint = maxHostedWakeSeqHint(
+      parseOptionalHostedWakeSeq(input.targetSeqHint),
+      parseOptionalHostedWakeSeq(materialization.targetSeqHint),
+    );
+    const requestedTargetSeq = targetSeqHint?.toString() ?? null;
     let committedSeq: string | null = null;
     let expectedVersion: string | null = null;
     let exitState: HostedWakeDrainState | null = null;
@@ -692,6 +701,7 @@ export class HostedUserRunner {
       body: {
         eventId: hostedWake.eventId,
         fetchProof: wake.fetchProof,
+        wakeEventId: hostedWake.eventId,
         wakeId: wake.id,
         wakeSeq: wake.seq,
       },
@@ -1287,17 +1297,6 @@ function sameHostedWakeCursorSnapshotRef(
   ) === JSON.stringify(bundleRef ?? null);
 }
 
-function hostedWakeMaterializationDueNow(
-  wakeMaterializationHints: HostedWakeMaterializationHints | null,
-): boolean {
-  if (!wakeMaterializationHints) {
-    return false;
-  }
-
-  return hostedWakeHintDueNow(wakeMaterializationHints.assistantWakeAt)
-    || hostedWakeHintDueNow(wakeMaterializationHints.deviceSyncWakeAt);
-}
-
 function toHostedExecutionWakeDrainResult(
   input: HostedWakeDrainInternalResult,
 ): HostedExecutionWakeDrainResult {
@@ -1312,21 +1311,6 @@ function shouldScheduleHostedWakeRetryAlarm(
   input: HostedWakeDrainInternalResult,
 ): boolean {
   return input.exitState === "backpressured";
-}
-
-function shouldRefreshHostedWakeMaterialization(
-  wakeMaterializationHints: HostedWakeMaterializationHints | null,
-): boolean {
-  if (!wakeMaterializationHints) {
-    return true;
-  }
-
-  if (wakeMaterializationHints.deviceSyncWakeAt == null) {
-    return true;
-  }
-
-  return hostedWakeMaterializationDueNow(wakeMaterializationHints)
-    || hostedWakeDeviceSyncHintNeedsRevalidation(wakeMaterializationHints.deviceSyncWakeAt);
 }
 
 function hostedWakeHintDueNow(value: string | null | undefined): boolean {
@@ -1370,4 +1354,16 @@ function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | 
   } catch {
     return null;
   }
+}
+
+function maxHostedWakeSeqHint(left: bigint | null, right: bigint | null): bigint | null {
+  if (left === null) {
+    return right;
+  }
+
+  if (right === null) {
+    return left;
+  }
+
+  return left > right ? left : right;
 }

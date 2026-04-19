@@ -1,20 +1,20 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-04-13
+Last verified against repo layout: 2026-04-19
 
 ## Current split
 
-Murph now treats hosted device sync as a split system:
+Murph's hosted device-sync stack is now split this way:
 
-- `apps/web` is the public integration control plane for OAuth callbacks, webhooks, user-authenticated settings flows, agent pairing, and durable hosted metadata in Postgres
-- `apps/cloudflare` owns the canonical decryptable hosted runtime snapshot and token escrow for device-sync connections, plus the signed internal read/apply routes the hosted runner uses
-- local `device-syncd` remains the data plane that fetches provider payloads, normalizes them through `@murphai/importers`, and writes canonical health records into the local vault
+- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, token-audit history, sparse sync signals, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link routes.
+- `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, or start a provider connect link, but it is not a second durable device-sync control plane.
+- local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
-This is no longer a future rollout plan. It is the current hosted direction indexed elsewhere in the repo.
+This is the live repo shape, not a future rollout plan.
 
 ## Shared ingress seam
 
-`@murphai/device-syncd/public-ingress` is the reusable callback/webhook core shared across local and hosted surfaces. It owns:
+`@murphai/device-syncd/public-ingress` remains the reusable callback and webhook core shared across local and hosted surfaces. It owns:
 
 - provider connect URL creation
 - OAuth state validation
@@ -23,12 +23,12 @@ This is no longer a future rollout plan. It is the current hosted direction inde
 - duplicate webhook trace suppression
 - dispatch into store-specific side effects
 
-That seam is reused by both:
+That seam is reused by:
 
-- local `device-syncd` when operators expose or tunnel callback/webhook routes
-- the hosted Vercel control plane in `apps/web`
+- local `device-syncd` when operators expose or tunnel callback and webhook routes
+- the hosted Next.js control plane in `apps/web`
 
-It does not own canonical health-data import. The data plane still lives below the hosted control plane.
+It does not own canonical health-data import, token authority, or canonical hosted control facts.
 
 ## Hosted responsibilities
 
@@ -37,12 +37,13 @@ It does not own canonical health-data import. The data plane still lives below t
 `apps/web` is responsible for:
 
 - provider connect UI and authenticated settings routes
-- OAuth start/callback routes
+- OAuth start and callback routes
 - public webhook routes
 - provider-account ownership mapping through blind indexes plus opaque connection ids
 - durable Postgres-owned connection summaries, webhook traces, token-audit history, sparse wake signals, and agent-session state
 - token export and refresh flows for the local agent
 - disconnect, pairing, and other hosted operational control flows
+- the signed internal runtime snapshot, runtime apply, and provider connect-link routes consumed by hosted execution
 
 `apps/web` must not:
 
@@ -54,12 +55,15 @@ It does not own canonical health-data import. The data plane still lives below t
 
 `apps/cloudflare` is responsible for:
 
-- Cloudflare-owned encrypted per-user device-sync runtime snapshots
-- canonical decryptable token escrow under the user root key
-- signed internal runtime snapshot and apply routes
-- hosted-runner access to current device-sync runtime state during hosted jobs
+- hosted execution coordination and per-user run orchestration
+- invoking signed internal `apps/web` callbacks when a hosted job needs current device-sync runtime authority
+- consuming current runtime snapshots during a hosted job and sending narrow runtime updates back to web
 
-The Cloudflare runtime is the owner of decryptable hosted token bundles. Postgres keeps durable metadata and control-plane facts only.
+`apps/cloudflare` must not:
+
+- become the durable owner of hosted device-sync token escrow
+- maintain a second canonical runtime snapshot store for device sync
+- replace `apps/web` as the device-sync control plane
 
 ### Local `device-syncd`
 
@@ -79,10 +83,10 @@ The hosted boundary may hold:
 
 - provider client credentials
 - per-user connection metadata and token-audit history in Postgres
-- encrypted provider tokens and mutable runtime state in Cloudflare-owned storage
 - sparse webhook traces and wake signals
+- execution-time runtime snapshots and runtime updates passed across signed internal callbacks during a hosted job
 
-It must fail closed on auth and never gain canonical vault-write authority.
+The hosted boundary must fail closed on auth and never gain canonical vault-write authority.
 
 ### Local boundary
 
@@ -99,7 +103,7 @@ Local agents authenticate to hosted APIs with a server-to-server credential tied
 
 ### Postgres in `apps/web`
 
-Postgres is required for hosted device sync because Vercel does not provide stable local disk for:
+Postgres remains required for hosted device sync because Vercel does not provide stable local disk for:
 
 - OAuth state round-trips
 - connection ownership mapping
@@ -118,16 +122,19 @@ Recommended durable tables remain:
 - `device_agent_session`
 - optional `device_webhook_subscription`
 
-Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, and audit history. It should not store raw provider tokens, raw provider payloads, or canonical health facts.
+Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, and the canonical hosted runtime authority consumed by the internal snapshot/apply routes. It should not store canonical health facts.
 
-### Cloudflare device-sync runtime store
+### Cloudflare execution state
 
-Cloudflare storage keeps:
+Cloudflare storage keeps hosted execution coordination state only, such as encrypted hosted workspace bundles, opaque runner residue, and other execution-plane metadata described in `ARCHITECTURE.md`.
 
-- per-user encrypted runtime snapshots under the user root key
-- connection snapshots plus local observation state
-- canonical encrypted token bundles and token-version fencing
-- signed internal read/apply routes plus metadata-only snapshot merges from `apps/web`
+When a hosted job needs device-sync access, Cloudflare must call the signed internal web routes to:
+
+- fetch the current runtime snapshot
+- apply narrow runtime updates
+- start a provider connect link
+
+That execution-time access does not make Cloudflare the durable owner of hosted device-sync authority.
 
 ### Local runtime
 
@@ -157,7 +164,7 @@ These are internet-facing and provider-facing only.
 - `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-These are the only browser-facing wearable-management routes. Ordinary reads should come from durable hosted metadata in Postgres. Live Cloudflare runtime inspection belongs only on explicit operational routes.
+These are the browser-facing wearable-management routes. Ordinary reads should come from durable hosted metadata in Postgres. Live execution/runtime inspection belongs only on explicit operational routes.
 
 ### Hosted assertion-authenticated browser bridge routes
 
@@ -182,20 +189,19 @@ These are authenticated by local-agent credentials, not browser cookies.
 - `POST /api/internal/device-sync/runtime/apply` on `apps/web`
 - `POST /api/internal/device-sync/providers/:provider/connect-link` on `apps/web`
 
-These routes are authenticated by signed server-to-server traffic that never reaches the browser. `apps/web` remains the canonical control plane while the Cloudflare worker only invokes the signed runtime callbacks it needs during execution.
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution.
 
-## Token strategy
+## Runtime access strategy
 
-The current hosted token strategy is:
+The current hosted runtime strategy is:
 
-1. Cloudflare runtime storage keeps encrypted token bundles durably under the user root key.
-2. The local agent exports a token bundle when needed, caches it locally, and persists the replacement agent bearer from the response.
-3. The local data plane fetches provider data directly until access-token refresh or bearer renewal is needed.
-4. When refresh or renewal is needed, the local agent calls the hosted refresh endpoint with its latest bearer.
-5. Hosted web refreshes provider tokens atomically, writes the updated token bundle into Cloudflare, and returns the next token bundle plus next agent bearer session.
-6. The local agent discards the prior bearer immediately and continues syncing locally.
+1. `apps/web` remains the durable owner of hosted device-sync control facts and runtime authority.
+2. A hosted job running through `apps/cloudflare` requests the current runtime snapshot from the signed internal web route only when execution needs device-sync access.
+3. The hosted job sends narrow runtime updates back through the signed internal web apply route.
+4. Local-agent token export and refresh flows stay on the hosted web boundary.
+5. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
 
-This keeps provider payload fetches local without proxying normal health-data traffic through hosted services.
+This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
 
 ## Provider split
 
@@ -206,8 +212,8 @@ Hosted responsibilities:
 - OAuth callback
 - webhook verification and dedupe
 - blind-index account mapping
-- Cloudflare-owned token escrow
-- optional refresh helper
+- hosted web token refresh and agent export flows
+- execution-time runtime snapshot/apply access when a hosted job needs it
 
 Local responsibilities:
 
@@ -219,9 +225,9 @@ Local responsibilities:
 Hosted responsibilities:
 
 - OAuth callback
-- Cloudflare-owned token escrow
+- hosted web token refresh and agent export flows
 - webhook subscription management when Oura webhooks are enabled
-- optional refresh helper
+- execution-time runtime snapshot/apply access when a hosted job needs it
 
 Local responsibilities:
 
@@ -236,6 +242,6 @@ Local responsibilities:
 - `DEVICE_SYNC_SECRET` is the daemon's local bootstrap and service secret
 - `DEVICE_SYNC_CONTROL_TOKEN` is the daemon's loopback control-plane bearer token
 
-Those are local-daemon concerns. They are not the browser-facing hosted control-plane contract.
+Those are local-daemon concerns. They are not part of the hosted browser or hosted execution auth contract.
 
-The hosted Cloudflare runner currently still uses a device-sync codec secret internally when it hydrates token bundles inside the hosted runtime. That is separate from the local daemon control token and should not be documented as a browser or local-agent bearer.
+Hosted execution continues to use signed internal web callbacks and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.
