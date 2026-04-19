@@ -297,23 +297,41 @@ export class RunnerContainer extends Container {
     const runnerControlToken = crypto.randomUUID();
     const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
     const readinessTimeoutMs = Math.min(remainingTimeoutMs, readRunnerReadyTimeoutMs(this.environment));
-    await this.startAndWaitForPorts({
-      cancellationOptions: {
-        abort: AbortSignal.timeout(readinessTimeoutMs),
-        instanceGetTimeoutMS: readinessTimeoutMs,
-        portReadyTimeoutMS: readinessTimeoutMs,
-        waitInterval: RUNNER_WAIT_INTERVAL_MS,
-      },
-      ports: RUNNER_PORT,
-      startOptions: {
-        enableInternet: true,
-        envVars: {
-          ...buildHostedRunnerOperatorEnv(this.environment),
-          HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: runnerControlToken,
-          PORT: String(RUNNER_PORT),
+    try {
+      await this.startAndWaitForPorts({
+        cancellationOptions: {
+          abort: AbortSignal.timeout(readinessTimeoutMs),
+          instanceGetTimeoutMS: readinessTimeoutMs,
+          portReadyTimeoutMS: readinessTimeoutMs,
+          waitInterval: RUNNER_WAIT_INTERVAL_MS,
         },
-      },
-    });
+        ports: RUNNER_PORT,
+        startOptions: {
+          enableInternet: true,
+          envVars: {
+            ...buildHostedRunnerOperatorEnv(this.environment),
+            HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: runnerControlToken,
+            PORT: String(RUNNER_PORT),
+          },
+        },
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        wake,
+        details: {
+          readinessLatencyMs: Date.now() - readinessStartedAt,
+          runElapsedMs: computeHostedRunElapsedMs(run),
+          startMode: "cold",
+        },
+        error,
+        level: "error",
+        message: "Hosted execution container failed to start or listen.",
+        phase: "container.starting",
+        run,
+      });
+      throw error;
+    }
     this.runnerControlToken = runnerControlToken;
 
     emitHostedExecutionStructuredLog({
@@ -407,38 +425,62 @@ export class RunnerContainer extends Container {
   private async destroyIfRunning(input: {
     failClosed?: boolean;
   } = {}): Promise<void> {
+    const failClosed = Boolean(input.failClosed);
+
     try {
       if (isRunnerContainerStopped(await readRunnerContainerStatus(this))) {
         return;
       }
-
-      let destroyError: unknown = null;
-      try {
-        await this.destroy();
-      } catch (error) {
-        if (isMissingRunnerContainerError(error)) {
-          return;
-        }
-        destroyError = error;
-      }
-
-      try {
-        await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
-      } catch (error) {
-        if (!isMissingRunnerContainerError(error)) {
-          throw error;
-        }
-        return;
-      }
-
-      if (destroyError) {
-        return;
-      }
-    } catch {
-      if (input.failClosed) {
+    } catch (error) {
+      emitRunnerContainerLifecycleFailure({
+        error,
+        failClosed,
+        message: "Hosted execution container failed while checking its lifecycle state.",
+        stage: "status",
+      });
+      if (failClosed) {
         throw new Error("Hosted runner container failed to destroy cleanly.");
       }
-      // best-effort cleanup only
+      return;
+    }
+
+    let destroyError: unknown = null;
+
+    try {
+      await this.destroy();
+    } catch (error) {
+      if (isMissingRunnerContainerError(error)) {
+        return;
+      }
+      destroyError = error;
+      emitRunnerContainerLifecycleFailure({
+        error,
+        failClosed,
+        message: "Hosted execution container destroy request failed.",
+        stage: "destroy",
+      });
+    }
+
+    try {
+      await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
+    } catch (error) {
+      if (isMissingRunnerContainerError(error)) {
+        return;
+      }
+      emitRunnerContainerLifecycleFailure({
+        error,
+        failClosed,
+        message: "Hosted execution container destroy did not stop the shell.",
+        stage: "wait-for-stop",
+      });
+      if (failClosed) {
+        throw new Error("Hosted runner container failed to destroy cleanly.");
+      }
+      return;
+    }
+
+    if (destroyError) {
+      return;
     }
   }
 
@@ -585,6 +627,25 @@ function readOptionalRunnerContainerEnvString(
 
 function createRunnerOutboundProxyToken(): string {
   return crypto.randomUUID();
+}
+
+function emitRunnerContainerLifecycleFailure(input: {
+  error: unknown;
+  failClosed: boolean;
+  message: string;
+  stage: "destroy" | "status" | "wait-for-stop";
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "container",
+    details: {
+      failClosed: input.failClosed,
+      lifecycleStage: input.stage,
+    },
+    error: input.error,
+    level: input.failClosed ? "error" : "warn",
+    message: input.message,
+    phase: "failed",
+  });
 }
 
 function createChildLocalInternalProxyBaseUrl(input: {

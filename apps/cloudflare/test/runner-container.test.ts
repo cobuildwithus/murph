@@ -305,6 +305,18 @@ describe("RunnerContainer", () => {
 
     expect(destroy).toHaveBeenCalled();
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          failClosed: false,
+          lifecycleStage: "destroy",
+        }),
+        level: "warn",
+        message: "Hosted execution container destroy request failed.",
+        phase: "failed",
+      }),
+    );
   });
 
   it("destroys an already-running shell with ambiguous supervisor state before reusing it", async () => {
@@ -378,6 +390,14 @@ describe("RunnerContainer", () => {
           portReadyTimeoutMS: 2_500,
         }),
       });
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          level: "warn",
+          message: "Hosted execution container warm health check failed; restarting shell.",
+          phase: "container.starting",
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
