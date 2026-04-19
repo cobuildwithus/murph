@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
-import { normalizeNullableString, sanitizeHostedSqlErrorText } from "../shared";
+import { normalizeNullableString, omitHostedSqlErrorText } from "../shared";
 import type { CreateHostedSignalInput, HostedSignalRecord } from "./types";
 
 type HostedSignalPrismaRecord = Prisma.DeviceSyncSignalGetPayload<Prisma.DeviceSyncSignalDefaultArgs>;
@@ -28,7 +28,7 @@ export class PrismaHostedSignalStore {
         reason: normalizeNullableString(input.reason),
         nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
         revokeWarningCode: normalizeNullableString(input.revokeWarning?.code),
-        revokeWarningMessage: sanitizeHostedSqlErrorText(input.revokeWarning?.message),
+        revokeWarningMessage: omitHostedSqlErrorText(input.revokeWarning?.message),
         createdAt: input.createdAt ? new Date(input.createdAt) : new Date(),
       },
     });
@@ -72,14 +72,7 @@ function mapHostedSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRe
     resourceCategory: record.resourceCategory,
     reason: record.reason,
     nextReconcileAt: record.nextReconcileAt?.toISOString() ?? null,
-    revokeWarning: record.revokeWarningCode || sanitizeHostedSqlErrorText(record.revokeWarningMessage)
-      ? {
-          ...(record.revokeWarningCode ? { code: record.revokeWarningCode } : {}),
-          ...(sanitizeHostedSqlErrorText(record.revokeWarningMessage)
-            ? { message: sanitizeHostedSqlErrorText(record.revokeWarningMessage) }
-            : {}),
-        }
-      : null,
+    revokeWarning: record.revokeWarningCode ? { code: record.revokeWarningCode } : null,
     createdAt: record.createdAt.toISOString(),
   } satisfies HostedSignalRecord;
 }

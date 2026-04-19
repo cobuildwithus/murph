@@ -531,6 +531,8 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       id: "dsc_123",
       status: "disconnected",
       metadata: {},
+      lastErrorCode: "REMOTE_REVOKE_FAILED",
+      lastErrorMessage: null,
       lastWebhookAt: "2026-03-25T07:00:00.000Z",
       updatedAt: "2026-03-25T08:00:00.000Z",
     }));

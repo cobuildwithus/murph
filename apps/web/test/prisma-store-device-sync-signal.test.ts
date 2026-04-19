@@ -250,6 +250,31 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
 
     expect(listed).toEqual([created]);
   });
+
+  it("drops hosted revoke warning messages while keeping the warning code", async () => {
+    const { createCalls, store } = createSignalStore();
+
+    const created = await store.createSignal({
+      userId: "user-123",
+      connectionId: "dsc_123",
+      provider: "whoop",
+      kind: "disconnect_warning",
+      revokeWarning: {
+        code: "WHOOP_REFRESH_TOKEN_MISSING",
+        message: "Provider revoke request failed during disconnect.",
+      },
+      createdAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0]).toEqual(expect.objectContaining({
+      revokeWarningCode: "WHOOP_REFRESH_TOKEN_MISSING",
+      revokeWarningMessage: null,
+    }));
+    expect(created.revokeWarning).toEqual({
+      code: "WHOOP_REFRESH_TOKEN_MISSING",
+    });
+  });
 });
 
 describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {

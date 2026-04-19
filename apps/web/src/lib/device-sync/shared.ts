@@ -21,7 +21,7 @@ export function normalizeNullableString(value: string | null | undefined): strin
 
 // Keep durable hosted SQL free of provider-sourced free-form text.
 // Runtime-only operational paths may still carry human-readable messages.
-export function sanitizeHostedSqlErrorText(_value: string | null | undefined): string | null {
+export function omitHostedSqlErrorText(_value: string | null | undefined): null {
   void _value;
   return null;
 }
