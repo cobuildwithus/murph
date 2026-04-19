@@ -1,11 +1,10 @@
-export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "murph.hosted-email-thread-target.v1";
+export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "murph.hosted-email-thread-target.v2";
 export const HOSTED_EMAIL_THREAD_TARGET_PREFIX = "hostedmail:";
 
 export interface HostedEmailThreadTarget {
   cc: string[];
   lastMessageId: string | null;
   references: string[];
-  replyAliasAddress: string | null;
   schema: typeof HOSTED_EMAIL_THREAD_TARGET_SCHEMA;
   subject: string | null;
   to: string[];
@@ -15,7 +14,6 @@ export function createHostedEmailThreadTarget(input: {
   cc?: ReadonlyArray<string> | null;
   lastMessageId?: string | null;
   references?: ReadonlyArray<string> | null;
-  replyAliasAddress?: string | null;
   subject?: string | null;
   to?: ReadonlyArray<string> | null;
 }): HostedEmailThreadTarget {
@@ -29,7 +27,6 @@ export function createHostedEmailThreadTarget(input: {
     cc: normalizeHostedEmailAddressList(input.cc ?? []),
     lastMessageId,
     references,
-    replyAliasAddress: normalizeHostedEmailAddress(input.replyAliasAddress),
     schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
     subject: normalizeHostedEmailSubject(input.subject),
     to: normalizeHostedEmailAddressList(input.to ?? []),

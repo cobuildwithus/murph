@@ -1,5 +1,6 @@
 import {
-  HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+  HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+  parseHostedEmailRouteResolutionCallbackRequest,
 } from "@murphai/hosted-execution/hosted-email";
 import {
   isHostedEmailInboundSenderAuthorized,
@@ -24,7 +25,7 @@ import { getPrisma } from "@/src/lib/prisma";
 export const POST = withJsonError(async (request: Request) => {
   const callbackUserId = await requireHostedCloudflareCallbackRequest(request);
 
-  if (callbackUserId !== HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID) {
+  if (callbackUserId !== HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID) {
     throw hostedOnboardingError({
       code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
       message: "Hosted Cloudflare callback is not authorized.",
@@ -32,9 +33,11 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const body = await readOptionalJsonObject(request);
+  const body = parseHostedEmailRouteResolutionCallbackRequest(
+    await readOptionalJsonObject(request),
+  );
   const prisma = getPrisma();
-  const aliasKey = typeof body.aliasKey === "string" ? body.aliasKey.trim() : "";
+  const aliasKey = body.aliasKey?.trim() ?? "";
 
   if (aliasKey) {
     const memberId = await readHostedMemberIdByReplyAliasLookupKey({
@@ -52,9 +55,9 @@ export const POST = withJsonError(async (request: Request) => {
 
     return jsonOk({
       userId: isHostedEmailInboundSenderAuthorized({
-        envelopeFrom: typeof body.envelopeFrom === "string" ? body.envelopeFrom : null,
-        hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom === true,
-        headerFrom: typeof body.headerFrom === "string" ? body.headerFrom : null,
+        envelopeFrom: body.envelopeFrom,
+        hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
+        headerFrom: body.headerFrom,
         verifiedEmailAddress: emailAuthorization?.verifiedEmail?.address ?? null,
       })
         ? memberId
@@ -63,9 +66,9 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const senderAddress = resolveHostedEmailDirectSenderLookupAddress({
-    envelopeFrom: typeof body.envelopeFrom === "string" ? body.envelopeFrom : null,
-    hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom === true,
-    headerFrom: typeof body.headerFrom === "string" ? body.headerFrom : null,
+    envelopeFrom: body.envelopeFrom,
+    hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
+    headerFrom: body.headerFrom,
   });
   const userId = senderAddress
     ? await readHostedMemberIdByAuthorizedDirectPublicSenderAddress({

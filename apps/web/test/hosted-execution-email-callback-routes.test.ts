@@ -11,7 +11,9 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+  HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+  HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+  HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
 } from "@murphai/hosted-execution/hosted-email";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -122,7 +124,7 @@ describe("hosted execution email callback routes", () => {
       body: JSON.stringify({
         aliasKey: "replyalias1234",
       }),
-      path: "/api/internal/hosted-execution/email/register-reply-alias",
+      path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     }));
@@ -141,7 +143,7 @@ describe("hosted execution email callback routes", () => {
   it("rejects reply-alias registration callbacks without a non-empty alias key", async () => {
     const response = await registerReplyAliasRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({}),
-      path: "/api/internal/hosted-execution/email/register-reply-alias",
+      path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     }));
@@ -176,9 +178,9 @@ describe("hosted execution email callback routes", () => {
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
       }),
-      path: "/api/internal/hosted-execution/email/resolve-route",
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
-      userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
     }));
 
     expect(response.status).toBe(200);
@@ -203,9 +205,9 @@ describe("hosted execution email callback routes", () => {
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
       }),
-      path: "/api/internal/hosted-execution/email/resolve-route",
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
-      userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
     }));
 
     expect(response.status).toBe(200);
@@ -234,9 +236,9 @@ describe("hosted execution email callback routes", () => {
         hasRepeatedHeaderFrom: false,
         headerFrom: "Attacker <attacker@example.com>",
       }),
-      path: "/api/internal/hosted-execution/email/resolve-route",
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
-      userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
     }));
 
     expect(response.status).toBe(200);
@@ -254,9 +256,9 @@ describe("hosted execution email callback routes", () => {
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
       }),
-      path: "/api/internal/hosted-execution/email/resolve-route",
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
-      userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
     }));
 
     expect(response.status).toBe(200);
@@ -276,7 +278,7 @@ describe("hosted execution email callback routes", () => {
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
       }),
-      path: "/api/internal/hosted-execution/email/resolve-route",
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     }));
