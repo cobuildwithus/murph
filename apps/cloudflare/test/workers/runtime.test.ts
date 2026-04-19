@@ -60,6 +60,7 @@ import {
   appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
+  materializeTestHostedWakes,
   quarantineTestHostedWake,
   readTestHostedWakeStatus,
   recordTestHostedWakeTerminal,
@@ -330,6 +331,14 @@ async function handleHostedWakeControlFetch(request: Request): Promise<Response 
     const body = await request.clone().json() as HostedWakeTerminalRequest;
     return Response.json(await recordTestHostedWakeTerminal({
       body,
+      bucket,
+      userId,
+    }));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/internal/hosted-wake/materialize") {
+    return Response.json(await materializeTestHostedWakes({
+      body: await request.clone().json(),
       bucket,
       userId,
     }));
