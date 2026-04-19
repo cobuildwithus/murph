@@ -129,14 +129,15 @@ export async function runHostedAssistantCronWakeLane(input: {
         nextWakeAt: null,
         progressed: false,
       };
+  const nextWakeAt = assistantResult.nextWakeAt
+    ?? (assistantResult.progressed ? new Date().toISOString() : null);
 
   return {
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
-    nextWakeAt: assistantResult.nextWakeAt
-      ?? (assistantResult.progressed ? new Date().toISOString() : null),
+    nextWakeAt,
     parserProcessed: 0,
-    wakeMaterializationHints: null,
+    wakeMaterializationHints: createAssistantWakeMaterializationHints(nextWakeAt),
   };
 }
 
@@ -463,7 +464,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
     deviceSyncSkipped: deviceSyncResult.skipped,
     nextWakeAt: deviceSyncResult.nextWakeAt,
     parserProcessed: 0,
-    wakeMaterializationHints: null,
+    wakeMaterializationHints: createDeviceSyncWakeMaterializationHints(deviceSyncResult.nextWakeAt),
   };
 }
 
@@ -522,4 +523,20 @@ function earliestHostedWakeAt(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function createAssistantWakeMaterializationHints(nextWakeAt: string | null): HostedMaintenanceMetrics["wakeMaterializationHints"] {
+  return nextWakeAt
+    ? {
+        assistantWakeAt: nextWakeAt,
+      }
+    : null;
+}
+
+function createDeviceSyncWakeMaterializationHints(nextWakeAt: string | null): HostedMaintenanceMetrics["wakeMaterializationHints"] {
+  return nextWakeAt
+    ? {
+        deviceSyncWakeAt: nextWakeAt,
+      }
+    : null;
 }

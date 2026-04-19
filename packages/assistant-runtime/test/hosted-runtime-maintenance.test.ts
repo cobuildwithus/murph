@@ -760,7 +760,9 @@ describe("runHostedAssistantCronWakeLane", () => {
       deviceSyncSkipped: true,
       nextWakeAt: "2026-04-08T01:00:00.000Z",
       parserProcessed: 0,
-      wakeMaterializationHints: null,
+      wakeMaterializationHints: {
+        assistantWakeAt: "2026-04-08T01:00:00.000Z",
+      },
     });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
       deliveryDispatchMode: "queue-only",
@@ -816,7 +818,9 @@ describe("runHostedAssistantCronWakeLane", () => {
         deviceSyncSkipped: true,
         nextWakeAt: "2026-04-08T00:00:00.000Z",
         parserProcessed: 0,
-        wakeMaterializationHints: null,
+        wakeMaterializationHints: {
+          assistantWakeAt: "2026-04-08T00:00:00.000Z",
+        },
       });
       expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
     } finally {
@@ -1014,7 +1018,9 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncSkipped: false,
       nextWakeAt: "2026-04-08T00:30:00.000Z",
       parserProcessed: 0,
-      wakeMaterializationHints: null,
+      wakeMaterializationHints: {
+        deviceSyncWakeAt: "2026-04-08T00:30:00.000Z",
+      },
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.openInboxRuntime).not.toHaveBeenCalled();
