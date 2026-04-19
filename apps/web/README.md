@@ -9,8 +9,8 @@ share facts, device-sync control-plane authority, the hosted AI usage ledger,
 and the canonical web-owned `HostedWake` / `HostedExecutionCursor` execution queue.
 
 Every hosted producer now appends canonical wakes in Postgres and hands execution
-off to Cloudflare with a narrow authenticated wake call. There is no parallel
-legacy dispatch architecture.
+off to Cloudflare with a narrow authenticated wake call. Hosted execution flows
+through that single wake/cursor path.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs one
