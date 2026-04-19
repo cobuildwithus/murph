@@ -119,7 +119,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | Path                         | Responsibility                                                                                                                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/contracts`         | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts.                                                             |
-| `packages/hosted-execution`  | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients.                                                         |
+| `packages/hosted-execution`  | Shared hosted wake/cursor/status contracts plus narrow control/auth helpers for the hosted `apps/web` control plane and Cloudflare worker. |
 | `packages/runtime-state`     | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers.       |
 | `packages/core`              | Workspace-private canonical mutation owner. No other package may write canonical vault data directly.                                      |
 | `packages/importers`         | Workspace-private external adapters that normalize inputs and delegate writes to `core`.                                                   |
@@ -138,7 +138,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
 | `packages/openclaw-plugin`   | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault.             |
 | `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and the canonical Postgres-owned `HostedWake` / `HostedExecutionCursor` lifecycle. |
-| `apps/cloudflare`            | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs.           |
+| `apps/cloudflare`            | Hosted execution plane for authenticated wake/control requests, per-user coordination, encrypted hosted bundles, and container-backed runs. |
 | `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |
 
 ## Local and hosted surfaces
