@@ -66,7 +66,9 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
 const HOSTED_WAKE_NUDGE_RETRY_DELAY_MS = 5_000;
 const HOSTED_WAKE_DEVICE_SYNC_HINT_REVALIDATE_INTERVAL_MS = 60_000;
-const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
+// Preserve the previous effective drain cap of 32 fetched batches * 64 wakes each
+// now that every successful cursor advance forces a refetch before the next wake.
+const MAX_HOSTED_WAKE_DRAIN_ROUNDS = DEFAULT_HOSTED_WAKE_BATCH_LIMIT * 32;
 const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
@@ -346,6 +348,7 @@ export class HostedUserRunner {
         break;
       }
 
+      let refetchAfterCommittedWake = false;
       let stoppingState: HostedWakeDrainState | null = null;
 
       for (const wake of batch.wakes) {
@@ -452,6 +455,8 @@ export class HostedUserRunner {
 
         afterSeq = cursor.committedSeq;
         expectedVersion = cursor.version;
+        refetchAfterCommittedWake = true;
+        break;
       }
 
       if (stoppingState) {
@@ -460,6 +465,10 @@ export class HostedUserRunner {
         }
 
         break;
+      }
+
+      if (refetchAfterCommittedWake) {
+        continue;
       }
 
       if (
