@@ -60,7 +60,7 @@ export class RunnerBundleSync {
     const nextBundleBytes = decodeHostedBundleBase64(bundle);
 
     for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
-      const bundleState = await this.stateStore.readBundleMetaState();
+      const bundleState = await this.stateStore.readBundleMetaStateForMutation();
       const nextBundleRef = bundle === null
         ? null
         : await writeHostedBundleBytesIfChanged({
