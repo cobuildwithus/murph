@@ -514,7 +514,8 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("created the canonical vault");
       expect(result.result.summary).toContain("hosted assistant config missing");
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
-      expect(result.result.summary).toContain("Parser jobs: 0.");
+      expect(result.result.summary).toContain("hosted Linq auto-reply unavailable");
+      expect(result.result.summary).toContain("hosted Telegram auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("linq");
       expect(automationState.autoReplyChannels).not.toContain("email");
       await expect(
@@ -1429,7 +1430,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("fails hosted execution when an externalized artifact cannot be fetched", async () => {
+  it("completes the hosted assistant cron tick when an externalized artifact cannot be fetched", async () => {
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -1526,15 +1527,33 @@ describe("runHostedExecutionJob", () => {
         artifactsBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
-      await expect(runHostedExecutionJob({
+      const result = await runHostedExecutionJob({
         bundles: {
           agentState: encodeHostedBundleBase64(snapshot.agentStateBundle),
           vault: encodeHostedBundleBase64(snapshot.vaultBundle),
         },
         wake: createCronWake({ eventId: "evt_artifact_missing_tick", occurredAt: "2026-03-26T12:05:00.000Z", reason: "manual", userId: "member_artifacts_missing" }),
-      })).rejects.toThrow(
-        `Hosted runner artifact fetch failed for ${artifactHash}.`,
-      );
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-missing-final-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        shouldRestoreArtifact: () => false,
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const finalRuntime = await openInboxRuntime({
+        vaultRoot: restored.vaultRoot,
+      });
+
+      try {
+        expect(result.result.summary).toBe(
+          "Processed assistant cron tick (manual) on the hosted assistant lane.",
+        );
+        expect(finalRuntime.listAttachmentParseJobs({ state: "pending" })).toHaveLength(0);
+      } finally {
+        finalRuntime.close();
+      }
       restoreFetch();
     } finally {
       server.close();
@@ -1813,12 +1832,13 @@ describe("runHostedExecutionJob", () => {
       operatorHomeRoot: restoredActivation.operatorHomeRoot,
       vaultRoot: restoredActivation.vaultRoot,
     });
-    const fetchSpy = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      if (String(url) !== "https://usage.worker/api/internal/hosted-execution/usage/record") {
-        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = normalizeFetchRequest(input, init);
+      if (request.url !== "http://web-control.worker/api/internal/hosted-execution/usage/record") {
+        throw new Error(`Unexpected fetch URL: ${request.url}`);
       }
 
-      expect(new Headers(init?.headers).get("authorization")).toBeNull();
+      expect(request.headers.get("authorization")).toBeNull();
 
       return new Response(JSON.stringify({
         recorded: 1,
@@ -1848,13 +1868,15 @@ describe("runHostedExecutionJob", () => {
         workspaceRoot,
       });
 
-      const [usageUrl, usageRequest] = fetchSpy.mock.calls[0] ?? [];
-      expect(String(usageUrl)).toBe("https://usage.worker/api/internal/hosted-execution/usage/record");
-      expect((usageRequest as RequestInit | undefined)?.method).toBe("POST");
-      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("content-type")).toBe("application/json");
-      const usageRequestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
-      expect(typeof usageRequestInit?.body).toBe("string");
-      expect(String(usageRequestInit?.body)).toContain("\"usageId\":\"turn_usage_proxy.attempt-1\"");
+      const [usageInput, usageInit] = fetchSpy.mock.calls[0] ?? [];
+      const usageRequest = normalizeFetchRequest(
+        usageInput as RequestInfo | URL,
+        usageInit as RequestInit | undefined,
+      );
+      expect(usageRequest.url).toBe("http://web-control.worker/api/internal/hosted-execution/usage/record");
+      expect(usageRequest.method).toBe("POST");
+      expect(usageRequest.headers.get("content-type")).toBe("application/json");
+      await expect(usageRequest.text()).resolves.toContain("\"usageId\":\"turn_usage_proxy.attempt-1\"");
       await expect(listPendingAssistantUsageRecords({
         vault: restored.vaultRoot,
       })).resolves.toEqual([]);
