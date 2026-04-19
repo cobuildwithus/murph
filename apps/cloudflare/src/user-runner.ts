@@ -65,6 +65,7 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
 const HOSTED_WAKE_NUDGE_RETRY_DELAY_MS = 5_000;
+const HOSTED_WAKE_DEVICE_SYNC_HINT_REVALIDATE_INTERVAL_MS = 60_000;
 const MAX_HOSTED_WAKE_DRAIN_ROUNDS = 32;
 const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
@@ -471,6 +472,7 @@ export class HostedUserRunner {
     }
 
     const committedSeq = afterSeq ?? await this.readCommittedWakeSeqFromWeb(userId);
+    await this.scheduleHostedWakeMaterializationRevalidationIfNeeded();
 
     return {
       committedSeq,
@@ -1019,6 +1021,21 @@ export class HostedUserRunner {
       }
     }
   }
+
+  private async scheduleHostedWakeMaterializationRevalidationIfNeeded(): Promise<void> {
+    const wakeMaterializationHints = await this.stateStore.readWakeMaterializationHints();
+    const preferredWakeAt = computeHostedWakeMaterializationRevalidationWakeAt(
+      wakeMaterializationHints,
+    );
+
+    if (!preferredWakeAt) {
+      return;
+    }
+
+    await this.wakeScheduler.syncNextWake({
+      preferredWakeAt,
+    });
+  }
 }
 
 function sameHostedWakeCursorSnapshotRef(
@@ -1055,7 +1072,8 @@ function shouldRefreshHostedWakeMaterialization(
     return true;
   }
 
-  return hostedWakeMaterializationDueNow(wakeMaterializationHints);
+  return hostedWakeMaterializationDueNow(wakeMaterializationHints)
+    || hostedWakeDeviceSyncHintNeedsRevalidation(wakeMaterializationHints.deviceSyncWakeAt);
 }
 
 function hostedWakeHintDueNow(value: string | null | undefined): boolean {
@@ -1065,6 +1083,28 @@ function hostedWakeHintDueNow(value: string | null | undefined): boolean {
 
   const parsedMs = Date.parse(value);
   return Number.isFinite(parsedMs) && parsedMs <= Date.now();
+}
+
+function hostedWakeDeviceSyncHintNeedsRevalidation(
+  value: string | null | undefined,
+): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const parsedMs = Date.parse(value);
+  return Number.isFinite(parsedMs)
+    && parsedMs > Date.now() + HOSTED_WAKE_DEVICE_SYNC_HINT_REVALIDATE_INTERVAL_MS;
+}
+
+function computeHostedWakeMaterializationRevalidationWakeAt(
+  wakeMaterializationHints: HostedWakeMaterializationHints | null,
+): string | null {
+  if (!hostedWakeDeviceSyncHintNeedsRevalidation(wakeMaterializationHints?.deviceSyncWakeAt)) {
+    return null;
+  }
+
+  return new Date(Date.now() + HOSTED_WAKE_DEVICE_SYNC_HINT_REVALIDATE_INTERVAL_MS).toISOString();
 }
 
 function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | null {
