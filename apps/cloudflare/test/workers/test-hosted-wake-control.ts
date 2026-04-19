@@ -165,7 +165,30 @@ export async function commitTestHostedWakeCursor(input: {
 
   const committedSeq = parseSeq(input.body.committedSeq);
   const currentCommittedSeq = parseSeq(state.cursor.committedSeq);
-  const nextCommittedSeq = committedSeq > currentCommittedSeq ? committedSeq : currentCommittedSeq;
+  const shouldAdvanceCommittedSeq = committedSeq > currentCommittedSeq;
+  const hasSnapshotRef = "snapshotRef" in input.body;
+  const nextSnapshotRef = hasSnapshotRef
+    ? input.body.snapshotRef ?? null
+    : state.cursor.snapshotRef ?? null;
+  const snapshotRefChanged = JSON.stringify(state.cursor.snapshotRef ?? null)
+    !== JSON.stringify(nextSnapshotRef);
+
+  if (
+    (shouldAdvanceCommittedSeq
+      && (
+        committedSeq !== currentCommittedSeq + 1n
+        || committedSeq >= state.nextSeq
+      ))
+    || (!shouldAdvanceCommittedSeq && committedSeq !== currentCommittedSeq)
+    || (!shouldAdvanceCommittedSeq && (!hasSnapshotRef || !snapshotRefChanged))
+  ) {
+    return {
+      committed: false,
+      cursor: state.cursor,
+    };
+  }
+
+  const nextCommittedSeq = shouldAdvanceCommittedSeq ? committedSeq : currentCommittedSeq;
   const nextVersion = String(parseSeq(state.cursor.version) + 1n);
 
   for (const wake of state.wakes) {
@@ -184,7 +207,7 @@ export async function commitTestHostedWakeCursor(input: {
     committedSeq: String(nextCommittedSeq),
     createdAt: state.cursor.createdAt,
     nextSeq: String(state.nextSeq),
-    snapshotRef: input.body.snapshotRef ?? null,
+    snapshotRef: nextSnapshotRef,
     updatedAt: now,
     userId: input.userId,
     version: nextVersion,
