@@ -26,6 +26,8 @@ Remove the rollout-only compatibility path that still accepts hosted wake fetch 
 
 - This is an intentional hard cut for greenfield hosted execution, not a staged backwards-compatible rollout.
 - The invariant is exact fetched-row identity binding, not just wake id plus seq.
+- Focused verification passed on 2026-04-19:
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/hosted-wake-store.test.ts -t "rejects a legacy fetch proof that omits wakeEventId binding"`
 Status: completed
 Updated: 2026-04-19
 Completed: 2026-04-19
