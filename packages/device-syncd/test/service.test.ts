@@ -2032,7 +2032,7 @@ test("sqlite store reopens an existing split-schema database at the current sche
   reopenedStore.close();
 });
 
-test("sqlite store rejects unsupported hybrid device_account tables even when the schema version claims current", async () => {
+test("sqlite store still rejects newer schema versions even when stale legacy tables remain", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-legacy-reject");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   const database = openSqliteRuntimeDatabase(databasePath);
@@ -2050,7 +2050,7 @@ test("sqlite store rejects unsupported hybrid device_account tables even when th
 
   assert.throws(
     () => new SqliteDeviceSyncStore(databasePath),
-    /Unsupported legacy device-sync runtime schema detected/,
+    /device sync runtime database schema version 2 is newer than supported version 1/,
   );
 });
 

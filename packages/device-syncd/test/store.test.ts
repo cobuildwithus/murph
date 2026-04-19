@@ -419,7 +419,7 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
   }
 });
 
-test("device sync store rejects legacy schemas and consumes missing or expired OAuth state safely", async () => {
+test("device sync store bootstraps current tables even when stale legacy tables remain and consumes missing or expired OAuth state safely", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-legacy");
   const legacyDatabasePath = path.join(tempDir, "legacy.sqlite");
   const legacyDatabase = openSqliteRuntimeDatabase(legacyDatabasePath);
@@ -430,10 +430,8 @@ test("device sync store rejects legacy schemas and consumes missing or expired O
   `);
   legacyDatabase.close();
 
-  assert.throws(
-    () => new SqliteDeviceSyncStore(legacyDatabasePath),
-    /Unsupported legacy device-sync runtime schema detected/u,
-  );
+  const legacyStore = new SqliteDeviceSyncStore(legacyDatabasePath);
+  legacyStore.close();
 
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
