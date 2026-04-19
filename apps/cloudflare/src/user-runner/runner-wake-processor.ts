@@ -66,7 +66,7 @@ export interface RunnerUserStores {
 
 export interface RunnerWakeExecutionResult {
   cursorSnapshotRef: HostedExecutionBundleRef | null;
-  postCursorAction: "cleanup-only";
+  postCursorAction: "cleanup-only" | "finalize-after-commit";
   state: HostedWakeLifecycleState;
 }
 
@@ -88,44 +88,6 @@ interface RunnerWakeProcessorDependencies {
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   wakeScheduler: RunnerWakeScheduler;
-}
-
-async function preparePendingCommitForCursorCommit(input: {
-  pendingCommit: RunnerPendingCommitRecord;
-  persistBrowserVaultSnapshotBestEffort: (
-    userId: string,
-    browserVaultSnapshot: unknown | null,
-  ) => Promise<void>;
-  restorePendingCommitState: (pendingCommit: RunnerPendingCommitRecord) => Promise<void>;
-  resumePendingCommitToFinalResult: (input: {
-    pendingCommit: RunnerPendingCommitRecord;
-    run: HostedExecutionRunContext;
-    userId: string;
-    wake: HostedExecutionWake;
-  }) => Promise<{
-    finalRunnerResult: HostedAssistantRuntimeCompletedJobResult;
-    finalizedPendingCommit: RunnerPendingCommitRecord;
-  }>;
-  run: HostedExecutionRunContext;
-  userId: string;
-  wake: HostedExecutionWake;
-}): Promise<RunnerPendingCommitRecord> {
-  if (input.pendingCommit.finalizedAt) {
-    await input.restorePendingCommitState(input.pendingCommit);
-    return input.pendingCommit;
-  }
-
-  const { finalRunnerResult, finalizedPendingCommit } = await input.resumePendingCommitToFinalResult({
-    pendingCommit: input.pendingCommit,
-    run: input.run,
-    userId: input.userId,
-    wake: input.wake,
-  });
-  await input.persistBrowserVaultSnapshotBestEffort(
-    input.userId,
-    finalRunnerResult.browserVaultSnapshot ?? null,
-  );
-  return finalizedPendingCommit;
 }
 
 async function reconcilePendingCommitAfterCursorCommit(input: {
@@ -221,32 +183,11 @@ export class RunnerWakeProcessor {
     }
 
     if (startMode.kind === "resumePendingCommit") {
-      const run = await this.resolvePendingCommitCleanupRun({
-        pendingCommit: startMode.pendingCommit,
-        wake,
-      });
-
       try {
-        const finalizedPendingCommit = await preparePendingCommitForCursorCommit({
-          pendingCommit: startMode.pendingCommit,
-          persistBrowserVaultSnapshotBestEffort: this.persistBrowserVaultSnapshotBestEffort.bind(this),
-          restorePendingCommitState: this.restorePendingCommitState.bind(this),
-          resumePendingCommitToFinalResult: this.resumePendingCommitToFinalResult.bind(this),
-          run,
-          userId,
-          wake,
-        });
-        await this.advanceRunPhase({
-          clearError: true,
-          wake,
-          message:
-            "Hosted wake execution finalized a DO-local pending commit before retrying cursor commit.",
-          phase: "completed",
-          run,
-        });
+        await this.restorePendingCommitState(startMode.pendingCommit);
         return {
-          cursorSnapshotRef: finalizedPendingCommit.bundleRef,
-          postCursorAction: "cleanup-only",
+          cursorSnapshotRef: startMode.pendingCommit.bundleRef,
+          postCursorAction: "finalize-after-commit",
           state: "completed",
         };
       } catch (error) {
@@ -258,7 +199,10 @@ export class RunnerWakeProcessor {
             policy: "same-event",
             run: null,
           },
-          run,
+          run: await this.resolvePendingCommitCleanupRun({
+            pendingCommit: startMode.pendingCommit,
+            wake,
+          }),
           wake,
         });
       }
@@ -347,16 +291,6 @@ export class RunnerWakeProcessor {
           phase: "commit.recorded",
           run,
         });
-        const finalizedPendingCommit = await preparePendingCommitForCursorCommit({
-          pendingCommit,
-          persistBrowserVaultSnapshotBestEffort: this.persistBrowserVaultSnapshotBestEffort.bind(this),
-          restorePendingCommitState: this.restorePendingCommitState.bind(this),
-          resumePendingCommitToFinalResult: this.resumePendingCommitToFinalResult.bind(this),
-          run,
-          userId,
-          wake,
-        });
-        cursorSnapshotRef = finalizedPendingCommit.bundleRef;
       } else {
         finalRunnerResult = runnerResult;
         cursorSnapshotRef = await this.persistCompletedRunnerResult({
@@ -389,7 +323,9 @@ export class RunnerWakeProcessor {
       }
       return {
         cursorSnapshotRef,
-        postCursorAction: "cleanup-only",
+        postCursorAction: runnerResult.phase === "committed"
+          ? "finalize-after-commit"
+          : "cleanup-only",
         state: "completed",
       };
     } catch (error) {
@@ -438,6 +374,79 @@ export class RunnerWakeProcessor {
       cleanupWake,
     );
     return input.cursor;
+  }
+
+  async finalizePendingCommitAfterCursorCommit(input: {
+    wake: HostedExecutionWake | null;
+  }): Promise<{
+    pendingCommit: RunnerPendingCommitRecord | null;
+    state: HostedWakeLifecycleState;
+  }> {
+    const pendingCommit = input.wake
+      ? await this.dependencies.stateStore.readPendingCommit(input.wake.eventId)
+      : await this.dependencies.stateStore.readPendingCommit();
+
+    if (!pendingCommit) {
+      return {
+        pendingCommit: null,
+        state: "completed",
+      };
+    }
+
+    const wake = input.wake ?? await this.restoreWakeFromPendingCommit(pendingCommit);
+    const run = await this.resolvePendingCommitCleanupRun({
+      pendingCommit,
+      wake,
+    });
+
+    try {
+      if (pendingCommit.finalizedAt) {
+        await this.restorePendingCommitState(pendingCommit);
+        return {
+          pendingCommit,
+          state: "completed",
+        };
+      }
+
+      const { finalRunnerResult, finalizedPendingCommit } = await this.resumePendingCommitToFinalResult({
+        pendingCommit,
+        run,
+        userId: pendingCommit.userId,
+        wake,
+      });
+      await this.persistBrowserVaultSnapshotBestEffort(
+        pendingCommit.userId,
+        finalRunnerResult.browserVaultSnapshot ?? null,
+      );
+      await this.advanceRunPhase({
+        clearError: true,
+        wake,
+        message:
+          "Hosted wake execution finalized a DO-local pending commit after the web cursor commit succeeded.",
+        phase: "completed",
+        run,
+      });
+      return {
+        pendingCommit: finalizedPendingCommit,
+        state: "completed",
+      };
+    } catch (error) {
+      const recovery = await this.recoverWakeExecutionFailure({
+        error,
+        holdLeaseUntilCleanup: true,
+        leaseOwner: {
+          eventId: wake.eventId,
+          policy: "same-event",
+          run: null,
+        },
+        run,
+        wake,
+      });
+      return {
+        pendingCommit: await this.dependencies.stateStore.readPendingCommit(wake.eventId),
+        state: recovery.state,
+      };
+    }
   }
 
   async discardWakeAfterLostCursorRace(input: {
