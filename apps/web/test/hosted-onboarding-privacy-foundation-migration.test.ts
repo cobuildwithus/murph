@@ -85,7 +85,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
 ]);
 
 describe("hosted Prisma baseline migration", () => {
-  it("starts from the current split-table hosted-member shape", () => {
+  it("preserves the current split-table hosted-member shape in the single checked-in baseline", () => {
     const migrationEntries = readdirSync(new URL("../prisma/migrations/", import.meta.url))
       .filter((entry) => !entry.startsWith("."))
       .sort();
@@ -93,141 +93,59 @@ describe("hosted Prisma baseline migration", () => {
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
     );
-    const optionalPhoneMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604141730_hosted_member_identity_optional_phone/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const hostedWebOwnerSlicesMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604161130_hosted_web_owner_slices/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const deviceSyncRuntimeStateMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604161430_device_sync_web_owner_runtime_state/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const hostedWakeBaselineMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604171900_hosted_wake_baseline/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const hostedWakeEventIdentityMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604191700_hosted_wake_event_identity/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const hostedWakeTerminalReceiptsMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604191830_hosted_wake_terminal_receipts/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const hostedWakeTerminalFetchCursorVersionMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604191915_hosted_wake_terminal_fetch_cursor_version/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const ownerScopedExternalEventIdentityMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/202604191945_owner_scoped_external_event_identity/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
-      "202604141730_hosted_member_identity_optional_phone",
-      "202604161130_hosted_web_owner_slices",
-      "202604161430_device_sync_web_owner_runtime_state",
-      "202604171900_hosted_wake_baseline",
-      "202604191700_hosted_wake_event_identity",
-      "202604191830_hosted_wake_terminal_receipts",
-      "202604191915_hosted_wake_terminal_fetch_cursor_version",
-      "202604191945_owner_scoped_external_event_identity",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_routing"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');
+    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_email_authorization"');
+    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_share_payload"');
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
-    expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT NOT NULL');
-    expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT NOT NULL');
-    expect(optionalPhoneMigrationSql).toContain('ALTER TABLE "hosted_member_identity"');
-    expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "masked_phone_number_hint" DROP NOT NULL');
-    expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "phone_lookup_key" DROP NOT NULL');
-    expect(hostedWebOwnerSlicesMigrationSql).toContain(
-      'CREATE TABLE "hosted_member_email_authorization"',
-    );
-    expect(hostedWebOwnerSlicesMigrationSql).toContain(
-      'CREATE TABLE "hosted_share_payload"',
-    );
-    expect(hostedWebOwnerSlicesMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT');
+    expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT');
+    expect(baselineMigrationSql).not.toContain('"masked_phone_number_hint" TEXT NOT NULL');
+    expect(baselineMigrationSql).not.toContain('"phone_lookup_key" TEXT NOT NULL');
+    expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_member_email_authorization_verified_email_lookup_key_key"',
     );
-    expect(deviceSyncRuntimeStateMigrationSql).toContain(
-      'ALTER TABLE "device_connection"',
-    );
-    expect(deviceSyncRuntimeStateMigrationSql).toContain(
-      'ADD COLUMN "access_token_encrypted" TEXT',
-    );
-    expect(deviceSyncRuntimeStateMigrationSql).toContain(
-      'ADD COLUMN "refresh_token_encrypted" TEXT',
-    );
-    expect(hostedWakeBaselineMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain('"access_token_encrypted" TEXT');
+    expect(baselineMigrationSql).toContain('"refresh_token_encrypted" TEXT');
+    expect(baselineMigrationSql).toContain(
       'CREATE TABLE "hosted_wake_payload"',
     );
-    expect(hostedWakeBaselineMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_wake_payload_user_id_idx"',
     );
-    expect(hostedWakeBaselineMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain(
       'CREATE TABLE "hosted_execution_cursor"',
     );
-    expect(hostedWakeBaselineMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain(
       'CREATE TABLE "hosted_wake"',
     );
-    expect(hostedWakeBaselineMigrationSql).toContain(
-      'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
-    );
-    expect(hostedWakeEventIdentityMigrationSql).toContain(
-      'CREATE TABLE "hosted_wake_event"',
-    );
-    expect(hostedWakeEventIdentityMigrationSql).toContain(
-      'INSERT INTO "hosted_wake_event"',
-    );
-    expect(hostedWakeEventIdentityMigrationSql).toContain(
-      'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
-    );
-    expect(hostedWakeTerminalReceiptsMigrationSql).toContain(
-      'CREATE TABLE "hosted_wake_terminal"',
-    );
-    expect(hostedWakeTerminalFetchCursorVersionMigrationSql).toContain(
-      'ADD COLUMN "fetched_cursor_version" BIGINT NOT NULL DEFAULT -1',
-    );
-    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key")',
     );
-    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
-      'ADD CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id", "event_id")',
+    expect(baselineMigrationSql).toContain(
+      'CREATE TABLE "hosted_wake_event"',
     );
-    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain(
+      'CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id","event_id")',
+    );
+    expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id")',
     );
-    expect(ownerScopedExternalEventIdentityMigrationSql).toContain(
+    expect(baselineMigrationSql).toContain(
+      'CREATE TABLE "hosted_wake_terminal"',
+    );
+    expect(baselineMigrationSql).toContain(
+      '"fetched_cursor_version" BIGINT NOT NULL',
+    );
+    expect(baselineMigrationSql).toContain(
+      'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
+    );
+    expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "linq_webhook_event_user_id_event_id_key" ON "linq_webhook_event"("user_id", "event_id")',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');

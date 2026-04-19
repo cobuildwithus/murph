@@ -255,9 +255,9 @@ pnpm --dir apps/web prisma:migrate:deploy
 The hosted schema now includes the canonical member slices, hosted email
 authorization, hosted share payload ownership, device-sync web ownership
 models, plus the canonical `HostedWake` / `HostedExecutionCursor` fence.
-The checked-in Prisma migration chain is intentionally incremental for now; do
-not collapse it back to a single hosted baseline unless an explicit reset lands
-in the repo.
+The checked-in Prisma history is now a single greenfield baseline migration
+that matches the current hosted schema. If you have an older local database
+from the superseded incremental chain, reset it before reapplying migrations.
 
 ## Local dev aids
 
