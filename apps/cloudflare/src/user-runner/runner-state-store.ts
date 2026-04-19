@@ -1,5 +1,6 @@
 import {
   HOSTED_WAKE_PAYLOAD_SCHEMAS,
+  emitHostedExecutionStructuredLog,
   isHostedExecutionWakeKind,
   type HostedWakeMaterializationHints,
   type HostedExecutionRunContext,
@@ -19,6 +20,7 @@ import {
   assignRunnerBundleRefs,
   createDefaultRunnerBundleState,
   createDefaultRunnerMetaRow,
+  hasDroppedWakeMaterializationHintPayload,
   projectRunnerStateRecord,
   resolveRunnerNextWakeAt,
   type RunnerMetaRow,
@@ -300,6 +302,22 @@ export class RunnerStateStore {
       return null;
     }
 
+    if (Number.isNaN(Date.parse(run.startedAt))) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          activeRunAttempt: run.attempt,
+          activeRunEventId: meta.active_run_event_id,
+          activeRunId: run.runId,
+          activeRunStartedAt: run.startedAt,
+        },
+        level: "warn",
+        message: "Hosted runner active-run lease timestamp was malformed but the persisted lease will remain readable.",
+        phase: "wake.running",
+        userId: meta.user_id,
+      });
+    }
+
     return {
       eventId: meta.active_run_event_id,
       run,
@@ -314,6 +332,26 @@ export class RunnerStateStore {
     const wakeMaterializationHints = input.wakeMaterializationHints === undefined
       ? parseWakeMaterializationHints(meta.wake_materialization_hints_json)
       : normalizeWakeMaterializationHints(input.wakeMaterializationHints);
+    if (
+      input.wakeMaterializationHints !== undefined
+      && input.wakeMaterializationHints !== null
+      && hasDroppedWakeMaterializationHintPayload(input.wakeMaterializationHints)
+    ) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          assistantWakeAt: input.wakeMaterializationHints.assistantWakeAt ?? null,
+          deviceSyncWakeAt: input.wakeMaterializationHints.deviceSyncWakeAt ?? null,
+          wakeMaterializationHintKeyCount: Object.keys(input.wakeMaterializationHints).length,
+          wakeMaterializationHintKeys: Object.keys(input.wakeMaterializationHints).sort(),
+        },
+        level: "warn",
+        message:
+          "Hosted wake materialization hints were dropped after normalization because they were malformed or empty.",
+        phase: "wake.running",
+        userId: meta.user_id,
+      });
+    }
     meta.next_wake_at = resolveRunnerNextWakeAt({
       preferredWakeAt: input.preferredWakeAt ?? null,
       wakeMaterializationHints,
@@ -327,7 +365,22 @@ export class RunnerStateStore {
   }
 
   async readWakeMaterializationHints(): Promise<HostedWakeMaterializationHints | null> {
-    return parseWakeMaterializationHints(this.requireMetaRowSync().wake_materialization_hints_json);
+    const meta = this.requireMetaRowSync();
+    const wakeMaterializationHints = parseWakeMaterializationHints(meta.wake_materialization_hints_json);
+    if (meta.wake_materialization_hints_json !== null && wakeMaterializationHints === null) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          storedWakeMaterializationHintsLength: meta.wake_materialization_hints_json.length,
+        },
+        level: "warn",
+        message: "Hosted wake materialization hints were dropped while reading runner state.",
+        phase: "wake.running",
+        userId: meta.user_id,
+      });
+    }
+
+    return wakeMaterializationHints;
   }
 
   async readPendingCommit(eventId?: string): Promise<RunnerPendingCommitRecord | null> {

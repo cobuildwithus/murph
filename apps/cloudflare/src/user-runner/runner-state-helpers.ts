@@ -152,6 +152,35 @@ export function resolveRunnerNextWakeAt(input: {
   );
 }
 
+export function hasWakeMaterializationHintPayload(
+  value: HostedWakeMaterializationHints | null,
+): boolean {
+  return Boolean(value && Object.keys(value).length > 0);
+}
+
+export function hasDroppedWakeMaterializationHintPayload(
+  value: HostedWakeMaterializationHints | null,
+): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const keys = Object.keys(value);
+  if (keys.length === 0) {
+    return true;
+  }
+
+  return keys.some((key) => key !== "assistantWakeAt" && key !== "deviceSyncWakeAt") || (
+    value.assistantWakeAt !== undefined
+    && value.assistantWakeAt !== null
+    && Number.isNaN(Date.parse(value.assistantWakeAt))
+  ) || (
+    value.deviceSyncWakeAt !== undefined
+    && value.deviceSyncWakeAt !== null
+    && Number.isNaN(Date.parse(value.deviceSyncWakeAt))
+  );
+}
+
 function normalizePreferredWakeAt(value: string | null): string | null {
   if (!value) {
     return null;

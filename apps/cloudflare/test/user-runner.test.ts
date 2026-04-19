@@ -855,6 +855,66 @@ describe("HostedUserRunner", () => {
     expect(bucket.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
+  it("logs best-effort raw email cleanup failures without failing the wake", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      createHostedWakeAwareFetch({
+        bucket,
+        handler: vi.fn(async (_url, init) => {
+          await commitResultForRunnerRequest({
+            payload: createRunnerSuccessPayload({
+              summary: "processed email",
+            }),
+            requestBody: JSON.parse(String(init?.body)),
+          });
+
+          return new Response(JSON.stringify(serializeRunnerSuccessPayload(createRunnerSuccessPayload({
+            summary: "processed email",
+          }))), {
+            status: 200,
+          });
+        }),
+      }),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const userId = "member_email_cleanup_failure";
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId,
+    });
+    const rawMessageKey = await writeHostedEmailRawMessage({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      plaintext: new TextEncoder().encode("From: alice@example.test\r\n\r\ncleanup failure"),
+      userId,
+    });
+    const deleteSpy = vi.spyOn(bucket.api, "delete").mockRejectedValueOnce(new Error("cleanup failed"));
+
+    await runner.wake(createEmailWake({
+      eventId: "email:cleanup-failure",
+      identityId: "assistant@mail.example.test",
+      rawMessageKey,
+      userId,
+    }));
+
+    expect(deleteSpy).toHaveBeenCalled();
+    const logRecords = warnSpy.mock.calls.map(([entry]) => JSON.parse(String(entry)) as {
+      details?: {
+        rawMessageKey?: string;
+        wakeChannel?: string;
+        wakeKind?: string;
+      };
+      message: string;
+    });
+    expect(logRecords.some((record) => record.message.includes("raw email cleanup failed")
+      && record.details?.rawMessageKey === rawMessageKey
+      && record.details?.wakeChannel === "email"
+      && record.details?.wakeKind === "conversation.message")).toBe(true);
+  });
+
   it("deletes hosted raw email bodies after recovering a finalized committed email dispatch", async () => {
     const userId = "member_email_recovery_cleanup";
     const crypto = await resolveHostedUserCryptoContextForTest({

@@ -191,6 +191,104 @@ describe("RunnerStateStore", () => {
     }
   });
 
+  it("logs malformed active-run lease timestamps while keeping the persisted lease readable", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    state.storage.sql.exec(
+      `UPDATE runner_meta
+         SET active_run_event_id = ?,
+             active_run_id = ?,
+             active_run_attempt = ?,
+             active_run_started_at = ?
+       WHERE singleton = 1`,
+      "evt_active",
+      "run_active",
+      1,
+      "not-a-timestamp",
+    );
+
+    await expect(store.readActiveRunLease()).resolves.toEqual({
+      eventId: "evt_active",
+      run: {
+        attempt: 1,
+        runId: "run_active",
+        startedAt: "not-a-timestamp",
+      },
+    });
+    const logRecords = warnSpy.mock.calls.map(([entry]) => JSON.parse(String(entry)) as {
+      details?: {
+        activeRunAttempt?: number;
+        activeRunEventId?: string;
+        activeRunId?: string;
+        activeRunStartedAt?: string;
+      };
+      message: string;
+    });
+    expect(logRecords.some((record) => record.message.includes("active-run lease timestamp was malformed")
+      && record.details?.activeRunEventId === "evt_active"
+      && record.details?.activeRunId === "run_active"
+      && record.details?.activeRunAttempt === 1
+      && record.details?.activeRunStartedAt === "not-a-timestamp")).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it("logs when malformed wake materialization hints are dropped while syncing", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+
+    const scheduled = await store.syncNextWake({
+      preferredWakeAt: null,
+      wakeMaterializationHints: {
+        assistantWakeAt: "not-a-timestamp",
+      },
+    });
+
+    expect(scheduled.nextWakeAt).toBeNull();
+    expect(await store.readWakeMaterializationHints()).toEqual({
+      assistantWakeAt: null,
+    });
+    const logRecords = warnSpy.mock.calls.map(([entry]) => JSON.parse(String(entry)) as {
+      details?: {
+        assistantWakeAt?: string | null;
+        deviceSyncWakeAt?: string | null;
+        wakeMaterializationHintKeys?: string[];
+      };
+      message: string;
+    });
+    expect(logRecords.some((record) => record.message.includes("dropped after normalization")
+      && record.details?.assistantWakeAt === "not-a-timestamp"
+      && record.details?.wakeMaterializationHintKeys?.length === 1)).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it("logs when empty wake materialization hints are dropped while syncing", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+
+    const scheduled = await store.syncNextWake({
+      preferredWakeAt: null,
+      wakeMaterializationHints: {},
+    });
+
+    expect(scheduled.nextWakeAt).toBeNull();
+    expect(await store.readWakeMaterializationHints()).toBeNull();
+    const logRecords = warnSpy.mock.calls.map(([entry]) => JSON.parse(String(entry)) as {
+      details?: {
+        wakeMaterializationHintKeyCount?: number;
+      };
+      message: string;
+    });
+    expect(logRecords.some((record) => record.message.includes("dropped after normalization")
+      && record.details?.wakeMaterializationHintKeyCount === 0)).toBe(true);
+    warnSpy.mockRestore();
+  });
+
   it("stores and clears DO-local pending commit recovery metadata", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
