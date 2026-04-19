@@ -38,15 +38,20 @@ export function LocalRunSection({
                 # Install Murph and launch setup
               </p>
               <p className="mt-2 break-all text-[#f5f0e8]">
-                <span className="text-[#d4b87a]">$</span>curl -fsSL{" "}
-                {installCommandUrl} | bash
+                <span className="select-none text-[#d4b87a]" aria-hidden="true">
+                  {"$ "}
+                </span>
+                curl -fsSL {installCommandUrl} | bash
               </p>
             </div>
 
             <div className="border-t border-white/8 pt-5">
               <p className="text-[#f5f0e8]/35"># Start chatting</p>
-              <p className="mt-2 text-[#f5f0e8]">
-                <span className="text-[#d4b87a]">$</span>murph chat
+              <p className="mt-2 break-all text-[#f5f0e8]">
+                <span className="select-none text-[#d4b87a]" aria-hidden="true">
+                  {"$ "}
+                </span>
+                murph chat
               </p>
             </div>
           </div>
