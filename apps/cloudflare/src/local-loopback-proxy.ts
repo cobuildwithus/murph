@@ -1,6 +1,5 @@
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-  HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionRunPhase } from "@murphai/hosted-execution";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
@@ -105,11 +104,9 @@ function createLocalLoopbackProxyRequest(upstreamUrl: URL, request: Request): Re
 
 function buildLocalLoopbackProxyRequestHeaders(headers: Headers, upstreamUrl: URL): Headers {
   const nextHeaders = new Headers();
-  const preserveHostedExecutionUserId =
-    upstreamUrl.pathname.startsWith("/__murph/local-internal-proxy/");
 
   headers.forEach((value, key) => {
-    if (shouldStripLocalLoopbackProxyHeader(key, { preserveHostedExecutionUserId })) {
+    if (shouldStripLocalLoopbackProxyHeader(key)) {
       return;
     }
     nextHeaders.set(key, value);
@@ -122,7 +119,7 @@ function buildLocalLoopbackProxyResponseHeaders(headers: Headers): Headers {
   const nextHeaders = new Headers();
 
   headers.forEach((value, key) => {
-    if (shouldStripLocalLoopbackProxyHeader(key, { preserveHostedExecutionUserId: false })) {
+    if (shouldStripLocalLoopbackProxyHeader(key)) {
       return;
     }
     nextHeaders.set(key, value);
@@ -131,12 +128,7 @@ function buildLocalLoopbackProxyResponseHeaders(headers: Headers): Headers {
   return nextHeaders;
 }
 
-function shouldStripLocalLoopbackProxyHeader(
-  name: string,
-  options: {
-    preserveHostedExecutionUserId: boolean;
-  },
-): boolean {
+function shouldStripLocalLoopbackProxyHeader(name: string): boolean {
   switch (name.toLowerCase()) {
     case "connection":
     case "content-length":
@@ -151,8 +143,6 @@ function shouldStripLocalLoopbackProxyHeader(
     case "transfer-encoding":
     case "upgrade":
       return true;
-    case HOSTED_EXECUTION_USER_ID_HEADER:
-      return !options.preserveHostedExecutionUserId;
     default:
       return false;
   }
@@ -160,9 +150,18 @@ function shouldStripLocalLoopbackProxyHeader(
 
 function redactTokenizedLocalProxyPathname(pathname: string): string {
   const redacted =
-    redactProxyPathToken(pathname, "/__murph/local-internal-proxy/")
+    redactLocalInternalProxyPathname(pathname)
     ?? redactProxyPathToken(pathname, "/__murph/local-loopback-proxy/");
   return redacted ?? pathname;
+}
+
+function redactLocalInternalProxyPathname(pathname: string): string | null {
+  const match = /^\/__murph\/local-internal-proxy\/users\/[^/]+(?<suffix>\/.*)?$/u.exec(pathname);
+  if (!match?.groups) {
+    return null;
+  }
+
+  return `/__murph/local-internal-proxy/users/<redacted>${match.groups.suffix ?? ""}`;
 }
 
 function redactProxyPathToken(pathname: string, prefix: string): string | null {

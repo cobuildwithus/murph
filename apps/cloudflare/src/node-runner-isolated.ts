@@ -23,7 +23,6 @@ import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
-  localLoopbackProxyToken?: string | null;
   job: HostedAssistantRuntimeJobInput;
 }
 

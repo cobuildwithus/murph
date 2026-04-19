@@ -17,8 +17,7 @@ import { readHostedExecutionProcessEnv } from "./hosted-execution-process-env.ts
 import { methodNotAllowed } from "./json.ts";
 import {
   buildLocalInternalProxyRouteBaseUrl,
-  createLocalInternalProxyUserToken,
-} from "./local-internal-proxy-token.ts";
+} from "./local-internal-proxy-route.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
@@ -32,8 +31,6 @@ const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
-const HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN_ENV =
-  "HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN";
 const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
 const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
@@ -77,6 +74,7 @@ interface HostedExecutionContainerRunnerInput {
 export interface HostedExecutionContainerStubLike {
   destroyInstance(): Promise<void>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedAssistantRuntimeJobResult>;
+  ownsInternalWorkerProxyToken(input: { token: string }): Promise<boolean>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -130,6 +128,10 @@ export class RunnerContainer extends Container {
     });
   }
 
+  async ownsInternalWorkerProxyToken(input: { token: string }): Promise<boolean> {
+    return this.runnerOutboundProxyToken !== null && this.runnerOutboundProxyToken === input.token;
+  }
+
   override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
       await this.stopWarmContainer({ failClosed: false });
@@ -155,15 +157,8 @@ export class RunnerContainer extends Container {
       this.environment,
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV,
     );
-    const localLoopbackProxyToken = readOptionalRunnerContainerEnvString(
-      this.environment,
-      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN_ENV,
-    );
     const internalWorkerProxyToken = this.runnerOutboundProxyToken
-      ?? await createRunnerOutboundProxyToken({
-        localLoopbackProxyToken,
-        userId: input.userId,
-      });
+      ?? createRunnerOutboundProxyToken();
     let keepWarm = false;
 
     try {
@@ -194,9 +189,8 @@ export class RunnerContainer extends Container {
             internalWorkerProxyToken,
             localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
               localInternalProxyBaseUrl,
-              localLoopbackProxyToken,
+              userId: input.userId,
             }),
-            localLoopbackProxyToken: null,
             job: input.job,
           }),
           headers: {
@@ -592,31 +586,21 @@ function readOptionalRunnerContainerEnvString(
   return normalized.length > 0 ? normalized : null;
 }
 
-async function createRunnerOutboundProxyToken(input: {
-  localLoopbackProxyToken: string | null;
-  userId: string;
-}): Promise<string> {
-  if (input.localLoopbackProxyToken) {
-    return await createLocalInternalProxyUserToken({
-      boundUserId: input.userId,
-      proxyTokenSecret: input.localLoopbackProxyToken,
-    });
-  }
-
+function createRunnerOutboundProxyToken(): string {
   return crypto.randomUUID();
 }
 
 function createChildLocalInternalProxyBaseUrl(input: {
   localInternalProxyBaseUrl: string | null;
-  localLoopbackProxyToken: string | null;
+  userId: string;
 }): string | null {
-  if (!input.localInternalProxyBaseUrl || !input.localLoopbackProxyToken) {
+  if (!input.localInternalProxyBaseUrl) {
     return null;
   }
 
   return buildLocalInternalProxyRouteBaseUrl({
     baseUrl: input.localInternalProxyBaseUrl,
-    loopbackToken: input.localLoopbackProxyToken,
+    userId: input.userId,
   });
 }
 

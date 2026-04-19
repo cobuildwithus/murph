@@ -8,7 +8,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-  HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
@@ -27,6 +26,10 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
+import {
+  buildLocalInternalProxyRouteBaseUrl,
+  isScopedLocalInternalProxyBaseUrl,
+} from "./local-internal-proxy-route.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
 
@@ -48,7 +51,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
   fetchImpl?: typeof fetch;
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
-  localLoopbackProxyToken?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
 }): HostedRuntimePlatform {
@@ -56,7 +58,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
     input.boundUserId,
     input.internalWorkerProxyToken ?? null,
     input.localInternalProxyBaseUrl ?? process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL ?? null,
-    input.localLoopbackProxyToken ?? process.env.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN ?? null,
     input.fetchImpl ?? fetch,
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
@@ -199,7 +200,6 @@ function createCloudflareHostedRuntimeFetch(
   boundUserId: string,
   internalWorkerProxyToken: string | null,
   localInternalProxyBaseUrl: string | null,
-  localLoopbackProxyToken: string | null,
   fetchImpl: typeof fetch,
 ): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -222,12 +222,9 @@ function createCloudflareHostedRuntimeFetch(
       ? createHostedLocalInternalProxyUrl(
         localInternalProxyBaseUrl,
         url,
-        requireLocalLoopbackProxyToken(localLoopbackProxyToken),
+        boundUserId,
       )
       : url;
-    if (localInternalProxyBaseUrl) {
-      headers.set(HOSTED_EXECUTION_USER_ID_HEADER, boundUserId);
-    }
     const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
     const details = {
       effectsFingerprintPresent: url.searchParams.has("fingerprint"),
@@ -278,7 +275,7 @@ function createCloudflareHostedRuntimeFetch(
 function createHostedLocalInternalProxyUrl(
   baseUrl: string,
   targetUrl: URL,
-  token: string,
+  boundUserId: string,
 ): URL {
   let normalizedBaseUrl: URL;
   try {
@@ -292,28 +289,18 @@ function createHostedLocalInternalProxyUrl(
   }
 
   const normalizedBasePath = ensureTrailingSlash(normalizedBaseUrl);
-  const proxyBaseUrl = isTokenizedLocalInternalProxyBaseUrl(normalizedBasePath)
+  const proxyBaseUrl = isScopedLocalInternalProxyBaseUrl(normalizedBasePath)
     ? normalizedBasePath
-    : new URL(
-      `__murph/local-internal-proxy/${encodeURIComponent(token)}/`,
-      normalizedBasePath,
-    );
+    : new URL(buildLocalInternalProxyRouteBaseUrl({
+      baseUrl: normalizedBasePath.toString(),
+      userId: boundUserId,
+    }));
   const proxyUrl = new URL(
     `${encodeURIComponent(targetUrl.hostname)}${targetUrl.pathname}`,
     proxyBaseUrl,
   );
   proxyUrl.search = targetUrl.search;
   return proxyUrl;
-}
-
-function requireLocalLoopbackProxyToken(value: string | null): string {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.trim();
-  }
-
-  throw new Error(
-    "HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN must be configured when HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL is set.",
-  );
 }
 
 interface HostedRequestInitWithDuplex extends RequestInit {
@@ -347,10 +334,6 @@ function ensureTrailingSlash(value: URL): URL {
   const next = new URL(value.toString());
   next.pathname = `${next.pathname}/`;
   return next;
-}
-
-function isTokenizedLocalInternalProxyBaseUrl(value: URL): boolean {
-  return /^\/__murph\/local-internal-proxy\/[^/]+\/$/u.test(value.pathname);
 }
 
 function createHostedWebDeviceSyncPort(input: {

@@ -69,7 +69,6 @@ interface HostedContainerRuntimeDependencies {
 
 interface HostedExecutionLocalBridgeConfig {
   localInternalProxyBaseUrl: string | null;
-  localLoopbackProxyToken: string | null;
 }
 
 class HostedRunnerShellIsolationError extends Error {
@@ -93,7 +92,6 @@ export async function startHostedContainerEntrypoint(input: {
     let internalWorkerProxyToken: string | null = null;
     let localBridge: HostedExecutionLocalBridgeConfig = {
       localInternalProxyBaseUrl: null,
-      localLoopbackProxyToken: null,
     };
 
     try {
@@ -202,7 +200,6 @@ export async function startHostedContainerEntrypoint(input: {
       const result = await runHostedExecutionJob(job, {
         internalWorkerProxyToken,
         localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
-        localLoopbackProxyToken: localBridge.localLoopbackProxyToken,
         signal: requestAbort.signal,
       });
       if (runtime.processIsolation) {
@@ -286,10 +283,6 @@ async function parseHostedExecutionContainerRunRequest(value: unknown): Promise<
       localInternalProxyBaseUrl: readNullableString(
         record.localInternalProxyBaseUrl,
         "Hosted container runner request.localInternalProxyBaseUrl",
-      ),
-      localLoopbackProxyToken: readNullableString(
-        record.localLoopbackProxyToken,
-        "Hosted container runner request.localLoopbackProxyToken",
       ),
     },
     job: assistantRuntime.parseHostedAssistantRuntimeJobInput(record.job),
@@ -613,7 +606,6 @@ async function runHostedExecutionJob(
   options?: {
     internalWorkerProxyToken?: string | null;
     localInternalProxyBaseUrl?: string | null;
-    localLoopbackProxyToken?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedExecutionJob"]>>> {

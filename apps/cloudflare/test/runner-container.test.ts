@@ -150,10 +150,8 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toMatchObject({
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
-      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
     });
     expect(
       startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars
@@ -165,7 +163,6 @@ describe("RunnerContainer", () => {
     const { container, containerFetch } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
       },
     });
 
@@ -187,8 +184,7 @@ describe("RunnerContainer", () => {
 
     expect(JSON.parse(executeCall[1].body)).toMatchObject({
       localInternalProxyBaseUrl:
-        "http://127.0.0.1:8787/__murph/local-internal-proxy/local-loopback-token/",
-      localLoopbackProxyToken: null,
+        "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/",
     });
   });
 
@@ -885,7 +881,6 @@ describe("RunnerContainer", () => {
     expect(forwarded).toMatchObject({
       internalWorkerProxyToken: expect.any(String),
       localInternalProxyBaseUrl: null,
-      localLoopbackProxyToken: null,
       job: {
         request: {
           resume: {

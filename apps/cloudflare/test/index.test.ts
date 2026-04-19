@@ -11,7 +11,6 @@ import {
 } from "../src/crypto-context.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
-import { createLocalInternalProxyUserToken } from "../src/local-internal-proxy-token.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
@@ -277,20 +276,12 @@ describe("cloudflare worker routes", () => {
   it("routes local internal proxy requests onto the results.worker handler", async () => {
     const env = createWorkerEnv(undefined, {
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
-      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
-    });
-    const runnerProxyToken = await createLocalInternalProxyUserToken({
-      boundUserId: "member_123",
-      proxyTokenSecret: "local-token",
     });
 
     const missingProxyTokenResponse = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/messages/raw_local_internal",
+        "https://runner.example.test/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
         {
-          headers: {
-            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-          },
           method: "GET",
         },
       ),
@@ -304,11 +295,10 @@ describe("cloudflare worker routes", () => {
 
     const readResponse = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/messages/raw_local_internal",
+        "https://runner.example.test/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
         {
           headers: {
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
-            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
           },
           method: "GET",
         },
@@ -325,20 +315,14 @@ describe("cloudflare worker routes", () => {
   it("rejects local internal proxy requests when the proxy token is replayed against another user", async () => {
     const env = createWorkerEnv(undefined, {
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
-      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
-    });
-    const runnerProxyToken = await createLocalInternalProxyUserToken({
-      boundUserId: "member_123",
-      proxyTokenSecret: "local-token",
     });
 
     const response = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/local-token/results.worker/messages/raw_local_internal",
+        "https://runner.example.test/__murph/local-internal-proxy/users/member_456/results.worker/messages/raw_local_internal",
         {
           headers: {
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: runnerProxyToken,
-            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_456",
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
           },
           method: "GET",
         },

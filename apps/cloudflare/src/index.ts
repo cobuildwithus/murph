@@ -24,7 +24,6 @@ import {
   proxyLocalLoopbackRequest,
   readLocalLoopbackProxyBaseUrl,
 } from "./local-loopback-proxy.ts";
-import { verifyLocalInternalProxyUserToken } from "./local-internal-proxy-token.ts";
 import {
   verifyHostedExecutionVercelOidcRequest,
 } from "./auth-adapter.ts";
@@ -444,31 +443,22 @@ async function maybeHandleLocalInternalProxyRoute(
   url: URL,
   env: WorkerEnvironmentSource,
 ): Promise<Response | null> {
-  const configuredToken = readLocalLoopbackProxyToken(env);
-  if (!configuredToken) {
+  if (!readLocalHostedInternalProxyIngressHost(env)) {
     return null;
   }
 
-  const match = /^\/__murph\/local-internal-proxy\/(?<token>[^/]+)\/(?<host>[^/]+)(?<path>\/.*)?$/u.exec(
-    url.pathname,
-  );
+  const match =
+    /^\/__murph\/local-internal-proxy\/users\/(?<userId>[^/]+)\/(?<host>[^/]+)(?<path>\/.*)?$/u.exec(
+      url.pathname,
+    );
   if (!match?.groups) {
     return null;
   }
 
-  if (match.groups.token !== configuredToken) {
-    return unauthorized();
-  }
   if (!isTrustedLocalHostedInternalProxyIngress(url, env)) {
     return unauthorized();
   }
 
-  const boundUserId = readHostedExecutionBoundUserId(request);
-  if (!boundUserId) {
-    return json({
-      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for local internal proxy requests.`,
-    }, 401);
-  }
   const runnerProxyToken = readOptionalTrimmedHeader(
     request,
     HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -478,10 +468,11 @@ async function maybeHandleLocalInternalProxyRoute(
       error: `${HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER} header is required for local internal proxy requests.`,
     }, 401);
   }
-  const validRunnerProxyToken = await verifyLocalInternalProxyUserToken({
-    boundUserId,
-    proxyTokenSecret: configuredToken,
+  const boundUserId = decodeRouteParam(match.groups.userId);
+  const validRunnerProxyToken = await ownsLocalInternalProxyTokenForUser({
+    env,
     token: runnerProxyToken,
+    userId: boundUserId,
   });
   if (!validRunnerProxyToken) {
     return unauthorized();
@@ -500,6 +491,17 @@ async function maybeHandleLocalInternalProxyRoute(
     boundUserId,
     runnerProxyToken,
   );
+}
+
+async function ownsLocalInternalProxyTokenForUser(input: {
+  env: WorkerEnvironmentSource;
+  token: string;
+  userId: string;
+}): Promise<boolean> {
+  const stub = input.env.RUNNER_CONTAINER.getByName(input.userId);
+  return typeof stub.ownsInternalWorkerProxyToken === "function"
+    ? await stub.ownsInternalWorkerProxyToken({ token: input.token })
+    : false;
 }
 
 async function maybeHandleLocalLoopbackProxyRoute(

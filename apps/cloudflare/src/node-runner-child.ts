@@ -20,7 +20,6 @@ async function main(): Promise<void> {
           commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
           internalWorkerProxyToken: input.internalWorkerProxyToken,
           localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
-          localLoopbackProxyToken: input.localLoopbackProxyToken,
         }),
       },
     );
@@ -60,7 +59,6 @@ async function readStandardInput(): Promise<string> {
 function parseHostedExecutionChildInput(value: unknown): {
   internalWorkerProxyToken: string | null;
   localInternalProxyBaseUrl: string | null;
-  localLoopbackProxyToken: string | null;
   job: ReturnType<typeof parseHostedAssistantRuntimeJobInput>;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -77,10 +75,6 @@ function parseHostedExecutionChildInput(value: unknown): {
     localInternalProxyBaseUrl: readNullableString(
       record.localInternalProxyBaseUrl,
       "Hosted node runner child input.localInternalProxyBaseUrl",
-    ),
-    localLoopbackProxyToken: readNullableString(
-      record.localLoopbackProxyToken,
-      "Hosted node runner child input.localLoopbackProxyToken",
     ),
     job: parseHostedAssistantRuntimeJobInput(record.job),
   };
