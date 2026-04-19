@@ -9,7 +9,6 @@ import {
 } from "@murphai/hosted-execution/hosted-email";
 import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
-import type { R2BucketLike } from "../bundle-store.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
@@ -25,10 +24,6 @@ import {
   deriveStableHostedEmailKey,
   parseHostedEmailRouteToken,
 } from "./route-crypto.ts";
-import {
-  createHostedEmailRouteStore,
-  type HostedEmailRouteStore,
-} from "./route-store.ts";
 
 export { isHostedEmailPublicSenderAddress } from "./route-addressing.ts";
 
@@ -46,94 +41,91 @@ export class HostedEmailIngressRouteResolutionError extends Error {
   }
 }
 
-interface HostedEmailRouteStoreContext {
-  bucket: R2BucketLike;
+interface HostedEmailRouteCallbackContext {
   fetchImpl?: typeof fetch;
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
 }
 
-const HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS = 1_500;
-const HOSTED_WEB_EMAIL_PUBLIC_ROUTE_PATH = "/api/internal/hosted-execution/email/public-route";
+const HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS = 1_500;
+const HOSTED_WEB_EMAIL_REGISTER_REPLY_ALIAS_PATH =
+  "/api/internal/hosted-execution/email/register-reply-alias";
+const HOSTED_WEB_EMAIL_RESOLVE_ROUTE_PATH =
+  "/api/internal/hosted-execution/email/resolve-route";
 
-export async function resolveHostedEmailIngressRoute(input: {
-  bucket: R2BucketLike;
+export async function resolveHostedEmailIngressRoute(input: HostedEmailRouteCallbackContext & {
   config: HostedEmailConfig;
   envelopeFrom?: string | null;
-  fetchImpl?: typeof fetch;
-  hasRepeatedHeaderFrom?: boolean;
-  headerFrom?: string | null;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
   to: string;
-  webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
-  webControlBaseUrl?: string | null;
 }): Promise<HostedEmailInboundRoute | null> {
   if (isHostedEmailPublicSenderAddress(input.to, input.config)) {
     return resolveHostedEmailPublicSenderIngressRoute(input);
   }
 
-  return resolveHostedEmailInboundRoute({
-    bucket: input.bucket,
-    config: input.config,
-    key: input.key,
-    keyId: input.keyId,
-    keysById: input.keysById,
-    to: input.to,
-  });
+  return resolveHostedEmailInboundRoute(input);
 }
 
 export async function createHostedEmailUserAddress(input: {
-  bucket: R2BucketLike;
   config: HostedEmailConfig;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
+  fetchImpl?: typeof fetch;
   userId: string;
+  webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlBaseUrl?: string | null;
 }): Promise<string> {
   if (!input.config.domain || !input.config.signingSecret || !input.config.fromAddress) {
     throw new Error("Hosted email addressing is not configured.");
   }
-
-  const aliasKey = await deriveStableHostedEmailKey(input.config.signingSecret, `user:${input.userId}`);
-  const store = createHostedEmailRoutingStore(input);
-  const existing = await store.readUserRoute(aliasKey);
-  if (existing && existing.userId !== input.userId) {
-    throw new Error("Hosted email user route is already assigned to a different user.");
+  if (!input.webCallbackSigning || !input.webControlBaseUrl) {
+    throw new Error("Hosted email route registration callback is not configured.");
   }
-  if (!existing) {
-    await store.writeUserRoute({
+
+  const aliasKey = await deriveStableHostedEmailKey(
+    input.config.signingSecret,
+    `user:${input.userId}`,
+  );
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    baseUrl: input.webControlBaseUrl,
+    body: JSON.stringify({
       aliasKey,
-      userId: input.userId,
-    });
+    }),
+    boundUserId: input.userId,
+    callbackSigning: input.webCallbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_WEB_EMAIL_REGISTER_REPLY_ALIAS_PATH,
+    timeoutMs: HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS,
+  }).catch((error: unknown) => {
+    throw new Error(
+      `Hosted email route registration failed: ${formatHostedEmailRouteErrorDetails(error)}`,
+    );
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted email route registration failed with HTTP ${response.status}.`);
   }
 
-  return formatHostedEmailAddress(input.config, await createHostedEmailRouteToken({
-    aliasKey,
-    secret: input.config.signingSecret,
-  }));
+  return formatHostedEmailAddress(
+    input.config,
+    await createHostedEmailRouteToken({
+      aliasKey,
+      secret: input.config.signingSecret,
+    }),
+  );
 }
 
-export async function resolveHostedEmailInboundRoute(input: {
-  bucket: R2BucketLike;
-  config: HostedEmailConfig;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-  to: string;
-}): Promise<HostedEmailInboundRoute | null> {
+export async function resolveHostedEmailInboundRoute(
+  input: HostedEmailRouteCallbackContext & {
+    config: HostedEmailConfig;
+    envelopeFrom?: string | null;
+    to: string;
+  },
+): Promise<HostedEmailInboundRoute | null> {
   const configuredSender = normalizeHostedEmailAddress(input.config.fromAddress);
   if (!input.config.domain || !input.config.signingSecret || !configuredSender) {
     return null;
   }
-
-  const store = createHostedEmailRoutingStore(input);
 
   const candidate = parseHostedEmailRouteCandidate(input.to, input.config);
   if (!candidate) {
@@ -148,8 +140,11 @@ export async function resolveHostedEmailInboundRoute(input: {
     return null;
   }
 
-  const record = await store.readUserRoute(token.aliasKey);
-  if (!record) {
+  const userId = await resolveHostedEmailRouteUserId({
+    aliasKey: token.aliasKey,
+    context: input,
+  });
+  if (!userId) {
     return null;
   }
 
@@ -157,12 +152,12 @@ export async function resolveHostedEmailInboundRoute(input: {
     authorization: "verified-email",
     identityId: configuredSender,
     routeAddress: candidate.address,
-    userId: record.userId,
+    userId,
   };
 }
 
 async function resolveHostedEmailPublicSenderIngressRoute(
-  input: HostedEmailRouteStoreContext & {
+  input: HostedEmailRouteCallbackContext & {
     config: HostedEmailConfig;
     envelopeFrom?: string | null;
     to: string;
@@ -174,37 +169,63 @@ async function resolveHostedEmailPublicSenderIngressRoute(
       "Hosted email public-sender routing is not configured.",
     );
   }
-  if (!input.webCallbackSigning || !input.webControlBaseUrl) {
+
+  const userId = await resolveHostedEmailRouteUserId({
+    aliasKey: null,
+    context: input,
+  });
+  if (!userId) {
+    return null;
+  }
+
+  return {
+    authorization: "direct-public-sender",
+    identityId: configuredSender,
+    routeAddress: input.to,
+    userId,
+  };
+}
+
+async function resolveHostedEmailRouteUserId(input: {
+  aliasKey: string | null;
+  context: HostedEmailRouteCallbackContext & {
+    envelopeFrom?: string | null;
+    webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+    webControlBaseUrl?: string | null;
+  };
+}): Promise<string | null> {
+  if (!input.context.webCallbackSigning || !input.context.webControlBaseUrl) {
     throw new HostedEmailIngressRouteResolutionError(
-      "Hosted email public-sender authorization callback is not configured.",
+      "Hosted email route resolution callback is not configured.",
     );
   }
 
   let response: Response;
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
-      baseUrl: input.webControlBaseUrl,
+      baseUrl: input.context.webControlBaseUrl,
       body: JSON.stringify({
-        envelopeFrom: input.envelopeFrom ?? null,
-        hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom === true,
-        headerFrom: input.headerFrom ?? null,
+        ...(input.aliasKey ? { aliasKey: input.aliasKey } : {}),
+        envelopeFrom: input.context.envelopeFrom ?? null,
+        hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
+        headerFrom: input.context.headerFrom ?? null,
       }),
       boundUserId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
-      callbackSigning: input.webCallbackSigning,
-      fetchImpl: input.fetchImpl,
+      callbackSigning: input.context.webCallbackSigning,
+      fetchImpl: input.context.fetchImpl,
       method: "POST",
-      path: HOSTED_WEB_EMAIL_PUBLIC_ROUTE_PATH,
-      timeoutMs: HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS,
+      path: HOSTED_WEB_EMAIL_RESOLVE_ROUTE_PATH,
+      timeoutMs: HOSTED_WEB_EMAIL_CALLBACK_TIMEOUT_MS,
     });
   } catch (error) {
     throw new HostedEmailIngressRouteResolutionError(
-      `Hosted email public-sender authorization lookup failed: ${formatHostedEmailRouteErrorDetails(error)}`,
+      `Hosted email route resolution failed: ${formatHostedEmailRouteErrorDetails(error)}`,
     );
   }
 
   if (!response.ok) {
     throw new HostedEmailIngressRouteResolutionError(
-      `Hosted email public-sender authorization lookup failed with HTTP ${response.status}.`,
+      `Hosted email route resolution failed with HTTP ${response.status}.`,
     );
   }
 
@@ -213,7 +234,7 @@ async function resolveHostedEmailPublicSenderIngressRoute(
     payload = await response.json() as { userId?: unknown };
   } catch (error) {
     throw new HostedEmailIngressRouteResolutionError(
-      `Hosted email public-sender authorization lookup returned invalid JSON: ${formatHostedEmailRouteErrorDetails(error)}`,
+      `Hosted email route resolution returned invalid JSON: ${formatHostedEmailRouteErrorDetails(error)}`,
     );
   }
 
@@ -226,25 +247,11 @@ async function resolveHostedEmailPublicSenderIngressRoute(
     : null;
   if (!userId) {
     throw new HostedEmailIngressRouteResolutionError(
-      "Hosted email public-sender authorization lookup returned an invalid payload.",
+      "Hosted email route resolution returned an invalid payload.",
     );
   }
 
-  return {
-    authorization: "direct-public-sender",
-    identityId: configuredSender,
-    routeAddress: input.to,
-    userId,
-  };
-}
-
-function createHostedEmailRoutingStore(input: HostedEmailRouteStoreContext): HostedEmailRouteStore {
-  return createHostedEmailRouteStore({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeyId: input.keyId,
-    cryptoKeysById: input.keysById,
-  });
+  return userId;
 }
 
 function formatHostedEmailRouteErrorDetails(error: unknown): string {
@@ -252,9 +259,11 @@ function formatHostedEmailRouteErrorDetails(error: unknown): string {
     const message = error.message.trim();
     return message.length > 0 ? message : error.name;
   }
+
   if (typeof error === "string") {
-    const message = error.trim();
-    return message.length > 0 ? message : "Unknown error";
+    const trimmed = error.trim();
+    return trimmed.length > 0 ? trimmed : "unknown error";
   }
-  return "Unknown error";
+
+  return "unknown error";
 }

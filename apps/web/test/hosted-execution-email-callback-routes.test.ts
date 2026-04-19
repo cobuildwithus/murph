@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress: vi.fn(),
+  readHostedMemberIdByReplyAliasLookupKey: vi.fn(),
+  upsertHostedMemberReplyAliasLookupKeyTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -38,17 +40,29 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   };
 });
 
-type AuthorizationRouteModule = typeof import(
-  "../app/api/internal/hosted-execution/email/authorization/route"
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
+  const actual = await vi.importActual<typeof import("../src/lib/hosted-onboarding/hosted-member-routing-store")>(
+    "../src/lib/hosted-onboarding/hosted-member-routing-store",
+  );
+
+  return {
+    ...actual,
+    readHostedMemberIdByReplyAliasLookupKey: mocks.readHostedMemberIdByReplyAliasLookupKey,
+    upsertHostedMemberReplyAliasLookupKeyTx: mocks.upsertHostedMemberReplyAliasLookupKeyTx,
+  };
+});
+
+type RegisterReplyAliasRouteModule = typeof import(
+  "../app/api/internal/hosted-execution/email/register-reply-alias/route"
 );
-type PublicRouteModule = typeof import(
-  "../app/api/internal/hosted-execution/email/public-route/route"
+type ResolveRouteModule = typeof import(
+  "../app/api/internal/hosted-execution/email/resolve-route/route"
 );
 
 type MockPrismaClient = ReturnType<typeof createPrismaMock>;
 
-let authorizationRoute: AuthorizationRouteModule;
-let publicRoute: PublicRouteModule;
+let registerReplyAliasRoute: RegisterReplyAliasRouteModule;
+let resolveRoute: ResolveRouteModule;
 let currentPrivateJwkJson = "";
 let prismaClient: MockPrismaClient;
 
@@ -58,11 +72,11 @@ const originalPublicKeyring = process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEY
 
 describe("hosted execution email callback routes", () => {
   beforeAll(async () => {
-    authorizationRoute = await import(
-      "../app/api/internal/hosted-execution/email/authorization/route"
+    registerReplyAliasRoute = await import(
+      "../app/api/internal/hosted-execution/email/register-reply-alias/route"
     );
-    publicRoute = await import(
-      "../app/api/internal/hosted-execution/email/public-route/route"
+    resolveRoute = await import(
+      "../app/api/internal/hosted-execution/email/resolve-route/route"
     );
   });
 
@@ -72,6 +86,8 @@ describe("hosted execution email callback routes", () => {
     mocks.getPrisma.mockReturnValue(prismaClient);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue(null);
+    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue(null);
+    mocks.upsertHostedMemberReplyAliasLookupKeyTx.mockResolvedValue(undefined);
 
     const keyPair = await crypto.subtle.generateKey(
       {
@@ -101,105 +117,144 @@ describe("hosted execution email callback routes", () => {
     );
   });
 
-  it("accepts a signed alias-authorization callback for the bound member and returns authorized true", async () => {
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
-      memberId: "member_123",
-      verifiedEmail: {
-        address: "owner@example.com",
-        lookupKey: "lookup_owner",
-        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
-      },
-    });
-
-    const response = await authorizationRoute.POST(await createSignedCallbackRequest({
+  it("accepts a signed reply-alias registration callback for the bound member", async () => {
+    const response = await registerReplyAliasRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        envelopeFrom: "owner@example.com",
-        hasRepeatedHeaderFrom: false,
-        headerFrom: "Owner <owner@example.com>",
+        aliasKey: "replyalias1234",
       }),
-      path: "/api/internal/hosted-execution/email/authorization",
+      path: "/api/internal/hosted-execution/email/register-reply-alias",
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).toHaveBeenCalledWith({
       memberId: "member_123",
-      prisma: prismaClient,
+      prisma: prismaClient.transactionClient,
+      replyAliasLookupKey: "replyalias1234",
     });
     await expect(response.json()).resolves.toEqual({
-      authorized: true,
+      ok: true,
     });
   });
 
-  it("returns authorized false for a signed alias-authorization callback whose sender does not match the canonical verified email", async () => {
-    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      directPublicSender: null,
-      memberId: "member_123",
-      verifiedEmail: {
-        address: "owner@example.com",
-        lookupKey: "lookup_owner",
-        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
-      },
-    });
-
-    const response = await authorizationRoute.POST(await createSignedCallbackRequest({
-      body: JSON.stringify({
-        envelopeFrom: "attacker@example.com",
-        hasRepeatedHeaderFrom: false,
-        headerFrom: "Attacker <attacker@example.com>",
-      }),
-      path: "/api/internal/hosted-execution/email/authorization",
+  it("rejects reply-alias registration callbacks without a non-empty alias key", async () => {
+    const response = await registerReplyAliasRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({}),
+      path: "/api/internal/hosted-execution/email/register-reply-alias",
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     }));
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      authorized: false,
-    });
-  });
-
-  it("rejects alias-authorization callbacks whose bound member header was changed after signing", async () => {
-    const signedRequest = await createSignedCallbackRequest({
-      body: JSON.stringify({
-        envelopeFrom: "owner@example.com",
-        hasRepeatedHeaderFrom: false,
-        headerFrom: "Owner <owner@example.com>",
-      }),
-      path: "/api/internal/hosted-execution/email/authorization",
-      privateJwkJson: currentPrivateJwkJson,
-      userId: "member_123",
-    });
-    const tamperedHeaders = new Headers(signedRequest.headers);
-    tamperedHeaders.set(HOSTED_EXECUTION_USER_ID_HEADER, "member_999");
-
-    const response = await authorizationRoute.POST(new Request(signedRequest, {
-      headers: tamperedHeaders,
-    }));
-
-    expect(response.status).toBe(401);
-    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(response.status).toBe(400);
+    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
-        message: "Unauthorized hosted Cloudflare callback.",
+        code: "HOSTED_EMAIL_REPLY_ALIAS_INVALID",
+        message: "Hosted email reply alias registration requires a non-empty alias key.",
         retryable: false,
       },
     });
   });
 
-  it("accepts a signed direct-public-sender callback only for the fixed service principal", async () => {
+  it("accepts a signed alias-route resolution callback and returns the member only when the sender matches the canonical verified email", async () => {
+    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "owner@example.com",
+        lookupKey: "lookup_owner",
+        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
+      },
+    });
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        aliasKey: "replyalias1234",
+        envelopeFrom: "owner@example.com",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Owner <owner@example.com>",
+      }),
+      path: "/api/internal/hosted-execution/email/resolve-route",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberIdByReplyAliasLookupKey).toHaveBeenCalledWith({
+      prisma: prismaClient,
+      replyAliasLookupKey: "replyalias1234",
+    });
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prismaClient,
+    });
+    await expect(response.json()).resolves.toEqual({
+      userId: "member_123",
+    });
+  });
+
+  it("returns userId null for alias-route resolution when the alias lookup misses", async () => {
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        aliasKey: "replyalias1234",
+        envelopeFrom: "owner@example.com",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Owner <owner@example.com>",
+      }),
+      path: "/api/internal/hosted-execution/email/resolve-route",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      userId: null,
+    });
+  });
+
+  it("returns userId null for alias-route resolution when the sender does not match the canonical verified email", async () => {
+    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "owner@example.com",
+        lookupKey: "lookup_owner",
+        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
+      },
+    });
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        aliasKey: "replyalias1234",
+        envelopeFrom: "attacker@example.com",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Attacker <attacker@example.com>",
+      }),
+      path: "/api/internal/hosted-execution/email/resolve-route",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      userId: null,
+    });
+  });
+
+  it("accepts a signed direct-public sender resolution callback only for the fixed service principal", async () => {
     mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_456");
 
-    const response = await publicRoute.POST(await createSignedCallbackRequest({
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
       }),
-      path: "/api/internal/hosted-execution/email/public-route",
+      path: "/api/internal/hosted-execution/email/resolve-route",
       privateJwkJson: currentPrivateJwkJson,
       userId: HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
     }));
@@ -214,20 +269,21 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
-  it("rejects direct-public-sender callbacks from any non-service-principal binding", async () => {
-    const response = await publicRoute.POST(await createSignedCallbackRequest({
+  it("rejects route-resolution callbacks from any non-service-principal binding", async () => {
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
       }),
-      path: "/api/internal/hosted-execution/email/public-route",
+      path: "/api/internal/hosted-execution/email/resolve-route",
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     }));
 
     expect(response.status).toBe(401);
     expect(mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberIdByReplyAliasLookupKey).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
@@ -240,7 +296,7 @@ describe("hosted execution email callback routes", () => {
 
 function createPrismaMock() {
   const consumedNonces = new Set<string>();
-  const tx = {
+  const transactionClient = {
     hostedWebInternalRequestNonce: {
       create: vi.fn(async (input: {
         data: {
@@ -271,9 +327,10 @@ function createPrismaMock() {
   };
 
   return {
-    $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
-      callback(tx)
+    $transaction: vi.fn(async (callback: (transaction: typeof transactionClient) => Promise<unknown>) =>
+      callback(transactionClient)
     ),
+    transactionClient,
   };
 }
 
@@ -327,37 +384,33 @@ async function createHostedCloudflareCallbackHeaders(input: {
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    {
-      name: "ECDSA",
-      hash: "SHA-256",
-    },
-    key,
-    encodeHostedExecutionSignedRequestPayload({
-      method: input.method,
-      nonce: input.nonce,
-      path: input.path,
-      payload: input.payload,
-      search: input.search,
-      timestamp: input.timestamp,
-      userId: input.userId,
-    }),
+
+  const encodedPayload = encodeHostedExecutionSignedRequestPayload({
+    method: input.method,
+    nonce: input.nonce,
+    path: input.path,
+    payload: input.payload,
+    search: input.search,
+    timestamp: input.timestamp,
+    userId: input.userId,
+  });
+  const signature = new Uint8Array(
+    await crypto.subtle.sign(
+      {
+        hash: "SHA-256",
+        name: "ECDSA",
+      },
+      key,
+      encodedPayload,
+    ),
   );
 
   return {
     [HOSTED_EXECUTION_NONCE_HEADER]: input.nonce,
     [HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER]: input.keyId,
-    [HOSTED_EXECUTION_SIGNATURE_HEADER]: encodeBase64Url(new Uint8Array(signature)),
+    [HOSTED_EXECUTION_SIGNATURE_HEADER]: Buffer.from(signature).toString("base64url"),
     [HOSTED_EXECUTION_TIMESTAMP_HEADER]: input.timestamp,
   };
-}
-
-function encodeBase64Url(bytes: Uint8Array): string {
-  return Buffer.from(bytes)
-    .toString("base64")
-    .replace(/\+/gu, "-")
-    .replace(/\//gu, "_")
-    .replace(/=+$/u, "");
 }
 
 function restoreEnv(key: string, value: string | undefined) {

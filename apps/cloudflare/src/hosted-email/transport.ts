@@ -18,7 +18,7 @@ import {
   type HostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 
-import type { R2BucketLike } from "../bundle-store.ts";
+import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import type { WorkerSendEmailBindingLike } from "../worker-contracts.ts";
 import type { HostedEmailConfig } from "./config.ts";
 import { createHostedEmailUserAddress } from "./routes.ts";
@@ -31,14 +31,13 @@ export class HostedEmailSendValidationError extends Error {
 }
 
 export async function sendHostedEmailMessage(input: {
-  bucket: R2BucketLike;
   config: HostedEmailConfig;
   emailBinding?: WorkerSendEmailBindingLike;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
+  fetchImpl?: typeof fetch;
   request: HostedEmailSendRequest;
   userId: string;
+  webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlBaseUrl?: string | null;
 }): Promise<{
   target: string;
 }> {
@@ -49,18 +48,18 @@ export async function sendHostedEmailMessage(input: {
     throw new Error("Hosted email sending is not configured.");
   }
 
-  assertSupportedHostedEmailSendRequest(input.request, input.config);
+  const preflight = assertSupportedHostedEmailSendRequest(input.request, input.config);
 
   const replyAddress = await createHostedEmailUserAddress({
-    bucket: input.bucket,
     config: input.config,
-    key: input.key,
-    keyId: input.keyId,
-    keysById: input.keysById,
+    fetchImpl: input.fetchImpl,
     userId: input.userId,
+    webCallbackSigning: input.webCallbackSigning,
+    webControlBaseUrl: input.webControlBaseUrl,
   });
   const prepared = await prepareHostedEmailSend({
     config: input.config,
+    existingThreadTarget: preflight.existingThreadTarget,
     message: input.request.message,
     replyAddress,
     subject: input.request.subject ?? null,
@@ -83,7 +82,9 @@ export async function sendHostedEmailMessage(input: {
 function assertSupportedHostedEmailSendRequest(
   request: HostedEmailSendRequest,
   config: HostedEmailConfig,
-): void {
+): {
+  existingThreadTarget: HostedEmailThreadTarget | null;
+} {
   const configuredSender = normalizeHostedEmailAddress(config.fromAddress);
   const requestedSender = normalizeHostedEmailAddress(request.identityId);
 
@@ -92,6 +93,40 @@ function assertSupportedHostedEmailSendRequest(
       `Hosted email sender identity is config-owned and must remain ${configuredSender}.`,
     );
   }
+
+  if (request.targetKind !== "explicit" && request.targetKind !== "thread") {
+    throw new HostedEmailSendValidationError(
+      "Hosted email delivery requires an explicit recipient or a serialized thread target.",
+    );
+  }
+
+  const existingThreadTarget = request.targetKind === "thread"
+    ? parseHostedEmailThreadTarget(request.target)
+    : null;
+  if (request.targetKind === "thread" && !existingThreadTarget) {
+    throw new HostedEmailSendValidationError(
+      "Hosted email thread delivery requires a serialized thread target.",
+    );
+  }
+
+  if (existingThreadTarget && normalizeHostedEmailSubject(request.subject)) {
+    throw new HostedEmailSendValidationError(
+      "Hosted email thread delivery preserves the existing subject. Do not provide a subject override when replying to a thread.",
+    );
+  }
+
+  const primaryRecipient = existingThreadTarget
+    ? existingThreadTarget.to[0] ?? null
+    : normalizeHostedEmailAddressList([request.target])[0] ?? null;
+  if (!primaryRecipient) {
+    throw new HostedEmailSendValidationError(
+      "Hosted email delivery requires at least one recipient email address.",
+    );
+  }
+
+  return {
+    existingThreadTarget,
+  };
 }
 
 async function sendHostedEmailMimeMessage(input: {
@@ -117,6 +152,7 @@ async function sendHostedEmailMimeMessage(input: {
 
 async function prepareHostedEmailSend(input: {
   config: HostedEmailConfig;
+  existingThreadTarget: HostedEmailThreadTarget | null;
   message: string;
   replyAddress: string;
   subject: string | null;
@@ -133,35 +169,15 @@ async function prepareHostedEmailSend(input: {
     throw new Error("Hosted email sender identity is not configured.");
   }
 
-  if (input.targetKind !== "explicit" && input.targetKind !== "thread") {
-    throw new HostedEmailSendValidationError(
-      "Hosted email delivery requires an explicit recipient or a serialized thread target.",
-    );
-  }
-
-  const existingThreadTarget = input.targetKind === "thread"
-    ? parseHostedEmailThreadTarget(input.target)
-    : null;
+  const existingThreadTarget = input.existingThreadTarget;
   const requestedSubject = normalizeHostedEmailSubject(input.subject);
-  if (input.targetKind === "thread" && !existingThreadTarget) {
-    throw new HostedEmailSendValidationError(
-      "Hosted email thread delivery requires a serialized thread target.",
-    );
-  }
 
   // Hosted email stays owner-only by default. Even when inbound normalization
   // captured reply-all participants, outbound replies collapse back to the
   // primary recipient so send retries remain atomic.
-  const threadPrimaryRecipient = existingThreadTarget?.to[0] ?? null;
-  const explicitRecipient = input.targetKind === "explicit"
-    ? normalizeHostedEmailAddressList([input.target])[0] ?? null
-    : null;
-  const primaryRecipient = existingThreadTarget ? threadPrimaryRecipient : explicitRecipient;
-  if (!primaryRecipient) {
-    throw new HostedEmailSendValidationError(
-      "Hosted email delivery requires at least one recipient email address.",
-    );
-  }
+  const primaryRecipient = existingThreadTarget
+    ? existingThreadTarget.to[0] ?? null
+    : normalizeHostedEmailAddressList([input.target])[0] ?? null;
   const to = [primaryRecipient];
   const cc: string[] = [];
 

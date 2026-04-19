@@ -11,18 +11,9 @@ export type HostedStorageScope =
   | "browser-vault-snapshot"
   | "bundle"
   | "email-raw"
-  | "email-route"
   | "root-key-envelope"
   | "root-key-recipient"
   | "runner-secrets";
-
-export type HostedLegacyCipherEnvelopeScope =
-  | "device-sync-runtime"
-  | "gateway-store";
-
-export type HostedCipherEnvelopeScope =
-  | HostedStorageScope
-  | HostedLegacyCipherEnvelopeScope;
 
 export interface HostedCipherEnvelope {
   algorithm: "AES-GCM";
@@ -30,12 +21,12 @@ export interface HostedCipherEnvelope {
   iv: string;
   keyId: string;
   schema: HostedCipherEnvelopeSchema;
-  scope: HostedCipherEnvelopeScope;
+  scope: HostedStorageScope;
 }
 
 export async function deriveHostedStorageKey(
   rootKey: Uint8Array,
-  scope: HostedCipherEnvelopeScope | `id:${string}` | "",
+  scope: HostedStorageScope | `id:${string}` | "",
 ): Promise<Uint8Array> {
   const hkdfKey = await crypto.subtle.importKey(
     "raw",
@@ -171,7 +162,7 @@ export async function decryptHostedStoragePayload(input: {
   expectedKeyId?: string;
   key: Uint8Array;
   keysById?: Readonly<Record<string, Uint8Array>>;
-  scope: HostedCipherEnvelopeScope;
+  scope: HostedStorageScope;
 }): Promise<Uint8Array> {
   if (input.envelope.scope !== input.scope) {
     throw new Error(
@@ -247,16 +238,10 @@ function isHostedStorageScope(value: string): value is HostedStorageScope {
   return HOSTED_STORAGE_SCOPES.has(value as HostedStorageScope);
 }
 
-function isHostedLegacyCipherEnvelopeScope(
-  value: string,
-): value is HostedLegacyCipherEnvelopeScope {
-  return HOSTED_LEGACY_CIPHER_ENVELOPE_SCOPES.has(value as HostedLegacyCipherEnvelopeScope);
-}
-
 function isHostedCipherEnvelopeScope(
   value: string,
-): value is HostedCipherEnvelopeScope {
-  return isHostedStorageScope(value) || isHostedLegacyCipherEnvelopeScope(value);
+): value is HostedStorageScope {
+  return isHostedStorageScope(value);
 }
 
 async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
@@ -294,13 +279,7 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "browser-vault-snapshot",
   "bundle",
   "email-raw",
-  "email-route",
   "root-key-envelope",
   "root-key-recipient",
   "runner-secrets",
-]);
-
-const HOSTED_LEGACY_CIPHER_ENVELOPE_SCOPES = new Set<HostedLegacyCipherEnvelopeScope>([
-  "device-sync-runtime",
-  "gateway-store",
 ]);

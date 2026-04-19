@@ -1,7 +1,4 @@
-import {
-  HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
-  readHostedEmailCapabilities,
-} from "@murphai/hosted-execution/hosted-email";
+import { readHostedEmailCapabilities } from "@murphai/hosted-execution/hosted-email";
 import {
   parseRawEmailMessage,
   readRawEmailHeaderValue,
@@ -24,14 +21,7 @@ import {
   type WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
-import {
-  fetchHostedExecutionWebControlPlaneResponse,
-} from "../web-control-plane.ts";
 import { appendHostedEmailIngressWakeInWeb } from "../web-control-plane-email-ingress.ts";
-import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
-
-const HOSTED_WEB_EMAIL_AUTHORIZATION_PATH = "/api/internal/hosted-execution/email/authorization";
-const HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS = 1_500;
 
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
@@ -75,36 +65,17 @@ export async function handleHostedEmailIngress(
     }
   };
   const route = await resolveHostedEmailIngressRoute({
-    bucket: env.BUNDLES,
     config,
     envelopeFrom: message.from,
     fetchImpl: fetch,
     hasRepeatedHeaderFrom: headerFrom.repeated,
     headerFrom: resolvedHeaderFrom,
-    key: environment.platformEnvelopeKey,
-    keyId: environment.platformEnvelopeKeyId,
-    keysById: environment.platformEnvelopeKeysById,
     to: message.to,
     webCallbackSigning: environment.webCallbackSigning,
     webControlBaseUrl: environment.hostedWebBaseUrl,
   });
 
   if (!route) {
-    rejectIngressFailure();
-    return;
-  }
-
-  if (
-    route.authorization === "verified-email"
-    && !await authorizeHostedEmailIngress({
-      callbackSigning: environment.webCallbackSigning,
-      envelopeFrom: message.from,
-      hasRepeatedHeaderFrom: headerFrom.repeated,
-      headerFrom: resolvedHeaderFrom,
-      routeUserId: route.userId,
-      webControlBaseUrl: environment.hostedWebBaseUrl,
-    })
-  ) {
     rejectIngressFailure();
     return;
   }
@@ -152,44 +123,5 @@ export async function handleHostedEmailIngress(
       userId: route.userId,
       wakeSeq: append.wake.seq,
     });
-  }
-}
-
-async function authorizeHostedEmailIngress(input: {
-  callbackSigning: HostedWebCallbackSigningEnvironment;
-  envelopeFrom: string | null | undefined;
-  hasRepeatedHeaderFrom: boolean;
-  headerFrom: string | null | undefined;
-  routeUserId: string;
-  webControlBaseUrl: string;
-}): Promise<boolean> {
-  if (input.routeUserId === HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID) {
-    return false;
-  }
-
-  try {
-    const response = await fetchHostedExecutionWebControlPlaneResponse({
-      baseUrl: input.webControlBaseUrl,
-      body: JSON.stringify({
-        envelopeFrom: input.envelopeFrom ?? null,
-        hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
-        headerFrom: input.headerFrom ?? null,
-      }),
-      boundUserId: input.routeUserId,
-      callbackSigning: input.callbackSigning,
-      fetchImpl: fetch,
-      method: "POST",
-      path: HOSTED_WEB_EMAIL_AUTHORIZATION_PATH,
-      timeoutMs: HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS,
-    });
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const payload = await response.json() as { authorized?: unknown };
-    return payload.authorized === true;
-  } catch {
-    return false;
   }
 }

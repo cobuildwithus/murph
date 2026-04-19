@@ -1,6 +1,9 @@
 /**
  * Owns hosted member messaging-routing lookup and binding surfaces.
  */
+import { Prisma } from "@prisma/client";
+
+import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import { createHostedTelegramUserLookupKeyReadCandidates } from "./contact-privacy";
 import {
   hostedMemberRoutingLookupSelect,
@@ -27,6 +30,64 @@ export {
   type HostedMemberRoutingLookupSnapshot,
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-state";
+
+export async function readHostedMemberIdByReplyAliasLookupKey(input: {
+  prisma: HostedOnboardingReadClient;
+  replyAliasLookupKey: string | null | undefined;
+}): Promise<string | null> {
+  const lookupKey = typeof input.replyAliasLookupKey === "string"
+    ? input.replyAliasLookupKey.trim()
+    : "";
+  if (!lookupKey) {
+    return null;
+  }
+
+  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      replyAliasLookupKey: lookupKey,
+    },
+    select: {
+      memberId: true,
+    },
+  });
+
+  return routingRecord?.memberId ?? null;
+}
+
+export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  replyAliasLookupKey: string;
+}): Promise<void> {
+  const lookupKey = input.replyAliasLookupKey.trim();
+  if (!lookupKey) {
+    throw new TypeError("Hosted member reply alias lookup key must be a non-empty string.");
+  }
+
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: input.memberId,
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramUserId: null,
+  });
+
+  await input.prisma.hostedMemberRouting.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: {
+      memberId: input.memberId,
+      replyAliasLookupKey: lookupKey,
+      telegramUserLookupKey: null,
+      ...routingPrivateColumns,
+    },
+    update: {
+      replyAliasLookupKey: lookupKey,
+    },
+  });
+}
 
 export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
   prisma: HostedOnboardingReadClient;
