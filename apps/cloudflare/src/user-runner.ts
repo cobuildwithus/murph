@@ -1,5 +1,7 @@
 import type {
   HostedExecutionBundleRef,
+  HostedExecutionCursorState,
+  HostedExecutionWakeDrainResult,
   HostedExecutionWake,
   HostedExecutionUserStatus,
   HostedWakeMaterializationHints,
@@ -286,9 +288,10 @@ export class HostedUserRunner {
       timeoutMs: this.env.runnerTimeoutMs,
     });
 
-    return this.wakeHostedWakes({
+    await this.wakeHostedWakes({
       targetSeqHint: append.wake.seq,
     });
+    return this.status();
   }
 
   async enqueueHostedWakeWithOutcome(
@@ -310,7 +313,7 @@ export class HostedUserRunner {
 
   async wakeHostedWakes(input: {
     targetSeqHint?: string | null;
-  } = {}): Promise<HostedExecutionUserStatus> {
+  } = {}): Promise<HostedExecutionWakeDrainResult> {
     return this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
   }
 
@@ -342,10 +345,11 @@ export class HostedUserRunner {
 
   private async wakeHostedWakesInternal(input: {
     targetSeqHint?: string | null;
-  }): Promise<HostedExecutionUserStatus> {
+  }): Promise<HostedExecutionWakeDrainResult> {
     const userId = await this.requireBoundUserId();
     await this.stateStore.bootstrapUser(userId);
     const targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
+    const requestedTargetSeq = targetSeqHint?.toString() ?? null;
     await this.resumePendingCommittedCleanupIfNeeded();
     let afterSeq: string | null = null;
     let expectedVersion: string | null = null;
@@ -485,7 +489,13 @@ export class HostedUserRunner {
       }
     }
 
-    return this.composeUserStatus(await this.stateStore.readState());
+    const committedSeq = afterSeq ?? await this.readCommittedWakeSeqFromWeb(userId);
+
+    return {
+      committedSeq,
+      requestedTargetSeq,
+      targetReached: targetSeqHint === null || BigInt(committedSeq) >= targetSeqHint,
+    };
   }
 
   private async executeHostedWakeRecord(wake: HostedWakeRecord): Promise<HostedWakeDrainOutcome> {
@@ -657,10 +667,12 @@ export class HostedUserRunner {
     }
   }
 
-  private async cleanupCommittedHostedWakesLocally(input: {
-    cursor: Awaited<ReturnType<typeof commitHostedWakeCursorToWeb>>["cursor"];
+  private async cleanupCommittedHostedWakesLocally<
+    TCursor extends HostedExecutionCursorState,
+  >(input: {
+    cursor: TCursor;
     wake: HostedExecutionWake | null;
-  }): Promise<Awaited<ReturnType<typeof commitHostedWakeCursorToWeb>>["cursor"]> {
+  }): Promise<TCursor> {
     try {
       return await this.wakeProcessor.cleanupWakeAfterCursorCommit({
         cursor: input.cursor,
@@ -748,6 +760,17 @@ export class HostedUserRunner {
       });
       return baseStatus;
     }
+  }
+
+  private async readCommittedWakeSeqFromWeb(userId: string): Promise<string> {
+    const wakeStatus = await readHostedWakeStatusFromWeb({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      boundUserId: userId,
+      callbackSigning: this.env.webCallbackSigning,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
+
+    return wakeStatus.cursor.committedSeq;
   }
 
   private async readHostedWakeStatus(

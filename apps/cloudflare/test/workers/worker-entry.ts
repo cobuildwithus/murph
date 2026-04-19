@@ -1,7 +1,6 @@
 import { DurableObject, env } from "cloudflare:workers";
 import {
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
@@ -369,9 +368,7 @@ function createPendingCommitWakeRecord(
     kind: wake.kind,
     occurredAt: wake.occurredAt,
     payloadCiphertext,
-    payloadSchema: wake.kind === "conversation.message"
-      ? HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA
-      : HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+    payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
     seq: "1",
     userId: wake.userId,
   };

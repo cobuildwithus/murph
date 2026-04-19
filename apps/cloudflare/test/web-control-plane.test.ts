@@ -6,6 +6,7 @@ import {
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
   readHostedWakeStatusFromWeb,
+  recordHostedWakeTerminalInWeb,
 } from "../src/web-control-plane.ts";
 
 type ObservedRequest = { init?: RequestInit; url: string };
@@ -138,6 +139,53 @@ describe("cloudflare web control plane wake helpers", () => {
       snapshotRef: {
         checkpoint: "wake_24",
       },
+    });
+  });
+
+  it("records hosted wake terminal receipts through the web control plane", async () => {
+    let observedRequest: ObservedRequest | null = null;
+
+    await expect(
+      recordHostedWakeTerminalInWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          fetchProof: "proof_24",
+          state: "completed",
+          wakeId: "wake_24",
+          wakeSeq: "24",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              recorded: true,
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toEqual({
+      recorded: true,
+    });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/api/internal/hosted-wake/terminal",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("content-type")).toBe("application/json");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(String(request.init?.body))).toEqual({
+      fetchProof: "proof_24",
+      state: "completed",
+      wakeId: "wake_24",
+      wakeSeq: "24",
     });
   });
 

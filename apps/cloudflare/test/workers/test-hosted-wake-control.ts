@@ -10,6 +10,8 @@ import type {
   HostedWakeFetchRequest,
   HostedWakeLifecycleState,
   HostedWakeFetchResponse,
+  HostedWakeTerminalRequest,
+  HostedWakeTerminalResponse,
   HostedWakeQuarantineRequest,
   HostedWakeQuarantineResponse,
   HostedWakeRecord,
@@ -162,25 +164,24 @@ export async function commitTestHostedWakeCursor(input: {
   const committedSeq = parseSeq(input.body.committedSeq);
   const currentCommittedSeq = parseSeq(state.cursor.committedSeq);
   const shouldAdvanceCommittedSeq = committedSeq > currentCommittedSeq;
+  const targetWake = state.wakes.find((candidate) => parseSeq(candidate.seq) === committedSeq);
   const hasSnapshotRef = "snapshotRef" in input.body;
   const nextSnapshotRef = hasSnapshotRef
     ? input.body.snapshotRef ?? null
     : state.cursor.snapshotRef ?? null;
-  const snapshotRefChanged = JSON.stringify(state.cursor.snapshotRef ?? null)
-    !== JSON.stringify(nextSnapshotRef);
 
   if (
     (shouldAdvanceCommittedSeq
       && (
-        !input.body.advance
-        || input.body.advance.wakeId !== `wake_${committedSeq}`
-        || input.body.advance.proof !== `${input.body.advance.wakeId}:${committedSeq}:2026-03-26T12:00:00.000Z`
-        || committedSeq !== currentCommittedSeq + 1n
-        || committedSeq >= state.nextSeq
+        committedSeq !== currentCommittedSeq + 1n
+        || committedSeq >= parseSeq(state.cursor.nextSeq)
+        || !targetWake
+        || (targetWake.wakeState !== "completed"
+          && targetWake.wakeState !== "replaced"
+          && targetWake.wakeState !== "poisoned")
       ))
-    || (!shouldAdvanceCommittedSeq && input.body.advance)
     || (!shouldAdvanceCommittedSeq && committedSeq !== currentCommittedSeq)
-    || (!shouldAdvanceCommittedSeq && (!hasSnapshotRef || !snapshotRefChanged))
+    || !shouldAdvanceCommittedSeq
   ) {
     return {
       committed: false,
@@ -188,23 +189,11 @@ export async function commitTestHostedWakeCursor(input: {
     };
   }
 
-  const nextCommittedSeq = shouldAdvanceCommittedSeq ? committedSeq : currentCommittedSeq;
   const nextVersion = String(parseSeq(state.cursor.version) + 1n);
-
-  for (const wake of state.wakes) {
-    if (wake.wakeState === "poisoned") {
-      continue;
-    }
-
-    if (parseSeq(wake.seq) <= nextCommittedSeq) {
-      wake.wakeState = "completed";
-      wake.updatedAt = new Date().toISOString();
-    }
-  }
 
   const now = new Date().toISOString();
   state.cursor = {
-    committedSeq: String(nextCommittedSeq),
+    committedSeq: String(committedSeq),
     createdAt: state.cursor.createdAt,
     nextSeq: String(state.nextSeq),
     snapshotRef: nextSnapshotRef,
@@ -217,6 +206,30 @@ export async function commitTestHostedWakeCursor(input: {
   return {
     committed: true,
     cursor: state.cursor,
+  };
+}
+
+export async function recordTestHostedWakeTerminal(input: {
+  body: HostedWakeTerminalRequest;
+  bucket: R2BucketLike;
+  userId: string;
+}): Promise<HostedWakeTerminalResponse> {
+  const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
+  const wake = state.wakes.find((candidate) =>
+    candidate.id === input.body.wakeId
+    && candidate.seq === input.body.wakeSeq);
+
+  if (!wake || input.body.fetchProof !== `${wake.id}:${wake.seq}:${wake.updatedAt}`) {
+    return {
+      recorded: false,
+    };
+  }
+
+  wake.wakeState = input.body.state;
+  wake.updatedAt = new Date().toISOString();
+  await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
+  return {
+    recorded: true,
   };
 }
 
@@ -249,7 +262,10 @@ export async function readTestHostedWakeStatus(input: {
   const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
   const committedSeq = parseSeq(state.cursor.committedSeq);
   const pendingWakeCount = state.wakes.filter((wake) =>
-    wake.wakeState !== "poisoned" && parseSeq(wake.seq) > committedSeq
+    wake.wakeState !== "poisoned"
+    && wake.wakeState !== "completed"
+    && wake.wakeState !== "replaced"
+    && parseSeq(wake.seq) > committedSeq
   ).length;
 
   const wake = input.body.eventId
@@ -346,7 +362,7 @@ function toHostedWakeRecord(wake: StoredHostedWakeRecord): HostedWakeRecord {
 function toHostedFetchedWakeRecord(wake: StoredHostedWakeRecord): HostedFetchedWakeRecord {
   return {
     ...toHostedWakeRecord(wake),
-    commitProof: `${wake.id}:${wake.seq}:${wake.updatedAt}`,
+    fetchProof: `${wake.id}:${wake.seq}:${wake.updatedAt}`,
   };
 }
 
