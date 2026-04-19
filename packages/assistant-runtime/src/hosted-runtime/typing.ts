@@ -6,10 +6,6 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
-  type LinqWebhookEvent,
-  parseCanonicalLinqMessageReceivedEvent,
-} from "@murphai/messaging-ingress/linq-webhook";
-import {
   parseTelegramThreadTarget,
 } from "@murphai/messaging-ingress/telegram-webhook";
 import {
@@ -93,25 +89,22 @@ function startHostedLinqWakeTypingIndicator(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   wake: HostedExecutionConversationMessageWake & {
-    message: { channel: "linq"; linqEvent: Record<string, unknown> };
+    message: {
+      channel: "linq";
+      linqMessage: {
+        chatId: string;
+      };
+    };
   };
 }): HostedWakeTypingIndicator | null {
   const env = input.runtimeEnv as NodeJS.ProcessEnv;
-
-  let chatId: string;
-  try {
-    if (!isCanonicalLinqWebhookEvent(input.wake.message.linqEvent)) {
-      throw new TypeError("Hosted Linq typing indicator wake is missing a canonical Linq event.");
-    }
-
-    const event = parseCanonicalLinqMessageReceivedEvent(input.wake.message.linqEvent);
-    chatId = event.data.chat_id;
-  } catch (error) {
+  const chatId = input.wake.message.linqMessage.chatId.trim();
+  if (chatId.length === 0) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: buildHostedLinqTypingLogDetails("typing_start", false),
       wake: input.wake,
-      error,
+      error: new TypeError("Hosted Linq typing indicator wake is missing a stable chat id."),
       level: "warn",
       message: "Hosted Linq typing indicator could not be started.",
       phase: "wake.running",
@@ -195,22 +188,6 @@ function buildHostedLinqTypingLogDetails(
     operation,
     provider: "linq",
   };
-}
-
-function isCanonicalLinqWebhookEvent(value: unknown): value is LinqWebhookEvent {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.api_version === "string"
-    && typeof record.created_at === "string"
-    && typeof record.event_id === "string"
-    && typeof record.event_type === "string"
-    && typeof record.data === "object"
-    && record.data !== null
-  );
 }
 
 function createAsyncHostedTypingIndicator(input: {

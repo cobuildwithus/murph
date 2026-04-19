@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_SYSTEM_PAYLOAD_SCHEMA,
+  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
 } from "../src/contracts.js";
 import {
   buildHostedExecutionEmailConversationMessageWake,
@@ -39,7 +38,7 @@ describe("hosted wake contract parsers", () => {
         occurredAt: wake.occurredAt,
         payloadBytes: 96,
         payloadCiphertext: "ciphertext:wake-123",
-        payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "42",
@@ -64,10 +63,14 @@ describe("hosted wake contract parsers", () => {
     });
   });
 
-  it("parses hosted wake payloads using the wake-first schema split", () => {
+  it("parses hosted wake payloads using the canonical full-wake schema", () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq:schema-split",
-      linqEvent: {
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
         parts: [
           {
             type: "text",
@@ -75,20 +78,16 @@ describe("hosted wake contract parsers", () => {
           },
         ],
       },
-      linqMessageId: "msg_123",
       occurredAt: "2026-04-17T00:00:00.000Z",
       phoneLookupKey: "lookup_123",
       userId: "user-123",
     });
 
     expect(parseHostedWakeExecutionPayload({
-      decryptedPayload: {
-        eventId: wake.eventId,
-        ...wake.message,
-      },
+      decryptedPayload: wake,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
   });
@@ -104,13 +103,10 @@ describe("hosted wake contract parsers", () => {
     });
 
     expect(parseHostedWakeExecutionPayload({
-      decryptedPayload: {
-        eventId: wake.eventId,
-        ...wake.message,
-      },
+      decryptedPayload: wake,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadSchema: HOSTED_WAKE_CONVERSATION_MESSAGE_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
   });

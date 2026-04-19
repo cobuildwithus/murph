@@ -255,8 +255,12 @@ describe("executeHostedWakeEvent", () => {
 
     const linqWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
-      linqEvent: {
-        event_type: "message.received",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [],
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
       phoneLookupKey: "15551234567",

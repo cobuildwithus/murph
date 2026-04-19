@@ -10,7 +10,6 @@ import {
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
-  parseCanonicalLinqMessageReceivedEvent: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   startTelegramTypingSession: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
@@ -26,11 +25,6 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
-  parseCanonicalLinqMessageReceivedEvent:
-    mocks.parseCanonicalLinqMessageReceivedEvent,
-}));
-
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
   startLinqChatTypingIndicator: mocks.startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator: mocks.stopLinqChatTypingIndicator,
@@ -45,27 +39,16 @@ import {
   stopHostedWakeTypingIndicator,
 } from "../src/hosted-runtime/typing.ts";
 
-function createCanonicalLinqEvent(eventId: string) {
-  return {
-    api_version: "v3",
-    created_at: "2026-04-08T00:00:00.000Z",
-    data: {
-      chat_id: "chat_123",
-      message: {
-        id: "msg_123",
-        parts: [],
-      },
-      received_at: "2026-04-08T00:00:00.000Z",
-    },
-    event_id: eventId,
-    event_type: "message.received",
-  } as const;
-}
-
 function createLinqWake() {
   return buildHostedExecutionLinqConversationMessageWake({
     eventId: "evt_linq_typing",
-    linqEvent: createCanonicalLinqEvent("evt_linq_typing"),
+    linqMessage: {
+      chatId: "chat_123",
+      from: "+15551234567",
+      isFromMe: false,
+      messageId: "msg_123",
+      parts: [],
+    },
     occurredAt: "2026-04-08T00:00:00.000Z",
     phoneLookupKey: "15551234567",
     userId: "member_123",
@@ -100,11 +83,6 @@ function createTelegramWakeWithTarget(threadId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue({
-    data: {
-      chat_id: "chat_123",
-    },
-  });
   mocks.startLinqChatTypingIndicator.mockResolvedValue(undefined);
   mocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined);
   mocks.startTelegramTypingSession.mockResolvedValue({
@@ -142,13 +120,21 @@ describe("hosted runtime typing helpers", () => {
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
-  it("fails closed when a Linq payload cannot be parsed", () => {
-    mocks.parseCanonicalLinqMessageReceivedEvent.mockImplementation(() => {
-      throw new Error("invalid linq payload");
-    });
-
+  it("fails closed when a Linq payload is missing a stable chat id", () => {
     const indicator = startHostedWakeTypingIndicator({
-      wake: createLinqWake(),
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_typing_invalid",
+        linqMessage: {
+          chatId: "   ",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
       run: null,
       runtimeEnv: {
         LINQ_API_TOKEN: "linq-token",
@@ -186,11 +172,6 @@ describe("hosted runtime typing helpers", () => {
       throw new Error("Expected a Linq typing indicator.");
     }
 
-    await vi.waitFor(() => {
-      expect(mocks.parseCanonicalLinqMessageReceivedEvent).toHaveBeenCalledWith(
-        createLinqWake().message.linqEvent,
-      );
-    });
     await vi.waitFor(() => {
       expect(mocks.startLinqChatTypingIndicator).toHaveBeenCalledWith(
         {

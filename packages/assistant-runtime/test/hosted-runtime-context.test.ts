@@ -81,8 +81,9 @@ function buildLegacyWake(input: {
     case "conversation.message":
       return buildHostedExecutionLinqConversationMessageWake({
         eventId: input.eventId,
-        linqEvent: input.event.linqEvent as Record<string, unknown>,
-        linqMessageId: (input.event.linqMessageId as string | null | undefined) ?? undefined,
+        linqMessage: input.event.linqMessage as Parameters<
+          typeof buildHostedExecutionLinqConversationMessageWake
+        >[0]["linqMessage"],
         occurredAt: input.occurredAt,
         phoneLookupKey: input.event.phoneLookupKey as string,
         userId: input.event.userId ?? "member_123",
@@ -561,10 +562,12 @@ test("hosted Linq inbound wake self-heals managed Linq auto-reply when the hoste
         buildLegacyWake({
           event: {
             kind: "conversation.message",
-            linqEvent: {
-              data: {
-                chat_id: "chat_123",
-              },
+            linqMessage: {
+              chatId: "chat_123",
+              from: "+15551234567",
+              isFromMe: false,
+              messageId: "msg_123",
+              parts: [],
             },
             phoneLookupKey: "phone_lookup_key",
             userId: "member_123",
@@ -622,10 +625,12 @@ test("hosted Linq inbound wake self-heal preserves existing managed channels", a
         buildLegacyWake({
           event: {
             kind: "conversation.message",
-            linqEvent: {
-              data: {
-                chat_id: "chat_123",
-              },
+            linqMessage: {
+              chatId: "chat_123",
+              from: "+15551234567",
+              isFromMe: false,
+              messageId: "msg_123",
+              parts: [],
             },
             phoneLookupKey: "phone_lookup_key",
             userId: "member_123",
@@ -686,10 +691,12 @@ test("hosted Linq inbound wake self-heal does not enable auto-reply when the hos
         buildLegacyWake({
           event: {
             kind: "conversation.message",
-            linqEvent: {
-              data: {
-                chat_id: "chat_123",
-              },
+            linqMessage: {
+              chatId: "chat_123",
+              from: "+15551234567",
+              isFromMe: false,
+              messageId: "msg_123",
+              parts: [],
             },
             phoneLookupKey: "phone_lookup_key",
             userId: "member_123",

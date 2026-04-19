@@ -44,28 +44,16 @@ function buildCronWake(
   });
 }
 
-function buildCanonicalLinqEvent(eventId: string) {
-  return {
-    api_version: "v3",
-    created_at: "2026-04-08T00:00:00.000Z",
-    data: {
-      chat_id: "chat_123",
-      message: {
-        id: "msg_123",
-        parts: [],
-      },
-      received_at: "2026-04-08T00:00:00.000Z",
-    },
-    event_id: eventId,
-    event_type: "message.received",
-  } as const;
-}
-
 function buildLinqWake(eventId: string) {
   return buildHostedExecutionLinqConversationMessageWake({
     eventId,
-    linqEvent: buildCanonicalLinqEvent(eventId),
-    linqMessageId: "msg_123",
+    linqMessage: {
+      chatId: "chat_123",
+      from: "+15551234567",
+      isFromMe: false,
+      messageId: "msg_123",
+      parts: [],
+    },
     occurredAt: "2026-04-08T00:00:00.000Z",
     phoneLookupKey: "phone_123",
     userId: "member_123",
@@ -80,7 +68,6 @@ const mocks = vi.hoisted(() => ({
   executeHostedWakeForCommit: vi.fn(),
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
-  parseCanonicalLinqMessageReceivedEvent: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
   resumeHostedCommittedExecution: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
@@ -109,11 +96,6 @@ vi.mock("@murphai/hosted-execution", async () => {
     emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
   };
 });
-
-vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
-  parseCanonicalLinqMessageReceivedEvent:
-    mocks.parseCanonicalLinqMessageReceivedEvent,
-}));
 
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
   startLinqChatTypingIndicator: mocks.startLinqChatTypingIndicator,
@@ -253,11 +235,6 @@ beforeEach(() => {
     resolvedConfig: createHostedRuntimeResolvedConfig(runtime?.resolvedConfig ?? {}),
     userEnv: { ...(runtime?.userEnv ?? {}) },
   }));
-  mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue({
-    data: {
-      chat_id: "chat_123",
-    },
-  });
   mocks.restoreHostedExecutionContext.mockResolvedValue({
     assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
     operatorHomeRoot: "/tmp/operator-home",

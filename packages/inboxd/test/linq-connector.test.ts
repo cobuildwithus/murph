@@ -297,56 +297,102 @@ test("normalizeHostedLinqConversationMessage preserves hosted account ids and re
         throw new Error("download should not run");
       },
     },
-    linqEvent: {
-      api_version: "v3",
-      created_at: "2026-04-02T04:00:00.000Z",
-      webhook_version: "2026-02-03",
-      data: {
-        chat: {
-          id: "chat_stored",
-          owner_handle: {
-            handle: "hbid:linq.recipient:v1:test",
-            id: "handle_owner_stored",
-            is_me: true,
-            service: "iMessage",
-          },
+    linqMessage: {
+      chatId: "chat_stored",
+      from: "hbid:linq.from:v1:test",
+      isFromMe: false,
+      messageId: "msg_real_123",
+      parts: [
+        {
+          type: "text",
+          value: "Stored hosted wake snapshot",
         },
-        chat_id: "chat_stored",
-        direction: "inbound",
-        from: "hbid:linq.from:v1:test",
-        from_handle: {
-          handle: "hbid:linq.from:v1:test",
-          id: "handle_sender_stored",
-          service: "iMessage",
-        },
-        is_from_me: false,
-        message: {
-          id: "hbid:linq.message:v1:test",
-          parts: [
-            {
-              type: "text",
-              value: "Stored hosted wake snapshot",
-            },
-          ],
-        },
-        received_at: "2026-04-02T04:00:01.000Z",
-        sender_handle: {
-          handle: "hbid:linq.from:v1:test",
-          id: "handle_sender_stored",
-          service: "iMessage",
-        },
-        service: "iMessage",
-      },
-      event_id: "evt_stored",
-      event_type: "message.received",
+      ],
+      service: "iMessage",
     },
-    linqMessageId: " msg_real_123 ",
+    occurredAt: "2026-04-02T04:00:01.000Z",
   });
 
   assert.equal(capture.accountId, "hbid:linq.recipient:v1:test");
   assert.equal(capture.externalId, "linq:msg_real_123");
   assert.equal(capture.thread.id, "chat_stored");
   assert.equal(capture.text, "Stored hosted wake snapshot");
+});
+
+test("normalizeHostedLinqConversationMessage preserves reply metadata and metadata-only attachments when downloads fail", async () => {
+  const capture = await normalizeHostedLinqConversationMessage({
+    accountId: "hbid:linq.recipient:v1:test",
+    attachmentDownloadTimeoutMs: 5_000,
+    downloadDriver: {
+      async downloadUrl(url) {
+        assert.equal(url, "https://cdn.example.test/voice-note.m4a");
+        throw new Error("download failed");
+      },
+    },
+    linqMessage: {
+      chatId: "chat_stored",
+      from: "hbid:linq.from:v1:test",
+      isFromMe: false,
+      messageId: "msg_reply_media_123",
+      parts: [
+        {
+          type: "text",
+          value: "See attached reply",
+        },
+        {
+          attachmentId: "voice_att_1",
+          fileName: "voice-note.m4a",
+          mimeType: "audio/m4a",
+          size: 4096,
+          type: "voice_memo",
+          url: "https://cdn.example.test/voice-note.m4a",
+        },
+      ],
+      replyToMessageId: "msg_parent_123",
+      replyToPartIndex: 1,
+      service: "iMessage",
+    },
+    occurredAt: "2026-04-02T04:00:01.000Z",
+  });
+
+  assert.equal(capture.accountId, "hbid:linq.recipient:v1:test");
+  assert.equal(capture.externalId, "linq:msg_reply_media_123");
+  assert.equal(capture.thread.id, "chat_stored");
+  assert.equal(capture.thread.title, "hbid:linq.from:v1:test (iMessage)");
+  assert.equal(capture.text, "See attached reply");
+  assert.deepEqual(capture.attachments, [
+    {
+      byteSize: 4096,
+      data: null,
+      externalId: "voice_att_1",
+      fileName: "voice-note.m4a",
+      kind: "audio",
+      mime: "audio/m4a",
+    },
+  ]);
+  assert.deepEqual(capture.raw, {
+    chatId: "chat_stored",
+    from: "hbid:linq.from:v1:test",
+    isFromMe: false,
+    messageId: "msg_reply_media_123",
+    parts: [
+      {
+        type: "text",
+        value: "See attached reply",
+      },
+      {
+        attachment_id: "voice_att_1",
+        filename: "voice-note.m4a",
+        mime_type: "audio/m4a",
+        size: 4096,
+        type: "voice_memo",
+        url: "https://cdn.example.test/voice-note.m4a",
+      },
+    ],
+    replyToMessageId: "msg_parent_123",
+    replyToPartIndex: 1,
+    service: "iMessage",
+  });
 });
 
 test("toLinqChatMessage validates stable message and chat ids", async () => {

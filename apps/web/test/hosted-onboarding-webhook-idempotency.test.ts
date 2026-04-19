@@ -248,7 +248,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         userId: "member_123",
         message: expect.objectContaining({
           channel: "linq",
-          linqMessageId: "msg_123",
+          linqMessage: expect.objectContaining({
+            messageId: "msg_123",
+          }),
         }),
       }),
     });

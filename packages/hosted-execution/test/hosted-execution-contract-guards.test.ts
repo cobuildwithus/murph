@@ -27,8 +27,18 @@ describe("hosted execution wake guards", () => {
   it("narrows hosted wakes by conversation channel versus system wake", () => {
     const linqWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-wake-1",
-      linqEvent: { text: "hello" },
-      linqMessageId: null,
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
       occurredAt: "2026-04-18T00:00:00.000Z",
       phoneLookupKey: "phone_lookup_guard",
       userId: "user_guard",
