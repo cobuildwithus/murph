@@ -57,7 +57,6 @@ export interface AssistantSessionResolutionFields {
   sandbox?: AssistantSandbox | null
   zeroDataRetention?: boolean | null
   sessionId?: string | null
-  sourceThreadId?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
   vault: string

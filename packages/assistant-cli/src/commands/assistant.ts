@@ -65,9 +65,9 @@ const assistantIdentityRoutingDescription =
   'Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.'
 
 const assistantParticipantRoutingDescription =
-  'Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.'
+  'Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.'
 
-const assistantSourceThreadRoutingDescription =
+const assistantThreadRoutingDescription =
   'Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.'
 
 const assistantOneSendDeliveryTargetRoutingDescription =
@@ -94,7 +94,7 @@ const assistantSessionOptionFields = {
   ),
   identity: optionalNonEmptyStringOption(assistantIdentityRoutingDescription),
   participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
-  sourceThread: optionalNonEmptyStringOption(assistantSourceThreadRoutingDescription),
+  thread: optionalNonEmptyStringOption(assistantThreadRoutingDescription),
 }
 
 const assistantProviderOptionFields = {
@@ -160,7 +160,7 @@ const assistantSelfDeliveryTargetOptionFields = {
     'Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.',
   ),
   participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
-  sourceThread: optionalNonEmptyStringOption(assistantSourceThreadRoutingDescription),
+  thread: optionalNonEmptyStringOption(assistantThreadRoutingDescription),
   deliveryTarget: optionalNonEmptyStringOption(
     assistantSavedDeliveryTargetRoutingDescription,
   ),
@@ -171,12 +171,12 @@ function assertAssistantSelfDeliveryTargetInput(input: {
   deliveryTarget?: string
   identity?: string
   participant?: string
-  sourceThread?: string
+  thread?: string
 }) {
-  if (!input.deliveryTarget && !input.participant && !input.sourceThread) {
+  if (!input.deliveryTarget && !input.participant && !input.thread) {
     throw new VaultCliError(
       'invalid_option',
-      'Saved self delivery targets require at least --participant, --sourceThread, or --deliveryTarget.',
+      'Saved self delivery targets require at least --participant, --thread, or --deliveryTarget.',
     )
   }
 
@@ -210,7 +210,7 @@ type AssistantConversationCliOptions = {
   identity?: string
   participant?: string
   session?: string
-  sourceThread?: string
+  thread?: string
 }
 
 type AssistantProviderCliOptions = {
@@ -370,7 +370,7 @@ function assistantConversationOptionsFromCli<T extends AssistantConversationCliO
     channel: options.channel,
     identityId: options.identity,
     participantId: options.participant,
-    sourceThreadId: options.sourceThread,
+    threadId: options.thread,
   }
 }
 
@@ -408,14 +408,14 @@ async function resolveAssistantDeliveryRouteFromCli(input: {
   deliveryTarget?: string
   identity?: string
   participant?: string
-  sourceThread?: string
+  thread?: string
 }) {
   return applyAssistantSelfDeliveryTargetDefaults(
     {
       channel: input.channel,
       identityId: input.identity,
       participantId: input.participant,
-      sourceThreadId: input.sourceThread,
+      threadId: input.thread,
       deliveryTarget: input.deliveryTarget,
     },
     {
@@ -437,7 +437,7 @@ async function resolveAssistantDeliveryInvocationFromCli(
         channel: options.channel,
         identity: options.identity,
         participant: options.participant,
-        sourceThread: options.sourceThread,
+        thread: options.thread,
         deliveryTarget: deliveryOverrides.deliveryTarget,
       })
     : null
@@ -448,7 +448,7 @@ async function resolveAssistantDeliveryInvocationFromCli(
       channel: savedRoute?.channel ?? options.channel,
       identity: savedRoute?.identityId ?? options.identity,
       participant: savedRoute?.participantId ?? options.participant,
-      sourceThread: savedRoute?.sourceThreadId ?? options.sourceThread,
+      thread: savedRoute?.threadId ?? options.thread,
     }),
     deliveryOverrides,
     resolvedDeliveryTarget: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
@@ -693,7 +693,7 @@ export function registerAssistantCommands(
           options: {
             vault: './vault',
             channel: 'linq',
-            sourceThread: 'chat_lunch',
+            thread: 'chat_lunch',
             deliveryTarget: 'chat_lunch',
             deliverResponse: true,
           },
@@ -707,7 +707,7 @@ export function registerAssistantCommands(
             vault: './vault',
             channel: 'telegram',
             participant: '123456789',
-            sourceThread: '123456789',
+            thread: '123456789',
             deliverResponse: true,
           },
           description: 'Generate a reply locally and deliver it back into a Telegram bot chat.',
@@ -774,7 +774,7 @@ export function registerAssistantCommands(
           options: {
             vault: './vault',
             channel: 'telegram',
-            sourceThread: '123456789',
+            thread: '123456789',
             deliveryTarget: '123456789',
           },
           description: 'Send a direct Telegram reply to one chat.',
@@ -786,7 +786,7 @@ export function registerAssistantCommands(
           options: {
             vault: './vault',
             channel: 'linq',
-            sourceThread: 'chat_123',
+            thread: 'chat_123',
             deliveryTarget: 'chat_123',
           },
           description: 'Send a Linq reply back into the same direct chat.',
@@ -798,7 +798,7 @@ export function registerAssistantCommands(
           options: {
             vault: './vault',
             channel: 'telegram',
-            sourceThread: '-1001234567890:topic:42',
+            thread: '-1001234567890:topic:42',
             deliveryTarget: '-1001234567890:topic:42',
           },
           description: 'Send a Telegram reply into a specific chat topic.',
@@ -907,9 +907,9 @@ export function registerAssistantCommands(
           .describe('Outbound channel to save, such as telegram, linq, or email.'),
       }),
       description:
-        'Save or replace the local default outbound target for one channel. Provide at least one of --participant, --sourceThread, or --deliveryTarget; saved email targets also require --identity with the configured AgentMail inbox id.',
+        'Save or replace the local default outbound target for one channel. Provide at least one of --participant, --thread, or --deliveryTarget; saved email targets also require --identity with the configured AgentMail inbox id.',
       hint:
-        'Provide at least one of --participant, --sourceThread, or --deliveryTarget. Saved email targets also require --identity with the configured AgentMail inbox id.',
+        'Provide at least one of --participant, --thread, or --deliveryTarget. Saved email targets also require --identity with the configured AgentMail inbox id.',
       options: z.object({
         requestId: requestIdSchema,
         ...assistantSelfDeliveryTargetOptionFields,
@@ -921,7 +921,7 @@ export function registerAssistantCommands(
           channel,
           identity: context.options.identity,
           participant: context.options.participant,
-          sourceThread: context.options.sourceThread,
+          thread: context.options.thread,
           deliveryTarget: context.options.deliveryTarget,
         })
 
@@ -929,7 +929,7 @@ export function registerAssistantCommands(
           channel,
           identityId: context.options.identity ?? null,
           participantId: context.options.participant ?? null,
-          sourceThreadId: context.options.sourceThread ?? null,
+          threadId: context.options.thread ?? null,
           deliveryTarget: context.options.deliveryTarget ?? null,
         })
 

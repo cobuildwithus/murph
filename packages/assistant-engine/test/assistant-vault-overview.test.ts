@@ -208,7 +208,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
       deliveryTarget: 'self',
       identityId: 'identity-01',
       participantId: 'participant-01',
-      sourceThreadId: 'thread-01',
+      threadId: 'thread-01',
     },
     status: 'active',
   })

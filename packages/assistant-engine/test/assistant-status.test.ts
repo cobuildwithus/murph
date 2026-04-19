@@ -600,9 +600,9 @@ describe('assistant service-result seam', () => {
       Authorization: '[REDACTED]',
       'X-Trace': 'trace-target',
     })
-    expect(result.session.providerBinding?.providerOptions.headers).toEqual({
-      Authorization: '[REDACTED]',
-      'X-Trace': 'trace-target',
+    expect(result.session.resumeState).toEqual({
+      providerSessionId: 'provider-session-1',
+      resumeRouteId: 'route-1',
     })
   })
 })

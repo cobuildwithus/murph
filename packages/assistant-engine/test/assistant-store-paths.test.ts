@@ -19,7 +19,7 @@ test('resolveAssistantConversationLookupKey ignores aliases and derives a stable
       alias: 'chat:alice',
       channel: 'telegram',
       identityId: 'assistant:primary',
-      sourceThreadId: 'thread/42',
+      threadId: 'thread/42',
     }),
     'channel:telegram|identity:assistant%3Aprimary|thread:thread%2F42',
   )
@@ -30,7 +30,7 @@ test('resolveAssistantAliasKey prefers explicit aliases and otherwise derives a 
     resolveAssistantAliasKey({
       alias: 'chat:alice',
       channel: 'telegram',
-      sourceThreadId: 'thread/42',
+      threadId: 'thread/42',
     }),
     'chat:alice',
   )
@@ -39,7 +39,7 @@ test('resolveAssistantAliasKey prefers explicit aliases and otherwise derives a 
     resolveAssistantAliasKey({
       channel: 'telegram',
       identityId: 'assistant:primary',
-      sourceThreadId: 'thread/42',
+      threadId: 'thread/42',
     }),
     'channel:telegram|identity:assistant%3Aprimary|thread:thread%2F42',
   )
@@ -55,7 +55,7 @@ test('binding locator helpers merge conversation defaults with explicit override
       threadId: 'chat-base',
     },
     actorId: 'contact:override',
-    sourceThreadId: 'chat-override',
+    threadId: 'chat-override',
     threadIsDirect: true,
   }
 

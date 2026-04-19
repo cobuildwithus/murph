@@ -349,8 +349,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     providerName: 'Example',
     reasoningEffort: 'high',
   })
-  assert.deepEqual(
-    parseAssistantSessionRecord({
+  const parsedAssistantSession = parseAssistantSessionRecord({
       alias: 'daily',
       binding: {
         actorId: null,
@@ -387,34 +386,30 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       },
       turnCount: 3,
       updatedAt: '2026-04-08T12:05:00.000Z',
-    }).providerBinding,
-    {
-      provider: 'openai-compatible',
-      providerOptions: {
-        apiKeyEnv: 'OPENAI_API_KEY',
-        approvalPolicy: null,
-        baseUrl: 'https://api.example.test/v1',
-        continuityFingerprint: openAiCompatibleRuntime.continuityFingerprint,
-        executionDriver: 'openai-compatible',
-        headers: {
-          'X-Trace-Id': 'trace',
-        },
-      model: 'gpt-5.4',
-      oss: false,
-      presetId: null,
-      profile: null,
-      provider: 'openai-compatible',
-      providerName: 'Example',
-      reasoningEffort: 'high',
-        resumeKind: null,
-        sandbox: null,
-      },
-      providerSessionId: 'provider-session',
-      providerState: {
-        resumeRouteId: 'route-1',
-      },
+    })
+  assert.deepEqual(parsedAssistantSession.resumeState, {
+    providerSessionId: 'provider-session',
+    resumeRouteId: 'route-1',
+  })
+  assert.deepEqual(parsedAssistantSession.providerOptions, {
+    apiKeyEnv: 'OPENAI_API_KEY',
+    approvalPolicy: null,
+    baseUrl: 'https://api.example.test/v1',
+    continuityFingerprint: openAiCompatibleRuntime.continuityFingerprint,
+    executionDriver: 'openai-compatible',
+    headers: {
+      'X-Trace-Id': 'trace',
     },
-  )
+    model: 'gpt-5.4',
+    oss: false,
+    presetId: null,
+    profile: null,
+    provider: 'openai-compatible',
+    providerName: 'Example',
+    reasoningEffort: 'high',
+    resumeKind: null,
+    sandbox: null,
+  })
   assert.deepEqual(
     assistantStatusAutomationSchema.parse({
       autoReply: [
@@ -469,7 +464,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       },
       turnCount: 0,
       updatedAt: '2026-04-08T12:05:00.000Z',
-    }).providerBinding,
+    }).resumeState,
     null,
   )
   assert.deepEqual(
@@ -505,7 +500,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       },
       turnCount: 1,
       updatedAt: '2026-04-08T12:05:00.000Z',
-    }).providerBinding,
+    }).resumeState,
     null,
   )
 })

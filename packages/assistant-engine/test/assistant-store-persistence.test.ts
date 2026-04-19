@@ -127,7 +127,6 @@ describe('assistant store persistence seams', () => {
       createdAt: session.createdAt,
       lastTurnAt: session.lastTurnAt,
       provider: session.provider,
-      providerBinding: null,
       resumeState: null,
       schema: 'murph.assistant-session.v1',
       sessionId: session.sessionId,

@@ -333,7 +333,7 @@ describe('outbound channel runtime', () => {
         threadId: 'thread-1',
       },
       message: 'default binding branch',
-      sourceThreadId: 'source-thread-9',
+      threadId: 'source-thread-9',
       threadIsDirect: false,
       vault: 'vault-routing',
     })
@@ -344,7 +344,7 @@ describe('outbound channel runtime', () => {
         participantId: 'participant-9',
         threadId: 'thread-1',
       },
-      sourceThreadId: 'source-thread-9',
+      threadId: 'source-thread-9',
       threadIsDirect: false,
       vault: 'vault-routing',
     })

@@ -1229,7 +1229,6 @@ function createAssistantSession(input?: {
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     provider: target.adapter,
-    providerBinding: null,
     providerOptions: serializeAssistantProviderSessionOptions({
       approvalPolicy: 'never',
       codexHome: null,

@@ -1,6 +1,5 @@
 import type {
   AssistantChatProvider,
-  AssistantProviderBinding,
   AssistantProviderSessionOptions,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -378,7 +377,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const resumeBinding = resolveAssistantRouteResumeBinding({
     route: input.route,
-    sessionBinding: input.session.providerBinding ?? null,
+    sessionResumeState: input.session.resumeState,
   })
   const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
     ...input.route.providerOptions,
@@ -389,7 +388,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
       ? resolveAssistantProviderResumeKey({
-          binding: resumeBinding,
+          resumeState: resumeBinding,
           provider: input.route.provider,
         })
       : null

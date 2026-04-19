@@ -731,8 +731,6 @@ exit 1
           outputRoot,
           '--name',
           'murph-test-data',
-          '--no-docs',
-          '--no-tests',
         ],
         {
           cwd: repoRoot,

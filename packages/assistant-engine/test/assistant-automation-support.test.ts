@@ -162,7 +162,6 @@ function createAssistantAskResult(input: {
         provider: 'codex-cli',
         resumeKind: 'codex-session',
       },
-      providerBinding: null,
     },
     delivery: input.delivery
       ? {

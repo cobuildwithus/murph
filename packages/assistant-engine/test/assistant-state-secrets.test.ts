@@ -240,9 +240,9 @@ describe('assistant session secret sidecars', () => {
       'X-Trace-Id': 'trace-123',
       'X-Upstream-Auth': 'Bearer firstsecret123',
     })
-    expect(merged.providerBinding?.providerOptions.headers).toEqual({
-      'X-Trace-Id': 'trace-123',
-      'X-Upstream-Auth': 'Bearer firstsecret123',
+    expect(merged.resumeState).toEqual({
+      providerSessionId: 'provider-session-123',
+      resumeRouteId: 'resume-route-123',
     })
   })
 

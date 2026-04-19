@@ -374,7 +374,7 @@ async function resolveAssistantCronTargetDefaults<
       channel: input.channel,
       identityId: input.identityId,
       participantId: input.participantId,
-      sourceThreadId: input.threadId,
+      threadId: input.threadId,
       deliveryTarget: input.deliveryTarget,
     },
     {
@@ -387,7 +387,7 @@ async function resolveAssistantCronTargetDefaults<
     channel: resolvedTarget.channel ?? undefined,
     identityId: resolvedTarget.identityId ?? undefined,
     participantId: resolvedTarget.participantId ?? undefined,
-    threadId: resolvedTarget.sourceThreadId ?? undefined,
+    threadId: resolvedTarget.threadId ?? undefined,
     deliveryTarget: resolvedTarget.deliveryTarget ?? undefined,
   } as TInput
 }
@@ -552,10 +552,7 @@ function projectCanonicalAssistantCronJob(input: {
     channel: targetRoute.channel,
     identityId: targetRoute.identityId,
     participantId: targetRoute.participantId,
-    threadId:
-      'sourceThreadId' in targetRoute
-        ? targetRoute.sourceThreadId
-        : targetRoute.threadId,
+    threadId: targetRoute.threadId,
     deliveryTarget: targetRoute.deliveryTarget,
   })
   const projectedState = projectCanonicalAssistantCronJobState({
@@ -683,7 +680,7 @@ function buildCanonicalAutomationRoute(
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
     participantId: target.participantId,
-    sourceThreadId: target.threadId,
+    threadId: target.threadId,
   }
 }
 
@@ -1415,7 +1412,7 @@ function validateAssistantCronDeliveryTarget(
   if (!channel) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      'Assistant cron jobs must declare an outbound channel and delivery route. Pass --channel plus --sourceThread, --participant, or --deliveryTarget. Cron jobs send a single notification message to the bound route.',
+      'Assistant cron jobs must declare an outbound channel and delivery route. Pass --channel plus --thread, --participant, or --deliveryTarget. Cron jobs send a single notification message to the bound route.',
     )
   }
 
@@ -1446,7 +1443,7 @@ function validateAssistantCronDeliveryTarget(
   if (!deliveryTarget && !bindingDelivery) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      'Assistant cron jobs must bind an explicit outbound route. Pass --sourceThread, --participant, or --deliveryTarget for the selected channel.',
+      'Assistant cron jobs must bind an explicit outbound route. Pass --thread, --participant, or --deliveryTarget for the selected channel.',
     )
   }
 
