@@ -1444,45 +1444,17 @@ function commandSchemaShapeKeys(
   return Object.keys(shape).sort()
 }
 
-test('root chat prints only a resume hint after a human TTY session exits', async () => {
-  runtimeMocks.runAssistantChat.mockResolvedValue(createMockChatResult('asst_human'))
-
+test('root chat fails closed when the terminal cannot provide interactive raw-mode input', async () => {
   const result = await runInProcessCliWithTty(['chat', '--vault', '/tmp/mock-vault'])
 
-  assert.equal(result.stdout, '')
+  assert.equal(result.stderr, '')
   assert.equal(
-    result.stderr,
-    'Resume chat by typing: murph chat --session "asst_human"\n',
+    result.stdout,
+    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
   )
-  assert.deepEqual(runtimeMocks.runAssistantChat.mock.calls, [
-    [
-      {
-        vault: '/tmp/mock-vault',
-        initialPrompt: undefined,
-        sessionId: undefined,
-        alias: undefined,
-        channel: undefined,
-        identityId: undefined,
-        participantId: undefined,
-        threadId: undefined,
-        provider: undefined,
-        codexCommand: undefined,
-        model: undefined,
-        baseUrl: undefined,
-        apiKeyEnv: undefined,
-        providerName: undefined,
-        sandbox: undefined,
-        approvalPolicy: undefined,
-        profile: undefined,
-        oss: undefined,
-      },
-    ],
-  ])
 })
 
-test('root chat keeps explicit machine-readable output intact', async () => {
-  runtimeMocks.runAssistantChat.mockResolvedValue(createMockChatResult('asst_json'))
-
+test('root chat surfaces the interactive-input failure before any json result can be emitted', async () => {
   const result = await runInProcessCliWithTty([
     'chat',
     '--vault',
@@ -1492,7 +1464,10 @@ test('root chat keeps explicit machine-readable output intact', async () => {
   ])
 
   assert.equal(result.stderr, '')
-  assert.deepEqual(JSON.parse(result.stdout), createMockChatResult('asst_json'))
+  assert.equal(
+    result.stdout,
+    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
+  )
 })
 
 test.sequential(

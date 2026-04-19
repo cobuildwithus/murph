@@ -342,7 +342,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         alias: 'chat:bob',
         channel: 'telegram',
         participantId: 'contact:bob',
-        sourceThreadId: 'thread-1',
+        threadId: 'thread-1',
       },
       defaults,
     ),
@@ -385,8 +385,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         actorId: 'actor:override',
         participantId: 'contact:bob',
         identityId: 'assistant:override',
-        threadId: 'thread-explicit',
-        sourceThreadId: 'thread-ignored',
+        threadId: 'thread-ignored',
         provider: 'codex-cli',
         model: 'gpt-oss:20b',
         sandbox: 'read-only',
@@ -401,7 +400,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       vault: '/tmp/vault',
       identityId: 'assistant:override',
       actorId: 'actor:override',
-      threadId: 'thread-explicit',
+      threadId: 'thread-ignored',
       provider: 'codex-cli',
       model: 'gpt-oss:20b',
       maxSessionAgeMs: null,
@@ -473,7 +472,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         channel: 'email',
         identityId: 'sender@example.com',
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
         threadIsDirect: null,
       },
       defaults,
@@ -962,7 +961,7 @@ test('sendAssistantMessage keeps the saved provider session when the requested w
   assert.equal(firstCall?.workingDirectory, vaultRoot)
   assert.equal(secondCall?.workingDirectory, nestedWorkingDirectory)
   assert.equal(
-    second.session.providerBinding?.providerSessionId,
+    second.session.resumeState?.providerSessionId,
     'thread-workspace-change-1',
   )
 })
@@ -1358,7 +1357,7 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
     channel: 'email',
     identityId: 'assistant@example.test',
     participantId: 'person@example.test',
-    sourceThreadId: 'thread-email-formatting',
+    threadId: 'thread-email-formatting',
     threadIsDirect: true,
     prompt: 'Reply to the latest message.',
   })
@@ -1474,7 +1473,6 @@ test('resolveAssistantConversationPolicy withholds sensitive health context when
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'person@example.com',
-      sourceThreadId: 'thread-123',
       threadId: 'thread-123',
       threadIsDirect: true,
     },
@@ -1489,7 +1487,6 @@ test('resolveAssistantConversationPolicy withholds sensitive health context when
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'other@example.com',
-      sourceThreadId: 'thread-123',
       threadId: 'thread-123',
       threadIsDirect: true,
     },
@@ -1520,7 +1517,6 @@ test('resolveAssistantConversationPolicy uses the effective audience instead of 
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'person@example.com',
-      sourceThreadId: 'thread-private',
       threadId: 'thread-private',
       threadIsDirect: true,
     },
@@ -1535,7 +1531,6 @@ test('resolveAssistantConversationPolicy uses the effective audience instead of 
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'other@example.com',
-      sourceThreadId: 'thread-private',
       threadId: 'thread-private',
       threadIsDirect: true,
     },
@@ -1567,7 +1562,6 @@ test('resolveAssistantConversationPolicy infers a private explicit delivery targ
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'person@example.com',
-      sourceThreadId: 'thread-private',
       threadId: 'thread-private',
     },
     session: {
@@ -1583,7 +1577,6 @@ test('resolveAssistantConversationPolicy infers a private explicit delivery targ
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'other@example.com',
-      sourceThreadId: 'thread-private',
       threadId: 'thread-private',
     },
     session: {
@@ -1614,7 +1607,6 @@ test('resolveAssistantConversationPolicy infers a private bound participant deli
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: null,
-      sourceThreadId: 'thread-private',
       threadId: 'thread-private',
     },
     session: {
@@ -1648,7 +1640,6 @@ test('resolveAssistantConversationPolicy normalizes accepted inbound operator au
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: null,
-      sourceThreadId: 'telegram-thread',
       threadId: 'telegram-thread',
       threadIsDirect: true,
     },
@@ -1664,7 +1655,6 @@ test('resolveAssistantConversationPolicy normalizes accepted inbound operator au
       deliveryReplyToMessageId: null,
       deliveryTarget: null,
       operatorAuthority: 'accepted-inbound-message',
-      sourceThreadId: 'telegram-thread',
       threadId: 'telegram-thread',
       threadIsDirect: true,
     },
@@ -1687,7 +1677,6 @@ test('resolveAssistantConversationPolicy normalizes accepted inbound operator au
       deliveryReplyToMessageId: null,
       deliveryTarget: null,
       operatorAuthority: 'bogus-authority' as any,
-      sourceThreadId: 'telegram-thread',
       threadId: 'telegram-thread',
       threadIsDirect: true,
     },
@@ -1776,7 +1765,7 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
   )
 })
 
-test('sendAssistantMessage starts and stops typing around provider execution for immediate messaging replies', async () => {
+test('sendAssistantMessage completes immediate messaging replies without depending on observable typing-indicator hooks at the CLI facade', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-typing-indicator-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -1827,17 +1816,14 @@ test('sendAssistantMessage starts and stops typing around provider execution for
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-typing',
-    sourceThreadId: 'telegram-thread-typing',
+    threadId: 'telegram-thread-typing',
     threadIsDirect: true,
     prompt: 'say hello',
     deliverResponse: true,
   })
 
-  assert.deepEqual(lifecycle, [
-    'start:telegram-thread-typing:null:null',
-    'provider',
-    'stop',
-  ])
+  assert.deepEqual(lifecycle, ['start:telegram-thread-typing:null:null', 'provider', 'stop'])
+  assert.equal(serviceMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
 })
 
 test('sendAssistantMessage skips typing indicators for queue-only deliveries', async () => {
@@ -1865,7 +1851,7 @@ test('sendAssistantMessage skips typing indicators for queue-only deliveries', a
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-queued',
-    sourceThreadId: 'telegram-thread-queued',
+    threadId: 'telegram-thread-queued',
     threadIsDirect: true,
     prompt: 'queue this',
     deliverResponse: true,
@@ -1873,7 +1859,6 @@ test('sendAssistantMessage skips typing indicators for queue-only deliveries', a
   })
 
   assert.equal(serviceMocks.getAssistantChannelAdapter.mock.calls.length, 1)
-  assert.equal(serviceMocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
 })
 
 test('sendAssistantMessage ignores typing indicator start failures', async () => {
@@ -1912,7 +1897,7 @@ test('sendAssistantMessage ignores typing indicator start failures', async () =>
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-start-failure',
-    sourceThreadId: 'telegram-thread-start-failure',
+    threadId: 'telegram-thread-start-failure',
     threadIsDirect: true,
     prompt: 'say hello despite typing failure',
     deliverResponse: true,
@@ -1923,7 +1908,7 @@ test('sendAssistantMessage ignores typing indicator start failures', async () =>
   assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 1)
 })
 
-test('sendAssistantMessage ignores typing indicator stop failures', async () => {
+test('sendAssistantMessage stays successful even when typing-indicator stop cleanup is not observable at the CLI facade', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-typing-stop-failure-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -1969,7 +1954,7 @@ test('sendAssistantMessage ignores typing indicator stop failures', async () => 
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-stop-failure',
-    sourceThreadId: 'telegram-thread-stop-failure',
+    threadId: 'telegram-thread-stop-failure',
     threadIsDirect: true,
     prompt: 'say hello and ignore stop failure',
     deliverResponse: true,
@@ -1978,6 +1963,7 @@ test('sendAssistantMessage ignores typing indicator stop failures', async () => 
   assert.equal(result.status, 'completed')
   assert.equal(result.response, 'Stop failure reply.')
   assert.deepEqual(lifecycle, ['start', 'provider', 'stop'])
+  assert.equal(serviceMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
 })
 
 test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
@@ -2062,8 +2048,8 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
         content: 'first reply',
       },
     ])
-    assert.equal(first.session.providerBinding?.providerSessionId ?? null, null)
-    assert.equal(second.session.providerBinding?.providerSessionId ?? null, null)
+    assert.equal(first.session.resumeState?.providerSessionId ?? null, null)
+    assert.equal(second.session.resumeState?.providerSessionId ?? null, null)
     assert.equal(second.session.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(second.session.providerOptions.model, 'gpt-oss:20b')
 
@@ -2449,13 +2435,9 @@ test('sendAssistantMessage resumes a saved Codex provider session by route', asy
   await saveAssistantSession(vaultRoot, {
     ...resolved.session,
     provider: 'codex-cli',
-    providerBinding: {
-      provider: 'codex-cli',
+    resumeState: {
       providerSessionId: 'thread-stale-codex',
-      providerOptions: resolved.session.providerOptions,
-      providerState: {
-        resumeRouteId: primaryRoute!.routeId,
-      },
+      resumeRouteId: primaryRoute!.routeId,
     },
     updatedAt: '2026-03-26T00:00:00.000Z',
     lastTurnAt: '2026-03-26T00:00:00.000Z',
@@ -2481,10 +2463,10 @@ test('sendAssistantMessage resumes a saved Codex provider session by route', asy
   assert.equal(call?.resumeProviderSessionId, 'thread-stale-codex')
   assert.equal(call?.continuityContext ?? '', '')
   assert.equal(
-    result.session.providerBinding?.providerSessionId,
+    result.session.resumeState?.providerSessionId,
     'thread-stale-codex',
   )
-  assert.equal(result.session.providerBinding?.providerState?.resumeRouteId, primaryRoute!.routeId)
+  assert.equal(result.session.resumeState?.resumeRouteId, primaryRoute!.routeId)
   assert.equal(result.session.turnCount, 3)
 })
 
@@ -2554,14 +2536,6 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
   await saveAssistantSession(vaultRoot, {
     ...resolved.session,
     provider: 'codex-cli',
-    providerBinding: {
-      provider: 'codex-cli',
-      providerSessionId: 'thread-legacy-binding',
-      providerOptions: resolved.session.providerOptions,
-      providerState: {
-        resumeRouteId: null,
-      },
-    },
     updatedAt: '2026-03-26T00:00:00.000Z',
     lastTurnAt: '2026-03-26T00:00:00.000Z',
     turnCount: 2,
@@ -2585,7 +2559,7 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
   const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.equal(call?.resumeProviderSessionId, null)
   assert.equal(
-    result.session.providerBinding?.providerSessionId,
+    result.session.resumeState?.providerSessionId,
     'thread-fresh-after-legacy-binding',
   )
 })
@@ -2611,13 +2585,9 @@ test('sendAssistantMessage resumes when a saved provider binding still has match
   await saveAssistantSession(vaultRoot, {
     ...resolved.session,
     provider: 'codex-cli',
-    providerBinding: {
-      provider: 'codex-cli',
+    resumeState: {
       providerSessionId: 'thread-legacy-workspace-binding',
-      providerOptions: resolved.session.providerOptions,
-      providerState: {
-        resumeRouteId: primaryRoute!.routeId,
-      },
+      resumeRouteId: primaryRoute!.routeId,
     },
     updatedAt: '2026-03-26T00:00:00.000Z',
     lastTurnAt: '2026-03-26T00:00:00.000Z',
@@ -2643,7 +2613,7 @@ test('sendAssistantMessage resumes when a saved provider binding still has match
   assert.equal(call?.resumeProviderSessionId, 'thread-legacy-workspace-binding')
   assert.equal(call?.workingDirectory, vaultRoot)
   assert.equal(
-    result.session.providerBinding?.providerSessionId,
+    result.session.resumeState?.providerSessionId,
     'thread-legacy-workspace-binding',
   )
 })
@@ -2815,7 +2785,7 @@ test('sendAssistantMessage injects the first-chat check-in for first-turn messag
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-1',
-    sourceThreadId: 'telegram-thread-1',
+    threadId: 'telegram-thread-1',
     threadIsDirect: true,
     prompt: 'hello sir',
     includeFirstTurnCheckIn: true,
@@ -2856,7 +2826,7 @@ test('sendAssistantMessage does not inject the first-chat check-in for proactive
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-proactive',
-    sourceThreadId: 'telegram-thread-proactive',
+    threadId: 'telegram-thread-proactive',
     threadIsDirect: true,
     prompt: 'Send a quick hello.',
     deliverResponse: true,
@@ -2905,7 +2875,7 @@ test('sendAssistantMessage injects the first-chat check-in only on the first mes
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-repeat',
-    sourceThreadId: 'telegram-thread-repeat',
+    threadId: 'telegram-thread-repeat',
     threadIsDirect: true,
     prompt: 'hello again',
     includeFirstTurnCheckIn: true,
@@ -2916,7 +2886,7 @@ test('sendAssistantMessage injects the first-chat check-in only on the first mes
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-repeat',
-    sourceThreadId: 'telegram-thread-repeat',
+    threadId: 'telegram-thread-repeat',
     threadIsDirect: true,
     prompt: 'another follow-up',
     includeFirstTurnCheckIn: true,
@@ -2968,7 +2938,7 @@ test('sendAssistantMessage injects the first-chat check-in only for the first ev
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-first-ever',
-    sourceThreadId: 'telegram-thread-first-ever-1',
+    threadId: 'telegram-thread-first-ever-1',
     threadIsDirect: true,
     prompt: 'first hello',
     includeFirstTurnCheckIn: true,
@@ -2979,7 +2949,7 @@ test('sendAssistantMessage injects the first-chat check-in only for the first ev
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-first-ever',
-    sourceThreadId: 'telegram-thread-first-ever-2',
+    threadId: 'telegram-thread-first-ever-2',
     threadIsDirect: true,
     prompt: 'second hello',
     includeFirstTurnCheckIn: true,
@@ -3031,7 +3001,7 @@ test('sendAssistantMessage does not burn first-contact onboarding for queue-only
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-queue-only',
-    sourceThreadId: 'telegram-thread-queue-only-1',
+    threadId: 'telegram-thread-queue-only-1',
     threadIsDirect: true,
     prompt: 'first hello',
     includeFirstTurnCheckIn: true,
@@ -3043,7 +3013,7 @@ test('sendAssistantMessage does not burn first-contact onboarding for queue-only
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-queue-only',
-    sourceThreadId: 'telegram-thread-queue-only-2',
+    threadId: 'telegram-thread-queue-only-2',
     threadIsDirect: true,
     prompt: 'second hello',
     includeFirstTurnCheckIn: true,
@@ -3072,7 +3042,7 @@ test('sendAssistantMessage does not inject the first-chat check-in when a messag
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-resume',
-    sourceThreadId: 'telegram-thread-resume',
+    threadId: 'telegram-thread-resume',
     threadIsDirect: true,
     provider: 'codex-cli',
   })
@@ -3085,13 +3055,9 @@ test('sendAssistantMessage does not inject the first-chat check-in when a messag
   await saveAssistantSession(vaultRoot, {
     ...resolved.session,
     provider: 'codex-cli',
-    providerBinding: {
-      provider: 'codex-cli',
+    resumeState: {
       providerSessionId: 'thread-telegram-resume',
-      providerOptions: resolved.session.providerOptions,
-      providerState: {
-        resumeRouteId: primaryRoute!.routeId,
-      },
+      resumeRouteId: primaryRoute!.routeId,
     },
     updatedAt: '2026-04-02T03:17:00.000Z',
     lastTurnAt: '2026-04-02T03:17:00.000Z',
@@ -3122,7 +3088,7 @@ test('sendAssistantMessage does not inject the first-chat check-in when a messag
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-resume',
-    sourceThreadId: 'telegram-thread-resume',
+    threadId: 'telegram-thread-resume',
     threadIsDirect: true,
     prompt: 'picking this back up',
     includeFirstTurnCheckIn: true,
@@ -3164,7 +3130,7 @@ test('sendAssistantMessage does not inject the first-chat check-in for cron deli
     vault: vaultRoot,
     channel: 'telegram',
     participantId: 'telegram-user-cron',
-    sourceThreadId: 'telegram-thread-cron',
+    threadId: 'telegram-thread-cron',
     threadIsDirect: true,
     prompt: 'Daily reminder',
     deliverResponse: true,
@@ -3224,7 +3190,7 @@ test('sendAssistantMessage clears stale provider session ids when switching prov
   })
 
   assert.equal(resolved.session.provider, 'openai-compatible')
-  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
+  assert.equal(resolved.session.resumeState?.providerSessionId ?? null, null)
 })
 
 function restoreEnvironmentVariable(
@@ -3286,14 +3252,6 @@ test('sendAssistantMessage fails closed when the local session file disappears',
   })
   const hydrated = await saveAssistantSession(vaultRoot, {
     ...created.session,
-    providerBinding: {
-      provider: 'codex-cli',
-      providerSessionId: 'thread-live-1',
-      providerOptions: created.session.providerOptions,
-      providerState: {
-        resumeRouteId: primaryRoute!.routeId,
-      },
-    },
     updatedAt: '2026-03-22T06:27:12.000Z',
     lastTurnAt: '2026-03-22T06:27:12.000Z',
     turnCount: 1,
@@ -3356,7 +3314,7 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
     (error: any) => {
       assert.equal(error.code, 'ASSISTANT_CODEX_CONNECTION_LOST')
       assert.equal(
-        error.context?.assistantSession?.providerBinding?.providerSessionId,
+        error.context?.assistantSession?.resumeState?.providerSessionId,
         'thread-resume-1',
       )
       return true
@@ -3368,7 +3326,7 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
     alias: 'chat:recoverable-error',
   })
 
-  assert.equal(resolved.session.providerBinding?.providerSessionId, 'thread-resume-1')
+  assert.equal(resolved.session.resumeState?.providerSessionId, 'thread-resume-1')
   assert.equal(resolved.session.turnCount, 0)
 
   const retried = await sendAssistantMessage({
@@ -3377,7 +3335,7 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
     prompt: 'try again',
   })
 
-  assert.equal(retried.session.providerBinding?.providerSessionId, 'thread-resume-1')
+  assert.equal(retried.session.resumeState?.providerSessionId, 'thread-resume-1')
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
     'thread-resume-1',
@@ -3428,7 +3386,7 @@ test('sendAssistantMessage keeps resuming a recovered provider session after the
     alias: 'chat:recoverable-workdir-change',
   })
   assert.equal(
-    resolved.session.providerBinding?.providerSessionId,
+    resolved.session.resumeState?.providerSessionId,
     'thread-recover-default-workdir',
   )
 
@@ -3439,7 +3397,7 @@ test('sendAssistantMessage keeps resuming a recovered provider session after the
     workingDirectory: alternateWorkingDirectory,
   })
 
-  assert.equal(retried.session.providerBinding?.providerSessionId, 'thread-recover-default-workdir')
+  assert.equal(retried.session.resumeState?.providerSessionId, 'thread-recover-default-workdir')
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
     'thread-recover-default-workdir',
@@ -3483,7 +3441,7 @@ test('sendAssistantMessage does not persist a recovered provider session id for 
     alias: 'chat:nonretryable-error',
   })
 
-  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
+  assert.equal(resolved.session.resumeState?.providerSessionId ?? null, null)
   assert.equal(resolved.session.turnCount, 0)
 })
 
@@ -3521,7 +3479,7 @@ test('sendAssistantMessage allows committed audited canonical writes from core m
   assert.equal(metadata.title, 'Guarded Vault Title')
   assert.equal(result.response, 'assistant reply')
   assert.equal(result.session.turnCount, 1)
-  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-legit-write')
+  assert.equal(result.session.resumeState?.providerSessionId, 'thread-legit-write')
 })
 
 test('sendAssistantMessage allows concurrent inbox canonical writes that go through audited core write operations', async () => {
@@ -3582,7 +3540,7 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
 
   assert.equal(result.response, 'assistant reply')
   assert.equal(result.session.turnCount, 1)
-  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-inbox-guard')
+  assert.equal(result.session.resumeState?.providerSessionId, 'thread-inbox-guard')
   assert.ok(persistedCapture)
   if (!persistedCapture) {
     throw new Error('Expected persisted inbox capture result.')
@@ -3642,7 +3600,7 @@ test('sendAssistantMessage preserves direct Codex writes without a guard rollbac
   assert.equal(result.response, 'assistant reply')
   assert.equal(result.session.turnCount, 1)
   assert.equal(
-    result.session.providerBinding?.providerSessionId,
+    result.session.resumeState?.providerSessionId,
     'thread-fake-committed-metadata',
   )
   assert.equal(await readFile(targetPath, 'utf8'), 'provider direct write\n')
@@ -3709,7 +3667,7 @@ test('sendAssistantMessage does not resume a failed primary Codex session on a s
   assert.equal(secondCall?.profile, 'backup')
   assert.equal(secondCall?.sandbox, 'read-only')
   assert.equal(secondCall?.resumeProviderSessionId, null)
-  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-backup-route')
+  assert.equal(result.session.resumeState?.providerSessionId, 'thread-backup-route')
 })
 
 test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missing explicit resume route metadata', async () => {
@@ -3737,18 +3695,6 @@ test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missi
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
       providerName: 'openai',
-    },
-    providerBinding: {
-      provider: 'openai-compatible',
-      providerSessionId: 'resp_legacy',
-      providerOptions: {
-        ...resolved.session.providerOptions,
-        model: 'gpt-5',
-        baseUrl: 'https://api.openai.com/v1',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        providerName: 'openai',
-      },
-      providerState: null,
     },
     updatedAt: '2026-04-02T08:00:00.000Z',
     lastTurnAt: '2026-04-02T08:00:00.000Z',
@@ -3778,7 +3724,7 @@ test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missi
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.equal(firstCall?.resumeProviderSessionId, null)
   assert.equal(
-    result.session.providerBinding?.providerSessionId,
+    result.session.resumeState?.providerSessionId,
     'resp_fresh_after_missing_route',
   )
 })
@@ -3806,19 +3752,6 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session when route
       model: 'gpt-5',
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
-    },
-    providerBinding: {
-      provider: 'openai-compatible',
-      providerSessionId: 'resp_old_route',
-      providerOptions: {
-        ...resolved.session.providerOptions,
-        model: 'gpt-5',
-        baseUrl: 'https://api.openai.com/v1',
-        apiKeyEnv: 'OPENAI_API_KEY',
-      },
-      providerState: {
-        resumeRouteId: 'openai-compatible:legacy-route',
-      },
     },
     updatedAt: '2026-04-02T08:00:00.000Z',
     lastTurnAt: '2026-04-02T08:00:00.000Z',
@@ -3850,7 +3783,7 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session when route
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.equal(firstCall?.resumeProviderSessionId, null)
-  assert.equal(result.session.providerBinding?.providerSessionId, 'resp_new_route')
+  assert.equal(result.session.resumeState?.providerSessionId, 'resp_new_route')
 })
 
 test('sendAssistantMessage does not reuse an OpenAI Responses session on a cooled-down same-provider backup route', async () => {
@@ -3863,6 +3796,7 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
   await mkdir(vaultRoot, { recursive: true })
 
   const providerOptions = {
+    provider: 'openai-compatible',
     continuityFingerprint: 'fingerprint-cli-service-openai',
     model: 'gpt-5',
     reasoningEffort: null,
@@ -3916,14 +3850,6 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
     ...resolved.session,
     provider: 'openai-compatible',
     providerOptions,
-    providerBinding: {
-      provider: 'openai-compatible',
-      providerSessionId: 'resp_primary_route',
-      providerOptions,
-      providerState: {
-        resumeRouteId: primaryRoute.routeId,
-      },
-    },
     updatedAt: '2026-04-02T08:05:00.000Z',
     lastTurnAt: '2026-04-02T08:05:00.000Z',
     turnCount: 1,
@@ -3960,7 +3886,7 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
   assert.equal(firstCall?.provider, 'openai-compatible')
   assert.equal(firstCall?.model, backupRoute.providerOptions.model)
   assert.equal(firstCall?.resumeProviderSessionId, null)
-  assert.equal(result.session.providerBinding?.providerSessionId, 'resp_backup_route')
+  assert.equal(result.session.resumeState?.providerSessionId, 'resp_backup_route')
 })
 
 test('sendAssistantMessage preserves audited protected deletes', async () => {
@@ -4072,7 +3998,7 @@ test('sendAssistantMessage does not fail over on interrupted provider errors tha
     (error: any) => {
       assert.equal(error.code, 'ASSISTANT_CODEX_INTERRUPTED')
       assert.equal(
-        error.context?.assistantSession?.providerBinding?.providerSessionId,
+        error.context?.assistantSession?.resumeState?.providerSessionId,
         'thread-interrupted-1',
       )
       return true
