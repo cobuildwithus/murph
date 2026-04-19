@@ -173,24 +173,24 @@ describe("hosted execution coverage gaps", () => {
     expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./client");
     expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./outbox-payload");
 
-    const importBySpecifier = new Function(
-      "specifier",
-      "return import(specifier);",
-    ) as (specifier: string) => Promise<unknown>;
+    const loadSpecifier = (specifier: string) => import(specifier);
     const rootModule = await import("@murphai/hosted-execution");
+    const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
 
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
-    expect("buildHostedExecutionRunnerCommitPath" in rootModule).toBe(false);
-    expect("buildHostedExecutionRunnerSideEffectPath" in rootModule).toBe(false);
     expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
-    await expect(importBySpecifier("@murphai/hosted-execution/dispatch-ref")).rejects.toThrow();
-    await expect(importBySpecifier("@murphai/hosted-execution/client")).rejects.toThrow();
-    await expect(importBySpecifier("@murphai/hosted-execution/outbox-payload")).rejects.toThrow();
+    expect(Object.keys(routeModule).sort()).toEqual([
+      "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
+      "buildHostedExecutionRunnerEmailMessagePath",
+    ]);
+    await expect(loadSpecifier("@murphai/hosted-execution/dispatch-ref")).rejects.toThrow();
+    await expect(loadSpecifier("@murphai/hosted-execution/client")).rejects.toThrow();
+    await expect(loadSpecifier("@murphai/hosted-execution/outbox-payload")).rejects.toThrow();
   });
 });
