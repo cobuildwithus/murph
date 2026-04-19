@@ -874,6 +874,126 @@ describe("hosted wake store", () => {
     });
   });
 
+  it("clears a pre-rewrite terminal receipt when a coalescing wake is rewritten in place", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 0n,
+        nextSeq: 2n,
+        userId: "member_123",
+        version: 7n,
+      },
+      wakes: [
+        {
+          behavior: "coalescing",
+          coalescingKey: "member.channels.updated:member_123",
+          dedupeKey: "first",
+          kind: "member.channels.updated",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payload: {
+            revision: 1,
+          },
+          seq: 1n,
+          userId: "member_123",
+        },
+      ],
+    });
+
+    const initialFetch = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+    const initialWake = initialFetch.wakes[0];
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: initialWake!.fetchProof,
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: initialWake!.id,
+      wakeSeq: 1n,
+    })).resolves.toBe(true);
+
+    await expect(appendHostedCoalescingWakeTx({
+      coalescingKey: "member.channels.updated:member_123",
+      dedupeKey: "second",
+      eventId: "second",
+      kind: "member.channels.updated",
+      occurredAt: "2026-04-17T00:01:00.000Z",
+      payload: {
+        revision: 2,
+      },
+      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual(expect.objectContaining({
+      updatedExisting: true,
+      wake: expect.objectContaining({
+        id: "wake_1",
+        seq: "1",
+      }),
+    }));
+
+    const latestFetch = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+    const latestWake = latestFetch.wakes[0];
+
+    expect(latestFetch.cursor.version).toBe("8");
+    await expect(readHostedExecutionWakeLifecycleStateTx({
+      eventId: "second",
+      tx,
+      userId: "member_123",
+    })).resolves.toBe("queued");
+    await expect(commitHostedExecutionCursorTx({
+      committedSeq: 1n,
+      expectedVersion: 8n,
+      snapshotRef: {
+        checkpoint: "wake_1_without_fresh_terminal",
+      },
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "0",
+        nextSeq: "2",
+        userId: "member_123",
+        version: "8",
+      }),
+    });
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: latestWake!.fetchProof,
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: latestWake!.id,
+      wakeSeq: 1n,
+    })).resolves.toBe(true);
+
+    await expect(commitHostedExecutionCursorTx({
+      committedSeq: 1n,
+      expectedVersion: 8n,
+      snapshotRef: {
+        checkpoint: "wake_1_with_fresh_terminal",
+      },
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      committed: true,
+      cursor: expect.objectContaining({
+        committedSeq: "1",
+        nextSeq: "2",
+        snapshotRef: {
+          checkpoint: "wake_1_with_fresh_terminal",
+        },
+        userId: "member_123",
+        version: "9",
+      }),
+    });
+  });
+
   it("does not allocate a new seq when a duplicate dedupe key is discovered after the cursor lock", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
