@@ -1,6 +1,7 @@
 import {
   PrivyClient,
   type User as PrivyUser,
+  verifyIdentityToken,
 } from "@privy-io/node";
 import { cookies } from "next/headers";
 
@@ -20,7 +21,6 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 
 const globalForHostedPrivy = globalThis as typeof globalThis & {
   __murphHostedPrivyManagementClient?: PrivyClient | null;
-  __murphHostedPrivyVerificationClient?: PrivyClient | null;
 };
 
 export const HOSTED_PRIVY_MEMBER_ID_METADATA_KEY = "murph_member_id";
@@ -102,11 +102,13 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
     });
   }
 
-  const client = requireHostedPrivyVerificationClient();
+  const { appId, verificationKey } = requireHostedPrivyPhoneAuthConfig();
 
   try {
-    const user = await client.users().get({
-      id_token: token,
+    const user = await verifyIdentityToken({
+      app_id: appId,
+      identity_token: token,
+      verification_key: verificationKey,
     });
 
     if (!user || typeof user !== "object" || typeof (user as { id?: unknown }).id !== "string") {
@@ -237,30 +239,27 @@ export function readHostedPrivyIdentityTokenFromRequestCookies(request: Request)
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(
     normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_APP_ID)
-      && normalizeEnvValue(source.PRIVY_APP_SECRET)
       && normalizeEnvValue(source.PRIVY_VERIFICATION_KEY),
   );
 }
 
 export function requireHostedPrivyPhoneAuthConfig(): {
   appId: string;
-  appSecret: string;
   verificationKey: string;
 } {
   const environment = getHostedOnboardingEnvironment();
 
-  if (!environment.privyAppId || !environment.privyAppSecret || !environment.privyVerificationKey) {
+  if (!environment.privyAppId || !environment.privyVerificationKey) {
     throw hostedOnboardingError({
       code: "PRIVY_CONFIG_REQUIRED",
       message:
-        "NEXT_PUBLIC_PRIVY_APP_ID, PRIVY_APP_SECRET, and PRIVY_VERIFICATION_KEY must be configured for hosted phone signup.",
+        "NEXT_PUBLIC_PRIVY_APP_ID and PRIVY_VERIFICATION_KEY must be configured for hosted phone signup.",
       httpStatus: 500,
     });
   }
 
   return {
     appId: environment.privyAppId,
-    appSecret: environment.privyAppSecret,
     verificationKey: environment.privyVerificationKey.replace(/\\n/g, "\n").trim(),
   };
 }
@@ -296,29 +295,9 @@ function getHostedPrivyManagementClient(): PrivyClient | null {
   return client;
 }
 
-function requireHostedPrivyVerificationClient(): PrivyClient {
-  if (globalForHostedPrivy.__murphHostedPrivyVerificationClient) {
-    return globalForHostedPrivy.__murphHostedPrivyVerificationClient;
-  }
-
-  const { appId, appSecret, verificationKey } = requireHostedPrivyPhoneAuthConfig();
-  const client = createHostedPrivyClient({
-    appId,
-    appSecret,
-    jwtVerificationKey: verificationKey,
-  });
-
-  if (process.env.NODE_ENV !== "production") {
-    globalForHostedPrivy.__murphHostedPrivyVerificationClient = client;
-  }
-
-  return client;
-}
-
 function createHostedPrivyClient(input: {
   appId: string;
   appSecret: string;
-  jwtVerificationKey?: string;
 }): PrivyClient {
   return new PrivyClient(input);
 }
