@@ -191,7 +191,7 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
-    sourceThreadId: normalizeNullableRouteString(object.sourceThreadId),
+    threadId: normalizeNullableRouteString(object.threadId),
   };
 }
 

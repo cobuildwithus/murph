@@ -10,7 +10,7 @@ export interface AssistantSelfDeliveryTargetLookupInput {
   deliveryTarget?: string | null
   identityId?: string | null
   participantId?: string | null
-  sourceThreadId?: string | null
+  threadId?: string | null
 }
 
 export type AssistantSelfDeliveryTargetMap = Record<
@@ -169,7 +169,7 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
       channel: normalizedChannel,
       identityId: dependencies.normalizeString(input.identityId),
       participantId: dependencies.normalizeString(input.participantId),
-      sourceThreadId: dependencies.normalizeString(input.sourceThreadId),
+      threadId: dependencies.normalizeString(input.threadId),
       deliveryTarget: dependencies.normalizeString(input.deliveryTarget),
     }
   }
@@ -184,9 +184,9 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
       dependencies.normalizeString(input.participantId) ??
       savedTarget.participantId ??
       null,
-    sourceThreadId:
-      dependencies.normalizeString(input.sourceThreadId) ??
-      savedTarget.sourceThreadId ??
+    threadId:
+      dependencies.normalizeString(input.threadId) ??
+      savedTarget.threadId ??
       null,
     deliveryTarget:
       dependencies.normalizeString(input.deliveryTarget) ??
@@ -230,7 +230,7 @@ export function normalizeAssistantSelfDeliveryTarget(
     channel,
     identityId: normalizeString(target.identityId),
     participantId: normalizeString(target.participantId),
-    sourceThreadId: normalizeString(target.sourceThreadId),
+    threadId: normalizeString(target.threadId),
     deliveryTarget: normalizeString(target.deliveryTarget),
   })
 }
