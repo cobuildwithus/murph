@@ -2249,7 +2249,7 @@ describe("HostedUserRunner", () => {
 
     const final = await runner.status();
 
-    expect(global.fetch).toHaveBeenCalledTimes(5);
+    expect(global.fetch).toHaveBeenCalledTimes(6);
     expect(final.pendingWakeCount).toBe(1);
     expect(final.lastEventId).toBe("evt_retry_1");
     expect(final.lastError).toBe("Hosted runner container returned an HTTP error.");
@@ -3686,12 +3686,14 @@ function createPendingCommitWakeRecord(
 
   return {
     eventId: wake.eventId,
+    fetchProof: null,
     kind: wake.kind,
     occurredAt: wake.occurredAt,
     payloadCiphertext,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+    payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
     seq: "1",
     userId: wake.userId,
+    wakeId: null,
   };
 }
 

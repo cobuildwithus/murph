@@ -31,9 +31,11 @@ import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByTelegramUserId,
   lookupHostedMemberRoutingByTelegramUserLookupKey,
+  readHostedMemberIdByReplyAliasLookupKey,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberReplyAliasLookupKeyTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -425,6 +427,67 @@ describe("hosted-member-store", () => {
       pendingLinqRecipientPhone: null,
       telegramUserId: null,
       telegramUserLookupKey: "tg_user_123",
+    });
+  });
+
+  it("looks up the routed member by reply-alias lookup key", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      memberId: "member_123",
+    });
+    const prisma = {
+      hostedMemberRouting: {
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberIdByReplyAliasLookupKey({
+        prisma,
+        replyAliasLookupKey: "  replyalias1234  ",
+      }),
+    ).resolves.toBe("member_123");
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        replyAliasLookupKey: "replyalias1234",
+      },
+      select: {
+        memberId: true,
+      },
+    });
+  });
+
+  it("upserts the reply-alias lookup key on the routing owner row", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      hostedMemberRouting: {
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberReplyAliasLookupKeyTx({
+      memberId: "member_123",
+      prisma,
+      replyAliasLookupKey: "  replyalias1234  ",
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      create: {
+        linqChatIdEncrypted: null,
+        linqRecipientPhoneEncrypted: null,
+        memberId: "member_123",
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        replyAliasLookupKey: "replyalias1234",
+        telegramUserLookupKey: null,
+        telegramUserIdEncrypted: null,
+      },
+      update: {
+        replyAliasLookupKey: "replyalias1234",
+      },
     });
   });
 

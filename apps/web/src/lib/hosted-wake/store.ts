@@ -382,17 +382,7 @@ export async function commitHostedExecutionCursorTx(input: {
     ? cursor.assistantNextWakeAt
     : normalizeHostedCursorWakeAt(input.assistantNextWakeAt);
   const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
-  const snapshotRefChanged = input.snapshotRef !== undefined
-    && JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(nextSnapshotJson);
-  const assistantNextWakeAtChanged = input.assistantNextWakeAt !== undefined
-    && (
-      cursor.assistantNextWakeAt?.toISOString() ?? null
-    ) !== (
-      nextAssistantNextWakeAt?.toISOString() ?? null
-    );
-  const shouldAdvanceCommittedSeq = true;
-  const canAdvanceSingleWake = shouldAdvanceCommittedSeq
-    && input.committedSeq === cursor.committedSeq + 1n
+  const canAdvanceSingleWake = input.committedSeq === cursor.committedSeq + 1n
     && input.committedSeq < cursor.nextSeq;
 
   if (!canAdvanceSingleWake) {
@@ -448,13 +438,6 @@ export async function commitHostedExecutionCursorTx(input: {
     currentReceipt.receipt.state !== "completed"
     && currentReceipt.receipt.state !== "quarantined"
   ) {
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  if (!assistantNextWakeAtChanged && !snapshotRefChanged) {
     return {
       committed: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
@@ -525,7 +508,14 @@ export async function finalizeHostedExecutionCursorTx(input: {
   if (
     cursor.committedSeq !== committedSeq
     || cursor.version !== committedCursorVersion
-    || JSON.stringify(cursor.snapshotRef ?? null) !== JSON.stringify(claims.previousSnapshotRef ?? null)
+    || !sameHostedWakeSnapshotRefValue(
+      cursor.snapshotRef,
+      claims.previousSnapshotRef ?? null,
+      {
+        leftLabel: "Hosted execution cursor snapshotRef",
+        rightLabel: "Hosted wake finalize proof previousSnapshotRef",
+      },
+    )
   ) {
     return {
       finalized: false,
@@ -537,7 +527,22 @@ export async function finalizeHostedExecutionCursorTx(input: {
     ? Prisma.DbNull
     : serializeHostedWakeSnapshotRef(input.snapshotRef);
   const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
-  if (JSON.stringify(cursor.snapshotRef ?? null) === JSON.stringify(nextSnapshotJson)) {
+  const snapshotRefChanged = !sameHostedWakeSnapshotRefValue(
+    cursor.snapshotRef,
+    nextSnapshotJson,
+    {
+      leftLabel: "Hosted execution cursor snapshotRef",
+      rightLabel: "Hosted wake finalize next snapshotRef",
+    },
+  );
+  const assistantNextWakeAtChanged = input.assistantNextWakeAt !== undefined
+    && (
+      cursor.assistantNextWakeAt?.toISOString() ?? null
+    ) !== (
+      nextAssistantNextWakeAt?.toISOString() ?? null
+    );
+
+  if (!snapshotRefChanged && !assistantNextWakeAtChanged) {
     return {
       finalized: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
@@ -596,6 +601,27 @@ function serializeHostedWakeSnapshotRef(
     size: snapshotRef.size,
     updatedAt: snapshotRef.updatedAt,
   };
+}
+
+function sameHostedWakeSnapshotRefValue(
+  left: unknown,
+  right: unknown,
+  labels: {
+    leftLabel: string;
+    rightLabel: string;
+  },
+): boolean {
+  const leftRef = parseHostedExecutionCursorSnapshotRef(left ?? null, labels.leftLabel);
+  const rightRef = parseHostedExecutionCursorSnapshotRef(right ?? null, labels.rightLabel);
+
+  if (leftRef === null || rightRef === null) {
+    return leftRef === rightRef;
+  }
+
+  return leftRef.hash === rightRef.hash
+    && leftRef.key === rightRef.key
+    && leftRef.size === rightRef.size
+    && leftRef.updatedAt === rightRef.updatedAt;
 }
 
 function normalizeHostedCursorWakeAt(value: string | null): Date | null {

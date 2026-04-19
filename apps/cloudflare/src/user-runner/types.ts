@@ -77,12 +77,14 @@ export interface RunnerPendingCommitRecord {
   // from the canonical web cursor snapshot before the replacement wake runs.
   wake: {
     eventId: string;
+    fetchProof: string | null;
     kind: HostedExecutionWakeKind;
     occurredAt: string;
     payloadCiphertext: string;
     payloadSchema: HostedWakePayloadSchema;
     seq: string;
     userId: string;
+    wakeId: string | null;
   };
 }
 

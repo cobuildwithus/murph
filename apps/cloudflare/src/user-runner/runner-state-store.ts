@@ -386,6 +386,25 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async discardPendingCommitRecoveryState(eventId: string): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    const existing = parsePendingCommitRecord(meta, meta.user_id);
+
+    if (existing?.eventId === eventId) {
+      meta.pending_commit_json = null;
+      meta.next_wake_at = null;
+      meta.wake_materialization_hints_json = null;
+    }
+
+    this.clearActiveRunLeaseSync(meta, {
+      eventId,
+      policy: "same-event",
+      run: null,
+    });
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
   private readStateSync(): RunnerStateRecord {
     return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
@@ -819,18 +838,30 @@ function parsePendingCommitWake(
       record.payloadSchema as RunnerPendingCommitRecord["wake"]["payloadSchema"],
     )
     || typeof record.seq !== "string"
+    || (
+      record.fetchProof !== undefined
+      && record.fetchProof !== null
+      && typeof record.fetchProof !== "string"
+    )
+    || (
+      record.wakeId !== undefined
+      && record.wakeId !== null
+      && typeof record.wakeId !== "string"
+    )
   ) {
     return null;
   }
 
   return {
     eventId: record.eventId,
+    fetchProof: typeof record.fetchProof === "string" ? record.fetchProof : null,
     kind: record.kind,
     occurredAt: record.occurredAt,
     payloadCiphertext: record.payloadCiphertext,
     payloadSchema: record.payloadSchema as RunnerPendingCommitRecord["wake"]["payloadSchema"],
     seq: record.seq,
     userId,
+    wakeId: typeof record.wakeId === "string" ? record.wakeId : null,
   };
 }
 
