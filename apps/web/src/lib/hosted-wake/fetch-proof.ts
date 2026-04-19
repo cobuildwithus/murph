@@ -16,7 +16,7 @@ interface HostedWakeFetchProofClaims {
   fetchedCursorVersion: string;
   iat: number;
   kind: "hosted-wake-fetch-proof";
-  wakeEventId?: string;
+  wakeEventId: string;
   userId: string;
   wakeId: string;
   wakeSeq: string;
@@ -165,6 +165,7 @@ function parseHostedWakeFetchProofClaims(encodedClaims: string): HostedWakeFetch
   if (
     kind !== "hosted-wake-fetch-proof"
     || typeof userId !== "string"
+    || typeof wakeEventId !== "string"
     || typeof wakeId !== "string"
     || typeof wakeSeq !== "string"
     || typeof fetchedCommittedSeq !== "string"
@@ -173,10 +174,6 @@ function parseHostedWakeFetchProofClaims(encodedClaims: string): HostedWakeFetch
     || typeof exp !== "number"
   ) {
     throw new TypeError("Hosted wake fetch proof payload is missing required claims.");
-  }
-
-  if (wakeEventId !== undefined && typeof wakeEventId !== "string") {
-    throw new TypeError("Hosted wake fetch proof wakeEventId claim must be a string when present.");
   }
 
   return {
