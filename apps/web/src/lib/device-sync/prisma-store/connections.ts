@@ -12,7 +12,7 @@ import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
   maybeDate,
   normalizeNullableString,
-  sanitizeHostedSqlErrorText,
+  omitHostedSqlErrorText,
   generateHostedRandomPrefixedId,
 } from "../shared";
 import type { HostedPrismaTransactionClient } from "./types";
@@ -242,7 +242,7 @@ export class PrismaHostedConnectionStore {
         lastSyncCompletedAt: maybeDate(account.lastSyncCompletedAt),
         lastSyncErrorAt: maybeDate(account.lastSyncErrorAt),
         lastErrorCode: normalizeNullableString(account.lastErrorCode),
-        lastErrorMessage: sanitizeHostedSqlErrorText(account.lastErrorMessage),
+        lastErrorMessage: omitHostedSqlErrorText(account.lastErrorMessage),
         metadataJson: sanitizeStoredDeviceSyncMetadata(account.metadata ?? {}),
         nextReconcileAt: maybeDate(account.nextReconcileAt),
         scopesJson: normalizeStoredScopes(account.scopes),
