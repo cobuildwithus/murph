@@ -219,7 +219,7 @@ describe("hosted email routing and transport", () => {
 
   it("surfaces malformed public-sender callback payloads instead of treating them as clean misses", async () => {
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({ userId: 7 }),
+      JSON.stringify({}),
       {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -236,7 +236,7 @@ describe("hosted email routing and transport", () => {
       to: TEST_CONFIG.fromAddress!,
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
-    })).rejects.toThrow(/invalid payload|invalid json|must be present/u);
+    })).rejects.toThrow(/invalid json|must be present/u);
   });
 
   it("uses deterministic opaque ids for identical hosted raw-email retries", async () => {

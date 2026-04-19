@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 export type WorkspaceSourceEntryRelativePaths = Readonly<Record<string, string>>;
@@ -76,20 +77,38 @@ export function createWorkspaceSourceImportExecOptions(
 export function createVitestWorkspaceRuntimeAliases(
   entries: Readonly<Record<string, string>>,
 ): VitestAlias[] {
-  return Object.entries(entries).flatMap(([packageName, entryPath]) => {
-    const packageSourceRoot = path.dirname(entryPath);
+  const aliases: VitestAlias[] = [];
+  const seen = new Set<string>();
 
-    return [
-      {
-        find: new RegExp(`^${escapeRegExp(packageName)}$`),
-        replacement: entryPath,
-      },
-      {
-        find: new RegExp(`^${escapeRegExp(packageName)}/(.+)$`),
-        replacement: `${packageSourceRoot}/$1`,
-      },
-    ];
-  });
+  const appendAlias = (specifier: string, replacement: string) => {
+    const key = `${specifier}\u0000${replacement}`;
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    aliases.push({
+      find: new RegExp(`^${escapeRegExp(specifier)}$`),
+      replacement,
+    });
+  };
+
+  for (const [specifier, entryPath] of Object.entries(entries)) {
+    appendAlias(specifier, entryPath);
+
+    if (!isPackageRootSpecifier(specifier)) {
+      continue;
+    }
+
+    for (const [subpathSpecifier, subpathEntryPath] of resolvePackageExportSourceEntries(
+      specifier,
+      entryPath,
+    )) {
+      appendAlias(subpathSpecifier, subpathEntryPath);
+    }
+  }
+
+  return aliases;
 }
 
 export const HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
@@ -100,6 +119,118 @@ export function resolveHostedWebWorkspaceSourceEntries(workspaceDir: string) {
   return resolveWorkspaceSourceEntries(
     workspaceDir,
     HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
+  );
+}
+
+function isPackageRootSpecifier(specifier: string): boolean {
+  const segments = specifier.split("/");
+  if (specifier.startsWith("@")) {
+    return segments.length === 2;
+  }
+
+  return segments.length === 1;
+}
+
+function resolvePackageExportSourceEntries(
+  packageName: string,
+  entryPath: string,
+): Array<readonly [string, string]> {
+  const packageDir = resolveWorkspacePackageDir(entryPath);
+  const packageJson = readWorkspacePackageJson(packageDir);
+  const exportsField = packageJson.exports;
+  if (!exportsField || typeof exportsField !== "object" || Array.isArray(exportsField)) {
+    return [];
+  }
+
+  const aliases: Array<readonly [string, string]> = [];
+  for (const [exportKey, exportValue] of Object.entries(exportsField)) {
+    if (exportKey === "." || !exportKey.startsWith("./") || exportKey.includes("*")) {
+      continue;
+    }
+
+    const exportTarget = resolvePackageExportDefaultTarget(exportValue);
+    if (!exportTarget) {
+      continue;
+    }
+
+    aliases.push([
+      `${packageName}/${exportKey.slice(2)}`,
+      resolveWorkspaceSourcePathFromExportTarget(packageDir, exportTarget),
+    ]);
+  }
+
+  return aliases;
+}
+
+function resolveWorkspacePackageDir(entryPath: string): string {
+  let currentDir = path.dirname(entryPath);
+
+  while (true) {
+    const packageJsonPath = path.join(currentDir, "package.json");
+    if (fs.existsSync(packageJsonPath)) {
+      return currentDir;
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      throw new Error(`Unable to resolve package directory for workspace entry: ${entryPath}`);
+    }
+    currentDir = parentDir;
+  }
+}
+
+function readWorkspacePackageJson(packageDir: string): Record<string, unknown> {
+  const packageJsonPath = path.join(packageDir, "package.json");
+  return JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as Record<string, unknown>;
+}
+
+function resolvePackageExportDefaultTarget(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Readonly<Record<string, unknown>>;
+  for (const key of ["default", "import", "node", "browser"]) {
+    const candidate = resolvePackageExportDefaultTarget(record[key]);
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function resolveWorkspaceSourcePathFromExportTarget(packageDir: string, exportTarget: string): string {
+  if (!exportTarget.startsWith("./dist/")) {
+    throw new Error(
+      `Workspace source resolution only supports dist-backed package exports, received ${exportTarget}.`,
+    );
+  }
+
+  const sourceRelativePath = exportTarget
+    .replace(/^\.\//u, "")
+    .replace(/^dist\//u, "src/")
+    .replace(/\.js$/u, ".ts");
+  const tsPath = path.resolve(packageDir, sourceRelativePath);
+  if (fs.existsSync(tsPath)) {
+    return tsPath;
+  }
+
+  const tsxPath = tsPath.replace(/\.ts$/u, ".tsx");
+  if (fs.existsSync(tsxPath)) {
+    return tsxPath;
+  }
+
+  const mtsPath = tsPath.replace(/\.ts$/u, ".mts");
+  if (fs.existsSync(mtsPath)) {
+    return mtsPath;
+  }
+
+  throw new Error(
+    `Unable to resolve a source file for export target ${exportTarget} under ${packageDir}.`,
   );
 }
 
