@@ -4337,22 +4337,22 @@
                           "minLength": 1
                         },
                         "stream": {
-                          "description": "Stream identifier to write under. Required unless the selected preset supplies it.",
+                          "description": "Optional stream identifier. Recognized aliases such as SpO2 are accepted, and the importer can infer the stream from recognizable CSV headers when unambiguous.",
                           "type": "string",
                           "minLength": 1
                         },
                         "tsColumn": {
-                          "description": "CSV column containing timestamps. Required unless the selected preset supplies it.",
+                          "description": "Optional timestamp column override. When omitted, the importer will use recognizable timestamp headers such as time or timestamp.",
                           "type": "string",
                           "minLength": 1
                         },
                         "valueColumn": {
-                          "description": "CSV column containing the numeric value. Required unless the selected preset supplies it.",
+                          "description": "Optional numeric value column override. When omitted, the importer will infer a recognizable metric column when the CSV is unambiguous.",
                           "type": "string",
                           "minLength": 1
                         },
                         "unit": {
-                          "description": "Unit label for the imported values. Required unless the selected preset supplies it.",
+                          "description": "Optional unit override. When omitted, the importer will use the preset unit or a stream-specific default.",
                           "type": "string",
                           "minLength": 1
                         },
