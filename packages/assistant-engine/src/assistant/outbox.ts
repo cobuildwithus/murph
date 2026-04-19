@@ -282,7 +282,9 @@ export async function readAssistantOutboxIntentMirrorState(input: {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
   const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
-  const intent = await readAssistantOutboxIntentAtPath(intentPath)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
   return buildAssistantOutboxIntentMirrorState({
     intent,
     now: input.now,
@@ -321,7 +323,9 @@ export async function dispatchAssistantOutboxIntent(input: {
   const prepared = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
-    const intent = await readAssistantOutboxIntentAtPath(intentPath)
+    const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+      vault: input.vault,
+    })
     if (!intent) {
       throw new Error(`Assistant outbox intent ${input.intentId} was not found.`)
     }
@@ -850,7 +854,9 @@ export async function beginAssistantOutboxIntentMirrorDispatch(input: {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
   const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
-  const intent = await readAssistantOutboxIntentAtPath(intentPath)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
   if (!intent) {
     return null
   }
@@ -874,7 +880,9 @@ export async function markAssistantOutboxIntentMirrorRetryableById(input: {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
   const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
-  const intent = await readAssistantOutboxIntentAtPath(intentPath)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
   if (!intent) {
     return null
   }
@@ -898,7 +906,9 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
   const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
-  const intent = await readAssistantOutboxIntentAtPath(intentPath)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
   if (!intent) {
     return null
   }
@@ -922,7 +932,9 @@ export async function markAssistantOutboxIntentSentById(input: {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
   const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
-  const intent = await readAssistantOutboxIntentAtPath(intentPath)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
   if (!intent) {
     return null
   }

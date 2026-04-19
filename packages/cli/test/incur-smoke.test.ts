@@ -341,6 +341,27 @@ test('descriptor manifest stays aligned with the live root command topology', as
   assert.deepEqual(actualRootCommands, collectVaultCliDescriptorRootCommandNames())
 })
 
+test('workout descriptor does not expose the removed workout measurement alias', () => {
+  const workoutDescriptor = vaultCliCommandDescriptors.find(
+    (descriptor) => descriptor.id === 'workout',
+  )
+
+  if (
+    !workoutDescriptor
+    || !('leafCommands' in workoutDescriptor)
+    || !workoutDescriptor.leafCommands
+  ) {
+    throw new Error('The workout command descriptor is missing its leaf commands.')
+  }
+
+  assert.equal(
+    workoutDescriptor.leafCommands.some(
+      (leafCommand) => leafCommand.path.join(' ').startsWith('workout measurement '),
+    ),
+    false,
+  )
+})
+
 test('descriptor direct service bindings resolve against the declared service surfaces', () => {
   const descriptorBindings = collectVaultCliDirectServiceBindings()
   const vaultServices = createUnwiredVaultServices()
