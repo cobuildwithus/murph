@@ -120,6 +120,7 @@ describe("HostedUserRunner cleanup after cursor commit", () => {
       bundleRef: finalBundleRef,
       committedAt: "2026-03-26T12:00:00.000Z",
       eventId: "evt_cleanup_final_bundle",
+      finalizeToken: null,
       finalizedAt: "2026-03-26T12:00:01.000Z",
       result: {
         eventsHandled: 1,

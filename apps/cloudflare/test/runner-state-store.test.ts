@@ -20,6 +20,7 @@ function createPendingCommit(): RunnerPendingCommitRecord {
     bundleRef: null,
     committedAt: "2026-04-18T12:00:00.000Z",
     eventId: "evt_committed",
+    finalizeToken: null,
     finalizedAt: null,
     result: {
       eventsHandled: 1,
@@ -41,20 +42,20 @@ function createPendingCommit(): RunnerPendingCommitRecord {
 }
 
 describe("RunnerStateStore", () => {
-  it("drops legacy local queue lifecycle tables during schema setup", async () => {
+  it("boots the greenfield runner state without depending on legacy local queue tables", async () => {
     const state = createState();
     const sql = state.storage.sql!;
     sql.exec("CREATE TABLE IF NOT EXISTS pending_events (event_id TEXT PRIMARY KEY)");
     sql.exec("CREATE TABLE IF NOT EXISTS consumed_events (event_id TEXT PRIMARY KEY)");
     sql.exec("CREATE TABLE IF NOT EXISTS backpressured_events (event_id TEXT PRIMARY KEY)");
-    sql.exec("CREATE TABLE IF NOT EXISTS poisoned_events (event_id TEXT PRIMARY KEY)");
+    sql.exec("CREATE TABLE IF NOT EXISTS legacy_terminal_events (event_id TEXT PRIMARY KEY)");
 
-    createQueueHarness(state);
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    const record = await store.readState();
 
-    expect(sql.exec<{ name: string }>("PRAGMA table_info(pending_events)").toArray()).toEqual([]);
-    expect(sql.exec<{ name: string }>("PRAGMA table_info(consumed_events)").toArray()).toEqual([]);
-    expect(sql.exec<{ name: string }>("PRAGMA table_info(backpressured_events)").toArray()).toEqual([]);
-    expect(sql.exec<{ name: string }>("PRAGMA table_info(poisoned_events)").toArray()).toEqual([]);
+    expect(record.userId).toBe("member_123");
+    expect(record.pendingWakeCount).toBe(0);
   });
 
   it("fails closed when runner_meta still carries the removed activated column", async () => {
@@ -76,10 +77,12 @@ describe("RunnerStateStore", () => {
 
     expect(() => {
       createQueueHarness(state);
-    }).toThrow(/runner_meta schema is unsupported; missing runtime_bootstrapped; forbidden activated/u);
+    }).toThrow(
+      /runner_meta schema is unsupported; missing bundle_ref_json, bundle_version, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at, runtime_bootstrapped, last_event_id, pending_commit_json, wake_materialization_hints_json/u,
+    );
   });
 
-  it("upgrades an existing runner_meta row by adding active-run lease and operator summary columns in place", async () => {
+  it("fails closed when runner_meta omits required greenfield columns", async () => {
     const state = createState();
     const sql = state.storage.sql!;
     sql.exec("DROP TABLE runner_meta");
@@ -116,22 +119,11 @@ describe("RunnerStateStore", () => {
       "2026-03-29T10:06:00.000Z",
     );
 
-    const { store } = createQueueHarness(state);
-    const columns = sql.exec<{ name: string }>("PRAGMA table_info(runner_meta)").toArray()
-      .map((row) => row.name);
-    const record = await store.readState();
-
-    expect(columns).toContain("active_run_event_id");
-    expect(columns).toContain("active_run_id");
-    expect(columns).toContain("active_run_attempt");
-    expect(columns).toContain("active_run_started_at");
-    expect(columns).toContain("last_event_id");
-    expect(record.userId).toBe("member_123");
-    expect(record.runtimeBootstrapped).toBe(true);
-    expect(record.inFlight).toBe(true);
-    expect(record.lastErrorCode).toBe("runner_http_error");
-    expect(record.lastRunAt).toBe("2026-03-29T10:05:00.000Z");
-    expect(record.pendingWakeCount).toBe(0);
+    expect(() => {
+      createQueueHarness(state);
+    }).toThrow(
+      /runner_meta schema is unsupported; missing bundle_ref_json, bundle_version, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at, last_event_id, pending_commit_json, wake_materialization_hints_json/u,
+    );
   });
 
   it("tracks active-run lease and next-wake scheduling without local queue rows", async () => {

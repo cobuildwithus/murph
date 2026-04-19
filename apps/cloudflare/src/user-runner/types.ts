@@ -67,10 +67,14 @@ export interface RunnerPendingCommitRecord {
   bundleRef: HostedExecutionBundleRef | null;
   committedAt: string;
   eventId: string;
+  finalizeToken: string | null;
   finalizedAt: string | null;
   result: HostedExecutionRunnerResult["result"];
   schemaVersion: 1;
   userId: string;
+  // Crash-recovery seam for one exact fetched wake and cursor fence. If that wake can no longer
+  // record terminal or participate in cursor CAS, the pending commit must be discarded and rebuilt
+  // from the canonical web cursor snapshot before the replacement wake runs.
   wake: {
     eventId: string;
     kind: HostedExecutionWakeKind;

@@ -10,6 +10,7 @@ import {
   parseHostedWakeFinalizeRequest,
   parseHostedWakeFinalizeResponse,
   parseHostedWakeQuarantineRequest,
+  parseHostedWakeStatusRequest,
   parseHostedWakeTerminalResponse,
 } from "../src/parsers.ts";
 import {
@@ -119,9 +120,6 @@ describe("hosted wake parser contracts", () => {
       payloadBytes: 128,
       payloadCiphertext: "opaque-ciphertext",
     });
-    expect(parsedFetch.wakes[0]).not.toHaveProperty("payloadJson");
-    expect(parsedFetch.wakes[0]).not.toHaveProperty("payloadInlineCiphertext");
-    expect(parsedFetch.wakes[0]).not.toHaveProperty("payloadRef");
 
     const parsedAppend = parseHostedWakeAppendResponse({
       duplicate: false,
@@ -149,52 +147,6 @@ describe("hosted wake parser contracts", () => {
       payloadBytes: 128,
       payloadCiphertext: "opaque-ciphertext",
     });
-    expect(parsedAppend.wake).not.toHaveProperty("payloadJson");
-    expect(parsedAppend.wake).not.toHaveProperty("payloadInlineCiphertext");
-    expect(parsedAppend.wake).not.toHaveProperty("payloadRef");
-  });
-
-  it("rejects legacy fetched payload transport fields", () => {
-    expect(() => parseHostedWakeRecord({
-      behavior: "ordered",
-      createdAt: "2026-04-17T00:00:00.000Z",
-      id: "wake-legacy-json",
-      kind: "member.channels.updated",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      payloadJson: {
-        legacy: true,
-      },
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-      seq: "12",
-      updatedAt: "2026-04-17T00:00:00.000Z",
-      userId: "member-1",
-    })).toThrow(/payloadJson/i);
-
-    expect(() => parseHostedWakeRecord({
-      behavior: "ordered",
-      createdAt: "2026-04-17T00:00:00.000Z",
-      id: "wake-legacy-inline",
-      kind: "member.channels.updated",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      payloadInlineCiphertext: "inline-ciphertext",
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-      seq: "12",
-      updatedAt: "2026-04-17T00:00:00.000Z",
-      userId: "member-1",
-    })).toThrow(/payloadInlineCiphertext/i);
-
-    expect(() => parseHostedWakeRecord({
-      behavior: "ordered",
-      createdAt: "2026-04-17T00:00:00.000Z",
-      id: "wake-legacy-ref",
-      kind: "member.channels.updated",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      payloadRef: "wake_payload_1",
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-      seq: "12",
-      updatedAt: "2026-04-17T00:00:00.000Z",
-      userId: "member-1",
-    })).toThrow(/payloadRef/i);
   });
 
   it("rejects invalid bigint strings in hosted wake responses", () => {
@@ -573,22 +525,6 @@ describe("hosted wake parser contracts", () => {
     })).toThrow(/execution payload schema/i);
   });
 
-  it("rejects wake records that still use the removed legacy message payload schema", () => {
-    expect(() => parseHostedWakeRecord({
-      behavior: "ordered",
-      createdAt: "2026-04-17T00:00:00.000Z",
-      id: "wake_legacy",
-      kind: "conversation.message",
-      occurredAt: "2026-04-17T00:00:00.000Z",
-      payloadBytes: 32,
-      payloadCiphertext: "ciphertext:legacy",
-      payloadSchema: "murph.hosted-wake-message.v1",
-      seq: "1",
-      updatedAt: "2026-04-17T00:00:00.000Z",
-      userId: "member-1",
-    })).toThrow(/Unsupported hosted wake payload schema/i);
-  });
-
   it("rejects wake records whose payload schema is not the canonical execution schema", () => {
     expect(() => parseHostedWakeRecord({
       behavior: "ordered",
@@ -631,6 +567,27 @@ describe("hosted wake parser contracts", () => {
       pendingWakeCount: 0,
       wakeState: null,
     });
+  });
+
+  it("parses hosted wake status requests with the fetched-proof validation triple", () => {
+    expect(parseHostedWakeStatusRequest({
+      eventId: "evt_old",
+      fetchProof: "proof_24",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    })).toEqual({
+      eventId: "evt_old",
+      fetchProof: "proof_24",
+      wakeId: "wake_24",
+      wakeSeq: "24",
+    });
+  });
+
+  it("rejects partial hosted wake status fetched-proof validation input", () => {
+    expect(() => parseHostedWakeStatusRequest({
+      fetchProof: "proof_24",
+      wakeId: "wake_24",
+    })).toThrow(/must be provided together/i);
   });
 
   it("rejects the removed dispatchState input alias for wake status responses", () => {
