@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  buildHostedPrivySessionState: vi.fn(),
   cookies: vi.fn(),
   readHostedPrivyIdentityTokenFromCookieStore: vi.fn(),
   readHostedPrivyIdentityTokenFromRequestCookies: vi.fn(),
-  readHostedPrivyMemberIdFromVerifiedUser: vi.fn(),
-  resolveHostedPrivyIdentityFromVerifiedUser: vi.fn(),
-  resolveHostedPrivyLinkedAccounts: vi.fn(),
   verifyHostedPrivyIdentityToken: vi.fn(),
 }));
 
@@ -16,16 +14,17 @@ vi.mock("next/headers", () => ({
   cookies: mocks.cookies,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+vi.mock("@/src/lib/hosted-onboarding/privy-token", () => ({
   readHostedPrivyIdentityTokenFromCookieStore: mocks.readHostedPrivyIdentityTokenFromCookieStore,
   readHostedPrivyIdentityTokenFromRequestCookies: mocks.readHostedPrivyIdentityTokenFromRequestCookies,
-  readHostedPrivyMemberIdFromVerifiedUser: mocks.readHostedPrivyMemberIdFromVerifiedUser,
-  resolveHostedPrivyIdentityFromVerifiedUser: mocks.resolveHostedPrivyIdentityFromVerifiedUser,
-  verifyHostedPrivyIdentityToken: mocks.verifyHostedPrivyIdentityToken,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/privy-shared", () => ({
-  resolveHostedPrivyLinkedAccounts: mocks.resolveHostedPrivyLinkedAccounts,
+vi.mock("@/src/lib/hosted-onboarding/privy-user", () => ({
+  buildHostedPrivySessionState: mocks.buildHostedPrivySessionState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+  verifyHostedPrivyIdentityToken: mocks.verifyHostedPrivyIdentityToken,
 }));
 
 describe("hosted Privy session", () => {
@@ -37,25 +36,31 @@ describe("hosted Privy session", () => {
     });
     mocks.readHostedPrivyIdentityTokenFromCookieStore.mockReturnValue(null);
     mocks.readHostedPrivyIdentityTokenFromRequestCookies.mockReturnValue(null);
-    mocks.readHostedPrivyMemberIdFromVerifiedUser.mockReturnValue(null);
-    mocks.resolveHostedPrivyIdentityFromVerifiedUser.mockReturnValue({
-      phone: {
-        number: "+14155552671",
-        verifiedAt: 1741194420,
-      },
-      userId: "did:privy:user_123",
-      wallet: null,
-    });
-    mocks.resolveHostedPrivyLinkedAccounts.mockReturnValue([
-      {
-        latest_verified_at: 1741194420,
-        phone_number: "+1 415 555 2671",
-        type: "phone",
-      },
-    ]);
     mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [],
+    });
+    mocks.buildHostedPrivySessionState.mockReturnValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+      memberId: null,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [],
+      },
     });
   });
 
@@ -121,12 +126,31 @@ describe("hosted Privy session", () => {
 
     expect(mocks.readHostedPrivyIdentityTokenFromRequestCookies).toHaveBeenCalledWith(request);
     expect(mocks.verifyHostedPrivyIdentityToken).toHaveBeenCalledWith("identity-token");
+    expect(mocks.buildHostedPrivySessionState).toHaveBeenCalledWith({
+      id: "did:privy:user_123",
+      linked_accounts: [],
+    });
   });
 
   it("reads the Murph member id from verified Privy custom metadata", async () => {
     const { resolveHostedPrivySessionFromRequest } = await import("@/src/lib/hosted-onboarding/hosted-session");
     mocks.readHostedPrivyIdentityTokenFromRequestCookies.mockReturnValue("identity-token");
-    mocks.readHostedPrivyMemberIdFromVerifiedUser.mockReturnValue("member_123");
+    mocks.buildHostedPrivySessionState.mockReturnValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [],
+      memberId: "member_123",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [],
+      },
+    });
     const request = new Request("https://join.example.test/api/hosted-onboarding/privy/complete");
 
     await expect(resolveHostedPrivySessionFromRequest(request)).resolves.toMatchObject({

@@ -16,7 +16,10 @@ import {
   remapHostedPrivyCompletionLagError,
 } from "./privy";
 import { type PrivyLinkedAccountLike } from "./privy-shared";
-import { resolveHostedPrivySessionFromRequest } from "./hosted-session";
+import {
+  type HostedPrivySession,
+  resolveHostedPrivySessionFromRequest,
+} from "./hosted-session";
 
 export interface PrivyMemberAuthContext {
   identity: HostedPrivyIdentity;
@@ -26,12 +29,7 @@ export interface PrivyMemberAuthContext {
   verifiedPrivyUser: HostedPrivyUser;
 }
 
-export interface PrivySessionContext {
-  identity: HostedPrivyIdentity;
-  linkedAccounts: PrivyLinkedAccountLike[];
-  memberId: string | null;
-  verifiedPrivyUser: HostedPrivyUser;
-}
+export type PrivySessionContext = HostedPrivySession;
 
 export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAuthContext, "member"> {
   member: HostedMember;
@@ -40,18 +38,7 @@ export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAut
 export async function getPrivySession(
   request: Request,
 ): Promise<PrivySessionContext | null> {
-  const session = await resolveHostedPrivySessionFromRequest(request);
-
-  if (!session) {
-    return null;
-  }
-
-  return {
-    identity: session.identity,
-    linkedAccounts: session.linkedAccounts,
-    memberId: session.memberId,
-    verifiedPrivyUser: session.verifiedPrivyUser,
-  };
+  return resolveHostedPrivySessionFromRequest(request);
 }
 
 export async function resolvePrivyMemberAuthFromSession(input: {

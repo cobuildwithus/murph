@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
-    cookies: vi.fn(),
     createPrivyClient,
     isHostedOnboardingRevnetEnabled: vi.fn(),
     privyUsersSetCustomMetadata,
@@ -37,10 +36,6 @@ vi.mock("@privy-io/node", () => ({
   verifyIdentityToken: mocks.verifyIdentityToken,
 }));
 
-vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
   isHostedOnboardingRevnetEnabled: mocks.isHostedOnboardingRevnetEnabled,
 }));
@@ -51,17 +46,22 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   hasHostedPrivyPhoneAuthConfig,
-  readHostedPrivyMemberIdFromVerifiedUser,
-  readHostedPrivyIdentityTokenFromCookieHeader,
-  readHostedPrivyIdentityTokenFromCookieStore,
-  readHostedPrivyIdentityTokenFromRequestCookies,
-  requireHostedPrivyCompletionIdentityFromCookies,
   requireHostedPrivyIdentity,
-  requireHostedPrivyIdentityFromCookies,
   requireHostedPrivyPhoneAuthConfig,
+  remapHostedPrivyCompletionLagError,
   syncHostedPrivyMemberIdMetadata,
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  readHostedPrivyIdentityTokenFromCookieHeader,
+  readHostedPrivyIdentityTokenFromCookieStore,
+  readHostedPrivyIdentityTokenFromRequestCookies,
+} from "@/src/lib/hosted-onboarding/privy-token";
+import {
+  buildHostedPrivySessionState,
+  readHostedPrivyMemberIdFromVerifiedUser,
+} from "@/src/lib/hosted-onboarding/privy-user";
 
 describe("hosted Privy verification", () => {
   beforeEach(() => {
@@ -73,9 +73,6 @@ describe("hosted Privy verification", () => {
     mocks.runtimeEnv.privyAppId = "cm_app_123";
     mocks.runtimeEnv.privyAppSecret = "app_secret_123";
     mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockReturnValue(undefined),
-    });
   });
 
   it("reads the Murph member id from verified Privy custom metadata", () => {
@@ -91,6 +88,61 @@ describe("hosted Privy verification", () => {
       },
       id: "did:privy:user_123",
     } as never)).toBeNull();
+  });
+
+  it("builds the shared hosted Privy session state from a verified user", () => {
+    expect(buildHostedPrivySessionState({
+      custom_metadata: {
+        murph_member_id: "member_123",
+      },
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+        {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+    } as never)).toMatchObject({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        telegram: null,
+        userId: "did:privy:user_123",
+        wallet: {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chainType: "ethereum",
+          id: "wallet_123",
+          type: "wallet",
+        },
+      },
+      linkedAccounts: [
+        {
+          type: "phone",
+        },
+        {
+          type: "wallet",
+        },
+      ],
+      memberId: "member_123",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
   });
 
   it("derives server-side phone-auth readiness from the app id plus verification key", () => {
@@ -240,53 +292,8 @@ describe("hosted Privy verification", () => {
     expect(readHostedPrivyIdentityTokenFromRequestCookies(request)).toBe("cookie-token");
   });
 
-  it("reads and verifies the hosted Privy identity from request cookies", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-    });
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-        {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          id: "wallet_123",
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ],
-    });
-
-    await expect(requireHostedPrivyIdentityFromCookies()).resolves.toMatchObject({
-      userId: "did:privy:user_123",
-      phone: {
-        number: "+14155552671",
-      },
-      telegram: null,
-      wallet: {
-        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-      },
-    });
-    expect(mocks.verifyIdentityToken).toHaveBeenCalledWith(
-      expect.objectContaining({
-        identity_token: "cookie-token",
-      }),
-    );
-  });
-
-  it("requires the Privy identity cookie when reading hosted identity from cookies", async () => {
-    await expect(requireHostedPrivyIdentityFromCookies()).rejects.toMatchObject({
+  it("requires a non-empty Privy identity token for hosted verification", async () => {
+    await expect(verifyHostedPrivyIdentityToken("   ")).rejects.toMatchObject({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
       httpStatus: 401,
     });
@@ -364,113 +371,45 @@ describe("hosted Privy verification", () => {
     expect(mocks.privyUsersSetCustomMetadata).not.toHaveBeenCalled();
   });
 
-  it("maps missing server-side account state to a retryable not-ready error for completion", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-    });
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          id: "wallet_123",
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ],
-    });
-
-    await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
+  it("maps missing server-side account state to a retryable not-ready error for completion", () => {
+    expect(remapHostedPrivyCompletionLagError(hostedOnboardingError({
+      code: "PRIVY_ACCOUNT_REQUIRED",
+      message: "account required",
+      httpStatus: 400,
+    }))).toMatchObject({
       code: "PRIVY_ACCOUNT_NOT_READY",
       httpStatus: 409,
       retryable: true,
     });
   });
 
-  it("allows Telegram-only server-side completion state", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-    });
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          first_name: "Alice",
-          id: 456,
-          type: "telegram",
-          username: "alice",
-        },
-      ],
-    });
-
-    await expect(requireHostedPrivyCompletionIdentityFromCookies()).resolves.toMatchObject({
-      phone: null,
-      telegram: {
-        firstName: "Alice",
-        telegramUserId: "456",
-        username: "alice",
-      },
-      userId: "did:privy:user_123",
-      wallet: null,
+  it("maps missing server-side phone state to a retryable not-ready error for completion", () => {
+    expect(remapHostedPrivyCompletionLagError(hostedOnboardingError({
+      code: "PRIVY_PHONE_REQUIRED",
+      message: "phone required",
+      httpStatus: 400,
+    }))).toMatchObject({
+      code: "PRIVY_PHONE_NOT_READY",
+      httpStatus: 409,
+      retryable: true,
     });
   });
 
-  it("allows phone-only server-side completion state", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-    });
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-      ],
-    });
-
-    await expect(requireHostedPrivyCompletionIdentityFromCookies()).resolves.toMatchObject({
-      phone: {
-        number: "+14155552671",
-      },
-      telegram: null,
-      userId: "did:privy:user_123",
-      wallet: null,
-    });
-  });
-
-  it("maps missing server-side wallet state to a retryable not-ready error for completion when RevNet is enabled", async () => {
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-    });
-    mocks.verifyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-      ],
-    });
-
-    await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
+  it("maps missing server-side wallet state to a retryable not-ready error for completion", () => {
+    expect(remapHostedPrivyCompletionLagError(hostedOnboardingError({
+      code: "PRIVY_WALLET_REQUIRED",
+      message: "wallet required",
+      httpStatus: 400,
+    }))).toMatchObject({
       code: "PRIVY_WALLET_NOT_READY",
       httpStatus: 409,
       retryable: true,
     });
+  });
+
+  it("passes through non-hosted errors when remapping completion lag failures", () => {
+    const error = new Error("boom");
+    expect(remapHostedPrivyCompletionLagError(error)).toBe(error);
   });
 
   it("rejects malformed verifier results", async () => {
