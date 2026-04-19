@@ -11,6 +11,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./assistant/*": {
+      "types": "./dist/assistant/*.d.ts",
+      "default": "./dist/assistant/*.js"
+    },
     "./commands/assistant": {
       "types": "./dist/commands/assistant.d.ts",
       "default": "./dist/commands/assistant.js"

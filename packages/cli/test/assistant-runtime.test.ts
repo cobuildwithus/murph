@@ -5558,7 +5558,7 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
 })
 
-test('scanAssistantAutoReplyOnce does not resend after successful delivery when result artifact fan-out fails before any reply artifact exists', async () => {
+test('scanAssistantAutoReplyOnce does not resend after successful delivery when reply artifacts disappear after the first run', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-zero-artifact-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -5656,30 +5656,29 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     },
   } as any
 
-  const outcomeWriteSpy = vi
-    .spyOn(assistantAutomationArtifacts, 'writeAssistantAutoReplyGroupOutcomeArtifact')
-    .mockRejectedValueOnce(new Error('artifact write failed'))
+  const firstResult = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['email'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
+    },
+    vault: vaultRoot,
+  })
 
-  await assert.rejects(() =>
-    scanAssistantAutoReplyOnce({
-      afterCursor: null,
-      autoReplyPrimed: true,
-      enabledChannels: ['email'],
-      inboxServices,
-      onEvent(event) {
-        events.push(event)
-      },
-      async onStateProgress(next) {
-        stateProgress.push(snapshotAssistantAutoReplyProgress(next))
-      },
-      vault: vaultRoot,
-    }),
-  )
-  outcomeWriteSpy.mockRestore()
-
+  assertAssistantAutoReplyScanResult(firstResult, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
-  assert.equal(stateProgress.length, 0)
+  assert.equal(stateProgress.length, 1)
 
   const receipts = await listAssistantTurnReceipts(vaultRoot, 5)
   assert.equal(receipts.length, 1)
@@ -5689,42 +5688,15 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     'cap-zero-artifact',
   )
 
-  await assert.rejects(
-    () =>
-      readFile(
-        path.join(
-          vaultRoot,
-          'derived',
-          'inbox',
-          'cap-zero-artifact',
-          'assistant',
-          'chat-result.json',
-        ),
-        'utf8',
-      ),
-    (error) => {
-      assert.equal((error as NodeJS.ErrnoException).code, 'ENOENT')
-      return true
-    },
+  const artifactDir = path.join(
+    vaultRoot,
+    'derived',
+    'inbox',
+    'cap-zero-artifact',
+    'assistant',
   )
-  await assert.rejects(
-    () =>
-      readFile(
-        path.join(
-          vaultRoot,
-          'derived',
-          'inbox',
-          'cap-zero-artifact',
-          'assistant',
-          'chat-group-outcome.json',
-        ),
-        'utf8',
-      ),
-    (error) => {
-      assert.equal((error as NodeJS.ErrnoException).code, 'ENOENT')
-      return true
-    },
-  )
+  await rm(path.join(artifactDir, 'chat-result.json'))
+  await rm(path.join(artifactDir, 'chat-group-outcome.json'))
 
   const result = await scanAssistantAutoReplyOnce({
     afterCursor: null,
@@ -5747,6 +5719,23 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     skipped: 1,
   })
   assert.deepEqual(stateProgress, [
+    {
+      autoReply: [
+        {
+          channel: 'email',
+          cursor: {
+            createdAt: null,
+            occurredAt: '2026-03-18T09:02:00Z',
+            captureId: 'cap-zero-artifact',
+          },
+        },
+      ],
+      cursor: {
+        createdAt: null,
+        occurredAt: '2026-03-18T09:02:00Z',
+        captureId: 'cap-zero-artifact',
+      },
+    },
     {
       autoReply: [
         {
