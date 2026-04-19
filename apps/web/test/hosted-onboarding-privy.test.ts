@@ -112,6 +112,29 @@ describe("hosted Privy verification", () => {
     ).toBe(true);
   });
 
+  it("rejects verifier config that normalizes to an empty verification key", () => {
+    expect(
+      hasHostedPrivyPhoneAuthConfig(
+        createProcessEnv({
+          NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
+          PRIVY_VERIFICATION_KEY: "   ",
+        }),
+      ),
+    ).toBe(false);
+
+    mocks.runtimeEnv.privyVerificationKey = "\\n";
+
+    try {
+      requireHostedPrivyPhoneAuthConfig();
+      expect.fail("Expected an empty normalized verification key to be rejected.");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "PRIVY_CONFIG_REQUIRED",
+        httpStatus: 500,
+      });
+    }
+  });
+
   it("fails fast when the hosted phone-auth config is incomplete", () => {
     mocks.runtimeEnv.privyVerificationKey = null;
 
@@ -163,6 +186,31 @@ describe("hosted Privy verification", () => {
         id: "wallet_123",
         type: "wallet",
       },
+    });
+
+    expect(mocks.verifyIdentityToken).toHaveBeenCalledWith({
+      app_id: "cm_app_123",
+      identity_token: "signed-identity-token",
+      verification_key: "line-1\nline-2",
+    });
+    expect(mocks.createPrivyClient).not.toHaveBeenCalled();
+  });
+
+  it("verifies the identity token without requiring the app secret on the read path", async () => {
+    mocks.runtimeEnv.privyAppSecret = null;
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phoneNumber: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+    });
+
+    await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).resolves.toMatchObject({
+      id: "did:privy:user_123",
     });
 
     expect(mocks.verifyIdentityToken).toHaveBeenCalledWith({

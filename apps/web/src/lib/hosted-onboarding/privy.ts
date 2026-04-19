@@ -237,10 +237,10 @@ export function readHostedPrivyIdentityTokenFromRequestCookies(request: Request)
 }
 
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(
-    normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_APP_ID)
-      && normalizeEnvValue(source.PRIVY_VERIFICATION_KEY),
-  );
+  return readHostedPrivyVerificationConfig({
+    appId: source.NEXT_PUBLIC_PRIVY_APP_ID,
+    verificationKey: source.PRIVY_VERIFICATION_KEY,
+  }) !== null;
 }
 
 export function requireHostedPrivyPhoneAuthConfig(): {
@@ -248,8 +248,12 @@ export function requireHostedPrivyPhoneAuthConfig(): {
   verificationKey: string;
 } {
   const environment = getHostedOnboardingEnvironment();
+  const config = readHostedPrivyVerificationConfig({
+    appId: environment.privyAppId,
+    verificationKey: environment.privyVerificationKey,
+  });
 
-  if (!environment.privyAppId || !environment.privyVerificationKey) {
+  if (!config) {
     throw hostedOnboardingError({
       code: "PRIVY_CONFIG_REQUIRED",
       message:
@@ -258,10 +262,7 @@ export function requireHostedPrivyPhoneAuthConfig(): {
     });
   }
 
-  return {
-    appId: environment.privyAppId,
-    verificationKey: environment.privyVerificationKey.replace(/\\n/g, "\n").trim(),
-  };
+  return config;
 }
 
 function normalizeEnvValue(value: string | null | undefined): string | null {
@@ -273,6 +274,36 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   }
 
   return null;
+}
+
+function readHostedPrivyVerificationConfig(input: {
+  appId: string | null | undefined;
+  verificationKey: string | null | undefined;
+}): {
+  appId: string;
+  verificationKey: string;
+} | null {
+  const appId = normalizeEnvValue(input.appId);
+  const verificationKey = normalizeHostedPrivyVerificationKey(input.verificationKey);
+
+  if (!appId || !verificationKey) {
+    return null;
+  }
+
+  return {
+    appId,
+    verificationKey,
+  };
+}
+
+function normalizeHostedPrivyVerificationKey(value: string | null | undefined): string | null {
+  const normalized = normalizeEnvValue(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalizeEnvValue(normalized.replace(/\\n/g, "\n"));
 }
 
 function getHostedPrivyManagementClient(): PrivyClient | null {
