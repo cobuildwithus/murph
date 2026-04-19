@@ -98,31 +98,10 @@ function compareSupplements(
   );
 }
 
-function deriveLegacySupplementIngredients(
-  record: SupplementQueryRecord,
-): SupplementIngredientQueryRecord[] {
-  if (!record.entity.substance) {
-    return [];
-  }
-
-  return [{
-    compound: record.entity.substance,
-    label: record.entity.substance,
-    amount: record.entity.dose,
-    unit: record.entity.unit,
-    active: true,
-    note: null,
-  }];
-}
-
 function activeSupplementIngredients(
   record: SupplementQueryRecord,
 ): SupplementIngredientQueryRecord[] {
-  const ingredients = record.entity.ingredients.length > 0
-    ? record.entity.ingredients
-    : deriveLegacySupplementIngredients(record);
-
-  return ingredients.filter((ingredient) => ingredient.active !== false);
+  return record.entity.ingredients.filter((ingredient) => ingredient.active !== false);
 }
 
 function buildCompoundSourceRecord(
