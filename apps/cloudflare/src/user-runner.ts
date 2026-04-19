@@ -85,15 +85,7 @@ interface HostedWakeDrainOutcome {
 }
 
 interface HostedWakeDrainInternalResult extends HostedExecutionWakeDrainResult {
-  retryableExit: boolean;
-  stoppingState: HostedWakeDrainState | null;
-}
-
-class HostedWakeDrainRetryableExitError extends Error {
-  constructor(message = "Hosted wake drain exited in a retryable state before cleanup could finish.") {
-    super(message);
-    this.name = "HostedWakeDrainRetryableExitError";
-  }
+  exitState: HostedWakeDrainState | null;
 }
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
@@ -262,9 +254,7 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: null,
       });
-      await this.wakeScheduler.syncNextWake({
-        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
-      });
+      await this.scheduleHostedWakeRetryAlarm();
       return;
     }
 
@@ -281,9 +271,7 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId ?? null,
       });
-      await this.wakeScheduler.syncNextWake({
-        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
-      });
+      await this.scheduleHostedWakeRetryAlarm();
       return;
     }
 
@@ -296,8 +284,8 @@ export class HostedUserRunner {
       const drainResult = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal({
         targetSeqHint: materialization.targetSeqHint,
       }));
-      if (shouldRetryAlarmDrivenHostedWakeDrain(drainResult)) {
-        throw new HostedWakeDrainRetryableExitError();
+      if (shouldScheduleHostedWakeRetryAlarm(drainResult)) {
+        await this.scheduleHostedWakeRetryAlarm();
       }
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -308,9 +296,7 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId,
       });
-      await this.wakeScheduler.syncNextWake({
-        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
-      });
+      await this.scheduleHostedWakeRetryAlarm();
     }
   }
 
@@ -346,11 +332,6 @@ export class HostedUserRunner {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedExecutionWakeDrainResult> {
     const result = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
-    if (shouldRetryAlarmDrivenHostedWakeDrain(result)) {
-      await this.wakeScheduler.syncNextWake({
-        preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
-      });
-    }
     return toHostedExecutionWakeDrainResult(result);
   }
 
@@ -387,8 +368,7 @@ export class HostedUserRunner {
     await this.resumePendingCommittedCleanupIfNeeded();
     let committedSeq: string | null = null;
     let expectedVersion: string | null = null;
-    let retryableExit = false;
-    let stoppingState: HostedWakeDrainState | null = null;
+    let exitState: HostedWakeDrainState | null = null;
 
     for (let round = 0; round < MAX_HOSTED_WAKE_DRAIN_ROUNDS; round += 1) {
       const batch = await fetchHostedWakeBatchFromWeb({
@@ -417,7 +397,7 @@ export class HostedUserRunner {
       }
 
       let refetchAfterCommittedWake = false;
-      stoppingState = null;
+      exitState = null;
 
       for (const wake of batch.wakes) {
         const outcome = await this.executeHostedWakeRecord(wake);
@@ -428,12 +408,12 @@ export class HostedUserRunner {
         }
 
         if (!shouldAdvanceHostedWakeCursor(outcome.state)) {
-          stoppingState = outcome.state;
+          exitState = outcome.state;
           break;
         }
 
         if (!expectedVersion) {
-          stoppingState = outcome.state;
+          exitState = outcome.state;
           break;
         }
 
@@ -456,8 +436,7 @@ export class HostedUserRunner {
             });
 
             if (!terminal.recorded) {
-              retryableExit = true;
-              stoppingState = "backpressured";
+              exitState = "backpressured";
               break;
             }
           } catch (error) {
@@ -481,8 +460,7 @@ export class HostedUserRunner {
               phase: "wake.running",
               userId,
             });
-            retryableExit = true;
-            stoppingState = "backpressured";
+            exitState = "backpressured";
             break;
           }
         }
@@ -516,7 +494,7 @@ export class HostedUserRunner {
               });
               committedSeq = cursor.committedSeq;
               expectedVersion = cursor.version;
-              stoppingState = "backpressured";
+              exitState = "backpressured";
               break;
             }
             await persistPendingCommitFinalizeToken(this.stateStore, {
@@ -531,8 +509,13 @@ export class HostedUserRunner {
             if (finalized.state !== "completed") {
               committedSeq = cursor.committedSeq;
               expectedVersion = cursor.version;
-              retryableExit = finalized.state === "backpressured";
-              stoppingState = finalized.state;
+              exitState = finalized.state;
+              break;
+            }
+            if (finalized.cleanupApplied) {
+              committedSeq = cursor.committedSeq;
+              expectedVersion = cursor.version;
+              refetchAfterCommittedWake = true;
               break;
             }
           }
@@ -555,8 +538,7 @@ export class HostedUserRunner {
           });
           committedSeq = cursor.committedSeq;
           expectedVersion = cursor.version;
-          retryableExit = true;
-          stoppingState = "backpressured";
+          exitState = "backpressured";
           break;
         }
 
@@ -566,8 +548,8 @@ export class HostedUserRunner {
         break;
       }
 
-      if (stoppingState) {
-        if (stoppingState === "quarantined") {
+      if (exitState) {
+        if (exitState === "quarantined") {
           continue;
         }
 
@@ -592,9 +574,8 @@ export class HostedUserRunner {
 
     return {
       committedSeq: finalCommittedSeq,
+      exitState,
       requestedTargetSeq,
-      retryableExit,
-      stoppingState,
       targetReached: targetSeqHint === null || BigInt(finalCommittedSeq) >= targetSeqHint,
     };
   }
@@ -911,6 +892,7 @@ export class HostedUserRunner {
     cursor: TCursor;
     wake: HostedExecutionWake | null;
   }): Promise<{
+    cleanupApplied: boolean;
     cursor: TCursor;
     state: HostedWakeDrainState;
   }> {
@@ -920,6 +902,7 @@ export class HostedUserRunner {
 
     if (finalized.state !== "completed") {
       return {
+        cleanupApplied: false,
         cursor: input.cursor,
         state: finalized.state,
       };
@@ -928,6 +911,7 @@ export class HostedUserRunner {
     const pendingCommit = finalized.pendingCommit;
     if (!pendingCommit) {
       return {
+        cleanupApplied: false,
         cursor: input.cursor,
         state: "completed",
       };
@@ -935,6 +919,7 @@ export class HostedUserRunner {
 
     if (BigInt(input.cursor.committedSeq) !== BigInt(pendingCommit.wake.seq)) {
       return {
+        cleanupApplied: false,
         cursor: input.cursor,
         state: "completed",
       };
@@ -942,6 +927,7 @@ export class HostedUserRunner {
 
     if (sameHostedWakeCursorSnapshotRef(input.cursor.snapshotRef, pendingCommit.bundleRef)) {
       return {
+        cleanupApplied: false,
         cursor: input.cursor,
         state: "completed",
       };
@@ -958,6 +944,7 @@ export class HostedUserRunner {
         userId: pendingCommit.userId,
       });
       return {
+        cleanupApplied: false,
         cursor: input.cursor,
         state: "backpressured",
       };
@@ -981,6 +968,7 @@ export class HostedUserRunner {
       || sameHostedWakeCursorSnapshotRef(published.cursor.snapshotRef, pendingCommit.bundleRef)
     ) {
       return {
+        cleanupApplied: false,
         cursor: published.cursor as TCursor,
         state: "completed",
       };
@@ -1000,6 +988,7 @@ export class HostedUserRunner {
       userId: pendingCommit.userId,
     });
     return {
+      cleanupApplied: true,
       cursor: published.cursor as TCursor,
       state: "completed",
     };
@@ -1033,10 +1022,12 @@ export class HostedUserRunner {
       await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
       return;
     }
-    cursor = await this.cleanupCommittedHostedWakesLocally({
-      cursor,
-      wake: null,
-    });
+    if (!finalized.cleanupApplied) {
+      cursor = await this.cleanupCommittedHostedWakesLocally({
+        cursor,
+        wake: null,
+      });
+    }
     await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
   }
 
@@ -1276,6 +1267,12 @@ export class HostedUserRunner {
       preferredWakeAt,
     });
   }
+
+  private async scheduleHostedWakeRetryAlarm(): Promise<void> {
+    await this.wakeScheduler.syncNextWake({
+      preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
+    });
+  }
 }
 
 function sameHostedWakeCursorSnapshotRef(
@@ -1311,10 +1308,10 @@ function toHostedExecutionWakeDrainResult(
   };
 }
 
-function shouldRetryAlarmDrivenHostedWakeDrain(
+function shouldScheduleHostedWakeRetryAlarm(
   input: HostedWakeDrainInternalResult,
 ): boolean {
-  return input.retryableExit && input.stoppingState === "backpressured";
+  return input.exitState === "backpressured";
 }
 
 function shouldRefreshHostedWakeMaterialization(
