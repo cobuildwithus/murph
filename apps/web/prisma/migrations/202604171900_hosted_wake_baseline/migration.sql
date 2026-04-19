@@ -1,4 +1,4 @@
-CREATE TYPE "HostedWakeBehavior" AS ENUM ('ordered', 'coalescing', 'edge_triggered');
+CREATE TYPE "HostedWakeBehavior" AS ENUM ('ordered', 'coalescing');
 
 CREATE TABLE "hosted_execution_cursor" (
     "user_id" TEXT NOT NULL,

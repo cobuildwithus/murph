@@ -8,7 +8,6 @@ import {
 import { issueHostedWakeFetchProof } from "@/src/lib/hosted-wake/fetch-proof";
 import {
   appendHostedCoalescingWakeTx,
-  appendHostedEdgeTriggeredWakeTx,
   appendHostedOrderedWakeTx,
   commitHostedExecutionCursorTx,
   listHostedWakesAfterSeq,
@@ -34,7 +33,7 @@ interface TestCursorState {
 }
 
 interface TestWakeState {
-  behavior: "coalescing" | "edge_triggered" | "ordered";
+  behavior: "coalescing" | "ordered";
   coalescingKey: string | null;
   createdAt: Date;
   dedupeKey: string | null;
@@ -74,6 +73,7 @@ interface TestWakeEventState {
 interface TestWakeTerminalState {
   createdAt: Date;
   fetchedCommittedSeq: bigint;
+  fetchedCursorVersion: bigint;
   state: "completed" | "replaced";
   updatedAt: Date;
   userId: string;
@@ -297,6 +297,7 @@ describe("hosted wake store", () => {
     await expect(recordHostedWakeTerminalTx({
       fetchProof: issueHostedWakeFetchProof({
         fetchedCommittedSeq: 1n,
+        fetchedCursorVersion: 4n,
         userId: "member_123",
         wakeId: "wake_other",
         wakeSeq: 2n,
@@ -307,6 +308,126 @@ describe("hosted wake store", () => {
       wakeId: "wake_1",
       wakeSeq: 2n,
     })).rejects.toThrow(/wakeId/i);
+  });
+
+  it("rejects advancing the cursor when the recorded terminal receipt came from an older committed cursor position", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 0n,
+        fetchedCursorVersion: 3n,
+        userId: "member_123",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
+
+    await expect(commitHostedExecutionCursorTx({
+      committedSeq: 2n,
+      expectedVersion: 4n,
+      snapshotRef: {
+        checkpoint: "wake_2",
+      },
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "1",
+        nextSeq: "3",
+        userId: "member_123",
+        version: "4",
+      }),
+    });
+  });
+
+  it("refreshes the terminal receipt fetch fence when the same wake is re-fetched from the current cursor", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 0n,
+        fetchedCursorVersion: 3n,
+        userId: "member_123",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 1n,
+        fetchedCursorVersion: 4n,
+        userId: "member_123",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
+
+    await expect(commitHostedExecutionCursorTx({
+      committedSeq: 2n,
+      expectedVersion: 4n,
+      snapshotRef: {
+        checkpoint: "wake_2",
+      },
+      tx,
+      userId: "member_123",
+    })).resolves.toEqual({
+      committed: true,
+      cursor: expect.objectContaining({
+        committedSeq: "2",
+        nextSeq: "3",
+        snapshotRef: {
+          checkpoint: "wake_2",
+        },
+        userId: "member_123",
+        version: "5",
+      }),
+    });
   });
 
   it("commits snapshot-only cursor CAS updates at the already-committed seq without a terminal receipt", async () => {
@@ -602,16 +723,17 @@ describe("hosted wake store", () => {
     })).resolves.toBeNull();
   });
 
-  it("suppresses duplicate unresolved edge-triggered wakes", async () => {
+  it("keeps rejecting a stale coalesced wake receipt even after the caller learns the rewritten cursor version", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
         committedSeq: 0n,
         nextSeq: 2n,
         userId: "member_123",
+        version: 7n,
       },
       wakes: [
         {
-          behavior: "edge_triggered",
+          behavior: "coalescing",
           coalescingKey: "member.channels.updated:member_123",
           dedupeKey: "first",
           kind: "member.channels.updated",
@@ -625,7 +747,20 @@ describe("hosted wake store", () => {
       ],
     });
 
-    const result = await appendHostedEdgeTriggeredWakeTx({
+    const initialFetch = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+    const staleWake = initialFetch.wakes[0];
+
+    expect(initialFetch.cursor.version).toBe("7");
+    expect(staleWake).toEqual(expect.objectContaining({
+      id: "wake_1",
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      seq: "1",
+    }));
+
+    const rewrite = await appendHostedCoalescingWakeTx({
       coalescingKey: "member.channels.updated:member_123",
       dedupeKey: "second",
       eventId: "second",
@@ -639,18 +774,104 @@ describe("hosted wake store", () => {
       userId: "member_123",
     });
 
-    expect(result.inserted).toBe(false);
-    expect(result.updatedExisting).toBe(false);
-    expect(result.wake.seq).toBe("1");
+    expect(rewrite.updatedExisting).toBe(true);
+    expect(rewrite.wake.id).toBe("wake_1");
+    expect(rewrite.wake.seq).toBe("1");
 
-    const listed = await listHostedWakesAfterSeq({
-      prisma: tx,
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: staleWake!.fetchProof,
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: staleWake!.id,
+      wakeSeq: 1n,
+    })).resolves.toBe(true);
+
+    const staleCommit = await commitHostedExecutionCursorTx({
+      committedSeq: 1n,
+      expectedVersion: 7n,
+      snapshotRef: {
+        checkpoint: "wake_1_stale",
+      },
+      tx,
       userId: "member_123",
     });
 
-    expect(listed.wakes).toHaveLength(1);
-    expect(listed.wakes[0]?.dedupeKey).toBe("first");
-    expect(listed.wakes[0]?.fetchProof).toEqual(expect.any(String));
+    expect(staleCommit).toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "0",
+        nextSeq: "2",
+        userId: "member_123",
+        version: "8",
+      }),
+    });
+
+    const staleRetry = await commitHostedExecutionCursorTx({
+      committedSeq: 1n,
+      expectedVersion: 8n,
+      snapshotRef: {
+        checkpoint: "wake_1_stale_retry",
+      },
+      tx,
+      userId: "member_123",
+    });
+
+    expect(staleRetry).toEqual({
+      committed: false,
+      cursor: expect.objectContaining({
+        committedSeq: "0",
+        nextSeq: "2",
+        userId: "member_123",
+        version: "8",
+      }),
+    });
+
+    const latestFetch = await listHostedWakesAfterSeq({
+      prisma: tx,
+      userId: "member_123",
+    });
+    const latestWake = latestFetch.wakes[0];
+
+    expect(latestFetch.cursor.version).toBe("8");
+    expect(latestWake).toEqual(expect.objectContaining({
+      id: "wake_1",
+      occurredAt: "2026-04-17T00:01:00.000Z",
+      seq: "1",
+    }));
+    expect(latestWake?.fetchProof).toEqual(expect.any(String));
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: latestWake!.fetchProof,
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: latestWake!.id,
+      wakeSeq: 1n,
+    })).resolves.toBe(true);
+
+    const latestCommit = await commitHostedExecutionCursorTx({
+      committedSeq: 1n,
+      expectedVersion: 8n,
+      snapshotRef: {
+        checkpoint: "wake_1_latest",
+      },
+      tx,
+      userId: "member_123",
+    });
+
+    expect(latestCommit).toEqual({
+      committed: true,
+      cursor: expect.objectContaining({
+        committedSeq: "1",
+        nextSeq: "2",
+        snapshotRef: {
+          checkpoint: "wake_1_latest",
+        },
+        userId: "member_123",
+        version: "9",
+      }),
+    });
   });
 
   it("does not allocate a new seq when a duplicate dedupe key is discovered after the cursor lock", async () => {
@@ -1203,6 +1424,37 @@ function createHostedWakeStoreHarness(input?: {
         const terminal = state.wakeTerminals.find((candidate) => candidate.wakeId === args.where.wakeId);
         return terminal ? cloneWakeTerminal(terminal) : null;
       },
+      update(args: {
+        data: {
+          fetchedCommittedSeq: bigint;
+          fetchedCursorVersion: bigint;
+        };
+        where: {
+          wakeId: string;
+        };
+      }): TestWakeTerminalState {
+        const terminal = state.wakeTerminals.find((candidate) => candidate.wakeId === args.where.wakeId);
+
+        if (!terminal) {
+          throw new Error(`Unknown hosted wake terminal ${args.where.wakeId}.`);
+        }
+
+        terminal.fetchedCommittedSeq = args.data.fetchedCommittedSeq;
+        terminal.fetchedCursorVersion = args.data.fetchedCursorVersion;
+        terminal.updatedAt = new Date(terminal.updatedAt.getTime() + 1);
+        return cloneWakeTerminal(terminal);
+      },
+      deleteMany(args: {
+        where: {
+          wakeId: string;
+        };
+      }): { count: number } {
+        const before = state.wakeTerminals.length;
+        state.wakeTerminals = state.wakeTerminals.filter((terminal) => terminal.wakeId !== args.where.wakeId);
+        return {
+          count: before - state.wakeTerminals.length,
+        };
+      },
       findMany(args: {
         where: {
           userId: string;
@@ -1494,6 +1746,7 @@ function cloneCursor(cursor: TestCursorState): TestCursorState {
     createdAt: new Date(cursor.createdAt),
     snapshotRef: cursor.snapshotRef === null ? null : structuredClone(cursor.snapshotRef),
     updatedAt: new Date(cursor.updatedAt),
+    version: cursor.version ?? 0n,
   };
 }
 
