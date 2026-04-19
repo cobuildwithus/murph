@@ -109,6 +109,7 @@ const BASE_SESSION: AssistantSession = {
   provider: 'codex-cli',
   providerOptions: {
     continuityFingerprint: 'fingerprint-doctor',
+    provider: 'codex-cli',
     model: null,
     reasoningEffort: null,
     sandbox: null,

@@ -68,19 +68,17 @@ export function resolveAssistantRouteUserMessageContent(input: {
 export function assistantRouteSupportsRichUserMessageContent(
   route: ResolvedAssistantFailoverRoute,
 ): boolean {
-  return resolveAssistantProviderTargetCapabilities({
-    provider: route.provider,
-    ...route.providerOptions,
-  }).supportsRichUserMessageContent
+  return resolveAssistantProviderTargetCapabilities(
+    route.providerOptions,
+  ).supportsRichUserMessageContent
 }
 
 export function resolveAssistantRouteSupportedUserMessageContentTypes(
   route: ResolvedAssistantFailoverRoute,
 ): readonly AssistantUserMessageContentType[] {
-  return resolveAssistantProviderTargetCapabilities({
-    provider: route.provider,
-    ...route.providerOptions,
-  }).supportedUserMessageContentTypes
+  return resolveAssistantProviderTargetCapabilities(
+    route.providerOptions,
+  ).supportedUserMessageContentTypes
 }
 
 function normalizeAssistantUserMessageContent(

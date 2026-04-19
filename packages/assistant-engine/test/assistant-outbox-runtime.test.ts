@@ -17,6 +17,10 @@ import { createAssistantModelTarget } from '@murphai/operator-config/assistant-b
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { buildAssistantFirstContactWelcomeTurnMetadata } from '../src/assistant/first-contact-welcome-turn-metadata.ts'
 import {
+  hasAssistantSeenFirstContact,
+  resolveAssistantFirstContactStateDocIds,
+} from '../src/assistant/first-contact.ts'
+import {
   buildAssistantOutboxSummary,
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
@@ -851,6 +855,98 @@ describe('assistant outbox runtime', () => {
         threadId: null,
       },
     })
+  })
+
+  it('marks the upgraded Linq thread as first-contact seen when queued materialization delivers', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-first-contact-thread-seen-',
+    )
+
+    await saveAssistantSession(
+      vaultRoot,
+      createAssistantSession({
+        binding: {
+          actorId: '+15550001',
+          channel: 'linq',
+          conversationKey: 'channel:linq|identity:phone_lookup_1|actor:%2B15550001',
+          delivery: {
+            kind: 'participant',
+            target: '+15550001',
+          },
+          identityId: 'phone_lookup_1',
+          threadId: null,
+          threadIsDirect: true,
+        },
+        sessionId: 'session-linq-first-contact-thread-seen',
+      }),
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
+        fromPhoneNumber: '+15550000',
+      }),
+      prompt: 'welcome',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-linq-first-contact-thread-seen',
+      turnId: 'turn-linq-first-contact-thread-seen',
+      vault: vaultRoot,
+    })
+    const queued = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      bindingDelivery: {
+        kind: 'participant',
+        target: '+15550001',
+      },
+      channel: 'linq',
+      deliveryIdempotencyKey: 'idem-linq-first-contact-thread-seen',
+      identityId: 'phone_lookup_1',
+      message: 'welcome',
+      sessionId: 'session-linq-first-contact-thread-seen',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-linq-first-contact-thread-seen',
+      vault: vaultRoot,
+    })
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-created',
+      providerThreadId: 'linq-chat-created-local',
+      target: 'linq-chat-created-local',
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq,
+      },
+      force: true,
+      intentId: queued.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    await expect(
+      getAssistantSession(vaultRoot, 'session-linq-first-contact-thread-seen'),
+    ).resolves.toMatchObject({
+      binding: {
+        delivery: {
+          kind: 'thread',
+          target: 'linq-chat-created-local',
+        },
+        threadId: 'linq-chat-created-local',
+      },
+    })
+    await expect(
+      hasAssistantSeenFirstContact({
+        docIds: resolveAssistantFirstContactStateDocIds({
+          actorId: null,
+          channel: 'linq',
+          identityId: 'phone_lookup_1',
+          threadId: 'linq-chat-created-local',
+          threadIsDirect: true,
+        }),
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(true)
   })
 
   it('clears prepared dispatches on definite failures and falls back to confirmation-pending retries when cleanup is ambiguous', async () => {

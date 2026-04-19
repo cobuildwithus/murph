@@ -87,6 +87,7 @@ const TEST_SESSION = {
     profile: null,
     oss: false,
     executionDriver: 'codex-cli',
+    provider: 'codex-cli',
     resumeKind: 'codex-session',
   },
   providerBinding: null,

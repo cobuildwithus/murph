@@ -2,9 +2,7 @@ import type {
   AssistantChatProvider,
   AssistantProviderBinding,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  readAssistantProviderResumeRouteId,
-} from './provider-state.js'
+import { normalizeNullableString } from './shared.js'
 import type { ResolvedAssistantFailoverRoute } from './failover.js'
 
 export function resolveAssistantProviderResumeKey(input: {
@@ -42,9 +40,9 @@ export function doesAssistantResumeBindingMatchRoute(input: {
     return false
   }
 
-  const storedRouteId = readAssistantProviderResumeRouteId({
-    providerBinding: input.binding,
-  })
+  const storedRouteId = normalizeNullableString(
+    input.binding.providerState?.resumeRouteId,
+  )
   if (storedRouteId === null) {
     return false
   }

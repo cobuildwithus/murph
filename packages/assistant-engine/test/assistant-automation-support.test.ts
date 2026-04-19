@@ -159,6 +159,7 @@ function createAssistantAskResult(input: {
         approvalPolicy: 'never',
         profile: null,
         oss: false,
+        provider: 'codex-cli',
         resumeKind: 'codex-session',
       },
       providerBinding: null,

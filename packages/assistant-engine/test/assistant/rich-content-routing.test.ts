@@ -141,6 +141,7 @@ function createProviderOptions(
 ): AssistantProviderSessionOptions {
   return {
     continuityFingerprint: `${provider}-fingerprint`,
+    provider,
     model: provider === 'codex-cli' ? 'gpt-5.4' : 'gpt-4.1-mini',
     reasoningEffort: null,
     sandbox: null,

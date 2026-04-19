@@ -114,6 +114,7 @@ export async function persistAssistantModelSelection(input: {
     vault: input.vault,
     sessionId: input.session.sessionId,
     providerOptions: {
+      provider: input.session.provider,
       model: input.nextModel,
       reasoningEffort: input.nextReasoningEffort,
     },

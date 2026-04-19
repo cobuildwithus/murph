@@ -46,14 +46,7 @@ export function readAssistantSessionResumeState(
     }
   }
 
-  return normalizeAssistantSessionResumeState(
-    'providerBinding' in input && input.providerBinding
-      ? {
-          providerSessionId: input.providerBinding.providerSessionId,
-          resumeRouteId: input.providerBinding.providerState?.resumeRouteId ?? null,
-        }
-      : null,
-  )
+  return null
 }
 
 export function writeAssistantProviderResumeRouteId(
@@ -113,16 +106,7 @@ export function serializeAssistantSessionForPersistence(
     throw new TypeError('Assistant session target is required.')
   }
 
-  const bindingResumeState =
-    session.providerBinding?.provider === target.adapter
-      ? {
-          providerSessionId: session.providerBinding.providerSessionId,
-          resumeRouteId: session.providerBinding.providerState?.resumeRouteId ?? null,
-        }
-      : null
-  const resumeState = normalizeAssistantSessionResumeState(
-    session.resumeState ?? bindingResumeState,
-  )
+  const resumeState = normalizeAssistantSessionResumeState(session.resumeState)
 
   return assistantPersistedSessionSchema.parse({
     schema: 'murph.assistant-session.v1',

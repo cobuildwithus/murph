@@ -9,6 +9,7 @@ import {
   parseAssistantMessageRequestBody,
   parseAssistantOutboxDrainRequestBody,
   parseAssistantSessionRoute,
+  parseAssistantSessionOptionsRequestBody,
   resolveAssistantHttpErrorStatus,
 } from '../src/http-protocol.js'
 import type { AssistantLocalService } from '../src/service.js'
@@ -30,7 +31,7 @@ const TEST_CRON_JOB = {
     channel: 'telegram',
     identityId: null,
     participantId: 'chat-123',
-    sourceThreadId: 'chat-123',
+    threadId: 'chat-123',
     deliveryTarget: null,
     deliverResponse: true,
   },
@@ -55,6 +56,7 @@ const TEST_PROVIDER_OPTIONS = {
   model: null,
   oss: false,
   profile: null,
+  provider: 'codex-cli',
   reasoningEffort: null,
   resumeKind: 'codex-session',
   sandbox: null,
@@ -431,5 +433,36 @@ test('assistantd http protocol validates optional nullable-string and boolean fi
         },
       ),
     /request field dryRun must be a boolean when present/u,
+  )
+
+  assert.throws(
+    () =>
+      parseAssistantMessageRequestBody({
+        prompt: 'hello',
+        sourceThreadId: 'legacy-thread',
+      }),
+    /sourceThreadId is no longer supported/u,
+  )
+
+  assert.throws(
+    () =>
+      parseAssistantCronTargetSetRequestBody(
+        new URL('http://localhost/cron/jobs/cron_http_test/target'),
+        {
+          sourceThreadId: 'legacy-thread',
+        },
+      ),
+    /sourceThreadId is no longer supported/u,
+  )
+
+  assert.throws(
+    () =>
+      parseAssistantSessionOptionsRequestBody({
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+        sessionId: 'session_http_test',
+      }),
+    /session-options provider must be one of codex-cli, openai-compatible/u,
   )
 })

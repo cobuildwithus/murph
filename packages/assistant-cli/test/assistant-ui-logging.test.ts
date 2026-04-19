@@ -42,6 +42,7 @@ function createSession(
     provider: 'openai-compatible',
     providerOptions: {
       continuityFingerprint: 'fingerprint-ui-logging',
+      provider: 'openai-compatible',
       model: null,
       reasoningEffort: null,
       sandbox: null,

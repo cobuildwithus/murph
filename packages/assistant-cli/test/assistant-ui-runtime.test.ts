@@ -113,6 +113,7 @@ const TEST_SESSION: AssistantSession = {
   provider: 'openai-compatible',
   providerOptions: {
     continuityFingerprint: 'fingerprint-ui-runtime',
+    provider: 'openai-compatible',
     model: null,
     reasoningEffort: null,
     sandbox: null,

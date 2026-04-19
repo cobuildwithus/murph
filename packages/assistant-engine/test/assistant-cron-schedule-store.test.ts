@@ -285,7 +285,7 @@ describe('assistant cron store helpers', () => {
         identityId: '  ident-1  ',
         participantId: '  person-1  ',
         sessionId: '  asst_123  ',
-        sourceThreadId: '  source-1  ',
+        threadId: '  source-1  ',
       }),
     ).toEqual({
       alias: 'morning',
@@ -294,7 +294,7 @@ describe('assistant cron store helpers', () => {
       identityId: 'ident-1',
       participantId: 'person-1',
       sessionId: 'asst_123',
-      sourceThreadId: 'source-1',
+      threadId: 'source-1',
     })
   })
 })
@@ -477,7 +477,7 @@ function createCronTarget(): AssistantCronTarget {
     identityId: null,
     participantId: null,
     sessionId: null,
-    sourceThreadId: null,
+    threadId: null,
   }
 }
 

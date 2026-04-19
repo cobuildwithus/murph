@@ -424,7 +424,7 @@ describe('assistant cron runtime threshold coverage', () => {
     expect(job.target).toMatchObject({
       channel: 'telegram',
       participantId: 'person-1',
-      sourceThreadId: 'thread-1',
+      threadId: 'thread-1',
     })
     expect(job.target.deliveryTarget).toBeNull()
   })

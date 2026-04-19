@@ -248,6 +248,7 @@ export const assistantCronRunIdSchema = createAssistantOpaqueIdSchema('cron run'
 
 export const assistantProviderSessionOptionsSchema = z.object({
   continuityFingerprint: z.string().min(1),
+  provider: z.enum(assistantChatProviderValues),
   model: z.string().min(1).nullable(),
   reasoningEffort: z.string().min(1).nullable().default(null),
   sandbox: z.enum(assistantSandboxValues).nullable(),
@@ -404,6 +405,7 @@ function buildAssistantRuntimeSession(
       ? assistantProviderSessionOptionsSchema.parse({
           continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
           executionDriver: resolvedRuntimeTarget.executionDriver,
+          provider,
           model: value.target.model,
           presetId: resolvedRuntimeTarget.presetId,
           reasoningEffort: value.target.reasoningEffort,
@@ -427,6 +429,7 @@ function buildAssistantRuntimeSession(
       : assistantProviderSessionOptionsSchema.parse({
           continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
           executionDriver: resolvedRuntimeTarget.executionDriver,
+          provider,
           model: value.target.model,
           reasoningEffort: value.target.reasoningEffort,
           resumeKind: resolvedRuntimeTarget.resumeKind,
@@ -856,9 +859,10 @@ export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
 ])
 
 const assistantCronRouteSchema = automationRouteSchema
-  .omit({ channel: true })
+  .omit({ channel: true, sourceThreadId: true })
   .extend({
     channel: z.string().min(1).nullable(),
+    threadId: z.string().min(1).nullable(),
   })
   .strict()
 
@@ -1261,10 +1265,11 @@ export type AssistantSessionShowResult = z.infer<
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
-export type AssistantCronTarget = Omit<AutomationRoute, 'channel'> & {
+export type AssistantCronTarget = Omit<AutomationRoute, 'channel' | 'sourceThreadId'> & {
   alias: string | null
   channel: string | null
   sessionId: string | null
+  threadId: string | null
 }
 export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
 export type AssistantCronFoodAutoLog = z.infer<typeof assistantCronFoodAutoLogSchema>

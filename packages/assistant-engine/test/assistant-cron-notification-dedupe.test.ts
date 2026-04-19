@@ -21,7 +21,7 @@ describe('buildAssistantCronNotificationDedupeToken', () => {
       sessionId: null,
       identityId: null,
       participantId: 'user_123',
-      sourceThreadId: 'thread_123',
+      threadId: 'thread_123',
       deliveryTarget: null,
     },
   }

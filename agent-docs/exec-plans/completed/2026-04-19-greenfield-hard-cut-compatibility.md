@@ -31,9 +31,27 @@ Remove live compatibility bridges, legacy projection fields, deprecated route/bu
 - Hosted files already have overlapping dirty-tree edits; keep local ownership for those integrations.
 - Prefer hard delete over migration when the only justification is compatibility for data or deploys that do not exist.
 - Update any docs/readmes that still advertise removed aliases or deploy/migration flows in the same patch.
-- This pass did not complete the full plan. The lasting code change preserved current assistant-provider normalization semantics by routing `normalizeAssistantProviderConfig()` through a local provider-for-normalization helper, after validation showed assistant-engine still depends on provider-less session-option shapes.
-- Narrow fixture cleanup also made hosted assistant profile/provider-option test inputs explicit where the production contract already requires it.
+- The assistant-provider/session-option hard-cut is now materially advanced:
+  - `AssistantProviderSessionOptions` now carries explicit `provider` across the schema, runtime session reconstruction, session persistence, and daemon/session-update boundaries.
+  - `inferAssistantProviderFromConfigInput()` and `mergeAssistantProviderConfigs()` no longer infer provider from non-provider fields.
+  - `resolveAssistantExecutionPlan()` no longer uses provider-less override inference.
+  - assistant session-option updates now require explicit `provider` through `assistant-cli`, `assistant-engine`, and `assistantd`, and the model-selection UI sends it explicitly.
+- The assistant cron/daemon hard-cut now also uses canonical `threadId` on the assistant-owned contract surfaces:
+  - `assistantd` request parsing rejects legacy `sourceThreadId` and now reads `threadId` for cron target updates instead of silently dropping it
+  - assistant cron target contracts, snapshots, notification dedupe, and daemon client serialization now use `threadId`
+  - assistant-cron keeps the translation back to canonical automation/self-delivery route owners at the boundary where those owners still use `sourceThreadId`
+- The overlapping hosted wake/runner cleanup was validated separately and is already present in the current hosted files:
+  - hosted wake status proof validation now requires `wakeEventId`
+  - the runner path cleanup keeps `/internal/run` as the canonical internal route
+  - the hosted-execution route surface no longer needs the raw-message path builder on the shared package surface
 - Verification outcome for this slice:
-  - targeted package tests passed for `packages/operator-config`, `packages/assistant-engine`, and `packages/hosted-execution`
-  - `pnpm typecheck` still fails in unrelated dirty-tree `apps/web/test/hosted-wake-store.test.ts` because that test references missing `assistantNextWakeAt` properties
-  - `bash scripts/workspace-verify.sh test:diff ...` advanced through reverse dependents and then surfaced unrelated `packages/cli/test/setup-cli.test.ts` failures already present in the dirty tree
+  - passed: full-package `pnpm exec vitest run --config vitest.config.ts --no-coverage` in `packages/operator-config`
+  - passed: full-package `pnpm exec vitest run --config vitest.config.ts --no-coverage` in `packages/assistant-engine`
+  - passed: full-package `pnpm exec vitest run --config vitest.config.ts --no-coverage` in `packages/assistantd`
+  - passed: targeted `packages/assistant-cli` Vitest coverage for the daemon/session-update/runtime-service seams
+  - package-level `packages/assistant-cli` Vitest still fails in pre-existing `test/assistant-ui-ink.test.ts` timeout cases unrelated to provider shape changes
+  - passed: package-level `tsc --noEmit` in `packages/{operator-config,assistant-engine,assistantd,assistant-cli}`
+  - unrelated broader `packages/cli` verification remains blocked by existing export-resolution failures in the dirty tree
+Status: completed
+Updated: 2026-04-19
+Completed: 2026-04-19

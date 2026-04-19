@@ -235,7 +235,7 @@ export async function installAssistantCronPreset(
     channel: input.channel,
     identityId: input.identityId,
     participantId: input.participantId,
-    sourceThreadId: input.sourceThreadId,
+    threadId: input.threadId,
     deliveryTarget: input.deliveryTarget,
   })
 
@@ -374,7 +374,7 @@ async function resolveAssistantCronTargetDefaults<
       channel: input.channel,
       identityId: input.identityId,
       participantId: input.participantId,
-      sourceThreadId: input.sourceThreadId,
+      sourceThreadId: input.threadId,
       deliveryTarget: input.deliveryTarget,
     },
     {
@@ -387,7 +387,7 @@ async function resolveAssistantCronTargetDefaults<
     channel: resolvedTarget.channel ?? undefined,
     identityId: resolvedTarget.identityId ?? undefined,
     participantId: resolvedTarget.participantId ?? undefined,
-    sourceThreadId: resolvedTarget.sourceThreadId ?? undefined,
+    threadId: resolvedTarget.sourceThreadId ?? undefined,
     deliveryTarget: resolvedTarget.deliveryTarget ?? undefined,
   } as TInput
 }
@@ -544,7 +544,7 @@ function projectCanonicalAssistantCronJob(input: {
           deliveryTarget: null,
           identityId: null,
           participantId: null,
-          sourceThreadId: null,
+          threadId: null,
         }
   const target = assistantCronTargetSchema.parse({
     sessionId: continuitySessionId,
@@ -552,7 +552,10 @@ function projectCanonicalAssistantCronJob(input: {
     channel: targetRoute.channel,
     identityId: targetRoute.identityId,
     participantId: targetRoute.participantId,
-    sourceThreadId: targetRoute.sourceThreadId,
+    threadId:
+      'sourceThreadId' in targetRoute
+        ? targetRoute.sourceThreadId
+        : targetRoute.threadId,
     deliveryTarget: targetRoute.deliveryTarget,
   })
   const projectedState = projectCanonicalAssistantCronJobState({
@@ -680,7 +683,7 @@ function buildCanonicalAutomationRoute(
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
     participantId: target.participantId,
-    sourceThreadId: target.sourceThreadId,
+    sourceThreadId: target.threadId,
   }
 }
 
@@ -1432,12 +1435,12 @@ function validateAssistantCronDeliveryTarget(
   }
 
   const participantId = normalizeNullableString(input.participantId)
-  const sourceThreadId = normalizeNullableString(input.sourceThreadId)
+  const threadId = normalizeNullableString(input.threadId)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
   const bindingDelivery = resolveAssistantBindingDelivery({
     channel,
     actorId: participantId,
-    threadId: sourceThreadId,
+    threadId,
   })
 
   if (!deliveryTarget && !bindingDelivery) {
@@ -1452,7 +1455,7 @@ function validateAssistantCronDeliveryTarget(
     channel,
     identityId,
     participantId,
-    sourceThreadId,
+    threadId,
     deliveryTarget,
   })
 }
@@ -1593,7 +1596,7 @@ async function executeClaimedAssistantCronJob(input: {
         channel: claimedJob.target.channel,
         identityId: claimedJob.target.identityId,
         participantId: claimedJob.target.participantId,
-        sourceThreadId: claimedJob.target.sourceThreadId,
+        threadId: claimedJob.target.threadId,
         deliveryDispatchMode: input.deliveryDispatchMode,
         deliveryTarget: claimedJob.target.deliveryTarget,
         turnTrigger: 'automation-cron',
@@ -2031,7 +2034,7 @@ function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean
     job.target.sessionId ||
       job.target.alias ||
       (job.target.channel &&
-        (job.target.participantId || job.target.sourceThreadId)),
+        (job.target.participantId || job.target.threadId)),
   )
 }
 
@@ -2045,7 +2048,7 @@ function buildAssistantCronTargetSnapshot(
     bindingDelivery: resolveAssistantBindingDelivery({
       channel: job.target.channel,
       actorId: job.target.participantId,
-      threadId: job.target.sourceThreadId,
+      threadId: job.target.threadId,
       deliveryTarget: job.target.deliveryTarget,
     }) as AssistantBindingDelivery | null,
   }
@@ -2054,18 +2057,18 @@ function buildAssistantCronTargetSnapshot(
 function assistantCronTargetAudienceEquals(
   left: Pick<
     AssistantCronTarget,
-    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
+    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
   >,
   right: Pick<
     AssistantCronTarget,
-    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
+    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
   >,
 ): boolean {
   return (
     left.channel === right.channel &&
     left.identityId === right.identityId &&
     left.participantId === right.participantId &&
-    left.sourceThreadId === right.sourceThreadId &&
+    left.threadId === right.threadId &&
     left.deliveryTarget === right.deliveryTarget
   )
 }

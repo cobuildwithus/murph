@@ -16,7 +16,6 @@ import {
 } from './failover.js'
 import {
   compactAssistantProviderConfigInput,
-  inferAssistantProviderFromConfigInput,
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
@@ -50,7 +49,6 @@ export function resolveAssistantExecutionPlan(input: {
   const resolvedProvider =
     overrideConfig?.provider ??
     baseProviderConfig?.provider ??
-    inferAssistantProviderFromConfigInput(overrideConfig) ??
     null
 
   if (!resolvedProvider) {

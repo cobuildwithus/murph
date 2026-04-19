@@ -16,6 +16,10 @@ import {
   sendLinqMessage,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
+import {
+  markAssistantFirstContactSeen,
+  resolveAssistantFirstContactStateDocIds,
+} from './first-contact.js'
 import { readAssistantFirstContactWelcomeFromPhoneNumber } from './first-contact-welcome-turn-metadata.js'
 import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
@@ -666,6 +670,18 @@ async function maybeDeliverAssistantFirstContactLinqMaterialization(input: {
 
   const sentAt = new Date().toISOString()
   const currentSession = await getAssistantSession(input.vault, input.payload.sessionId)
+  const threadIsDirect = currentSession.binding.threadIsDirect ?? input.payload.threadIsDirect ?? true
+  await markAssistantFirstContactSeen({
+    docIds: resolveAssistantFirstContactStateDocIds({
+      actorId: currentSession.binding.actorId,
+      channel: currentSession.binding.channel ?? 'linq',
+      identityId: currentSession.binding.identityId,
+      threadId: target,
+      threadIsDirect,
+    }),
+    seenAt: sentAt,
+    vault: input.vault,
+  })
   return {
     delivery: assistantChannelDeliverySchema.parse({
       channel: 'linq',
@@ -687,7 +703,7 @@ async function maybeDeliverAssistantFirstContactLinqMaterialization(input: {
         deliveryKind: 'thread',
         deliveryTarget: target,
         threadId: target,
-        threadIsDirect: currentSession.binding.threadIsDirect ?? input.payload.threadIsDirect ?? true,
+        threadIsDirect,
       }),
       updatedAt: sentAt,
     },

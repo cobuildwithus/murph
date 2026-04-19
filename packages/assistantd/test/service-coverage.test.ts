@@ -160,7 +160,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
     job: 'cron_job_test',
     participantId: null,
     resetContinuity: true,
-    sourceThreadId: null,
+    threadId: null,
     vault: TEST_VAULT_ROOT,
   })
   await service.runAutomationOnce({
@@ -177,7 +177,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
     vault: TEST_VAULT_ROOT,
   } as Parameters<AssistantLocalService['sendMessage']>[0])
   await service.updateSessionOptions({
-    providerOptions: { model: 'gpt-5.4' },
+    providerOptions: { provider: 'codex-cli', model: 'gpt-5.4' },
     sessionId: 'session_service_test',
     vault: TEST_VAULT_ROOT,
   } as Parameters<AssistantLocalService['updateSessionOptions']>[0])
@@ -247,7 +247,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       job: 'cron_job_test',
       participantId: undefined,
       resetContinuity: true,
-      sourceThreadId: undefined,
+      threadId: undefined,
       vault: TEST_VAULT_ROOT,
     },
   ])
@@ -291,7 +291,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
   ])
   assert.deepEqual(mocks.updateAssistantSessionOptions.mock.calls[0], [
     {
-      providerOptions: { model: 'gpt-5.4' },
+      providerOptions: { provider: 'codex-cli', model: 'gpt-5.4' },
       sessionId: 'session_service_test',
       vault: TEST_VAULT_ROOT,
     },
@@ -341,7 +341,7 @@ test('createAssistantLocalService drops non-finite optional values to the engine
     identityId: null,
     job: 'cron_job_test',
     participantId: null,
-    sourceThreadId: null,
+    threadId: null,
     vault: TEST_VAULT_ROOT,
   })
 
@@ -382,7 +382,7 @@ test('createAssistantLocalService drops non-finite optional values to the engine
       job: 'cron_job_test',
       participantId: undefined,
       resetContinuity: undefined,
-      sourceThreadId: undefined,
+      threadId: undefined,
       vault: TEST_VAULT_ROOT,
     },
   ])

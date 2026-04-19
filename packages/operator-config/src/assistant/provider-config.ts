@@ -88,34 +88,7 @@ export function resolveAssistantProvider(
 export function inferAssistantProviderFromConfigInput(
   input: AssistantProviderConfigInput | null | undefined,
 ): AssistantChatProvider | null {
-  if (input?.provider) {
-    return input.provider
-  }
-
-  if (
-    normalizeNullableString(input?.baseUrl) ||
-    normalizeNullableString(input?.apiKeyEnv) ||
-    normalizeNullableString(input?.providerName) ||
-    normalizeAssistantPresetId(input?.presetId) ||
-    normalizeAssistantHeaders(input?.headers) ||
-    normalizeAssistantWebSearchMode(input?.webSearch) ||
-    input?.zeroDataRetention === true
-  ) {
-    return 'openai-compatible'
-  }
-
-  if (
-    normalizeNullableString(input?.codexCommand) ||
-    normalizeNullableString(input?.codexHome) ||
-    normalizeNullableString(input?.profile) ||
-    input?.approvalPolicy !== null && input?.approvalPolicy !== undefined ||
-    input?.sandbox !== null && input?.sandbox !== undefined ||
-    input?.oss === true
-  ) {
-    return 'codex-cli'
-  }
-
-  return null
+  return input?.provider ?? null
 }
 
 export function normalizeAssistantProviderConfig(
@@ -224,9 +197,8 @@ export function mergeAssistantProviderConfigs(
   let provider: AssistantChatProvider = 'codex-cli'
 
   for (const input of inputs) {
-    const inferredProvider = inferAssistantProviderFromConfigInput(input)
-    if (inferredProvider) {
-      provider = inferredProvider
+    if (input?.provider) {
+      provider = input.provider
     }
   }
 
@@ -267,6 +239,7 @@ export function serializeAssistantProviderSessionOptions(
   return assistantProviderSessionOptionsSchema.parse({
     continuityFingerprint: resolved.continuityFingerprint,
     executionDriver: resolved.executionDriver,
+    provider: normalized.provider,
     model: normalized.model,
     reasoningEffort: normalized.reasoningEffort,
     resumeKind: resolved.resumeKind,

@@ -610,6 +610,7 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
   const result = await updateAssistantSessionOptionsLocal({
     providerOptions: {
       model: 'gpt-5.4-mini',
+      provider: 'openai-compatible',
       providerName: 'Updated Provider',
       reasoningEffort: 'low',
     },

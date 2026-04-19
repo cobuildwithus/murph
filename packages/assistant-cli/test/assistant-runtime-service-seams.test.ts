@@ -184,6 +184,7 @@ test('service wrappers prefer daemon responses and fall back to local implementa
   assert.deepEqual(
     await updateAssistantSessionOptions({
       providerOptions: {
+        provider: 'codex-cli',
         model: 'gpt-5.4',
       },
       sessionId: 'session_demo',
@@ -231,6 +232,7 @@ test('service wrappers prefer daemon responses and fall back to local implementa
   assert.deepEqual(
     await updateAssistantSessionOptions({
       providerOptions: {
+        provider: 'codex-cli',
         model: 'remote',
       },
       sessionId: 'session_remote',
