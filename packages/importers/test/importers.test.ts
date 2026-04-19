@@ -552,6 +552,36 @@ test("prepareCsvSampleImport infers SpO2 imports from O2Ring-style CSV rows and 
   assert.equal(payload.payload.batchProvenance?.rows?.[2]?.rawValue, "--");
 });
 
+test("prepareCsvSampleImport infers the stream from valueColumn when no stream is provided", async () => {
+  const filePath = await createTempFile(
+    "pulse-rate.csv",
+    [
+      "Time,Pulse Rate,Device",
+      "00:55:47 Apr 17 2026,75,watch",
+      "00:55:48 Apr 17 2026,74,watch",
+    ].join("\n"),
+  );
+
+  const plan = await prepareCsvSampleImport({
+    filePath,
+    valueColumn: "Pulse Rate",
+    metadataColumns: ["Device"],
+  });
+
+  const [payload] = plan.imports;
+
+  assert.ok(payload);
+  assert.equal(plan.timeZone, "UTC");
+  assert.equal(plan.tsColumn, "Time");
+  assert.equal(payload.stream, "heart_rate");
+  assert.equal(payload.unit, "bpm");
+  assert.equal(payload.valueColumn, "Pulse Rate");
+  assert.equal(payload.importedCount, 2);
+  assert.equal(payload.payload.importConfig.valueColumn, "Pulse Rate");
+  assert.equal(payload.payload.samples[0]?.recordedAt, "2026-04-17T00:55:47.000Z");
+  assert.deepEqual(payload.payload.batchProvenance?.rows?.[0]?.metadata, { Device: "watch" });
+});
+
 test("prepareCsvSampleImport rejects header-only files", async () => {
   const filePath = await createTempFile("header-only.csv", "recorded,value\n");
 

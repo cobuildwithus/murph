@@ -9,6 +9,7 @@ import {
   buildHostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
+import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
   createAssistantDeliveryAmbiguousError: vi.fn(),
@@ -296,6 +297,34 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
+  it("returns missing-result when the outbox mirror marks a delivery sent without a receipt", async () => {
+    const effect = createEffect();
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "sent",
+      }),
+    );
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_MISSING_RESULT",
+        deliveryStatus: "missing-result",
+        retryable: false,
+      }),
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
   it("waits on an in-flight sending mirror state instead of dispatching again", async () => {
     const effect = createEffect();
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
@@ -388,6 +417,37 @@ describe("hosted runtime callbacks", () => {
         deliveryErrorCode: "ASSISTANT_DELIVERY_FAILED",
         deliveryStatus: "failed",
         retryable: false,
+      }),
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
+  it("returns retryable without dispatching when the mirror scheduled a later retry", async () => {
+    const effect = createEffect();
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        intentId: effect.effectId,
+        lastError: {
+          code: "ASSISTANT_DELIVERY_UNAVAILABLE",
+          message: "provider retry scheduled",
+        },
+        status: "retryable",
+      }),
+    );
+    mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(false);
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_UNAVAILABLE",
+        deliveryStatus: "retryable",
+        retryable: true,
       }),
     ]);
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
@@ -494,6 +554,59 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("routes hosted email thread deliveries through the shared effects port", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "thread_123",
+      channel: "email",
+      explicitTarget: "thread_123",
+      identityId: "assistant@example.com",
+      subject: "Hosted subject",
+    });
+    const sendEmail = vi.fn(async (request: HostedEmailSendRequest) =>
+      createDelivery({
+        channel: "email",
+        ...request,
+      })
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        identityId: "assistant@example.com",
+        message: "hello from hosted",
+        subject: "Hosted subject",
+        target: "thread_123",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery,
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendEmail,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(sendEmail).toHaveBeenCalledWith({
+      identityId: "assistant@example.com",
+      message: "hello from hosted",
+      subject: "Hosted subject",
+      target: "thread_123",
+      targetKind: "thread",
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "email",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
   it("rejects hosted email participant routes before dispatching", async () => {
     const effect = createEffect({
       bindingDeliveryKind: "participant",
@@ -551,6 +664,48 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         deliveryStatus: "failed_ambiguous",
         retryable: false,
+      }),
+    );
+  });
+
+  it("keeps an ambiguous confirmation-pending outcome when mirror sync logging is best effort", async () => {
+    const effect = createEffect({ transportIdempotent: false });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
+      createDispatchResult(
+        {
+          lastError: {
+            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            message: "telegram timeout",
+          },
+          status: "retryable",
+        },
+        {
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "telegram timeout",
+        },
+      ),
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockRejectedValueOnce(
+      new Error("mirror write failed"),
+    );
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
+        retryable: false,
+      }),
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message: "Hosted assistant delivery local mirror update failed.",
       }),
     );
   });
@@ -652,6 +807,83 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      deliveryError: {
+        code: "ASSISTANT_DELIVERY_FAILED",
+        message: "failed",
+      },
+      expectedStatus: "failed",
+      inputStatus: "failed",
+      retryable: false,
+    },
+    {
+      deliveryError: {
+        code: "ASSISTANT_DELIVERY_UNAVAILABLE",
+        message: "sending",
+      },
+      expectedStatus: "sending",
+      inputStatus: "sending",
+      retryable: true,
+    },
+    {
+      deliveryError: {
+        code: "ASSISTANT_DELIVERY_UNAVAILABLE",
+        message: "pending",
+      },
+      expectedStatus: "pending",
+      inputStatus: "pending",
+      retryable: true,
+    },
+    {
+      deliveryError: {
+        code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        message: "abandoned",
+      },
+      expectedStatus: "failed_ambiguous",
+      inputStatus: "abandoned",
+      retryable: false,
+    },
+    {
+      deliveryError: {
+        code: "ASSISTANT_DELIVERY_UNAVAILABLE",
+        message: "unsupported",
+      },
+      expectedStatus: "missing-result",
+      inputStatus: "unsupported",
+      retryable: false,
+    },
+  ])(
+    "maps dispatched %s outbox states into hosted delivery outcomes",
+    async ({ deliveryError, expectedStatus, inputStatus, retryable }) => {
+      const effect = createEffect();
+      mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+        createDispatchResult(
+          {
+            lastError: deliveryError,
+            status: inputStatus,
+          },
+          deliveryError,
+        ),
+      );
+
+      const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+        assistantDeliveryEffects: [effect],
+        wake: HOSTED_WAKE.wake,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+      });
+
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          deliveryErrorCode: inputStatus === "unsupported" ? "ASSISTANT_DELIVERY_MISSING_RESULT" : deliveryError.code,
+          deliveryStatus: expectedStatus,
+          retryable,
+        }),
+      ]);
+    },
+  );
+
   it("rethrows outbox dispatch failures with effect details attached", async () => {
     const effect = createEffect();
     mocks.dispatchAssistantOutboxIntent.mockRejectedValue(new Error("boom"));
@@ -671,5 +903,58 @@ describe("hosted runtime callbacks", () => {
       }),
       message: "boom",
     });
+  });
+
+  it("logs retryable dispatch context when the shared email dependency rejects participant targets", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "thread_123",
+      channel: "email",
+      explicitTarget: "thread_123",
+      identityId: "assistant@example.com",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendEmail({
+          identityId: "assistant@example.com",
+          message: "hello from hosted",
+          subject: null,
+          target: "thread_123",
+          targetKind: "participant",
+        });
+      } catch {
+        throw {
+          context: {
+            retryable: true,
+          },
+          message: "delivery unavailable",
+        };
+      }
+      throw new Error("expected shared email dependency to reject participant targets");
+    });
+
+    await expect(
+      drainHostedCommittedAssistantDeliveriesAfterCommit({
+        assistantDeliveryEffects: [effect],
+        wake: HOSTED_WAKE.wake,
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      details: expect.objectContaining({
+        effectFingerprint: effect.fingerprint,
+        effectId: effect.effectId,
+        userId: HOSTED_WAKE.wake.userId,
+      }),
+      message: "delivery unavailable",
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          retryable: true,
+        }),
+        message: "Hosted assistant delivery threw during post-commit delivery.",
+      }),
+    );
   });
 });

@@ -7,11 +7,6 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../hosted-execution"
-    }
-  ],
   "include": [
     "*.ts",
     "test/**/*.ts",

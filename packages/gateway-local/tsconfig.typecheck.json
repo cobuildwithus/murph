@@ -7,17 +7,6 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../gateway-core"
-    },
-    {
-      "path": "../inboxd"
-    },
-    {
-      "path": "../runtime-state"
-    }
-  ],
   "include": [
     "*.ts",
     "test/**/*.ts",

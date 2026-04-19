@@ -24,6 +24,7 @@ import {
 type AssertTrue<T extends true> = T;
 type IsMutuallyAssignable<A, B> =
   [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
 
 type _normalizedDeviceBatchMatchesCorePayload = AssertTrue<
   IsMutuallyAssignable<NormalizedDeviceBatch, Omit<DeviceBatchImportPayload, "vaultRoot">>
@@ -1201,8 +1202,13 @@ test("importDeviceProviderSnapshot re-imports metadata-only Garmin activity file
     },
   );
 
-  const firstActivityEvent = firstImport.events.find((event) => event.kind === "activity_session");
-  const secondActivityEvent = secondImport.events.find((event) => event.kind === "activity_session");
+  type ImportedEventRecord = (typeof firstImport.events)[number];
+  const firstActivityEvent = firstImport.events.find(
+    (event: ImportedEventRecord) => event.kind === "activity_session",
+  );
+  const secondActivityEvent = secondImport.events.find(
+    (event: ImportedEventRecord) => event.kind === "activity_session",
+  );
   const storedEvents = await coreRuntime.readJsonlRecords({
     vaultRoot,
     relativePath: firstImport.eventShardPaths[0]!,
@@ -1210,7 +1216,7 @@ test("importDeviceProviderSnapshot re-imports metadata-only Garmin activity file
 
   assert.equal(firstActivityEvent?.id, secondActivityEvent?.id);
   assert.equal(
-    storedEvents.filter((event) => event.id === firstActivityEvent?.id).length,
+    storedEvents.filter((event: StoredJsonlRecord) => event.id === firstActivityEvent?.id).length,
     1,
   );
 });
@@ -1396,17 +1402,33 @@ test("importDeviceProviderSnapshot round-trips Garmin date buckets through real 
     },
   );
 
+  type ResultEventRecord = (typeof result.events)[number];
+  type ResultSampleRecord = (typeof result.samples)[number];
   const dailySteps = result.events.find(
-    (event) => event.kind === "observation" && event.metric === "daily-steps",
+    (
+      event: ResultEventRecord,
+    ): event is Extract<ResultEventRecord, { kind: "observation" }> =>
+      event.kind === "observation" && event.metric === "daily-steps",
   );
-  const sleepEvent = result.events.find((event) => event.kind === "sleep_session");
-  const sleepStage = result.samples.find((sample) => sample.stream === "sleep_stage");
+  const sleepEvent = result.events.find(
+    (
+      event: ResultEventRecord,
+    ): event is Extract<ResultEventRecord, { kind: "sleep_session" }> => event.kind === "sleep_session",
+  );
+  const sleepStage = result.samples.find(
+    (
+      sample: ResultSampleRecord,
+    ): sample is Extract<ResultSampleRecord, { stream: "sleep_stage" }> => sample.stream === "sleep_stage",
+  );
 
   assert.equal(dailySteps?.dayKey, "2026-03-15");
   assert.equal(dailySteps?.timeZone, "America/Los_Angeles");
   assert.equal(sleepEvent?.durationMinutes, 2);
   assert.equal(sleepStage?.durationMinutes, 1);
-  assert.equal(result.samples.filter((sample) => sample.stream === "sleep_stage").length, 1);
+  assert.equal(
+    result.samples.filter((sample: ResultSampleRecord) => sample.stream === "sleep_stage").length,
+    1,
+  );
 });
 
 

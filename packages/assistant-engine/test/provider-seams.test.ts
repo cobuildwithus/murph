@@ -365,6 +365,42 @@ describe('assistant provider seam helpers', () => {
       }),
     ).toBe(false)
   })
+
+  it('rejects missing resume state and blank stored route ids', () => {
+    expect(
+      resolveAssistantProviderResumeKey({
+        resumeState: null,
+        provider: 'openai-compatible',
+      }),
+    ).toBeNull()
+
+    expect(
+      doesAssistantResumeBindingMatchRoute({
+        resumeState: null,
+        route: createRoute(),
+      }),
+    ).toBe(false)
+
+    expect(
+      doesAssistantResumeBindingMatchRoute({
+        resumeState: {
+          providerSessionId: 'provider_session_alpha',
+          resumeRouteId: '   ',
+        },
+        route: createRoute(),
+      }),
+    ).toBe(false)
+
+    expect(
+      resolveAssistantRouteResumeBinding({
+        route: createRoute(),
+        sessionResumeState: {
+          providerSessionId: 'provider_session_alpha',
+          resumeRouteId: null,
+        },
+      }),
+    ).toBeNull()
+  })
 })
 
 function createRoute(input?: {

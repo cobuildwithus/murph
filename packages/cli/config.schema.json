@@ -4547,7 +4547,7 @@
                           "minLength": 1
                         },
                         "valueColumn": {
-                          "description": "Optional numeric value column override. When omitted, the importer will infer a recognizable metric column when the CSV is unambiguous.",
+                          "description": "Optional numeric value column override. When omitted, the importer will infer a recognizable metric column, or import all recognizable metrics when the CSV is unambiguous.",
                           "type": "string",
                           "minLength": 1
                         },
