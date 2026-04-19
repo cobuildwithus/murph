@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionBundleRef,
   HostedExecutionWake,
   HostedExecutionUserStatus,
   HostedWakeMaterializationHints,
@@ -36,6 +37,7 @@ import {
   materializeHostedDueWakesInWeb,
   quarantineHostedWakeInWeb,
   readHostedWakeStatusFromWeb,
+  recordHostedWakeTerminalInWeb,
 } from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
@@ -66,6 +68,7 @@ const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
 interface HostedWakeDrainOutcome {
+  cursorSnapshotRef: HostedExecutionBundleRef | null;
   postCursorAction: "cleanup-only";
   wake: HostedExecutionWake | null;
   seq: bigint;
@@ -389,17 +392,46 @@ export class HostedUserRunner {
           break;
         }
 
-        const bundleState = await this.stateStore.readBundleMetaState();
+        if (outcome.state === "completed" || outcome.state === "replaced") {
+          try {
+            const terminal = await recordHostedWakeTerminalInWeb({
+              baseUrl: this.env.hostedWebBaseUrl,
+              body: {
+                fetchProof: wake.fetchProof,
+                state: outcome.state,
+                wakeId: wake.id,
+                wakeSeq: wake.seq,
+              },
+              boundUserId: userId,
+              callbackSigning: this.env.webCallbackSigning,
+              timeoutMs: this.env.runnerTimeoutMs,
+            });
+
+            if (!terminal.recorded) {
+              stoppingState = "backpressured";
+              break;
+            }
+          } catch (error) {
+            emitHostedExecutionStructuredLog({
+              component: "hosted.runner",
+              error,
+              eventId: outcome.wake?.eventId ?? wake.id,
+              level: "warn",
+              message: "Hosted wake terminal receipt record failed; refusing to advance the web cursor.",
+              phase: "wake.running",
+              userId,
+            });
+            stoppingState = "backpressured";
+            break;
+          }
+        }
+
         const commit = await commitHostedWakeCursorToWeb({
           baseUrl: this.env.hostedWebBaseUrl,
           body: {
-            advance: {
-              proof: wake.commitProof,
-              wakeId: wake.id,
-            },
             committedSeq: wake.seq,
             expectedVersion,
-            snapshotRef: bundleState.bundleRef ?? null,
+            snapshotRef: outcome.cursorSnapshotRef,
           },
           boundUserId: userId,
           callbackSigning: this.env.webCallbackSigning,
@@ -472,6 +504,7 @@ export class HostedUserRunner {
         userId,
       });
       return {
+        cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
         postCursorAction: "cleanup-only",
         wake: null,
         seq,
@@ -506,8 +539,20 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD,
       )
-        ? { postCursorAction: "cleanup-only", wake: null, seq, state: "quarantined" }
-        : { postCursorAction: "cleanup-only", wake: null, seq, state: "backpressured" };
+        ? {
+          cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          postCursorAction: "cleanup-only",
+          wake: null,
+          seq,
+          state: "quarantined",
+        }
+        : {
+          cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          postCursorAction: "cleanup-only",
+          wake: null,
+          seq,
+          state: "backpressured",
+        };
     }
 
     if (hostedWake.userId !== userId) {
@@ -523,8 +568,20 @@ export class HostedUserRunner {
         wake.id,
         HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
       )
-        ? { postCursorAction: "cleanup-only", wake: null, seq, state: "quarantined" }
-        : { postCursorAction: "cleanup-only", wake: null, seq, state: "backpressured" };
+        ? {
+          cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          postCursorAction: "cleanup-only",
+          wake: null,
+          seq,
+          state: "quarantined",
+        }
+        : {
+          cursorSnapshotRef: await this.readCurrentHostedWakeCursorSnapshotRef(),
+          postCursorAction: "cleanup-only",
+          wake: null,
+          seq,
+          state: "backpressured",
+        };
     }
 
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
@@ -546,6 +603,7 @@ export class HostedUserRunner {
     });
 
     return {
+      cursorSnapshotRef: execution.cursorSnapshotRef,
       postCursorAction: execution.postCursorAction,
       wake: hostedWake,
       seq,
@@ -655,6 +713,11 @@ export class HostedUserRunner {
       "Hosted wake cursor snapshotRef",
     );
     await this.stateStore.syncBundleRefCache(nextBundleRef);
+  }
+
+  private async readCurrentHostedWakeCursorSnapshotRef(): Promise<HostedExecutionBundleRef | null> {
+    const bundleState = await this.stateStore.readBundleMetaState();
+    return bundleState.bundleRef ?? null;
   }
 
   private async composeUserStatus(record: RunnerStateRecord): Promise<HostedExecutionUserStatus> {
