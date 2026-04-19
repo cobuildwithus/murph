@@ -1,5 +1,24 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
+
+import {
+  HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+  HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+} from "@murphai/hosted-execution/hosted-email";
 import {
   createHostedEmailThreadTarget,
   parseHostedEmailThreadTarget,
@@ -59,6 +78,10 @@ afterEach(() => {
 });
 
 describe("hosted email routing and transport", () => {
+  beforeEach(() => {
+    mocks.emitHostedExecutionStructuredLog.mockReset();
+  });
+
   afterEach(() => {
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
@@ -111,6 +134,71 @@ describe("hosted email routing and transport", () => {
       routeAddress: firstAddress,
       userId: "user_123",
     });
+  });
+
+  it("logs route registration transport failures before surfacing them", async () => {
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockRejectedValue(
+      new Error("callback unavailable"),
+    );
+
+    await expect(createHostedEmailUserAddress({
+      config: TEST_CONFIG,
+      userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toThrow(/route registration failed/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          operation: "register-reply-alias",
+          path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+          userId: "user_123",
+          webControlOrigin: "https://web.example.test",
+        },
+        level: "warn",
+        message: "Hosted email route registration request failed.",
+        phase: "side-effects.draining",
+        userId: "user_123",
+      }),
+    );
+  });
+
+  it("logs route registration non-OK responses before surfacing them", async () => {
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      "registration rejected",
+      {
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+        },
+        status: 502,
+      },
+    ));
+
+    await expect(createHostedEmailUserAddress({
+      config: TEST_CONFIG,
+      userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toThrow(/HTTP 502/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          operation: "register-reply-alias",
+          path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+          responseStatus: 502,
+          userId: "user_123",
+          webControlOrigin: "https://web.example.test",
+        },
+        level: "warn",
+        message: "Hosted email route registration response returned non-OK.",
+        phase: "side-effects.draining",
+        userId: "user_123",
+      }),
+    );
   });
 
   it("keeps public-sender misses non-routable and avoids reject-on-miss for them", async () => {
@@ -189,6 +277,23 @@ describe("hosted email routing and transport", () => {
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(HostedEmailIngressRouteResolutionError);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          envelopeFrom: "owner@example.com",
+          headerFrom: "Owner <owner@example.com>",
+          operation: "resolve-route-user-id",
+          path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+          webControlOrigin: "https://web.example.test",
+        },
+        level: "warn",
+        message: "Hosted email route resolution request failed.",
+        phase: "side-effects.draining",
+        userId: null,
+      }),
+    );
   });
 
   it("surfaces public-sender callback config failures instead of treating them as clean misses", async () => {
@@ -215,6 +320,24 @@ describe("hosted email routing and transport", () => {
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/HTTP 503/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          envelopeFrom: "owner@example.com",
+          headerFrom: "Owner <owner@example.com>",
+          operation: "resolve-route-user-id",
+          path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+          responseStatus: 503,
+          webControlOrigin: "https://web.example.test",
+        },
+        level: "warn",
+        message: "Hosted email route resolution response returned non-OK.",
+        phase: "side-effects.draining",
+        userId: null,
+      }),
+    );
   });
 
   it("surfaces malformed public-sender callback payloads instead of treating them as clean misses", async () => {
@@ -470,6 +593,20 @@ describe("hosted email routing and transport", () => {
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          fromAddress: "assistant@mail.example.test",
+          recipient: "owner@example.com",
+        },
+        level: "warn",
+        message: "Hosted email send failed.",
+        phase: "side-effects.draining",
+        userId: null,
+      }),
+    );
   });
 
   it("surfaces the collapsed primary recipient when a threaded binding send fails", async () => {
@@ -507,5 +644,19 @@ describe("hosted email routing and transport", () => {
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          fromAddress: "assistant@mail.example.test",
+          recipient: "owner@example.com",
+        },
+        level: "warn",
+        message: "Hosted email send failed.",
+        phase: "side-effects.draining",
+        userId: null,
+      }),
+    );
   });
 });

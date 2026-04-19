@@ -1,4 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 
@@ -12,10 +27,86 @@ import {
   readHostedWakeStatusFromWeb,
   recordHostedWakeTerminalInWeb,
 } from "../src/web-control-plane.ts";
+import { appendHostedEmailIngressWakeInWeb } from "../src/web-control-plane-email-ingress.ts";
 
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("cloudflare web control plane wake helpers", () => {
+  beforeEach(() => {
+    mocks.emitHostedExecutionStructuredLog.mockReset();
+  });
+
+  it("logs non-OK wake fetch responses with safe response details", async () => {
+    const fetchMock = vi.fn(async () => new Response("control-plane down", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 503,
+    }));
+
+    await expect(fetchHostedWakeBatchFromWeb({
+      baseUrl: "https://runner.example.test/root/",
+      boundUserId: "user_123",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 2_500,
+    })).rejects.toThrow(/Hosted wake batch fetch failed with HTTP 503/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          description: "Hosted wake batch fetch",
+          path: "/api/internal/hosted-wake/unseen",
+          responseDetail: "control-plane down",
+          responseStatus: 503,
+          userId: "user_123",
+        },
+        level: "warn",
+        message: "Hosted web control-plane response returned non-OK.",
+        phase: "side-effects.draining",
+        userId: "user_123",
+      }),
+    );
+  });
+
+  it("logs email ingress append failures before surfacing them", async () => {
+    const fetchMock = vi.fn(async () => new Response("append rejected", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 502,
+    }));
+
+    await expect(appendHostedEmailIngressWakeInWeb({
+      baseUrl: "https://runner.example.test/root/",
+      body: {
+        eventId: "evt_123",
+        identityId: null,
+        occurredAt: "2026-04-17T00:00:00.000Z",
+        rawMessageKey: "raw_123",
+      },
+      boundUserId: "user_123",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 2_500,
+    })).rejects.toThrow(/Hosted email ingress wake append failed with HTTP 502/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: {
+          description: "Hosted email ingress wake append",
+          path: "/api/internal/hosted-wake/email-ingress",
+          responseStatus: 502,
+          userId: "user_123",
+        },
+        level: "warn",
+        message: "Hosted email ingress control-plane response returned non-OK.",
+        phase: "side-effects.draining",
+        userId: "user_123",
+      }),
+    );
+  });
+
   it("fetches hosted wake batches from the web control plane", async () => {
     let observedRequest: ObservedRequest | null = null;
 

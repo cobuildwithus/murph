@@ -1,4 +1,7 @@
 import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE,
   type HostedWakeCommitRequest,
@@ -133,19 +136,37 @@ export async function fetchHostedWakeBatchFromWeb(input: {
   const body = JSON.stringify({
     ...(input.limit === undefined ? {} : { limit: input.limit }),
   } satisfies HostedWakeFetchRequest);
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body,
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH,
-    timeoutMs: input.timeoutMs,
-  });
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      body,
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake batch fetch",
+      error,
+      path: HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`Hosted wake batch fetch failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake batch fetch",
+      path: HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
   }
 
   return parseHostedWakeFetchResponse(await response.json());
@@ -159,19 +180,37 @@ export async function commitHostedWakeCursorToWeb(input: {
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
 }): Promise<HostedWakeCommitResponse> {
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body: JSON.stringify(input.body),
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH,
-    timeoutMs: input.timeoutMs,
-  });
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      body: JSON.stringify(input.body),
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake cursor commit",
+      error,
+      path: HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`Hosted wake cursor commit failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake cursor commit",
+      path: HOSTED_WEB_HOSTED_WAKE_COMMIT_PATH,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
   }
 
   return parseHostedWakeCommitResponse(await response.json());
@@ -185,19 +224,37 @@ export async function finalizeHostedWakeCursorInWeb(input: {
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
 }): Promise<HostedWakeFinalizeResponse> {
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body: JSON.stringify(input.body),
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_FINALIZE_PATH,
-    timeoutMs: input.timeoutMs,
-  });
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      body: JSON.stringify(input.body),
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_WAKE_FINALIZE_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake cursor finalize",
+      error,
+      path: HOSTED_WEB_HOSTED_WAKE_FINALIZE_PATH,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`Hosted wake cursor finalize failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake cursor finalize",
+      path: HOSTED_WEB_HOSTED_WAKE_FINALIZE_PATH,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
   }
 
   return parseHostedWakeFinalizeResponse(await response.json());
@@ -211,16 +268,27 @@ export async function recordHostedWakeTerminalInWeb(input: {
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
 }): Promise<HostedWakeTerminalResponse> {
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body: JSON.stringify(input.body),
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_TERMINAL_PATH,
-    timeoutMs: input.timeoutMs,
-  });
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      body: JSON.stringify(input.body),
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_WAKE_TERMINAL_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake terminal record",
+      error,
+      path: HOSTED_WEB_HOSTED_WAKE_TERMINAL_PATH,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
     const errorBody = await readJsonErrorBody(response);
@@ -229,14 +297,32 @@ export async function recordHostedWakeTerminalInWeb(input: {
       response.status === 409
       && errorBody?.error?.code === HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE
     ) {
-      throw new HostedWakeTerminalStaleFetchProofError(
+      const error = new HostedWakeTerminalStaleFetchProofError(
         typeof errorBody.error.message === "string" && errorBody.error.message.length > 0
           ? errorBody.error.message
           : undefined,
       );
+      emitHostedWebControlPlaneResponseFailure({
+        boundUserId: input.boundUserId,
+        description: "Hosted wake terminal record",
+        error,
+        path: HOSTED_WEB_HOSTED_WAKE_TERMINAL_PATH,
+        response,
+        responseDetail: typeof errorBody.error.message === "string"
+          ? errorBody.error.message
+          : null,
+      });
+      throw error;
     }
 
-    throw new Error(`Hosted wake terminal record failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake terminal record",
+      path: HOSTED_WEB_HOSTED_WAKE_TERMINAL_PATH,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
   }
 
   return parseHostedWakeTerminalResponse(await response.json());
@@ -249,18 +335,36 @@ export async function materializeHostedDueWakesInWeb(input: {
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
 }): Promise<HostedWakeMaterializeResponse> {
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_MATERIALIZE_PATH,
-    timeoutMs: input.timeoutMs,
-  });
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_WAKE_MATERIALIZE_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake materialize",
+      error,
+      path: HOSTED_WEB_HOSTED_WAKE_MATERIALIZE_PATH,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`Hosted wake materialize failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake materialize",
+      path: HOSTED_WEB_HOSTED_WAKE_MATERIALIZE_PATH,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
   }
 
   return parseHostedWakeMaterializeResponse(await response.json());
@@ -283,19 +387,37 @@ export async function quarantineHostedWakeInWeb(input: {
     wakeId: input.wakeId,
     wakeSeq: input.wakeSeq,
   } satisfies HostedWakeQuarantineRequest);
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body,
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH,
-    timeoutMs: input.timeoutMs,
-  });
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      body,
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake quarantine",
+      error,
+      path: HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`Hosted wake quarantine failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake quarantine",
+      path: HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
   }
 
   return parseHostedWakeQuarantineResponse(await response.json());
@@ -309,19 +431,37 @@ export async function readHostedWakeStatusFromWeb(input: {
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
 }): Promise<HostedWakeStatusResponse> {
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.baseUrl,
-    body: JSON.stringify(input.body ?? {}),
-    boundUserId: input.boundUserId,
-    callbackSigning: input.callbackSigning,
-    fetchImpl: input.fetchImpl,
-    method: "POST",
-    path: HOSTED_WEB_HOSTED_WAKE_STATUS_PATH,
-    timeoutMs: input.timeoutMs,
-  });
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.baseUrl,
+      body: JSON.stringify(input.body ?? {}),
+      boundUserId: input.boundUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: input.fetchImpl,
+      method: "POST",
+      path: HOSTED_WEB_HOSTED_WAKE_STATUS_PATH,
+      timeoutMs: input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake status read",
+      error,
+      path: HOSTED_WEB_HOSTED_WAKE_STATUS_PATH,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`Hosted wake status read failed with HTTP ${response.status}.`);
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.boundUserId,
+      description: "Hosted wake status read",
+      path: HOSTED_WEB_HOSTED_WAKE_STATUS_PATH,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
   }
 
   return parseHostedWakeStatusResponse(await response.json());
@@ -349,4 +489,81 @@ async function readJsonErrorBody(response: Response): Promise<JsonErrorBody | nu
   } catch {
     return null;
   }
+}
+
+function emitHostedWebControlPlaneRequestFailure(input: {
+  boundUserId: string;
+  description: string;
+  error: unknown;
+  path: string;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details: {
+      description: input.description,
+      path: input.path,
+      userId: input.boundUserId,
+    },
+    error: input.error,
+    level: "warn",
+    message: "Hosted web control-plane request failed.",
+    phase: "side-effects.draining",
+    userId: input.boundUserId,
+  });
+}
+
+function emitHostedWebControlPlaneResponseFailure(input: {
+  boundUserId: string;
+  description: string;
+  error?: Error;
+  path: string;
+  response: Response;
+  responseDetail?: string | null;
+}): Error {
+  const error = input.error ?? createHostedWebControlPlaneResponseError({
+    description: input.description,
+    response: input.response,
+    responseDetail: input.responseDetail ?? null,
+  });
+
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details: {
+      description: input.description,
+      path: input.path,
+      responseStatus: input.response.status,
+      ...(input.responseDetail ? { responseDetail: input.responseDetail } : {}),
+      userId: input.boundUserId,
+    },
+    error,
+    level: "warn",
+    message: "Hosted web control-plane response returned non-OK.",
+    phase: "side-effects.draining",
+    userId: input.boundUserId,
+  });
+
+  return error;
+}
+
+function createHostedWebControlPlaneResponseError(input: {
+  description: string;
+  response: Response;
+  responseDetail?: string | null;
+}): Error & {
+  status: number;
+  statusCode: number;
+} {
+  const detail = input.responseDetail?.trim() ?? "";
+  const error = new Error(
+    detail.length > 0
+      ? `${input.description} failed with HTTP ${input.response.status}. ${detail}`
+      : `${input.description} failed with HTTP ${input.response.status}.`,
+  ) as Error & {
+    status: number;
+    statusCode: number;
+  };
+
+  error.status = input.response.status;
+  error.statusCode = input.response.status;
+  return error;
 }
