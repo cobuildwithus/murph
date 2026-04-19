@@ -20,7 +20,7 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
   readHostedWakeScheduleByEventIdTx: vi.fn(),
 }));
 
-import { materializeHostedExecutionWakeTx } from "@/src/lib/hosted-execution/wake-lifecycle";
+import { materializeHostedExecutionWakeTx } from "@/src/lib/hosted-wake/lifecycle";
 import {
   buildHostedAssistantCronWakeEventId,
   materializeHostedAssistantCronWakeTx,
@@ -66,10 +66,18 @@ describe("materializeHostedExecutionWakeTx", () => {
   it("persists canonical Linq conversation wakes without a nested dispatch envelope", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_message",
-      linqEvent: {
-        id: "msg_123",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15555550123",
+        isFromMe: false,
+        messageId: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
       },
-      linqMessageId: "msg_123",
       occurredAt: "2026-04-18T00:00:00.000Z",
       phoneLookupKey: "lookup_123",
       userId: "member_123",

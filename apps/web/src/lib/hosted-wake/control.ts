@@ -4,7 +4,7 @@ import { readHostedExecutionControlClientIfConfigured } from "../hosted-executio
 import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
 import {
   readHostedWakeTarget,
-} from "../hosted-execution/wake-lifecycle";
+} from "./lifecycle";
 import { getPrisma } from "../prisma";
 
 export async function triggerHostedWakeUser(input: {

@@ -1,7 +1,7 @@
 import { type Prisma } from "@prisma/client";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 
-import { materializeHostedExecutionWakeTx } from "../hosted-execution/wake-lifecycle";
+import { materializeHostedExecutionWakeTx } from "../hosted-wake/lifecycle";
 import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,

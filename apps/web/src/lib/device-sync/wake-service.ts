@@ -21,7 +21,7 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   materializeHostedExecutionWakeTx,
-} from "../hosted-execution/wake-lifecycle";
+} from "../hosted-wake/lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import {
   buildHostedDeviceSyncWake,

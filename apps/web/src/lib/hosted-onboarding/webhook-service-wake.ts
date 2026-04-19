@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 
 import {
   readHostedWakeTarget,
-} from "../hosted-execution/wake-lifecycle";
+} from "../hosted-wake/lifecycle";
 import {
   triggerHostedWakeUserBestEffort,
 } from "../hosted-wake/control";

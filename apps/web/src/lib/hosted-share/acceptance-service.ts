@@ -8,7 +8,7 @@ import {
 import { getPrisma } from "../prisma";
 import {
   materializeHostedExecutionWakeTx,
-} from "../hosted-execution/wake-lifecycle";
+} from "../hosted-wake/lifecycle";
 import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";

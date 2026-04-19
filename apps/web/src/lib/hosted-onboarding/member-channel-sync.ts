@@ -6,7 +6,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { materializeHostedExecutionWakeTx } from "../hosted-execution/wake-lifecycle";
+import { materializeHostedExecutionWakeTx } from "../hosted-wake/lifecycle";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberEmailAuthorization,

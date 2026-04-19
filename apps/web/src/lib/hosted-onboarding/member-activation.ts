@@ -12,7 +12,7 @@ import {
 import {
   findHostedWakeByEventIdTx,
   materializeHostedExecutionWakeTx,
-} from "../hosted-execution/wake-lifecycle";
+} from "../hosted-wake/lifecycle";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,

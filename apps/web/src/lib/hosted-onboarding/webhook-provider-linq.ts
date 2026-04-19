@@ -20,11 +20,9 @@ import {
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "./linq-routing-policy";
-import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
-import { materializeHostedExecutionWakeTx } from "../hosted-execution/wake-lifecycle";
+import { materializeHostedExecutionWakeTx } from "../hosted-wake/lifecycle";
 import {
   createHostedPhoneLookupKey,
-  sanitizeHostedLinqEventForStorage,
 } from "./contact-privacy";
 import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import {
@@ -164,14 +162,35 @@ export async function planHostedOnboardingLinqWebhook(input: {
     await materializeHostedExecutionWakeTx({
       wake: buildHostedExecutionLinqConversationMessageWake({
         eventId: input.event.event_id,
-        linqEvent: sanitizeHostedLinqEventForStorage(
-          minimizeLinqMessageReceivedEvent(messageEvent),
-          {
-            omitRecipientPhone: true,
-            preserveFrom: true,
-          },
-        ),
-        linqMessageId: summary.messageId,
+        linqMessage: {
+          chatId: summary.chatId,
+          from: participantPhoneNumber,
+          isFromMe: summary.isFromMe,
+          messageId: summary.messageId,
+          parts: messageEvent.data.message.parts.map((part) =>
+            part.type === "text" || part.type === "link"
+              ? {
+                  type: part.type,
+                  value: part.value,
+                }
+              : {
+                  ...(part.attachment_id === undefined
+                    ? {}
+                    : { attachmentId: part.attachment_id }),
+                  ...(part.filename === undefined ? {} : { fileName: part.filename }),
+                  ...(part.mime_type === undefined ? {} : { mimeType: part.mime_type }),
+                  ...(part.size === undefined ? {} : { size: part.size }),
+                  type: part.type,
+                  ...(part.url === undefined ? {} : { url: part.url }),
+                }),
+          ...(messageEvent.data.message.reply_to?.message_id === undefined
+            ? {}
+            : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
+          ...(messageEvent.data.message.reply_to?.part_index === undefined
+            ? {}
+            : { replyToPartIndex: messageEvent.data.message.reply_to.part_index }),
+          ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
+        },
         occurredAt,
         phoneLookupKey,
         userId: existingMember.id,

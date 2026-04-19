@@ -42,7 +42,7 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
   requireVercelCronRequest: mocks.requireVercelCronRequest,
 }));
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   readHostedWakeLifecycleState:
     mocks.readHostedWakeLifecycleState,
 }));

@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   updateHostedMemberCoreState: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", () => ({
+vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
   findHostedWakeByEventIdTx: mocks.findHostedWakeByEventIdTx,
   materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
 }));

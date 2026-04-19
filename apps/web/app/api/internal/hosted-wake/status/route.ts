@@ -1,6 +1,6 @@
 import {
   readHostedWakeLifecycleState,
-} from "@/src/lib/hosted-execution/wake-lifecycle";
+} from "@/src/lib/hosted-wake/lifecycle";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";

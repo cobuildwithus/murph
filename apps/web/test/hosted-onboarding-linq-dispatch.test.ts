@@ -103,9 +103,9 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-execution/wake-lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/wake-lifecycle")>(
-    "@/src/lib/hosted-execution/wake-lifecycle",
+vi.mock("@/src/lib/hosted-wake/lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-wake/lifecycle")>(
+    "@/src/lib/hosted-wake/lifecycle",
   );
 
   return {
