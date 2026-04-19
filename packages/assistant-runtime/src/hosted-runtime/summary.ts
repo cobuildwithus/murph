@@ -13,13 +13,11 @@ export function summarizeWake(
   wake: HostedExecutionWake,
   metrics: HostedWakeExecutionMetrics & HostedMaintenanceMetrics,
 ): string {
-  const suffix = ` Parser jobs: ${metrics.parserProcessed}. Device sync jobs: ${metrics.deviceSyncProcessed}${metrics.deviceSyncSkipped ? " (skipped: providers not configured)." : "."}`;
-
   switch (wake.kind) {
     case "member.activated":
-      return `Processed member activation (${formatHostedBootstrapResult(metrics.bootstrapResult)}) and ran the hosted maintenance loop.${suffix}`;
+      return `Processed member activation (${formatHostedBootstrapResult(metrics.bootstrapResult)}).`;
     case "member.channels.updated":
-      return `Processed member channel sync and ran the hosted maintenance loop.${suffix}`;
+      return "Processed member channel sync.";
     case "conversation.message":
       switch (wake.message.channel) {
         case "linq":
@@ -31,20 +29,24 @@ export function summarizeWake(
       }
       return assertNever(wake.message);
     case "assistant.cron.tick":
-      return `Processed assistant cron tick (${wake.reason}) and ran the hosted maintenance loop.${suffix}`;
+      return `Processed assistant cron tick (${wake.reason}) on the hosted assistant lane.`;
     case "device-sync.wake":
-      return `Processed device-sync wake (${wake.reason}) and ran the hosted maintenance loop.${suffix}`;
+      return `Processed device-sync wake (${wake.reason}) on the hosted device-sync lane.${formatDeviceSyncSuffix(metrics)}`;
     case "vault.share.accepted": {
       const importedFoods = metrics.shareImportResult?.foods.length ?? 0;
       const importedProtocols = metrics.shareImportResult?.protocols.length ?? 0;
       const importedRecipes = metrics.shareImportResult?.recipes.length ?? 0;
       const loggedMeal = metrics.shareImportResult?.meal ? " Logged one meal entry from the shared food." : "";
       const title = metrics.shareImportTitle ?? wake.share.shareId;
-      return `Imported share pack "${title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
+      return `Imported share pack "${title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}`;
     }
   }
 
   return assertNever(wake);
+}
+
+function formatDeviceSyncSuffix(metrics: HostedMaintenanceMetrics): string {
+  return ` Device sync jobs: ${metrics.deviceSyncProcessed}${metrics.deviceSyncSkipped ? " (skipped: providers not configured)." : "."}`;
 }
 
 function formatHostedBootstrapResult(result: HostedBootstrapResult | null): string {

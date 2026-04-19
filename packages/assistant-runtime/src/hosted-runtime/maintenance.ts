@@ -43,10 +43,6 @@ const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_MAINTENANCE_PASSES = 10;
 const HOSTED_MAX_PARSER_JOBS = 50;
 
-interface HostedMaintenancePassResult extends HostedMaintenanceMetrics {
-  progressed: boolean;
-}
-
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
   activeProfileManagedBy: "member" | "platform" | null;
@@ -107,17 +103,11 @@ function reportHostedAssistantAutomationSkipped(
   });
 }
 
-export async function runHostedMaintenanceLoop(input: {
-  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
-  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+export async function runHostedAssistantCronWakeLane(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   requestId: string;
-  resolvedConfig: {
-    deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
-  };
   skipAssistantAutomation?: boolean;
-  timeoutMs: number | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
@@ -128,46 +118,25 @@ export async function runHostedMaintenanceLoop(input: {
     reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation);
   }
 
-  let deviceSyncProcessed = 0;
-  let deviceSyncSkipped = true;
-  let nextWakeAt: string | null = null;
-  let parserProcessed = 0;
-
-  for (let pass = 0; pass < HOSTED_MAX_MAINTENANCE_PASSES; pass += 1) {
-    const passResult = await runHostedMaintenancePass({
-      artifactMaterializer: input.artifactMaterializer ?? null,
-      assistantAutomation,
-      deviceSyncPort: input.deviceSyncPort,
-      wake: input.wake,
-      executionContext: input.executionContext,
-      requestId: input.requestId,
-      resolvedConfig: input.resolvedConfig,
-      timeoutMs: input.timeoutMs,
-      vaultRoot: input.vaultRoot,
-    });
-
-    deviceSyncProcessed += passResult.deviceSyncProcessed;
-    deviceSyncSkipped &&= passResult.deviceSyncSkipped;
-    nextWakeAt = passResult.nextWakeAt;
-    parserProcessed += passResult.parserProcessed;
-
-    if (!passResult.progressed) {
-      break;
-    }
-
-    if (pass === HOSTED_MAX_MAINTENANCE_PASSES - 1) {
-      nextWakeAt = earliestHostedWakeAt(
-        new Date().toISOString(),
-        passResult.nextWakeAt,
-      );
-    }
-  }
+  const assistantResult = assistantAutomation.shouldRun
+    ? await runHostedAssistantAutomation(
+        input.vaultRoot,
+        input.requestId,
+        input.executionContext,
+        input.wake,
+      )
+    : {
+        nextWakeAt: null,
+        progressed: false,
+      };
 
   return {
-    deviceSyncProcessed,
-    deviceSyncSkipped,
-    nextWakeAt,
-    parserProcessed,
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
+    nextWakeAt: assistantResult.nextWakeAt
+      ?? (assistantResult.progressed ? new Date().toISOString() : null),
+    parserProcessed: 0,
+    wakeMaterializationHints: null,
   };
 }
 
@@ -472,34 +441,15 @@ export async function runHostedDeviceSyncPass(
   }
 }
 
-async function runHostedMaintenancePass(input: {
-  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
-  assistantAutomation: HostedAssistantAutomationReadiness;
+export async function runHostedDeviceSyncWakeLane(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   wake: HostedExecutionWake;
-  executionContext: AssistantExecutionContext;
-  requestId: string;
   resolvedConfig: {
     deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
   };
   timeoutMs: number | null;
   vaultRoot: string;
-}): Promise<HostedMaintenancePassResult> {
-  const parserResult = await drainHostedParserQueue({
-    artifactMaterializer: input.artifactMaterializer ?? null,
-    vaultRoot: input.vaultRoot,
-  });
-  const assistantResult = input.assistantAutomation.shouldRun
-    ? await runHostedAssistantAutomation(
-        input.vaultRoot,
-        input.requestId,
-        input.executionContext,
-        input.wake,
-      )
-    : {
-        nextWakeAt: null,
-        progressed: false,
-      };
+}): Promise<HostedMaintenanceMetrics> {
   const deviceSyncResult = await runHostedDeviceSyncPass(
     input.wake,
     input.vaultRoot,
@@ -511,19 +461,19 @@ async function runHostedMaintenancePass(input: {
   return {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: earliestHostedWakeAt(
-      parserResult.nextWakeAt,
-      assistantResult.nextWakeAt,
-      deviceSyncResult.nextWakeAt,
-    ),
-    parserProcessed: parserResult.processedJobs,
-    progressed:
-      parserResult.processedJobs > 0 ||
-      assistantResult.progressed ||
-      (
-        deviceSyncResult.processedJobs > 0 &&
-        hostedWakeDueNow(deviceSyncResult.nextWakeAt)
-      ),
+    nextWakeAt: deviceSyncResult.nextWakeAt,
+    parserProcessed: 0,
+    wakeMaterializationHints: null,
+  };
+}
+
+export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
+  return {
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
+    nextWakeAt: null,
+    parserProcessed: 0,
+    wakeMaterializationHints: null,
   };
 }
 
@@ -572,13 +522,4 @@ function earliestHostedWakeAt(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
-}
-
-function hostedWakeDueNow(value: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-
-  const parsedMs = Date.parse(value);
-  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
 }

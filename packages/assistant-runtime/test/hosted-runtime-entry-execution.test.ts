@@ -23,9 +23,10 @@ const mocks = vi.hoisted(() => ({
   refreshAssistantStatusSnapshot: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
   resumeHostedCommittedExecution: vi.fn(),
+  runHostedAssistantCronWakeLane: vi.fn(),
   runHostedConversationAssistantAutomation: vi.fn(),
-  runHostedDeviceSyncPass: vi.fn(),
-  runHostedMaintenanceLoop: vi.fn(),
+  runHostedDeviceSyncWakeLane: vi.fn(),
+  runHostedNoopSystemWakeLane: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
   withHostedProcessEnvironment: vi.fn(),
 }));
@@ -95,10 +96,11 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
+  runHostedAssistantCronWakeLane: mocks.runHostedAssistantCronWakeLane,
   runHostedConversationAssistantAutomation:
     mocks.runHostedConversationAssistantAutomation,
-  runHostedDeviceSyncPass: mocks.runHostedDeviceSyncPass,
-  runHostedMaintenanceLoop: mocks.runHostedMaintenanceLoop,
+  runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+  runHostedNoopSystemWakeLane: mocks.runHostedNoopSystemWakeLane,
 }));
 
 vi.mock("../src/hosted-runtime/usage.ts", () => ({
@@ -145,16 +147,26 @@ beforeEach(() => {
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     progressed: false,
   });
-  mocks.runHostedDeviceSyncPass.mockResolvedValue({
-    nextWakeAt: null,
-    processedJobs: 0,
-    skipped: false,
-  });
-  mocks.runHostedMaintenanceLoop.mockResolvedValue({
+  mocks.runHostedAssistantCronWakeLane.mockResolvedValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 0,
+    wakeMaterializationHints: null,
+  });
+  mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: false,
+    nextWakeAt: null,
+    parserProcessed: 0,
+    wakeMaterializationHints: null,
+  });
+  mocks.runHostedNoopSystemWakeLane.mockReturnValue({
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
+    nextWakeAt: null,
+    parserProcessed: 0,
+    wakeMaterializationHints: null,
   });
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
@@ -331,7 +343,7 @@ describe("executeHostedWakeForCommit", () => {
       },
     });
 
-    expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
+    expect(mocks.runHostedAssistantCronWakeLane).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
@@ -344,7 +356,6 @@ describe("executeHostedWakeForCommit", () => {
           }),
         }),
         requestId: "evt_tick",
-        timeoutMs: 45_000,
         vaultRoot: "/tmp/vault-root",
         wake: {
           eventId: "evt_tick",
