@@ -171,7 +171,7 @@ export async function executeHostedWakeForCommit(input: {
     {
       sourceReader: assistantGatewayLocalProjectionSourceReader,
     },
-  ).catch((error) => {
+  ).catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       wake,
@@ -360,6 +360,7 @@ async function resolveHostedConversationPreservedWakeMetrics(input: {
 }): Promise<HostedMaintenanceMetrics> {
   const preservedMetrics = await resolveHostedPreservedWakeMetrics({
     deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
+    includeAssistant: false,
     run: input.run ?? null,
     vaultRoot: input.vaultRoot,
     wake: input.wake,
@@ -373,7 +374,7 @@ async function resolveHostedConversationPreservedWakeMetrics(input: {
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
     },
     message:
-      "Hosted runtime resolved preserved assistant and device-sync wakes after conversation wake handling.",
+      "Hosted runtime resolved preserved device-sync wakes after conversation wake handling.",
     phase: "wake.running",
     run: input.run ?? null,
   });
@@ -391,6 +392,7 @@ async function runHostedConversationWakeFollowupExecution(input: {
   vaultRoot: string;
   wake: HostedExecutionWake;
 }): Promise<HostedMaintenanceMetrics> {
+  const assistantWakeAt = new Date().toISOString();
   const preservedMetrics = await resolveHostedConversationPreservedWakeMetrics({
     wake: input.wake,
     run: input.run ?? null,
@@ -402,9 +404,16 @@ async function runHostedConversationWakeFollowupExecution(input: {
     ...preservedMetrics,
     nextWakeAt: earliestHostedWakeAt(
       input.conversationMetrics?.nextWakeAt,
+      assistantWakeAt,
       preservedMetrics.nextWakeAt,
     ),
     parserProcessed: input.conversationMetrics?.parserProcessed ?? 0,
+    wakeMaterializationHints: createHostedWakeMaterializationHints({
+      assistantWakeAt,
+      deviceSyncWakeAt:
+        preservedMetrics.wakeMaterializationHints?.deviceSyncWakeAt
+        ?? preservedMetrics.nextWakeAt,
+    }),
   };
 }
 
@@ -721,7 +730,7 @@ export async function completeHostedExecutionAfterCommit(input: {
     {
       sourceReader: assistantGatewayLocalProjectionSourceReader,
     },
-  ).catch((error) => {
+  ).catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       wake: input.wake,

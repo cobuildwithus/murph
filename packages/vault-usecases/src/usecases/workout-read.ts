@@ -13,6 +13,11 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { asListEnvelope, toListEntity } from './shared.js'
 import {
+  listMeasurementRecords,
+  showMeasurementManifest,
+  showMeasurementRecord,
+} from './measurement-read.js'
+import {
   relativePathEntries,
   relativePathStrings,
   resolveVaultRelativePath,
@@ -219,12 +224,7 @@ export async function showWorkoutManifest(vault: string, lookup: string) {
 }
 
 export async function showWorkoutMeasurementRecord(vault: string, lookup: string) {
-  const record = await loadTrackedWorkoutRecord(vault, lookup, ['body_measurement'], 'body measurement')
-
-  return {
-    vault,
-    entity: toCommandShowEntity(record),
-  }
+  return showMeasurementRecord(vault, lookup)
 }
 
 export async function listWorkoutMeasurementRecords(input: {
@@ -233,12 +233,9 @@ export async function listWorkoutMeasurementRecords(input: {
   to?: string
   limit?: number
 }) {
-  return listTrackedWorkoutRecords({
-    ...input,
-    kinds: ['body_measurement'],
-  })
+  return listMeasurementRecords(input)
 }
 
 export async function showWorkoutMeasurementManifest(vault: string, lookup: string) {
-  return showTrackedWorkoutManifest(vault, lookup, ['body_measurement'], 'body measurement')
+  return showMeasurementManifest(vault, lookup)
 }

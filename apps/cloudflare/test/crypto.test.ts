@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildHostedAssistantDeliveryPreparedRecord,
-} from "@murphai/hosted-execution/side-effects";
-import {
   createHostedArtifactStore,
   createHostedBundleStore,
   createHostedRunnerSecretsStore,

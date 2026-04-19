@@ -28,7 +28,7 @@ type MockAutomationRecord = {
     deliveryTarget: string | null
     identityId: string | null
     participantId: string | null
-    sourceThreadId: string | null
+    threadId: string | null
   }
   schedule: AssistantCronSchedule
   slug?: string
@@ -149,7 +149,7 @@ beforeEach(() => {
       deliveryTarget: input.deliveryTarget ?? null,
       identityId: input.identityId ?? null,
       participantId: input.participantId ?? null,
-      sourceThreadId: input.sourceThreadId ?? null,
+      threadId: input.threadId ?? null,
     }),
   )
   cronMocks.getAssistantChannelAdapter
@@ -408,7 +408,7 @@ describe('assistant cron runtime threshold coverage', () => {
       deliveryTarget: null,
       identityId: null,
       participantId: 'person-1',
-      sourceThreadId: 'thread-1',
+      threadId: 'thread-1',
     })
 
     const job = await addAssistantCronJob({
@@ -729,7 +729,7 @@ describe('assistant cron runtime threshold coverage', () => {
       deliveryTarget: null,
       identityId: null,
       participantId: null,
-      sourceThreadId: null,
+      threadId: null,
     })
 
     await expect(

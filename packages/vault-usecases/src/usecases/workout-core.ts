@@ -1,6 +1,7 @@
 import type {
   ActivitySessionEventRecord,
   BodyMeasurementEventRecord,
+  MeasurementEventRecord,
   RawImportKind,
 } from '@murphai/contracts'
 import type {
@@ -12,6 +13,7 @@ import { loadRuntimeModule } from '../runtime-import.js'
 
 export type ActivitySessionDraftInput = Omit<EventDraftByKind<'activity_session'>, 'kind'>
 export type BodyMeasurementDraftInput = Omit<EventDraftByKind<'body_measurement'>, 'kind'>
+export type MeasurementDraftInput = Omit<EventDraftByKind<'measurement'>, 'kind'>
 
 export interface WorkoutRawImportOptions {
   importId?: string
@@ -45,6 +47,18 @@ export interface WorkoutCoreRuntime {
     created: boolean
     manifestPath: string | null
     event: BodyMeasurementEventRecord
+  }>
+  addMeasurement(input: {
+    vaultRoot: string
+    draft: MeasurementDraftInput
+    attachments?: readonly EventAttachmentSourceInput[]
+    rawImport?: WorkoutRawImportOptions
+  }): Promise<{
+    eventId: string
+    ledgerFile: string
+    created: boolean
+    manifestPath: string | null
+    event: MeasurementEventRecord
   }>
 }
 

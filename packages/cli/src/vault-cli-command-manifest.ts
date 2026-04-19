@@ -31,6 +31,10 @@ import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
 import { registerMealCommands } from './commands/meal.js'
+import {
+  measurementCommandDescriptions,
+  registerMeasurementCommands,
+} from './commands/measurement.js'
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
@@ -55,7 +59,10 @@ import { registerSamplesCommands } from './commands/samples.js'
 import { registerSearchCommands } from './commands/search.js'
 import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
-import { registerWorkoutCommands } from './commands/workout.js'
+import {
+  registerWorkoutCommands,
+  workoutMeasurementCommandDescriptions,
+} from './commands/workout.js'
 import {
   registerWearablesCommands,
   wearablesActivityListResultSchema,
@@ -426,6 +433,32 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'measurement',
+    bindingMode: 'none',
+    rootCommandNames: ['measurement'],
+    leafCommands: [
+      {
+        path: ['measurement', 'add'],
+        description: measurementCommandDescriptions.add,
+      },
+      {
+        path: ['measurement', 'show'],
+        description: measurementCommandDescriptions.show,
+      },
+      {
+        path: ['measurement', 'list'],
+        description: measurementCommandDescriptions.list,
+      },
+      {
+        path: ['measurement', 'manifest'],
+        description: measurementCommandDescriptions.manifest,
+      },
+    ],
+    register({ cli, services }) {
+      registerMeasurementCommands(cli, services)
+    },
+  },
+  {
     id: 'workout',
     bindingMode: 'none',
     rootCommandNames: ['workout'],
@@ -458,20 +491,19 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'measurement', 'add'],
-        description:
-          'Record one body-measurement check-in from a structured JSON payload or a single typed measurement, with optional progress photos.',
+        description: workoutMeasurementCommandDescriptions.add,
       },
       {
         path: ['workout', 'measurement', 'show'],
-        description: 'Show one body-measurement event by canonical event id.',
+        description: workoutMeasurementCommandDescriptions.show,
       },
       {
         path: ['workout', 'measurement', 'list'],
-        description: 'List body-measurement events with optional date bounds.',
+        description: workoutMeasurementCommandDescriptions.list,
       },
       {
         path: ['workout', 'measurement', 'manifest'],
-        description: 'Show the immutable raw import manifest for an imported body-measurement event.',
+        description: workoutMeasurementCommandDescriptions.manifest,
       },
       {
         path: ['workout', 'units', 'show'],

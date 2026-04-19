@@ -13,11 +13,13 @@ import {
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const body = parseHostedWakeCommitRequest(await readOptionalJsonObject(request));
+  const assistantNextWakeAt = "assistantNextWakeAt" in body ? body.assistantNextWakeAt ?? null : undefined;
   const committedSeq = BigInt(body.committedSeq);
   const expectedVersion = BigInt(body.expectedVersion);
   const snapshotRef = "snapshotRef" in body ? body.snapshotRef ?? null : undefined;
   const response = await getPrisma().$transaction((tx) => {
     return commitHostedExecutionCursorTx({
+      assistantNextWakeAt,
       committedSeq,
       expectedVersion,
       snapshotRef,

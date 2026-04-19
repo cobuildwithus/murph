@@ -43,4 +43,21 @@ describe('buildAssistantCliProcessEnv', () => {
     expect(env.PATH).toMatch(/C:\\Windows\\System32$/)
     expect(env.Path).toBeUndefined()
   })
+
+  it('treats an explicit empty cli PATH as an override instead of inheriting ambient entries', () => {
+    const env = buildAssistantCliProcessEnv({
+      ambientEnv: {
+        HOME: '/tmp/murph-home',
+        PATH: '/usr/local/bin:/usr/bin',
+      },
+      cliEnv: {
+        HOME: '/tmp/murph-home',
+        PATH: '',
+      },
+    })
+
+    expect(env.PATH).not.toContain('/usr/local/bin')
+    expect(env.PATH).not.toContain('/usr/bin')
+    expect(env.PATH).toContain('/tmp/murph-home/.local/bin')
+  })
 })

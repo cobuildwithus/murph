@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_DATABASE_URL,
 } from "../../../../scripts/dev-hosted-local/constants.ts";
+import { loadHostedLocalBaseEnvironment } from "../../../../scripts/dev-hosted-local/environment.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
@@ -39,9 +40,10 @@ import {
   type HostedLocalDevHarness,
 } from "./hosted-local-dev-harness.js";
 import {
+  bindHostedActiveLinqHomeChat,
   seedHostedActiveLinqMember,
   seedHostedActiveMember,
-} from "@murphai/hosted-web/testing";
+} from "#hosted-web-testing";
 
 interface HostedActiveMemberSeedArgs {
   environment?: NodeJS.ProcessEnv;
@@ -55,6 +57,11 @@ interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
 
 export interface HostedLocalFullStackScenario {
   assistantProviderBodies: string[];
+  bindActiveHostedLinqHomeChat(input: {
+    chatId: string;
+    memberId: string;
+    recipientPhone: string;
+  }): Promise<void>;
   runWake(
     wake: HostedExecutionWake,
     userId: string,
@@ -91,8 +98,9 @@ export async function startHostedLocalFullStackScenario(input: {
 }): Promise<HostedLocalFullStackScenario> {
   const assistantProviderBodies: string[] = [];
   const localDatabaseUrl = input.localDatabaseUrl?.trim() || DEFAULT_DATABASE_URL;
-  const seedEnvironment = input.seedEnvironment ?? process.env;
-  const useAssistantProviderStub = shouldUseAssistantProviderStub(process.env);
+  const baseEnvironment = await loadHostedLocalBaseEnvironment();
+  const seedEnvironment = input.seedEnvironment ?? baseEnvironment;
+  const useAssistantProviderStub = shouldUseAssistantProviderStub(baseEnvironment);
 
   let assistantProviderServer: HttpServer | null = null;
   let assistantProviderBaseUrl: string | null = null;
@@ -113,20 +121,20 @@ export async function startHostedLocalFullStackScenario(input: {
 
     oidcFixture = await startHostedLocalOidcFixture();
     const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
-      process.env,
+      baseEnvironment,
       assistantProviderBaseUrl,
       input.scenarioLabel,
     );
     const webPort = await reserveLocalTcpPort();
     const workerPort = await reserveLocalTcpPort();
     const runtimeEnv: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...baseEnvironment,
       ...hostedAssistantDevEnv,
-      ...resolveHostedLocalSmokeWebEnv(process.env),
+      ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
       ...(input.additionalEnv ?? {}),
       DATABASE_URL: localDatabaseUrl,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRequiredEnvProfile(
-        process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
+        baseEnvironment.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
         input.requiredRunnerEnvProfile,
       ),
       HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: oidcFixture.jwksUrl,
@@ -154,6 +162,19 @@ export async function startHostedLocalFullStackScenario(input: {
 
     return {
       assistantProviderBodies,
+      bindActiveHostedLinqHomeChat: async (bindingInput) => {
+        await bindHostedActiveLinqHomeChat({
+          chatId: bindingInput.chatId,
+          environment: {
+            ...seedEnvironment,
+            DATABASE_URL: localDatabaseUrl,
+            NODE_ENV: "test",
+            VITEST: "1",
+          },
+          memberId: bindingInput.memberId,
+          recipientPhone: bindingInput.recipientPhone,
+        });
+      },
       buildFailureMessage: async (
         userId: string,
         summaryLines: readonly string[],
@@ -168,12 +189,24 @@ export async function startHostedLocalFullStackScenario(input: {
       },
       runWake: async (wake, userId) =>
         await appendHostedWakeAndWakeWorker({
+          environment: {
+            ...seedEnvironment,
+            DATABASE_URL: localDatabaseUrl,
+            NODE_ENV: "test",
+            VITEST: "1",
+          },
           harness: scenarioHarness,
           userId,
           wake,
         }),
       enqueueWake: async (wake, userId) =>
         await appendHostedWake({
+          environment: {
+            ...seedEnvironment,
+            DATABASE_URL: localDatabaseUrl,
+            NODE_ENV: "test",
+            VITEST: "1",
+          },
           harness: scenarioHarness,
           userId,
           wake,

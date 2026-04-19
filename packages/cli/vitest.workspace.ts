@@ -13,6 +13,7 @@ import {
 } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 import {
+  createVitestAliasesFromTsconfigPaths,
   createVitestWorkspaceRuntimeAliases,
   resolveWorkspaceSourceEntries,
 } from "../../config/workspace-source-resolution.js";
@@ -56,6 +57,11 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
 const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
   resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
 );
+const cliVitestTsconfigAliases = createVitestAliasesFromTsconfigPaths({
+  workspaceDir: packageDir,
+  specifierFilter: (specifier) =>
+    specifier === "murph" || specifier.startsWith("@murphai/"),
+});
 
 export const cliVitestCoverage = createMurphVitestCoverage({
   customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
@@ -87,7 +93,7 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
 
   return defineConfig({
     resolve: {
-      alias: cliVitestRuntimeAliases,
+      alias: [...cliVitestRuntimeAliases, ...cliVitestTsconfigAliases],
     },
     test: {
       ...murphVitestNoTimeouts,

@@ -11,7 +11,7 @@ const hostedWebSmokeDistMode = "smoke";
 const hostedWebSmokeDefaultDatabaseUrl = "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync";
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
-const hostedWebSmokeDefaultPrivyAppId = "cm_app_smoke";
+const hostedWebSmokeDefaultPrivyAppId = "cm_app_smoke_placeholder1";
 
 export function createHostedWebSmokeEnvironment(
   environment: NodeJS.ProcessEnv = process.env,

@@ -8,7 +8,6 @@ import { initializeVault } from "../src/index.ts";
 import { WriteBatch } from "../src/operations/write-batch.ts";
 import {
   buildAttachmentCompatibilityProjections,
-  buildAttachmentPathCompatibilityProjections,
   cleanupStagedEventAttachments,
   prepareEventAttachments,
   stageEventAttachments,
@@ -97,61 +96,12 @@ describe("event attachment helpers", () => {
     expect(prepared.every((attachment) => attachment.raw.relativePath.startsWith(`raw/workouts/2026/04/${WORKOUT_OWNER_ID}/`))).toBe(true);
   });
 
-  it("projects compatibility paths and media with empty-input and deduped raw refs behavior", () => {
-    const emptyPathProjection = buildAttachmentPathCompatibilityProjections([]);
+  it("projects current media and raw refs with empty-input and deduped behavior", () => {
     const emptyCompatibilityProjection = buildAttachmentCompatibilityProjections([]);
 
-    expect(emptyPathProjection).toEqual({
-      audioPaths: [],
-      documentPath: null,
-      photoPaths: [],
-      rawRefs: [],
-    });
     expect(emptyCompatibilityProjection).toEqual({
-      audioPaths: [],
-      documentPath: null,
       media: [],
-      photoPaths: [],
       rawRefs: [],
-    });
-
-    const pathProjections = buildAttachmentPathCompatibilityProjections([
-      {
-        role: "document_1",
-        kind: "document",
-        relativePath: "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/summary.pdf",
-      },
-      {
-        role: "photo_1",
-        kind: "photo",
-        relativePath: "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/hero.jpg",
-      },
-      {
-        role: "thumbnail_1",
-        kind: "other",
-        relativePath: "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/hero.jpg",
-      },
-      {
-        role: "audio_1",
-        kind: "other",
-        relativePath: "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/voice.m4a",
-      },
-      {
-        role: "voice_1",
-        kind: "audio",
-        relativePath: "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/voice.m4a",
-      },
-    ]);
-
-    expect(pathProjections).toEqual({
-      audioPaths: ["raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/voice.m4a"],
-      documentPath: "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/summary.pdf",
-      photoPaths: ["raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/hero.jpg"],
-      rawRefs: [
-        "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/summary.pdf",
-        "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/hero.jpg",
-        "raw/meals/2026/04/meal_01ARZ3NDEKTSV4RRFFQ69G5FAV/voice.m4a",
-      ],
     });
 
     const compatibilityProjection = buildAttachmentCompatibilityProjections([

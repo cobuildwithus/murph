@@ -397,6 +397,42 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
   },
   {
     schemaVersion: "murph.event.v1",
+    id: "evt_01JNV44MEASUREMENT000000001",
+    kind: "measurement",
+    occurredAt: "2026-03-12T07:00:00Z",
+    recordedAt: "2026-03-12T07:00:10Z",
+    dayKey: "2026-03-12",
+    source: "manual",
+    title: "Performance check-in",
+    note: "Grip strength plus morning body metrics.",
+    attachments: [
+      {
+        role: "media_1",
+        kind: "photo",
+        relativePath: "raw/measurements/2026/03/evt_01JNV44MEASUREMENT000000001/front.jpg",
+        mediaType: "image/jpeg",
+        sha256: "4343434343434343434343434343434343434343434343434343434343434343",
+        originalFileName: "front.jpg",
+      }
+    ],
+    measurements: [
+      { metric: "weight", value: 182.4, unit: "lb" },
+      { metric: "body-fat-percentage", value: 18.2, unit: "percent" },
+      { metric: "grip-strength", value: 97.2, unit: "lb", qualifiers: { side: "right" } }
+    ],
+    media: [
+      {
+        kind: "photo",
+        relativePath: "raw/measurements/2026/03/evt_01JNV44MEASUREMENT000000001/front.jpg",
+        mediaType: "image/jpeg",
+      }
+    ],
+    rawRefs: [
+      "raw/measurements/2026/03/evt_01JNV44MEASUREMENT000000001/front.jpg"
+    ],
+  },
+  {
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV450A1B2C3D4E5F6G7H8JK",
     kind: "body_measurement",
     occurredAt: "2026-03-12T07:00:00Z",

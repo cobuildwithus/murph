@@ -7,7 +7,7 @@ sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.
 hosted_web_default_database_url="postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"
 hosted_web_default_hosted_key="BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"
 hosted_web_default_hosted_key_version="v1"
-hosted_web_build_default_privy_app_id="cm_app_build"
+hosted_web_build_default_privy_app_id="cm_app_build_placeholder1"
 
 if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/web verify" -- \

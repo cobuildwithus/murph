@@ -209,6 +209,34 @@ describe("hosted local dev stack", () => {
     });
   });
 
+  it("uses prisma migrate deploy for non-local databases instead of forcing db push", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 111 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 112 }));
+
+    const environmentModule = await import("./environment.ts");
+    vi.mocked(environmentModule.shouldSyncLocalDatabaseSchema).mockReturnValueOnce(false);
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "prisma:migrate:deploy"],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"],
+      expect.any(Object),
+    );
+  });
+
   it("uses the Docker bridge gateway as the worker bridge host on Linux", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 151 }))

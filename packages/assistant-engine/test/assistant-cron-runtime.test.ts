@@ -18,7 +18,7 @@ type MockAutomationRecord = {
     deliveryTarget: string | null
     identityId: string | null
     participantId: string | null
-    sourceThreadId: string | null
+    threadId: string | null
   }
   schedule: AssistantCronSchedule
   slug?: string
@@ -126,7 +126,7 @@ beforeEach(() => {
       deliveryTarget: input.deliveryTarget ?? null,
       identityId: input.identityId ?? null,
       participantId: input.participantId ?? null,
-      sourceThreadId: input.sourceThreadId ?? null,
+      threadId: input.threadId ?? null,
     }),
   )
   cronMocks.getAssistantChannelAdapter.mockReset().mockImplementation((channel) =>

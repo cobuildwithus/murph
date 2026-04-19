@@ -406,6 +406,36 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
     title: "Missing provider observation",
   });
 
+  const measurementRows = [
+    makeWearableEntity({
+      attributes: {
+        externalRef: makeExternalRef({
+          resourceId: "measurement-weight-1",
+          resourceType: "summary",
+          system: "garmin",
+        }),
+        measurements: [
+          {
+            metric: "weight",
+            unit: "lb",
+            value: 182,
+          },
+          {
+            metric: "body-fat-pct",
+            unit: "percent",
+            value: 18.4,
+          },
+        ],
+        recordedAt: "2026-04-02T10:30:00Z",
+      },
+      entityId: "measurement_garmin_body_state",
+      family: "event",
+      kind: "measurement",
+      recordClass: "ledger",
+      title: "Garmin body state",
+    }),
+  ];
+
   const activitySessions = [
     makeWearableEntity({
       attributes: {
@@ -513,6 +543,7 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
   const vault = makeVault([
     ...sampleRows,
     ...observationRows,
+    ...measurementRows,
     excludedObservation,
     ...activitySessions,
     ...sleepSessions,
@@ -552,6 +583,11 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "distanceKm"), true);
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "awakeMinutes"), true);
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "remMinutes"), true);
+  assert.equal(
+    dataset.rawMetricCandidates.some((candidate) => candidate.metric === "weightKg" && candidate.value === 82.5538),
+    true,
+  );
+  assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "bodyFatPercentage" && candidate.value === 18.4), true);
 
   assert.equal(dataset.metricCandidates.some((candidate) => candidate.sourceKind === "sleep-stage-aggregate"), true);
   assert.equal(dataset.metricCandidates.some((candidate) => candidate.metric === "awakeMinutes" && candidate.sourceKind === "sleep-stage-aggregate"), true);

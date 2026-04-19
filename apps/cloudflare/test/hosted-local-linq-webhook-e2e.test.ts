@@ -1,6 +1,4 @@
 import { createHmac } from "node:crypto";
-import path from "node:path";
-
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -9,9 +7,7 @@ import {
 
 import {
   DEFAULT_DATABASE_URL,
-  repoRoot,
 } from "../../../scripts/dev-hosted-local/constants.ts";
-import { readOptionalSimpleEnvFile } from "../../../scripts/dev-hosted-local/environment.ts";
 import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -35,7 +31,6 @@ const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() ||
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
 
 let linqStub: HostedLocalLinqStub | null = null;
-let localSeedEnv: NodeJS.ProcessEnv = process.env;
 let scenario: HostedLocalFullStackScenario | null = null;
 
 it("derives stable numeric suffixes from the full Linq user id", () => {
@@ -46,16 +41,6 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 
 describe("hosted local Linq webhook e2e", () => {
   beforeAll(async () => {
-    const repoEnv = await readOptionalSimpleEnvFile(path.join(repoRoot, ".env"));
-    const webEnv = await readOptionalSimpleEnvFile(path.join(repoRoot, "apps/web/.env"));
-    const webLocalEnv = await readOptionalSimpleEnvFile(path.join(repoRoot, "apps/web/.env.local"));
-    localSeedEnv = {
-      ...repoEnv,
-      ...webEnv,
-      ...webLocalEnv,
-      ...process.env,
-    };
-
     linqStub = await startHostedLocalLinqStub();
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
@@ -69,7 +54,6 @@ describe("hosted local Linq webhook e2e", () => {
       requiredRunnerEnvProfile: "linq",
       resolveAssistantReplyText: resolveHostedLinqAssistantReplyText,
       scenarioLabel: "Local hosted Linq webhook e2e",
-      seedEnvironment: localSeedEnv,
       streamLogs: streamDevLogs,
     });
   }, 300_000);

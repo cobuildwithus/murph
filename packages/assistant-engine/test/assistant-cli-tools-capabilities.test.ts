@@ -147,7 +147,7 @@ describe('assistant CLI tool capability seam', () => {
           deliveryTarget: null,
           identityId: null,
           participantId: null,
-          sourceThreadId: null,
+          threadId: null,
         },
       ])
     const showTargetSpy = vi
@@ -157,7 +157,7 @@ describe('assistant CLI tool capability seam', () => {
         deliveryTarget: '@murph',
         identityId: null,
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
       })
     const cliExecuteSpy = vi
       .spyOn(executionAdapters, 'executeAssistantCliCommand')
@@ -341,7 +341,7 @@ describe('assistant CLI tool capability seam', () => {
         deliveryTarget: null,
         identityId: null,
         participantId: null,
-        sourceThreadId: null,
+        threadId: null,
       },
     ])
     expect(await executeTool(runtimeTools, 'assistant.selfTarget.show', {
@@ -351,7 +351,7 @@ describe('assistant CLI tool capability seam', () => {
       deliveryTarget: '@murph',
       identityId: null,
       participantId: null,
-      sourceThreadId: null,
+      threadId: null,
     })
     expect(listTargetsSpy).toHaveBeenCalledTimes(1)
     expect(showTargetSpy).toHaveBeenCalledWith('telegram')

@@ -286,7 +286,9 @@ export function buildAssistantCliProcessEnv(input: {
   const env: NodeJS.ProcessEnv = {}
 
   copyAllowedAssistantCliEnvEntries(env, ambientEnv)
-  copyAllowedAssistantCliEnvEntries(env, input.cliEnv)
+  copyAllowedAssistantCliEnvEntries(env, input.cliEnv, {
+    allowEmptyPath: true,
+  })
 
   env.NO_COLOR = '1'
 
@@ -296,13 +298,20 @@ export function buildAssistantCliProcessEnv(input: {
 function copyAllowedAssistantCliEnvEntries(
   target: NodeJS.ProcessEnv,
   source: NodeJS.ProcessEnv | undefined,
+  options: {
+    allowEmptyPath?: boolean
+  } = {},
 ): void {
   for (const [key, value] of Object.entries(source ?? {})) {
     const normalizedKey = key.toUpperCase() === 'PATH' ? 'PATH' : key
+    const isExplicitEmptyPath =
+      normalizedKey === 'PATH' &&
+      value === '' &&
+      options.allowEmptyPath === true
 
     if (
       typeof value !== 'string' ||
-      value.length === 0 ||
+      (!isExplicitEmptyPath && value.length === 0) ||
       !assistantCliAllowedEnvKeys.has(normalizedKey)
     ) {
       continue
@@ -434,6 +443,13 @@ async function resolveAssistantCliLauncher(
   cliProcessEnv: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
   const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
+  if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
+    return {
+      argvPrefix: [localBuiltCliBinPath],
+      command: process.execPath,
+    }
+  }
+
   const vaultCliBinary = await resolveExecutableOnPath(
     'vault-cli',
     cliProcessEnv,
@@ -442,13 +458,6 @@ async function resolveAssistantCliLauncher(
     return {
       argvPrefix: [],
       command: vaultCliBinary,
-    }
-  }
-
-  if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
-    return {
-      argvPrefix: [localBuiltCliBinPath],
-      command: process.execPath,
     }
   }
 

@@ -22,7 +22,7 @@ export const cloudflareVitestAliases = [
       "@murphai/operator-config": "packages/operator-config/src/index.ts",
       "@murphai/assistant-runtime": "packages/assistant-runtime/src/index.ts",
       "@murphai/cloudflare-hosted-control": "packages/cloudflare-hosted-control/src/index.ts",
-      "@murphai/hosted-web/testing": "apps/web/src/testing.ts",
+      "#hosted-web-testing": "apps/web/src/testing.ts",
       "@murphai/murph": "packages/cli/src/index.ts",
       "@murphai/contracts": "packages/contracts/src/index.ts",
       "@murphai/core": "packages/core/src/index.ts",

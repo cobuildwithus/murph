@@ -192,10 +192,9 @@ test("protocol shared registry definition owns payload and relation metadata", (
   }
 
   const links = extractHealthEntityRegistryLinks("protocol", {
-    goalId: "goal_scalar_01",
-    conditionIds: ["cond_array_01"],
-    protocolIds: ["prot_related_01"],
-    protocolId: "prot_self_01",
+    relatedGoalIds: ["goal_scalar_01"],
+    relatedConditionIds: ["cond_array_01"],
+    relatedProtocolIds: ["prot_related_01", "prot_self_01"],
   });
 
   assert.deepEqual(
@@ -209,16 +208,15 @@ test("protocol shared registry definition owns payload and relation metadata", (
   );
   assert.deepEqual(
     extractHealthEntityRegistryRelatedIds("protocol", {
-      goalId: "goal_scalar_01",
-      conditionIds: ["cond_array_01"],
-      protocolIds: ["prot_related_01"],
-      protocolId: "prot_self_01",
+      relatedGoalIds: ["goal_scalar_01"],
+      relatedConditionIds: ["cond_array_01"],
+      relatedProtocolIds: ["prot_related_01", "prot_self_01"],
     }),
     ["goal_scalar_01", "cond_array_01", "prot_related_01", "prot_self_01"],
   );
 });
 
-test("protocol query projection merges mixed relation alias arrays into normalized links", () => {
+test("protocol query projection normalizes current relation arrays into links", () => {
   const protocolRecord = toRegistryRecord(
     {
       relativePath: "bank/protocols/recovery/cold-exposure.md",
@@ -229,12 +227,9 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
         title: "Cold exposure",
         status: "active",
         kind: "recovery",
-        goalIds: ["goal_primary_01", "goal_shared_01"],
-        relatedGoalIds: ["goal_secondary_01", "goal_shared_01"],
-        conditionIds: ["cond_primary_01", "cond_shared_01"],
-        relatedConditionIds: ["cond_secondary_01", "cond_shared_01"],
-        protocolIds: ["prot_related_01", "prot_shared_01"],
-        relatedProtocolIds: ["prot_related_02", "prot_shared_01"],
+        relatedGoalIds: ["goal_primary_01", "goal_shared_01", "goal_secondary_01", "goal_shared_01"],
+        relatedConditionIds: ["cond_primary_01", "cond_shared_01", "cond_secondary_01", "cond_shared_01"],
+        relatedProtocolIds: ["prot_related_01", "prot_shared_01", "prot_related_02", "prot_shared_01"],
       },
     },
     protocolRegistryDefinition,

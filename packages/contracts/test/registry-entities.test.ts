@@ -250,7 +250,7 @@ describe("health registry seam", () => {
     });
   });
 
-  it("projects protocol metadata, derives protocol groups from paths, and prefers explicit links when present", () => {
+  it("projects protocol metadata, derives protocol groups from paths, and keeps explicit links authoritative", () => {
     const projection = getHealthEntityRegistryProjectionMetadata("protocol");
 
     expect(deriveProtocolGroupFromRelativePath("bank/protocols/sleep/magnesium.md")).toBe("sleep");
@@ -272,9 +272,8 @@ describe("health registry seam", () => {
             { compound: " Taurine ", active: false, note: " bedtime " },
             { compound: " " },
           ],
-          goalIds: ["goal_sleep"],
           relatedGoalIds: [" goal_energy ", "goal_sleep"],
-          conditionId: "cond_insomnia",
+          relatedConditionIds: ["cond_insomnia"],
           relatedProtocolIds: [" protocol_existing "],
         },
         helpers: projectionHelpers,
@@ -310,56 +309,53 @@ describe("health registry seam", () => {
         },
       ],
       relatedGoalIds: ["goal_energy", "goal_sleep"],
-      relatedConditionIds: [],
+      relatedConditionIds: ["cond_insomnia"],
       relatedProtocolIds: ["protocol_existing"],
       group: "sleep",
     });
 
     expect(
       extractHealthEntityRegistryLinks("protocol", {
-        goalIds: ["goal_sleep", "goal_energy"],
-        goalId: "goal_sleep",
-        conditionIds: ["cond_insomnia"],
+        relatedGoalIds: ["goal_sleep", "goal_energy"],
         relatedConditionIds: [" cond_fatigue ", "cond_insomnia"],
-        protocolId: "protocol_base",
         relatedProtocolIds: ["protocol_stack", "protocol_base"],
       }),
     ).toEqual([
       {
         type: "supports_goal",
         targetId: "goal_sleep",
-        sourceKeys: ["goalIds", "relatedGoalIds"],
+        sourceKeys: ["relatedGoalIds"],
       },
       {
         type: "supports_goal",
         targetId: "goal_energy",
-        sourceKeys: ["goalIds", "relatedGoalIds"],
+        sourceKeys: ["relatedGoalIds"],
       },
       {
         type: "addresses_condition",
         targetId: "cond_insomnia",
-        sourceKeys: ["conditionIds", "relatedConditionIds"],
+        sourceKeys: ["relatedConditionIds"],
       },
       {
         type: "addresses_condition",
         targetId: "cond_fatigue",
-        sourceKeys: ["conditionIds", "relatedConditionIds"],
+        sourceKeys: ["relatedConditionIds"],
       },
       {
         type: "related_protocol",
         targetId: "protocol_stack",
-        sourceKeys: ["protocolIds", "relatedProtocolIds"],
+        sourceKeys: ["relatedProtocolIds"],
       },
       {
         type: "related_protocol",
         targetId: "protocol_base",
-        sourceKeys: ["protocolIds", "relatedProtocolIds"],
+        sourceKeys: ["relatedProtocolIds"],
       },
     ]);
 
     expect(
       extractHealthEntityRegistryLinks("protocol", {
-        goalIds: ["goal_should_be_ignored"],
+        relatedGoalIds: ["goal_should_be_ignored"],
         links: [
           { type: "supports_goal", targetId: "goal_explicit" },
           { type: "related_protocol", targetId: "protocol_explicit" },

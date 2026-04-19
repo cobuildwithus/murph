@@ -57,6 +57,7 @@ describe("materializeHostedDueWakesTx", () => {
 
   it("materializes due assistant and reconcile wakes from canonical Postgres state", async () => {
     const tx = createMaterializeTx({
+      assistantNextWakeAt: new Date("2026-04-17T00:30:00.000Z"),
       connections: [{
         id: "connection_due",
         nextReconcileAt: new Date("2026-04-17T00:00:00.000Z"),
@@ -79,10 +80,6 @@ describe("materializeHostedDueWakesTx", () => {
       now: new Date("2026-04-17T01:00:00.000Z"),
       tx,
       userId: "member_123",
-      wakeMaterializationHints: {
-        assistantWakeAt: "2026-04-17T00:30:00.000Z",
-        deviceSyncWakeAt: "2026-04-17T03:00:00.000Z",
-      },
     });
 
     expect(mocks.materializeHostedAssistantCronWakeTx).toHaveBeenCalledWith({
@@ -109,14 +106,10 @@ describe("materializeHostedDueWakesTx", () => {
     });
   });
 
-  it("materializes due device-sync wakes even when Cloudflare does not send a due hint", async () => {
+  it("materializes due assistant wakes even when Cloudflare clears its local hints", async () => {
     const tx = createMaterializeTx({
-      connections: [{
-        id: "connection_due",
-        nextReconcileAt: new Date("2026-04-17T00:15:00.000Z"),
-        provider: "oura",
-        userId: "member_123",
-      }],
+      assistantNextWakeAt: new Date("2026-04-17T00:15:00.000Z"),
+      connections: [],
     });
 
     const result = await materializeHostedDueWakesTx({
@@ -133,21 +126,17 @@ describe("materializeHostedDueWakesTx", () => {
       now: new Date("2026-04-17T01:00:00.000Z"),
       tx,
       userId: "member_123",
-      wakeMaterializationHints: null,
     });
 
-    expect(mocks.materializeHostedAssistantCronWakeTx).not.toHaveBeenCalled();
-    expect(mocks.appendHostedExecutionWakePayloadTx).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.materializeHostedAssistantCronWakeTx).toHaveBeenCalledWith({
+      occurredAt: "2026-04-17T01:00:00.000Z",
+      reason: "alarm",
       tx,
-      wake: expect.objectContaining({
-        connectionId: "connection_due",
-        kind: "device-sync.wake",
-        reason: "reconcile_due",
-        userId: "member_123",
-      }),
-    }));
+      userId: "member_123",
+    });
+    expect(mocks.appendHostedExecutionWakePayloadTx).not.toHaveBeenCalled();
     expect(result).toEqual({
-      targetSeqHint: "12",
+      targetSeqHint: "11",
       wakeMaterializationHints: {
         assistantWakeAt: null,
         deviceSyncWakeAt: null,
@@ -157,6 +146,7 @@ describe("materializeHostedDueWakesTx", () => {
 
   it("does not enqueue far-future work but still returns the canonical next device-sync wake hint", async () => {
     const tx = createMaterializeTx({
+      assistantNextWakeAt: new Date("2026-04-17T04:00:00.000Z"),
       connections: [{
         id: "connection_future",
         nextReconcileAt: new Date("2026-04-17T03:00:00.000Z"),
@@ -179,10 +169,6 @@ describe("materializeHostedDueWakesTx", () => {
       now: new Date("2026-04-17T01:00:00.000Z"),
       tx,
       userId: "member_123",
-      wakeMaterializationHints: {
-        assistantWakeAt: "2026-04-17T04:00:00.000Z",
-        deviceSyncWakeAt: "2026-04-17T03:00:00.000Z",
-      },
     });
 
     expect(mocks.materializeHostedAssistantCronWakeTx).not.toHaveBeenCalled();
@@ -199,6 +185,7 @@ describe("materializeHostedDueWakesTx", () => {
 });
 
 function createMaterializeTx(input: {
+  assistantNextWakeAt?: Date | null;
   connections: Array<{
     id: string;
     nextReconcileAt: Date | null;
@@ -271,6 +258,18 @@ function createMaterializeTx(input: {
             provider: connection.provider,
           }));
       }),
+    },
+    hostedExecutionCursor: {
+      upsert: vi.fn(async () => ({
+        assistantNextWakeAt: input.assistantNextWakeAt ?? null,
+        committedSeq: 0n,
+        createdAt: new Date("2026-04-17T00:00:00.000Z"),
+        nextSeq: 1n,
+        snapshotRef: null,
+        updatedAt: new Date("2026-04-17T00:00:00.000Z"),
+        userId: "member_123",
+        version: 0n,
+      })),
     },
   };
 }

@@ -111,6 +111,66 @@ export function createVitestWorkspaceRuntimeAliases(
   return aliases;
 }
 
+export function createVitestAliasesFromTsconfigPaths(input: {
+  specifierFilter?: (specifier: string) => boolean;
+  tsconfigPath?: string;
+  workspaceDir: string;
+}): VitestAlias[] {
+  const repoRoot = resolveWorkspaceRepoRoot(input.workspaceDir);
+  const tsconfigPath =
+    input.tsconfigPath ?? path.join(repoRoot, "tsconfig.base.json");
+  const tsconfig = JSON.parse(fs.readFileSync(tsconfigPath, "utf8")) as {
+    compilerOptions?: {
+      paths?: Record<string, string[]>;
+    };
+  };
+  const pathMappings = tsconfig.compilerOptions?.paths ?? {};
+  const aliases: VitestAlias[] = [];
+  const seen = new Set<string>();
+
+  const appendAlias = (find: RegExp, replacement: string) => {
+    const key = `${find.source}\u0000${replacement}`;
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    aliases.push({ find, replacement });
+  };
+
+  for (const [specifier, targets] of Object.entries(pathMappings)) {
+    if (input.specifierFilter && !input.specifierFilter(specifier)) {
+      continue;
+    }
+
+    const target = targets[0];
+    if (typeof target !== "string") {
+      continue;
+    }
+
+    const specifierStars = countOccurrences(specifier, "*");
+    const targetStars = countOccurrences(target, "*");
+    if (specifierStars !== targetStars || specifierStars > 1) {
+      continue;
+    }
+
+    if (specifierStars === 0) {
+      appendAlias(
+        new RegExp(`^${escapeRegExp(specifier)}$`),
+        path.resolve(repoRoot, target),
+      );
+      continue;
+    }
+
+    appendAlias(
+      new RegExp(`^${escapeRegExp(specifier).replace("\\*", "(.+)")}$`),
+      path.resolve(repoRoot, target.replace("*", "$1")),
+    );
+  }
+
+  return aliases;
+}
+
 export const HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
   HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
 );
@@ -236,4 +296,8 @@ function resolveWorkspaceSourcePathFromExportTarget(packageDir: string, exportTa
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
 }

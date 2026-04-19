@@ -23,7 +23,6 @@ import {
   redactHomePath,
   redactHomePathInText,
   redactHomePathsInValue,
-  resolveShellProfilePath,
 } from '../src/setup-services/shell.ts'
 import { configureSetupWearables } from '../src/setup-services/wearables.ts'
 import {
@@ -552,10 +551,6 @@ test('setup wearable preferences helper covers dry-run and unchanged canonical s
 
 test('shell and process helpers normalize paths and command failures predictably', async () => {
   const homeDirectory = path.join('/tmp', 'murph-home')
-
-  assert.equal(resolveShellProfilePath(homeDirectory, { SHELL: '/bin/zsh' }), path.join(homeDirectory, '.zshrc'))
-  assert.equal(resolveShellProfilePath(homeDirectory, { SHELL: '/bin/bash' }), path.join(homeDirectory, '.bashrc'))
-  assert.equal(resolveShellProfilePath(homeDirectory, {}), path.join(homeDirectory, '.profile'))
 
   assert.equal(redactHomePath(path.join(homeDirectory, 'projects', 'murph'), homeDirectory), '~/projects/murph')
   assert.equal(

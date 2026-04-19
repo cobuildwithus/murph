@@ -21,12 +21,3 @@ export {
   parseHostedContainerImageListOutput,
   selectHostedContainerImageTagsForCleanup,
 } from "./deploy-automation/container-images.ts";
-export type {
-  HostedWorkerDeploymentVersionTraffic,
-  HostedWorkerGradualDeploymentSupport,
-} from "./deploy-automation/deployment-traffic.ts";
-export {
-  formatHostedWorkerDeploymentVersionSpecs,
-  resolveHostedWorkerDeploymentTraffic,
-  resolveHostedWorkerGradualDeploymentSupport,
-} from "./deploy-automation/deployment-traffic.ts";

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { resolveHostedWebSmokeDevCommand } from "../scripts/dev-smoke";
+import {
+  HOSTED_WEB_SMOKE_HEALTH_PATH,
+  resolveHostedWebSmokeDevCommand,
+} from "../scripts/dev-smoke";
 import { createHostedWebSmokeEnvironment } from "../next-artifacts";
 
 function createEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
@@ -19,6 +22,10 @@ test("hosted web smoke uses the linked vercel path outside CI", () => {
     })),
     "dev",
   );
+});
+
+test("hosted web smoke probes the lightweight internal health route", () => {
+  assert.equal(HOSTED_WEB_SMOKE_HEALTH_PATH, "/api/internal/health");
 });
 
 test("hosted web smoke uses the local-env path in CI", () => {
@@ -62,7 +69,8 @@ test("hosted web smoke falls back to the local database url when none is configu
   assert.equal(smokeEnv.HOSTED_WEB_ENCRYPTION_KEY_VERSION, "v1");
   assert.equal(smokeEnv.HOSTED_WAKE_ENCRYPTION_KEY, "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
   assert.equal(smokeEnv.HOSTED_WAKE_ENCRYPTION_KEY_VERSION, "v1");
-  assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_smoke");
+  assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_smoke_placeholder1");
+  assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID?.length, 25);
 });
 
 test("hosted web smoke preserves an existing database url", () => {

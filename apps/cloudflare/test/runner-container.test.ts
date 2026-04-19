@@ -125,14 +125,19 @@ describe("RunnerContainer", () => {
     expect(outboundAssignments).toEqual([expectedOutboundAssignments]);
   });
 
-  it("starts the container without forwarding hosted supervisor secrets", async () => {
+  it("starts the container with the hosted execution operator env needed by the runtime", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"pub","y":"pub"}',
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://host.docker.internal:4010/.well-known/jwks",
+        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
         HOSTED_WAKE_ENCRYPTION_KEY: "hosted-wake-key",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -150,8 +155,20 @@ describe("RunnerContainer", () => {
     });
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toEqual({
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toMatchObject({
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"pub","y":"pub"}',
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
       HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+      HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://host.docker.internal:4010/.well-known/jwks",
+      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
+      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-wake-key",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "web:v3",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
       PORT: "8080",
     });
   });
@@ -623,6 +640,21 @@ describe("RunnerContainer", () => {
       throw new Error(
         "Monitoring container failed with: 404 {\"message\":\"No such container: workerd-murph-hosted-RunnerContainer-abc\"}",
       );
+    });
+    const { container } = createContainerDouble({
+      destroy,
+      initialStatus: "running",
+    });
+
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats missing containers as already destroyed even when the runtime throws a plain object", async () => {
+    const destroy = vi.fn(async () => {
+      throw {
+        message: "Monitoring container failed with: 404 {\"message\":\"No such container: workerd-murph-hosted-RunnerContainer-abc\"}",
+      };
     });
     const { container } = createContainerDouble({
       destroy,

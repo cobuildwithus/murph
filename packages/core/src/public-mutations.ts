@@ -52,6 +52,7 @@ import {
 import {
   addActivitySession as addActivitySessionInternal,
   addBodyMeasurement as addBodyMeasurementInternal,
+  addMeasurement as addMeasurementInternal,
   deleteEvent as deleteEventInternal,
   upsertEvent as upsertEventInternal,
 } from "./domains/events.ts";
@@ -465,6 +466,14 @@ export async function addBodyMeasurement(
   return hasStableCanonicalId(input.draft.id)
     ? withCanonicalInputWriteLock(input, addBodyMeasurementInternal)
     : addBodyMeasurementInternal(input);
+}
+
+export async function addMeasurement(
+  input: Parameters<typeof addMeasurementInternal>[0],
+): ReturnType<typeof addMeasurementInternal> {
+  return hasStableCanonicalId(input.draft.id)
+    ? withCanonicalInputWriteLock(input, addMeasurementInternal)
+    : addMeasurementInternal(input);
 }
 
 export async function importSamples(

@@ -7,12 +7,6 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
-  // Hard cut: web owns wake lifecycle truth, so the runner drops the old local
-  // queue lifecycle tables instead of migrating them forward.
-  sql.exec("DROP TABLE IF EXISTS pending_events");
-  sql.exec("DROP TABLE IF EXISTS consumed_events");
-  sql.exec("DROP TABLE IF EXISTS backpressured_events");
-  sql.exec("DROP TABLE IF EXISTS poisoned_events");
   sql.exec(`
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -34,15 +28,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       wake_materialization_hints_json TEXT
     )
   `);
-  // Greenfield hard cut: the runner only persists one vault bundle pointer now,
-  // so the old slot table is deleted instead of being carried as compatibility
-  // state for dead multi-slot paths.
-  sql.exec("DROP TABLE IF EXISTS runner_bundle_slots");
-  ensureRunnerMetaColumns(sql);
   assertRunnerStateTableColumns(sql, "runner_meta", {
-    forbiddenColumns: [
-      "activated",
-    ],
     requiredColumns: [
       "singleton",
       "user_id",
@@ -65,56 +51,6 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   });
 }
 
-function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
-  const columns = new Set(readRunnerStateTableColumns(sql, "runner_meta"));
-  const additions = [
-    {
-      columnName: "bundle_ref_json",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN bundle_ref_json TEXT",
-    },
-    {
-      columnName: "bundle_version",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN bundle_version INTEGER NOT NULL DEFAULT 0",
-    },
-    {
-      columnName: "active_run_event_id",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_event_id TEXT",
-    },
-    {
-      columnName: "active_run_id",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_id TEXT",
-    },
-    {
-      columnName: "active_run_attempt",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_attempt INTEGER",
-    },
-    {
-      columnName: "active_run_started_at",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_started_at TEXT",
-    },
-    {
-      columnName: "last_event_id",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN last_event_id TEXT",
-    },
-    {
-      columnName: "pending_commit_json",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN pending_commit_json TEXT",
-    },
-    {
-      columnName: "wake_materialization_hints_json",
-      ddl: "ALTER TABLE runner_meta ADD COLUMN wake_materialization_hints_json TEXT",
-    },
-  ] as const;
-
-  for (const addition of additions) {
-    if (columns.has(addition.columnName)) {
-      continue;
-    }
-
-    sql.exec(addition.ddl);
-  }
-}
-
 function readRunnerStateTableColumns(
   sql: DurableObjectSqlStorageLike,
   tableName: string,
@@ -128,26 +64,18 @@ function assertRunnerStateTableColumns(
   sql: DurableObjectSqlStorageLike,
   tableName: string,
   input: {
-    forbiddenColumns?: readonly string[];
     requiredColumns: readonly string[];
   },
 ): void {
   const actualColumns = readRunnerStateTableColumns(sql, tableName);
-  const forbiddenColumns = (input.forbiddenColumns ?? [])
-    .filter((columnName) => actualColumns.includes(columnName));
   const missingColumns = input.requiredColumns
     .filter((columnName) => !actualColumns.includes(columnName));
 
-  if (missingColumns.length === 0 && forbiddenColumns.length === 0) {
+  if (missingColumns.length === 0) {
     return;
   }
 
-  const details = [
-    missingColumns.length > 0 ? `missing ${missingColumns.join(", ")}` : null,
-    forbiddenColumns.length > 0 ? `forbidden ${forbiddenColumns.join(", ")}` : null,
-  ].filter((value): value is string => value !== null);
-
   throw new Error(
-    `Hosted runner Durable Object ${tableName} schema is unsupported; ${details.join("; ")}.`,
+    `Hosted runner Durable Object ${tableName} schema is unsupported; missing ${missingColumns.join(", ")}.`,
   );
 }

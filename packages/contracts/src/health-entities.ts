@@ -406,9 +406,9 @@ const checkedHealthEntityDefinitions = [
             manufacturer: helpers.firstString(attributes, ["manufacturer"]),
             servingSize: helpers.firstString(attributes, ["servingSize"]),
             ingredients: projectSupplementIngredients(attributes.ingredients),
-            relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds", "goalIds"]),
-            relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds", "conditionIds"]),
-            relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds", "protocolIds"]),
+            relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
+            relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
+            relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds"]),
             group:
               helpers.firstString(attributes, ["group"])
               ?? deriveProtocolGroupFromRelativePath(relativePath),
@@ -419,33 +419,18 @@ const checkedHealthEntityDefinitions = [
       relationKeys: [
         {
           type: "supports_goal",
-          keys: ["goalIds", "relatedGoalIds"],
-          cardinality: "many",
-        },
-        {
-          type: "supports_goal",
-          keys: ["goalId"],
-          cardinality: "one",
-        },
-        {
-          type: "addresses_condition",
-          keys: ["conditionIds", "relatedConditionIds"],
+          keys: ["relatedGoalIds"],
           cardinality: "many",
         },
         {
           type: "addresses_condition",
-          keys: ["conditionId"],
-          cardinality: "one",
-        },
-        {
-          type: "related_protocol",
-          keys: ["protocolIds", "relatedProtocolIds"],
+          keys: ["relatedConditionIds"],
           cardinality: "many",
         },
         {
           type: "related_protocol",
-          keys: ["protocolId"],
-          cardinality: "one",
+          keys: ["relatedProtocolIds"],
+          cardinality: "many",
         },
       ],
       titleKeys: ["title"],

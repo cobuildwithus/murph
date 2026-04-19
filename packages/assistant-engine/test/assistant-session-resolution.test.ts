@@ -152,7 +152,6 @@ describe('assistant session resolution', () => {
         providerName: 'Example Gateway',
         reasoningEffort: 'high',
         sessionId: 'message-session',
-        sourceThreadId: 'message-source-thread',
         threadId: 'message-thread',
         threadIsDirect: true,
       }),
@@ -200,7 +199,7 @@ describe('assistant session resolution', () => {
         },
         model: 'gpt-5-codex',
         provider: 'codex-cli',
-        sourceThreadId: 'source-thread',
+        threadId: 'source-thread',
       }),
       createOperatorDefaults({
         identityId: 'default-identity',

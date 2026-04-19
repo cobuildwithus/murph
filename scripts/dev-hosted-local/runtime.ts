@@ -276,35 +276,25 @@ export async function cleanupHostedRunnerContainers(input: {
   timeoutMs?: number;
 }): Promise<void> {
   const timeoutMs = input.timeoutMs ?? 15_000;
-  const listed = await runBoundedCommand({
-    args: [
-      "ps",
-      "-aq",
-      "--filter",
-      `name=${HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX}`,
-    ],
-    command: "docker",
+  const listed = await listHostedRunnerContainerIds({
     cwd: input.cwd,
     env: input.env,
     timeoutMs,
   });
 
-  if (listed.timedOut || listed.exitCode !== 0) {
+  if (listed.result.timedOut || listed.result.exitCode !== 0) {
     if (input.ignoreErrors) {
       return;
     }
     throw new Error(
       [
         "Failed to inspect local Cloudflare runner containers before startup.",
-        formatBoundedCommandResult("docker ps -aq", listed),
+        formatBoundedCommandResult("docker ps -aq", listed.result),
       ].join("\n"),
     );
   }
 
-  const containerIds = listed.stdout
-    .split(/\s+/)
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+  const containerIds = listed.containerIds;
   if (containerIds.length === 0) {
     return;
   }
@@ -317,7 +307,19 @@ export async function cleanupHostedRunnerContainers(input: {
     timeoutMs,
   });
 
-  if ((removed.timedOut || removed.exitCode !== 0) && !input.ignoreErrors) {
+  if (
+    removed.timedOut
+    || removed.exitCode !== 0
+  ) {
+    const disappeared = await waitForHostedRunnerContainersToDisappear({
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs: Math.min(timeoutMs, 3_000),
+    });
+    if (disappeared || input.ignoreErrors) {
+      return;
+    }
+
     throw new Error(
       [
         "Failed to remove stale local Cloudflare runner containers.",
@@ -325,6 +327,59 @@ export async function cleanupHostedRunnerContainers(input: {
       ].join("\n"),
     );
   }
+}
+
+async function listHostedRunnerContainerIds(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}): Promise<{
+  containerIds: string[];
+  result: BoundedCommandResult;
+}> {
+  const result = await runBoundedCommand({
+    args: [
+      "ps",
+      "-aq",
+      "--filter",
+      `name=${HOSTED_LOCAL_RUNNER_CONTAINER_NAME_PREFIX}`,
+    ],
+    command: "docker",
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return {
+    containerIds: result.stdout
+      .split(/\s+/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+    result,
+  };
+}
+
+async function waitForHostedRunnerContainersToDisappear(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}): Promise<boolean> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < input.timeoutMs) {
+    const listed = await listHostedRunnerContainerIds({
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs: Math.min(input.timeoutMs, 1_000),
+    });
+    if (!listed.result.timedOut && listed.result.exitCode === 0 && listed.containerIds.length === 0) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return false;
 }
 
 export async function waitForHealthyHttpEndpoint(input: {

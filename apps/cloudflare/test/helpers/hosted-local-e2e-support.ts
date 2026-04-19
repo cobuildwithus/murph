@@ -9,6 +9,11 @@ import {
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedLocalE2eRunnerTimeoutMs = "240000";
+const defaultHostedRunnerEnvProfiles = [
+  "assistant",
+  "parsers",
+  "web",
+] as const;
 
 export async function startAssistantProviderStubServer(input: {
   messageText?: string;
@@ -205,7 +210,10 @@ export function mergeRequiredEnvProfile(
   requiredProfile: string,
 ): string {
   const profiles = new Set(
-    String(existingProfiles ?? "")
+    String(
+      existingProfiles
+      ?? defaultHostedRunnerEnvProfiles.join(","),
+    )
       .split(",")
       .map((entry) => entry.trim())
       .filter(Boolean),

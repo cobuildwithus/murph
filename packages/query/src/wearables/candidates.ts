@@ -100,6 +100,16 @@ export function collectWearableDataset(
       continue;
     }
 
+    if (entity.kind === "measurement" || entity.kind === "body_measurement") {
+      const candidates = buildMeasurementMetricCandidates(entity, provider, externalRef);
+      for (const candidate of candidates) {
+        if (matchesDateFilters(candidate.date, filters)) {
+          rawMetricCandidates.push(candidate);
+        }
+      }
+      continue;
+    }
+
     if (entity.kind === "observation") {
       const candidates = buildObservationMetricCandidates(entity, provider, externalRef);
       for (const candidate of candidates) {
@@ -432,7 +442,7 @@ function buildObservationMetricCandidates(
     return [];
   }
 
-  const mapped = mapObservationMetric(rawMetric, rawValue, normalizeUnit(entity.attributes.unit));
+  const mapped = mapScalarMetric(rawMetric, rawValue, normalizeUnit(entity.attributes.unit));
   if (!mapped) {
     return [];
   }
@@ -445,6 +455,56 @@ function buildObservationMetricCandidates(
     unit: mapped.unit,
     value: mapped.value,
   }];
+}
+
+function buildMeasurementMetricCandidates(
+  entity: CanonicalEntity,
+  provider: string,
+  externalRef: WearableExternalRef | null,
+): WearableMetricCandidate[] {
+  const date = deriveWearableDate(entity, externalRef, {
+    preferSleepEndAt: true,
+  });
+
+  if (!date) {
+    return [];
+  }
+
+  const entries = Array.isArray(entity.attributes.measurements)
+    ? entity.attributes.measurements
+    : [];
+  const base = createMetricCandidateBase(entity, provider, externalRef, date, "event", entity.kind);
+
+  return entries.flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const rawMetric =
+      normalizeLowercaseString(candidate.metric)
+      ?? normalizeLowercaseString(candidate.type)?.replace(/_/gu, "-")
+      ?? null;
+    const rawValue = readNumber(candidate.value);
+    const rawUnit = normalizeUnit(candidate.unit);
+
+    if (!rawMetric || rawValue === null) {
+      return [];
+    }
+
+    const mapped = mapScalarMetric(rawMetric, rawValue, rawUnit);
+    if (!mapped) {
+      return [];
+    }
+
+    return [{
+      ...base,
+      candidateId: `${base.candidateId}:measurement:${index + 1}`,
+      metric: mapped.metric,
+      unit: mapped.unit,
+      value: mapped.value,
+    }];
+  });
 }
 
 function buildActivitySessionCandidate(
@@ -537,25 +597,41 @@ function buildSleepStageCandidate(
   };
 }
 
-function mapObservationMetric(
+function mapScalarMetric(
   metric: string,
   value: number,
   unit: string | null,
 ): { metric: WearableMetricKey; unit: string | null; value: number } | null {
-  switch (metric) {
+  const normalizedMetric = metric.toLowerCase().replace(/_/gu, "-");
+  const normalizedUnit = normalizeMetricUnit(unit);
+
+  if (normalizedMetric === "weight") {
+    const kilograms = normalizeWeightKilograms(value, normalizedUnit);
+    return kilograms === null ? null : { metric: "weightKg", unit: "kg", value: kilograms };
+  }
+
+  if (normalizedMetric === "body-fat-percentage" || normalizedMetric === "body-fat-pct") {
+    return { metric: "bodyFatPercentage", unit: "%", value };
+  }
+
+  switch (normalizedMetric) {
     case "daily-steps":
       return { metric: "steps", unit: "count", value };
     case "active-calories":
       return { metric: "activeCalories", unit: "kcal", value };
     case "distance":
     case "equivalent-walking-distance":
-      return { metric: "distanceKm", unit: "km", value: metersToKilometers(value) };
+      return {
+        metric: "distanceKm",
+        unit: "km",
+        value: normalizeDistanceKilometers(value, normalizedUnit),
+      };
     case "activity-score":
-      return { metric: "activityScore", unit: unit ?? "%", value };
+      return { metric: "activityScore", unit: normalizedUnit ?? "%", value };
     case "day-strain":
-      return { metric: "dayStrain", unit: unit ?? "whoop_strain", value };
+      return { metric: "dayStrain", unit: normalizedUnit ?? "whoop_strain", value };
     case "sleep-efficiency":
-      return { metric: "sleepEfficiency", unit: unit ?? "%", value };
+      return { metric: "sleepEfficiency", unit: normalizedUnit ?? "%", value };
     case "sleep-total-minutes":
       return { metric: "totalSleepMinutes", unit: "minutes", value };
     case "time-in-bed-minutes":
@@ -569,39 +645,91 @@ function mapObservationMetric(
     case "sleep-rem-minutes":
       return { metric: "remMinutes", unit: "minutes", value };
     case "sleep-score":
-      return { metric: "sleepScore", unit: unit ?? "%", value };
+      return { metric: "sleepScore", unit: normalizedUnit ?? "%", value };
     case "sleep-performance":
-      return { metric: "sleepPerformance", unit: unit ?? "%", value };
+      return { metric: "sleepPerformance", unit: normalizedUnit ?? "%", value };
     case "sleep-consistency":
-      return { metric: "sleepConsistency", unit: unit ?? "%", value };
+      return { metric: "sleepConsistency", unit: normalizedUnit ?? "%", value };
     case "recovery-score":
-      return { metric: "recoveryScore", unit: unit ?? "%", value };
+      return { metric: "recoveryScore", unit: normalizedUnit ?? "%", value };
     case "readiness-score":
-      return { metric: "readinessScore", unit: unit ?? "%", value };
+      return { metric: "readinessScore", unit: normalizedUnit ?? "%", value };
     case "resting-heart-rate":
-      return { metric: "restingHeartRate", unit: unit ?? "bpm", value };
+      return { metric: "restingHeartRate", unit: normalizedUnit ?? "bpm", value };
     case "average-heart-rate":
-      return { metric: "averageHeartRate", unit: unit ?? "bpm", value };
+      return { metric: "averageHeartRate", unit: normalizedUnit ?? "bpm", value };
     case "lowest-heart-rate":
-      return { metric: "lowestHeartRate", unit: unit ?? "bpm", value };
+      return { metric: "lowestHeartRate", unit: normalizedUnit ?? "bpm", value };
     case "respiratory-rate":
-      return { metric: "respiratoryRate", unit: unit ?? "breaths_per_minute", value };
+      return { metric: "respiratoryRate", unit: normalizedUnit ?? "breaths_per_minute", value };
     case "spo2":
-      return { metric: "spo2", unit: unit ?? "%", value };
+      return { metric: "spo2", unit: normalizedUnit ?? "%", value };
     case "temperature-deviation":
-      return { metric: "temperatureDeviation", unit: unit ?? "celsius", value };
+      return {
+        metric: "temperatureDeviation",
+        unit: "celsius",
+        value: normalizeTemperatureCelsius(value, normalizedUnit),
+      };
     case "body-battery":
-      return { metric: "bodyBattery", unit: unit ?? "score", value };
+      return { metric: "bodyBattery", unit: normalizedUnit ?? "score", value };
     case "stress-level":
-      return { metric: "stressLevel", unit: unit ?? "score", value };
-    case "weight":
-      return { metric: "weightKg", unit: unit ?? "kg", value };
-    case "body-fat-percentage":
-      return { metric: "bodyFatPercentage", unit: unit ?? "%", value };
+      return { metric: "stressLevel", unit: normalizedUnit ?? "score", value };
     case "bmi":
-      return { metric: "bmi", unit: unit ?? "kg_m2", value };
+      return { metric: "bmi", unit: normalizedUnit ?? "kg_m2", value };
+    case "temperature":
+      return {
+        metric: "temperature",
+        unit: "celsius",
+        value: normalizeTemperatureCelsius(value, normalizedUnit),
+      };
     default:
       return null;
+  }
+}
+
+function normalizeMetricUnit(unit: string | null): string | null {
+  return unit?.trim().toLowerCase() ?? null;
+}
+
+function normalizeWeightKilograms(value: number, unit: string | null): number | null {
+  switch (unit) {
+    case null:
+    case "kg":
+    case "kilogram":
+    case "kilograms":
+      return value;
+    case "lb":
+    case "lbs":
+    case "pound":
+    case "pounds":
+      return Number((value * 0.45359237).toFixed(4));
+    default:
+      return null;
+  }
+}
+
+function normalizeDistanceKilometers(value: number, unit: string | null): number {
+  switch (unit) {
+    case "km":
+    case "kilometer":
+    case "kilometers":
+      return value;
+    case "mi":
+    case "mile":
+    case "miles":
+      return Number((value * 1.609344).toFixed(4));
+    default:
+      return metersToKilometers(value);
+  }
+}
+
+function normalizeTemperatureCelsius(value: number, unit: string | null): number {
+  switch (unit) {
+    case "f":
+    case "fahrenheit":
+      return Number((((value - 32) * 5) / 9).toFixed(4));
+    default:
+      return value;
   }
 }
 

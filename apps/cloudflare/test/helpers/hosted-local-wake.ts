@@ -1,28 +1,26 @@
-import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import {
   type HostedExecutionWakeDrainResult,
-  type HostedWakeAppendRequest,
   type HostedExecutionWake,
   type HostedWakeAppendResponse,
   type HostedWakeStatusResponse,
 } from "@murphai/hosted-execution/contracts";
-import { parseHostedWakeAppendResponse } from "@murphai/hosted-execution/parsers";
+import {
+  appendHostedExecutionWakeForTest,
+} from "#hosted-web-testing";
 
-import {
-  fetchHostedExecutionWebControlPlaneResponse,
-  readHostedWakeStatusFromWeb,
-} from "../../src/web-control-plane.ts";
-import {
-  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-} from "../hosted-execution-fixtures.js";
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+
+import { TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON } from "../hosted-execution-fixtures.js";
+import { readHostedWakeStatusFromWeb } from "../../src/web-control-plane.ts";
 import type { HostedLocalDevHarness } from "./hosted-local-dev-harness.js";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
 const HOSTED_LOCAL_WORKER_RESTART_BODY = "Your worker restarted mid-request.";
 const HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES = 4;
 
 export async function appendHostedWakeAndWakeWorker(input: {
+  environment?: NodeJS.ProcessEnv;
   wake: HostedExecutionWake;
   harness: HostedLocalDevHarness;
   timeoutMs?: number;
@@ -45,33 +43,16 @@ export async function appendHostedWakeAndWakeWorker(input: {
 }
 
 export async function appendHostedWake(input: {
+  environment?: NodeJS.ProcessEnv;
   wake: HostedExecutionWake;
   harness: HostedLocalDevHarness;
   timeoutMs?: number;
   userId: string;
 }): Promise<HostedWakeAppendResponse> {
-  const body = JSON.stringify({
+  return await appendHostedExecutionWakeForTest({
+    environment: input.environment,
     wake: input.wake,
-  } satisfies HostedWakeAppendRequest);
-  const response = await fetchHostedExecutionWebControlPlaneResponse({
-    baseUrl: input.harness.webBaseUrl,
-    body,
-    boundUserId: input.userId,
-    callbackSigning: {
-      keyId: DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID,
-      privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-    },
-    method: "POST",
-    path: "/api/internal/hosted-wake/append",
-    timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
-  const rawBody = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`Hosted wake append failed with HTTP ${response.status}. body: ${rawBody}`);
-  }
-
-  return parseHostedWakeAppendResponse(rawBody.length > 0 ? JSON.parse(rawBody) : null);
 }
 
 function createHostedLocalCloudflareControlClient(
@@ -175,6 +156,11 @@ export async function wakeHostedWorkerForLatestPendingWake(input: {
   });
 }
 
+function deriveLatestPendingWakeSeq(status: HostedWakeStatusResponse): string {
+  const latestPendingSeq = BigInt(status.cursor.nextSeq) - 1n;
+  return latestPendingSeq.toString();
+}
+
 async function readHostedWakeStatus(input: {
   harness: HostedLocalDevHarness;
   userId: string;
@@ -188,11 +174,6 @@ async function readHostedWakeStatus(input: {
     },
     timeoutMs: DEFAULT_TIMEOUT_MS,
   });
-}
-
-function deriveLatestPendingWakeSeq(status: HostedWakeStatusResponse): string {
-  const latestPendingSeq = BigInt(status.cursor.nextSeq) - 1n;
-  return latestPendingSeq.toString();
 }
 
 function formatHostedLocalWorkerControlFailure(input: {

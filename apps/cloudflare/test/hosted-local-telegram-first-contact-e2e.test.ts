@@ -80,6 +80,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     const requestCountBeforeInbound = requireTelegramStub().observedRequests.length;
     await requireScenario().runWake(buildInboundTelegramWake(userId), userId);
 
+    await requireScenario().waitForLatestPendingWake(userId);
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.bundleRef).not.toBeNull();
     expect(finalStatus.lastError).toBeNull();

@@ -234,7 +234,7 @@ describe("hosted runtime context coverage", () => {
       expect(mocks.inboxList).not.toHaveBeenCalled();
       expect(mocks.vaultInit).not.toHaveBeenCalled();
       expect(mocks.inboxInit).toHaveBeenCalledWith({
-        rebuild: false,
+        rebuild: true,
         requestId: "evt_tick",
         vault: vaultRoot,
       });

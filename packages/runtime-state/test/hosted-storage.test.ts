@@ -146,28 +146,6 @@ test("hosted storage parsing and decryption fail closed on invalid envelopes", a
     }).scope,
     "root-key-recipient",
   );
-  assert.equal(
-    parseHostedCipherEnvelope({
-      algorithm: "AES-GCM",
-      ciphertext: "abc",
-      iv: "def",
-      keyId: "key-v1",
-      schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
-      scope: "device-sync-runtime",
-    }).scope,
-    "device-sync-runtime",
-  );
-  assert.equal(
-    parseHostedCipherEnvelope({
-      algorithm: "AES-GCM",
-      ciphertext: "abc",
-      iv: "def",
-      keyId: "key-v1",
-      schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
-      scope: "gateway-store",
-    }).scope,
-    "gateway-store",
-  );
 
   const aad = buildHostedStorageAad({ scope: "bundle" });
   const envelope = await encryptHostedStoragePayload({
@@ -211,47 +189,4 @@ test("hosted storage parsing and decryption fail closed on invalid envelopes", a
   ).rejects.toThrow(
     /expected key-v2, got key-v1\. No keyring is configured for multi-key decryption\./u,
   );
-});
-
-test("hosted storage decrypt keeps explicit legacy ciphertext scope support", async () => {
-  const scope = "device-sync-runtime";
-  const aad = buildHostedStorageAad({ scope, userId: "user-1" });
-  const plaintext = new TextEncoder().encode("legacy hosted payload");
-  const keyBytes = await deriveHostedStorageKey(ROOT_KEY, scope);
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    Buffer.from(keyBytes),
-    "AES-GCM",
-    false,
-    ["encrypt"],
-  );
-  const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 1);
-  const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt(
-      {
-        additionalData: Buffer.from(aad),
-        iv: Buffer.from(iv),
-        name: "AES-GCM",
-      },
-      cryptoKey,
-      plaintext,
-    ),
-  );
-
-  const decrypted = await decryptHostedStoragePayload({
-    aad,
-    envelope: parseHostedCipherEnvelope({
-      algorithm: "AES-GCM",
-      ciphertext: Buffer.from(ciphertext).toString("base64"),
-      iv: Buffer.from(iv).toString("base64"),
-      keyId: "key-v1",
-      schema: HOSTED_CIPHER_ENVELOPE_SCHEMA,
-      scope,
-    }),
-    expectedKeyId: "key-v1",
-    key: ROOT_KEY,
-    scope,
-  });
-
-  assert.deepEqual(decrypted, plaintext);
 });

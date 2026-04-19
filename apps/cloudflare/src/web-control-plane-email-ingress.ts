@@ -1,8 +1,8 @@
 import type {
-  HostedEmailIngressWakeAppendRequest,
   HostedWakeAppendResponse,
+  HostedEmailIngressWakeAppendRequest,
 } from "@murphai/hosted-execution";
-import { parseHostedWakeAppendResponse } from "@murphai/hosted-execution";
+import { parseHostedWakeAppendResponse } from "@murphai/hosted-execution/parsers";
 
 import {
   fetchHostedExecutionWebControlPlaneResponse,
