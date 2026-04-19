@@ -1,14 +1,16 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 
 import type {
   HostedExecutionUserStatus,
+  HostedExecutionWake,
   HostedWakeCommitRequest,
   HostedWakeFetchRequest,
   HostedWakeFinalizeRequest,
+  HostedWakeAppendResponse,
   HostedWakeQuarantineRequest,
   HostedWakeStatusRequest,
   HostedWakeTerminalRequest,
@@ -17,6 +19,7 @@ import type {
 import { repoRoot } from "../../vitest.shared.js";
 import type { R2BucketLike } from "../../src/bundle-store.js";
 import {
+  appendTestHostedWake,
   commitTestHostedWakeCursor,
   fetchTestHostedWakeBatch,
   finalizeTestHostedWakeCursor,
@@ -31,7 +34,9 @@ import {
   waitForHealthyHttpEndpoint,
 } from "../../../../scripts/dev-hosted-local/runtime.ts";
 
-const hostedWakeControlPort = 8913;
+const wranglerVitestConfigPath = path.join(repoRoot, "apps/cloudflare/test/workers/wrangler.vitest.jsonc");
+const wranglerVitestWorkerEntryPath = path.join(repoRoot, "apps/cloudflare/test/workers/worker-entry.ts");
+const hostedWakeControlBaseUrlPlaceholder = "http://127.0.0.1:8913";
 
 export interface HostedLocalTestWorkerClient {
   getJson(pathname: string): Promise<unknown>;
@@ -50,10 +55,11 @@ export interface HostedLocalTestWorkerFixture {
 
 export async function startHostedLocalTestWorkerFixture(input: {
   persistDirPrefix?: string;
-  port: number;
+  port?: number;
 }): Promise<HostedLocalTestWorkerFixture> {
   const persistDir = await mkdtemp(path.join(os.tmpdir(), input.persistDirPrefix ?? "murph-hosted-test-worker-"));
-  const baseUrl = `http://127.0.0.1:${input.port}`;
+  const workerPort = input.port ?? await reserveTcpPort();
+  const baseUrl = `http://127.0.0.1:${workerPort}`;
   let child: ChildProcess | null = null;
   let hostedWakeControlServer: Server | null = null;
   let stdout = "";
@@ -94,7 +100,12 @@ export async function startHostedLocalTestWorkerFixture(input: {
   };
 
   try {
-    hostedWakeControlServer = await startHostedWakeControlServer(hostedWakeControlPort);
+    const hostedWakeControl = await startHostedWakeControlServer();
+    hostedWakeControlServer = hostedWakeControl.server;
+    const wranglerConfigPath = await writeHostedLocalWranglerConfig({
+      hostedWebBaseUrl: hostedWakeControl.baseUrl,
+      persistDir,
+    });
     child = spawn("pnpm", [
       "--dir",
       "apps/cloudflare",
@@ -102,11 +113,11 @@ export async function startHostedLocalTestWorkerFixture(input: {
       "wrangler",
       "dev",
       "--config",
-      "./test/workers/wrangler.vitest.jsonc",
+      wranglerConfigPath,
       "--ip",
       "127.0.0.1",
       "--port",
-      String(input.port),
+      String(workerPort),
       "--local-protocol",
       "http",
       "--persist-to",
@@ -130,12 +141,11 @@ export async function startHostedLocalTestWorkerFixture(input: {
     });
 
     try {
-      await waitForHealthyHttpEndpoint({
-        host: "127.0.0.1",
-        label: "cloudflare-test-worker",
-        path: "/health",
-        port: input.port,
-        protocol: "http",
+      await waitForWorkerReady({
+        child,
+        getStderr: () => stderr,
+        getStdout: () => stdout,
+        port: workerPort,
       });
     } catch (error) {
       await dispose().catch(() => {});
@@ -197,6 +207,98 @@ export async function startHostedLocalTestWorkerFixture(input: {
 
     throw error;
   }
+}
+
+async function waitForWorkerReady(input: {
+  child: ChildProcess;
+  getStderr: () => string;
+  getStdout: () => string;
+  port: number;
+}): Promise<void> {
+  await Promise.race([
+    waitForHealthyHttpEndpoint({
+      host: "127.0.0.1",
+      label: "cloudflare-test-worker",
+      path: "/health",
+      port: input.port,
+      protocol: "http",
+    }),
+    waitForWorkerExit(input),
+  ]);
+}
+
+async function waitForWorkerExit(input: {
+  child: ChildProcess;
+  getStderr: () => string;
+  getStdout: () => string;
+  port: number;
+}): Promise<never> {
+  await new Promise<void>((resolve, reject) => {
+    input.child.once("error", reject);
+    input.child.once("exit", (code, signal) => {
+      reject(new Error(formatFailure([
+        `Wrangler exited before the hosted local test worker became healthy on port ${input.port}.`,
+        `exit code: ${code === null ? "unknown" : String(code)}`,
+        `signal: ${signal ?? "none"}`,
+      ], input.getStdout(), input.getStderr())));
+    });
+  });
+
+  throw new Error("Unreachable.");
+}
+
+async function reserveTcpPort(): Promise<number> {
+  const server = createServer();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("Failed to resolve an ephemeral TCP port.");
+    }
+
+    return address.port;
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    }).catch(() => {});
+  }
+}
+
+async function writeHostedLocalWranglerConfig(input: {
+  hostedWebBaseUrl: string;
+  persistDir: string;
+}): Promise<string> {
+  const rawConfig = await readFile(wranglerVitestConfigPath, "utf8");
+  const nextConfig = rawConfig.replace(
+    hostedWakeControlBaseUrlPlaceholder,
+    input.hostedWebBaseUrl,
+  ).replace(
+    '"main": "./worker-entry.ts"',
+    `"main": ${JSON.stringify(wranglerVitestWorkerEntryPath)}`,
+  );
+
+  if (nextConfig === rawConfig) {
+    throw new Error("Failed to rewrite HOSTED_WEB_BASE_URL in the hosted local Wrangler config.");
+  }
+
+  const configPath = path.join(input.persistDir, "wrangler.hosted-local-test.jsonc");
+  await writeFile(configPath, nextConfig, "utf8");
+  return configPath;
 }
 
 function createHostedLocalTestWorkerClient(input: {
@@ -307,7 +409,10 @@ function tail(value: string, maxChars: number = 2_000): string {
   return value.slice(value.length - maxChars);
 }
 
-async function startHostedWakeControlServer(port: number): Promise<Server> {
+async function startHostedWakeControlServer(): Promise<{
+  baseUrl: string;
+  server: Server;
+}> {
   const bucket = new InMemoryR2Bucket();
   const server = createServer(async (request, response) => {
     try {
@@ -323,13 +428,21 @@ async function startHostedWakeControlServer(port: number): Promise<Server> {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
+    server.listen(0, "127.0.0.1", () => {
       server.off("error", reject);
       resolve();
     });
   });
 
-  return server;
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Failed to resolve the hosted wake control server address.");
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    server,
+  };
 }
 
 async function handleHostedWakeControlRequest(
@@ -354,6 +467,18 @@ async function handleHostedWakeControlRequest(
       bucket,
       userId,
     })));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/internal/hosted-wake/test-append") {
+    const body = await readJsonBody<HostedExecutionWake>(request);
+    response.end(JSON.stringify(await appendTestHostedWake({
+      bucket,
+      wake: body,
+    } satisfies {
+      bucket: R2BucketLike;
+      wake: HostedExecutionWake;
+    }) satisfies HostedWakeAppendResponse));
     return;
   }
 

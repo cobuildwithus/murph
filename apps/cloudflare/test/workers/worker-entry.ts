@@ -38,7 +38,6 @@ import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import { encryptTestHostedWakePayload } from "../hosted-execution-fixtures.js";
-import { appendTestHostedWake } from "./test-hosted-wake-control.ts";
 
 type TestWorkerEnvironment = WorkerEnvironmentSource & {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
@@ -73,11 +72,11 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 
   async wake(input: HostedExecutionWake): Promise<HostedExecutionUserStatus> {
-    return wakeRunnerForTest(this.bucket, this.runner, input);
+    return wakeRunnerForTest(this.runner, this.runtimeEnv, input);
   }
 
   async wakeWithOutcome(input: HostedExecutionWake): Promise<HostedWakeExecutionResult> {
-    return wakeRunnerWithOutcomeForTest(this.bucket, this.runner, this.runtimeEnv, input);
+    return wakeRunnerWithOutcomeForTest(this.runner, this.runtimeEnv, input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -129,15 +128,12 @@ export class VitestUserRunnerDurableObject extends DurableObject {
 }
 
 async function wakeRunnerForTest(
-  bucket: R2BucketLike,
   runner: HostedUserRunner,
+  runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
   wake: HostedExecutionWake,
 ): Promise<HostedExecutionUserStatus> {
   await runner.bootstrapUser(wake.userId);
-  const append = await appendTestHostedWake({
-    bucket,
-    wake,
-  });
+  const append = await appendHostedWakeInWeb(runtimeEnv, wake);
 
   await runner.wakeHostedWakes({
     targetSeqHint: append.wake.seq,
@@ -146,16 +142,12 @@ async function wakeRunnerForTest(
 }
 
 async function wakeRunnerWithOutcomeForTest(
-  bucket: R2BucketLike,
   runner: HostedUserRunner,
   runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
   wake: HostedExecutionWake,
 ): Promise<HostedWakeExecutionResult> {
   await runner.bootstrapUser(wake.userId);
-  const append = await appendTestHostedWake({
-    bucket,
-    wake,
-  });
+  const append = await appendHostedWakeInWeb(runtimeEnv, wake);
 
   await runner.wakeHostedWakes({
     targetSeqHint: append.wake.seq,
@@ -195,6 +187,34 @@ async function wakeRunnerWithOutcomeForTest(
 }
 
 export { RunnerContainerTestDouble } from "./runner-container-double.ts";
+
+async function appendHostedWakeInWeb(
+  runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
+  wake: HostedExecutionWake,
+): Promise<{
+  wake: {
+    seq: string;
+  };
+}> {
+  const response = await fetch(new URL("/api/internal/hosted-wake/test-append", runtimeEnv.hostedWebBaseUrl), {
+    body: JSON.stringify(wake),
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-hosted-execution-user-id": wake.userId,
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to append the test hosted wake: HTTP ${response.status}.`);
+  }
+
+  return await response.json() as {
+    wake: {
+      seq: string;
+    };
+  };
+}
 
 export default {
   async fetch(request: Request, _env: WorkerEnvironmentSource): Promise<Response> {
