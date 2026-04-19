@@ -3097,7 +3097,7 @@ describe("HostedUserRunner", () => {
     storage.lastAlarm = Date.parse("2026-03-26T12:05:00.000Z");
     await runner.alarm();
 
-    expect(storage.lastAlarm).toBeNull();
+    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:05:00.000Z"));
   });
 
   it("logs and reschedules when alarm state reads fail", async () => {

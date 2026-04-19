@@ -1694,8 +1694,19 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("applies caller-supplied forwarded env when launching isolated jobs", async () => {
+  it("strips process-control keys from caller-supplied forwarded env before isolated runs", async () => {
+    const runIsolated = vi.fn(async (): Promise<HostedAssistantRuntimeJobResult> => ({
+      finalGatewayProjectionSnapshot: null,
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 0,
+          summary: "ok",
+        },
+      },
+    }));
     runHostedExecutionJobInternal = createHostedExecutionJobRunner({
+      runIsolated,
       runMode: "isolated",
     });
 
@@ -1708,9 +1719,24 @@ describe("runHostedExecutionJob", () => {
         wake: createActivationWake({ eventId: "evt_isolated_env", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-29T10:00:00.000Z", userId: "member_isolated_env" }),
         forwardedEnv: {
           NODE_OPTIONS: "--definitely-invalid-node-option",
+          OPENAI_API_KEY: "job-openai-key",
         },
       }),
-    ).rejects.toThrow("Hosted assistant runtime child did not emit a result payload.");
+    ).resolves.toMatchObject({
+      result: {
+        summary: "ok",
+      },
+    });
+
+    expect(runIsolated).toHaveBeenCalledWith(expect.objectContaining({
+      job: expect.objectContaining({
+        runtime: expect.objectContaining({
+          forwardedEnv: {
+            OPENAI_API_KEY: "job-openai-key",
+          },
+        }),
+      }),
+    }), expect.any(Object));
   });
 
   it("does not read direct hosted env when a worker proxy token is present", async () => {
@@ -2634,7 +2660,9 @@ describe("runHostedExecutionJob", () => {
       ...captureEnvVars([
         "BRAVE_API_KEY",
         "FFMPEG_COMMAND",
+        "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL",
         "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
+        "HOSTED_ASSISTANT_BASE_URL",
         "WHISPER_COMMAND",
         "WHISPER_MODEL_PATH",
         ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
@@ -2654,6 +2682,8 @@ describe("runHostedExecutionJob", () => {
         Object.keys(previousAmbientRunnerEnv).map((key) => [key, undefined]),
       ),
     );
+    process.env.HOSTED_ASSISTANT_BASE_URL = "http://127.0.0.1:4111/v1";
+    process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL = "http://host.docker.internal:8787";
     process.env.NODE_ENV = "production";
     process.env.OPENAI_API_KEY = "ambient-openai-key";
 
@@ -2661,6 +2691,7 @@ describe("runHostedExecutionJob", () => {
       const runtime = buildHostedExecutionJobRuntime({});
 
       expect(runtime.forwardedEnv).toEqual({
+        HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
         HOSTED_EMAIL_INGRESS_READY: "false",
         HOSTED_EMAIL_SEND_READY: "false",
         NODE_ENV: "production",

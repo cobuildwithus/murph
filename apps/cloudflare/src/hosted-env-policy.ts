@@ -23,6 +23,10 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEYS = [
   "NODE_PATH",
 ] as const;
 
+const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
+  RUNNER_SECRET_PROCESS_CONTROL_KEYS,
+);
+
 const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [
   "ANTHROPIC_API_KEY",
   "BRAVE_API_KEY",
@@ -158,8 +162,65 @@ export function isHostedRunnerSecretKeyAllowed(
   return allowedKeys.has(key);
 }
 
+export function isHostedRunnerProcessControlEnvKey(key: string): boolean {
+  return RUNNER_SECRET_PROCESS_CONTROL_KEY_SET.has(key);
+}
+
 export function buildHostedRunnerContainerEnv(
   source: UnknownEnvSource,
+): Record<string, string> {
+  return buildHostedRunnerEnv(source, {
+    rewriteLoopbackUrlsForContainer: true,
+  });
+}
+
+export function buildHostedRunnerAmbientEnv(
+  source: UnknownEnvSource,
+): Record<string, string> {
+  return buildHostedRunnerEnv(source, {
+    rewriteLoopbackUrlsForContainer: false,
+  });
+}
+
+export function normalizeHostedRunnerEnvForHostExecution(
+  forwardedEnv: Readonly<Record<string, string>>,
+  source: UnknownEnvSource,
+): Record<string, string> {
+  const normalized = { ...forwardedEnv };
+  const rewriteHostnames = new Set<string>(["host.docker.internal"]);
+  const containerReachableHost = readContainerReachableHost(source);
+
+  if (containerReachableHost) {
+    rewriteHostnames.add(containerReachableHost);
+  }
+
+  for (const [key, forwardedValue] of Object.entries(forwardedEnv)) {
+    const ambientValue = normalizeHostedRunnerLoopbackUrlForHostExecution(
+      key,
+      source[key],
+    );
+    if (!ambientValue || typeof forwardedValue !== "string") {
+      continue;
+    }
+
+    try {
+      const forwardedUrl = new URL(forwardedValue);
+      if (rewriteHostnames.has(forwardedUrl.hostname)) {
+        normalized[key] = ambientValue;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return normalized;
+}
+
+function buildHostedRunnerEnv(
+  source: UnknownEnvSource,
+  options: {
+    rewriteLoopbackUrlsForContainer: boolean;
+  },
 ): Record<string, string> {
   const values: Record<string, string> = {};
   const enabledProfileNames = resolveHostedRunnerEnvProfileNames(source);
@@ -174,7 +235,9 @@ export function buildHostedRunnerContainerEnv(
       continue;
     }
 
-    values[key] = rewriteHostedRunnerLoopbackUrlForContainer(key, value, source);
+    values[key] = options.rewriteLoopbackUrlsForContainer
+      ? rewriteHostedRunnerLoopbackUrlForContainer(key, value, source)
+      : value;
   }
 
   if (!values.NODE_ENV) {
@@ -224,6 +287,22 @@ function rewriteHostedRunnerLoopbackUrlForContainer(
     return url.toString();
   } catch {
     return value;
+  }
+}
+
+function normalizeHostedRunnerLoopbackUrlForHostExecution(
+  key: string,
+  value: unknown,
+): string | null {
+  if (!CONTAINER_REWRITABLE_RUNNER_URL_KEYS.has(key) || typeof value !== "string") {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return isLoopbackHostname(url.hostname) ? value : null;
+  } catch {
+    return null;
   }
 }
 

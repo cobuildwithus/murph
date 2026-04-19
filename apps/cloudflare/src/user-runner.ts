@@ -373,21 +373,23 @@ export class HostedUserRunner {
     const userId = await this.requireBoundUserId();
     await this.stateStore.bootstrapUser(userId);
     await this.resumePendingCommittedCleanupIfNeeded();
-    const materialization = await this.materializeDueHostedWakesInWeb(userId);
-    await this.wakeScheduler.syncNextWake({
-      preferredWakeAt: null,
-      wakeMaterializationHints: materialization.wakeMaterializationHints,
-    });
-    const targetSeqHint = maxHostedWakeSeqHint(
-      parseOptionalHostedWakeSeq(input.targetSeqHint),
-      parseOptionalHostedWakeSeq(materialization.targetSeqHint),
-    );
-    const requestedTargetSeq = targetSeqHint?.toString() ?? null;
+    let targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
     let committedSeq: string | null = null;
     let expectedVersion: string | null = null;
     let exitState: HostedWakeDrainState | null = null;
 
     for (let round = 0; round < MAX_HOSTED_WAKE_DRAIN_ROUNDS; round += 1) {
+      const materialization = await this.materializeDueHostedWakesInWeb(userId);
+      if (materialization.wakeMaterializationHints) {
+        await this.wakeScheduler.syncNextWake({
+          preferredWakeAt: null,
+          wakeMaterializationHints: materialization.wakeMaterializationHints,
+        });
+      }
+      targetSeqHint = maxHostedWakeSeqHint(
+        targetSeqHint,
+        parseOptionalHostedWakeSeq(materialization.targetSeqHint),
+      );
       const batch = await fetchHostedWakeBatchFromWeb({
         baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: userId,
@@ -592,7 +594,7 @@ export class HostedUserRunner {
     return {
       committedSeq: finalCommittedSeq,
       exitState,
-      requestedTargetSeq,
+      requestedTargetSeq: targetSeqHint?.toString() ?? null,
       targetReached: targetSeqHint === null || BigInt(finalCommittedSeq) >= targetSeqHint,
     };
   }
