@@ -89,6 +89,7 @@ export const EXPERIMENT_PHASES = Object.freeze(["start", "checkpoint", "stop"] a
 
 export const SAMPLE_STREAMS = Object.freeze([
   "heart_rate",
+  "spo2",
   "hrv",
   "steps",
   "sleep_stage",

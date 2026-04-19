@@ -750,6 +750,10 @@ export const sampleRecordSchema = withContractMetadata(
       value: integerSchema(0),
       unit: z.literal("bpm"),
     }),
+    sampleSchema("spo2", {
+      value: numberSchema(0),
+      unit: z.literal("%"),
+    }),
     sampleSchema("hrv", {
       value: numberSchema(0),
       unit: z.literal("ms"),
@@ -1331,6 +1335,7 @@ export type AdverseEffectEventRecord = Extract<z.infer<typeof eventRecordSchema>
 export type ExposureEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "exposure" }>;
 export type EventRecord = z.infer<typeof eventRecordSchema>;
 export type HeartRateSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "heart_rate" }>;
+export type Spo2SampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "spo2" }>;
 export type HrvSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "hrv" }>;
 export type StepsSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "steps" }>;
 export type SleepStageSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "sleep_stage" }>;

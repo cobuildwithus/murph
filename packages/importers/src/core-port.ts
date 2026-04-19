@@ -27,11 +27,13 @@ export interface SampleImportRecord {
 
 export interface SampleImportRowProvenance {
   rowNumber: number;
-  recordedAt: string;
-  value: number;
+  recordedAt?: string;
+  value?: number;
   rawRecordedAt: string;
   rawValue: string;
   metadata?: Record<string, string>;
+  skipped?: boolean;
+  skipReason?: string;
 }
 
 export interface SampleImportConfig {

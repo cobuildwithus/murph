@@ -211,6 +211,17 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
       value: 59,
     },
     {
+      entityId: "sample_oura_spo2",
+      provider: "oura",
+      recordedAt: "2026-04-02T07:22:00Z",
+      resourceId: "spo2-1",
+      resourceType: "summary",
+      stream: "spo2",
+      title: "Oura SpO2",
+      unit: "%",
+      value: 97.5,
+    },
+    {
       entityId: "sample_garmin_unused",
       provider: "garmin",
       recordedAt: "2026-04-02T07:25:00Z",
@@ -536,6 +547,7 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
   assert.equal(dataset.rawMetricCandidates.every((candidate) => candidate.provider === "oura" || candidate.provider === "garmin"), true);
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "temperature"), true);
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "averageHeartRate"), true);
+  assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "spo2"), true);
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "steps"), true);
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "distanceKm"), true);
   assert.equal(dataset.rawMetricCandidates.some((candidate) => candidate.metric === "awakeMinutes"), true);

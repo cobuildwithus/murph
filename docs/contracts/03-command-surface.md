@@ -501,6 +501,8 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 
 `transformId` identifies the raw import batch only. `manifestFile` points at the immutable batch sidecar with checksum, import-config, and row provenance. Use the returned `lookupIds` or `list --kind sample` for follow-on reads.
 
+`samples import-csv` should make a best-effort pass over real-world device exports: it may infer `stream`, timestamp column, value column, and default unit from recognizable headers, normalize common naive timestamps using the vault timezone, and skip malformed rows in provenance instead of failing the entire batch. Ambiguous multi-metric CSVs still require `--stream` or `--value-column`.
+
 ### `experiment create`
 
 ```json

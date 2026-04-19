@@ -28,6 +28,7 @@
         "type": "string",
         "enum": [
           "heart_rate",
+          "spo2",
           "hrv",
           "steps",
           "sleep_stage",

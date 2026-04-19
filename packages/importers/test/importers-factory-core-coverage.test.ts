@@ -28,6 +28,7 @@ const coreModuleCalls = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/core", () => ({
+  DEFAULT_TIMEZONE: "UTC",
   importDocument: async (payload: unknown) => {
     coreModuleCalls.importDocument.push(payload);
     return { ok: true, kind: "document" as const };
@@ -48,6 +49,11 @@ vi.mock("@murphai/core", () => ({
     coreModuleCalls.importAssessmentResponse.push(payload);
     return { ok: true, kind: "assessment" as const };
   },
+  loadVault: async () => ({
+    metadata: {
+      timezone: "UTC",
+    },
+  }),
 }));
 
 test("createImporters builds default registries when options are omitted", () => {
@@ -664,6 +670,36 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
   assert.equal(payload.batchProvenance?.rows?.[0]?.metadata, undefined);
   assert.equal(payload.samples[0]?.recordedAt, "2026-03-11T08:00:00.000Z");
   assert.equal(payload.samples[1]?.value, 95);
+});
+
+test("prepareCsvSampleImport infers SpO2 sample columns and skips placeholder rows", async () => {
+  const filePath = await createTempFile(
+    "o2ring.csv",
+    [
+      "Time,Oxygen Level,Pulse Rate,Motion",
+      "2026-04-17 00:55:47,88,75,0",
+      "2026-04-17 00:55:48,89,74,0",
+      "2026-04-17 09:16:00,--,--,0",
+    ].join("\n"),
+    "murph-importers-coverage-",
+  );
+
+  const payload = await prepareCsvSampleImport({
+    filePath,
+    vaultRoot: "/tmp/canonical-vault",
+    stream: "SpO2",
+    metadataColumns: ["Motion"],
+  });
+
+  assert.equal(payload.stream, "spo2");
+  assert.equal(payload.unit, "%");
+  assert.equal(payload.importConfig.tsColumn, "Time");
+  assert.equal(payload.importConfig.valueColumn, "Oxygen Level");
+  assert.equal(payload.samples.length, 2);
+  assert.equal(payload.samples[0]?.recordedAt, "2026-04-17T00:55:47.000Z");
+  assert.deepEqual(payload.batchProvenance?.rows?.[0]?.metadata, { Motion: "0" });
+  assert.equal(payload.batchProvenance?.rows?.[2]?.skipped, true);
+  assert.equal(payload.batchProvenance?.rows?.[2]?.skipReason, "non-numeric value");
 });
 
 test("prepareCsvSampleImport rejects header-only files", async () => {

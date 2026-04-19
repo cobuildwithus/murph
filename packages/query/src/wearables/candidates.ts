@@ -399,6 +399,8 @@ function buildSampleMetricCandidates(
       return [{ ...base, metric: "steps", unit: "count", value }];
     case "hrv":
       return [{ ...base, metric: "hrv", unit: normalizeUnit(entity.attributes.unit) ?? "ms", value }];
+    case "spo2":
+      return [{ ...base, metric: "spo2", unit: normalizeUnit(entity.attributes.unit) ?? "%", value }];
     case "respiratory_rate":
       return [{
         ...base,
