@@ -108,26 +108,34 @@ describe("hosted email worker ingress", () => {
 
   it("rejects alias ingress from an unauthorized sender before raw-message persistence and dispatch", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: null,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
     const replyAliasAddress = await createHostedEmailUserAddress({
-      bucket,
       config: createHostedEmailConfig(),
-      key: TEST_KEY,
-      keyId: "v1",
       userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
     });
     const setReject = vi.fn();
-
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({
-        authorized: false,
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
 
     await handleHostedEmailIngress({
       from: "attacker@example.com",
@@ -148,25 +156,33 @@ describe("hosted email worker ingress", () => {
 
   it("persists and dispatches alias ingress only after the web-owned verified-email authorization succeeds", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    const replyAliasAddress = await createHostedEmailUserAddress({
-      bucket,
-      config: createHostedEmailConfig(),
-      key: TEST_KEY,
-      keyId: "v1",
-      userId: "user_123",
-    });
-
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({
-        authorized: true,
-      }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
         },
-        status: 200,
-      },
-    ));
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user_123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
 
     await handleHostedEmailIngress({
       from: "owner@example.com",

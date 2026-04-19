@@ -1,7 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-import { buildHostedStorageAad } from "../src/crypto-context.ts";
-import { readEncryptedR2Json, writeEncryptedR2Json } from "../src/crypto.ts";
 import { parseHostedEmailRouteCandidate } from "../src/hosted-email/route-addressing.ts";
 import { parseHostedEmailRouteToken } from "../src/hosted-email/route-crypto.ts";
 import {
@@ -9,16 +7,20 @@ import {
   resolveHostedEmailInboundRoute,
 } from "../src/hosted-email/routes.ts";
 
-import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
+const webControlPlane = vi.hoisted(() => ({
+  fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
+}));
 
-class TrackingMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
-  lastPutKey: string | null = null;
+vi.mock("../src/web-control-plane.ts", async () => {
+  const actual = await vi.importActual<typeof import("../src/web-control-plane.ts")>(
+    "../src/web-control-plane.ts",
+  );
 
-  override async put(key: string, value: string): Promise<void> {
-    this.lastPutKey = key;
-    await super.put(key, value);
-  }
-}
+  return {
+    ...actual,
+    fetchHostedExecutionWebControlPlaneResponse: webControlPlane.fetchHostedExecutionWebControlPlaneResponse,
+  };
+});
 
 function createHostedEmailTestConfig() {
   return {
@@ -30,186 +32,149 @@ function createHostedEmailTestConfig() {
   };
 }
 
-describe("hosted email route storage", () => {
-  it("stores owner-only reply aliases without redundant sender identity state", async () => {
-    const bucket = new TrackingMemoryEncryptedR2Bucket();
+const TEST_CALLBACK_SIGNING = {
+  keyId: "v1",
+  privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
+};
+
+describe("hosted email route callbacks", () => {
+  beforeEach(() => {
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("registers the stable alias key in web before returning the reply address", async () => {
     const config = createHostedEmailTestConfig();
-    const key = new Uint8Array(32).fill(7);
-    const keyId = "route:v1";
-    const userId = "user-123";
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
 
     const address = await createHostedEmailUserAddress({
-      bucket,
       config,
-      key,
-      keyId,
-      userId,
+      userId: "user-123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
     const candidate = parseHostedEmailRouteCandidate(address, config);
 
     expect(candidate).not.toBeNull();
-
     const parsedToken = await parseHostedEmailRouteToken({
       secret: config.signingSecret,
       token: candidate!.detail,
     });
 
     expect(parsedToken).not.toBeNull();
-    expect(bucket.lastPutKey).not.toBeNull();
-
-    const stored = await readEncryptedR2Json<Record<string, unknown>>({
-      aad: buildHostedStorageAad({
-        aliasKey: parsedToken!.aliasKey,
-        key: bucket.lastPutKey!,
-        purpose: "email-route",
-        routeKind: "user",
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: "https://web.example.test",
+        boundUserId: "user-123",
+        method: "POST",
+        path: "/api/internal/hosted-execution/email/register-reply-alias",
       }),
-      bucket,
-      cryptoKey: key,
-      expectedKeyId: keyId,
-      key: bucket.lastPutKey!,
-      parse(value) {
-        if (!value || typeof value !== "object" || Array.isArray(value)) {
-          throw new TypeError("Hosted email route record must be an object.");
-        }
-
-        return value as Record<string, unknown>;
-      },
-      scope: "email-route",
-    });
-
-    expect(stored).toEqual({
-      schema: "murph.hosted-email-user-route.v2",
-      userId,
-    });
-
-    const route = await resolveHostedEmailInboundRoute({
-      bucket,
-      config,
-      key,
-      keyId,
-      to: `Murph+${candidate!.detail}@Reply.Example.COM`,
-    });
-
-    expect(route).toEqual({
-      authorization: "verified-email",
-      identityId: "murph@reply.example.com",
-      routeAddress: address,
-      userId,
-    });
+    );
   });
 
-  it("uses the current configured sender identity when resolving inbound reply aliases", async () => {
-    const bucket = new TrackingMemoryEncryptedR2Bucket();
+  it("uses the current configured sender identity when resolving inbound reply aliases through web-owned lookup", async () => {
     const createConfig = createHostedEmailTestConfig();
     const resolveConfig = {
       ...createConfig,
       fromAddress: "current@reply.example.com",
     };
-    const key = new Uint8Array(32).fill(7);
-    const keyId = "route:v1";
-    const userId = "user-123";
+
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user-123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
 
     const address = await createHostedEmailUserAddress({
-      bucket,
       config: createConfig,
-      key,
-      keyId,
-      userId,
-    });
-    const candidate = parseHostedEmailRouteCandidate(address, createConfig);
-
-    expect(candidate).not.toBeNull();
-    const parsedToken = await parseHostedEmailRouteToken({
-      secret: createConfig.signingSecret,
-      token: candidate!.detail,
-    });
-
-    expect(parsedToken).not.toBeNull();
-    expect(bucket.lastPutKey).not.toBeNull();
-
-    await writeEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        aliasKey: parsedToken!.aliasKey,
-        key: bucket.lastPutKey!,
-        purpose: "email-route",
-        routeKind: "user",
-      }),
-      bucket,
-      cryptoKey: key,
-      key: bucket.lastPutKey!,
-      keyId,
-      scope: "email-route",
-      value: {
-        schema: "murph.hosted-email-user-route.v2",
-        userId,
-      },
+      userId: "user-123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
 
     await expect(resolveHostedEmailInboundRoute({
-      bucket,
       config: resolveConfig,
-      key,
-      keyId,
-      to: `Murph+${candidate!.detail}@Reply.Example.COM`,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      to: address,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     })).resolves.toEqual({
       authorization: "verified-email",
       identityId: "current@reply.example.com",
       routeAddress: address,
-      userId,
+      userId: "user-123",
     });
   });
 
-  it("rejects legacy v1 reply-alias records instead of accepting them", async () => {
-    const bucket = new TrackingMemoryEncryptedR2Bucket();
+  it("returns null when the web-owned alias lookup misses", async () => {
     const config = createHostedEmailTestConfig();
-    const key = new Uint8Array(32).fill(7);
-    const keyId = "route:v1";
-    const userId = "user-123";
+
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: null,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
 
     const address = await createHostedEmailUserAddress({
-      bucket,
       config,
-      key,
-      keyId,
-      userId,
-    });
-    const candidate = parseHostedEmailRouteCandidate(address, config);
-
-    expect(candidate).not.toBeNull();
-    const parsedToken = await parseHostedEmailRouteToken({
-      secret: config.signingSecret,
-      token: candidate!.detail,
-    });
-
-    expect(parsedToken).not.toBeNull();
-    expect(bucket.lastPutKey).not.toBeNull();
-
-    await writeEncryptedR2Json({
-      aad: buildHostedStorageAad({
-        aliasKey: parsedToken!.aliasKey,
-        key: bucket.lastPutKey!,
-        purpose: "email-route",
-        routeKind: "user",
-      }),
-      bucket,
-      cryptoKey: key,
-      key: bucket.lastPutKey!,
-      keyId,
-      scope: "email-route",
-      value: {
-        schema: "murph.hosted-email-user-route.v1",
-        senderIdentity: "legacy@reply.example.com",
-        userId,
-      },
+      userId: "user-123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
 
     await expect(resolveHostedEmailInboundRoute({
-      bucket,
       config,
-      key,
-      keyId,
-      to: `Murph+${candidate!.detail}@Reply.Example.COM`,
-    })).rejects.toThrow("Hosted email user route schema is invalid.");
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      to: address,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).resolves.toBeNull();
   });
 });

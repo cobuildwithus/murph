@@ -48,6 +48,10 @@ const TEST_CONFIG: HostedEmailConfig = {
 };
 const TEST_KEY = new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1));
 const TEST_KEY_ID = "v1";
+const TEST_CALLBACK_SIGNING = {
+  keyId: "v1",
+  privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -60,30 +64,48 @@ describe("hosted email routing and transport", () => {
   });
 
   it("creates one stable reply alias per user and resolves inbound alias mail through it", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ userId: "user_123" }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
 
     const firstAddress = await createHostedEmailUserAddress({
-      bucket,
       config: TEST_CONFIG,
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
     const secondAddress = await createHostedEmailUserAddress({
-      bucket,
       config: TEST_CONFIG,
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
 
     expect(secondAddress).toBe(firstAddress);
     await expect(resolveHostedEmailInboundRoute({
-      bucket,
       config: TEST_CONFIG,
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
       to: firstAddress,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     })).resolves.toMatchObject({
       identityId: TEST_CONFIG.fromAddress,
       routeAddress: firstAddress,
@@ -92,7 +114,6 @@ describe("hosted email routing and transport", () => {
   });
 
   it("keeps public-sender misses non-routable and avoids reject-on-miss for them", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
         userId: null,
@@ -106,18 +127,12 @@ describe("hosted email routing and transport", () => {
     ));
 
     await expect(resolveHostedEmailIngressRoute({
-      bucket,
       config: TEST_CONFIG,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-      webCallbackSigning: {
-        keyId: "v1",
-        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
-      },
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toBeNull();
 
@@ -132,7 +147,6 @@ describe("hosted email routing and transport", () => {
   });
 
   it("resolves public-sender ingress through the web-owned sender-authorization callback", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
         userId: "user_123",
@@ -146,18 +160,12 @@ describe("hosted email routing and transport", () => {
     ));
 
     await expect(resolveHostedEmailIngressRoute({
-      bucket,
       config: TEST_CONFIG,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-      webCallbackSigning: {
-        keyId: "v1",
-        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
-      },
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toMatchObject({
       authorization: "direct-public-sender",
@@ -168,68 +176,48 @@ describe("hosted email routing and transport", () => {
   });
 
   it("surfaces public-sender callback transport failures instead of treating them as clean misses", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockRejectedValue(
       new Error("callback unavailable"),
     );
 
     await expect(resolveHostedEmailIngressRoute({
-      bucket,
       config: TEST_CONFIG,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-      webCallbackSigning: {
-        keyId: "v1",
-        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
-      },
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(HostedEmailIngressRouteResolutionError);
   });
 
   it("surfaces public-sender callback config failures instead of treating them as clean misses", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-
     await expect(resolveHostedEmailIngressRoute({
-      bucket,
       config: TEST_CONFIG,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-    })).rejects.toThrow(/authorization callback is not configured/u);
+    })).rejects.toThrow(/route resolution callback is not configured/u);
   });
 
   it("surfaces public-sender callback HTTP failures instead of treating them as clean misses", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(null, {
       status: 503,
     }));
 
     await expect(resolveHostedEmailIngressRoute({
-      bucket,
       config: TEST_CONFIG,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-      webCallbackSigning: {
-        keyId: "v1",
-        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
-      },
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/HTTP 503/u);
   });
 
   it("surfaces malformed public-sender callback payloads instead of treating them as clean misses", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({}),
       {
@@ -241,18 +229,12 @@ describe("hosted email routing and transport", () => {
     ));
 
     await expect(resolveHostedEmailIngressRoute({
-      bucket,
       config: TEST_CONFIG,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-      webCallbackSigning: {
-        keyId: "v1",
-        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
-      },
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/invalid payload/u);
   });
@@ -306,17 +288,22 @@ describe("hosted email routing and transport", () => {
   });
 
   it("sends outbound mail with the stable per-user reply alias and returns a thread target", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
 
     const response = await sendHostedEmailMessage({
-      bucket,
       config: TEST_CONFIG,
       emailBinding,
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       request: {
         identityId: null,
         message: "hello from murph",
@@ -324,6 +311,8 @@ describe("hosted email routing and transport", () => {
         targetKind: "explicit",
       },
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
 
     const threadTarget = parseHostedEmailThreadTarget(response.target);
@@ -341,7 +330,6 @@ describe("hosted email routing and transport", () => {
   });
 
   it("rejects thread subject overrides on the hosted email bridge", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     const threadTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
       cc: [],
       lastMessageId: "<thread@example.test>",
@@ -352,13 +340,10 @@ describe("hosted email routing and transport", () => {
     }));
 
     await expect(sendHostedEmailMessage({
-      bucket,
       config: TEST_CONFIG,
       emailBinding: {
         send: vi.fn(async (_message: unknown) => undefined),
       },
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       request: {
         identityId: null,
         message: "hello from murph",
@@ -367,21 +352,28 @@ describe("hosted email routing and transport", () => {
         targetKind: "thread",
       },
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/preserves the existing subject/u);
   });
 
   it("collapses thread-target sends to the primary recipient while preserving reply headers", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
 
     const initial = await sendHostedEmailMessage({
-      bucket,
       config: TEST_CONFIG,
       emailBinding,
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       request: {
         identityId: null,
         message: "first note",
@@ -389,6 +381,8 @@ describe("hosted email routing and transport", () => {
         targetKind: "explicit",
       },
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
     const initialThreadTarget = parseHostedEmailThreadTarget(initial.target);
     expect(initialThreadTarget).not.toBeNull();
@@ -403,11 +397,8 @@ describe("hosted email routing and transport", () => {
     }));
 
     const followUp = await sendHostedEmailMessage({
-      bucket,
       config: TEST_CONFIG,
       emailBinding,
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       request: {
         identityId: null,
         message: "follow up",
@@ -415,6 +406,8 @@ describe("hosted email routing and transport", () => {
         targetKind: "thread",
       },
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     });
 
     expect(emailBinding.send).toHaveBeenCalledTimes(2);
@@ -434,16 +427,11 @@ describe("hosted email routing and transport", () => {
   });
 
   it("rejects sender overrides when the caller tries to bypass the configured sender identity", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-
     await expect(sendHostedEmailMessage({
-      bucket,
       config: TEST_CONFIG,
       emailBinding: {
         send: vi.fn(async (_message: unknown) => undefined),
       },
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       request: {
         identityId: "other-sender@example.com",
         message: "hello from murph",
@@ -451,22 +439,29 @@ describe("hosted email routing and transport", () => {
         targetKind: "explicit",
       },
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/sender identity is config-owned/u);
   });
 
   it("surfaces the primary recipient when the native binding send fails", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
 
     await expect(sendHostedEmailMessage({
-      bucket,
       config: TEST_CONFIG,
       emailBinding: {
         send: vi.fn(async (_message: unknown) => {
           throw new Error("binding unavailable");
         }),
       },
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       request: {
         identityId: null,
         message: "hello from murph",
@@ -474,11 +469,12 @@ describe("hosted email routing and transport", () => {
         targetKind: "explicit",
       },
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
   });
 
   it("surfaces the collapsed primary recipient when a threaded binding send fails", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
     const initialThreadTarget = createHostedEmailThreadTarget({
       cc: ["carol@example.com"],
       lastMessageId: "<prev@example.test>",
@@ -487,17 +483,23 @@ describe("hosted email routing and transport", () => {
       subject: "Murph update",
       to: ["owner@example.com", "bob@example.com"],
     });
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
 
     await expect(sendHostedEmailMessage({
-      bucket,
       config: TEST_CONFIG,
       emailBinding: {
         send: vi.fn(async (_message: unknown) => {
           throw new Error("binding unavailable");
         }),
       },
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
       request: {
         identityId: null,
         message: "follow up",
@@ -505,6 +507,8 @@ describe("hosted email routing and transport", () => {
         targetKind: "thread",
       },
       userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
     })).rejects.toThrow(/owner@example\.com: binding unavailable/u);
   });
 });

@@ -101,14 +101,13 @@ async function handleRunnerEmailSendRequest(input: {
 }): Promise<Response> {
   try {
     const payload = await sendHostedEmailMessage({
-      bucket: input.bucket,
       config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
       emailBinding: input.env.HOSTED_EMAIL,
-      key: input.environment.platformEnvelopeKey,
-      keyId: input.environment.platformEnvelopeKeyId,
-      keysById: input.environment.platformEnvelopeKeysById,
+      fetchImpl: fetch,
       request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
       userId: input.userId,
+      webCallbackSigning: input.environment.webCallbackSigning,
+      webControlBaseUrl: input.environment.hostedWebBaseUrl,
     });
 
     return json({

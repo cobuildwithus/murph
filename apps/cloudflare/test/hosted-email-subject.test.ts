@@ -1,6 +1,4 @@
-import { TextEncoder } from 'node:util'
-
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 
@@ -9,26 +7,20 @@ import {
   sendHostedEmailMessage,
 } from '../src/hosted-email/transport.ts'
 
-class MemoryBucket {
-  private readonly objects = new Map<string, string>()
+const webControlPlane = vi.hoisted(() => ({
+  fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
+}))
 
-  async get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null> {
-    const value = this.objects.get(key)
-    if (value === undefined) {
-      return null
-    }
+vi.mock('../src/web-control-plane.ts', async () => {
+  const actual = await vi.importActual<typeof import('../src/web-control-plane.ts')>(
+    '../src/web-control-plane.ts',
+  )
 
-    return {
-      async arrayBuffer() {
-        return new TextEncoder().encode(value).buffer
-      },
-    }
+  return {
+    ...actual,
+    fetchHostedExecutionWebControlPlaneResponse: webControlPlane.fetchHostedExecutionWebControlPlaneResponse,
   }
-
-  async put(key: string, value: string): Promise<void> {
-    this.objects.set(key, value)
-  }
-}
+})
 
 describe('hosted Cloudflare email subject handling', () => {
   const config = {
@@ -39,22 +31,37 @@ describe('hosted Cloudflare email subject handling', () => {
     signingSecret: 'super-secret-signing-key',
   } as const
 
-  const key = new TextEncoder().encode('12345678901234567890123456789012')
+  const webCallbackSigning = {
+    keyId: 'v1',
+    privateKeyJwkJson: '{"kty":"EC","crv":"P-256","x":"x","y":"y","d":"d"}',
+  }
+
+  beforeEach(() => {
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockReset()
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(() =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        status: 200,
+      }),
+    )
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
 
   it('uses an explicit subject for new outbound email sends', async () => {
     const sentMessages: Array<{ from: string; raw: string; to: string }> = []
-    const bucket = new MemoryBucket()
 
     const delivered = await sendHostedEmailMessage({
-      bucket,
       config,
       emailBinding: {
         async send(message) {
           sentMessages.push(message as { from: string; raw: string; to: string })
         },
       },
-      key,
-      keyId: 'key_123',
       request: {
         identityId: 'assistant@example.com',
         message: 'Hello from Murph',
@@ -63,6 +70,8 @@ describe('hosted Cloudflare email subject handling', () => {
         targetKind: 'explicit',
       },
       userId: 'user_123',
+      webCallbackSigning,
+      webControlBaseUrl: 'https://web.example.test',
     })
 
     expect(sentMessages).toHaveLength(1)
@@ -74,17 +83,13 @@ describe('hosted Cloudflare email subject handling', () => {
   })
 
   it('rejects a subject override when replying to an existing thread', async () => {
-    const bucket = new MemoryBucket()
     const binding = {
       async send() {},
     }
 
     const firstSend = await sendHostedEmailMessage({
-      bucket,
       config,
       emailBinding: binding,
-      key,
-      keyId: 'key_123',
       request: {
         identityId: 'assistant@example.com',
         message: 'Hello from Murph',
@@ -92,15 +97,14 @@ describe('hosted Cloudflare email subject handling', () => {
         targetKind: 'explicit',
       },
       userId: 'user_123',
+      webCallbackSigning,
+      webControlBaseUrl: 'https://web.example.test',
     })
 
     await expect(
       sendHostedEmailMessage({
-        bucket,
         config,
         emailBinding: binding,
-        key,
-        keyId: 'key_123',
         request: {
           identityId: 'assistant@example.com',
           message: 'Reply from Murph',
@@ -109,6 +113,8 @@ describe('hosted Cloudflare email subject handling', () => {
           targetKind: 'thread',
         },
         userId: 'user_123',
+        webCallbackSigning,
+        webControlBaseUrl: 'https://web.example.test',
       }),
     ).rejects.toThrow(HostedEmailSendValidationError)
   })
