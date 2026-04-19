@@ -39,8 +39,9 @@ describe("summarizeWake", () => {
         parserProcessed: 2,
         shareImportResult: null,
         shareImportTitle: null,
+        wakeMaterializationHints: null,
       }),
-      "Processed member activation (bootstrap state unavailable) and ran the hosted maintenance loop. Parser jobs: 2. Device sync jobs: 1 (skipped: providers not configured).",
+      "Processed member activation (bootstrap state unavailable).",
     );
   });
 
@@ -76,8 +77,9 @@ describe("summarizeWake", () => {
         parserProcessed: 0,
         shareImportResult: null,
         shareImportTitle: null,
+        wakeMaterializationHints: null,
       }),
-      "Processed member activation (created the canonical vault; seeded explicit hosted assistant config (openai-compatible); hosted email auto-reply ready; hosted Linq auto-reply ready; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+      "Processed member activation (created the canonical vault; seeded explicit hosted assistant config (openai-compatible); hosted email auto-reply ready; hosted Linq auto-reply ready; hosted Telegram auto-reply unavailable).",
     );
   });
 
@@ -113,8 +115,9 @@ describe("summarizeWake", () => {
         parserProcessed: 0,
         shareImportResult: null,
         shareImportTitle: null,
+        wakeMaterializationHints: null,
       }),
-      "Processed member activation (reused the canonical vault; hosted assistant config missing; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply ready) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+      "Processed member activation (reused the canonical vault; hosted assistant config missing; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply ready).",
     );
   });
 
@@ -132,15 +135,15 @@ describe("summarizeWake", () => {
 
     const statuses = [
       {
-        expected: "Processed member activation (created the canonical vault; hosted assistant config invalid; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+        expected: "Processed member activation (created the canonical vault; hosted assistant config invalid; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable).",
         status: "invalid" as const,
       },
       {
-        expected: "Processed member activation (created the canonical vault; hosted assistant config not ready; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+        expected: "Processed member activation (created the canonical vault; hosted assistant config not ready; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable).",
         status: "unready" as const,
       },
       {
-        expected: "Processed member activation (created the canonical vault; hosted assistant config unavailable; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+        expected: "Processed member activation (created the canonical vault; hosted assistant config unavailable; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable).",
         status: "hosted-env" as const,
       },
     ];
@@ -166,6 +169,7 @@ describe("summarizeWake", () => {
           parserProcessed: 0,
           shareImportResult: null,
           shareImportTitle: null,
+          wakeMaterializationHints: null,
         }),
         entry.expected,
       );
@@ -195,8 +199,9 @@ describe("summarizeWake", () => {
         parserProcessed: 0,
         shareImportResult: null,
         shareImportTitle: null,
+        wakeMaterializationHints: null,
       }),
-      "Processed member channel sync and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+      "Processed member channel sync.",
     );
   });
 
@@ -233,8 +238,9 @@ describe("summarizeWake", () => {
           recipes: [],
         },
         shareImportTitle: null,
+        wakeMaterializationHints: null,
       }),
-      "Imported share pack \"share_123\" (0 foods, 0 protocols, 0 recipes). Parser jobs: 1. Device sync jobs: 0.",
+      "Imported share pack \"share_123\" (0 foods, 0 protocols, 0 recipes).",
     );
   });
 
@@ -243,10 +249,18 @@ describe("summarizeWake", () => {
       {
         wake: buildHostedExecutionLinqConversationMessageWake({
           eventId: "evt_linq",
-          linqEvent: {
-            body: "hello",
+          linqMessage: {
+            chatId: "chat_123",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "linq_123",
+            parts: [
+              {
+                value: "hello",
+                type: "text",
+              },
+            ],
           },
-          linqMessageId: "linq_123",
           occurredAt: "2026-04-08T00:00:00.000Z",
           phoneLookupKey: "phone_lookup_123",
           userId: "member_123",
@@ -284,7 +298,7 @@ describe("summarizeWake", () => {
           reason: "alarm",
           userId: "member_123",
         }),
-        expected: "Processed assistant cron tick (alarm) and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
+        expected: "Processed assistant cron tick (alarm) on the hosted assistant lane.",
       },
       {
         wake: buildHostedExecutionDeviceSyncWake({
@@ -293,7 +307,7 @@ describe("summarizeWake", () => {
           reason: "connected",
           userId: "member_123",
         }),
-        expected: "Processed device-sync wake (connected) and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
+        expected: "Processed device-sync wake (connected) on the hosted device-sync lane. Device sync jobs: 2.",
       },
     ];
 
@@ -313,6 +327,7 @@ describe("summarizeWake", () => {
           parserProcessed: 1,
           shareImportResult: null,
           shareImportTitle: null,
+          wakeMaterializationHints: null,
         }),
         entry.expected,
       );
