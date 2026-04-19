@@ -15,6 +15,7 @@ import {
 } from "../src/hosted-email.ts";
 import {
   createHostedEmailUserAddress,
+  HostedEmailIngressRouteResolutionError,
   resolveHostedEmailIngressRoute,
   resolveHostedEmailInboundRoute,
 } from "../src/hosted-email/routes.ts";
@@ -92,13 +93,32 @@ describe("hosted email routing and transport", () => {
 
   it("keeps public-sender misses non-routable and avoids reject-on-miss for them", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: null,
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
 
     await expect(resolveHostedEmailIngressRoute({
       bucket,
       config: TEST_CONFIG,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
+      },
+      webControlBaseUrl: "https://web.example.test",
     })).resolves.toBeNull();
 
     expect(shouldRejectHostedEmailIngressFailure({
@@ -145,6 +165,96 @@ describe("hosted email routing and transport", () => {
       routeAddress: TEST_CONFIG.fromAddress,
       userId: "user_123",
     });
+  });
+
+  it("surfaces public-sender callback transport failures instead of treating them as clean misses", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockRejectedValue(
+      new Error("callback unavailable"),
+    );
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
+      },
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toThrow(HostedEmailIngressRouteResolutionError);
+  });
+
+  it("surfaces public-sender callback config failures instead of treating them as clean misses", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+    })).rejects.toThrow(/authorization callback is not configured/u);
+  });
+
+  it("surfaces public-sender callback HTTP failures instead of treating them as clean misses", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(null, {
+      status: 503,
+    }));
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
+      },
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toThrow(/HTTP 503/u);
+  });
+
+  it("surfaces malformed public-sender callback payloads instead of treating them as clean misses", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({}),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await expect(resolveHostedEmailIngressRoute({
+      bucket,
+      config: TEST_CONFIG,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      key: TEST_KEY,
+      keyId: TEST_KEY_ID,
+      to: TEST_CONFIG.fromAddress!,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
+      },
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toThrow(/invalid payload/u);
   });
 
   it("uses deterministic opaque ids for identical hosted raw-email retries", async () => {

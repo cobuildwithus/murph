@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   appendHostedWakeInWeb: vi.fn(),
@@ -82,7 +83,7 @@ describe("hosted email worker ingress", () => {
         id: "wake_123",
         kind: "conversation.message",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadSchema: "murph.hosted-wake-conversation-message.v1",
+        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "24",
@@ -235,6 +236,86 @@ describe("hosted email worker ingress", () => {
       targetSeqHint: "24",
     });
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+  });
+
+  it("keeps fixed public-sender misses as accept-and-drop without append, reject, or persistence", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const setReject = vi.fn();
+
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: null,
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await handleHostedEmailIngress({
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      setReject,
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket));
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.appendHostedWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+  });
+
+  it("surfaces fixed public-sender callback transport failures instead of treating them as clean misses", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const setReject = vi.fn();
+
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockRejectedValue(
+      new Error("callback unavailable"),
+    );
+
+    await expect(handleHostedEmailIngress({
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      setReject,
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket))).rejects.toThrow(/callback unavailable/u);
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.appendHostedWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+  });
+
+  it("surfaces fixed public-sender callback HTTP failures instead of treating them as clean misses", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const setReject = vi.fn();
+
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(null, {
+      status: 503,
+    }));
+
+    await expect(handleHostedEmailIngress({
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      setReject,
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 503/u);
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.appendHostedWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.wakeHostedWakes).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 });
 
