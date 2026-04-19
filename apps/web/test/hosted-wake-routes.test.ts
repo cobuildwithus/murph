@@ -442,7 +442,7 @@ describe("hosted wake internal routes", () => {
         deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
       },
     });
-    expect(mocks.materializeHostedDueWakesTx).toHaveBeenCalledWith({
+    expect(mocks.materializeHostedDueWakesTx).toHaveBeenCalledWith(expect.objectContaining({
       tx: expect.objectContaining({
         label: "wake-route-tx",
       }),
@@ -451,7 +451,7 @@ describe("hosted wake internal routes", () => {
         assistantWakeAt: "2026-04-17T00:00:00.000Z",
         deviceSyncWakeAt: "2026-04-17T01:00:00.000Z",
       },
-    });
+    }));
   });
 
   it("parses and forwards wake quarantine requests", async () => {

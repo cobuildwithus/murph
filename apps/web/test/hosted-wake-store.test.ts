@@ -28,6 +28,15 @@ import {
   readHostedExecutionWakeTargetTx,
 } from "@/src/lib/hosted-wake/queue";
 
+function makeSnapshotRef(label: string): Prisma.JsonObject {
+  return {
+    hash: `hash_${label}`,
+    key: `bundles/vault/${label}`,
+    size: label.length,
+    updatedAt: "2026-04-17T00:00:00.000Z",
+  };
+}
+
 interface TestCursorState {
   committedSeq: bigint;
   createdAt: Date;
@@ -134,9 +143,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 3n,
       expectedVersion: 4n,
-      snapshotRef: {
-        checkpoint: "wake_3",
-      },
+      snapshotRef: makeSnapshotRef("wake_3"),
       tx,
       userId: "member_123",
     });
@@ -165,9 +172,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 3n,
       expectedVersion: 4n,
-      snapshotRef: {
-        checkpoint: "wake_3",
-      },
+      snapshotRef: makeSnapshotRef("wake_3"),
       tx,
       userId: "member_123",
     });
@@ -224,9 +229,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 4n,
-      snapshotRef: {
-        checkpoint: "wake_2",
-      },
+      snapshotRef: makeSnapshotRef("wake_2"),
       tx,
       userId: "member_123",
     });
@@ -236,9 +239,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "3",
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: "5",
       }),
@@ -265,9 +266,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 4n,
-      snapshotRef: {
-        checkpoint: "wake_2",
-      },
+      snapshotRef: makeSnapshotRef("wake_2"),
       tx,
       userId: "member_123",
     });
@@ -351,6 +350,41 @@ describe("hosted wake store", () => {
     })).rejects.toThrow(/stale/i);
   });
 
+  it("locks the cursor before recording terminal state", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      requireCursorLockBeforeWakeMutation: true,
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    await expect(recordHostedWakeTerminalTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 1n,
+        fetchedCursorVersion: 4n,
+        userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      state: "completed",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
+  });
+
   it("binds quarantine to the fetched wake identity before cursor advancement", async () => {
     const tx = createHostedWakeStoreHarness({
       cursor: {
@@ -387,9 +421,7 @@ describe("hosted wake store", () => {
     await expect(commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 4n,
-      snapshotRef: {
-        checkpoint: "wake_2",
-      },
+      snapshotRef: makeSnapshotRef("wake_2"),
       tx,
       userId: "member_123",
     })).resolves.toEqual({
@@ -435,6 +467,41 @@ describe("hosted wake store", () => {
       wakeId: "wake_1",
       wakeSeq: 2n,
     })).rejects.toThrow(/stale/i);
+  });
+
+  it("locks the cursor before quarantining a wake", async () => {
+    const tx = createHostedWakeStoreHarness({
+      cursor: {
+        committedSeq: 1n,
+        nextSeq: 3n,
+        userId: "member_123",
+        version: 4n,
+      },
+      requireCursorLockBeforeWakeMutation: true,
+      wakes: [
+        createHarnessWake({
+          kind: "assistant.cron.tick",
+          seq: 2n,
+          userId: "member_123",
+        }),
+      ],
+    });
+
+    await expect(quarantineHostedWakeTx({
+      fetchProof: issueHostedWakeFetchProof({
+        fetchedCommittedSeq: 1n,
+        fetchedCursorVersion: 4n,
+        userId: "member_123",
+        wakeEventId: "assistant.cron.tick:2",
+        wakeId: "wake_1",
+        wakeSeq: 2n,
+      }),
+      quarantineCode: "invalid-wake-payload",
+      tx,
+      userId: "member_123",
+      wakeId: "wake_1",
+      wakeSeq: 2n,
+    })).resolves.toBe(true);
   });
 
   it("refreshes the terminal receipt fetch fence when the same wake is re-fetched from the current cursor", async () => {
@@ -489,9 +556,7 @@ describe("hosted wake store", () => {
     await expect(commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 4n,
-      snapshotRef: {
-        checkpoint: "wake_2",
-      },
+      snapshotRef: makeSnapshotRef("wake_2"),
       tx,
       userId: "member_123",
     })).resolves.toEqual({
@@ -499,9 +564,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "3",
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: "5",
       }),
@@ -513,9 +576,7 @@ describe("hosted wake store", () => {
       cursor: {
         committedSeq: 2n,
         nextSeq: 4n,
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: 7n,
       },
@@ -524,9 +585,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 7n,
-      snapshotRef: {
-        checkpoint: "wake_2_finalized",
-      },
+      snapshotRef: makeSnapshotRef("wake_2_finalized"),
       tx,
       userId: "member_123",
     });
@@ -536,9 +595,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "4",
-        snapshotRef: {
-          checkpoint: "wake_2_finalized",
-        },
+        snapshotRef: makeSnapshotRef("wake_2_finalized"),
         userId: "member_123",
         version: "8",
       }),
@@ -550,9 +607,7 @@ describe("hosted wake store", () => {
       cursor: {
         committedSeq: 2n,
         nextSeq: 4n,
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: 7n,
       },
@@ -561,9 +616,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 6n,
-      snapshotRef: {
-        checkpoint: "wake_2_finalized",
-      },
+      snapshotRef: makeSnapshotRef("wake_2_finalized"),
       tx,
       userId: "member_123",
     });
@@ -573,9 +626,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "4",
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: "7",
       }),
@@ -651,9 +702,7 @@ describe("hosted wake store", () => {
       cursor: {
         committedSeq: 2n,
         nextSeq: 4n,
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: 7n,
       },
@@ -662,9 +711,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 2n,
       expectedVersion: 7n,
-      snapshotRef: {
-        checkpoint: "wake_2",
-      },
+      snapshotRef: makeSnapshotRef("wake_2"),
       tx,
       userId: "member_123",
     });
@@ -674,9 +721,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "4",
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: "7",
       }),
@@ -688,9 +733,7 @@ describe("hosted wake store", () => {
       cursor: {
         committedSeq: 2n,
         nextSeq: 4n,
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: 7n,
       },
@@ -699,9 +742,7 @@ describe("hosted wake store", () => {
     const result = await commitHostedExecutionCursorTx({
       committedSeq: 1n,
       expectedVersion: 7n,
-      snapshotRef: {
-        checkpoint: "wake_1",
-      },
+      snapshotRef: makeSnapshotRef("wake_1"),
       tx,
       userId: "member_123",
     });
@@ -711,9 +752,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "2",
         nextSeq: "4",
-        snapshotRef: {
-          checkpoint: "wake_2",
-        },
+        snapshotRef: makeSnapshotRef("wake_2"),
         userId: "member_123",
         version: "7",
       }),
@@ -1028,9 +1067,7 @@ describe("hosted wake store", () => {
     const staleCommit = await commitHostedExecutionCursorTx({
       committedSeq: 1n,
       expectedVersion: 7n,
-      snapshotRef: {
-        checkpoint: "wake_1_stale",
-      },
+      snapshotRef: makeSnapshotRef("wake_1_stale"),
       tx,
       userId: "member_123",
     });
@@ -1048,9 +1085,7 @@ describe("hosted wake store", () => {
     const staleRetry = await commitHostedExecutionCursorTx({
       committedSeq: 1n,
       expectedVersion: 8n,
-      snapshotRef: {
-        checkpoint: "wake_1_stale_retry",
-      },
+      snapshotRef: makeSnapshotRef("wake_1_stale_retry"),
       tx,
       userId: "member_123",
     });
@@ -1109,9 +1144,7 @@ describe("hosted wake store", () => {
     const latestCommit = await commitHostedExecutionCursorTx({
       committedSeq: 1n,
       expectedVersion: 8n,
-      snapshotRef: {
-        checkpoint: "wake_1_latest",
-      },
+      snapshotRef: makeSnapshotRef("wake_1_latest"),
       tx,
       userId: "member_123",
     });
@@ -1121,9 +1154,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "1",
         nextSeq: "2",
-        snapshotRef: {
-          checkpoint: "wake_1_latest",
-        },
+        snapshotRef: makeSnapshotRef("wake_1_latest"),
         userId: "member_123",
         version: "9",
       }),
@@ -1259,9 +1290,7 @@ describe("hosted wake store", () => {
     await expect(commitHostedExecutionCursorTx({
       committedSeq: 1n,
       expectedVersion: 8n,
-      snapshotRef: {
-        checkpoint: "wake_1_without_fresh_terminal",
-      },
+      snapshotRef: makeSnapshotRef("wake_1_without_fresh_terminal"),
       tx,
       userId: "member_123",
     })).resolves.toEqual({
@@ -1286,9 +1315,7 @@ describe("hosted wake store", () => {
     await expect(commitHostedExecutionCursorTx({
       committedSeq: 1n,
       expectedVersion: 8n,
-      snapshotRef: {
-        checkpoint: "wake_1_with_fresh_terminal",
-      },
+      snapshotRef: makeSnapshotRef("wake_1_with_fresh_terminal"),
       tx,
       userId: "member_123",
     })).resolves.toEqual({
@@ -1296,9 +1323,7 @@ describe("hosted wake store", () => {
       cursor: expect.objectContaining({
         committedSeq: "1",
         nextSeq: "2",
-        snapshotRef: {
-          checkpoint: "wake_1_with_fresh_terminal",
-        },
+        snapshotRef: makeSnapshotRef("wake_1_with_fresh_terminal"),
         userId: "member_123",
         version: "9",
       }),
@@ -1544,6 +1569,7 @@ describe("hosted wake store", () => {
 
 function createHostedWakeStoreHarness(input?: {
   cursor?: Partial<TestCursorState>;
+  requireCursorLockBeforeWakeMutation?: boolean;
   wakes?: Array<{
     behavior: TestWakeState["behavior"];
     coalescingKey: string | null;
@@ -1562,12 +1588,14 @@ function createHostedWakeStoreHarness(input?: {
   const payloads: TestWakePayloadState[] = [];
   const wakeTerminals: TestWakeTerminalState[] = [];
   const state: {
+    cursorLocked: boolean;
     cursor: TestCursorState;
     wakeEvents: TestWakeEventState[];
     wakeTerminals: TestWakeTerminalState[];
     payloads: TestWakePayloadState[];
     wakes: TestWakeState[];
   } = {
+    cursorLocked: false,
     cursor: {
       committedSeq: input?.cursor?.committedSeq ?? 0n,
       createdAt: input?.cursor?.createdAt ?? createdAt,
@@ -1632,6 +1660,7 @@ function createHostedWakeStoreHarness(input?: {
       const sql = strings.join(" ");
 
       if (sql.includes("SELECT user_id")) {
+        state.cursorLocked = true;
         return [{ user_id: state.cursor.userId }];
       }
 
@@ -1844,6 +1873,9 @@ function createHostedWakeStoreHarness(input?: {
       create(args: {
         data: Omit<TestWakeTerminalState, "createdAt" | "updatedAt">;
       }): TestWakeTerminalState {
+        if (input?.requireCursorLockBeforeWakeMutation && !state.cursorLocked) {
+          throw new Error("Expected hosted execution cursor to be locked before writing terminal state.");
+        }
         const terminal: TestWakeTerminalState = {
           ...args.data,
           createdAt,
@@ -1869,6 +1901,9 @@ function createHostedWakeStoreHarness(input?: {
           wakeId: string;
         };
       }): TestWakeTerminalState {
+        if (input?.requireCursorLockBeforeWakeMutation && !state.cursorLocked) {
+          throw new Error("Expected hosted execution cursor to be locked before writing terminal state.");
+        }
         const terminal = state.wakeTerminals.find((candidate) => candidate.wakeId === args.where.wakeId);
 
         if (!terminal) {
@@ -2135,6 +2170,9 @@ function createHostedWakeStoreHarness(input?: {
           userId: string;
         };
       }): { count: number } {
+        if (input?.requireCursorLockBeforeWakeMutation && !state.cursorLocked) {
+          throw new Error("Expected hosted execution cursor to be locked before mutating a quarantined wake.");
+        }
         const wake = state.wakes.find((candidate) =>
           candidate.id === args.where.id
           && candidate.seq === args.where.seq
