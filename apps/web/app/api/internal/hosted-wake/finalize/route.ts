@@ -17,6 +17,8 @@ export const POST = withJsonError(async (request: Request) => {
     return finalizeHostedExecutionCursorTx({
       assistantNextWakeAt: "assistantNextWakeAt" in body ? body.assistantNextWakeAt ?? null : undefined,
       finalizeToken: body.finalizeToken,
+      nextRuntimeWakeAt: "nextRuntimeWakeAt" in body ? body.nextRuntimeWakeAt ?? null : undefined,
+      nextRuntimeWakeReason: "nextRuntimeWakeReason" in body ? body.nextRuntimeWakeReason ?? null : undefined,
       snapshotRef: body.snapshotRef,
       tx,
       userId,

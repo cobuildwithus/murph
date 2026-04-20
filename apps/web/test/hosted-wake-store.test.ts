@@ -2794,8 +2794,9 @@ function createHarnessWake(input: {
 function makeProjectedWakeRow(
   overrides: Partial<Parameters<typeof projectHostedWakeRecord>[0]> = {},
 ): Parameters<typeof projectHostedWakeRecord>[0] {
-  return {
+  const row: Parameters<typeof projectHostedWakeRecord>[0] = {
     behavior: "ordered",
+    completedAt: null,
     coalescingKey: null,
     createdAt: new Date("2026-04-17T00:00:00.000Z"),
     dedupeKey: null,
@@ -2808,10 +2809,19 @@ function makeProjectedWakeRow(
     payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
     quarantineCode: null,
     quarantinedAt: null,
+    runId: null,
     seq: 1n,
+    state: "queued",
     updatedAt: new Date("2026-04-17T00:00:00.000Z"),
     userId: "member_123",
     ...overrides,
+  };
+
+  return {
+    ...row,
+    completedAt: row.completedAt ?? null,
+    runId: row.runId ?? null,
+    state: row.state ?? "queued",
   };
 }
 

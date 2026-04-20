@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseHostedExecutionCursorState,
+  parseHostedRunAcquireRequest,
+  parseHostedRunAcquireResponse,
+  parseHostedRunCommitRequest,
+  parseHostedRunCommitResponse,
+  parseHostedRunFinalizeRequest,
+  parseHostedRunFinalizeResponse,
+  parseHostedRunLogRequest,
+  parseHostedRunLogResponse,
+  parseHostedRunStatusRequest,
+  parseHostedRunStatusResponse,
   parseHostedWakeAppendResponse,
   parseHostedWakeCommitRequest,
   parseHostedWakeCommitResponse,
@@ -37,6 +47,41 @@ const TEST_SNAPSHOT_REF = {
   size: 128,
   updatedAt: "2026-04-17T00:00:01.000Z",
 } as const;
+
+function createHostedRunRecord() {
+  return {
+    acquiredAt: "2026-04-17T00:00:00.000Z",
+    attempt: 1,
+    committedAt: "2026-04-17T00:00:02.000Z",
+    createdAt: "2026-04-17T00:00:00.000Z",
+    errorClass: null,
+    errorCode: null,
+    eventCount: 1,
+    eventKinds: ["assistant.cron.tick"],
+    eventSeqs: ["24"],
+    executorKind: "cloudflare-container",
+    failedAt: null,
+    finalSnapshotRef: TEST_SNAPSHOT_REF,
+    finalizedAt: "2026-04-17T00:00:03.000Z",
+    id: "run-1",
+    inputCommittedSeq: "24",
+    inputCursorVersion: "4",
+    inputSnapshotRef: TEST_SNAPSHOT_REF,
+    nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+    nextRuntimeWakeReason: "assistant.run",
+    outputCommittedSeq: "25",
+    outputCursorVersion: "5",
+    preparedAt: "2026-04-17T00:00:01.000Z",
+    preparedSnapshotRef: TEST_SNAPSHOT_REF,
+    redactedSummary: { stage: "prepared" },
+    startedAt: "2026-04-17T00:00:00.500Z",
+    status: "committed_needs_finalize",
+    triggerKind: "runtime_timer",
+    updatedAt: "2026-04-17T00:00:03.000Z",
+    userId: "member-1",
+    wakeIds: ["wake-1"],
+  } as const;
+}
 
 describe("hosted wake parser contracts", () => {
   it("parses hosted wake batch responses with bigint-string cursor fields", () => {
@@ -161,6 +206,30 @@ describe("hosted wake parser contracts", () => {
     })).toThrow(/committedSeq/i);
   });
 
+  it("parses runtime wake projections on the hosted execution cursor", () => {
+    expect(parseHostedExecutionCursorState({
+      committedSeq: "12",
+      createdAt: "2026-04-17T00:00:00.000Z",
+      nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      nextSeq: "13",
+      snapshotRef: TEST_SNAPSHOT_REF,
+      updatedAt: "2026-04-17T00:00:01.000Z",
+      userId: "member-1",
+      version: "4",
+    })).toEqual({
+      committedSeq: "12",
+      createdAt: "2026-04-17T00:00:00.000Z",
+      nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      nextSeq: "13",
+      snapshotRef: TEST_SNAPSHOT_REF,
+      updatedAt: "2026-04-17T00:00:01.000Z",
+      userId: "member-1",
+      version: "4",
+    });
+  });
+
   it("rejects invalid snapshotRef shapes in hosted wake cursor contracts", () => {
     expect(() => parseHostedExecutionCursorState({
       committedSeq: "12",
@@ -234,10 +303,14 @@ describe("hosted wake parser contracts", () => {
 
   it("parses hosted wake commit, finalize, and quarantine requests", () => {
     expect(parseHostedWakeCommitRequest({
+      nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
       committedSeq: "24",
       expectedVersion: "8",
       snapshotRef: TEST_SNAPSHOT_REF,
     })).toEqual({
+      nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
       committedSeq: "24",
       expectedVersion: "8",
       snapshotRef: TEST_SNAPSHOT_REF,
@@ -245,10 +318,14 @@ describe("hosted wake parser contracts", () => {
 
     expect(parseHostedWakeFinalizeRequest({
       assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      nextRuntimeWakeAt: "2026-04-17T03:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
       finalizeToken: "finalize_token_24",
       snapshotRef: TEST_SNAPSHOT_REF,
     })).toEqual({
       assistantNextWakeAt: "2026-04-17T03:00:00.000Z",
+      nextRuntimeWakeAt: "2026-04-17T03:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
       finalizeToken: "finalize_token_24",
       snapshotRef: TEST_SNAPSHOT_REF,
     });
@@ -307,6 +384,286 @@ describe("hosted wake parser contracts", () => {
         version: "9",
       },
       finalized: true,
+    });
+  });
+
+  it("parses hosted run acquire, commit, and finalize contracts", () => {
+    const run = createHostedRunRecord();
+
+    expect(parseHostedRunAcquireRequest({
+      executorKind: "cloudflare-container",
+      limit: 5,
+      now: "2026-04-17T00:00:00.000Z",
+      triggerKind: "runtime_timer",
+    })).toEqual({
+      executorKind: "cloudflare-container",
+      limit: 5,
+      now: "2026-04-17T00:00:00.000Z",
+      triggerKind: "runtime_timer",
+    });
+
+    expect(parseHostedRunAcquireResponse({
+      acquired: true,
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+        nextRuntimeWakeReason: "assistant.run",
+        nextSeq: "25",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "4",
+      },
+      events: [],
+      pendingWakeCount: 0,
+      resumeFinalize: false,
+      run,
+      runToken: "run_token_123",
+    })).toEqual({
+      acquired: true,
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+        nextRuntimeWakeReason: "assistant.run",
+        nextSeq: "25",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:01.000Z",
+        userId: "member-1",
+        version: "4",
+      },
+      events: [],
+      pendingWakeCount: 0,
+      resumeFinalize: false,
+      run,
+      runToken: "run_token_123",
+    });
+
+    expect(parseHostedRunCommitRequest({
+      eventResults: [
+        {
+          quarantineCode: null,
+          state: "completed",
+          wakeId: "wake-1",
+        },
+      ],
+      expectedCursorVersion: "4",
+      finalizeRequired: true,
+      nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      outputCommittedSeq: "25",
+      preparedSnapshotRef: TEST_SNAPSHOT_REF,
+      redactedSummary: { stage: "prepared" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    })).toEqual({
+      eventResults: [
+        {
+          quarantineCode: null,
+          state: "completed",
+          wakeId: "wake-1",
+        },
+      ],
+      expectedCursorVersion: "4",
+      finalizeRequired: true,
+      nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      outputCommittedSeq: "25",
+      preparedSnapshotRef: TEST_SNAPSHOT_REF,
+      redactedSummary: { stage: "prepared" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    });
+
+    expect(parseHostedRunCommitResponse({
+      committed: true,
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:02.000Z",
+        userId: "member-1",
+        version: "5",
+      },
+      needsFinalize: true,
+      run,
+    })).toEqual({
+      committed: true,
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:02.000Z",
+        userId: "member-1",
+        version: "5",
+      },
+      needsFinalize: true,
+      run,
+    });
+
+    expect(parseHostedRunFinalizeRequest({
+      finalSnapshotRef: TEST_SNAPSHOT_REF,
+      nextRuntimeWakeAt: "2026-04-17T03:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      redactedSummary: { stage: "finalized" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    })).toEqual({
+      finalSnapshotRef: TEST_SNAPSHOT_REF,
+      nextRuntimeWakeAt: "2026-04-17T03:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      redactedSummary: { stage: "finalized" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    });
+
+    expect(parseHostedRunFinalizeResponse({
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:03.000Z",
+        userId: "member-1",
+        version: "6",
+      },
+      finalized: true,
+      run,
+    })).toEqual({
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:03.000Z",
+        userId: "member-1",
+        version: "6",
+      },
+      finalized: true,
+      run,
+    });
+  });
+
+  it("parses hosted run log and status contracts", () => {
+    const run = createHostedRunRecord();
+
+    expect(parseHostedRunLogRequest({
+      at: "2026-04-17T00:00:00.000Z",
+      component: "runtime",
+      level: "info",
+      message: "prepared snapshot",
+      phase: "prepare",
+      redacted: { stage: "prepared" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    })).toEqual({
+      at: "2026-04-17T00:00:00.000Z",
+      component: "runtime",
+      level: "info",
+      message: "prepared snapshot",
+      phase: "prepare",
+      redacted: { stage: "prepared" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    });
+
+    expect(parseHostedRunLogResponse({
+      logged: true,
+      log: {
+        at: "2026-04-17T00:00:00.000Z",
+        component: "runtime",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        id: "log-1",
+        level: "info",
+        message: "prepared snapshot",
+        phase: "prepare",
+        redacted: { stage: "prepared" },
+        runId: "run-1",
+        userId: "member-1",
+      },
+    })).toEqual({
+      logged: true,
+      log: {
+        at: "2026-04-17T00:00:00.000Z",
+        component: "runtime",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        id: "log-1",
+        level: "info",
+        message: "prepared snapshot",
+        phase: "prepare",
+        redacted: { stage: "prepared" },
+        runId: "run-1",
+        userId: "member-1",
+      },
+    });
+
+    expect(parseHostedRunStatusRequest({
+      includeLogs: true,
+      limit: 3,
+      runId: "run-1",
+    })).toEqual({
+      includeLogs: true,
+      limit: 3,
+      runId: "run-1",
+    });
+
+    expect(parseHostedRunStatusResponse({
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:03.000Z",
+        userId: "member-1",
+        version: "6",
+      },
+      logs: [
+        {
+          at: "2026-04-17T00:00:00.000Z",
+          component: "runtime",
+          createdAt: "2026-04-17T00:00:00.000Z",
+          id: "log-1",
+          level: "info",
+          message: "prepared snapshot",
+          phase: "prepare",
+          redacted: { stage: "prepared" },
+          runId: "run-1",
+          userId: "member-1",
+        },
+      ],
+      pendingWakeCount: 0,
+      run,
+      runs: [run],
+    })).toEqual({
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:03.000Z",
+        userId: "member-1",
+        version: "6",
+      },
+      logs: [
+        {
+          at: "2026-04-17T00:00:00.000Z",
+          component: "runtime",
+          createdAt: "2026-04-17T00:00:00.000Z",
+          id: "log-1",
+          level: "info",
+          message: "prepared snapshot",
+          phase: "prepare",
+          redacted: { stage: "prepared" },
+          runId: "run-1",
+          userId: "member-1",
+        },
+      ],
+      pendingWakeCount: 0,
+      run,
+      runs: [run],
     });
   });
 

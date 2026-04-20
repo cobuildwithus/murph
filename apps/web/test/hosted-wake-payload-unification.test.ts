@@ -126,6 +126,7 @@ describe("hosted wake payload unification", () => {
   it("projects both conversation and system rows through the canonical schema", () => {
     expect(projectHostedWakeRecord({
       behavior: "ordered",
+      completedAt: null,
       coalescingKey: null,
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
       dedupeKey: "evt_linq_message",
@@ -138,7 +139,9 @@ describe("hosted wake payload unification", () => {
       payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       quarantineCode: null,
       quarantinedAt: null,
+      runId: null,
       seq: 1n,
+      state: "queued",
       updatedAt: new Date("2026-04-18T00:00:00.000Z"),
       userId: "member_123",
     })).toMatchObject({
@@ -148,6 +151,7 @@ describe("hosted wake payload unification", () => {
 
     expect(projectHostedWakeRecord({
       behavior: "coalescing",
+      completedAt: null,
       coalescingKey: "assistant.cron.tick:member_123",
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
       dedupeKey: "evt_tick",
@@ -160,7 +164,9 @@ describe("hosted wake payload unification", () => {
       payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
       quarantineCode: null,
       quarantinedAt: null,
+      runId: null,
       seq: 2n,
+      state: "queued",
       updatedAt: new Date("2026-04-18T00:00:00.000Z"),
       userId: "member_123",
     })).toMatchObject({
@@ -172,6 +178,7 @@ describe("hosted wake payload unification", () => {
   it("fails closed on legacy per-kind payload schemas", () => {
     expect(() => projectHostedWakeRecord({
       behavior: "ordered",
+      completedAt: null,
       coalescingKey: null,
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
       dedupeKey: "evt_legacy",
@@ -184,7 +191,9 @@ describe("hosted wake payload unification", () => {
       payloadSchema: "murph.hosted-wake-conversation-message.v1",
       quarantineCode: null,
       quarantinedAt: null,
+      runId: null,
       seq: 3n,
+      state: "queued",
       updatedAt: new Date("2026-04-18T00:00:00.000Z"),
       userId: "member_123",
     })).toThrow(/payload schema is invalid/i);

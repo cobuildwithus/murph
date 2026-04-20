@@ -14,6 +14,8 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const body = parseHostedWakeCommitRequest(await readOptionalJsonObject(request));
   const assistantNextWakeAt = "assistantNextWakeAt" in body ? body.assistantNextWakeAt ?? null : undefined;
+  const nextRuntimeWakeAt = "nextRuntimeWakeAt" in body ? body.nextRuntimeWakeAt ?? null : undefined;
+  const nextRuntimeWakeReason = "nextRuntimeWakeReason" in body ? body.nextRuntimeWakeReason ?? null : undefined;
   const committedSeq = BigInt(body.committedSeq);
   const expectedVersion = BigInt(body.expectedVersion);
   const snapshotRef = "snapshotRef" in body ? body.snapshotRef ?? null : undefined;
@@ -22,6 +24,8 @@ export const POST = withJsonError(async (request: Request) => {
       assistantNextWakeAt,
       committedSeq,
       expectedVersion,
+      nextRuntimeWakeAt,
+      nextRuntimeWakeReason,
       snapshotRef,
       tx,
       userId,

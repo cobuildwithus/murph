@@ -99,6 +99,8 @@ export function projectHostedExecutionCursorRecord(
     committedSeq: record.committedSeq.toString(),
     createdAt: record.createdAt.toISOString(),
     nextSeq: record.nextSeq.toString(),
+    nextRuntimeWakeAt: (record.nextRuntimeWakeAt ?? record.assistantNextWakeAt)?.toISOString() ?? null,
+    nextRuntimeWakeReason: record.nextRuntimeWakeReason,
     snapshotRef: parseHostedWakeSnapshotRef(record.snapshotRef),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
