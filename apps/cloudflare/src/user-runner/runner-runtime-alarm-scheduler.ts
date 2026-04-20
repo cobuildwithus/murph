@@ -1,7 +1,7 @@
 import type { DurableObjectStateLike, RunnerStateRecord } from "./types.js";
 import { RunnerStateStore } from "./runner-state-store.js";
 
-export class RunnerWakeScheduler {
+export class RunnerRuntimeAlarmScheduler {
   constructor(
     private readonly stateStore: RunnerStateStore,
     private readonly state: DurableObjectStateLike,

@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   createHostedArtifactStore,
   createHostedBundleStore,
-  createHostedRunnerSecretsStore,
 } from "../src/bundle-store.js";
+import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
+import { hostedRunnerSecretsObjectKey } from "../src/storage-paths.js";
 import {
   encryptHostedStorageEnvelope,
   readEncryptedR2Payload,
+  writeEncryptedR2Payload,
 } from "../src/crypto.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions.js";
@@ -172,19 +174,25 @@ describe("hosted storage object keys", () => {
     const storedArtifactKey = findStoredObjectKey(bucket, (key) => key.endsWith(".artifact.bin"));
     expectOpaqueStrings([storedArtifactKey], ["user_artifact_123", artifactSha]);
 
-    const runnerSecretsStore = createHostedRunnerSecretsStore({
+    const runnerSecretsUserId = "user_env_123";
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, runnerSecretsUserId);
+    await writeEncryptedR2Payload({
+      aad: buildHostedStorageAad({
+        key: runnerSecretsKey,
+        purpose: "runner-secrets",
+        userId: runnerSecretsUserId,
+      }),
       bucket,
-      key: rootKey,
+      cryptoKey: rootKey,
+      key: runnerSecretsKey,
       keyId,
+      plaintext: new TextEncoder().encode('{"OPENAI_API_KEY":"secret"}'),
+      scope: "runner-secrets",
     });
-    await runnerSecretsStore.writeRunnerSecrets(
-      "user_env_123",
-      new TextEncoder().encode('{"OPENAI_API_KEY":"secret"}'),
-    );
     const storedRunnerSecretsKey = findStoredObjectKey(bucket, (key) =>
       key.startsWith("users/runner-secrets/")
     );
-    expectOpaqueStrings([storedRunnerSecretsKey], ["user_env_123"]);
+    expectOpaqueStrings([storedRunnerSecretsKey], [runnerSecretsUserId]);
 
     const rawMessageKey = await writeHostedEmailRawMessage({
       bucket,

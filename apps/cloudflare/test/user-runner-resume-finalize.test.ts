@@ -82,12 +82,12 @@ vi.mock("../src/web-control-plane.ts", async () => {
   };
 });
 
-vi.mock("../src/user-runner/runner-wake-processor.js", async () => {
-  const actual = await vi.importActual<typeof import("../src/user-runner/runner-wake-processor.js")>(
-    "../src/user-runner/runner-wake-processor.js",
+vi.mock("../src/user-runner/runner-run-processor.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/user-runner/runner-run-processor.js")>(
+    "../src/user-runner/runner-run-processor.js",
   );
 
-  class MockRunnerWakeProcessor {
+  class MockRunnerRunProcessor {
     cleanupTransientWakeDataBestEffortForRunDrain =
       wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain;
 
@@ -102,7 +102,7 @@ vi.mock("../src/user-runner/runner-wake-processor.js", async () => {
 
   return {
     ...actual,
-    RunnerWakeProcessor: MockRunnerWakeProcessor,
+    RunnerRunProcessor: MockRunnerRunProcessor,
   };
 });
 

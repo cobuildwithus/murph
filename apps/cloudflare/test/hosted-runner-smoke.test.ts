@@ -40,16 +40,18 @@ describe("runHostedRunnerSmokeDetailed", () => {
           JSON.stringify({
             childCwd: options.cwd,
             murphBin: "/app/node_modules/.bin/murph",
-            normalizedTranscript: "hello murph smoke test",
+            normalizedTranscriptMatchesExpectedSnippet: true,
             normalizedTranscriptProviderId: "whisper.cpp",
+            normalizedTranscriptSha256: "normalized-hash",
             operatorHomeRoot: "/tmp/home",
             reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
             schema: "murph.cloudflare-hosted-runner-smoke.v1",
             vaultCliBin: "/app/node_modules/.bin/vault-cli",
             vaultRoot: "/tmp/vault",
             vaultShowBytes: 128,
-            wavTranscript: "hello murph smoke test",
+            wavTranscriptMatchesExpectedSnippet: true,
             wavTranscriptProviderId: "whisper.cpp",
+            wavTranscriptSha256: "wav-hash",
           }),
         );
         child.emit("close", 0);
@@ -67,6 +69,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
 
     expect(result.childCwd).toMatch(/hosted-runner-smoke-launch-/u);
     expect(result.murphBin).toContain("murph");
+    expect(result.normalizedTranscriptSha256).toBe("normalized-hash");
     expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
     expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
   });

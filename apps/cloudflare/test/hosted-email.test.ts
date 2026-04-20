@@ -282,8 +282,8 @@ describe("hosted email routing and transport", () => {
       expect.objectContaining({
         component: "assistant-delivery",
         details: {
-          envelopeFrom: "owner@example.com",
-          headerFrom: "Owner <owner@example.com>",
+          hasEnvelopeFrom: true,
+          hasHeaderFrom: true,
           operation: "resolve-route-user-id",
           path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
           webControlOrigin: "https://web.example.test",
@@ -325,8 +325,8 @@ describe("hosted email routing and transport", () => {
       expect.objectContaining({
         component: "assistant-delivery",
         details: {
-          envelopeFrom: "owner@example.com",
-          headerFrom: "Owner <owner@example.com>",
+          hasEnvelopeFrom: true,
+          hasHeaderFrom: true,
           operation: "resolve-route-user-id",
           path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
           responseStatus: 503,

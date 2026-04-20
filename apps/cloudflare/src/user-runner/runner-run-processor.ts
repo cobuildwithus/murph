@@ -44,12 +44,16 @@ import {
   buildHostedRunnerJobRuntimeConfig,
 } from "../runner-env.ts";
 import {
+  summarizeHostedRunnerForwardedEnvLogCategories,
+  summarizeHostedRunnerSecretLogCategories,
+} from "../hosted-env-policy.ts";
+import {
   type RunnerStateRecord,
 } from "./types.js";
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
 import { RunnerStateStore } from "./runner-state-store.js";
 import type { RunnerLeaseOwnerInput } from "./runner-state-store.js";
-import { RunnerWakeScheduler } from "./runner-wake-scheduler.js";
+import { RunnerRuntimeAlarmScheduler } from "./runner-runtime-alarm-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
@@ -78,15 +82,15 @@ export interface RunnerRunDrainExecutionResult {
 const HOSTED_RUN_PHASE_LOG_TIMEOUT_MS = 2_000;
 const HOSTED_RUN_LOG_COMPONENT = "cloudflare-runner";
 
-interface RunnerWakeTransitionInput<T> {
+interface RunnerRunTransitionInput<T> {
   eventId: string;
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   leaseOwner?: RunnerLeaseOwnerInput;
   run: (userId: string, stores: RunnerUserStores) => Promise<T>;
 }
 
-interface RunnerWakeProcessorDependencies {
-  applyHostedTransition<T>(input: RunnerWakeTransitionInput<T>): Promise<T>;
+interface RunnerRunProcessorDependencies {
+  applyHostedTransition<T>(input: RunnerRunTransitionInput<T>): Promise<T>;
   bucket: R2BucketLike;
   ensureRunnerStores(userId?: string): Promise<RunnerUserStores>;
   env: HostedExecutionEnvironment;
@@ -95,12 +99,12 @@ interface RunnerWakeProcessorDependencies {
   readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>>;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
-  wakeScheduler: RunnerWakeScheduler;
+  runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
 }
 
-export class RunnerWakeProcessor {
+export class RunnerRunProcessor {
   constructor(
-    private readonly dependencies: RunnerWakeProcessorDependencies,
+    private readonly dependencies: RunnerRunProcessorDependencies,
   ) {}
 
   async readRunDrainSharePack(
@@ -117,6 +121,7 @@ export class RunnerWakeProcessor {
   }
 
   async executeRunDrain(input: {
+    currentBundleRef: HostedExecutionBundleRef | null;
     events: HostedRuntimeDrainEvent[];
     primaryWake: HostedRuntimeEvent;
     run: HostedRunRecord;
@@ -185,6 +190,7 @@ export class RunnerWakeProcessor {
     try {
       const runnerResult = await this.invokeRunner(
         userId,
+        input.currentBundleRef,
         input.primaryWake,
         run,
         buildHostedRuntimeDrainRequest({
@@ -196,8 +202,9 @@ export class RunnerWakeProcessor {
       );
       const result = runnerResult.result;
 
-      if (runnerResult.phase === "committed") {
+      if (runnerResult.phase === "prepared") {
         const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+          currentBundleRef: input.currentBundleRef,
           eventId: runEventId,
           finalGatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
           result: runnerResult.result,
@@ -221,7 +228,7 @@ export class RunnerWakeProcessor {
         await this.advanceRunPhase({
           clearError: true,
           wake: { eventId: runEventId, userId },
-          message: "Hosted run drain prepared a committed snapshot and is awaiting web commit.",
+          message: "Hosted run drain prepared a snapshot and is awaiting web commit.",
           phase: "commit.recorded",
           run,
           runToken: input.runToken,
@@ -246,6 +253,7 @@ export class RunnerWakeProcessor {
       }
 
       const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+        currentBundleRef: input.currentBundleRef,
         eventId: runEventId,
         finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
         result: runnerResult.result,
@@ -317,6 +325,7 @@ export class RunnerWakeProcessor {
   }
 
   async finalizeRunDrain(input: {
+    currentBundleRef: HostedExecutionBundleRef | null;
     primaryWake: HostedRuntimeEvent;
     run: HostedRunRecord;
     runToken?: string | null;
@@ -346,6 +355,7 @@ export class RunnerWakeProcessor {
     try {
       const runnerResult = await this.invokeRunner(
         userId,
+        input.currentBundleRef,
         input.primaryWake,
         run,
         buildHostedRuntimeDrainRequest({
@@ -361,6 +371,7 @@ export class RunnerWakeProcessor {
       }
 
       const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+        currentBundleRef: input.currentBundleRef,
         eventId: runEventId,
         finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
         result: runnerResult.result,
@@ -481,6 +492,7 @@ export class RunnerWakeProcessor {
 
   private async invokeRunner(
     userId: string,
+    currentBundleRef: HostedExecutionBundleRef | null,
     primaryWake: HostedRuntimeEvent,
     run: HostedExecutionRunContext,
     runDrain: HostedRuntimeDrainRequest,
@@ -493,17 +505,14 @@ export class RunnerWakeProcessor {
     const { bundleSync, runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
       userId,
     );
-    const [bundleState, runnerSecrets] = await Promise.all([
-      this.dependencies.stateStore.readBundleMetaState(),
-      runnerSecretsService.readRunnerSecrets(userId),
-    ]);
+    const runnerSecrets = await runnerSecretsService.readRunnerSecrets(userId);
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.dependencies.runnerRuntimeEnvSource,
     );
     const job: HostedAssistantRuntimeJobInput = {
       request: {
-        bundle: await bundleSync.readBundlesForRunner(),
-        currentBundleRef: bundleState.bundleRef,
+        bundle: await bundleSync.readBundlesForRunner(currentBundleRef),
+        currentBundleRef,
         run,
         runDrain,
       },
@@ -534,84 +543,13 @@ export class RunnerWakeProcessor {
       component: "runner",
       details: {
         bundlePresent: job.request.bundle !== null,
-        forwardedEnvCategories: {
-          assistantConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
-            "ANTHROPIC_API_KEY",
-            "CEREBRAS_API_KEY",
-            "DEEPSEEK_API_KEY",
-            "FIREWORKS_API_KEY",
-            "GOOGLE_API_KEY",
-            "GOOGLE_GENERATIVE_AI_API_KEY",
-            "GROQ_API_KEY",
-            "MISTRAL_API_KEY",
-            "OPENAI_API_KEY",
-            "OPENROUTER_API_KEY",
-            "PERPLEXITY_API_KEY",
-            "TOGETHER_API_KEY",
-            "VERCEL_AI_API_KEY",
-            "VENICE_API_KEY",
-            "XAI_API_KEY",
-          ]),
-          hostedEmailConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
-            "HOSTED_EMAIL_DOMAIN",
-            "HOSTED_EMAIL_FROM_ADDRESS",
-            "HOSTED_EMAIL_LOCAL_PART",
-          ]),
-          linqConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
-            "LINQ_API_BASE_URL",
-            "LINQ_API_TOKEN",
-            "LINQ_WEBHOOK_SECRET",
-          ]),
-          parserToolingConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
-            "FFMPEG_COMMAND",
-            "WHISPER_COMMAND",
-            "WHISPER_MODEL_PATH",
-          ]),
-          telegramConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
-            "TELEGRAM_API_BASE_URL",
-            "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_BOT_USERNAME",
-            "TELEGRAM_FILE_BASE_URL",
-          ]),
-          webSearchConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
-            "BRAVE_API_KEY",
-            "MURPH_WEB_FETCH_ENABLED",
-            "MURPH_WEB_SEARCH_MAX_RESULTS",
-            "MURPH_WEB_SEARCH_PROVIDER",
-          ]),
-        },
+        forwardedEnvCategories: summarizeHostedRunnerForwardedEnvLogCategories(forwardedEnv),
         forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
         runElapsedMs: computeHostedRunElapsedMs(run),
         runDrainEventCount: runDrain.events.length,
         runDrainResumeFinalize: runDrain.resumeFinalize === true,
         runDrainRunId: runDrain.runId,
-        runnerSecretsCategories: {
-          modelCredentialConfigured: hasAnyRunnerConfigKey(runnerSecrets, [
-            "ANTHROPIC_API_KEY",
-            "BRAVE_API_KEY",
-            "CEREBRAS_API_KEY",
-            "DEEPSEEK_API_KEY",
-            "FIREWORKS_API_KEY",
-            "GOOGLE_API_KEY",
-            "GOOGLE_GENERATIVE_AI_API_KEY",
-            "GROQ_API_KEY",
-            "HF_TOKEN",
-            "HUGGINGFACEHUB_API_TOKEN",
-            "HUGGINGFACE_API_KEY",
-            "HUGGING_FACE_HUB_TOKEN",
-            "LITELLM_PROXY_API_KEY",
-            "MISTRAL_API_KEY",
-            "NVIDIA_API_KEY",
-            "NGC_API_KEY",
-            "OPENAI_API_KEY",
-            "OPENROUTER_API_KEY",
-            "PERPLEXITY_API_KEY",
-            "TOGETHER_API_KEY",
-            "VERCEL_AI_API_KEY",
-            "VENICE_API_KEY",
-            "XAI_API_KEY",
-          ]),
-        },
+        runnerSecretsCategories: summarizeHostedRunnerSecretLogCategories(runnerSecrets),
         runnerSecretKeyCount: Object.keys(runnerSecrets).length,
       },
       eventId: primaryWake.eventId,
@@ -666,6 +604,7 @@ export class RunnerWakeProcessor {
   }
 
   private async persistCompletedRunnerResult(input: {
+    currentBundleRef: HostedExecutionBundleRef | null;
     eventId: string;
     finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
     result: HostedExecutionRunnerResult;
@@ -679,16 +618,16 @@ export class RunnerWakeProcessor {
         run: input.run,
       },
       run: async (userId, stores) => {
-        const bundleState = await this.dependencies.stateStore.readBundleMetaState();
-        const record = await stores.bundleSync.applyRunnerResultBundles(
+        const { bundleRef: nextBundleRef } = await stores.bundleSync.applyRunnerResultBundles(
           userId,
-          bundleState.bundleVersion,
+          input.currentBundleRef,
           input.result.bundle,
         );
-        await this.dependencies.wakeScheduler.syncNextWake({
+        await this.dependencies.stateStore.syncBundleRefCache(nextBundleRef);
+        await this.dependencies.runtimeAlarmScheduler.syncNextWake({
           preferredWakeAt: input.result.result.nextWakeAt ?? null,
         });
-        return record.bundleRef;
+        return nextBundleRef;
       },
     });
   }
@@ -871,7 +810,7 @@ function buildHostedRuntimeDrainRequest(input: {
 
 function isCompletedRunnerResult(
   result: HostedAssistantRuntimeJobResult,
-): result is Exclude<HostedAssistantRuntimeJobResult, { phase: "committed" }> {
+): result is Exclude<HostedAssistantRuntimeJobResult, { phase: "prepared" }> {
   return result.phase === undefined || result.phase === "completed";
 }
 
@@ -939,6 +878,11 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
     return;
   }
 
+  if (typeof input.runToken !== "string") {
+    return;
+  }
+
+  const runToken = input.runToken;
   const recordLog = input.recordLog ?? recordHostedRunLogInWeb;
   const redacted = {
     ...(input.redacted ?? {}),
@@ -957,7 +901,7 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
         phase: input.phase,
         redacted,
         runId: input.run.runId,
-        ...(input.runToken === undefined ? {} : { runToken: input.runToken }),
+        runToken,
       },
       boundUserId: input.userId,
       callbackSigning: input.callbackSigning,
@@ -996,11 +940,4 @@ function isMissingHostedSharePackError(error: unknown): error is Error & { code:
   return error instanceof Error
     && "code" in error
     && error.code === "HOSTED_SHARE_PACK_NOT_FOUND";
-}
-
-function hasAnyRunnerConfigKey(
-  source: Readonly<Record<string, string>>,
-  keys: readonly string[],
-): boolean {
-  return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }

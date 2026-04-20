@@ -29,3 +29,6 @@ export {
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
+export {
+  computeHostedRunElapsedMs,
+} from "./hosted-runtime/utils.ts";
