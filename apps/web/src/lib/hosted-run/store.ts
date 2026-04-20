@@ -259,7 +259,7 @@ export async function commitHostedRun(input: {
   expectedCursorVersion: bigint;
   failureClass?: string | null;
   failureCode?: string | null;
-  finalizeRequired?: boolean | null;
+  finalizeRequired: boolean;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: bigint;
@@ -280,7 +280,7 @@ export async function commitHostedRunTx(input: {
   expectedCursorVersion: bigint;
   failureClass?: string | null;
   failureCode?: string | null;
-  finalizeRequired?: boolean | null;
+  finalizeRequired: boolean;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: bigint;
@@ -486,7 +486,7 @@ export async function commitHostedRunTx(input: {
   }
 
   const current = await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
-  const needsFinalize = input.finalizeRequired ?? true;
+  const needsFinalize = input.finalizeRequired;
   const updatedRun = await input.tx.hostedRun.update({
     where: { id: run.id },
     data: {

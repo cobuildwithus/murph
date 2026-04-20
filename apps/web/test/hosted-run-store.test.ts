@@ -179,6 +179,7 @@ describe("commitHostedRunTx", () => {
 
     const result = await commitHostedRunTx({
       expectedCursorVersion: 3n,
+      finalizeRequired: false,
       outputCommittedSeq: 10n,
       runId: run.id,
       runToken,
@@ -299,6 +300,108 @@ describe("commitHostedRunTx", () => {
       status: "finalized",
       triggerKind: "runtime_timer",
     });
+    expect(hostedExecutionCursorUpdateMany).toHaveBeenCalledWith({
+      data: {
+        committedSeq: 9n,
+        nextRuntimeWakeAt: null,
+        nextRuntimeWakeReason: null,
+        snapshotRef: expect.anything(),
+        version: { increment: 1 },
+      },
+      where: {
+        committedSeq: 9n,
+        userId: "member_123",
+        version: 3n,
+      },
+    });
+  });
+
+  it("keeps committed runs in committed_needs_finalize when finalizeRequired is true", async () => {
+    const initialCursor = buildCursorRow();
+    const committedCursor = buildCursorRow({
+      committedSeq: 9n,
+      version: 4n,
+    });
+    const runToken = "run-token.needs-finalize";
+    const run = buildRunRow({
+      eventSeqs: [],
+      runToken,
+      triggerKind: "runtime_timer",
+      wakeIds: [],
+    });
+    const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const hostedRunUpdate = vi.fn(async ({ data }: {
+      data: {
+        committedAt: Date;
+        nextRuntimeWakeAt: Date | null;
+        nextRuntimeWakeReason: string | null;
+        outputCommittedSeq: bigint;
+        outputCursorVersion: bigint;
+        preparedAt: Date;
+        preparedSnapshotRef: unknown;
+        redactedSummaryJson?: unknown;
+        status: "committed_needs_finalize";
+      };
+      where: { id: string };
+    }) => ({
+      ...run,
+      committedAt: data.committedAt,
+      nextRuntimeWakeAt: data.nextRuntimeWakeAt,
+      nextRuntimeWakeReason: data.nextRuntimeWakeReason,
+      outputCommittedSeq: data.outputCommittedSeq,
+      outputCursorVersion: data.outputCursorVersion,
+      preparedAt: data.preparedAt,
+      preparedSnapshotRef: null,
+      redactedSummaryJson: data.redactedSummaryJson ?? null,
+      status: data.status,
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedExecutionCursor: {
+        updateMany: hostedExecutionCursorUpdateMany,
+      },
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        update: hostedRunUpdate,
+      },
+      hostedIngressEvent: {
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRowTx
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(committedCursor);
+
+    const result = await commitHostedRunTx({
+      expectedCursorVersion: 3n,
+      finalizeRequired: true,
+      outputCommittedSeq: 9n,
+      runId: run.id,
+      runToken,
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result.committed).toBe(true);
+    expect(result.needsFinalize).toBe(true);
+    expect(result.cursor).toMatchObject({
+      committedSeq: "9",
+      version: "4",
+    });
+    expect(result.run).toMatchObject({
+      outputCommittedSeq: "9",
+      outputCursorVersion: "4",
+      status: "committed_needs_finalize",
+      triggerKind: "runtime_timer",
+    });
+    expect(hostedRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "committed_needs_finalize",
+      }),
+      where: { id: run.id },
+    }));
     expect(hostedExecutionCursorUpdateMany).toHaveBeenCalledWith({
       data: {
         committedSeq: 9n,

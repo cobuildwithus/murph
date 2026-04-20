@@ -536,7 +536,7 @@ export interface HostedRunCommitRequest {
   expectedCursorVersion: string;
   failureClass?: string | null;
   failureCode?: string | null;
-  finalizeRequired?: boolean | null;
+  finalizeRequired: boolean;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: string;
