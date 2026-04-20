@@ -117,6 +117,10 @@ function buildFakeJwt(payload: Record<string, unknown>): string {
   return `${encode(header)}.${encode(body)}.`
 }
 
+function buildOwnedCliBinPath(root: string): string {
+  return path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js')
+}
+
 test('setup wizard completion waits for Ink exit before resolving the selected flow', async () => {
   const completion = createSetupWizardCompletionController()
   const selected = {
@@ -938,6 +942,7 @@ test.sequential('onboard CLI dry-run returns a macOS plan without mutating servi
     },
     log() {},
     platform: () => 'darwin',
+    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
     runCommand: async ({ file, args }) => {
       if (path.basename(file) === 'brew' && args[0] === 'list' && args[1] === '--versions') {
         return {
@@ -1029,6 +1034,7 @@ test.sequential('onboard CLI dry-run reuses an existing vault without mutating s
     },
     log() {},
     platform: () => 'darwin',
+    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
     runCommand: async ({ file, args }) => {
       if (path.basename(file) === 'brew' && args[0] === 'list' && args[1] === '--versions') {
         return {
@@ -2763,6 +2769,7 @@ test.sequential('setup preserves saved public OpenAI-compatible headers when re-
     },
     log() {},
     platform: () => 'darwin',
+    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
     runCommand: async ({ file, args }) => {
       const baseName = path.basename(file)
 
@@ -2886,6 +2893,7 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
     },
     log() {},
     platform: () => 'darwin',
+    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
     runCommand: async ({ file, args }) => {
       const baseName = path.basename(file)
 
@@ -3219,6 +3227,7 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
     },
     log() {},
     platform: () => 'darwin',
+    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
     runCommand: async ({ file, args }) => {
       const baseName = path.basename(file)
 
@@ -3352,6 +3361,7 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
     },
     log() {},
     platform: () => 'darwin',
+    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
     runCommand: async ({ file, args }) => {
       if (path.basename(file) === 'brew' && args[0] === 'list' && args[1] === '--versions') {
         const formula = args[2] ?? ''
@@ -3813,6 +3823,7 @@ test.sequential('setup service dry-run on Linux reports supported channels clean
     getHomeDirectory: () => homeRoot,
     log() {},
     platform: () => 'linux',
+    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
   })
 
   try {

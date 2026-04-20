@@ -2330,6 +2330,21 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
     await assert.rejects(
       async () =>
         createSetupServices({
+          getHomeDirectory: () => homeDirectory,
+          getCwd: () => cwd,
+          platform: () => 'linux',
+        }).setupHost({
+          vault: './vault',
+        }),
+      (error: unknown) =>
+        error instanceof VaultCliError &&
+        error.code === 'setup_cli_binary_path_missing' &&
+        error.message.includes('published Murph CLI binary path'),
+    )
+
+    await assert.rejects(
+      async () =>
+        createSetupServices({
           platform: () => 'win32',
         }).setupHost({
           vault: './vault',
@@ -2635,6 +2650,7 @@ test('createSetupServices on linux records apt provisioning failures and saves a
         },
       },
       platform: () => 'linux',
+      resolveCliBinPath: () => path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js'),
       runCommand: async (input) => {
         runCalls.push(`${input.file} ${input.args.join(' ')}`)
         if (input.args.at(-1) === 'update') {
@@ -2734,6 +2750,7 @@ test('createSetupServices on linux records apt provisioning failures and saves a
         },
       },
       platform: () => 'linux',
+      resolveCliBinPath: () => path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js'),
       runCommand: async () => {
         throw new Error('apt should not run when unavailable')
       },
@@ -2809,6 +2826,7 @@ test('createSetupServices on linux covers root apt install success paths', async
           },
         },
         platform: () => 'linux',
+        resolveCliBinPath: () => path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js'),
         runCommand: async (input) => {
           if (input.args.at(-1) === 'update') {
             return { exitCode: 0, stderr: '', stdout: '' }

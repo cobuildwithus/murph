@@ -1,7 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import {
   createIntegratedInboxServices,
   type InboxServices,
@@ -114,8 +113,7 @@ export function createSetupServices(
   const getHomeDirectory = dependencies.getHomeDirectory
   const getPlatform = dependencies.platform
   const log = dependencies.log ?? defaultLogger
-  const resolveCliBinPath =
-    dependencies.resolveCliBinPath ?? defaultResolveCliBinPath
+  const resolveCliBinPath = dependencies.resolveCliBinPath
   const runCommand = dependencies.runCommand ?? createDefaultCommandRunner(log)
   const downloadFile = dependencies.downloadFile ?? defaultDownloadFile
   const vaultServices =
@@ -145,7 +143,14 @@ export function createSetupServices(
     const requestId = input.requestId ?? null
     const whisperModel = input.whisperModel ?? 'base.en'
     const homeDirectory = path.resolve(getHomeDirectory?.() ?? os.homedir())
-    const cliBinPath = path.resolve(resolveCliBinPath())
+    const cliBinPath = resolveCliBinPath?.()
+    if (typeof cliBinPath !== 'string' || cliBinPath.length === 0) {
+      throw new VaultCliError(
+        'setup_cli_binary_path_missing',
+        'Setup could not resolve the published Murph CLI binary path. Invoke setup through the owning `@murphai/murph` CLI package or construct setup services with `resolveCliBinPath` explicitly.',
+      )
+    }
+    const resolvedCliBinPath = path.resolve(cliBinPath)
     const defaultToolchainRoot = path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY)
     const toolchainRoot = path.resolve(
       getCwd?.() ?? process.cwd(),
@@ -258,7 +263,7 @@ export function createSetupServices(
     }
 
     await ensureCliShims({
-      cliBinPath,
+      cliBinPath: resolvedCliBinPath,
       dryRun,
       env: toolchainEnv,
       fileExists,
@@ -463,8 +468,4 @@ async function ensureDirectoryStep(input: {
       title: input.title,
     }),
   )
-}
-
-function defaultResolveCliBinPath(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'bin.js')
 }
