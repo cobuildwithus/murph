@@ -22,12 +22,15 @@ export type HealthCommonsEntityType = (typeof HEALTH_COMMONS_ENTITY_TYPES)[numbe
 
 export const HEALTH_COMMONS_RELATION_TYPES = [
   "alias_of",
+  "child_family",
   "cites",
   "contraindicates",
   "fork_of",
   "measures",
+  "mirror_of",
   "parent_family",
   "primary_biomarker",
+  "readable_mirror",
   "related_protocol",
   "secondary_biomarker",
   "source_person",

@@ -3,6 +3,157 @@
     {
       "artifacts": [
         {
+          "accessNotes": "Optional HTML snapshot for internal provenance only; review rights before storing or redistributing.",
+          "artifactId": "art_bryan_johnson_morning_routine_2026_04_08_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/bryan-johnson-morning-routine-2026-04-08.html",
+          "objectKey": "commons/sources/sauna/bryan-johnson-morning-routine-2026-04-08.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:bryan-johnson-morning-routine-2026-04-08",
+          "sourceUrl": "https://blueprint.bryanjohnson.com/blogs/news/morning-routine",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Optional HTML snapshot for internal provenance only; review rights before storing or redistributing.",
+          "artifactId": "art_bryan_johnson_sauna_protocol_2026_01_28_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/bryan-johnson-sauna-protocol-2026-01-28.html",
+          "objectKey": "commons/sources/sauna/bryan-johnson-sauna-protocol-2026-01-28.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:bryan-johnson-sauna-protocol-2026-01-28",
+          "sourceUrl": "https://blueprint.bryanjohnson.com/blogs/news/sauna-protocol",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Optional HTML snapshot for internal provenance only; review rights before storing or redistributing.",
+          "artifactId": "art_bryan_johnson_saunamaxx_2026_04_14_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/bryan-johnson-saunamaxx-2026-04-14.html",
+          "objectKey": "commons/sources/sauna/bryan-johnson-saunamaxx-2026-04-14.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:bryan-johnson-saunamaxx-2026-04-14",
+          "sourceUrl": "https://bryanjohns0n.substack.com/p/31-brutal-minutes-to-saunamaxx",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.",
+          "artifactId": "art_linkedin_bryan_johnson_core_temp_2026_04_16_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/linkedin-bryan-johnson-core-temp-2026-04-16.html",
+          "objectKey": "commons/sources/sauna/linkedin-bryan-johnson-core-temp-2026-04-16.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16",
+          "sourceUrl": "https://www.linkedin.com/posts/bryanrjohnson_most-people-might-miss-the-biggest-benefit-activity-7451007192889024512-UFlX",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.",
+          "artifactId": "art_linkedin_bryan_johnson_core_temp_prototype_2026_04_03_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/linkedin-bryan-johnson-core-temp-prototype-2026-04-03.html",
+          "objectKey": "commons/sources/sauna/linkedin-bryan-johnson-core-temp-prototype-2026-04-03.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03",
+          "sourceUrl": "https://www.linkedin.com/posts/bryanrjohnson_felt-like-i-was-going-to-die-in-the-sauna-activity-7445948233736138752-YU_1",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.",
+          "artifactId": "art_linkedin_bryan_johnson_sauna_guide_2025_12_06_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/linkedin-bryan-johnson-sauna-guide-2025-12-06.html",
+          "objectKey": "commons/sources/sauna/linkedin-bryan-johnson-sauna-guide-2025-12-06.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06",
+          "sourceUrl": "https://www.linkedin.com/posts/bryanrjohnson_sauna-is-one-of-the-most-effective-health-activity-7404655111576223744-tIrx",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "X content may require special access and rights review before snapshotting; readable LinkedIn mirror is included separately.",
+          "artifactId": "art_x_bryan_johnson_comprehensive_sauna_guide_2025_12_06_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/x-bryan-johnson-comprehensive-sauna-guide-2025-12-06.html",
+          "objectKey": "commons/sources/sauna/x-bryan-johnson-comprehensive-sauna-guide-2025-12-06.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06",
+          "sourceUrl": "https://x.com/bryan_johnson/status/1997403290171330638",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "X content may require special access and rights review before snapshotting; use LinkedIn or Substack mirrors for readable corroboration.",
+          "artifactId": "art_x_bryan_johnson_core_temp_2026_04_16_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/x-bryan-johnson-core-temp-2026-04-16.html",
+          "objectKey": "commons/sources/sauna/x-bryan-johnson-core-temp-2026-04-16.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:x-bryan-johnson-core-temp-2026-04-16",
+          "sourceUrl": "https://x.com/bryan_johnson/status/2044876107263234186",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "X content may require special access and rights review before snapshotting; readable LinkedIn mirror is included separately.",
+          "artifactId": "art_x_bryan_johnson_core_temp_update_2026_04_03_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/x-bryan-johnson-core-temp-update-2026-04-03.html",
+          "objectKey": "commons/sources/sauna/x-bryan-johnson-core-temp-update-2026-04-03.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:x-bryan-johnson-core-temp-update-2026-04-03",
+          "sourceUrl": "https://x.com/bryan_johnson/status/2040127999954313485",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "X content may require special access and rights review before snapshotting; corroboration is limited to secondary snippets unless a full readable mirror is captured.",
+          "artifactId": "art_x_bryan_johnson_fired_review_2026_04_06_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/x-bryan-johnson-fired-review-2026-04-06.html",
+          "objectKey": "commons/sources/sauna/x-bryan-johnson-fired-review-2026-04-06.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:x-bryan-johnson-fired-review-2026-04-06",
+          "sourceUrl": "https://x.com/bryan_johnson/status/2041202370672288028",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "X content may require special access and rights review before snapshotting; corroboration is limited to secondary snippets unless a fuller readable copy is captured.",
+          "artifactId": "art_x_bryan_johnson_ice_balls_2026_04_09_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/x-bryan-johnson-ice-balls-2026-04-09.html",
+          "objectKey": "commons/sources/sauna/x-bryan-johnson-ice-balls-2026-04-09.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:x-bryan-johnson-ice-balls-2026-04-09",
+          "sourceUrl": "https://x.com/bryan_johnson/status/2042360189958107190",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "X content may require special access and rights review before snapshotting; current corroboration depends on secondary snippets unless a readable mirror is captured.",
+          "artifactId": "art_x_bryan_johnson_most_people_sauna_wrong_2025_11_12_html_snapshot",
+          "kind": "html",
+          "localPath": "source-artifacts/sauna/x-bryan-johnson-most-people-sauna-wrong-2025-11-12.html",
+          "objectKey": "commons/sources/sauna/x-bryan-johnson-most-people-sauna-wrong-2025-11-12.html",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12",
+          "sourceUrl": "https://x.com/bryan_johnson/status/1988653016963219693",
+          "storage": "cloudflare-r2"
+        }
+      ],
+      "description": "Synthetic manifest for artifact pointers declared directly on Health Commons source pages.",
+      "manifestKey": "artifact_manifest:page-frontmatter-artifacts",
+      "schemaVersion": "murph.commons.artifact-manifest.v1"
+    },
+    {
+      "artifacts": [
+        {
           "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
           "artifactId": "art_doi_10.1080_23328940.2026.2645467_pdf",
           "contentType": "application/pdf",

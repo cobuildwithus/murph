@@ -3,11 +3,13 @@ import type { Dirent } from "node:fs";
 import path from "node:path";
 
 import {
+  HEALTH_COMMONS_ARTIFACT_MANIFEST_SCHEMA_VERSION,
   healthCommonsArtifactManifestSchema,
   healthCommonsChangeRecordSchema,
   healthCommonsPageFrontmatterSchema,
   healthCommonsRedirectsFileSchema,
   type HealthCommonsArtifactManifest,
+  type HealthCommonsArtifactPointer,
   type HealthCommonsChangeRecord,
   type HealthCommonsPageFrontmatter,
   type HealthCommonsRedirect,
@@ -31,20 +33,31 @@ export interface HealthCommonsContentSet {
   redirects: HealthCommonsRedirect[];
 }
 
+const PAGE_ARTIFACTS_MANIFEST_KEY = "artifact_manifest:page-frontmatter-artifacts";
+
 export async function readHealthCommonsContent(contentRoot: string): Promise<HealthCommonsContentSet> {
-  const [pages, redirects, changes, artifactManifests] = await Promise.all([
-    readHealthCommonsPages(contentRoot),
+  const pages = await readHealthCommonsPages(contentRoot);
+  const [redirects, changes, fileArtifactManifests] = await Promise.all([
     readHealthCommonsRedirects(contentRoot),
     readHealthCommonsChanges(contentRoot),
     readHealthCommonsArtifactManifests(contentRoot),
   ]);
 
   return {
-    artifactManifests,
+    artifactManifests: withPageArtifactManifest(fileArtifactManifests, pages),
     changes,
     pages,
     redirects,
   };
+}
+
+export async function readAllHealthCommonsArtifactManifests(contentRoot: string): Promise<HealthCommonsArtifactManifest[]> {
+  const [pages, fileArtifactManifests] = await Promise.all([
+    readHealthCommonsPages(contentRoot),
+    readHealthCommonsArtifactManifests(contentRoot),
+  ]);
+
+  return withPageArtifactManifest(fileArtifactManifests, pages);
 }
 
 export async function readHealthCommonsPages(contentRoot: string): Promise<HealthCommonsSourcePage[]> {
@@ -162,6 +175,42 @@ export async function walkRelativeFiles(root: string, extension: string): Promis
   await walk(root);
   files.sort((left, right) => left.localeCompare(right));
   return files;
+}
+
+function withPageArtifactManifest(
+  fileArtifactManifests: readonly HealthCommonsArtifactManifest[],
+  pages: readonly HealthCommonsSourcePage[],
+): HealthCommonsArtifactManifest[] {
+  const pageArtifacts = collectPageArtifacts(pages);
+  if (pageArtifacts.length === 0) {
+    return [...fileArtifactManifests];
+  }
+
+  const manifests = [
+    ...fileArtifactManifests,
+    healthCommonsArtifactManifestSchema.parse({
+      schemaVersion: HEALTH_COMMONS_ARTIFACT_MANIFEST_SCHEMA_VERSION,
+      manifestKey: PAGE_ARTIFACTS_MANIFEST_KEY,
+      description: "Synthetic manifest for artifact pointers declared directly on Health Commons source pages.",
+      artifacts: pageArtifacts,
+    }),
+  ];
+
+  manifests.sort((left, right) => left.manifestKey.localeCompare(right.manifestKey));
+  return manifests;
+}
+
+function collectPageArtifacts(pages: readonly HealthCommonsSourcePage[]): HealthCommonsArtifactPointer[] {
+  return pages.flatMap((page) => {
+    if (page.frontmatter.entityType !== "source_artifact") {
+      return [];
+    }
+
+    return (page.frontmatter.artifacts ?? []).map((artifact) => ({
+      ...artifact,
+      sourceKey: page.frontmatter.key,
+    }));
+  });
 }
 
 function normalizePath(value: string): string {

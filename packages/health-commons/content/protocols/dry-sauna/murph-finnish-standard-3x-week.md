@@ -41,9 +41,6 @@ relations:
     target: source_artifact:sauna-bibliography-2026-04-18
   -
     type: cites
-    target: source_artifact:pmid-16871826
-  -
-    type: cites
     target: source_artifact:pmid-29849692
   -
     type: cites
@@ -53,82 +50,13 @@ relations:
     target: source_artifact:pmid-32814462
   -
     type: cites
-    target: source_artifact:pmid-31126559
-  -
-    type: cites
     target: source_artifact:pmid-38577299
-  -
-    type: cites
-    target: source_artifact:pmid-36813265
-  -
-    type: cites
-    target: source_artifact:pmid-25432420
-  -
-    type: cites
-    target: source_artifact:pmid-29269746
-  -
-    type: cites
-    target: source_artifact:pmid-31331560
-  -
-    type: cites
-    target: source_artifact:pmid-34622026
-  -
-    type: cites
-    target: source_artifact:pmid-35785965
-  -
-    type: cites
-    target: source_artifact:pmid-31490429
-  -
-    type: cites
-    target: source_artifact:pmid-34727008
-  -
-    type: cites
-    target: source_artifact:pmid-41032138
   -
     type: cites
     target: source_artifact:pmid-25705824
   -
     type: cites
-    target: source_artifact:pmid-28633297
-  -
-    type: cites
-    target: source_artifact:pmid-27932366
-  -
-    type: cites
-    target: source_artifact:pmid-29229091
-  -
-    type: cites
-    target: source_artifact:pmid-28905164
-  -
-    type: cites
-    target: source_artifact:pmid-30665914
-  -
-    type: cites
-    target: source_artifact:pmid-35908583
-  -
-    type: cites
-    target: source_artifact:pmid-36255556
-  -
-    type: cites
-    target: source_artifact:pmid-37029766
-  -
-    type: cites
-    target: source_artifact:pmid-38410962
-  -
-    type: cites
-    target: source_artifact:pmid-37650138
-  -
-    type: cites
-    target: source_artifact:pmid-35710395
-  -
-    type: cites
     target: source_artifact:pmid-40611569
-  -
-    type: cites
-    target: source_artifact:pmid-41831305
-  -
-    type: cites
-    target: source_artifact:doi-10.1152-ajpregu.00012.2025
 lineage:
   relationship: root
   rationale: Murph canonical dry-sauna protocol for the first Health Commons field test.

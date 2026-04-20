@@ -104,6 +104,26 @@
     },
     {
       "affectedFields": [
+        "relations",
+        "claims.long-term-cohort-findings-are-context-not-endpoints.caveats",
+        "generated.artifactManifests",
+        "packages/health-commons/src/load.ts",
+        "packages/health-commons/src/hash-artifact.ts"
+      ],
+      "changeId": "chg_2026_04_20_sauna_cleanup_page_artifacts",
+      "changeType": "copy_edit",
+      "editSummary": "Simplified canonical sauna page-level citations and fixed artifact generation for source-page snapshots.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "Detailed source attribution now lives in claim sourceKeys and the bibliography page; generated artifact manifests now also include artifact pointers declared directly on source pages so Cloudflare R2 sync sees them.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
         "artifacts/sauna/research-artifacts.json",
         "packages/health-commons/src/hash-artifact.ts",
         "packages/health-commons/README.md",

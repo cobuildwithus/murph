@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { HealthCommonsArtifactPointer } from "@murphai/contracts";
 
-import { readHealthCommonsArtifactManifests } from "./load.ts";
+import { readAllHealthCommonsArtifactManifests } from "./load.ts";
 import { sha256Buffer } from "./normalize.ts";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -27,7 +27,7 @@ interface UploadCandidate {
 }
 
 export async function syncHealthCommonsArtifactsToCloudflareR2(options: CliOptions): Promise<void> {
-  const manifests = await readHealthCommonsArtifactManifests(options.contentRoot);
+  const manifests = await readAllHealthCommonsArtifactManifests(options.contentRoot);
   const candidates: UploadCandidate[] = [];
 
   for (const manifest of manifests) {
@@ -135,7 +135,7 @@ function formatCommand(args: readonly string[]): string {
     .join(" ");
 }
 
-function parseCliOptions(argv: readonly string[]): CliOptions {
+export function parseCliOptions(argv: readonly string[]): CliOptions {
   const options: CliOptions = {
     allowUnclearedRights: false,
     artifactRoot: repoRoot,

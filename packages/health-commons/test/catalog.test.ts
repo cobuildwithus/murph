@@ -29,8 +29,9 @@ describe("health commons catalog", () => {
       "experiment_family:dry-sauna",
     );
     const protocolClaimSources = saunaProtocol?.claims?.flatMap((claim) => claim.sourceKeys ?? []) ?? [];
+    const catalogEntityKeys = new Set(catalog.entities.map((entity) => entity.key));
     for (const sourceKey of protocolClaimSources) {
-      expect(protocolRelationTargets).toContain(sourceKey);
+      expect(catalogEntityKeys).toContain(sourceKey);
     }
 
     expect(catalog.entities.map((entity) => entity.key)).toContain("experiment_family:infrared-sauna");

@@ -1,14 +1,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
 import { printArtifactMetadata } from "@murphai/health-commons";
-
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const repoRoot = path.resolve(packageRoot, "..", "..");
 
 describe("hash artifact CLI helper", () => {
   it("prints manifest-ready metadata with stable defaults", async () => {
@@ -24,7 +20,7 @@ describe("hash artifact CLI helper", () => {
         contentType: "application/pdf",
         file: filePath,
         kind: "pdf",
-        localPath: null,
+        localPath: "research-artifacts/sauna/my-sauna-proof.pdf",
         objectKey: null,
         rightsStatus: "permission_required",
         redistributable: false,
@@ -42,8 +38,8 @@ describe("hash artifact CLI helper", () => {
         byteSize: 5,
         contentType: "application/pdf",
         kind: "pdf",
-        localPath: path.relative(repoRoot, filePath).split(path.sep).join(path.posix.sep),
-        objectKey: "commons/research/sauna/my sauna proof/source.pdf",
+        localPath: "research-artifacts/sauna/my-sauna-proof.pdf",
+        objectKey: "commons/research/sauna/my_sauna_proof/source.pdf",
         rightsStatus: "permission_required",
         redistributable: false,
         sourceKey: "source_artifact:sauna-proof",

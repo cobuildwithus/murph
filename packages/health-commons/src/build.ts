@@ -52,7 +52,7 @@ export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions):
   }
 }
 
-function parseCliOptions(argv: readonly string[]): CliOptions {
+export function parseCliOptions(argv: readonly string[]): CliOptions {
   const options: CliOptions = {
     check: false,
     contentRoot: path.join(packageRoot, "content"),
