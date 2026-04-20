@@ -79,6 +79,13 @@ export interface HostedLocalFullStackScenario {
       timeoutMs?: number;
     },
   ): Promise<HostedExecutionUserStatus>;
+  waitForHostedIdle(
+    userId: string,
+    input?: {
+      pollIntervalMs?: number;
+      timeoutMs?: number;
+    },
+  ): Promise<HostedExecutionUserStatus>;
   waitForLatestPendingWake(userId: string): Promise<HostedExecutionWakeDrainResult>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
@@ -248,6 +255,8 @@ export async function startHostedLocalFullStackScenario(input: {
       },
       waitForHostedCompletion: async (userId, waitInput) =>
         await scenarioHarness.waitForHostedCompletion(userId, waitInput),
+      waitForHostedIdle: async (userId, waitInput) =>
+        await scenarioHarness.waitForHostedIdle(userId, waitInput),
       waitForLatestPendingWake: async (userId) =>
         await wakeHostedWorkerForLatestPendingWake({
           harness: scenarioHarness,

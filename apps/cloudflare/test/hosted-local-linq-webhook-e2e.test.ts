@@ -73,7 +73,7 @@ describe("hosted local Linq webhook e2e", () => {
     });
 
     await requireScenario().runWake(buildActivationWake(webhookUserId), webhookUserId);
-    await requireScenario().waitForHostedCompletion(webhookUserId);
+    await requireScenario().waitForHostedIdle(webhookUserId);
     await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
       matchRequest: requireLinqStub().createCreateChatRequestMatcher(webhookUserId),
@@ -83,7 +83,18 @@ describe("hosted local Linq webhook e2e", () => {
 
     const materializedChatId = requireLinqStub().requireObservedChatId(webhookUserId);
     const expectedReplyChatPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const expectedTypingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
+    const typingStartsBeforeInbound = requireLinqStub().countObservedRequests(
+      expectedTypingPath,
+      createLinqRequestMethodMatcher("POST"),
+    );
+    const typingStopsBeforeInbound = requireLinqStub().countObservedRequests(
+      expectedTypingPath,
+      createLinqRequestMethodMatcher("DELETE"),
+    );
+    await requireLinqStub().waitForRequestsToSettle();
+    const requestCountBeforeInbound = requireLinqStub().observedRequests.length;
     const webhookEvent = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
       eventId: `evt_webhook_${webhookUserId}`,
       messageId: `msg_webhook_${webhookUserId}`,
@@ -98,14 +109,57 @@ describe("hosted local Linq webhook e2e", () => {
     });
 
     await requireScenario().waitForLatestPendingWake(webhookUserId);
-    await requireScenario().waitForHostedCompletion(webhookUserId);
-
+    await requireScenario().waitForHostedIdle(webhookUserId);
+    await requireLinqStub().waitForRequestCount({
+      expectedCount: typingStartsBeforeInbound + 2,
+      expectedPath: expectedTypingPath,
+      matchRequest: createLinqRequestMethodMatcher("POST"),
+      scenario: requireScenario(),
+      userId: webhookUserId,
+    });
+    await requireLinqStub().waitForRequestCount({
+      expectedCount: typingStopsBeforeInbound + 2,
+      expectedPath: expectedTypingPath,
+      matchRequest: createLinqRequestMethodMatcher("DELETE"),
+      scenario: requireScenario(),
+      userId: webhookUserId,
+    });
     const replySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: expectedReplyChatPath,
       scenario: requireScenario(),
       userId: webhookUserId,
     });
+    const replySendIndex = requireLinqStub().observedRequests.indexOf(replySend);
+    const requestsThroughFirstReply = requireLinqStub().observedRequests.slice(
+      requestCountBeforeInbound,
+      replySendIndex + 1,
+    );
+    const typingStartsAfterInbound = requestsThroughFirstReply.filter((request) =>
+      request.url === expectedTypingPath && request.method === "POST"
+    );
+    const typingStopsAfterInbound = requestsThroughFirstReply.filter((request) =>
+      request.url === expectedTypingPath && request.method === "DELETE"
+    );
+    const replySendsThroughFirstReply = requestsThroughFirstReply.filter((request) =>
+      request.url === expectedReplyChatPath && request.method === "POST"
+    );
+
+    expect(typingStartsAfterInbound).toHaveLength(2);
+    expect(typingStopsAfterInbound).toHaveLength(2);
+    expect(replySendsThroughFirstReply).toHaveLength(1);
+
+    const firstTypingStartIndex = requestsThroughFirstReply.indexOf(typingStartsAfterInbound[0]!);
+    const firstTypingStopIndex = requestsThroughFirstReply.indexOf(typingStopsAfterInbound[0]!);
+    const secondTypingStartIndex = requestsThroughFirstReply.indexOf(typingStartsAfterInbound[1]!);
+    const secondTypingStopIndex = requestsThroughFirstReply.indexOf(typingStopsAfterInbound[1]!);
+    const replySendSequenceIndex = requestsThroughFirstReply.indexOf(replySend);
+
+    expect(firstTypingStartIndex).toBeGreaterThanOrEqual(0);
+    expect(firstTypingStopIndex).toBeGreaterThan(firstTypingStartIndex);
+    expect(secondTypingStartIndex).toBeGreaterThan(firstTypingStopIndex);
+    expect(secondTypingStopIndex).toBeGreaterThan(secondTypingStartIndex);
+    expect(replySendSequenceIndex).toBeGreaterThan(secondTypingStopIndex);
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?",
     );
@@ -230,6 +284,10 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .digest("hex");
 
   return `sha256=${signature}`;
+}
+
+function createLinqRequestMethodMatcher(method: "DELETE" | "POST") {
+  return (request: { method: string }) => request.method === method;
 }
 
 function requireLinqStub(): HostedLocalLinqStub {
