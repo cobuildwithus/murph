@@ -5,6 +5,9 @@ import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 function buildPrompt(
   assistantCommandAccessMode: 'bound-tools' | 'direct-cli' | 'none',
   turnTrigger: 'automation-cron' | 'manual-ask' | null = null,
+  options?: {
+    firstTurnCheckIn?: boolean
+  },
 ) {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -19,7 +22,7 @@ function buildPrompt(
     },
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
-    firstTurnCheckIn: false,
+    firstTurnCheckIn: options?.firstTurnCheckIn ?? false,
     modelBehaviorProfile: 'default',
     turnTrigger,
     vaultOverview: null,
@@ -133,6 +136,40 @@ describe('buildAssistantSystemPrompt', () => {
     )
     expect(prompt).toContain(
       'If the result says nothing changed, do not claim that something new was saved.',
+    )
+  })
+
+  it('uses the gradual first-turn onboarding guidance when the first-contact flow is enabled', () => {
+    const prompt = buildPrompt('bound-tools', null, { firstTurnCheckIn: true })
+
+    expect(prompt).toContain('First-turn onboarding guidance:')
+    expect(prompt).toContain(`Hey, I'm Murph — your personal health assistant.
+
+Send me things as they happen: meals, workouts, supplements, labs, symptoms, whatever. I'll keep track of it all and help you spot patterns, answer questions, and stay on top of your goals.
+
+Your own private health team, whenever you need it.
+
+Ready to get started?`)
+    expect(prompt).toContain(
+      'Use onboarding to make a brand-new user feel oriented, not interviewed.',
+    )
+    expect(prompt).toContain(
+      "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?",
+    )
+    expect(prompt).toContain(
+      'Useful context, whenever you have it: recent labs, health records, current meds or supplements, and wearable data can all help.',
+    )
+    expect(prompt).toContain(
+      "You don't have to set everything up now. You can just text normal notes as things happen - sleep, food, workouts, symptoms, energy, questions - and I'll help keep the thread together over time.",
+    )
+    expect(prompt).toContain(
+      'Want to start light? Send something like: "slept 5 hours, knee is bugging me" - I can log both and start watching for patterns.',
+    )
+    expect(prompt).toContain(
+      'Do not append a capability paragraph, examples, or intake questions to it.',
+    )
+    expect(prompt).toContain(
+      'If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding;',
     )
   })
 })
