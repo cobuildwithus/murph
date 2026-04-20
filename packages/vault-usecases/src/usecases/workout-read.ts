@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { rawImportManifestSchema, type RawImportManifest } from '@murphai/contracts'
-import { parseRawImportManifest } from '@murphai/core'
+import { rawImportManifestSchema } from '@murphai/contracts'
 import { z } from 'zod'
 import {
   isJsonObject,
@@ -11,7 +9,7 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
-import { asListEnvelope, toListEntity } from './shared.js'
+import { asListEnvelope, readRawImportManifest, toListEntity } from './shared.js'
 import {
   listMeasurementRecords,
   showMeasurementManifest,
@@ -20,7 +18,6 @@ import {
 import {
   relativePathEntries,
   relativePathStrings,
-  resolveVaultRelativePath,
 } from './vault-usecase-helpers.js'
 
 const DEFAULT_LIST_LIMIT = 50
@@ -91,59 +88,6 @@ async function loadTrackedWorkoutRecord(
   return record
 }
 
-async function readImportManifest(
-  vault: string,
-  manifestFile: string,
-): Promise<RawImportManifest> {
-  const manifestPath = await resolveVaultRelativePath(vault, manifestFile)
-  let manifestText: string
-
-  try {
-    manifestText = await readFile(manifestPath, 'utf8')
-  } catch (error) {
-    throw new VaultCliError(
-      'manifest_missing',
-      `Manifest file "${manifestFile}" is missing from the vault.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-
-  let manifest: unknown
-
-  try {
-    manifest = JSON.parse(manifestText)
-  } catch (error) {
-    throw new VaultCliError(
-      'manifest_invalid',
-      `Manifest file "${manifestFile}" is not valid JSON.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-
-  if (!isJsonObject(manifest)) {
-    throw new VaultCliError(
-      'manifest_invalid',
-      `Manifest file "${manifestFile}" must contain a JSON object.`,
-    )
-  }
-
-  try {
-    return parseRawImportManifest(manifest)
-  } catch (error) {
-    throw new VaultCliError(
-      'manifest_invalid',
-      `Manifest file "${manifestFile}" does not match the raw import manifest contract.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-}
-
 async function listTrackedWorkoutRecords(input: {
   vault: string
   from?: string
@@ -186,7 +130,7 @@ async function showTrackedWorkoutManifest(
 ) {
   const record = await loadTrackedWorkoutRecord(vault, lookup, allowedKinds, label)
   const manifestFile = resolveManifestFile(record)
-  const manifest = await readImportManifest(vault, manifestFile)
+  const manifest = await readRawImportManifest(vault, manifestFile)
 
   return {
     vault,
