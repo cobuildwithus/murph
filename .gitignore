@@ -37,3 +37,6 @@ apps/cloudflare/.runner.env*
 apps/cloudflare/.deploy
 .vercel
 .gstack/
+
+# Local staged research artifacts
+research-artifacts/

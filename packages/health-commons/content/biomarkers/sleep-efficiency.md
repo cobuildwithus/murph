@@ -24,4 +24,6 @@ interpretationFrame:
   caveat: Device estimates can be affected by time in bed, awakenings, sensor placement, illness, alcohol, and travel.
 ---
 
-Sleep efficiency is a secondary Murph marker for protocols that may change relaxation, thermoregulation, or recovery. It should be interpreted with bedtime, wake time, and subjective sleep quality.
+Sleep efficiency is a useful secondary Murph marker for protocols that may change relaxation, thermoregulation, or recovery.
+
+For the dry-sauna protocol, Murph should treat sleep efficiency as **context**, not as a guaranteed mechanism. If it moves in the expected direction alongside better subjective sleep or lower resting heart rate, that can strengthen the personal story. If it does not move, the protocol may still be useful.
