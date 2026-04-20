@@ -12,6 +12,7 @@ engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
+  - '@cobuild/review-gpt@0.5.71'
   - '@cobuild/review-gpt@0.5.70'
   - '@cobuild/review-gpt@0.5.69'
   - '@cobuild/review-gpt@0.5.66'
