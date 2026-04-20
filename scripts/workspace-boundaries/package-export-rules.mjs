@@ -3,6 +3,9 @@ import path from "node:path";
 
 import { findFiles, pathExists, repoRoot } from "./scanner.mjs";
 
+const ALLOWED_ASSISTANT_ENGINE_IMPLEMENTATION_SHAPED_EXPORTS = new Set([
+]);
+
 export async function verifyWorkspacePackageExports(failures) {
   const packageJsonPaths = await findFiles(["packages", "apps"], (filePath) =>
     path.basename(filePath) === "package.json",
@@ -12,118 +15,117 @@ export async function verifyWorkspacePackageExports(failures) {
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 
     for (const exportKey of Object.keys(packageJson.exports ?? {})) {
-      if (exportKey === "./assistant/*") {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant/* is an internal namespace and must be surfaced through dedicated top-level package exports instead.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/assistant-engine"
-        && isAssistantEngineWildcardHelperNamespace(exportKey)
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine helper namespaces must stay on explicit named exports so inbox and usecase internals do not become ambient package surface.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/assistant-engine"
-        && isAssistantEngineInternalHelperExport(exportKey)
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine must keep CLI/inbox/usecase helper modules behind its canonical owner surfaces instead of exporting the internal helper directly.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/operator-config"
-        && exportKey === "./runtime-errors"
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; runtime-unavailable helpers belong with @murphai/vault-usecases/runtime instead of the operator-config contract surface.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/operator-config"
-        && exportKey === "./knowledge-contracts"
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; knowledge result contracts are owned by @murphai/query and must not leak back through the operator-config boundary.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/messaging-ingress"
-        && exportKey === "."
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; messaging-ingress should expose provider-specific seams only instead of a root convenience barrel.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/cloudflare-hosted-control"
-        && exportKey === "."
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cloudflare-hosted-control should expose only its dedicated client/contracts/parsers/routes seams instead of a root umbrella barrel.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/murph"
-        && exportKey === "./knowledge-cli-contracts"
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; shared knowledge result contracts belong on @murphai/query, so the published CLI package must not grow a second public knowledge-contract surface.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/importers"
-        && exportKey === "./device-providers"
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cross-package wearable metadata must stay on @murphai/importers/device-providers/provider-descriptors instead of leaking the full device-provider implementation barrel.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/query"
-        && exportKey === "./knowledge-contracts"
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge result contracts already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/query"
-        && exportKey === "./knowledge-search"
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge search helpers already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`,
-        );
-      }
-
-      if (
-        packageJson.name === "@murphai/query"
-        && exportKey === "./search"
-      ) {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; lexical vault search already lives on the @murphai/query root surface, so the internal search module should not leak as a second boundary.`,
-        );
-      }
-
-      if (exportKey === "./testing") {
-        failures.push(
-          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; test helpers must stay package-local or use package-local Vitest aliases instead of leaking through the workspace package surface.`,
-        );
+      const failure = getWorkspacePackageExportFailure({
+        exportKey,
+        packageJson,
+        packageJsonPath,
+      });
+      if (failure) {
+        failures.push(failure);
       }
     }
   }
+}
+
+export function getWorkspacePackageExportFailure({
+  exportKey,
+  packageJson,
+  packageJsonPath,
+}) {
+  if (exportKey === "./assistant/*") {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant/* is an internal namespace and must be surfaced through dedicated top-level package exports instead.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/assistant-engine"
+    && isAssistantEngineImplementationShapedExport(exportKey)
+    && !ALLOWED_ASSISTANT_ENGINE_IMPLEMENTATION_SHAPED_EXPORTS.has(exportKey)
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine assistant/* file-shaped exports are implementation detail and must stay behind semantic top-level seams unless the exact subpath is explicitly allowlisted here.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/assistant-engine"
+    && isAssistantEngineWildcardHelperNamespace(exportKey)
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine helper namespaces must stay on explicit named exports so inbox and usecase internals do not become ambient package surface.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/assistant-engine"
+    && isAssistantEngineInternalHelperExport(exportKey)
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine must keep CLI/inbox/usecase helper modules behind its canonical owner surfaces instead of exporting the internal helper directly.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/operator-config"
+    && exportKey === "./runtime-errors"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; runtime-unavailable helpers belong with @murphai/vault-usecases/runtime instead of the operator-config contract surface.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/operator-config"
+    && exportKey === "./knowledge-contracts"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; knowledge result contracts are owned by @murphai/query and must not leak back through the operator-config boundary.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/messaging-ingress"
+    && exportKey === "."
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; messaging-ingress should expose provider-specific seams only instead of a root convenience barrel.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/cloudflare-hosted-control"
+    && exportKey === "."
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cloudflare-hosted-control should expose only its dedicated client/contracts/parsers/routes seams instead of a root umbrella barrel.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/murph"
+    && exportKey === "./knowledge-cli-contracts"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; shared knowledge result contracts belong on @murphai/query, so the published CLI package must not grow a second public knowledge-contract surface.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/importers"
+    && exportKey === "./device-providers"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cross-package wearable metadata must stay on @murphai/importers/device-providers/provider-descriptors instead of leaking the full device-provider implementation barrel.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/query"
+    && exportKey === "./knowledge-contracts"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge result contracts already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/query"
+    && exportKey === "./knowledge-search"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge search helpers already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/query"
+    && exportKey === "./search"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; lexical vault search already lives on the @murphai/query root surface, so the internal search module should not leak as a second boundary.`;
+  }
+
+  if (exportKey === "./testing") {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; test helpers must stay package-local or use package-local Vitest aliases instead of leaking through the workspace package surface.`;
+  }
+
+  return null;
 }
 
 export async function verifyWorkspacePackageExportTargets(failures) {
@@ -155,6 +157,7 @@ export async function verifyWorkspacePackageExportTargets(failures) {
   }
 }
 
+
 function listWorkspaceExportTargets(exportsField) {
   if (!exportsField || typeof exportsField !== "object" || Array.isArray(exportsField)) {
     return [];
@@ -170,6 +173,10 @@ function isAssistantEngineWildcardHelperNamespace(exportKey) {
     /^\.\/inbox-services(?:\/.+)?\/\*$/u.test(exportKey)
     || /^\.\/usecases(?:\/.+)?\/\*$/u.test(exportKey)
   );
+}
+
+function isAssistantEngineImplementationShapedExport(exportKey) {
+  return /^\.\/assistant\//u.test(exportKey);
 }
 
 function isAssistantEngineInternalHelperExport(exportKey) {
