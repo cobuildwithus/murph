@@ -317,6 +317,54 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
+  it("treats a disconnected status update as a token clear even when tokenBundle is omitted", async () => {
+    const harness = createAuthorityHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                status: "disconnected",
+              },
+              connectionId: "conn_123",
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connection: expect.objectContaining({
+        accessTokenExpiresAt: null,
+        status: "disconnected",
+        updatedAt: "2026-04-06T10:11:00.000Z",
+      }),
+      connectionId: "conn_123",
+      tokenUpdate: "cleared",
+      writeUpdate: "applied",
+    });
+    expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenCalledTimes(1);
+    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: "conn_123",
+        tokenBundle: null,
+      }),
+    );
+    expect(harness.record.accessTokenExpiresAt).toBeNull();
+    expect(harness.record.status).toBe("disconnected");
+    expect(harness.storedAccount).toBeNull();
+  });
+
   it("applies fresh null fences once and rejects a replay after the hosted version advances", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({

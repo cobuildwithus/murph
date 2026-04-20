@@ -290,6 +290,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
       };
     }
 
+    if (baselineTokenBundle !== null) {
+      update.observedTokenVersion = input.observedTokenVersion;
+      update.tokenBundle = null;
+    }
+
     assignErrorFieldUpdate(update, input.account, baselineLocalState);
 
     return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;

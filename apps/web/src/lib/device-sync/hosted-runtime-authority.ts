@@ -102,12 +102,13 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           tx,
         );
         const baseline = buildHostedRuntimeConnectionSnapshot(record, storedAccount);
+        const disconnectClearsTokens = update.connection?.status === "disconnected";
         const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
-        const tokenMutationRequested = update.tokenBundle !== undefined;
+        const tokenMutationRequested = update.tokenBundle !== undefined || disconnectClearsTokens;
         const connectionWriteRequested = stateMutationRequested || tokenMutationRequested;
         const connectionVersionMismatch = stateMutationRequested
           && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
-        const tokenVersionMismatch = tokenMutationRequested
+        const tokenVersionMismatch = update.tokenBundle !== undefined
           && (baseline.tokenBundle?.tokenVersion ?? null) !== update.observedTokenVersion;
         const versionMismatch = connectionVersionMismatch || tokenVersionMismatch;
         const nextAccount = buildPublicConnectionFromRuntimeSnapshot(baseline);
@@ -150,14 +151,14 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         }
 
         let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
-        if (update.tokenBundle === undefined) {
-          tokenUpdate = baseline.tokenBundle ? "unchanged" : "missing";
-        } else if (versionMismatch) {
+        if (versionMismatch) {
           tokenUpdate = "skipped_version_mismatch";
-        } else if (update.connection?.status === "disconnected" || update.tokenBundle === null) {
+        } else if (disconnectClearsTokens || update.tokenBundle === null) {
           tokenBundleToPersist = null;
           nextAccount.accessTokenExpiresAt = null;
           tokenUpdate = baseline.tokenBundle ? "cleared" : "missing";
+        } else if (update.tokenBundle === undefined) {
+          tokenUpdate = baseline.tokenBundle ? "unchanged" : "missing";
         } else {
           tokenBundleToPersist = {
             ...update.tokenBundle,
@@ -180,7 +181,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           await controlPlane.store.syncDurableConnectionState(nextAccount, tx);
         }
 
-        if (!versionMismatch && update.tokenBundle !== undefined) {
+        if (!versionMismatch && tokenMutationRequested) {
           await controlPlane.store.persistStoredConnectionTokenBundle({
             connectionId: update.connectionId,
             externalAccountId: storedAccount?.externalAccountId ?? null,
