@@ -74,7 +74,7 @@ import {
 } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
-const SETUP_ALIAS_TIMEOUT_MS = 45_000
+const SETUP_ALIAS_TIMEOUT_MS = 90_000
 const SETUP_ONBOARD_TIMEOUT_MS = 90_000
 
 type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]

@@ -2,6 +2,17 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
+    "paths": {
+      "@murphai/vault-usecases": [
+        "packages/vault-usecases/src/index.ts"
+      ],
+      "@murphai/vault-usecases/testing": [
+        "packages/vault-usecases/src/testing.ts"
+      ],
+      "@murphai/vault-usecases/*": [
+        "packages/vault-usecases/src/*"
+      ]
+    },
     "rootDir": "../..",
     "composite": false,
     "incremental": true,
