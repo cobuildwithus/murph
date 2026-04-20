@@ -397,7 +397,7 @@ export class RunnerWakeProcessor {
     userId: string,
     wake: HostedExecutionWake,
     run: HostedExecutionRunContext,
-    runDrain: HostedRuntimeDrainRequest | null = null,
+    runDrain: HostedRuntimeDrainRequest,
   ): Promise<HostedAssistantRuntimeJobResult> {
     if (!this.dependencies.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
@@ -406,7 +406,7 @@ export class RunnerWakeProcessor {
     const { bundleSync, runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
       userId,
     );
-    const runDrainPrimarySharePack = runDrain?.events.find((event) => {
+    const runDrainPrimarySharePack = runDrain.events.find((event) => {
       return event.wake.eventId === wake.eventId && event.sharePack;
     })?.sharePack ?? null;
     const [bundleState, runnerSecrets, sharePack] = await Promise.all([
@@ -431,7 +431,7 @@ export class RunnerWakeProcessor {
         wake,
         ...(sharePack ? { sharePack } : {}),
         run,
-        ...(runDrain ? { runDrain } : {}),
+        runDrain,
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
         configSource: this.dependencies.readRunnerRuntimeConfigSource(),
@@ -492,9 +492,9 @@ export class RunnerWakeProcessor {
         },
         forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
         runElapsedMs: computeHostedRunElapsedMs(run),
-        runDrainEventCount: runDrain?.events.length ?? null,
-        runDrainResumeFinalize: runDrain?.resumeFinalize === true,
-        runDrainRunId: runDrain?.runId ?? null,
+        runDrainEventCount: runDrain.events.length,
+        runDrainResumeFinalize: runDrain.resumeFinalize === true,
+        runDrainRunId: runDrain.runId,
         sharePackAttached: Boolean(sharePack),
         runnerSecretsCategories: {
           modelCredentialConfigured: hasAnyRunnerConfigKey(runnerSecrets, [
