@@ -34,6 +34,7 @@ import {
   upsertGatewayPermissionOverride,
   type GatewayPermissionResolutionOverride,
 } from "./gateway-projection-cache-permissions.js";
+import { withSerializedLock } from "./serialized-lock.js";
 import { sameStructuredJsonValue } from "./structured-json.js";
 
 // Gateway projection state is a transient DO-local cache. Durable truth still
@@ -227,23 +228,15 @@ export class HostedGatewayProjectionCache {
   }
 
   private async withStateLock<T>(run: () => Promise<T>): Promise<T> {
-    const previous = this.stateLock ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const chain = previous.catch(() => {}).then(() => current);
-    this.stateLock = chain;
-    await previous.catch(() => {});
-
-    try {
-      return await run();
-    } finally {
-      release();
-      if (this.stateLock === chain) {
-        this.stateLock = null;
-      }
-    }
+    return withSerializedLock(
+      {
+        get: () => this.stateLock,
+        set: (value) => {
+          this.stateLock = value;
+        },
+      },
+      run,
+    );
   }
 }
 
