@@ -7,12 +7,16 @@ import { afterEach, test } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 
-import type { CanonicalEntity } from "../src/canonical-entities.ts";
+import {
+  resolveCanonicalRecordClass,
+  type CanonicalEntity,
+} from "../src/canonical-entities.ts";
 import {
   BROWSER_VAULT_SNAPSHOT_SCHEMA,
   createBrowserVaultSnapshot,
   parseBrowserVaultSnapshot,
 } from "../src/browser-snapshot.ts";
+import { createVaultReadModel } from "../src/model.ts";
 import { readVaultTolerant } from "../src/vault-reader.ts";
 
 const tempRoots: string[] = [];
@@ -23,149 +27,123 @@ afterEach(async () => {
   ));
 });
 
-test("browser vault snapshots clone entities and metadata before serialization", () => {
-  const entity: CanonicalEntity = {
-    attributes: {
-      nested: {
-        state: "active",
-      },
-    },
-    body: "Body copy",
+test("browser vault snapshots clone dashboard projections before serialization", () => {
+  const experiment = createEntity("experiment", "exp_browser_01", {
+    body: "# Trial\n\nKeep the sauna protocol lightweight.\n",
     date: "2026-04-17",
-    entityId: "goal_browser_01",
-    experimentSlug: null,
-    family: "goal",
-    frontmatter: {
-      title: "Browser goal",
-    },
-    kind: "goal",
-    links: [{ targetId: "cond_browser_01", type: "addresses_condition" }],
-    lookupIds: ["goal_browser_01"],
+    experimentSlug: "sauna-protocol",
     occurredAt: "2026-04-17T08:00:00.000Z",
-    path: "bank/goals/browser.md",
-    primaryLookupId: "goal_browser_01",
-    recordClass: "bank",
-    relatedIds: ["cond_browser_01"],
     status: "active",
-    stream: null,
     tags: ["browser"],
-    title: "Browser goal",
-  };
-  const metadata = {
-    nested: {
-      enabled: true,
+    title: "Browser experiment",
+  });
+  const journal = createEntity("journal", "journal_browser_01", {
+    body: "# Journal\n\n- Good energy\n",
+    date: "2026-04-16",
+    occurredAt: "2026-04-16T08:00:00.000Z",
+    tags: ["journal"],
+    title: "Browser journal",
+  });
+  const sample = createEntity("sample", "sample_browser_01", {
+    attributes: {
+      unit: "ms",
+      value: 48,
     },
-  };
+    date: "2026-04-17",
+    occurredAt: "2026-04-17T08:30:00.000Z",
+    stream: "hrv",
+    tags: ["signal"],
+    title: "HRV sample",
+  });
+  const vault = createVaultReadModel({
+    entities: [experiment, journal, sample],
+    metadata: {
+      title: "Browser vault",
+    },
+    vaultRoot: "browser://vault",
+  });
 
   const snapshot = createBrowserVaultSnapshot({
-    entities: [entity],
     generatedAt: "2026-04-17T08:05:00.000Z",
-    metadata,
     sourceVersion: "a".repeat(64),
+    vault,
   });
 
-  entity.attributes.nested = { state: "mutated" };
-  entity.frontmatter = { title: "Mutated" };
-  entity.links[0]!.targetId = "mutated";
-  entity.lookupIds.push("goal_browser_02");
-  entity.relatedIds.push("cond_browser_02");
-  entity.tags.push("mutated");
-  metadata.nested.enabled = false;
+  experiment.tags.push("mutated");
+  experiment.body = "Mutated protocol body";
+  journal.tags.push("mutated");
+  sample.attributes = {
+    unit: "ms",
+    value: 90,
+  };
 
-  assert.deepEqual(snapshot.entities[0], {
-    attributes: {
-      nested: {
-        state: "active",
-      },
-    },
-    body: "Body copy",
-    date: "2026-04-17",
-    entityId: "goal_browser_01",
-    experimentSlug: null,
-    family: "goal",
-    frontmatter: {
-      title: "Browser goal",
-    },
-    kind: "goal",
-    links: [{ targetId: "cond_browser_01", type: "addresses_condition" }],
-    lookupIds: ["goal_browser_01"],
-    occurredAt: "2026-04-17T08:00:00.000Z",
-    path: "bank/goals/browser.md",
-    primaryLookupId: "goal_browser_01",
-    recordClass: "bank",
-    relatedIds: ["cond_browser_01"],
+  assert.deepEqual(snapshot.overview.trackedExperiments[0], {
+    id: "exp_browser_01",
+    slug: "sauna-protocol",
+    startedOn: "2026-04-17",
     status: "active",
-    stream: null,
+    summary: "Keep the sauna protocol lightweight.",
     tags: ["browser"],
-    title: "Browser goal",
+    title: "Browser experiment",
   });
-  assert.deepEqual(snapshot.metadata, {
-    nested: {
-      enabled: true,
-    },
+  assert.deepEqual(snapshot.overview.recentJournals[0], {
+    date: "2026-04-16",
+    id: "journal_browser_01",
+    summary: "Good energy",
+    tags: ["journal"],
+    title: "Browser journal",
   });
+  assert.equal(snapshot.history.timeline[0]?.id, "sample-summary:2026-04-17:hrv:ms");
+  assert.deepEqual(snapshot.history.timeline[0]?.tags, ["sample_summary", "hrv"]);
+  assert.equal(snapshot.overview.weeklySampleSummaries[0]?.averageValue, 48);
 });
 
-test("browser vault snapshots parse canonical entities and validate schema", () => {
-  const parsed = parseBrowserVaultSnapshot({
-    entities: [{
-      attributes: {
-        score: 5,
-      },
-      body: null,
-      date: null,
-      entityId: "journal_browser_01",
-      experimentSlug: null,
-      family: "journal",
-      frontmatter: null,
-      kind: "journal_day",
-      links: [],
-      lookupIds: ["journal_browser_01"],
-      occurredAt: null,
-      path: "history/journal/2026-04-17.md",
-      primaryLookupId: "journal_browser_01",
-      recordClass: "history",
-      relatedIds: [],
-      status: null,
-      stream: null,
-      tags: [],
-      title: null,
-    }],
+test("browser vault snapshots parse dashboard projections and validate schema", () => {
+  const snapshot = createBrowserVaultSnapshot({
     generatedAt: "2026-04-17T08:05:00.000Z",
-    metadata: null,
-    schema: BROWSER_VAULT_SNAPSHOT_SCHEMA,
     sourceVersion: "b".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("experiment", "exp_browser_parse", {
+          body: "Track the protocol.",
+          date: "2026-04-17",
+          occurredAt: "2026-04-17T08:00:00.000Z",
+          status: "active",
+          title: "Parse experiment",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
   });
+  const parsed = parseBrowserVaultSnapshot(
+    JSON.parse(JSON.stringify(snapshot)) as unknown,
+  );
 
   assert.equal(parsed.schema, BROWSER_VAULT_SNAPSHOT_SCHEMA);
-  assert.equal(parsed.entities[0]?.entityId, "journal_browser_01");
-  assert.equal(parsed.entities[0]?.title, null);
-  assert.equal(parsed.metadata, null);
+  assert.equal(parsed.overview.trackedExperiments[0]?.id, "exp_browser_parse");
+  assert.equal(parsed.overview.trackedExperiments[0]?.title, "Parse experiment");
+  assert.deepEqual(parsed.history.timeline, snapshot.history.timeline);
 
   assert.throws(
     () =>
       parseBrowserVaultSnapshot({
-        entities: [],
+        ...snapshot,
         generatedAt: "2026-04-17T08:05:00.000Z",
-        metadata: null,
-        schema: "murph.browser-vault-snapshot.wrong",
-        sourceVersion: "b".repeat(64),
+        schema: "murph.browser-vault-dashboard-snapshot.wrong",
       }),
-    /Browser vault snapshot\.schema must be murph\.browser-vault-snapshot\.v1\./,
+    /Browser vault snapshot\.schema must be murph\.browser-vault-dashboard-snapshot\.v1\./,
   );
 
   assert.throws(
     () =>
       parseBrowserVaultSnapshot({
-        entities: [{
-          lookupIds: [],
-        }],
-        generatedAt: "2026-04-17T08:05:00.000Z",
-        metadata: null,
-        schema: BROWSER_VAULT_SNAPSHOT_SCHEMA,
-        sourceVersion: "b".repeat(64),
+        ...snapshot,
+        history: {
+          timeline: {},
+        },
       }),
-    /Browser vault snapshot\.entities\[0\]\.entityId must be a non-empty string\./,
+    /Browser vault snapshot\.history\.timeline must be an array\./,
   );
 
   assert.throws(
@@ -176,13 +154,10 @@ test("browser vault snapshots parse canonical entities and validate schema", () 
   assert.throws(
     () =>
       parseBrowserVaultSnapshot({
-        entities: {},
-        generatedAt: "2026-04-17T08:05:00.000Z",
-        metadata: null,
-        schema: BROWSER_VAULT_SNAPSHOT_SCHEMA,
-        sourceVersion: "b".repeat(64),
+        ...snapshot,
+        overview: {},
       }),
-    /Browser vault snapshot\.entities must be an array\./,
+    /Browser vault snapshot\.overview\.metrics must be an array\./,
   );
 });
 
@@ -222,3 +197,32 @@ Get outside after waking.
   assert.equal(vault.metadata?.title, "Browser tolerant vault");
   assert.ok(Array.isArray(vault.entities));
 });
+
+function createEntity(
+  family: CanonicalEntity["family"],
+  entityId: string,
+  overrides: Partial<CanonicalEntity> = {},
+): CanonicalEntity {
+  return {
+    attributes: {},
+    body: null,
+    date: null,
+    entityId,
+    experimentSlug: null,
+    family,
+    frontmatter: null,
+    kind: family,
+    links: [],
+    lookupIds: [entityId],
+    occurredAt: null,
+    path: `${family}/${entityId}.md`,
+    primaryLookupId: entityId,
+    recordClass: resolveCanonicalRecordClass(family),
+    relatedIds: [],
+    status: null,
+    stream: null,
+    tags: [],
+    title: entityId,
+    ...overrides,
+  };
+}
