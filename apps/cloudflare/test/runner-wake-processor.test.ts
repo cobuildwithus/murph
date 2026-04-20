@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
+  recordHostedRunBreadcrumbInWebBestEffort,
   recordHostedRunPhaseLogInWebBestEffort,
   summarizeHostedAssistantDeliveryOutcomes,
 } from "../src/user-runner/runner-wake-processor.ts";
@@ -44,7 +45,7 @@ describe("runner wake processor delivery summaries", () => {
   });
 });
 
-describe("recordHostedRunPhaseLogInWebBestEffort", () => {
+describe("recordHostedRunBreadcrumbInWebBestEffort", () => {
   const callbackSigning = {
     keyId: "v1",
     privateKeyJwkJson: "{\"kty\":\"EC\"}",
@@ -56,14 +57,17 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
       logged: true,
     });
 
-    await recordHostedRunPhaseLogInWebBestEffort({
+    await recordHostedRunBreadcrumbInWebBestEffort({
       baseUrl: "https://hosted.example",
       callbackSigning,
       error: new Error("boom"),
       level: "warn",
-      message: "Hosted run drain deferred because the runtime is not configured yet. boom",
-      phase: "retry.scheduled",
+      message: "Cloudflare runner invocation failed while preparing the hosted run snapshot.",
+      phase: "runtime_failed",
       recordLog,
+      redacted: {
+        reason: "runner_invocation_failed",
+      },
       run: {
         attempt: 2,
         runId: "run-123",
@@ -80,11 +84,11 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
       body: expect.objectContaining({
         component: "cloudflare-runner",
         level: "warn",
-        message: "Hosted run drain deferred because the runtime is not configured yet. boom",
-        phase: "retry.scheduled",
+        message: "Cloudflare runner invocation failed while preparing the hosted run snapshot.",
+        phase: "runtime_failed",
         redacted: expect.objectContaining({
           errorCode: expect.any(String),
-          eventId: "wake-123",
+          reason: "runner_invocation_failed",
           runElapsedMs: expect.any(Number),
         }),
         runId: "run-123",
@@ -100,11 +104,11 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await expect(
-      recordHostedRunPhaseLogInWebBestEffort({
+      recordHostedRunBreadcrumbInWebBestEffort({
         baseUrl: "https://hosted.example",
         callbackSigning,
-        message: "Hosted run finalized committed side effects.",
-        phase: "completed",
+        message: "Cloudflare finished hosted run finalization.",
+        phase: "finalize_finished",
         recordLog: vi.fn().mockRejectedValue(new Error("network down")),
         run: {
           attempt: 1,
@@ -125,7 +129,7 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
       message: expect.stringContaining(
         "Hosted run phase log write to web failed; continuing with runner-local observability only.",
       ),
-      phase: "completed",
+      phase: "retry.scheduled",
       userId: "user-456",
     }));
   });
@@ -133,11 +137,11 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
   it("skips the web log write when the hosted web base URL is unavailable", async () => {
     const recordLog = vi.fn();
 
-    await recordHostedRunPhaseLogInWebBestEffort({
+    await recordHostedRunBreadcrumbInWebBestEffort({
       baseUrl: null,
       callbackSigning,
-      message: "Running hosted run drain from the web-owned run ledger.",
-      phase: "wake.running",
+      message: "Cloudflare acquired a hosted run from the web-owned run ledger.",
+      phase: "acquired",
       recordLog,
       run: {
         attempt: 1,
@@ -149,5 +153,46 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
     });
 
     expect(recordLog).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordHostedRunPhaseLogInWebBestEffort", () => {
+  const callbackSigning = {
+    keyId: "v1",
+    privateKeyJwkJson: "{\"kty\":\"EC\"}",
+  };
+
+  it("adds the wake event id to redacted phase logs without storing raw error text", async () => {
+    const recordLog = vi.fn().mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    await recordHostedRunPhaseLogInWebBestEffort({
+      baseUrl: "https://hosted.example",
+      callbackSigning,
+      error: new Error("boom"),
+      level: "warn",
+      message: "Hosted run drain failed after invoking the runtime.",
+      phase: "retry.scheduled",
+      recordLog,
+      run: {
+        attempt: 1,
+        runId: "run-999",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+      },
+      userId: "user-999",
+      wakeEventId: "wake-999",
+    });
+
+    expect(recordLog).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        message: "Hosted run drain failed after invoking the runtime.",
+        redacted: expect.objectContaining({
+          eventId: "wake-999",
+          errorCode: expect.any(String),
+        }),
+      }),
+    }));
   });
 });

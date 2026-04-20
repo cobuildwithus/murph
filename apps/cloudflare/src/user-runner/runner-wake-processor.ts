@@ -3,13 +3,14 @@ import type {
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
+  HostedRuntimeEvent,
   HostedExecutionRunnerResult,
   HostedExecutionRunnerSharePack,
-  HostedExecutionWake,
+  HostedIngressEnvelope,
   HostedRunRecord,
   HostedRuntimeDrainEvent,
   HostedRuntimeDrainRequest,
-  HostedWakeLifecycleState,
+  HostedIngressLifecycleState,
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
@@ -54,8 +55,8 @@ import {
   recordHostedRunLogInWeb,
 } from "../web-control-plane.ts";
 
-export type HostedExecutionWakeProgressRecord =
-  Pick<HostedExecutionWake, "eventId" | "userId">;
+export type HostedIngressEnvelopeProgressRecord =
+  Pick<HostedRuntimeEvent, "eventId" | "userId">;
 
 export interface RunnerUserStores {
   bundleSync: RunnerBundleSync;
@@ -70,10 +71,11 @@ export interface RunnerRunDrainExecutionResult {
   finalizeRequired: boolean;
   nextRuntimeWakeAt?: string | null;
   redactedSummary?: Record<string, unknown>;
-  state: HostedWakeLifecycleState;
+  state: HostedIngressLifecycleState;
 }
 
 const HOSTED_RUN_PHASE_LOG_TIMEOUT_MS = 2_000;
+const HOSTED_RUN_LOG_COMPONENT = "cloudflare-runner";
 
 interface RunnerWakeTransitionInput<T> {
   eventId: string;
@@ -101,7 +103,7 @@ export class RunnerWakeProcessor {
   ) {}
 
   async readRunDrainSharePack(
-    wake: HostedExecutionWake,
+    wake: HostedIngressEnvelope,
   ): Promise<HostedExecutionRunnerSharePack | null> {
     if (wake.kind !== "vault.share.accepted") {
       return null;
@@ -115,8 +117,9 @@ export class RunnerWakeProcessor {
 
   async executeRunDrain(input: {
     events: HostedRuntimeDrainEvent[];
-    primaryWake: HostedExecutionWake;
+    primaryWake: HostedRuntimeEvent;
     run: HostedRunRecord;
+    runToken?: string | null;
   }): Promise<RunnerRunDrainExecutionResult> {
     const userId = input.primaryWake.userId;
     const run = hostedRunRecordToExecutionRunContext(input.run);
@@ -142,6 +145,21 @@ export class RunnerWakeProcessor {
         run: null,
         userId,
       });
+      void recordHostedRunBreadcrumbInWebBestEffort({
+        baseUrl: this.dependencies.hostedWebBaseUrl,
+        callbackSigning: this.dependencies.env.webCallbackSigning,
+        level: "info",
+        message: "Cloudflare deferred hosted run execution because another active run still owns the user lease.",
+        phase: "runtime_backpressured",
+        redacted: {
+          activeRunId: activeLease.run.runId,
+          reason: "active_lease",
+        },
+        run,
+        runToken: input.runToken,
+        userId,
+        wakeEventId: runEventId,
+      });
       return {
         cursorSnapshotRef: null,
         finalizeRequired: false,
@@ -160,6 +178,7 @@ export class RunnerWakeProcessor {
       message: "Running hosted run drain from the web-owned run ledger.",
       phase: "wake.running",
       run,
+      runToken: input.runToken,
     });
 
     try {
@@ -172,6 +191,7 @@ export class RunnerWakeProcessor {
           resumeFinalize: false,
           run: input.run,
         }),
+        input.runToken,
       );
       const result = runnerResult.result;
 
@@ -182,12 +202,28 @@ export class RunnerWakeProcessor {
           result: runnerResult.result,
           run,
         });
+        void recordHostedRunBreadcrumbInWebBestEffort({
+          baseUrl: this.dependencies.hostedWebBaseUrl,
+          callbackSigning: this.dependencies.env.webCallbackSigning,
+          message: "Cloudflare prepared a hosted run snapshot for commit.",
+          phase: "runner_prepared_snapshot",
+          redacted: {
+            assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
+            eventCount: input.events.length,
+            nextRuntimeWakeScheduled: result.result.nextWakeAt !== null,
+          },
+          run,
+          runToken: input.runToken,
+          userId,
+          wakeEventId: runEventId,
+        });
         await this.advanceRunPhase({
           clearError: true,
           wake: { eventId: runEventId, userId },
           message: "Hosted run drain prepared a committed snapshot and is awaiting web commit.",
           phase: "commit.recorded",
           run,
+          runToken: input.runToken,
         });
         await this.dependencies.stateStore.completeWakeRun({
           eventId: runEventId,
@@ -240,15 +276,36 @@ export class RunnerWakeProcessor {
         eventId: runEventId,
         leaseOwner,
       });
+      const backpressured = error instanceof HostedExecutionConfigurationError;
+      void recordHostedRunBreadcrumbInWebBestEffort({
+        baseUrl: this.dependencies.hostedWebBaseUrl,
+        callbackSigning: this.dependencies.env.webCallbackSigning,
+        error,
+        level: backpressured ? "warn" : "error",
+        message: backpressured
+          ? "Cloudflare deferred hosted run execution because the runtime is not configured yet."
+          : "Cloudflare runner invocation failed while preparing the hosted run snapshot.",
+        phase: backpressured ? "runtime_backpressured" : "runtime_failed",
+        redacted: {
+          eventCount: input.events.length,
+          reason: backpressured ? "runtime_not_configured" : "runner_invocation_failed",
+          resumeFinalize: false,
+        },
+        run,
+        runToken: input.runToken,
+        userId,
+        wakeEventId: runEventId,
+      });
       await this.advanceRunPhase({
         wake: { eventId: runEventId, userId },
         error,
-        level: error instanceof HostedExecutionConfigurationError ? "warn" : "error",
-        message: error instanceof HostedExecutionConfigurationError
+        level: backpressured ? "warn" : "error",
+        message: backpressured
           ? "Hosted run drain deferred because the runtime is not configured yet."
           : "Hosted run drain failed after invoking the runtime.",
         phase: "retry.scheduled",
         run,
+        runToken: input.runToken,
       });
       return {
         cursorSnapshotRef: null,
@@ -259,8 +316,9 @@ export class RunnerWakeProcessor {
   }
 
   async finalizeRunDrain(input: {
-    primaryWake: HostedExecutionWake;
+    primaryWake: HostedRuntimeEvent;
     run: HostedRunRecord;
+    runToken?: string | null;
   }): Promise<RunnerRunDrainExecutionResult> {
     const userId = input.primaryWake.userId;
     const run = hostedRunRecordToExecutionRunContext(input.run);
@@ -281,6 +339,7 @@ export class RunnerWakeProcessor {
       message: "Finalizing hosted run-drain side effects from the web-visible prepared snapshot.",
       phase: "side-effects.draining",
       run,
+      runToken: input.runToken,
     });
 
     try {
@@ -293,6 +352,7 @@ export class RunnerWakeProcessor {
           resumeFinalize: true,
           run: input.run,
         }),
+        input.runToken,
       );
 
       if (!isCompletedRunnerResult(runnerResult)) {
@@ -320,6 +380,7 @@ export class RunnerWakeProcessor {
         message: "Hosted run drain finalized committed side effects.",
         phase: "completed",
         run,
+        runToken: input.runToken,
       });
 
       return {
@@ -340,15 +401,35 @@ export class RunnerWakeProcessor {
         eventId: runEventId,
         leaseOwner,
       });
+      const backpressured = error instanceof HostedExecutionConfigurationError;
+      void recordHostedRunBreadcrumbInWebBestEffort({
+        baseUrl: this.dependencies.hostedWebBaseUrl,
+        callbackSigning: this.dependencies.env.webCallbackSigning,
+        error,
+        level: backpressured ? "warn" : "error",
+        message: backpressured
+          ? "Cloudflare deferred hosted run finalization because the runtime is not configured yet."
+          : "Cloudflare runner invocation failed while finalizing the hosted run.",
+        phase: backpressured ? "runtime_backpressured" : "runtime_failed",
+        redacted: {
+          reason: backpressured ? "runtime_not_configured" : "runner_finalize_failed",
+          resumeFinalize: true,
+        },
+        run,
+        runToken: input.runToken,
+        userId,
+        wakeEventId: runEventId,
+      });
       await this.advanceRunPhase({
         wake: { eventId: runEventId, userId },
         error,
-        level: error instanceof HostedExecutionConfigurationError ? "warn" : "error",
-        message: error instanceof HostedExecutionConfigurationError
+        level: backpressured ? "warn" : "error",
+        message: backpressured
           ? "Hosted run-drain finalization deferred because the runtime is not configured yet."
           : "Hosted run-drain finalization failed after invoking the runtime.",
         phase: "retry.scheduled",
         run,
+        runToken: input.runToken,
       });
       return {
         cursorSnapshotRef: null,
@@ -359,12 +440,12 @@ export class RunnerWakeProcessor {
   }
 
   async cleanupTransientWakeDataBestEffortForRunDrain(
-    wake: HostedExecutionWake,
+    wake: HostedIngressEnvelope,
   ): Promise<void> {
     await this.deleteTransientWakeDataBestEffort(wake);
   }
 
-  private async deleteTransientWakeDataBestEffort(wake: HostedExecutionWake): Promise<void> {
+  private async deleteTransientWakeDataBestEffort(wake: HostedIngressEnvelope): Promise<void> {
     if (wake.kind !== "conversation.message" || wake.message.channel !== "email") {
       return;
     }
@@ -399,9 +480,10 @@ export class RunnerWakeProcessor {
 
   private async invokeRunner(
     userId: string,
-    wake: HostedExecutionWake,
+    primaryWake: HostedRuntimeEvent,
     run: HostedExecutionRunContext,
     runDrain: HostedRuntimeDrainRequest,
+    runToken?: string | null,
   ): Promise<HostedAssistantRuntimeJobResult> {
     if (!this.dependencies.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
@@ -410,20 +492,9 @@ export class RunnerWakeProcessor {
     const { bundleSync, runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
       userId,
     );
-    const runDrainPrimarySharePack = runDrain.events.find((event) => {
-      return event.wake.eventId === wake.eventId && event.sharePack;
-    })?.sharePack ?? null;
-    const [bundleState, runnerSecrets, sharePack] = await Promise.all([
+    const [bundleState, runnerSecrets] = await Promise.all([
       this.dependencies.stateStore.readBundleMetaState(),
       runnerSecretsService.readRunnerSecrets(userId),
-      wake.kind === "vault.share.accepted"
-        ? runDrainPrimarySharePack
-          ? Promise.resolve(runDrainPrimarySharePack)
-          : this.readRunnerSharePack({
-              ownerUserId: wake.share.ownerUserId,
-              shareId: wake.share.shareId,
-            })
-        : Promise.resolve(null),
     ]);
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.dependencies.runnerRuntimeEnvSource,
@@ -432,10 +503,9 @@ export class RunnerWakeProcessor {
       request: {
         bundle: await bundleSync.readBundlesForRunner(),
         currentBundleRef: bundleState.bundleRef,
-        wake,
-        ...(sharePack ? { sharePack } : {}),
         run,
         runDrain,
+        wake: primaryWake,
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
         configSource: this.dependencies.readRunnerRuntimeConfigSource(),
@@ -443,6 +513,22 @@ export class RunnerWakeProcessor {
         runnerSecrets,
       }),
     };
+    void recordHostedRunBreadcrumbInWebBestEffort({
+      baseUrl: this.dependencies.hostedWebBaseUrl,
+      callbackSigning: this.dependencies.env.webCallbackSigning,
+      message: "Cloudflare started a runner invocation for the acquired hosted run.",
+      phase: "runner_invocation_started",
+      redacted: {
+        eventCount: runDrain.events.length,
+        resumeFinalize: runDrain.resumeFinalize === true,
+        triggerKind: runDrain.triggerKind,
+        wakeKind: primaryWake.kind,
+      },
+      run,
+      runToken,
+      userId,
+      wakeEventId: primaryWake.eventId,
+    });
 
     emitHostedExecutionStructuredLog({
       component: "runner",
@@ -499,7 +585,6 @@ export class RunnerWakeProcessor {
         runDrainEventCount: runDrain.events.length,
         runDrainResumeFinalize: runDrain.resumeFinalize === true,
         runDrainRunId: runDrain.runId,
-        sharePackAttached: Boolean(sharePack),
         runnerSecretsCategories: {
           modelCredentialConfigured: hasAnyRunnerConfigKey(runnerSecrets, [
             "ANTHROPIC_API_KEY",
@@ -529,7 +614,7 @@ export class RunnerWakeProcessor {
         },
         runnerSecretKeyCount: Object.keys(runnerSecrets).length,
       },
-      eventId: wake.eventId,
+      eventId: primaryWake.eventId,
       message: "Hosted runner prepared container invocation.",
       phase: "wake.running",
       run,
@@ -687,12 +772,13 @@ export class RunnerWakeProcessor {
 
   private async advanceRunPhase(input: {
     clearError?: boolean;
-    wake: HostedExecutionWakeProgressRecord;
+    wake: HostedIngressEnvelopeProgressRecord;
     error?: unknown;
     level?: HostedExecutionRunLevel;
     message: string;
     phase: HostedExecutionRunPhase;
     run: HostedExecutionRunContext;
+    runToken?: string | null;
   }): Promise<RunnerStateRecord> {
     const message = formatHostedExecutionLogMessage(input.message, input.error);
     const record = await this.dependencies.stateStore.recordRunPhase({
@@ -727,9 +813,10 @@ export class RunnerWakeProcessor {
       callbackSigning: this.dependencies.env.webCallbackSigning,
       error: input.error,
       level: input.level,
-      message,
+      message: input.message,
       phase: input.phase,
       run: input.run,
+      runToken: input.runToken,
       userId: input.wake.userId,
       wakeEventId: input.wake.eventId,
     });
@@ -778,6 +865,7 @@ function buildHostedRuntimeDrainRequest(input: {
     ...(input.resumeFinalize ? { resumeFinalize: true } : {}),
     runId: input.run.id,
     triggerKind: input.run.triggerKind,
+    userId: input.run.userId,
   };
 }
 
@@ -825,26 +913,49 @@ export async function recordHostedRunPhaseLogInWebBestEffort(input: {
   userId: string;
   wakeEventId: string;
 }): Promise<void> {
+  return recordHostedRunBreadcrumbInWebBestEffort({
+    ...input,
+    redacted: {
+      eventId: input.wakeEventId,
+    },
+  });
+}
+
+export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
+  baseUrl: string | null;
+  callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
+  error?: unknown;
+  level?: HostedExecutionRunLevel;
+  message: string;
+  phase: string;
+  recordLog?: typeof recordHostedRunLogInWeb;
+  redacted?: Record<string, unknown> | null;
+  run: HostedExecutionRunContext;
+  runToken?: string | null;
+  userId: string;
+  wakeEventId: string;
+}): Promise<void> {
   if (!input.baseUrl) {
     return;
   }
 
   const recordLog = input.recordLog ?? recordHostedRunLogInWeb;
+  const redacted = {
+    ...(input.redacted ?? {}),
+    errorCode: input.error === undefined ? null : deriveHostedExecutionErrorCode(input.error),
+    runElapsedMs: computeHostedRunElapsedMs(input.run),
+  };
 
   try {
     await recordLog({
       baseUrl: input.baseUrl,
       body: {
         at: new Date().toISOString(),
-        component: "cloudflare-runner",
+        component: HOSTED_RUN_LOG_COMPONENT,
         level: input.level ?? (input.error === undefined ? "info" : "error"),
         message: input.message,
         phase: input.phase,
-        redacted: {
-          errorCode: input.error === undefined ? null : deriveHostedExecutionErrorCode(input.error),
-          eventId: input.wakeEventId,
-          runElapsedMs: computeHostedRunElapsedMs(input.run),
-        },
+        redacted,
         runId: input.run.runId,
         ...(input.runToken === undefined ? {} : { runToken: input.runToken }),
       },
@@ -854,7 +965,7 @@ export async function recordHostedRunPhaseLogInWebBestEffort(input: {
     });
   } catch (error) {
     emitHostedExecutionStructuredLog({
-      component: "cloudflare-runner",
+      component: HOSTED_RUN_LOG_COMPONENT,
       details: {
         runElapsedMs: computeHostedRunElapsedMs(input.run),
         runLogWakeEventId: input.wakeEventId,
@@ -863,7 +974,7 @@ export async function recordHostedRunPhaseLogInWebBestEffort(input: {
       eventId: input.wakeEventId,
       level: "warn",
       message: "Hosted run phase log write to web failed; continuing with runner-local observability only.",
-      phase: input.phase,
+      phase: "retry.scheduled",
       run: input.run,
       userId: input.userId,
     });
