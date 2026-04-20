@@ -84,6 +84,17 @@ export async function upsertHostedSharePayload(input: {
   return projectHostedSharePayloadState(record);
 }
 
+export async function deleteHostedSharePayload(input: {
+  prisma: HostedSharePrismaClient;
+  shareId: string;
+}): Promise<void> {
+  await input.prisma.hostedSharePayload.deleteMany({
+    where: {
+      shareId: input.shareId,
+    },
+  });
+}
+
 export function projectHostedSharePayloadState(
   record: Pick<HostedSharePayload, "payloadEncrypted" | "payloadSchema" | "shareId">,
 ): HostedSharePayloadState {

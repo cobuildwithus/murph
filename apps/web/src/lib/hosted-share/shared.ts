@@ -5,6 +5,7 @@ export {
   serializeHostedSharePreview,
 } from "./shared-preview";
 export {
+  deleteHostedSharePayload,
   HOSTED_SHARE_PAYLOAD_SCHEMA,
   projectHostedSharePayloadState,
   readHostedSharePayload,

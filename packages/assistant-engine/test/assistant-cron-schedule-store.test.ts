@@ -22,6 +22,7 @@ import {
   assertAssistantCronJobNameIsAvailable,
   buildAssistantCronTarget,
   isAssistantCronJobDue,
+  pruneAssistantCronRunHistory,
   readAssistantCronRuns,
   readAssistantCronStore,
   resolveAssistantCronJobFromStore,
@@ -407,6 +408,54 @@ describe('assistant cron store filesystem edges', () => {
     ])
   })
 
+  it('redacts older cron responses and prunes stale run history during maintenance', async () => {
+    const paths = await createAssistantPaths('assistant-cron-schedule-store-retention-')
+    await appendAssistantCronRun(paths, createCronRun({
+      finishedAt: '2026-01-01T00:01:00.000Z',
+      response: 'stale response',
+      runId: 'cronrun_alpha_stale',
+      startedAt: '2026-01-01T00:00:00.000Z',
+    }))
+    for (let index = 0; index < 201; index += 1) {
+      const startedAt = new Date(Date.UTC(2026, 3, 8, 10, index, 0)).toISOString()
+      const finishedAt = new Date(Date.UTC(2026, 3, 8, 10, index, 30)).toISOString()
+      await appendAssistantCronRun(paths, createCronRun({
+        finishedAt,
+        response: `response-${index}`,
+        runId: `cronrun_alpha_recent_${index}`,
+        startedAt,
+      }))
+    }
+
+    await expect(
+      pruneAssistantCronRunHistory({
+        now: new Date('2026-04-20T12:00:00.000Z'),
+        paths,
+      }),
+    ).resolves.toEqual({
+      responsesRedacted: 180,
+      runsPruned: 2,
+    })
+
+    const retained = await readAssistantCronRuns(paths, 'cron_alpha')
+    expect(retained).toHaveLength(200)
+    expect(retained[0]).toMatchObject({
+      response: 'response-200',
+      runId: 'cronrun_alpha_recent_200',
+    })
+    expect(retained[19]).toMatchObject({
+      response: 'response-181',
+      runId: 'cronrun_alpha_recent_181',
+    })
+    expect(retained[20]).toMatchObject({
+      response: null,
+      responseLength: 'response-180'.length,
+      runId: 'cronrun_alpha_recent_180',
+    })
+    expect(retained.some((run) => run.runId === 'cronrun_alpha_stale')).toBe(false)
+    expect(retained.some((run) => run.runId === 'cronrun_alpha_recent_0')).toBe(false)
+  })
+
   it('salvages truncated run tails but quarantines malformed committed run lines', async () => {
     const salvagePaths = await createAssistantPaths('assistant-cron-schedule-store-runs-salvage-')
     const run = createCronRun({
@@ -520,6 +569,7 @@ function createCronJob(input: {
 function createCronRun(input: {
   finishedAt?: string
   jobId?: string
+  response?: string | null
   runId: string
   startedAt: string
   trigger?: AssistantCronRunRecord['trigger']
@@ -528,8 +578,8 @@ function createCronRun(input: {
     error: null,
     finishedAt: input.finishedAt ?? '2026-04-08T10:01:00.000Z',
     jobId: input.jobId ?? 'cron_alpha',
-    response: null,
-    responseLength: 0,
+    response: input.response ?? null,
+    responseLength: input.response?.length ?? 0,
     runId: input.runId,
     schema: 'murph.assistant-cron-run.v1',
     sessionId: null,

@@ -338,6 +338,7 @@ describe("hosted share service", () => {
     expect(finalizedPageData.stage).toBe("consumed");
     expect(finalizedPageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
+    expect(prisma.hostedSharePayloadRows).toHaveLength(0);
 
     const consumedWithoutPackPageData = await buildHostedSharePageData({
       authenticatedMember: {
@@ -597,6 +598,50 @@ describe("hosted share service", () => {
       consumedByMemberId: null,
       lastEventId: null,
     });
+  });
+
+  it("prunes expired hosted share payloads when the share page is read", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    prisma.rows[0]!.expiresAt = new Date("2026-03-01T00:00:00.000Z");
+
+    await expect(buildHostedSharePageData({
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      stage: "expired",
+    });
+    expect(prisma.hostedSharePayloadRows).toHaveLength(0);
+  });
+
+  it("prunes expired hosted share payloads when a claim arrives after expiry", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    prisma.rows[0]!.expiresAt = new Date("2026-03-01T00:00:00.000Z");
+
+    await expect(acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).rejects.toMatchObject({
+      code: "HOSTED_SHARE_EXPIRED",
+      httpStatus: 410,
+    });
+    expect(prisma.hostedSharePayloadRows).toHaveLength(0);
   });
 
   it("releases a processing share when the wake lifecycle is replaced before local reconciliation catches up", async () => {
@@ -976,6 +1021,17 @@ function createHostedSharePrisma(input?: {
     hostedSharePayload: {
       findUnique: async ({ where }: { where: { shareId: string } }) =>
         hostedSharePayloadRows.find((row) => row.shareId === where.shareId) ?? null,
+      deleteMany: async ({ where }: { where: { shareId: string } }) => {
+        const before = hostedSharePayloadRows.length;
+        for (let index = hostedSharePayloadRows.length - 1; index >= 0; index -= 1) {
+          if (hostedSharePayloadRows[index]?.shareId === where.shareId) {
+            hostedSharePayloadRows.splice(index, 1);
+          }
+        }
+        return {
+          count: before - hostedSharePayloadRows.length,
+        };
+      },
       upsert: async ({
         create,
         update,

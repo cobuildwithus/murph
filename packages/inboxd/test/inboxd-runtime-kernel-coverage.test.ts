@@ -9,12 +9,6 @@ import { initializeVault } from "@murphai/core";
 import * as indexSurface from "../src/index.ts";
 import * as runtimeSurface from "../src/runtime.ts";
 import {
-  buildInboxCaptureAuditPath,
-  buildInboxCaptureAuditRecord,
-  buildInboxCaptureAuditPathForStoredAt,
-  buildInboxCaptureEventPath,
-  buildInboxCaptureEventPathForOccurredAt,
-  buildInboxCaptureEventRecord,
   buildInboxCaptureRecord,
   buildInboxCaptureLedgerPath,
   buildInboxCaptureLedgerPathForOccurredAt,
@@ -176,8 +170,7 @@ test("sqlite runtime mutation head follows the latest capture state and created-
   }
 });
 
-test("canonical inbox record builders sanitize attachment paths, truncate long notes, and keep audit changes sparse", () => {
-  const longText = "x".repeat(4_100);
+test("canonical inbox record builders sanitize attachment paths and keep raw refs sparse", () => {
   const inbound = createInboundCaptureFixture({
     source: "telegram",
     accountId: "bot",
@@ -215,33 +208,6 @@ test("canonical inbox record builders sanitize attachment paths, truncate long n
     inbound,
     stored,
   });
-  const eventRecord = buildInboxCaptureEventRecord({
-    eventId: stored.eventId,
-    inbound: {
-      ...inbound,
-      text: longText,
-    },
-    stored,
-  });
-  const auditRecord = buildInboxCaptureAuditRecord({
-    auditId: "aud_01JQKZ7PQ6J0M7Q5A2V9W4X6YZ",
-    eventId: stored.eventId,
-    inbound,
-    stored,
-    eventPath: "ledger/events/2026/2026-03.jsonl",
-  });
-  const attachmentOnlyEvent = buildInboxCaptureEventRecord({
-    eventId: stored.eventId,
-    inbound: {
-      ...inbound,
-      text: null,
-      attachments: [
-        { kind: "document" },
-        { kind: "image" },
-      ],
-    },
-    stored,
-  });
 
   assert.equal("auditId" in captureRecord, false);
   assert.deepEqual(captureRecord.rawRefs, [
@@ -251,26 +217,6 @@ test("canonical inbox record builders sanitize attachment paths, truncate long n
   assert.equal(captureRecord.attachments[0]?.originalPath, null);
   assert.equal(captureRecord.attachments[0]?.storedPath, "raw/inbox/telegram/bot/lab.pdf");
   assert.equal(captureRecord.attachments[1]?.storedPath ?? null, null);
-
-  assert.ok(eventRecord.note);
-  assert.equal(eventRecord.note.length, 4_000);
-  assert.equal(eventRecord.note.endsWith("..."), true);
-  assert.deepEqual(eventRecord.tags, ["inbox", "source-telegram"]);
-  assert.deepEqual(eventRecord.rawRefs, captureRecord.rawRefs);
-  assert.equal(
-    attachmentOnlyEvent.note,
-    "Attachment-only inbox capture from telegram (2 attachments).",
-  );
-
-  assert.deepEqual(
-    auditRecord.changes.map((change) => change.path),
-    [
-      stored.envelopePath,
-      "raw/inbox/telegram/bot/lab.pdf",
-      "ledger/events/2026/2026-03.jsonl",
-      "audit/2026/2026-03.jsonl",
-    ],
-  );
   assert.equal(
     buildInboxCaptureLedgerPathForOccurredAt(inbound.occurredAt),
     "ledger/inbox-captures/2026/2026-03.jsonl",
@@ -278,22 +224,6 @@ test("canonical inbox record builders sanitize attachment paths, truncate long n
   assert.equal(
     buildInboxCaptureLedgerPath({ input: inbound }),
     "ledger/inbox-captures/2026/2026-03.jsonl",
-  );
-  assert.equal(
-    buildInboxCaptureEventPathForOccurredAt(inbound.occurredAt),
-    "ledger/events/2026/2026-03.jsonl",
-  );
-  assert.equal(
-    buildInboxCaptureEventPath({ input: inbound }),
-    "ledger/events/2026/2026-03.jsonl",
-  );
-  assert.equal(
-    buildInboxCaptureAuditPathForStoredAt(stored.storedAt),
-    "audit/2026/2026-03.jsonl",
-  );
-  assert.equal(
-    buildInboxCaptureAuditPath({ stored }),
-    "audit/2026/2026-03.jsonl",
   );
 });
 

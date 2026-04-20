@@ -10,7 +10,12 @@ import {
   clearAssistantAutomationRunLock,
   inspectAssistantAutomationRunLock,
 } from './automation/runtime-lock.js'
-import { ensureAssistantState } from './store/persistence.js'
+import {
+  ensureAssistantState,
+  pruneAssistantTranscriptRetention,
+} from './store/persistence.js'
+import { pruneAssistantTerminalOutboxIntents } from './outbox/store.js'
+import { pruneAssistantCronRunHistory } from './cron/store.js'
 import {
   clearAssistantRuntimeWriteLock,
   inspectAssistantRuntimeWriteLock,
@@ -75,6 +80,36 @@ export async function runAssistantRuntimeMaintenance(input: {
         `${staleQuarantinePruned} expired quarantine artifact(s) were removed.`,
       )
     }
+    const transcriptRetention = await pruneAssistantTranscriptRetention(paths)
+    if (transcriptRetention.entriesTrimmed > 0) {
+      notes.push(
+        `${transcriptRetention.entriesTrimmed} transcript entr${transcriptRetention.entriesTrimmed === 1 ? 'y was' : 'ies were'} trimmed across ${transcriptRetention.transcriptsTrimmed} session transcript(s).`,
+      )
+    }
+    const terminalOutboxPruned = await pruneAssistantTerminalOutboxIntents({
+      now,
+      paths,
+      vault: input.vault,
+    })
+    if (terminalOutboxPruned > 0) {
+      notes.push(
+        `${terminalOutboxPruned} terminal outbox intent(s) were pruned.`,
+      )
+    }
+    const cronHistory = await pruneAssistantCronRunHistory({
+      now,
+      paths,
+    })
+    if (cronHistory.responsesRedacted > 0) {
+      notes.push(
+        `${cronHistory.responsesRedacted} older cron response(s) were redacted.`,
+      )
+    }
+    if (cronHistory.runsPruned > 0) {
+      notes.push(
+        `${cronHistory.runsPruned} stale cron run record(s) were pruned.`,
+      )
+    }
     const staleLocksCleared = await clearStaleAssistantLocks({
       paths,
       vault: input.vault,
@@ -105,8 +140,13 @@ export async function runAssistantRuntimeMaintenance(input: {
           ? notes.join(' ')
           : 'Assistant runtime maintenance ran with no corrective actions.',
       data: {
+        cronResponsesRedacted: cronHistory.responsesRedacted,
+        cronRunsPruned: cronHistory.runsPruned,
         staleQuarantinePruned,
         staleLocksCleared,
+        terminalOutboxPruned,
+        transcriptEntriesTrimmed: transcriptRetention.entriesTrimmed,
+        transcriptFilesTrimmed: transcriptRetention.transcriptsTrimmed,
       },
     }).catch(() => undefined)
     return snapshot

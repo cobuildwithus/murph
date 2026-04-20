@@ -17,8 +17,10 @@ import type {
   HostedRunTriggerKind,
   HostedIngressSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
+import { normalizeHostedExecutionOperatorMessage } from "@murphai/hosted-execution";
 import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
 
+import { sanitizeJsonLogString } from "../http";
 import { getPrisma } from "../prisma";
 import {
   ensureHostedExecutionCursorRowTx,
@@ -100,15 +102,16 @@ export async function acquireHostedRunTx(input: {
   });
 
   if (resumableFinalize) {
-    return {
+    return buildHostedRunAcquireResponseTx({
       acquired: true,
-      cursor: projectHostedExecutionCursorRecord(cursor),
       events: [],
-      pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
       resumeFinalize: true,
-      run: projectHostedRunRecord(resumableFinalize.run),
+      run: resumableFinalize.run,
       runToken: resumableFinalize.runToken,
-    };
+      tx: input.tx,
+      userId: input.userId,
+      cursor,
+    });
   }
 
   const activeRun = await findActiveHostedRunTx({
@@ -131,15 +134,16 @@ export async function acquireHostedRunTx(input: {
         });
 
         if (resumedFinalize) {
-          return {
+          return buildHostedRunAcquireResponseTx({
             acquired: true,
-            cursor: projectHostedExecutionCursorRecord(cursor),
             events: [],
-            pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
             resumeFinalize: true,
-            run: projectHostedRunRecord(resumedFinalize.run),
+            run: resumedFinalize.run,
             runToken: resumedFinalize.runToken,
-          };
+            tx: input.tx,
+            userId: input.userId,
+            cursor,
+          });
         }
       } else {
         await closeHostedRunWithoutCommitTx({
@@ -153,14 +157,15 @@ export async function acquireHostedRunTx(input: {
         });
       }
     } else {
-      return {
+      return buildHostedRunAcquireResponseTx({
         acquired: false,
-        cursor: projectHostedExecutionCursorRecord(cursor),
         events: [],
-        pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
         resumeFinalize: false,
-        run: projectHostedRunRecord(activeRun),
-      };
+        run: activeRun,
+        tx: input.tx,
+        userId: input.userId,
+        cursor,
+      });
     }
   }
 
@@ -170,14 +175,15 @@ export async function acquireHostedRunTx(input: {
   });
 
   if (activeRunAfterRecovery) {
-    return {
+    return buildHostedRunAcquireResponseTx({
       acquired: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
       events: [],
-      pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
       resumeFinalize: false,
-      run: projectHostedRunRecord(activeRunAfterRecovery),
-    };
+      run: activeRunAfterRecovery,
+      tx: input.tx,
+      userId: input.userId,
+      cursor,
+    });
   }
 
   const wakeRows = await listContiguousHostedRunWakeRowsTx({
@@ -194,14 +200,15 @@ export async function acquireHostedRunTx(input: {
   });
 
   if (wakeRows.length === 0 && !runtimeTimerDue && triggerKind !== "manual_repair") {
-    return {
+    return buildHostedRunAcquireResponseTx({
       acquired: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
       events: [],
-      pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
       resumeFinalize: false,
       run: null,
-    };
+      tx: input.tx,
+      userId: input.userId,
+      cursor,
+    });
   }
 
   const runToken = createHostedRunToken();
@@ -244,15 +251,16 @@ export async function acquireHostedRunTx(input: {
     });
   }
 
-  return {
+  return buildHostedRunAcquireResponseTx({
     acquired: true,
-    cursor: projectHostedExecutionCursorRecord(cursor),
     events,
-    pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
     resumeFinalize: false,
-    run: projectHostedRunRecord(run),
+    run,
     runToken,
-  };
+    tx: input.tx,
+    userId: input.userId,
+    cursor,
+  });
 }
 
 export async function commitHostedRun(input: {
@@ -716,10 +724,12 @@ export async function recordHostedRunLog(input: {
   prisma?: PrismaClient;
   redacted?: unknown | null;
   runId: string;
-  runToken?: string | null;
+  runToken: string;
   userId: string;
 }): Promise<HostedRunLogResponse> {
   const prisma = input.prisma ?? getPrisma();
+  const safeMessage = sanitizeHostedRunLogMessage(input.message, input.redacted);
+  const safeRedacted = sanitizeHostedRunLogRedacted(input.redacted);
 
   return prisma.$transaction(async (tx) => {
     const run = await tx.hostedRun.findFirst({
@@ -733,7 +743,7 @@ export async function recordHostedRunLog(input: {
       return { logged: false, log: null };
     }
 
-    if (input.runToken && !hostedRunTokenMatches(run.runTokenHash, input.runToken)) {
+    if (!hostedRunTokenMatches(run.runTokenHash, input.runToken)) {
       return { logged: false, log: null };
     }
 
@@ -743,9 +753,9 @@ export async function recordHostedRunLog(input: {
         component: input.component,
         id: randomUUID(),
         level: input.level,
-        message: input.message,
+        message: safeMessage,
         phase: input.phase,
-        redactedJson: input.redacted === undefined ? Prisma.DbNull : toNullablePrismaJson(input.redacted ?? null),
+        redactedJson: input.redacted === undefined ? Prisma.DbNull : toNullablePrismaJson(safeRedacted),
         runId: input.runId,
         userId: input.userId,
       },
@@ -798,7 +808,7 @@ export async function readHostedRunStatus(input: {
 }
 
 function isHostedRunActiveStale(
-  run: Parameters<typeof projectHostedRunRecord>[0],
+  run: HostedRunRow,
   now: Date,
 ): boolean {
   const updatedAtMs = run.updatedAt.getTime();
@@ -899,7 +909,7 @@ async function claimResumableFinalizeRunTx(input: {
   tx: HostedRunMutationTx;
   userId: string;
 }): Promise<{
-  run: Parameters<typeof projectHostedRunRecord>[0];
+  run: HostedRunRow;
   runToken: string;
 } | null> {
   const candidate = await findResumableFinalizeRunTx({
@@ -971,10 +981,10 @@ async function readHostedRunForMutationTx(input: {
 
 async function closeHostedRunFinalizeConflictTx(input: {
   errorCode: string;
-  run: Parameters<typeof projectHostedRunRecord>[0];
+  run: HostedRunRow;
   status: Extract<HostedRunStatus, "failed" | "superseded">;
   tx: HostedRunMutationTx;
-}): Promise<Parameters<typeof projectHostedRunRecord>[0]> {
+}): Promise<HostedRunRow> {
   const now = new Date();
 
   return input.tx.hostedRun.update({
@@ -990,9 +1000,9 @@ async function closeHostedRunFinalizeConflictTx(input: {
 }
 
 async function resetHostedRunFinalizeForRetryTx(input: {
-  run: Parameters<typeof projectHostedRunRecord>[0];
+  run: HostedRunRow;
   tx: HostedRunMutationTx;
-}): Promise<Parameters<typeof projectHostedRunRecord>[0]> {
+}): Promise<HostedRunRow> {
   return input.tx.hostedRun.update({
     where: { id: input.run.id },
     data: {
@@ -1005,11 +1015,11 @@ async function closeHostedRunWithoutCommitTx(input: {
   cursor: HostedExecutionCursorRow;
   errorClass?: string | null;
   errorCode: string;
-  run: Parameters<typeof projectHostedRunRecord>[0];
+  run: HostedRunRow;
   status: Extract<HostedRunStatus, "failed" | "superseded">;
   tx: HostedRunMutationTx;
   userId: string;
-}): Promise<Parameters<typeof projectHostedRunRecord>[0]> {
+}): Promise<HostedRunRow> {
   const now = new Date();
 
   await input.tx.hostedIngressEvent.updateMany({
@@ -1065,6 +1075,8 @@ async function markHostedRunWakesTerminalTx(input: {
       where: { id: wake.id },
       data: {
         completedAt: new Date(),
+        payloadInlineCiphertext: null,
+        payloadRef: null,
         quarantineCode: state === "quarantined"
           ? normalizeHostedRunWakeQuarantineCode(result?.quarantineCode ?? wake.quarantineCode)
           : wake.quarantineCode,
@@ -1073,7 +1085,37 @@ async function markHostedRunWakesTerminalTx(input: {
         state,
       },
     });
+
+    if (wake.payloadRef) {
+      await input.tx.hostedIngressPayload.deleteMany({
+        where: {
+          ingressEventId: wake.payloadRef,
+          userId: input.userId,
+        },
+      });
+    }
   }
+}
+
+async function buildHostedRunAcquireResponseTx(input: {
+  acquired: boolean;
+  cursor: HostedExecutionCursorRow;
+  events: HostedRunAcquireResponse["events"];
+  resumeFinalize: boolean;
+  run: HostedRunRow | null;
+  runToken?: string;
+  tx: HostedRunMutationTx;
+  userId: string;
+}): Promise<HostedRunAcquireResponse> {
+  return {
+    acquired: input.acquired,
+    cursor: projectHostedExecutionCursorRecord(input.cursor),
+    events: input.events,
+    pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
+    resumeFinalize: input.resumeFinalize,
+    run: input.run ? projectHostedRunRecord(input.run) : null,
+    ...(input.runToken === undefined ? {} : { runToken: input.runToken }),
+  };
 }
 
 function resolveHostedRunTriggerKind(input: {
@@ -1283,18 +1325,54 @@ function projectHostedRunLogRecord(record: {
   runId: string;
   userId: string;
 }): HostedRunLogRecord {
+  const redactedMessage = typeof record.redactedJson === "string"
+    ? sanitizeHostedRunLogMessage(record.redactedJson, null)
+    : null;
+
   return {
     at: record.at.toISOString(),
     component: record.component,
     createdAt: record.createdAt.toISOString(),
     id: record.id,
     level: parseHostedRunLogLevelForProjection(record.level),
-    message: record.message,
+    message: redactedMessage ?? record.message,
     phase: record.phase,
     redacted: record.redactedJson ?? null,
     runId: record.runId,
     userId: record.userId,
   };
+}
+
+function sanitizeHostedRunLogMessage(message: string, redacted: unknown): string {
+  const candidate = typeof redacted === "string" && redacted.trim().length > 0
+    ? redacted
+    : message;
+  return normalizeHostedExecutionOperatorMessage(
+    sanitizeJsonLogString(candidate) ?? candidate,
+  );
+}
+
+function sanitizeHostedRunLogRedacted(value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return sanitizeHostedRunLogMessage(value, null);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return toPrismaJson(value.map((entry) => sanitizeHostedRunLogRedacted(entry)));
+  }
+  if (typeof value === "object") {
+    return toPrismaJson(
+      Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => [key, sanitizeHostedRunLogRedacted(entry)]),
+      ),
+    );
+  }
+  return null;
 }
 
 function parseHostedRunSnapshotRef(value: unknown): HostedIngressSnapshotRef {

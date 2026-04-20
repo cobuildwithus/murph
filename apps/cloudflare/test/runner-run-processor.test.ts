@@ -6,12 +6,14 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
+import { createHostedBrowserVaultSnapshotStore } from "../src/browser-vault-store.ts";
 import {
   RunnerRunProcessor,
   recordHostedRunBreadcrumbInWebBestEffort,
   recordHostedRunPhaseLogInWebBestEffort,
   summarizeHostedAssistantDeliveryOutcomes,
 } from "../src/user-runner/runner-run-processor.ts";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -297,5 +299,106 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     });
     expect(beginWakeRun).toHaveBeenCalledTimes(1);
     expect(completeWakeRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes stale browser-vault snapshot sidecars when a completed run returns no snapshot", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const rootKey = createTestRootKey(33);
+    const snapshotStore = createHostedBrowserVaultSnapshotStore({
+      bucket,
+      key: rootKey,
+      keyId: "k-current",
+    });
+
+    await snapshotStore.writeBrowserVaultSnapshot("user_123", {
+      entities: [],
+      generatedAt: "2026-04-20T09:00:00.000Z",
+      metadata: null,
+      schema: "murph.browser-vault-snapshot.v1",
+      sourceVersion: "c".repeat(64),
+    });
+
+    const processor = new RunnerRunProcessor({
+      applyHostedTransition: vi.fn(),
+      bucket: bucket as never,
+      ensureRunnerStores: vi.fn().mockResolvedValue({
+        crypto: {
+          rootKey,
+          rootKeyId: "k-current",
+        },
+      }),
+      env: {
+        runnerTimeoutMs: 60_000,
+        webCallbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: "{\"kty\":\"EC\"}",
+        },
+      },
+      hostedWebBaseUrl: null,
+      readRunnerRuntimeConfigSource: () => ({}),
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      stateStore: {
+        beginWakeRun: vi.fn().mockResolvedValue(undefined),
+        completeWakeRun: vi.fn().mockResolvedValue(undefined),
+        failWakeRun: vi.fn(),
+        recordRunPhase: vi.fn().mockResolvedValue({}),
+      },
+      runtimeAlarmScheduler: {},
+    } as never);
+
+    (processor as any).advanceRunPhase = vi.fn().mockResolvedValue({});
+    (processor as any).invokeRunner = vi.fn().mockResolvedValue({
+      assistantDeliveryOutcomes: [],
+      browserVaultSnapshot: null,
+      finalGatewayProjectionSnapshot: null,
+      phase: "completed",
+      result: {
+        bundle: "bundle-encoded",
+        result: {
+          eventsHandled: 0,
+          nextWakeAt: null,
+          summary: "Finalized hosted run snapshot.",
+        },
+      },
+    });
+    (processor as any).persistCompletedRunnerResult = vi.fn().mockResolvedValue(null);
+    (processor as any).readRecentActiveRunLease = vi.fn().mockResolvedValue(null);
+
+    const run: HostedRunRecord = {
+      acquiredAt: "2026-04-20T09:00:00.000Z",
+      attempt: 1,
+      createdAt: "2026-04-20T09:00:00.000Z",
+      eventCount: 0,
+      eventKinds: [],
+      eventSeqs: [],
+      executorKind: "cloudflare-container",
+      id: "run_456",
+      inputCommittedSeq: "10",
+      inputCursorVersion: "cursor-v1",
+      status: "acquired",
+      triggerKind: "runtime_timer",
+      updatedAt: "2026-04-20T09:00:00.000Z",
+      userId: "user_123",
+      wakeIds: [],
+    };
+    const primaryWake: HostedExecutionRuntimeTimerWake = {
+      eventId: "runtime-timer",
+      kind: "runtime.timer",
+      occurredAt: "2026-04-20T09:00:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "user_123",
+    };
+
+    await processor.executeRunDrain({
+      currentBundleRef: null,
+      events: [],
+      primaryWake,
+      run,
+      runToken: "run-token",
+    });
+
+    await expect(snapshotStore.readBrowserVaultSnapshotEnvelope("user_123")).resolves.toBeNull();
+    expect(bucket.deleted).toHaveLength(1);
   });
 });

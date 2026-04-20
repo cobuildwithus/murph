@@ -49,6 +49,11 @@ export interface HostedEmailWorkerRequest {
   to: string;
 }
 
+export interface HostedEmailRawMessageStorageRef {
+  objectKey: string;
+  rawMessageKey: string;
+}
+
 export async function readHostedEmailRawMessage(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
@@ -81,34 +86,51 @@ export async function readHostedEmailRawMessage(input: {
   return rawMessage;
 }
 
-export async function writeHostedEmailRawMessage(input: {
-  bucket: R2BucketLike;
+export async function resolveHostedEmailRawMessageStorageRef(input: {
   key: Uint8Array;
-  keyId: string;
   plaintext: Uint8Array;
   userId: string;
-}): Promise<string> {
+}): Promise<HostedEmailRawMessageStorageRef> {
   const rawMessageKey = await deriveHostedEmailRawMessageKey(
     input.key,
     input.userId,
     input.plaintext,
   );
-  const key = await hostedEmailRawMessageObjectKey(input.key, input.userId, rawMessageKey);
+
+  return {
+    objectKey: await hostedEmailRawMessageObjectKey(input.key, input.userId, rawMessageKey),
+    rawMessageKey,
+  };
+}
+
+export async function writeHostedEmailRawMessage(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  plaintext: Uint8Array;
+  storageRef?: HostedEmailRawMessageStorageRef;
+  userId: string;
+}): Promise<string> {
+  const storageRef = input.storageRef ?? await resolveHostedEmailRawMessageStorageRef({
+    key: input.key,
+    plaintext: input.plaintext,
+    userId: input.userId,
+  });
   await writeEncryptedR2Payload({
     aad: buildHostedStorageAad({
-      key,
+      key: storageRef.objectKey,
       purpose: "email-raw",
-      rawMessageKey,
+      rawMessageKey: storageRef.rawMessageKey,
       userId: input.userId,
     }),
     bucket: input.bucket,
     cryptoKey: input.key,
-    key,
+    key: storageRef.objectKey,
     keyId: input.keyId,
     plaintext: input.plaintext,
     scope: "email-raw",
   });
-  return rawMessageKey;
+  return storageRef.rawMessageKey;
 }
 
 export async function deleteHostedEmailRawMessage(input: {

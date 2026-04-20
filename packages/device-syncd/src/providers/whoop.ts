@@ -16,6 +16,7 @@ import {
   sha256Text,
   subtractDays,
 } from "../shared.ts";
+import { formatDeviceSyncAccountLabel } from "../provider-label.ts";
 import {
   buildOAuthConnectUrl,
   buildProviderApiError,
@@ -231,14 +232,6 @@ function tokenResponseToAuthTokens(payload: WhoopTokenResponse): ProviderAuthTok
       httpStatus: 502,
     }),
   );
-}
-
-function buildDisplayName(profile: Record<string, unknown>): string {
-  const firstName = normalizeString(profile.first_name);
-  const lastName = normalizeString(profile.last_name);
-  const email = normalizeString(profile.email);
-  const userId = normalizeIdentifier(profile.user_id ?? profile.id);
-  return [firstName, lastName].filter(Boolean).join(" ") || email || `WHOOP ${userId ?? "user"}`;
 }
 
 function hasWhoopScopeValue(scopes: readonly string[], scope: string): boolean {
@@ -608,7 +601,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
 
       return {
         externalAccountId,
-        displayName: buildDisplayName(profile ?? {}),
+        displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
         scopes: effectiveScopes,
         tokens,
         initialJobs: [

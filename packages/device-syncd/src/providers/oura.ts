@@ -16,6 +16,7 @@ import {
   sha256Text,
   subtractDays,
 } from "../shared.ts";
+import { formatDeviceSyncAccountLabel } from "../provider-label.ts";
 import {
   buildOAuthConnectUrl,
   buildProviderApiError,
@@ -187,12 +188,6 @@ function toDateTimeParameter(timestamp: string): string {
 
 function normalizeGrantedScopes(value: unknown): string[] {
   return [...new Set(splitScopes(value).map((scope) => scope.replace(/^extapi:/u, "")))];
-}
-
-function buildDisplayName(personalInfo: Record<string, unknown>): string {
-  const email = normalizeString(personalInfo.email);
-  const accountId = normalizeIdentifier(personalInfo.id ?? personalInfo.user_id ?? personalInfo.userId);
-  return email ?? `Oura ${accountId ?? "user"}`;
 }
 
 function tokenResponseToAuthTokens(payload: OuraTokenResponse): ProviderAuthTokens {
@@ -975,7 +970,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
 
       return {
         externalAccountId,
-        displayName: buildDisplayName(personalInfo),
+        displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
         scopes: grantedScopes,
         tokens,
         initialJobs: [

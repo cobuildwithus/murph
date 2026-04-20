@@ -1,4 +1,5 @@
 import { access, readdir, readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
 import {
   assistantAliasStoreSchema,
@@ -51,6 +52,8 @@ import type { ResolvedAssistantSession } from './types.js'
 
 export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
+// Keep aligned with the bootstrap transcript replay ceiling in provider-turn-runner.
+export const ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT = 100
 
 const assistantSessionCache = createAssistantBoundedRuntimeCache<string, AssistantSession | null>({
   name: 'assistant.sessions',
@@ -284,6 +287,95 @@ export async function replaceTranscriptEntries(
       : ''
 
   await writeTextFileAtomic(transcriptPath, serialized)
+}
+
+export async function pruneAssistantTranscriptRetention(
+  paths: AssistantStatePaths,
+): Promise<{
+  entriesTrimmed: number
+  transcriptsTrimmed: number
+}> {
+  await ensureAssistantStateDirectory(paths.transcriptsDirectory)
+  const entries = await readdir(paths.transcriptsDirectory, {
+    withFileTypes: true,
+  })
+  let entriesTrimmed = 0
+  let transcriptsTrimmed = 0
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
+      continue
+    }
+
+    const transcriptPath = path.join(paths.transcriptsDirectory, entry.name)
+    let raw: string
+    try {
+      raw = await readFile(transcriptPath, 'utf8')
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        continue
+      }
+      throw error
+    }
+
+    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+      assistantTranscriptEntrySchema.parse(value),
+    )
+    if (parsed.malformedLineCount > 0) {
+      continue
+    }
+
+    const retained = trimAssistantTranscriptEntriesForReplay(parsed.values)
+    if (retained.length === parsed.values.length) {
+      continue
+    }
+
+    const trimmedCount = parsed.values.length - retained.length
+    await writeTextFileAtomic(
+      transcriptPath,
+      retained.length > 0
+        ? `${retained.map((retainedEntry) => JSON.stringify(retainedEntry)).join('\n')}\n`
+        : '',
+    )
+    entriesTrimmed += trimmedCount
+    transcriptsTrimmed += 1
+  }
+
+  return {
+    entriesTrimmed,
+    transcriptsTrimmed,
+  }
+}
+
+export function trimAssistantTranscriptEntriesForReplay(
+  entries: readonly AssistantTranscriptEntry[],
+): AssistantTranscriptEntry[] {
+  let replayableSeen = 0
+  let startIndex = entries.length
+
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (!entry) {
+      continue
+    }
+    if (entry.kind === 'assistant' || entry.kind === 'user') {
+      replayableSeen += 1
+    }
+    if (replayableSeen === ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT) {
+      startIndex = index
+      break
+    }
+  }
+
+  if (startIndex < entries.length) {
+    return entries.slice(startIndex)
+  }
+
+  if (entries.length <= ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT) {
+    return [...entries]
+  }
+
+  return entries.slice(-ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT)
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

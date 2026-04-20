@@ -10,8 +10,10 @@ import type {
   HostedEmailWorkerRequest,
 } from "../hosted-email.ts";
 import {
+  deleteHostedEmailRawMessage,
   readHostedEmailConfig,
   readHostedEmailMessageBytes,
+  resolveHostedEmailRawMessageStorageRef,
   resolveHostedEmailIngressRoute,
   shouldRejectHostedEmailIngressFailure,
   writeHostedEmailRawMessage,
@@ -125,31 +127,73 @@ export async function handleHostedEmailIngress(
     environment,
     userId: route.userId,
   });
+  const rawMessageStorageRef = await resolveHostedEmailRawMessageStorageRef({
+    key: userCrypto.rootKey,
+    plaintext: rawBytes,
+    userId: route.userId,
+  });
+  const rawMessageObjectExistedBeforeWrite =
+    (await env.BUNDLES.get(rawMessageStorageRef.objectKey)) !== null;
 
   const rawMessageKey = await writeHostedEmailRawMessage({
     bucket: env.BUNDLES,
     key: userCrypto.rootKey,
     keyId: userCrypto.rootKeyId,
     plaintext: rawBytes,
+    storageRef: rawMessageStorageRef,
     userId: route.userId,
   });
   const eventId = `email:${rawMessageKey}`;
   const occurredAt = new Date().toISOString();
 
-  const append = await appendHostedEmailIngressWakeInWeb({
-    baseUrl: environment.hostedWebBaseUrl,
-    body: {
-      eventId,
-      identityId: route.identityId,
-      occurredAt,
-      rawMessageKey,
-      selfAddress: route.routeAddress,
-    },
-    boundUserId: route.userId,
-    callbackSigning: environment.webCallbackSigning,
-    fetchImpl: fetch,
-    timeoutMs: environment.runnerTimeoutMs,
-  });
+  try {
+    await appendHostedEmailIngressWakeInWeb({
+      baseUrl: environment.hostedWebBaseUrl,
+      body: {
+        eventId,
+        identityId: route.identityId,
+        occurredAt,
+        rawMessageKey,
+        selfAddress: route.routeAddress,
+      },
+      boundUserId: route.userId,
+      callbackSigning: environment.webCallbackSigning,
+      fetchImpl: fetch,
+      timeoutMs: environment.runnerTimeoutMs,
+    });
+  } catch (error) {
+    if (
+      !rawMessageObjectExistedBeforeWrite
+      && isDefinitiveHostedEmailIngressAppendFailure(error)
+    ) {
+      try {
+        await deleteHostedEmailRawMessage({
+          bucket: env.BUNDLES,
+          key: userCrypto.rootKey,
+          rawMessageKey,
+          userId: route.userId,
+        });
+      } catch (cleanupError) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.email",
+          details: buildHostedEmailIngressLogDetails({
+            eventId,
+            identityId: route.identityId,
+            reason: "raw-message-append-cleanup-failed",
+            routeAddress: route.routeAddress,
+            to: message.to,
+          }),
+          error: cleanupError,
+          level: "warn",
+          message: "Hosted email append cleanup failed after the canonical ingress append was rejected.",
+          phase: "failed",
+          userId: route.userId,
+        });
+      }
+    }
+
+    throw error;
+  }
 
   try {
     const stub = await resolveUserRunnerStub(env, route.userId);
@@ -216,6 +260,25 @@ export async function handleHostedEmailIngress(
   }
 }
 
+function isDefinitiveHostedEmailIngressAppendFailure(
+  error: unknown,
+): error is Error & { status: number } {
+  if (
+    !(error instanceof Error)
+    || !("status" in error)
+    || typeof error.status !== "number"
+    || !Number.isFinite(error.status)
+  ) {
+    return false;
+  }
+
+  return error.status >= 400
+    && error.status < 500
+    && error.status !== 408
+    && error.status !== 409
+    && error.status !== 429;
+}
+
 function buildHostedEmailIngressLogDetails(input: {
   eventId?: string | null;
   from?: string | null;
@@ -226,18 +289,18 @@ function buildHostedEmailIngressLogDetails(input: {
   reason?: string | null;
   routeAddress?: string | null;
   to: string;
-}): Record<string, string> {
+}): Record<string, string | boolean> {
   return {
-    ...(input.eventId ? { eventId: input.eventId } : {}),
-    ...(input.from ? { envelopeFrom: input.from } : {}),
-    ...(input.headerFrom ? { headerFrom: input.headerFrom } : {}),
-    ...(input.identityId ? { identityId: input.identityId } : {}),
+    ...(input.eventId ? { hasEventId: true } : {}),
+    ...(input.from ? { hasEnvelopeFrom: true } : {}),
+    ...(input.headerFrom ? { hasHeaderFrom: true } : {}),
+    ...(input.identityId ? { hasIdentityId: true } : {}),
     ...(input.ingressReady === null || input.ingressReady === undefined
       ? {}
       : { ingressReady: String(input.ingressReady) }),
     ...(input.rawSize ? { rawSize: input.rawSize } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
-    ...(input.routeAddress ? { routeAddress: input.routeAddress } : {}),
-    to: input.to,
+    ...(input.routeAddress ? { hasRouteAddress: true } : {}),
+    hasRecipientAddress: input.to.trim().length > 0,
   };
 }

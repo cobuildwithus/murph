@@ -17,7 +17,7 @@ function createAccount(scopes: string[]): DeviceSyncAccount {
     provider: "oura",
     externalAccountId: "oura-user-1",
     disconnectGeneration: 0,
-    displayName: "oura@example.com",
+    displayName: "Oura oura-user-1",
     status: "active",
     scopes,
     accessTokenExpiresAt: null,
@@ -127,7 +127,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
   );
 
   assert.equal(connection.externalAccountId, "oura-user-1");
-  assert.equal(connection.displayName, "oura@example.com");
+  assert.equal(connection.displayName, "Oura oura-user-1");
   assert.equal(connection.tokens.refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["personal", "daily", "heartrate"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");

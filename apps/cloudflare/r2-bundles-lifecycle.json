@@ -1,3 +1,17 @@
 {
-  "rules": []
+  "rules": [
+    {
+      "id": "delete-hosted-email-raw-messages-after-1h",
+      "enabled": true,
+      "conditions": {
+        "prefix": "hosted-email/messages/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 3600
+        }
+      }
+    }
+  ]
 }

@@ -8,6 +8,7 @@ import {
 describe("hosted share claim transitions", () => {
   it("waits for the claim mutation before reading finalization state", async () => {
     let committed = false;
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
     const updateMany = vi.fn(async (_input: {
       data: Record<string, unknown>;
       where: Record<string, unknown>;
@@ -27,6 +28,9 @@ describe("hosted share claim transitions", () => {
       eventId: "event_123",
       memberId: "member_123",
       prisma: {
+        hostedSharePayload: {
+          deleteMany,
+        },
         hostedShareLink: {
           findUnique,
           updateMany,
@@ -58,9 +62,15 @@ describe("hosted share claim transitions", () => {
     expect(data).not.toHaveProperty("acceptedAt");
     expect(data).not.toHaveProperty("acceptedByMemberId");
     expect(data).not.toHaveProperty("lastEventId");
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        shareId: "share_123",
+      },
+    });
   });
 
   it("keeps the pack cleanup owner available for duplicate finalize callbacks", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 0 }));
     const updateMany = vi.fn(async (_input: {
       data: Record<string, unknown>;
       where: Record<string, unknown>;
@@ -76,6 +86,9 @@ describe("hosted share claim transitions", () => {
       eventId: "event_123",
       memberId: "member_123",
       prisma: {
+        hostedSharePayload: {
+          deleteMany,
+        },
         hostedShareLink: {
           findUnique,
           updateMany,
@@ -88,6 +101,11 @@ describe("hosted share claim transitions", () => {
       finalized: false,
       shareFound: true,
       sharePackOwnerMemberId: "owner_123",
+    });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        shareId: "share_123",
+      },
     });
   });
 
@@ -140,11 +158,15 @@ describe("hosted share claim transitions", () => {
       lastEventId: "event_123",
       senderMemberId: "owner_123",
     }));
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
 
     await expect(finalizeHostedShareAcceptance({
       eventId: "event_123",
       memberId: "   ",
       prisma: {
+        hostedSharePayload: {
+          deleteMany,
+        },
         hostedShareLink: {
           findUnique,
           updateMany,
@@ -170,9 +192,11 @@ describe("hosted share claim transitions", () => {
 
     expect(updateMany).not.toHaveBeenCalled();
     expect(findUnique).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
   it("normalizes callback member ids before persisting and matching finalization state", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
     const updateMany = vi.fn(async (_input: {
       data: Record<string, unknown>;
       where: Record<string, unknown>;
@@ -188,6 +212,9 @@ describe("hosted share claim transitions", () => {
       eventId: "event_123",
       memberId: " member_123 ",
       prisma: {
+        hostedSharePayload: {
+          deleteMany,
+        },
         hostedShareLink: {
           findUnique,
           updateMany,
@@ -213,5 +240,10 @@ describe("hosted share claim transitions", () => {
       lastEventId: "event_123",
     });
     expect(data.consumedByMemberId).toBe("member_123");
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        shareId: "share_123",
+      },
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir, rm } from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
 import {
   assistantCronJobSchema,
@@ -18,6 +19,7 @@ import {
   normalizeNullableString,
   parseAssistantJsonLinesWithTailSalvage,
   writeJsonFileAtomic,
+  writeTextFileAtomic,
 } from '../shared.js'
 import {
   assertAssistantCronJobId,
@@ -26,6 +28,10 @@ import {
 } from '../state-ids.js'
 
 const ASSISTANT_CRON_STORE_VERSION = 1
+const ASSISTANT_CRON_RESPONSE_RETENTION_LIMIT = 20
+const ASSISTANT_CRON_RESPONSE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+const ASSISTANT_CRON_HISTORY_RETENTION_LIMIT = 200
+const ASSISTANT_CRON_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
 
 const assistantCronStoreSchema = z
   .object({
@@ -134,6 +140,86 @@ export async function appendAssistantCronRun(
   const runsPath = resolveAssistantCronRunsPath(paths, run.jobId)
   await ensureAssistantStateDirectory(paths.cronRunsDirectory)
   await appendTextFile(runsPath, `${JSON.stringify(run)}\n`)
+}
+
+export async function pruneAssistantCronRunHistory(input: {
+  now: Date
+  paths: AssistantStatePaths
+}): Promise<{
+  responsesRedacted: number
+  runsPruned: number
+}> {
+  await ensureAssistantCronState(input.paths)
+  const entries = await readdir(input.paths.cronRunsDirectory, {
+    withFileTypes: true,
+  })
+  const historyCutoffMs = input.now.getTime() - ASSISTANT_CRON_HISTORY_RETENTION_MS
+  const responseCutoffMs = input.now.getTime() - ASSISTANT_CRON_RESPONSE_RETENTION_MS
+  let responsesRedacted = 0
+  let runsPruned = 0
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
+      continue
+    }
+
+    const runsPath = path.join(input.paths.cronRunsDirectory, entry.name)
+    const jobId = path.basename(entry.name, '.jsonl')
+    const runs = await readAssistantCronRuns(input.paths, jobId)
+    if (runs.length === 0) {
+      continue
+    }
+
+    const retained: AssistantCronRunRecord[] = []
+    let changed = false
+
+    for (const [index, run] of runs.entries()) {
+      const finishedAtMs = Date.parse(run.finishedAt)
+      const pruneByCount = index >= ASSISTANT_CRON_HISTORY_RETENTION_LIMIT
+      const pruneByAge = Number.isFinite(finishedAtMs) && finishedAtMs < historyCutoffMs
+      if (pruneByCount || pruneByAge) {
+        runsPruned += 1
+        changed = true
+        continue
+      }
+
+      const redactByCount = index >= ASSISTANT_CRON_RESPONSE_RETENTION_LIMIT
+      const redactByAge =
+        Number.isFinite(finishedAtMs) && finishedAtMs < responseCutoffMs
+      if (run.response !== null && (redactByCount || redactByAge)) {
+        retained.push({
+          ...run,
+          response: null,
+        })
+        responsesRedacted += 1
+        changed = true
+        continue
+      }
+
+      retained.push(run)
+    }
+
+    if (!changed) {
+      continue
+    }
+
+    if (retained.length === 0) {
+      await rm(runsPath, {
+        force: true,
+      })
+      continue
+    }
+
+    await writeTextFileAtomic(
+      runsPath,
+      `${retained.map((retainedRun) => JSON.stringify(retainedRun)).join('\n')}\n`,
+    )
+  }
+
+  return {
+    responsesRedacted,
+    runsPruned,
+  }
 }
 
 export function resolveAssistantCronJobIndex(

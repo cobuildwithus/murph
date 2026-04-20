@@ -4,6 +4,7 @@ import { finalizeHostedShareAcceptance } from "../src/lib/hosted-share/shared";
 
 describe("finalizeHostedShareAcceptance", () => {
   it("preserves the original acceptance fields when marking a share consumed", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
     const updateMany = vi.fn<(input: {
       data: {
         acceptedAt?: Date;
@@ -30,6 +31,9 @@ describe("finalizeHostedShareAcceptance", () => {
       eventId: "evt_accepted",
       memberId: "member_123",
       prisma: {
+        hostedSharePayload: {
+          deleteMany,
+        },
         hostedShareLink: {
           findUnique,
           updateMany,
@@ -59,5 +63,10 @@ describe("finalizeHostedShareAcceptance", () => {
     expect(payload?.data.acceptedAt).toBeUndefined();
     expect(payload?.data.acceptedByMemberId).toBeUndefined();
     expect(payload?.data.lastEventId).toBeUndefined();
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        shareId: "share_123",
+      },
+    });
   });
 });

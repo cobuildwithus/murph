@@ -108,4 +108,33 @@ describe("hosted browser vault snapshot store", () => {
       ),
     ).toThrow("Browser vault snapshot.schema must be murph.browser-vault-snapshot.v1.");
   });
+
+  it("deletes stored browser vault snapshot sidecars", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const rootKey = createTestRootKey(31);
+    const store = createHostedBrowserVaultSnapshotStore({
+      bucket,
+      key: rootKey,
+      keyId: "k-current",
+    });
+
+    await store.writeBrowserVaultSnapshot("user_123", {
+      entities: [],
+      generatedAt: "2026-04-17T00:00:00.000Z",
+      metadata: null,
+      schema: "murph.browser-vault-snapshot.v1",
+      sourceVersion: "b".repeat(64),
+    });
+    const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
+      rootKey,
+      userId: "user_123",
+    });
+
+    expect(bucket.objects.has(storageRef.objectKey)).toBe(true);
+
+    await store.deleteBrowserVaultSnapshot("user_123");
+
+    expect(bucket.objects.has(storageRef.objectKey)).toBe(false);
+    expect(bucket.deleted).toContain(storageRef.objectKey);
+  });
 });

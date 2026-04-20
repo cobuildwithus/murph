@@ -36,6 +36,8 @@ import {
   acquireHostedRunTx,
   commitHostedRunTx,
   finalizeHostedRunTx,
+  readHostedRunStatus,
+  recordHostedRunLog,
   releaseHostedRunFinalizeTx,
 } from "@/src/lib/hosted-run/store";
 
@@ -124,6 +126,214 @@ function buildRunRow(input: {
 function asHostedRunMutationTx<T extends Record<string, unknown>>(tx: T) {
   return Object.assign(Object.create(null), tx) as Parameters<typeof commitHostedRunTx>[0]["tx"];
 }
+
+function asHostedRunStoreClient<T extends Record<string, unknown>>(client: T) {
+  return Object.assign(Object.create(null), client) as Parameters<typeof readHostedRunStatus>[0]["prisma"];
+}
+
+function asHostedRunLogPrisma<T extends Record<string, unknown>>(client: T) {
+  return Object.assign(Object.create(null), client) as Parameters<typeof recordHostedRunLog>[0]["prisma"];
+}
+
+describe("hosted run log handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.countPendingHostedIngressEvents.mockResolvedValue(0);
+    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(buildCursorRow());
+  });
+
+  it("stores only sanitized operator messages and requires the active run token", async () => {
+    const runToken = "run-token.logging";
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      runToken,
+      wakeIds: ["wake_10"],
+    });
+    const hostedRunLogCreate = vi.fn(async ({ data }: {
+      data: {
+        at: Date;
+        component: string;
+        id: string;
+        level: "warn";
+        message: string;
+        phase: string;
+        redactedJson: string;
+        runId: string;
+        userId: string;
+      };
+    }) => ({
+      ...data,
+      createdAt: new Date("2026-04-20T00:01:00.000Z"),
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+      },
+      hostedRunLog: {
+        create: hostedRunLogCreate,
+      },
+    });
+    const prisma = asHostedRunLogPrisma({
+      $transaction: async <T>(callback: (inner: typeof tx) => Promise<T>) => callback(tx),
+    });
+
+    const result = await recordHostedRunLog({
+      component: "runner",
+      level: "warn",
+      message: "authorization: Bearer top-secret-token https://secret.example.test/path person@example.com",
+      prisma,
+      redacted: "Runner failed for user person@example.com with Bearer top-secret-token",
+      phase: "running",
+      runId: run.id,
+      runToken,
+      userId: run.userId,
+    });
+
+    expect(result.logged).toBe(true);
+    expect(hostedRunLogCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        message: "Runner failed for user <redacted-email> with Bearer <redacted-secret>",
+        redactedJson: "Runner failed for user <redacted-email> with Bearer <redacted-secret>",
+      }),
+    });
+
+    const rejected = await recordHostedRunLog({
+      component: "runner",
+      level: "warn",
+      message: "should not log",
+      prisma,
+      phase: "running",
+      runId: run.id,
+      runToken: "stale-token",
+      userId: run.userId,
+    });
+
+    expect(rejected).toEqual({
+      logged: false,
+      log: null,
+    });
+  });
+
+  it("returns the redacted string in status responses when present", async () => {
+    const runToken = "run-token.status";
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      runToken,
+      wakeIds: ["wake_10"],
+      status: "committed_needs_finalize",
+    });
+    const prisma = asHostedRunStoreClient({
+      hostedRun: {
+        findMany: vi.fn(async () => [run]),
+      },
+      hostedRunLog: {
+        findMany: vi.fn(async () => [
+          {
+            at: new Date("2026-04-20T00:01:00.000Z"),
+            component: "runner",
+            createdAt: new Date("2026-04-20T00:01:01.000Z"),
+            id: "log_123",
+            level: "warn",
+            message: "raw runner error with https://secret.example.test/path",
+            phase: "running",
+            redactedJson: "redacted https://secret.example.test/path person@example.com",
+            runId: run.id,
+            userId: run.userId,
+          },
+        ]),
+      },
+    });
+
+    const result = await readHostedRunStatus({
+      includeLogs: true,
+      prisma,
+      runId: run.id,
+      userId: run.userId,
+    });
+
+    expect(result.logs).toEqual([
+      expect.objectContaining({
+        id: "log_123",
+        message: "redacted <redacted-url> <redacted-email>",
+      }),
+    ]);
+  });
+
+  it("sanitizes structured redacted payloads before storage and projection", async () => {
+    const runToken = "run-token.structured-redaction";
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      runToken,
+      wakeIds: ["wake_10"],
+    });
+    const hostedRunLogCreate = vi.fn(async ({ data }: {
+      data: {
+        at: Date;
+        component: string;
+        id: string;
+        level: "warn";
+        message: string;
+        phase: string;
+        redactedJson: {
+          error: string;
+          nested: {
+            recipient: string;
+          };
+        };
+        runId: string;
+        userId: string;
+      };
+    }) => ({
+      ...data,
+      createdAt: new Date("2026-04-20T00:01:00.000Z"),
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+      },
+      hostedRunLog: {
+        create: hostedRunLogCreate,
+      },
+    });
+    const prisma = asHostedRunLogPrisma({
+      $transaction: async <T>(callback: (inner: typeof tx) => Promise<T>) => callback(tx),
+    });
+
+    const result = await recordHostedRunLog({
+      component: "runner",
+      level: "warn",
+      message: "plain message",
+      prisma,
+      redacted: {
+        error: "Bearer top-secret-token",
+        nested: {
+          recipient: "person@example.com",
+        },
+      },
+      phase: "running",
+      runId: run.id,
+      runToken,
+      userId: run.userId,
+    });
+
+    expect(hostedRunLogCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        redactedJson: {
+          error: "Bearer <redacted-secret>",
+          nested: {
+            recipient: "<redacted-email>",
+          },
+        },
+      }),
+    });
+    expect(result.log?.redacted).toEqual({
+      error: "Bearer <redacted-secret>",
+      nested: {
+        recipient: "<redacted-email>",
+      },
+    });
+  });
+});
 
 describe("commitHostedRunTx", () => {
   beforeEach(() => {
@@ -414,6 +624,166 @@ describe("commitHostedRunTx", () => {
         committedSeq: 9n,
         userId: "member_123",
         version: 3n,
+      },
+    });
+  });
+
+  it("scrubs terminal ingress payload ciphertext and spilled payload rows after commit", async () => {
+    const initialCursor = buildCursorRow();
+    const committedCursor = buildCursorRow({
+      committedSeq: 11n,
+      version: 4n,
+    });
+    const runToken = "run-token.scrub-terminal-payloads";
+    const run = buildRunRow({
+      eventSeqs: ["10", "11"],
+      runToken,
+      wakeIds: ["wake_10", "wake_11"],
+    });
+    const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const hostedIngressEventFindMany = vi.fn(async () => [
+      {
+        id: "wake_10",
+        payloadInlineCiphertext: "inline-ciphertext",
+        payloadRef: null,
+        quarantineCode: null,
+        quarantinedAt: null,
+        seq: 10n,
+        userId: run.userId,
+      },
+      {
+        id: "wake_11",
+        payloadInlineCiphertext: null,
+        payloadRef: "wake_11",
+        quarantineCode: null,
+        quarantinedAt: null,
+        seq: 11n,
+        userId: run.userId,
+      },
+    ]);
+    const hostedIngressEventUpdate = vi.fn(async ({ where, data }: {
+      data: {
+        completedAt: Date;
+        payloadInlineCiphertext: null;
+        payloadRef: null;
+        quarantineCode: string | null;
+        quarantinedAt: Date | null;
+        runId: string;
+        state: "completed" | "quarantined";
+      };
+      where: { id: string };
+    }) => ({
+      id: where.id,
+      ...data,
+    }));
+    const hostedIngressPayloadDeleteMany = vi.fn(async () => ({ count: 1 }));
+    const hostedRunUpdate = vi.fn(async ({ data }: {
+      data: {
+        committedAt: Date;
+        finalSnapshotRef: unknown;
+        finalizedAt: Date;
+        nextRuntimeWakeAt: Date | null;
+        nextRuntimeWakeReason: string | null;
+        outputCommittedSeq: bigint;
+        outputCursorVersion: bigint;
+        preparedAt: Date;
+        preparedSnapshotRef: unknown;
+        redactedSummaryJson?: unknown;
+        status: "finalized";
+      };
+      where: { id: string };
+    }) => ({
+      ...run,
+      committedAt: data.committedAt,
+      finalSnapshotRef: null,
+      finalizedAt: data.finalizedAt,
+      nextRuntimeWakeAt: data.nextRuntimeWakeAt,
+      nextRuntimeWakeReason: data.nextRuntimeWakeReason,
+      outputCommittedSeq: data.outputCommittedSeq,
+      outputCursorVersion: data.outputCursorVersion,
+      preparedAt: data.preparedAt,
+      preparedSnapshotRef: null,
+      redactedSummaryJson: data.redactedSummaryJson ?? null,
+      status: data.status,
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedExecutionCursor: {
+        updateMany: hostedExecutionCursorUpdateMany,
+      },
+      hostedIngressEvent: {
+        findMany: hostedIngressEventFindMany,
+        update: hostedIngressEventUpdate,
+        updateMany: vi.fn(),
+      },
+      hostedIngressPayload: {
+        deleteMany: hostedIngressPayloadDeleteMany,
+      },
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        update: hostedRunUpdate,
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRowTx
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(committedCursor);
+
+    const result = await commitHostedRunTx({
+      eventResults: [
+        {
+          state: "completed",
+          wakeId: "wake_10",
+        },
+        {
+          quarantineCode: "share_payload_rejected",
+          state: "quarantined",
+          wakeId: "wake_11",
+        },
+      ],
+      expectedCursorVersion: 3n,
+      finalizeRequired: false,
+      outputCommittedSeq: 11n,
+      runId: run.id,
+      runToken,
+      tx,
+      userId: run.userId,
+    });
+
+    expect(result.committed).toBe(true);
+    expect(hostedIngressEventFindMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["wake_10", "wake_11"] },
+        userId: run.userId,
+      },
+    });
+    expect(hostedIngressEventUpdate).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        payloadInlineCiphertext: null,
+        payloadRef: null,
+        quarantineCode: null,
+        quarantinedAt: null,
+        runId: run.id,
+        state: "completed",
+      }),
+      where: { id: "wake_10" },
+    });
+    expect(hostedIngressEventUpdate).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({
+        payloadInlineCiphertext: null,
+        payloadRef: null,
+        quarantineCode: "share_payload_rejected",
+        quarantinedAt: expect.any(Date),
+        runId: run.id,
+        state: "quarantined",
+      }),
+      where: { id: "wake_11" },
+    });
+    expect(hostedIngressPayloadDeleteMany).toHaveBeenCalledTimes(1);
+    expect(hostedIngressPayloadDeleteMany).toHaveBeenCalledWith({
+      where: {
+        ingressEventId: "wake_11",
+        userId: run.userId,
       },
     });
   });
