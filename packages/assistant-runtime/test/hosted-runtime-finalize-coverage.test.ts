@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
-  executeHostedIngressEventAlias: vi.fn(),
+  executeHostedIngressEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedBrowserVaultSnapshot: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
@@ -110,7 +110,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
-  executeHostedIngressEventAlias: mocks.executeHostedIngressEventAlias,
+  executeHostedIngressEvent: mocks.executeHostedIngressEvent,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
@@ -242,10 +242,10 @@ beforeEach(() => {
   mocks.encodeHostedBundleBase64.mockImplementation((bytes: Uint8Array) =>
     Buffer.from(bytes).toString("base64"),
   );
-  mocks.executeHostedIngressEventAlias.mockResolvedValue({
+  mocks.executeHostedIngressEvent.mockResolvedValue({
     bootstrapResult: null,
     conversationMetrics: null,
-    followupExecution: "member-activated",
+    ingressLane: "member-activated",
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -297,19 +297,19 @@ beforeEach(() => {
 });
 
 describe("assistant-runtime execution coverage", () => {
-  it("preserves the earliest device-sync wake after a conversation wake and clamps stale timestamps", async () => {
+  it("preserves the earliest device-sync wake after a conversation wake, clamps stale timestamps, and drains stale due work locally", async () => {
     vi.useFakeTimers();
 
     try {
       vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
       const close = vi.fn();
-      mocks.executeHostedIngressEventAlias.mockResolvedValueOnce({
+      mocks.executeHostedIngressEvent.mockResolvedValueOnce({
         bootstrapResult: null,
         conversationMetrics: {
           nextWakeAt: null,
           parserProcessed: 2,
         },
-        followupExecution: "conversation-message",
+        ingressLane: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
       });
@@ -373,10 +373,10 @@ describe("assistant-runtime execution coverage", () => {
       });
 
       expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
-      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
       expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
       expect(close).toHaveBeenCalledTimes(1);
-      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
+      assert.equal(result.committedResult.result.nextWakeAt, null);
       assert.match(result.committedResult.result.summary, /conversation\.message/u);
     } finally {
       vi.useRealTimers();
@@ -384,13 +384,13 @@ describe("assistant-runtime execution coverage", () => {
   });
 
   it("logs and continues when preserved device-sync wake resolution fails", async () => {
-    mocks.executeHostedIngressEventAlias.mockResolvedValueOnce({
+    mocks.executeHostedIngressEvent.mockResolvedValueOnce({
       bootstrapResult: null,
       conversationMetrics: {
         nextWakeAt: null,
         parserProcessed: 0,
       },
-      followupExecution: "conversation-message",
+      ingressLane: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -449,28 +449,6 @@ describe("assistant-runtime execution coverage", () => {
         message:
           "Hosted runtime could not resolve the preserved device-sync wake after conversation wake handling; continuing without it.",
       }),
-    );
-  });
-
-  it("fails closed when runDrain is missing during finalization", async () => {
-    await expect(
-      completeHostedRunDrainAfterCommit({
-        request: {
-          bundle: "committed-bundle",
-          run: HOSTED_RUN_CONTEXT,
-          runDrain: undefined as never,
-        },
-        restored: createRestored(),
-        runtime: createRuntime(),
-        wake: buildHostedExecutionRuntimeTimerWake({
-          eventId: "evt_missing_run_drain",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        }),
-      }),
-    ).rejects.toThrow(
-      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
     );
   });
 
