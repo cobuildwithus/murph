@@ -117,7 +117,7 @@ function buildRunRow(input: {
     triggerKind: input.triggerKind ?? "external_ingress",
     updatedAt: now,
     userId: "member_123",
-    wakeIdsJson: input.wakeIds,
+    ingressEventIdsJson: input.wakeIds,
   };
 }
 

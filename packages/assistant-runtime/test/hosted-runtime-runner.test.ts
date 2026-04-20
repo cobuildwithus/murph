@@ -242,7 +242,7 @@ const finalResult: HostedAssistantRuntimeJobResult = {
 const committedFirstPassResult: HostedAssistantRuntimeJobResult = {
   committedAssistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
   committedGatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
-  phase: "committed",
+  phase: "prepared",
   result: committedExecution.committedResult,
 };
 

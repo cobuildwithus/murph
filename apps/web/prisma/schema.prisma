@@ -364,7 +364,7 @@ model HostedRun {
   eventCount           Int            @default(0) @map("event_count")
   eventKindsJson       Json           @map("event_kinds_json")
   eventSeqsJson        Json           @map("event_seqs_json")
-  wakeIdsJson          Json           @map("wake_ids_json")
+  ingressEventIdsJson  Json           @map("wake_ids_json")
   redactedSummaryJson  Json?          @map("redacted_summary_json")
   errorCode            String?        @map("error_code")
   errorClass           String?        @map("error_class")

@@ -203,7 +203,7 @@ function isHostedAssistantRuntimeJobResult(
   const candidate = value as Record<string, unknown>;
   if (
     candidate.phase !== undefined
-    && candidate.phase !== "committed"
+    && candidate.phase !== "prepared"
     && candidate.phase !== "completed"
   ) {
     return false;

@@ -57,7 +57,7 @@ export type {
   HostedAssistantRuntimeChannelCapabilities,
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeCompletedJobResult,
-  HostedAssistantRuntimeCommittedJobResult,
+  HostedAssistantRuntimePreparedJobResult,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
@@ -230,7 +230,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
               committedExecution.committedAssistantDeliveryEffects,
             committedGatewayProjectionSnapshot:
               committedExecution.committedGatewayProjectionSnapshot ?? null,
-            phase: "committed",
+            phase: "prepared",
             result: committedExecution.committedResult,
           };
         } finally {
