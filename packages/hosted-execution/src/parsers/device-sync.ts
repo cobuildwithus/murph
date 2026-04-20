@@ -1,8 +1,8 @@
 import { parseHostedExecutionDeviceSyncWakeHint as parseOwnedHostedExecutionDeviceSyncWakeHint } from "@murphai/device-syncd/hosted-runtime";
 
 import type {
-  HostedExecutionAssistantCronTickEvent,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionLegacyCronReason,
 } from "../contracts.ts";
 
 import { requireString } from "./assertions.ts";
@@ -15,7 +15,7 @@ export function parseHostedExecutionDeviceSyncWakeHint(
 
 export function parseHostedExecutionCronReason(
   value: unknown,
-): HostedExecutionAssistantCronTickEvent["reason"] {
+): HostedExecutionLegacyCronReason {
   const reason = requireString(value, "Hosted execution assistant.cron.tick reason");
 
   if (reason === "alarm" || reason === "manual" || reason === "device-sync") {

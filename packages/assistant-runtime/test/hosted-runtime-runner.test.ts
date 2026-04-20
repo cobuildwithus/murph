@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeTimerWake,
@@ -34,14 +34,11 @@ function buildMemberActivatedWake(eventId: string) {
   });
 }
 
-function buildCronWake(
-  eventId: string,
-  reason: "alarm" | "device-sync" | "manual" = "manual",
-) {
-  return buildHostedExecutionAssistantCronTickWake({
+function buildSystemIngressWake(eventId: string) {
+  return buildHostedExecutionDeviceSyncWake({
     eventId,
     occurredAt: "2026-04-08T00:00:00.000Z",
-    reason,
+    reason: "connected",
     userId: "member_123",
   });
 }
@@ -480,7 +477,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             bundle: "incoming-bundle",
             run: HOSTED_RUN_CONTEXT,
             runDrain: createSingleWakeRunDrain(
-              buildCronWake("evt_runtime_normalization_failure"),
+              buildSystemIngressWake("evt_runtime_normalization_failure"),
             ),
           },
         },
@@ -554,7 +551,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         request: {
           bundle: "incoming-bundle",
           run: HOSTED_RUN_CONTEXT,
-          runDrain: createSingleWakeRunDrain(buildCronWake("evt_dedupe_artifacts")),
+          runDrain: createSingleWakeRunDrain(buildSystemIngressWake("evt_dedupe_artifacts")),
         },
       },
       {
@@ -655,7 +652,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         request: {
           bundle: "incoming-bundle",
           run: HOSTED_RUN_CONTEXT,
-          runDrain: createSingleWakeRunDrain(buildCronWake("evt_no_bundle")),
+          runDrain: createSingleWakeRunDrain(buildSystemIngressWake("evt_no_bundle")),
         },
       },
       {

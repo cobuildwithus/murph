@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
@@ -9,7 +9,7 @@ import {
 import {
   isHostedConversationMessageWake,
   isHostedEmailConversationMessageWake,
-  isHostedExecutionWakeKind,
+  isHostedIngressKind,
   isHostedLinqConversationMessageWake,
   isHostedSystemWake,
   isHostedTelegramConversationMessageWake,
@@ -17,11 +17,11 @@ import {
 
 describe("hosted execution wake guards", () => {
   it("accepts canonical wake kinds only", () => {
-    expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
-    expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
-    expect(isHostedExecutionWakeKind("assistant.cron.tick")).toBe(true);
-    expect(isHostedExecutionWakeKind("linq.message.received")).toBe(false);
-    expect(isHostedExecutionWakeKind("email.message.received")).toBe(false);
+    expect(isHostedIngressKind("conversation.message")).toBe(true);
+    expect(isHostedIngressKind("member.activated")).toBe(true);
+    expect(isHostedIngressKind("assistant.cron.tick")).toBe(false);
+    expect(isHostedIngressKind("linq.message.received")).toBe(false);
+    expect(isHostedIngressKind("email.message.received")).toBe(false);
   });
 
   it("narrows hosted wakes by conversation channel versus system wake", () => {
@@ -62,10 +62,10 @@ describe("hosted execution wake guards", () => {
       selfAddress: null,
       userId: "user_guard",
     });
-    const systemWake = buildHostedExecutionAssistantCronTickWake({
-      eventId: "cron-wake-1",
+    const systemWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync-wake-1",
       occurredAt: "2026-04-18T00:00:00.000Z",
-      reason: "manual",
+      reason: "connected",
       userId: "user_guard",
     });
 

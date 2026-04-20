@@ -21,7 +21,7 @@ import {
 } from "../hosted-device-sync-runtime.ts";
 import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
-  HostedExecutionWake,
+  HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -63,7 +63,7 @@ async function resolveHostedAssistantAutomationReadiness(input: {
 }
 
 function reportHostedAssistantAutomationSkipped(
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
   readiness: HostedAssistantAutomationReadiness,
 ): void {
   emitHostedExecutionStructuredLog({
@@ -92,8 +92,8 @@ function reportHostedAssistantAutomationSkipped(
   });
 }
 
-export async function runHostedAssistantCronWakeLane(input: {
-  wake: HostedExecutionWake;
+export async function runHostedAssistantRuntimeTimerLane(input: {
+  wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
   requestId: string;
   skipAssistantAutomation?: boolean;
@@ -133,7 +133,7 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
   executionContext: AssistantExecutionContext,
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
 ): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
@@ -224,7 +224,7 @@ export async function runHostedAssistantAutomation(
 }
 
 export async function runHostedDeviceSyncPass(
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
   vaultRoot: string,
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null,
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
@@ -305,7 +305,7 @@ export async function runHostedDeviceSyncPass(
 
 export async function runHostedDeviceSyncWakeLane(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
   resolvedConfig: {
     deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
   };
@@ -339,7 +339,7 @@ export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
 
 function reportHostedDeviceSyncControlPlaneFailure(
   phase: "reconcile" | "sync",
-  wake: HostedExecutionWake,
+  wake: HostedRuntimeEvent,
   error: unknown,
 ): void {
   emitHostedExecutionStructuredLog({

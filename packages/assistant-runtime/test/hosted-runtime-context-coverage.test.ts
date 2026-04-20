@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
@@ -100,11 +100,11 @@ function buildLegacyWake(input: {
   occurredAt: string;
 }) {
   switch (input.event.kind) {
-    case "assistant.cron.tick":
-      return buildHostedExecutionAssistantCronTickWake({
+    case "device-sync.wake":
+      return buildHostedExecutionDeviceSyncWake({
         eventId: input.eventId,
         occurredAt: input.occurredAt,
-        reason: input.event.reason as "alarm" | "device-sync" | "manual",
+        reason: input.event.reason as "connected" | "disconnected" | "reauthorization_required" | "reconcile_due" | "webhook_hint",
         userId: input.event.userId ?? "member_123",
       });
     case "member.activated":
@@ -212,8 +212,8 @@ describe("hosted runtime context coverage", () => {
         vaultRoot,
         buildLegacyWake({
           event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
+            kind: "device-sync.wake",
+            reason: "connected",
             userId: "member_123",
           },
           eventId: "evt_tick",
@@ -556,8 +556,8 @@ describe("hosted runtime context coverage", () => {
           vaultRoot,
           buildLegacyWake({
             event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
+              kind: "device-sync.wake",
+              reason: "connected",
               userId: "member_123",
             },
             eventId: "evt_tick",

@@ -26,7 +26,6 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
   "member.channels.updated",
-  "assistant.cron.tick",
   "device-sync.wake",
   "vault.share.accepted",
 ] as const;
@@ -38,7 +37,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "conversation.message",
   "member.activated",
   "member.channels.updated",
-  "assistant.cron.tick",
   "device-sync.wake",
   "vault.share.accepted",
 ] as const;
@@ -47,6 +45,7 @@ export type HostedIngressKind =
   (typeof HOSTED_EXECUTION_WAKE_KINDS)[number];
 export type HostedExecutionBaseWakeKind =
   | HostedIngressKind
+  | "assistant.cron.tick"
   | "runtime.timer";
 
 export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
@@ -123,10 +122,7 @@ export interface HostedExecutionTelegramMessage {
   threadId: string;
 }
 
-export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
-  kind: "assistant.cron.tick";
-  reason: "alarm" | "manual" | "device-sync";
-}
+export type HostedExecutionLegacyCronReason = "alarm" | "manual" | "device-sync";
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
   connectionId?: string | null;
@@ -178,7 +174,6 @@ export interface HostedRuntimeDrainRequest {
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
-  | HostedExecutionAssistantCronTickEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionVaultShareAcceptedEvent;
 
@@ -263,9 +258,10 @@ export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutio
   memberChannels: HostedExecutionMemberChannels;
 }
 
+// Legacy runtime-only compatibility wake. Do not persist or append this as hosted ingress.
 export interface HostedExecutionAssistantCronTickWake extends HostedExecutionBaseWake {
   kind: "assistant.cron.tick";
-  reason: HostedExecutionAssistantCronTickEvent["reason"];
+  reason: HostedExecutionLegacyCronReason;
 }
 
 export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
@@ -290,12 +286,12 @@ export type HostedIngressEnvelope =
   | HostedExecutionConversationMessageWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
-  | HostedExecutionAssistantCronTickWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareAcceptedWake;
 
 export type HostedRuntimeEvent =
   | HostedIngressEnvelope
+  | HostedExecutionAssistantCronTickWake
   | HostedExecutionRuntimeTimerWake;
 
 export type HostedExecutionWakeKind = HostedIngressKind;
@@ -314,10 +310,8 @@ export type HostedIngressSnapshotRef = HostedExecutionBundleRefState;
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
   currentBundleRef?: HostedIngressSnapshotRef | null;
-  run?: HostedExecutionRunContext | null;
-  runDrain?: HostedRuntimeDrainRequest | null;
-  sharePack?: HostedExecutionRunnerSharePack | null;
-  wake: HostedExecutionRunnerWake;
+  run: HostedExecutionRunContext;
+  runDrain: HostedRuntimeDrainRequest;
 }
 
 export interface HostedExecutionRunnerResult {

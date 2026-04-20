@@ -66,7 +66,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   runHostedAssistantAutomation,
-  runHostedAssistantCronWakeLane,
+  runHostedAssistantRuntimeTimerLane,
   runHostedDeviceSyncPass,
   runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
@@ -186,9 +186,9 @@ describe("runHostedAssistantAutomation", () => {
         },
         {
           eventId: "evt_automation_event",
-          kind: "assistant.cron.tick",
+          kind: "runtime.timer",
           occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
+          triggerKind: "runtime_timer",
           userId: "member_123",
         },
       ),
@@ -237,9 +237,9 @@ describe("runHostedAssistantAutomation", () => {
         },
         {
           eventId: "evt_automation_gap",
-          kind: "assistant.cron.tick",
+          kind: "runtime.timer",
           occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
+          triggerKind: "runtime_timer",
           userId: "member_123",
         },
       ),
@@ -265,9 +265,9 @@ describe("runHostedAssistantAutomation", () => {
         },
         {
           eventId: "evt_automation_failure",
-          kind: "assistant.cron.tick",
+          kind: "runtime.timer",
           occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
+          triggerKind: "runtime_timer",
           userId: "member_123",
         },
       ),
@@ -284,9 +284,9 @@ describe("runHostedDeviceSyncPass", () => {
     const result = await runHostedDeviceSyncPass(
       {
         eventId: "evt_skip",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       "/tmp/vault-root",
@@ -311,9 +311,9 @@ describe("runHostedDeviceSyncPass", () => {
     const result = await runHostedDeviceSyncPass(
       {
         eventId: "evt_empty_registry",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       "/tmp/vault-root",
@@ -334,9 +334,9 @@ describe("runHostedDeviceSyncPass", () => {
     const result = await runHostedDeviceSyncPass(
       {
         eventId: "evt_missing_env",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       "/tmp/vault-root",
@@ -371,9 +371,9 @@ describe("runHostedDeviceSyncPass", () => {
     const result = await runHostedDeviceSyncPass(
       {
         eventId: "evt_continue",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       "/tmp/vault-root",
@@ -419,9 +419,9 @@ describe("runHostedDeviceSyncPass", () => {
     const result = await runHostedDeviceSyncPass(
       {
         eventId: "evt_reconcile_continue",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       "/tmp/vault-root",
@@ -523,14 +523,14 @@ describe("runHostedDeviceSyncPass", () => {
   });
 });
 
-describe("runHostedAssistantCronWakeLane", () => {
+describe("runHostedAssistantRuntimeTimerLane", () => {
   it("runs assistant automation without sweeping parser or device-sync work", async () => {
-    const result = await runHostedAssistantCronWakeLane({
+    const result = await runHostedAssistantRuntimeTimerLane({
       wake: {
         eventId: "evt_assistant_lane",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       executionContext: {
@@ -579,12 +579,12 @@ describe("runHostedAssistantCronWakeLane", () => {
         progressed: true,
       });
 
-      const result = await runHostedAssistantCronWakeLane({
+      const result = await runHostedAssistantRuntimeTimerLane({
         wake: {
           eventId: "evt_assistant_progress",
-          kind: "assistant.cron.tick",
+          kind: "runtime.timer",
           occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
+          triggerKind: "runtime_timer",
           userId: "member_123",
         },
         executionContext: {
@@ -611,12 +611,12 @@ describe("runHostedAssistantCronWakeLane", () => {
   });
 
   it("skips assistant automation without warning when the caller explicitly disables it", async () => {
-    const result = await runHostedAssistantCronWakeLane({
+    const result = await runHostedAssistantRuntimeTimerLane({
       wake: {
         eventId: "evt_skip_requested",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       executionContext: {
@@ -648,12 +648,12 @@ describe("runHostedAssistantCronWakeLane", () => {
       assistantProvider: null,
     });
 
-    const result = await runHostedAssistantCronWakeLane({
+    const result = await runHostedAssistantRuntimeTimerLane({
       wake: {
         eventId: "evt_skip_automation",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       executionContext: {
@@ -695,12 +695,12 @@ describe("runHostedAssistantCronWakeLane", () => {
       assistantProvider: null,
     });
 
-    await runHostedAssistantCronWakeLane({
+    await runHostedAssistantRuntimeTimerLane({
       wake: {
         eventId: "evt_invalid_automation",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       executionContext: {
@@ -735,12 +735,12 @@ describe("runHostedAssistantCronWakeLane", () => {
       assistantProvider: "openai-compatible",
     });
 
-    await runHostedAssistantCronWakeLane({
+    await runHostedAssistantRuntimeTimerLane({
       wake: {
         eventId: "evt_unready_automation",
-        kind: "assistant.cron.tick",
+        kind: "runtime.timer",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       },
       executionContext: {

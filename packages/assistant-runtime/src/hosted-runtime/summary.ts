@@ -1,5 +1,5 @@
 import {
-  type HostedExecutionWake,
+  type HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 
 import type {
@@ -10,7 +10,7 @@ import type {
 import { assertNever } from "./utils.ts";
 
 export function summarizeWake(
-  wake: HostedExecutionWake,
+  wake: HostedIngressEnvelope,
   metrics: HostedWakeExecutionMetrics & HostedMaintenanceMetrics,
 ): string {
   switch (wake.kind) {
@@ -28,8 +28,6 @@ export function summarizeWake(
           return "Persisted hosted email capture on the hosted conversation lane.";
       }
       return assertNever(wake.message);
-    case "assistant.cron.tick":
-      return `Processed assistant cron tick (${wake.reason}) on the hosted assistant lane.`;
     case "device-sync.wake":
       return `Processed device-sync wake (${wake.reason}) on the hosted device-sync lane.${formatDeviceSyncSuffix(metrics)}`;
     case "vault.share.accepted": {

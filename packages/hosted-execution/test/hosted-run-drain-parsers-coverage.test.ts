@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionRuntimeTimerWake,
 } from "../src/builders.ts";
 import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "../src/contracts.ts";
@@ -35,10 +35,10 @@ describe("hosted run drain parser coverage", () => {
           {
             seq: "24",
             sharePack: null,
-            wake: buildHostedExecutionAssistantCronTickWake({
+            wake: buildHostedExecutionDeviceSyncWake({
               eventId: "evt_123",
               occurredAt: "2026-04-08T00:00:00.000Z",
-              reason: "manual",
+              reason: "connected",
               userId: "user_123",
             }),
             wakeId: "wake_24",
@@ -64,10 +64,10 @@ describe("hosted run drain parser coverage", () => {
           {
             seq: "24",
             sharePack: null,
-            wake: buildHostedExecutionAssistantCronTickWake({
+            wake: buildHostedExecutionDeviceSyncWake({
               eventId: "evt_123",
               occurredAt: "2026-04-08T00:00:00.000Z",
-              reason: "manual",
+              reason: "connected",
               userId: "user_123",
             }),
             wakeId: "wake_24",

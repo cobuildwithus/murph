@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
@@ -33,7 +33,7 @@ const mocks = vi.hoisted(() => ({
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
-  runHostedAssistantCronWakeLane: vi.fn(),
+  runHostedAssistantRuntimeTimerLane: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   runHostedNoopSystemWakeLane: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
@@ -92,7 +92,7 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
-  runHostedAssistantCronWakeLane: mocks.runHostedAssistantCronWakeLane,
+  runHostedAssistantRuntimeTimerLane: mocks.runHostedAssistantRuntimeTimerLane,
   runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane: mocks.runHostedNoopSystemWakeLane,
 }));
@@ -174,7 +174,7 @@ beforeEach(() => {
     executionContext,
   );
   mocks.listHostedBundleArtifacts.mockReturnValue([]);
-  mocks.runHostedAssistantCronWakeLane.mockResolvedValue({
+  mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValue({
     deviceSyncProcessed: 2,
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
@@ -217,7 +217,7 @@ describe("executeHostedRunDrainForCommit", () => {
     );
 
     expect(mocks.executeHostedIngressEventAlias).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantRuntimeTimerLane).not.toHaveBeenCalled();
     expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
   });
 
@@ -243,7 +243,7 @@ describe("executeHostedRunDrainForCommit", () => {
     });
 
     expect(mocks.executeHostedIngressEventAlias).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantCronWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
     assert.equal(result.committedResult.result.eventsHandled, 0);
@@ -291,10 +291,10 @@ describe("executeHostedRunDrainForCommit", () => {
           events: [
             {
               seq: "24",
-              wake: buildHostedExecutionAssistantCronTickWake({
-                eventId: "evt_conversation_followup",
+              wake: buildHostedExecutionDeviceSyncWake({
+                eventId: "evt_device_sync_followup",
                 occurredAt: "2026-04-08T00:00:00.000Z",
-                reason: "manual",
+                reason: "connected",
                 userId: "member_123",
               }),
               wakeId: "wake_24",
@@ -327,11 +327,11 @@ describe("executeHostedRunDrainForCommit", () => {
     });
 
     expect(mocks.executeHostedIngressEventAlias).toHaveBeenCalledTimes(2);
-    expect(mocks.runHostedAssistantCronWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     assert.equal(result.committedResult.result.eventsHandled, 2);
     assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:12:00.000Z");
-    assert.match(result.committedResult.result.summary, /kinds=assistant\.cron\.tick,member\.activated/u);
+    assert.match(result.committedResult.result.summary, /kinds=device-sync\.wake,member\.activated/u);
   });
 });

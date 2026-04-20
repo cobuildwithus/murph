@@ -14,7 +14,6 @@ import {
 } from "./contracts.ts";
 
 import type {
-  HostedExecutionAssistantCronTickEvent,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
@@ -377,6 +376,7 @@ export function parseHostedRuntimeEvent(value: unknown): HostedRuntimeEvent {
   }
 
   if (kind === "assistant.cron.tick") {
+    // Legacy runtime-only compatibility. Persisted ingress must not use this kind.
     return buildHostedExecutionAssistantCronTickWake({
       eventId: requireString(record.eventId, "Hosted execution runner wake eventId"),
       occurredAt: requireString(record.occurredAt, "Hosted execution runner wake occurredAt"),
@@ -658,12 +658,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       } satisfies HostedExecutionMemberChannelsUpdatedEvent;
-    case "assistant.cron.tick":
-      return {
-        kind,
-        reason: parseHostedExecutionCronReason(record.reason),
-        userId,
-      } satisfies HostedExecutionAssistantCronTickEvent;
     case "device-sync.wake":
       return {
         ...(record.connectionId === undefined
