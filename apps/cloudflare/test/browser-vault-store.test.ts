@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createBrowserVaultSnapshot, parseBrowserVaultSnapshot } from "@murphai/query/browser";
+import {
+  createBrowserVaultSnapshot,
+  createVaultReadModel,
+  parseBrowserVaultSnapshot,
+} from "@murphai/query/browser";
 
 import {
   createHostedBrowserVaultSnapshotStore,
@@ -20,29 +24,29 @@ describe("hosted browser vault snapshot store", () => {
       key: rootKey,
       keyId: "k-current",
     });
-    type BrowserVaultEntity = Parameters<typeof createBrowserVaultSnapshot>[0]["entities"][number];
+    type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
     const entities: BrowserVaultEntity[] = [{
       attributes: {
         source: "browser",
       },
       body: null,
-      date: null,
-      entityId: "goal_browser_01",
+      date: "2026-04-17",
+      entityId: "journal_browser_01",
       experimentSlug: null,
-      family: "goal",
+      family: "journal",
       frontmatter: null,
-      kind: "goal",
+      kind: "journal_day",
       links: [],
-      lookupIds: ["goal_browser_01"],
-      occurredAt: null,
-      path: "bank/goals/browser.md",
-      primaryLookupId: "goal_browser_01",
-      recordClass: "bank",
+      lookupIds: ["journal_browser_01"],
+      occurredAt: "2026-04-17T08:00:00.000Z",
+      path: "history/journal/2026-04-17.md",
+      primaryLookupId: "journal_browser_01",
+      recordClass: "ledger",
       relatedIds: [],
       status: null,
       stream: null,
       tags: ["browser"],
-      title: "Browser vault goal",
+      title: "Browser vault journal",
     }];
     const metadata = {
       nested: {
@@ -51,10 +55,13 @@ describe("hosted browser vault snapshot store", () => {
       source: "browser",
     };
     const snapshot = createBrowserVaultSnapshot({
-      entities,
       generatedAt: "2026-04-17T00:00:00.000Z",
-      metadata,
       sourceVersion: "a".repeat(64),
+      vault: createVaultReadModel({
+        entities,
+        metadata,
+        vaultRoot: "browser://vault",
+      }),
     });
 
     entities[0]!.tags.push("mutated");
@@ -91,22 +98,17 @@ describe("hosted browser vault snapshot store", () => {
     const loaded = JSON.parse(new TextDecoder().decode(loadedBytes ?? undefined)) as unknown;
     expect(loaded).toEqual(snapshot);
     expect(parseBrowserVaultSnapshot(loaded)).toEqual(snapshot);
-    expect(snapshot.entities[0]?.tags).toEqual(["browser"]);
-    expect(snapshot.metadata).toEqual({
-      nested: {
-        flag: true,
-      },
-      source: "browser",
-    });
+    expect(snapshot.history.timeline[0]?.tags).toEqual(["browser"]);
+    expect(snapshot.history.timeline[0]?.title).toBe("Browser vault journal");
     expect(() =>
       parseBrowserVaultSnapshot(
         {
           ...snapshot,
-          schema: "murph.browser-vault-snapshot.wrong",
+          schema: "murph.browser-vault-dashboard-snapshot.wrong",
         },
         "Browser vault snapshot",
       ),
-    ).toThrow("Browser vault snapshot.schema must be murph.browser-vault-snapshot.v1.");
+    ).toThrow("Browser vault snapshot.schema must be murph.browser-vault-dashboard-snapshot.v1.");
   });
 
   it("deletes stored browser vault snapshot sidecars", async () => {
@@ -118,13 +120,18 @@ describe("hosted browser vault snapshot store", () => {
       keyId: "k-current",
     });
 
-    await store.writeBrowserVaultSnapshot("user_123", {
-      entities: [],
-      generatedAt: "2026-04-17T00:00:00.000Z",
-      metadata: null,
-      schema: "murph.browser-vault-snapshot.v1",
-      sourceVersion: "b".repeat(64),
-    });
+    await store.writeBrowserVaultSnapshot(
+      "user_123",
+      createBrowserVaultSnapshot({
+        generatedAt: "2026-04-17T00:00:00.000Z",
+        sourceVersion: "b".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: null,
+          vaultRoot: "browser://vault",
+        }),
+      }),
+    );
     const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
       rootKey,
       userId: "user_123",
