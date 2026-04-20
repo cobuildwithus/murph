@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Experiment } from "@/src/types/experiments";
+import type { ExperimentProtocol } from "@/src/types/experiments";
 
 const mocks = vi.hoisted(() => ({
   experimentDetailClient: vi.fn(),
@@ -17,19 +17,19 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("../app/(dashboard)/experiments/[experimentId]/experiment-detail-client", () => ({
   ExperimentDetailClient({
-    experiment,
+    protocol,
   }: {
-    experiment: Experiment;
+    protocol: ExperimentProtocol;
   }) {
-    mocks.experimentDetailClient({ experiment });
+    mocks.experimentDetailClient({ protocol });
 
     return createElement(
       "div",
       {
-        "data-experiment-id": experiment.id,
-        "data-experiment-key": experiment.commons?.key,
+        "data-experiment-id": protocol.id,
+        "data-experiment-key": protocol.commons?.key,
       },
-      experiment.title,
+      protocol.title,
     );
   },
 }));
@@ -47,14 +47,14 @@ describe("ExperimentDetailPage", () => {
 
     expect(mocks.experimentDetailClient).toHaveBeenCalledTimes(1);
     const clientExperiment = mocks.experimentDetailClient.mock.calls[0]?.[0]
-      ?.experiment as Experiment;
+      ?.protocol as ExperimentProtocol;
 
     expect(clientExperiment).toEqual(expect.objectContaining({
       commons: expect.objectContaining({
         key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+        routeId: "finnish-sauna",
       }),
       id: "finnish-sauna",
-      status: "upcoming",
       title: "Murph Finnish Dry Sauna",
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
@@ -83,8 +83,9 @@ describe("ExperimentDetailPage", () => {
     const markup = renderToStaticMarkup(element);
 
     expect(mocks.experimentDetailClient).toHaveBeenCalledWith({
-      experiment: expect.objectContaining({
+      protocol: expect.objectContaining({
         commons: expect.objectContaining({
+          aliases: expect.arrayContaining(["bryan-johnson-blueprint"]),
           key: "protocol_variant:dry-sauna/bryan-johnson-blueprint",
         }),
         id: "bryan-johnson-blueprint",
