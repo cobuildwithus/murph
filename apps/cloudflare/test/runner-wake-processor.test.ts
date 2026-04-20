@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  HostedExecutionRuntimeTimerWake,
+  HostedRunRecord,
+} from "@murphai/hosted-execution/contracts";
 import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
+  RunnerWakeProcessor,
   recordHostedRunBreadcrumbInWebBestEffort,
   recordHostedRunPhaseLogInWebBestEffort,
   summarizeHostedAssistantDeliveryOutcomes,
@@ -194,5 +199,100 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
         }),
       }),
     }));
+  });
+});
+
+describe("RunnerWakeProcessor.executeRunDrain", () => {
+  it("always requires finalize for committed snapshots, even without delivery effects", async () => {
+    const beginWakeRun = vi.fn().mockResolvedValue(undefined);
+    const completeWakeRun = vi.fn().mockResolvedValue(undefined);
+
+    const processor = new RunnerWakeProcessor({
+      applyHostedTransition: vi.fn(),
+      bucket: {} as never,
+      ensureRunnerStores: vi.fn(),
+      env: {
+        runnerTimeoutMs: 60_000,
+        webCallbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: "{\"kty\":\"EC\"}",
+        },
+      },
+      hostedWebBaseUrl: null,
+      readRunnerRuntimeConfigSource: () => ({}),
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      stateStore: {
+        beginWakeRun,
+        completeWakeRun,
+        failWakeRun: vi.fn(),
+        recordRunPhase: vi.fn().mockResolvedValue({}),
+      },
+      wakeScheduler: {},
+    } as never);
+
+    (processor as any).advanceRunPhase = vi.fn().mockResolvedValue({});
+    (processor as any).invokeRunner = vi.fn().mockResolvedValue({
+      committedAssistantDeliveryEffects: [],
+      committedGatewayProjectionSnapshot: null,
+      phase: "committed",
+      result: {
+        bundle: "bundle-encoded",
+        result: {
+          eventsHandled: 0,
+          nextWakeAt: null,
+          summary: "Prepared hosted run snapshot.",
+        },
+      },
+    });
+    (processor as any).persistCompletedRunnerResult = vi.fn().mockResolvedValue(null);
+    (processor as any).readRecentActiveRunLease = vi.fn().mockResolvedValue(null);
+
+    const run: HostedRunRecord = {
+      acquiredAt: "2026-04-20T09:00:00.000Z",
+      attempt: 1,
+      createdAt: "2026-04-20T09:00:00.000Z",
+      eventCount: 0,
+      eventKinds: [],
+      eventSeqs: [],
+      executorKind: "cloudflare-container",
+      id: "run_123",
+      inputCommittedSeq: "10",
+      inputCursorVersion: "cursor-v1",
+      status: "acquired",
+      triggerKind: "runtime_timer",
+      updatedAt: "2026-04-20T09:00:00.000Z",
+      userId: "user_123",
+      wakeIds: [],
+    };
+    const primaryWake: HostedExecutionRuntimeTimerWake = {
+      eventId: "runtime-timer",
+      kind: "runtime.timer",
+      occurredAt: "2026-04-20T09:00:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "user_123",
+    };
+
+    const result = await processor.executeRunDrain({
+      events: [],
+      primaryWake,
+      run,
+      runToken: "run-token",
+    });
+
+    expect(result).toMatchObject({
+      cursorSnapshotRef: null,
+      finalizeRequired: true,
+      nextRuntimeWakeAt: null,
+      redactedSummary: {
+        assistantDeliveryEffectCount: 0,
+        eventsHandled: 0,
+        phase: "prepared",
+        summary: "Prepared hosted run snapshot.",
+      },
+      state: "completed",
+    });
+    expect(beginWakeRun).toHaveBeenCalledTimes(1);
+    expect(completeWakeRun).toHaveBeenCalledTimes(1);
   });
 });

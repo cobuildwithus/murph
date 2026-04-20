@@ -21,13 +21,13 @@ import {
 import {
   parseHostedExecutionRunnerSharePack,
 } from "@murphai/hosted-execution/parsers";
-import { computeHostedRunElapsedMs } from "@murphai/assistant-runtime";
 import type {
   HostedAssistantDeliveryOutcome,
   HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import { computeHostedRunElapsedMs } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { R2BucketLike } from "../bundle-store.js";
 import { createHostedBrowserVaultSnapshotStore } from "../browser-vault-store.js";
 import { deleteHostedEmailRawMessage } from "../hosted-email.ts";
@@ -233,7 +233,7 @@ export class RunnerWakeProcessor {
         });
         return {
           cursorSnapshotRef,
-          finalizeRequired: runnerResult.committedAssistantDeliveryEffects.length > 0,
+          finalizeRequired: true,
           nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
           redactedSummary: {
             assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
