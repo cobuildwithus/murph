@@ -356,7 +356,7 @@ export function resolveHostedLinqAssistantReplyText(body: string): string {
       return "Got you — stronger, fitter, faster, and more endurance.";
     }
 
-    return "What should I call you? And out of those, which ones matter most to you right now?";
+    return "What should I call you? And what's been on your mind health-wise — anything you're working on, or something that's been bugging you?";
   }
 
   if (body.includes("Rocket Man")) {

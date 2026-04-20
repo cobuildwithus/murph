@@ -236,7 +236,10 @@ describe("hosted local Linq first-contact e2e", () => {
     const newReplySends = replySends.slice(outboundCountBeforeReply);
     expect(newReplySends).toHaveLength(1);
     const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
-    if (groupedReplyText !== "What should I call you? And out of those, which ones matter most to you right now?") {
+    if (
+      groupedReplyText
+      !== "What should I call you? And what's been on your mind health-wise — anything you're working on, or something that's been bugging you?"
+    ) {
       throw new Error(
         `Unexpected grouped Linq reply: ${JSON.stringify({
           groupedReplyText,
@@ -245,7 +248,7 @@ describe("hosted local Linq first-contact e2e", () => {
       );
     }
     expect(groupedReplyText).toBe(
-      "What should I call you? And out of those, which ones matter most to you right now?",
+      "What should I call you? And what's been on your mind health-wise — anything you're working on, or something that's been bugging you?",
     );
     expect(groupedReplyText).not.toContain("Hey, I'm Murph");
     expect(requireScenario().assistantProviderBodies).toHaveLength(

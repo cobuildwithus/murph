@@ -230,7 +230,7 @@ describe("hosted local Linq webhook e2e", () => {
     const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
 
     expect(groupedReplyText).toBe(
-      "What should I call you? And out of those, which ones matter most to you right now?",
+      "What should I call you? And what's been on your mind health-wise — anything you're working on, or something that's been bugging you?",
     );
     expect(groupedReplyText).not.toContain("Hey, I'm Murph");
     expect(requireScenario().assistantProviderBodies).toHaveLength(

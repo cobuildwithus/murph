@@ -181,7 +181,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     );
 
     expect(replyTexts).toEqual([
-      "What should I call you? And out of those, which ones matter most to you right now?",
+      "What should I call you? And what's been on your mind health-wise — anything you're working on, or something that's been bugging you?",
     ]);
     expect(requireScenario().assistantProviderBodies).toHaveLength(
       assistantProviderBodyCountBeforeReply + 1,
