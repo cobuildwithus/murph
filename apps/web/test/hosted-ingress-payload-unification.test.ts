@@ -41,14 +41,14 @@ describe("hosted wake payload unification", () => {
         userId: "member_123",
       },
     });
-    mocks.appendHostedCoalescingWakeTx.mockResolvedValue({
+    mocks.appendHostedOrderedWakeTx.mockResolvedValueOnce({
       duplicate: false,
       inserted: true,
       updatedExisting: false,
       wake: {
-        behavior: "coalescing",
+        behavior: "ordered",
         createdAt: "2026-04-18T00:00:00.000Z",
-        id: "wake_coalesced",
+        id: "wake_device_sync",
         kind: "device-sync.wake",
         occurredAt: "2026-04-18T00:00:00.000Z",
         payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
@@ -110,16 +110,19 @@ describe("hosted wake payload unification", () => {
       wake,
     });
 
-    expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.appendHostedOrderedWakeTx).toHaveBeenCalledWith(expect.objectContaining({
       kind: "device-sync.wake",
       payload: wake,
       payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: "member_123",
     }));
-    expect(mocks.appendHostedCoalescingWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({
         event: expect.anything(),
       }),
+    }));
+    expect(mocks.appendHostedCoalescingWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
+      kind: "device-sync.wake",
     }));
   });
 
@@ -150,9 +153,9 @@ describe("hosted wake payload unification", () => {
     });
 
     expect(projectHostedIngressEvent({
-      behavior: "coalescing",
+      behavior: "ordered",
       completedAt: null,
-      coalescingKey: "device-sync.wake:member_123:global",
+      coalescingKey: null,
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
       dedupeKey: "evt_device_sync",
       id: "wake_system",
