@@ -5,6 +5,7 @@ import type {
   HostedRunRecord,
 } from "@murphai/hosted-execution/contracts";
 import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type { BrowserVaultSnapshot } from "@murphai/query/browser";
 
 import { createHostedBrowserVaultSnapshotStore } from "../src/browser-vault-store.ts";
 import {
@@ -321,21 +322,12 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
         trackedExperiments: [],
         weeklySampleSummaries: [],
       },
-      schema: "murph.browser-vault-dashboard-snapshot.v1",
+      schema: "murph.browser-vault-dashboard-snapshot.v2",
       signals: {
         activity: [],
         assistantSummary: {
-          activity: null,
-          bodyState: null,
-          date: null,
-          from: null,
           highlights: [],
           latestDate: null,
-          providers: [],
-          recovery: null,
-          sleep: null,
-          sourceHealth: [],
-          to: null,
         },
         bodyState: [],
         recovery: [],
@@ -343,7 +335,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
         sourceHealth: [],
       },
       sourceVersion: "c".repeat(64),
-    });
+    } satisfies BrowserVaultSnapshot);
 
     const processor = new RunnerRunProcessor({
       applyHostedTransition: vi.fn(),

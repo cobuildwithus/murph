@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { buildTimeline } from "@murphai/query/browser";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -30,8 +29,8 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function HistoryPage() {
-  const { error, refresh, snapshot, status, vault } = useBrowserVault();
-  const timeline = useMemo(() => buildTimeline(vault, { limit: 120 }), [vault]);
+  const { error, refresh, snapshot, status } = useBrowserVault();
+  const timeline = useMemo(() => snapshot?.history.timeline ?? [], [snapshot]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -44,11 +43,11 @@ export default function HistoryPage() {
             Timeline from your vault
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Journals, events, assessments, and sample summaries sorted from most recent to oldest.
+            Recent notes, events, assessments, and daily summaries sorted from most recent to oldest.
           </p>
         </div>
         <div className="text-sm text-muted-foreground">
-          {snapshot ? `Snapshot generated ${formatIsoDate(snapshot.generatedAt)}` : "No browser snapshot yet."}
+          {snapshot ? `Updated ${formatIsoDate(snapshot.generatedAt)}` : "No history available yet."}
         </div>
       </div>
 
@@ -57,7 +56,7 @@ export default function HistoryPage() {
           <CardHeader>
             <CardTitle>Preparing your timeline</CardTitle>
             <CardDescription>
-              Reading journal, event, assessment, and sample-summary entities from the client-side read model.
+              Loading your recent timeline.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -68,7 +67,7 @@ export default function HistoryPage() {
           <AlertTitle>Could not load history</AlertTitle>
           <AlertDescription>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{error ?? "The browser vault could not be loaded."}</span>
+              <span>{error ?? "Your history is not available right now."}</span>
               <Button size="sm" variant="outline" onClick={() => void refresh()}>
                 Retry
               </Button>
@@ -82,7 +81,7 @@ export default function HistoryPage() {
           <CardHeader>
             <CardTitle>No timeline entries yet</CardTitle>
             <CardDescription>
-              The latest browser snapshot did not contain journals, events, assessments, or sample summaries.
+              No notes, events, assessments, or daily summaries are available yet.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -92,9 +91,7 @@ export default function HistoryPage() {
         <Card>
           <CardHeader>
             <CardTitle>{timeline.length} recent timeline entries</CardTitle>
-            <CardDescription>
-              Entries are ordered by occurrence time inside the browser-resolved read model.
-            </CardDescription>
+            <CardDescription>Most recent first.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -117,10 +114,7 @@ export default function HistoryPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="flex max-w-xl flex-col gap-1">
-                        <span className="font-medium text-foreground">{entry.title}</span>
-                        <span className="text-xs text-muted-foreground">{entry.path ?? entry.id}</span>
-                      </div>
+                      <span className="font-medium text-foreground">{entry.title}</span>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-2">

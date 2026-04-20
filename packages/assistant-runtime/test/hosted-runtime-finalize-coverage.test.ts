@@ -7,6 +7,7 @@ import {
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import { buildHostedAssistantDeliveryEffect } from "@murphai/hosted-execution/side-effects";
+import type { BrowserVaultSnapshot } from "@murphai/query/browser";
 
 import {
   createHostedRuntimeArtifactStoreStub,
@@ -267,21 +268,12 @@ beforeEach(() => {
       trackedExperiments: [],
       weeklySampleSummaries: [],
     },
-    schema: "murph.browser-vault-dashboard-snapshot.v1",
+    schema: "murph.browser-vault-dashboard-snapshot.v2",
     signals: {
       activity: [],
       assistantSummary: {
-        activity: null,
-        bodyState: null,
-        date: null,
-        from: null,
         highlights: [],
         latestDate: null,
-        providers: [],
-        recovery: null,
-        sleep: null,
-        sourceHealth: [],
-        to: null,
       },
       bodyState: [],
       recovery: [],
@@ -289,7 +281,7 @@ beforeEach(() => {
       sourceHealth: [],
     },
     sourceVersion: "a".repeat(64),
-  });
+  } satisfies BrowserVaultSnapshot);
   mocks.exportHostedPendingAssistantUsage.mockResolvedValue({
     exported: 1,
     failed: 0,

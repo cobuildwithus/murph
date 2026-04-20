@@ -2,11 +2,8 @@
 
 import { useMemo } from "react";
 import {
-  buildOverviewMetrics,
-  buildOverviewWeeklyStats,
+  buildOverviewWeeklyStatsFromDailySampleSummaries,
   isActiveOverviewExperimentStatus,
-  summarizeOverviewExperiments,
-  summarizeRecentOverviewJournals,
 } from "@murphai/query/browser";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -37,19 +34,23 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function OverviewPage() {
-  const { error, refresh, snapshot, status, vault } = useBrowserVault();
+  const { error, refresh, snapshot, status } = useBrowserVault();
   const timeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     [],
   );
-  const metrics = useMemo(() => buildOverviewMetrics(vault), [vault]);
-  const experiments = useMemo(() => summarizeOverviewExperiments(vault, 8), [vault]);
-  const recentJournals = useMemo(() => summarizeRecentOverviewJournals(vault, 4), [vault]);
+  const metrics = snapshot?.overview.metrics ?? [];
+  const experiments = snapshot?.overview.trackedExperiments.slice(0, 8) ?? [];
+  const recentJournals = snapshot?.overview.recentJournals ?? [];
   const weeklyStats = useMemo(
-    () => buildOverviewWeeklyStats(vault, timeZone)
+    () => buildOverviewWeeklyStatsFromDailySampleSummaries(
+      snapshot?.overview.weeklySampleSummaries ?? [],
+      timeZone,
+      snapshot?.generatedAt ?? new Date(),
+    )
       .filter((entry) => entry.currentWeekAvg !== null || entry.previousWeekAvg !== null)
       .slice(0, 8),
-    [timeZone, vault],
+    [snapshot, timeZone],
   );
   const activeExperiments = experiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status));
   const completedExperiments = experiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status));
@@ -64,34 +65,34 @@ export default function OverviewPage() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Browser vault snapshot
+            Overview
           </span>
           <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
             Where your data stands today
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Client-side decrypted summary built from your latest hosted vault snapshot.
+            A quick read on your recent notes, experiments, and tracked trends.
           </p>
         </div>
         <div className="text-sm text-muted-foreground">
           {snapshot
-            ? `Generated ${formatIsoDate(snapshot.generatedAt, {
+            ? `Updated ${formatIsoDate(snapshot.generatedAt, {
               day: "numeric",
               hour: "numeric",
               minute: "2-digit",
               month: "short",
               year: "numeric",
             })}`
-            : "No browser snapshot yet."}
+            : "No overview available yet."}
         </div>
       </div>
 
       {status === "loading" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Decrypting your vault</CardTitle>
+            <CardTitle>Loading your overview</CardTitle>
             <CardDescription>
-              Loading the latest encrypted browser snapshot and building your read model locally.
+              Loading your latest dashboard data.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -99,10 +100,10 @@ export default function OverviewPage() {
 
       {status === "error" ? (
         <Alert variant="destructive">
-          <AlertTitle>Could not load your browser vault</AlertTitle>
+          <AlertTitle>Could not load your overview</AlertTitle>
           <AlertDescription>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{error ?? "The browser vault session could not be created."}</span>
+              <span>{error ?? "Your dashboard data could not be decrypted."}</span>
               <Button size="sm" variant="outline" onClick={() => void refresh()}>
                 Retry
               </Button>
@@ -114,10 +115,9 @@ export default function OverviewPage() {
       {status === "ready" && isEmpty ? (
         <Card>
           <CardHeader>
-            <CardTitle>Your vault is ready for data</CardTitle>
+            <CardTitle>Your dashboard is ready for data</CardTitle>
             <CardDescription>
-              We decrypted an empty or near-empty read model. As soon as journal entries, experiments, samples,
-              or imports land in the vault, this page will populate automatically.
+              As soon as notes, experiments, or samples land in your vault, this page will fill in automatically.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -130,7 +130,7 @@ export default function OverviewPage() {
               <CardHeader>
                 <CardTitle>Tracked experiments</CardTitle>
                 <CardDescription>
-                  Active investigations from your vault plus the most recent completed ones.
+                  What is active now and what finished recently.
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -147,7 +147,7 @@ export default function OverviewPage() {
                         {entry.title}
                       </Badge>
                     )) : (
-                      <span className="text-sm text-muted-foreground">No active experiments in the latest snapshot.</span>
+                      <span className="text-sm text-muted-foreground">No active experiments right now.</span>
                     )}
                   </div>
                 </div>
@@ -161,7 +161,7 @@ export default function OverviewPage() {
                   <div className="mt-3 text-sm text-muted-foreground">
                     {completedExperiments[0]
                       ? `${completedExperiments[0].title} started ${formatIsoDate(completedExperiments[0].startedOn)}.`
-                      : "No completed experiments yet in the latest snapshot."}
+                      : "No completed experiments yet."}
                   </div>
                 </div>
               </CardContent>
@@ -169,41 +169,30 @@ export default function OverviewPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Snapshot coverage</CardTitle>
+                <CardTitle>Included today</CardTitle>
                 <CardDescription>
-                  High-level counts from the local browser read model.
+                  Counts available in this dashboard.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                {metrics.slice(0, 4).map((metric) => (
-                  <div key={metric.label} className="rounded-xl border border-border/70 bg-background/60 p-4">
-                    <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      {metric.label}
+              <CardContent className="flex flex-col gap-3">
+                {metrics.map((metric) => (
+                  <div
+                    key={metric.label}
+                    className="flex items-start justify-between gap-4 rounded-xl border border-border/70 bg-background/60 p-4"
+                  >
+                    <div>
+                      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        {metric.label}
+                      </div>
+                      <div className="mt-1 text-sm text-muted-foreground">{metric.note}</div>
                     </div>
-                    <div className="mt-2 font-serif text-3xl font-semibold text-foreground">
+                    <div className="font-serif text-3xl font-semibold text-foreground">
                       {formatNumber(metric.value, { maximumFractionDigits: 0 })}
                     </div>
-                    <div className="mt-1 text-sm text-muted-foreground">{metric.note}</div>
                   </div>
                 ))}
               </CardContent>
             </Card>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {metrics.map((metric) => (
-              <Card key={metric.label} size="sm">
-                <CardHeader>
-                  <CardTitle>{metric.label}</CardTitle>
-                  <CardDescription>{metric.note}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="font-serif text-3xl font-semibold text-foreground">
-                    {formatNumber(metric.value, { maximumFractionDigits: 0 })}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -211,7 +200,7 @@ export default function OverviewPage() {
               <CardHeader>
                 <CardTitle>Recent journal entries</CardTitle>
                 <CardDescription>
-                  The latest narrative pages in your vault.
+                  Recent notes included in your dashboard.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
@@ -236,7 +225,7 @@ export default function OverviewPage() {
                   </div>
                 )) : (
                   <div className="rounded-xl border border-dashed border-border bg-background/40 p-4 text-sm text-muted-foreground">
-                    No journal entries were present in the latest browser snapshot.
+                    No journal entries are available yet.
                   </div>
                 )}
               </CardContent>
@@ -246,7 +235,7 @@ export default function OverviewPage() {
               <CardHeader>
                 <CardTitle>Recent experiments</CardTitle>
                 <CardDescription>
-                  Experiments found directly from canonical vault entities.
+                  Recent experiments available in your dashboard.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
@@ -262,7 +251,7 @@ export default function OverviewPage() {
                       ) : null}
                     </div>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {entry.summary ?? "No experiment summary text was available in the latest snapshot."}
+                      {entry.summary ?? "No experiment summary was available."}
                     </p>
                     {entry.tags.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -276,7 +265,7 @@ export default function OverviewPage() {
                   </div>
                 )) : (
                   <div className="rounded-xl border border-dashed border-border bg-background/40 p-4 text-sm text-muted-foreground">
-                    No experiments were present in the latest browser snapshot.
+                    No experiments are available yet.
                   </div>
                 )}
               </CardContent>
@@ -287,7 +276,7 @@ export default function OverviewPage() {
             <CardHeader>
               <CardTitle>Weekly sample deltas</CardTitle>
               <CardDescription>
-                This week versus last week for numeric sample streams in your vault.
+                This week versus last week for tracked numeric signals.
               </CardDescription>
             </CardHeader>
             <CardContent>

@@ -52,7 +52,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     } catch (loadError) {
       setSnapshot(null);
       setStatus("error");
-      setError(loadError instanceof Error ? loadError.message : "Failed to load browser vault snapshot.");
+      setError(normalizeBrowserVaultError(loadError));
     }
   }, []);
 
@@ -77,7 +77,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
         setSnapshot(null);
         setStatus("error");
-        setError(loadError instanceof Error ? loadError.message : "Failed to load browser vault snapshot.");
+        setError(normalizeBrowserVaultError(loadError));
       }
     })();
 
@@ -110,7 +110,7 @@ export function useBrowserVault(): BrowserVaultContextValue {
   return value;
 }
 
-async function loadBrowserVaultSnapshot(): Promise<BrowserVaultSnapshot | null> {
+async function loadBrowserVaultSnapshot(): Promise<BrowserVaultSnapshot> {
   const { privateKeyJwk, publicKeyJwk } = await generateHostedUserRecipientKeyPair();
   const response = await fetch("/api/browser-vault/session", {
     body: JSON.stringify({
@@ -133,7 +133,9 @@ async function loadBrowserVaultSnapshot(): Promise<BrowserVaultSnapshot | null> 
   const snapshotEnvelope = session.snapshotEnvelope;
 
   if (rootKeyEnvelope === null && snapshotEnvelope === null && snapshotAad === null) {
-    return null;
+    throw new Error(
+      "Browser vault session is missing the hosted snapshot sidecar.",
+    );
   }
 
   if (rootKeyEnvelope === null || snapshotEnvelope === null || snapshotAad === null) {
@@ -230,6 +232,20 @@ async function readJsonErrorMessage(response: Response): Promise<string> {
   } catch {
     return `Browser vault session failed with HTTP ${response.status}.`;
   }
+}
+
+function normalizeBrowserVaultError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+
+  if (/HTTP 401|HTTP 403/u.test(message)) {
+    return "Your dashboard session expired. Refresh and try again.";
+  }
+
+  if (/HTTP 404/u.test(message)) {
+    return "Your dashboard data is not available yet.";
+  }
+
+  return "Your dashboard data is not available right now.";
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

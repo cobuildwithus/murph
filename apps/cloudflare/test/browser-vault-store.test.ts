@@ -108,7 +108,7 @@ describe("hosted browser vault snapshot store", () => {
         },
         "Browser vault snapshot",
       ),
-    ).toThrow("Browser vault snapshot.schema must be murph.browser-vault-dashboard-snapshot.v1.");
+    ).toThrow("Browser vault snapshot.schema must be murph.browser-vault-dashboard-snapshot.v2.");
   });
 
   it("deletes stored browser vault snapshot sidecars", async () => {
