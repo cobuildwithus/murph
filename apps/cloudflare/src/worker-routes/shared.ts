@@ -1,6 +1,6 @@
 import type {
-  HostedExecutionWakeDrainResult,
-  HostedExecutionWakeNudgeResult,
+  HostedRunDrainResult,
+  HostedRunNudgeResult,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 
@@ -16,11 +16,11 @@ import type {
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
-  nudgeHostedWakes(): Promise<HostedExecutionWakeNudgeResult>;
+  nudgeHostedRun(): Promise<HostedRunNudgeResult>;
   status(): Promise<HostedExecutionUserStatus>;
-  wakeHostedWakes(input?: {
+  drainHostedRuns(input?: {
     targetSeqHint?: string | null;
-  }): Promise<HostedExecutionWakeDrainResult>;
+  }): Promise<HostedRunDrainResult>;
 }
 
 export interface WorkerEnvironmentSource

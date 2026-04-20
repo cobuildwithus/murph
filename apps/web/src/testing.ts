@@ -1,6 +1,6 @@
 export {
-  appendHostedExecutionWakeForTest,
-} from "./lib/hosted-wake/hosted-wake-test-seed";
+  appendHostedIngressEnvelopeForTest,
+} from "./lib/hosted-ingress/hosted-ingress-test-seed";
 
 export {
   bindHostedActiveLinqHomeChat,

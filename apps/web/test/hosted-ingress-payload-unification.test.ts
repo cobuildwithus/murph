@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-  buildHostedExecutionAssistantCronTickWake,
+  HOSTED_INGRESS_PAYLOAD_SCHEMA,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 
@@ -10,17 +10,17 @@ const mocks = vi.hoisted(() => ({
   appendHostedOrderedWakeTx: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-wake/store", () => ({
+vi.mock("@/src/lib/hosted-ingress/store", () => ({
   appendHostedCoalescingWakeTx: mocks.appendHostedCoalescingWakeTx,
   appendHostedOrderedWakeTx: mocks.appendHostedOrderedWakeTx,
-  findHostedWakeEventIdByEventIdTx: vi.fn(),
-  readHostedWakeLifecycleByDedupeKeyTx: vi.fn(),
-  readHostedWakeLifecycleByEventIdTx: vi.fn(),
-  readHostedWakeScheduleByEventIdTx: vi.fn(),
+  findHostedIngressEventAliasIdByEventIdTx: vi.fn(),
+  readHostedIngressLifecycleByDedupeKeyTx: vi.fn(),
+  readHostedIngressLifecycleByEventIdTx: vi.fn(),
+  readHostedIngressScheduleByEventIdTx: vi.fn(),
 }));
 
-import { materializeHostedExecutionWakeTx } from "@/src/lib/hosted-wake/lifecycle";
-import { projectHostedWakeRecord } from "@/src/lib/hosted-wake/store-projections";
+import { materializeHostedIngressEnvelopeTx } from "@/src/lib/hosted-ingress/lifecycle";
+import { projectHostedIngressEvent } from "@/src/lib/hosted-ingress/store-projections";
 
 describe("hosted wake payload unification", () => {
   beforeEach(() => {
@@ -35,7 +35,7 @@ describe("hosted wake payload unification", () => {
         id: "wake_ordered",
         kind: "conversation.message",
         occurredAt: "2026-04-18T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
         seq: "1",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
@@ -49,9 +49,9 @@ describe("hosted wake payload unification", () => {
         behavior: "coalescing",
         createdAt: "2026-04-18T00:00:00.000Z",
         id: "wake_coalesced",
-        kind: "assistant.cron.tick",
+        kind: "device-sync.wake",
         occurredAt: "2026-04-18T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
         seq: "2",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
@@ -79,7 +79,7 @@ describe("hosted wake payload unification", () => {
       userId: "member_123",
     });
 
-    await materializeHostedExecutionWakeTx({
+    await materializeHostedIngressEnvelopeTx({
       tx: {} as never,
       wake,
     });
@@ -87,7 +87,7 @@ describe("hosted wake payload unification", () => {
     expect(mocks.appendHostedOrderedWakeTx).toHaveBeenCalledWith(expect.objectContaining({
       kind: "conversation.message",
       payload: wake,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: "member_123",
     }));
     expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -97,23 +97,23 @@ describe("hosted wake payload unification", () => {
     }));
   });
 
-  it("stores system wakes as the full canonical wake object", async () => {
-    const wake = buildHostedExecutionAssistantCronTickWake({
-      eventId: "evt_tick",
+  it("stores device-sync wakes as the full canonical wake object", async () => {
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "evt_device_sync",
       occurredAt: "2026-04-18T00:00:00.000Z",
-      reason: "alarm",
+      reason: "connected",
       userId: "member_123",
     });
 
-    await materializeHostedExecutionWakeTx({
+    await materializeHostedIngressEnvelopeTx({
       tx: {} as never,
       wake,
     });
 
     expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "assistant.cron.tick",
+      kind: "device-sync.wake",
       payload: wake,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: "member_123",
     }));
     expect(mocks.appendHostedCoalescingWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -124,7 +124,7 @@ describe("hosted wake payload unification", () => {
   });
 
   it("projects both conversation and system rows through the canonical schema", () => {
-    expect(projectHostedWakeRecord({
+    expect(projectHostedIngressEvent({
       behavior: "ordered",
       completedAt: null,
       coalescingKey: null,
@@ -136,7 +136,7 @@ describe("hosted wake payload unification", () => {
       payloadBytes: 128,
       payloadInlineCiphertext: "ciphertext_inline",
       payloadRef: null,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       quarantineCode: null,
       quarantinedAt: null,
       runId: null,
@@ -146,22 +146,22 @@ describe("hosted wake payload unification", () => {
       userId: "member_123",
     })).toMatchObject({
       kind: "conversation.message",
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
     });
 
-    expect(projectHostedWakeRecord({
+    expect(projectHostedIngressEvent({
       behavior: "coalescing",
       completedAt: null,
-      coalescingKey: "assistant.cron.tick:member_123",
+      coalescingKey: "device-sync.wake:member_123:global",
       createdAt: new Date("2026-04-18T00:00:00.000Z"),
-      dedupeKey: "evt_tick",
+      dedupeKey: "evt_device_sync",
       id: "wake_system",
-      kind: "assistant.cron.tick",
+      kind: "device-sync.wake",
       occurredAt: new Date("2026-04-18T00:00:00.000Z"),
       payloadBytes: 128,
       payloadInlineCiphertext: "ciphertext_inline",
       payloadRef: null,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       quarantineCode: null,
       quarantinedAt: null,
       runId: null,
@@ -170,13 +170,13 @@ describe("hosted wake payload unification", () => {
       updatedAt: new Date("2026-04-18T00:00:00.000Z"),
       userId: "member_123",
     })).toMatchObject({
-      kind: "assistant.cron.tick",
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      kind: "device-sync.wake",
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
     });
   });
 
   it("fails closed on legacy per-kind payload schemas", () => {
-    expect(() => projectHostedWakeRecord({
+    expect(() => projectHostedIngressEvent({
       behavior: "ordered",
       completedAt: null,
       coalescingKey: null,
@@ -188,7 +188,7 @@ describe("hosted wake payload unification", () => {
       payloadBytes: 128,
       payloadInlineCiphertext: "ciphertext_inline",
       payloadRef: null,
-      payloadSchema: "murph.hosted-wake-conversation-message.v1",
+      payloadSchema: "murph.hosted-ingress-conversation-message.v1",
       quarantineCode: null,
       quarantinedAt: null,
       runId: null,

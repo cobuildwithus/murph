@@ -70,7 +70,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
 } as const;
 
-const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
+const HOSTED_INGRESS_RUNTIME_SCHEMA_GUARD = {
   HostedExecutionCursor: [
     'userId String @id @map("user_id")',
     'nextSeq BigInt @default(1) @map("next_seq")',
@@ -82,13 +82,13 @@ const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
-  HostedWake: [
+  HostedIngressEvent: [
     "id String @id",
     'userId String @map("user_id")',
     'runId String? @map("run_id")',
     'seq BigInt @map("seq")',
     "kind String",
-    "behavior HostedWakeBehavior",
+    "behavior HostedIngressBehavior",
     'state String @default("pending")',
     'dedupeKey String? @map("dedupe_key")',
     'coalescingKey String? @map("coalescing_key")',
@@ -104,16 +104,16 @@ const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
     'updatedAt DateTime @updatedAt @map("updated_at")',
     'run HostedRun? @relation(fields: [runId], references: [id], onDelete: SetNull)',
   ],
-  HostedWakeEvent: [
+  HostedIngressEventAlias: [
     'eventId String @map("event_id")',
-    'wakeId String @map("wake_id")',
+    'ingressEventId String @map("ingress_event_id")',
     'userId String @map("user_id")',
     'replacedByEventId String? @map("replaced_by_event_id")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
-  HostedWakePayload: [
-    'wakeId String @id @map("wake_id")',
+  HostedIngressPayload: [
+    'ingressEventId String @id @map("ingress_event_id")',
     'userId String @map("user_id")',
     'payloadCiphertext String @map("payload_ciphertext")',
     'payloadSchema String @map("payload_schema")',
@@ -123,7 +123,7 @@ const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
   ],
 } as const;
 
-const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
+const HOSTED_INGRESS_RUNTIME_MIGRATION_GUARD = {
   hosted_execution_cursor: {
     columns: [
       '"user_id" TEXT NOT NULL',
@@ -144,14 +144,14 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     ],
     indexes: [],
   },
-  hosted_wake: {
+  hosted_ingress_event: {
     columns: [
       '"id" TEXT NOT NULL',
       '"user_id" TEXT NOT NULL',
       '"run_id" TEXT',
       '"seq" BIGINT NOT NULL',
       '"kind" TEXT NOT NULL',
-      '"behavior" "HostedWakeBehavior" NOT NULL',
+      '"behavior" "HostedIngressBehavior" NOT NULL',
       '"state" TEXT NOT NULL DEFAULT \'pending\'',
       '"dedupe_key" TEXT',
       '"coalescing_key" TEXT',
@@ -167,48 +167,48 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
       '"updated_at" TIMESTAMP(3) NOT NULL',
     ],
     constraints: [
-      'CONSTRAINT "hosted_wake_pkey" PRIMARY KEY ("id")',
+      'CONSTRAINT "hosted_ingress_event_pkey" PRIMARY KEY ("id")',
     ],
     foreignKeys: [
-      'ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE SET NULL ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_ingress_event" ADD CONSTRAINT "hosted_ingress_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_ingress_event" ADD CONSTRAINT "hosted_ingress_event_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE SET NULL ON UPDATE CASCADE',
     ],
     indexes: [
-      'CREATE INDEX "hosted_wake_user_id_seq_idx" ON "hosted_wake"("user_id", "seq")',
-      'CREATE INDEX "hosted_wake_user_id_state_seq_idx" ON "hosted_wake"("user_id", "state", "seq")',
-      'CREATE INDEX "hosted_wake_run_id_idx" ON "hosted_wake"("run_id")',
-      'CREATE INDEX "hosted_wake_user_id_coalescing_key_seq_idx" ON "hosted_wake"("user_id", "coalescing_key", "seq")',
-      'CREATE INDEX "hosted_wake_user_id_kind_seq_idx" ON "hosted_wake"("user_id", "kind", "seq")',
-      'CREATE UNIQUE INDEX "hosted_wake_user_id_seq_key" ON "hosted_wake"("user_id", "seq")',
-      'CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key")',
+      'CREATE INDEX "hosted_ingress_event_user_id_seq_idx" ON "hosted_ingress_event"("user_id", "seq")',
+      'CREATE INDEX "hosted_ingress_event_user_id_state_seq_idx" ON "hosted_ingress_event"("user_id", "state", "seq")',
+      'CREATE INDEX "hosted_ingress_event_run_id_idx" ON "hosted_ingress_event"("run_id")',
+      'CREATE INDEX "hosted_ingress_event_user_id_coalescing_key_seq_idx" ON "hosted_ingress_event"("user_id", "coalescing_key", "seq")',
+      'CREATE INDEX "hosted_ingress_event_user_id_kind_seq_idx" ON "hosted_ingress_event"("user_id", "kind", "seq")',
+      'CREATE UNIQUE INDEX "hosted_ingress_event_user_id_seq_key" ON "hosted_ingress_event"("user_id", "seq")',
+      'CREATE UNIQUE INDEX "hosted_ingress_event_user_id_dedupe_key_key" ON "hosted_ingress_event"("user_id", "dedupe_key")',
     ],
   },
-  hosted_wake_event: {
+  hosted_ingress_event_alias: {
     columns: [
       '"event_id" TEXT NOT NULL',
-      '"wake_id" TEXT NOT NULL',
+      '"ingress_event_id" TEXT NOT NULL',
       '"user_id" TEXT NOT NULL',
       '"replaced_by_event_id" TEXT',
       '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
       '"updated_at" TIMESTAMP(3) NOT NULL',
     ],
     constraints: [
-      'CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id","event_id")',
+      'CONSTRAINT "hosted_ingress_event_alias_pkey" PRIMARY KEY ("user_id","event_id")',
     ],
     foreignKeys: [
-      'ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE',
     ],
     indexes: [
-      'CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id")',
-      'CREATE INDEX "hosted_wake_event_user_id_idx" ON "hosted_wake_event"("user_id")',
-      'CREATE INDEX "hosted_wake_event_user_id_replaced_by_event_id_idx" ON "hosted_wake_event"("user_id", "replaced_by_event_id")',
-      'CREATE INDEX "hosted_wake_event_wake_id_idx" ON "hosted_wake_event"("wake_id")',
+      'CREATE INDEX "hosted_ingress_event_alias_event_id_idx" ON "hosted_ingress_event_alias"("event_id")',
+      'CREATE INDEX "hosted_ingress_event_alias_user_id_idx" ON "hosted_ingress_event_alias"("user_id")',
+      'CREATE INDEX "hosted_ingress_event_alias_user_id_replaced_by_event_id_idx" ON "hosted_ingress_event_alias"("user_id", "replaced_by_event_id")',
+      'CREATE INDEX "hosted_ingress_event_alias_ingress_event_id_idx" ON "hosted_ingress_event_alias"("ingress_event_id")',
     ],
   },
-  hosted_wake_payload: {
+  hosted_ingress_payload: {
     columns: [
-      '"wake_id" TEXT NOT NULL',
+      '"ingress_event_id" TEXT NOT NULL',
       '"user_id" TEXT NOT NULL',
       '"payload_ciphertext" TEXT NOT NULL',
       '"payload_schema" TEXT NOT NULL',
@@ -217,14 +217,14 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
       '"updated_at" TIMESTAMP(3) NOT NULL',
     ],
     constraints: [
-      'CONSTRAINT "hosted_wake_payload_pkey" PRIMARY KEY ("wake_id")',
+      'CONSTRAINT "hosted_ingress_payload_pkey" PRIMARY KEY ("ingress_event_id")',
     ],
     foreignKeys: [
-      'ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE',
     ],
     indexes: [
-      'CREATE INDEX "hosted_wake_payload_user_id_idx" ON "hosted_wake_payload"("user_id")',
+      'CREATE INDEX "hosted_ingress_payload_user_id_idx" ON "hosted_ingress_payload"("user_id")',
     ],
   },
 } as const;
@@ -240,9 +240,9 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberIdentity",
   "HostedMemberRouting",
   "HostedRevnetIssuance",
-  "HostedWake",
-  "HostedWakeEvent",
-  "HostedWakePayload",
+  "HostedIngressEvent",
+  "HostedIngressEventAlias",
+  "HostedIngressPayload",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -275,31 +275,31 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('"access_token_encrypted" TEXT');
     expect(baselineMigrationSql).toContain('"refresh_token_encrypted" TEXT');
     expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_wake_payload"',
+      'CREATE TABLE "hosted_ingress_payload"',
     );
     expect(baselineMigrationSql).toContain(
-      'CREATE INDEX "hosted_wake_payload_user_id_idx"',
+      'CREATE INDEX "hosted_ingress_payload_user_id_idx"',
     );
     expect(baselineMigrationSql).toContain(
       'CREATE TABLE "hosted_execution_cursor"',
     );
     expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_wake"',
+      'CREATE TABLE "hosted_ingress_event"',
     );
     expect(baselineMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key")',
+      'CREATE UNIQUE INDEX "hosted_ingress_event_user_id_dedupe_key_key" ON "hosted_ingress_event"("user_id", "dedupe_key")',
     );
     expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_wake_event"',
+      'CREATE TABLE "hosted_ingress_event_alias"',
     );
     expect(baselineMigrationSql).toContain(
-      'CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id","event_id")',
+      'CONSTRAINT "hosted_ingress_event_alias_pkey" PRIMARY KEY ("user_id","event_id")',
     );
     expect(baselineMigrationSql).toContain(
-      'CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id")',
+      'CREATE INDEX "hosted_ingress_event_alias_event_id_idx" ON "hosted_ingress_event_alias"("event_id")',
     );
     expect(baselineMigrationSql).toContain(
-      'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
+      'FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id")',
     );
     expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "linq_webhook_event_user_id_event_id_key" ON "linq_webhook_event"("user_id", "event_id")',
@@ -357,7 +357,7 @@ describe("hosted Prisma baseline migration", () => {
     );
   });
 
-  it("keeps hosted-wake runtime storage aligned between the Prisma schema and baseline migration", () => {
+  it("keeps hosted-ingress runtime storage aligned between the Prisma schema and baseline migration", () => {
     const schema = readFileSync(
       new URL("../prisma/schema.prisma", import.meta.url),
       "utf8",
@@ -367,29 +367,29 @@ describe("hosted Prisma baseline migration", () => {
       "utf8",
     );
 
-    for (const [modelName, expectedFields] of Object.entries(HOSTED_WAKE_RUNTIME_SCHEMA_GUARD)) {
+    for (const [modelName, expectedFields] of Object.entries(HOSTED_INGRESS_RUNTIME_SCHEMA_GUARD)) {
       expect(
         readPrismaScalarFieldSpecs(schema, modelName).sort(),
-        `${modelName} changed. Review hosted-wake runtime persistence explicitly before changing greenfield wake/cursor storage.`,
+        `${modelName} changed. Review hosted-ingress runtime persistence explicitly before changing greenfield ingress/cursor storage.`,
       ).toEqual([...expectedFields].sort());
     }
 
-    for (const [tableName, guard] of Object.entries(HOSTED_WAKE_RUNTIME_MIGRATION_GUARD)) {
+    for (const [tableName, guard] of Object.entries(HOSTED_INGRESS_RUNTIME_MIGRATION_GUARD)) {
       expect(
         readSqlTableColumns(baselineMigrationSql, tableName),
-        `${tableName} column set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+        `${tableName} column set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
       ).toEqual(new Set(guard.columns));
       expect(
         readSqlTableConstraints(baselineMigrationSql, tableName),
-        `${tableName} constraint set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+        `${tableName} constraint set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
       ).toEqual(new Set(guard.constraints));
       expect(
         readSqlTableForeignKeys(baselineMigrationSql, tableName),
-        `${tableName} foreign-key set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+        `${tableName} foreign-key set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
       ).toEqual(new Set(guard.foreignKeys));
       expect(
         readSqlTableIndexes(baselineMigrationSql, tableName),
-        `${tableName} index set changed. Review hosted-wake greenfield runtime storage before landing schema drift.`,
+        `${tableName} index set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
       ).toEqual(new Set(guard.indexes));
     }
   });

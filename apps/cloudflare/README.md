@@ -26,7 +26,7 @@ Public routes:
 
 Internal control routes:
 
-- `POST /internal/users/:userId/wake` returns a dedicated wake-drain result (`committedSeq`, `requestedTargetSeq`, `targetReached`) rather than the general status read model
+- `POST /internal/users/:userId/run` returns a dedicated run-drain result (`committedSeq`, `requestedTargetSeq`, `targetReached`) rather than the general status read model
 - `POST /internal/users/:userId/browser-vault/session`
 - `GET /internal/users/:userId/status`
 

@@ -153,20 +153,20 @@ export async function handleHostedEmailIngress(
 
   try {
     const stub = await resolveUserRunnerStub(env, route.userId);
-    const nudgeResult = await stub.nudgeHostedWakes();
-    const drainPromise = stub.wakeHostedWakes().catch((error) => {
+    const nudgeResult = await stub.nudgeHostedRun();
+    const drainPromise = stub.drainHostedRuns().catch((error) => {
       emitHostedExecutionStructuredLog({
         component: "hosted.email",
         details: buildHostedEmailIngressLogDetails({
           eventId,
           identityId: route.identityId,
-          reason: "wake-drain-after-nudge-failed",
+          reason: "run-drain-after-nudge-failed",
           routeAddress: route.routeAddress,
           to: message.to,
         }),
         error,
         level: "warn",
-        message: "Hosted email wake drain failed after the canonical wake nudge was accepted.",
+        message: "Hosted email run drain failed after the canonical ingress nudge was accepted.",
         phase: "wake.running",
         userId: route.userId,
       });
@@ -186,12 +186,12 @@ export async function handleHostedEmailIngress(
           alarmScheduled: String(nudgeResult.alarmScheduled),
           eventId,
           identityId: route.identityId,
-          reason: "wake-nudge-not-accepted",
+          reason: "run-nudge-not-accepted",
           routeAddress: route.routeAddress,
           to: message.to,
         }),
         level: "warn",
-        message: "Hosted email wake nudge was not accepted after appending the canonical wake.",
+        message: "Hosted email run nudge was not accepted after appending the canonical ingress event.",
         phase: "wake.running",
         userId: route.userId,
       });
@@ -202,13 +202,13 @@ export async function handleHostedEmailIngress(
       details: buildHostedEmailIngressLogDetails({
         eventId,
         identityId: route.identityId,
-        reason: "wake-nudge-failed",
+        reason: "run-nudge-failed",
         routeAddress: route.routeAddress,
         to: message.to,
       }),
       error,
       level: "warn",
-      message: "Hosted email wake nudge failed after appending the canonical wake.",
+      message: "Hosted email run nudge failed after appending the canonical ingress event.",
       phase: "wake.running",
       userId: route.userId,
     });

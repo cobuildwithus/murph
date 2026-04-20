@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
     prisma: {
       $transaction: vi.fn(),
     },
-    handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
+    nudgeHostedRunBestEffort: vi.fn(async (input: {
       eventId: string;
       prisma?: unknown;
       userId: string;
@@ -39,7 +39,7 @@ const mocks = vi.hoisted(() => {
       });
       return "outbox";
     }),
-    materializeHostedExecutionWakeTx: vi.fn(async (input: {
+    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
       wake: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
@@ -66,12 +66,12 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
 }));
 
-vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
-  materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
+vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
+  materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
 }));
 
-vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionWakeBestEffort: mocks.handoffHostedExecutionWakeBestEffort,
+vi.mock("@/src/lib/hosted-ingress/control", () => ({
+  nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({

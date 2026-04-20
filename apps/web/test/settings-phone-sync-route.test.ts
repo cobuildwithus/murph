@@ -5,7 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
-  handoffHostedExecutionWakeBestEffort: vi.fn(),
+  nudgeHostedRunBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -37,8 +37,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
 }));
 
-vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionWakeBestEffort: mocks.handoffHostedExecutionWakeBestEffort,
+vi.mock("@/src/lib/hosted-ingress/control", () => ({
+  nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
 }));
 
 type SettingsPhoneSyncRouteModule = typeof import("../app/api/settings/phone/sync/route");
@@ -65,7 +65,7 @@ describe("settings phone sync route", () => {
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
     });
-    mocks.handoffHostedExecutionWakeBestEffort.mockResolvedValue("wake");
+    mocks.nudgeHostedRunBestEffort.mockResolvedValue("wake");
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       identity: {
         phone: {
@@ -117,7 +117,7 @@ describe("settings phone sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.phone.sync",
     });
-    expect(mocks.handoffHostedExecutionWakeBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
       context: "settings.phone.sync",
       eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
       userId: "member_123",
@@ -156,7 +156,7 @@ describe("settings phone sync route", () => {
     expect(response.status).toBe(200);
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
-    expect(mocks.handoffHostedExecutionWakeBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       ok: true,
       phoneNumber: "+14155552671",
@@ -190,7 +190,7 @@ describe("settings phone sync route", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedMemberEmailLinked).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
-    expect(mocks.handoffHostedExecutionWakeBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       ok: true,
       phoneNumber: "+14155552671",

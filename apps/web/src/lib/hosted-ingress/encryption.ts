@@ -19,52 +19,52 @@ const HOSTED_WAKE_ENCRYPTION_KEYRING_JSON_ENV_KEYS = [
   "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
 ] as const;
 
-interface HostedWakeEncryptionEnvironment {
+interface HostedIngressEncryptionEnvironment {
   encryptionKey: Buffer;
   encryptionKeyVersion: string;
   encryptionKeysByVersion: Readonly<Record<string, Buffer>>;
 }
 
-interface HostedWakeConfigurationErrorInput {
+interface HostedIngressConfigurationErrorInput {
   code: string;
   httpStatus: number;
   message: string;
 }
 
-const globalForHostedWakeEncryption = globalThis as typeof globalThis & {
-  __murphHostedWakeEncryptionCodec?: HostedSecretCodec;
+const globalForHostedIngressEncryption = globalThis as typeof globalThis & {
+  __murphHostedIngressEncryptionCodec?: HostedSecretCodec;
 };
 
-export class HostedWakeConfigurationError extends Error {
+export class HostedIngressConfigurationError extends Error {
   readonly code: string;
   readonly httpStatus: number;
 
-  constructor(input: HostedWakeConfigurationErrorInput) {
+  constructor(input: HostedIngressConfigurationErrorInput) {
     super(input.message);
-    this.name = "HostedWakeConfigurationError";
+    this.name = "HostedIngressConfigurationError";
     this.code = input.code;
     this.httpStatus = input.httpStatus;
   }
 }
 
-export function hostedWakeConfigurationError(
-  input: HostedWakeConfigurationErrorInput,
-): HostedWakeConfigurationError {
-  return new HostedWakeConfigurationError(input);
+export function hostedIngressConfigurationError(
+  input: HostedIngressConfigurationErrorInput,
+): HostedIngressConfigurationError {
+  return new HostedIngressConfigurationError(input);
 }
 
-export function isHostedWakeConfigurationError(
+export function isHostedIngressConfigurationError(
   error: unknown,
-): error is HostedWakeConfigurationError {
-  return error instanceof HostedWakeConfigurationError;
+): error is HostedIngressConfigurationError {
+  return error instanceof HostedIngressConfigurationError;
 }
 
-export function getHostedWakeEncryptionCodec(): HostedSecretCodec {
-  if (globalForHostedWakeEncryption.__murphHostedWakeEncryptionCodec) {
-    return globalForHostedWakeEncryption.__murphHostedWakeEncryptionCodec;
+export function getHostedIngressEncryptionCodec(): HostedSecretCodec {
+  if (globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec) {
+    return globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec;
   }
 
-  const environment = readHostedWakeEncryptionEnvironment();
+  const environment = readHostedIngressEncryptionEnvironment();
   const codec = createHostedSecretCodec({
     key: environment.encryptionKey,
     keyVersion: environment.encryptionKeyVersion,
@@ -72,13 +72,13 @@ export function getHostedWakeEncryptionCodec(): HostedSecretCodec {
   });
 
   if (process.env.NODE_ENV !== "test") {
-    globalForHostedWakeEncryption.__murphHostedWakeEncryptionCodec = codec;
+    globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec = codec;
   }
 
   return codec;
 }
 
-export function encryptHostedWakeNullableString(input: {
+export function encryptHostedIngressNullableString(input: {
   field: string;
   userId: string;
   value: string | null | undefined;
@@ -89,13 +89,13 @@ export function encryptHostedWakeNullableString(input: {
     return null;
   }
 
-  return getHostedWakeEncryptionCodec().encrypt(
+  return getHostedIngressEncryptionCodec().encrypt(
     normalized,
-    buildHostedWakeFieldCipherOptions(input),
+    buildHostedIngressFieldCipherOptions(input),
   );
 }
 
-export function decryptHostedWakeNullableString(input: {
+export function decryptHostedIngressNullableString(input: {
   field: string;
   userId: string;
   value: string | null | undefined;
@@ -107,11 +107,11 @@ export function decryptHostedWakeNullableString(input: {
   }
 
   return normalizeNullableString(
-    getHostedWakeEncryptionCodec().decrypt(normalized, buildHostedWakeFieldCipherOptions(input)),
+    getHostedIngressEncryptionCodec().decrypt(normalized, buildHostedIngressFieldCipherOptions(input)),
   );
 }
 
-function buildHostedWakeFieldCipherOptions(input: {
+function buildHostedIngressFieldCipherOptions(input: {
   field: string;
   userId: string;
 }) {
@@ -119,15 +119,15 @@ function buildHostedWakeFieldCipherOptions(input: {
     aad: buildHostedSecretAad({
       field: input.field,
       memberId: input.userId,
-      purpose: "hosted-wake-payload",
+      purpose: "hosted-ingress-payload",
     }),
-    keyScope: `hosted-wake-payload:${input.field}`,
+    keyScope: `hosted-ingress-payload:${input.field}`,
   } as const;
 }
 
-function readHostedWakeEncryptionEnvironment(
+function readHostedIngressEncryptionEnvironment(
   source: NodeJS.ProcessEnv = process.env,
-): HostedWakeEncryptionEnvironment {
+): HostedIngressEncryptionEnvironment {
   try {
     const encryptionKeyValue = readEnv(source, HOSTED_WAKE_ENCRYPTION_KEY_ENV_KEYS);
     const encryptionKeyVersion =
@@ -135,7 +135,7 @@ function readHostedWakeEncryptionEnvironment(
     const encryptionKeyringJson = readEnv(source, HOSTED_WAKE_ENCRYPTION_KEYRING_JSON_ENV_KEYS);
     const encryptionKey = encryptionKeyValue
       ? decodeHostedEncryptionKey(encryptionKeyValue)
-      : readRequiredHostedWakeEncryptionKey();
+      : readRequiredHostedIngressEncryptionKey();
 
     return {
       encryptionKey,
@@ -148,15 +148,15 @@ function readHostedWakeEncryptionEnvironment(
       }),
     };
   } catch (error) {
-    throw toHostedWakeConfigurationError(error);
+    throw toHostedIngressConfigurationError(error);
   }
 }
 
-function readRequiredHostedWakeEncryptionKey(): never {
-  throw hostedWakeConfigurationError({
+function readRequiredHostedIngressEncryptionKey(): never {
+  throw hostedIngressConfigurationError({
     code: "HOSTED_WAKE_ENCRYPTION_KEY_REQUIRED",
     httpStatus: 500,
-    message: "HOSTED_WAKE_ENCRYPTION_KEY must be configured for hosted wake payload encryption.",
+    message: "HOSTED_WAKE_ENCRYPTION_KEY must be configured for hosted ingress payload encryption.",
   });
 }
 
@@ -175,13 +175,13 @@ function readEnv(
   return null;
 }
 
-function toHostedWakeConfigurationError(error: unknown): HostedWakeConfigurationError | never {
-  if (isHostedWakeConfigurationError(error)) {
+function toHostedIngressConfigurationError(error: unknown): HostedIngressConfigurationError | never {
+  if (isHostedIngressConfigurationError(error)) {
     return error;
   }
 
   if (error instanceof TypeError || error instanceof RangeError) {
-    return hostedWakeConfigurationError({
+    return hostedIngressConfigurationError({
       code: "HOSTED_WAKE_ENCRYPTION_CONFIG_INVALID",
       httpStatus: 500,
       message: error.message,

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  appendHostedExecutionWakePayloadTx: vi.fn(),
+  appendHostedIngressEnvelopePayloadTx: vi.fn(),
   getPrisma: vi.fn(),
   readOptionalJsonObject: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -27,8 +27,8 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-wake/queue", () => ({
-  appendHostedExecutionWakePayloadTx: mocks.appendHostedExecutionWakePayloadTx,
+vi.mock("@/src/lib/hosted-ingress/queue", () => ({
+  appendHostedIngressEnvelopePayloadTx: mocks.appendHostedIngressEnvelopePayloadTx,
 }));
 
 describe("hosted email ingress route", () => {
@@ -39,7 +39,7 @@ describe("hosted email ingress route", () => {
       $transaction: vi.fn(async (callback: (tx: { label: string }) => Promise<unknown>) =>
         callback({ label: "wake-route-tx" })),
     });
-    mocks.appendHostedExecutionWakePayloadTx.mockResolvedValue({
+    mocks.appendHostedIngressEnvelopePayloadTx.mockResolvedValue({
       duplicate: false,
       inserted: true,
       updatedExisting: false,
@@ -52,7 +52,7 @@ describe("hosted email ingress route", () => {
         occurredAt: "2026-04-17T00:00:00.000Z",
         payloadBytes: 128,
         payloadCiphertext: "ciphertext_inline_123",
-        payloadSchema: "murph.hosted-wake-execution.v1",
+        payloadSchema: "murph.hosted-ingress-execution.v1",
         quarantineCode: null,
         quarantinedAt: null,
         seq: "24",
@@ -84,7 +84,7 @@ describe("hosted email ingress route", () => {
         seq: "24",
       }),
     });
-    expect(mocks.appendHostedExecutionWakePayloadTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedIngressEnvelopePayloadTx).toHaveBeenCalledWith({
       wake: {
         eventId: "evt_email",
         kind: "conversation.message",

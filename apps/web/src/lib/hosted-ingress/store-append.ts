@@ -3,51 +3,51 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 
 import {
-  allocateHostedWakeSeqTx,
-  assertHostedWakeUserMatch,
+  allocateHostedIngressSeqTx,
+  assertHostedIngressUserMatch,
   bumpHostedExecutionCursorVersionTx,
-  createHostedWakeEventTx,
+  createHostedIngressEventAliasTx,
   ensureHostedExecutionCursorRowTx,
-  findHostedWakeByDedupeKeyTx,
-  findHostedWakeByEventIdTx,
-  findCurrentHostedWakeEventByWakeIdTx,
+  findHostedIngressByDedupeKeyTx,
+  findHostedIngressByEventIdTx,
+  findCurrentHostedIngressEventAliasByWakeIdTx,
   findUncommittedWakeByCoalescingKeyTx,
   lockHostedExecutionCursorRowTx,
-  replaceHostedWakeEventTx,
-  writeHostedWakePayloadStorageTx,
+  replaceHostedIngressEventAliasTx,
+  writeHostedIngressPayloadStorageTx,
 } from "./store-data";
-import { encodeHostedWakeStoredPayload } from "./payload";
-import { hydrateHostedWakeRecordTx } from "./store-projections";
+import { encodeHostedIngressStoredPayload } from "./payload";
+import { hydrateHostedIngressEventTx } from "./store-projections";
 import {
   requireOccurredAtDate,
-  type AppendHostedWakeInput,
-  type AppendHostedWakeResult,
-  type HostedWakeRow,
+  type AppendHostedIngressInput,
+  type AppendHostedIngressResult,
+  type HostedIngressEventRow,
 } from "./store.types";
 
 export async function appendHostedOrderedWakeTx(
-  input: Omit<AppendHostedWakeInput, "behavior">,
-): Promise<AppendHostedWakeResult> {
-  return appendHostedWakeTx({
+  input: Omit<AppendHostedIngressInput, "behavior">,
+): Promise<AppendHostedIngressResult> {
+  return appendHostedIngressTx({
     ...input,
     behavior: "ordered",
   });
 }
 
 export async function appendHostedCoalescingWakeTx(
-  input: Omit<AppendHostedWakeInput, "behavior"> & {
+  input: Omit<AppendHostedIngressInput, "behavior"> & {
     coalescingKey: string;
   },
-): Promise<AppendHostedWakeResult> {
-  return appendHostedWakeTx({
+): Promise<AppendHostedIngressResult> {
+  return appendHostedIngressTx({
     ...input,
     behavior: "coalescing",
   });
 }
 
-export async function appendHostedWakeTx(
-  input: AppendHostedWakeInput,
-): Promise<AppendHostedWakeResult> {
+export async function appendHostedIngressTx(
+  input: AppendHostedIngressInput,
+): Promise<AppendHostedIngressResult> {
   const occurredAt = requireOccurredAtDate(input.occurredAt);
 
   await ensureHostedExecutionCursorRowTx({
@@ -61,13 +61,13 @@ export async function appendHostedWakeTx(
 
   {
     const existingDuplicate = input.eventId
-      ? await findHostedWakeByEventIdTx({
+      ? await findHostedIngressByEventIdTx({
         eventId: input.eventId,
         tx: input.tx,
         userId: input.userId,
       })
       : input.dedupeKey
-        ? await findHostedWakeByDedupeKeyTx({
+        ? await findHostedIngressByDedupeKeyTx({
           dedupeKey: input.dedupeKey,
           tx: input.tx,
           userId: input.userId,
@@ -75,7 +75,7 @@ export async function appendHostedWakeTx(
         : null;
 
     if (existingDuplicate) {
-      assertHostedWakeUserMatch(
+      assertHostedIngressUserMatch(
         existingDuplicate,
         input.userId,
         input.eventId ?? input.dedupeKey ?? existingDuplicate.id,
@@ -84,7 +84,7 @@ export async function appendHostedWakeTx(
         duplicate: true,
         inserted: false,
         updatedExisting: false,
-        wake: await hydrateHostedWakeRecordTx({
+        wake: await hydrateHostedIngressEventTx({
           record: existingDuplicate,
           tx: input.tx,
         }),
@@ -101,9 +101,9 @@ export async function appendHostedWakeTx(
 
     if (unresolved) {
       if (occurredAt.getTime() < unresolved.occurredAt.getTime()) {
-        await recordHostedWakeReplacementTx({
+        await recordHostedIngressReplacementTx({
           eventId: input.eventId,
-          replacementEventId: await resolveCurrentHostedWakeEventIdTx({
+          replacementEventId: await resolveCurrentHostedIngressEventAliasIdTx({
             tx: input.tx,
             wake: unresolved,
           }),
@@ -115,31 +115,31 @@ export async function appendHostedWakeTx(
           duplicate: false,
           inserted: false,
           updatedExisting: false,
-          wake: await hydrateHostedWakeRecordTx({
+          wake: await hydrateHostedIngressEventTx({
             record: unresolved,
             tx: input.tx,
           }),
         };
       }
 
-      const encodedPayload = encodeHostedWakeStoredPayload({
+      const encodedPayload = encodeHostedIngressStoredPayload({
         userId: input.userId,
         value: input.payload,
       });
-      await writeHostedWakePayloadStorageTx({
+      await writeHostedIngressPayloadStorageTx({
+        ingressEventId: unresolved.id,
         payload: encodedPayload,
         payloadSchema: input.payloadSchema,
         tx: input.tx,
         userId: input.userId,
-        wakeId: unresolved.id,
       });
-      await replaceCurrentHostedWakeEventTx({
+      await replaceCurrentHostedIngressEventAliasTx({
         nextEventId: input.eventId,
         tx: input.tx,
         userId: input.userId,
         wake: unresolved,
       });
-      const updated = await input.tx.hostedWake.update({
+      const updated = await input.tx.hostedIngressEvent.update({
         where: {
           id: unresolved.id,
         },
@@ -163,7 +163,7 @@ export async function appendHostedWakeTx(
         duplicate: false,
         inserted: false,
         updatedExisting: true,
-        wake: await hydrateHostedWakeRecordTx({
+        wake: await hydrateHostedIngressEventTx({
           record: updated,
           tx: input.tx,
         }),
@@ -171,28 +171,28 @@ export async function appendHostedWakeTx(
     }
   }
 
-  return createHostedWakeTx({
+  return createHostedIngressTx({
     ...input,
     occurredAt: occurredAt.toISOString(),
   });
 }
 
-async function createHostedWakeTx(
-  input: AppendHostedWakeInput,
-): Promise<AppendHostedWakeResult> {
+async function createHostedIngressTx(
+  input: AppendHostedIngressInput,
+): Promise<AppendHostedIngressResult> {
   const occurredAt = requireOccurredAtDate(input.occurredAt);
-  const encodedPayload = encodeHostedWakeStoredPayload({
+  const encodedPayload = encodeHostedIngressStoredPayload({
     userId: input.userId,
     value: input.payload,
   });
-  const seq = await allocateHostedWakeSeqTx({
+  const seq = await allocateHostedIngressSeqTx({
     tx: input.tx,
     userId: input.userId,
   });
   const wakeId = randomUUID();
 
   try {
-    const wake = await input.tx.hostedWake.create({
+    const wake = await input.tx.hostedIngressEvent.create({
       data: {
         behavior: input.behavior,
         coalescingKey: input.coalescingKey ?? null,
@@ -208,19 +208,19 @@ async function createHostedWakeTx(
         userId: input.userId,
       },
     });
-    await writeHostedWakePayloadStorageTx({
+    await writeHostedIngressPayloadStorageTx({
+      ingressEventId: wakeId,
       payload: encodedPayload,
       payloadSchema: input.payloadSchema,
       tx: input.tx,
       userId: input.userId,
-      wakeId,
     });
     if (input.eventId) {
-      await createHostedWakeEventTx({
+      await createHostedIngressEventAliasTx({
         eventId: input.eventId,
+        ingressEventId: wakeId,
         tx: input.tx,
         userId: input.userId,
-        wakeId,
       });
     }
 
@@ -228,7 +228,7 @@ async function createHostedWakeTx(
       duplicate: false,
       inserted: true,
       updatedExisting: false,
-      wake: await hydrateHostedWakeRecordTx({
+      wake: await hydrateHostedIngressEventTx({
         record: wake,
         tx: input.tx,
       }),
@@ -239,13 +239,13 @@ async function createHostedWakeTx(
       && error.code === "P2002"
     ) {
       const existing = input.eventId
-        ? await findHostedWakeByEventIdTx({
+        ? await findHostedIngressByEventIdTx({
           eventId: input.eventId,
           tx: input.tx,
           userId: input.userId,
         })
         : input.dedupeKey
-          ? await findHostedWakeByDedupeKeyTx({
+          ? await findHostedIngressByDedupeKeyTx({
             dedupeKey: input.dedupeKey,
             tx: input.tx,
             userId: input.userId,
@@ -253,7 +253,7 @@ async function createHostedWakeTx(
           : null;
 
       if (existing) {
-        assertHostedWakeUserMatch(
+        assertHostedIngressUserMatch(
           existing,
           input.userId,
           input.eventId ?? input.dedupeKey ?? existing.id,
@@ -262,7 +262,7 @@ async function createHostedWakeTx(
           duplicate: true,
           inserted: false,
           updatedExisting: false,
-          wake: await hydrateHostedWakeRecordTx({
+          wake: await hydrateHostedIngressEventTx({
             record: existing,
             tx: input.tx,
           }),
@@ -274,11 +274,11 @@ async function createHostedWakeTx(
   }
 }
 
-async function replaceCurrentHostedWakeEventTx(input: {
+async function replaceCurrentHostedIngressEventAliasTx(input: {
   nextEventId?: string | null;
-  tx: AppendHostedWakeInput["tx"];
+  tx: AppendHostedIngressInput["tx"];
   userId: string;
-  wake: HostedWakeRow;
+  wake: HostedIngressEventRow;
 }): Promise<void> {
   const nextEventId = input.nextEventId?.trim();
 
@@ -286,10 +286,10 @@ async function replaceCurrentHostedWakeEventTx(input: {
     return;
   }
 
-  const currentEvent = await findCurrentHostedWakeEventByWakeIdTx({
+  const currentEvent = await findCurrentHostedIngressEventAliasByWakeIdTx({
+    ingressEventId: input.wake.id,
     tx: input.tx,
     userId: input.userId,
-    wakeId: input.wake.id,
   });
 
   if (currentEvent?.eventId === nextEventId) {
@@ -297,36 +297,36 @@ async function replaceCurrentHostedWakeEventTx(input: {
   }
 
   if (currentEvent) {
-    await replaceHostedWakeEventTx({
+    await replaceHostedIngressEventAliasTx({
       eventId: currentEvent.eventId,
       replacedByEventId: nextEventId,
       tx: input.tx,
       userId: input.userId,
     });
   } else if (input.wake.dedupeKey && input.wake.dedupeKey !== nextEventId) {
-    await createHostedWakeEventTx({
+    await createHostedIngressEventAliasTx({
       eventId: input.wake.dedupeKey,
+      ingressEventId: input.wake.id,
       replacedByEventId: nextEventId,
       tx: input.tx,
       userId: input.userId,
-      wakeId: input.wake.id,
     });
   }
 
-  await createHostedWakeEventTx({
+  await createHostedIngressEventAliasTx({
     eventId: nextEventId,
+    ingressEventId: input.wake.id,
     tx: input.tx,
     userId: input.userId,
-    wakeId: input.wake.id,
   });
 }
 
-async function recordHostedWakeReplacementTx(input: {
+async function recordHostedIngressReplacementTx(input: {
   eventId?: string | null;
   replacementEventId: string | null;
-  tx: AppendHostedWakeInput["tx"];
+  tx: AppendHostedIngressInput["tx"];
   userId: string;
-  wake: HostedWakeRow;
+  wake: HostedIngressEventRow;
 }): Promise<void> {
   const eventId = input.eventId?.trim();
 
@@ -334,23 +334,23 @@ async function recordHostedWakeReplacementTx(input: {
     return;
   }
 
-  await createHostedWakeEventTx({
+  await createHostedIngressEventAliasTx({
     eventId,
+    ingressEventId: input.wake.id,
     replacedByEventId: input.replacementEventId,
     tx: input.tx,
     userId: input.userId,
-    wakeId: input.wake.id,
   });
 }
 
-async function resolveCurrentHostedWakeEventIdTx(input: {
-  tx: AppendHostedWakeInput["tx"];
-  wake: HostedWakeRow;
+async function resolveCurrentHostedIngressEventAliasIdTx(input: {
+  tx: AppendHostedIngressInput["tx"];
+  wake: HostedIngressEventRow;
 }): Promise<string | null> {
-  const currentEvent = await findCurrentHostedWakeEventByWakeIdTx({
+  const currentEvent = await findCurrentHostedIngressEventAliasByWakeIdTx({
+    ingressEventId: input.wake.id,
     tx: input.tx,
     userId: input.wake.userId,
-    wakeId: input.wake.id,
   });
 
   return currentEvent?.eventId ?? input.wake.dedupeKey ?? null;

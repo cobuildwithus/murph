@@ -18,10 +18,10 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { handoffHostedExecutionWakeBestEffort } from "@/src/lib/hosted-wake/control";
+import { nudgeHostedRunBestEffort } from "@/src/lib/hosted-ingress/control";
 import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
 
-describe("handoffHostedExecutionWakeBestEffort", () => {
+describe("nudgeHostedRunBestEffort", () => {
   beforeEach(() => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
   });
@@ -31,29 +31,29 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
   });
 
   it("swallows nudge failures because the handoff is best-effort", async () => {
-    const nudgeUserRunner = vi.fn().mockRejectedValue(new Error("nudge failed"));
+    const nudgeUserRun = vi.fn().mockRejectedValue(new Error("nudge failed"));
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       getStatus: vi.fn(),
-      nudgeUserRunner,
+      nudgeUserRun,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      handoffHostedExecutionWakeBestEffort({
+      nudgeHostedRunBestEffort({
         eventId: "member.activated:test-event",
         userId: "user-123",
       }),
     ).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalledWith(
-      "Hosted wake handoff failed.",
+      "Hosted run nudge failed.",
       expect.objectContaining({ message: "nudge failed" }),
     );
   });
 
   it("nudges the user through the deferred callback when present", async () => {
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
+    const nudgeUserRun = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
@@ -61,14 +61,14 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       getStatus: vi.fn(),
-      nudgeUserRunner,
+      nudgeUserRun,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     const defer = vi.fn(async (run: () => Promise<void>) => {
       await run();
     });
 
-    await handoffHostedExecutionWakeBestEffort({
+    await nudgeHostedRunBestEffort({
       context: "member-activation",
       defer,
       eventId: "member.activated:test-event",
@@ -77,11 +77,11 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
     });
 
     expect(defer).toHaveBeenCalledTimes(1);
-    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
+    expect(nudgeUserRun).toHaveBeenCalledWith("user-123");
   });
 
   it("schedules a deferred webhook nudge without an inline drain wait contract", async () => {
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
+    const nudgeUserRun = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
@@ -89,7 +89,7 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       getStatus: vi.fn(),
-      nudgeUserRunner,
+      nudgeUserRun,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     const deferred: Array<() => Promise<void>> = [];
@@ -107,12 +107,12 @@ describe("handoffHostedExecutionWakeBestEffort", () => {
       userId: "user-123",
     });
 
-    expect(nudgeUserRunner).not.toHaveBeenCalled();
+    expect(nudgeUserRun).not.toHaveBeenCalled();
     expect(deferred).toHaveLength(1);
 
     await deferred[0]?.();
 
-    expect(nudgeUserRunner).toHaveBeenCalledTimes(1);
-    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
+    expect(nudgeUserRun).toHaveBeenCalledTimes(1);
+    expect(nudgeUserRun).toHaveBeenCalledWith("user-123");
   });
 });

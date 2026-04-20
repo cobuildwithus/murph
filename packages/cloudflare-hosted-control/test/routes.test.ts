@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
-  buildCloudflareHostedControlUserWakePath,
 } from "../src/routes.ts";
 
 describe("cloudflare hosted control routes", () => {
@@ -18,8 +18,8 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlUserStatusPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/status",
     );
-    expect(buildCloudflareHostedControlUserWakePath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/wake",
+    expect(buildCloudflareHostedControlUserRunPath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/run",
     );
   });
 
@@ -58,8 +58,8 @@ describe("cloudflare hosted control routes", () => {
     });
     await expect(import("@murphai/cloudflare-hosted-control/routes")).resolves.toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
+      buildCloudflareHostedControlUserRunPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
-      buildCloudflareHostedControlUserWakePath: expect.any(Function),
     });
     await expect(importBySpecifier("@murphai/cloudflare-hosted-control/contracts")).rejects.toThrow();
     await expect(importBySpecifier("@murphai/cloudflare-hosted-control/parsers")).rejects.toThrow();

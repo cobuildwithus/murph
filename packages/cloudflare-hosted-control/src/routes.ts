@@ -2,8 +2,8 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
   return `/internal/users/${encodeURIComponent(userId)}/status`;
 }
 
-export function buildCloudflareHostedControlUserWakePath(userId: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/wake`;
+export function buildCloudflareHostedControlUserRunPath(userId: string): string {
+  return `/internal/users/${encodeURIComponent(userId)}/run`;
 }
 
 export function buildCloudflareHostedControlBrowserVaultSessionPath(userId: string): string {

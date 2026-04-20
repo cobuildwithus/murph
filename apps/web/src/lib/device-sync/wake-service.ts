@@ -14,15 +14,15 @@ import {
   type HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionWake,
+  HostedIngressEnvelope,
   HostedExecutionDeviceSyncWakeEvent,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import {
-  materializeHostedExecutionWakeTx,
-} from "../hosted-wake/lifecycle";
-import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
+  materializeHostedIngressEnvelopeTx,
+} from "../hosted-ingress/lifecycle";
+import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
@@ -334,7 +334,7 @@ export async function appendHostedDeviceSyncWake(input: {
 }
 
 async function persistHostedDeviceSyncWake(input: {
-  wake: HostedExecutionWake;
+  wake: HostedIngressEnvelope;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
   complete?(tx: HostedPrismaTransactionClient): Promise<void>;
@@ -343,14 +343,14 @@ async function persistHostedDeviceSyncWake(input: {
   // tied to the stable wake event id instead of the transient signal primary key.
   await input.store.prisma.$transaction(async (tx) => {
     await input.persist(tx);
-    await materializeHostedExecutionWakeTx({
+    await materializeHostedIngressEnvelopeTx({
       wake: input.wake,
       tx,
     });
     await input.complete?.(tx);
   });
 
-  void handoffHostedExecutionWakeBestEffort({
+  void nudgeHostedRunBestEffort({
     context: "device-sync.wake",
     eventId: input.wake.eventId,
     prisma: input.store.prisma,

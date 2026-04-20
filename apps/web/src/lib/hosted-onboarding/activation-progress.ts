@@ -5,11 +5,11 @@ import {
 } from "@prisma/client";
 
 import {
-  isHostedWakeLifecycleTerminal,
-} from "../hosted-wake/lifecycle";
+  isHostedIngressLifecycleTerminal,
+} from "../hosted-ingress/lifecycle";
 import {
-  readLatestHostedWakeLifecycleByKind,
-} from "../hosted-wake/store";
+  readLatestHostedIngressLifecycleByKind,
+} from "../hosted-ingress/store";
 
 type HostedActivationProgressPrismaClient = PrismaClient | Prisma.TransactionClient;
 
@@ -23,7 +23,7 @@ export async function isHostedMemberActivationPending(input: {
     return false;
   }
 
-  const activationLifecycle = await readLatestHostedWakeLifecycleByKind({
+  const activationLifecycle = await readLatestHostedIngressLifecycleByKind({
     kind: HOSTED_MEMBER_ACTIVATION_EVENT_KIND,
     prisma: input.prisma,
     userId: input.memberId,
@@ -33,5 +33,5 @@ export async function isHostedMemberActivationPending(input: {
     return false;
   }
 
-  return !isHostedWakeLifecycleTerminal(activationLifecycle.state);
+  return !isHostedIngressLifecycleTerminal(activationLifecycle.state);
 }

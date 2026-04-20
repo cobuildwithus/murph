@@ -5,11 +5,11 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readLatestHostedWakeLifecycleByKind: vi.fn(),
+  readLatestHostedIngressLifecycleByKind: vi.fn(),
 }));
 
-vi.mock("../hosted-wake/store", () => ({
-  readLatestHostedWakeLifecycleByKind: mocks.readLatestHostedWakeLifecycleByKind,
+vi.mock("../hosted-ingress/store", () => ({
+  readLatestHostedIngressLifecycleByKind: mocks.readLatestHostedIngressLifecycleByKind,
 }));
 
 import { isHostedMemberActivationPending } from "./activation-progress";
@@ -17,12 +17,12 @@ import { isHostedMemberActivationPending } from "./activation-progress";
 describe("hosted member activation progress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readLatestHostedWakeLifecycleByKind.mockResolvedValue(null);
+    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue(null);
   });
 
   it("keeps activation pending when the latest hosted wake lifecycle is non-terminal", async () => {
     const prisma = {} as PrismaClient;
-    mocks.readLatestHostedWakeLifecycleByKind.mockResolvedValue({
+    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue({
       eventId: "evt_activation",
       state: "queued",
     });
@@ -32,7 +32,7 @@ describe("hosted member activation progress", () => {
       memberId: "member_123",
       prisma,
     })).resolves.toBe(true);
-    expect(mocks.readLatestHostedWakeLifecycleByKind).toHaveBeenCalledWith({
+    expect(mocks.readLatestHostedIngressLifecycleByKind).toHaveBeenCalledWith({
       kind: "member.activated",
       prisma,
       userId: "member_123",
@@ -40,7 +40,7 @@ describe("hosted member activation progress", () => {
   });
 
   it("treats completed hosted wake lifecycle records as terminal", async () => {
-    mocks.readLatestHostedWakeLifecycleByKind.mockResolvedValue({
+    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue({
       eventId: "evt_activation",
       state: "completed",
     });
@@ -53,7 +53,7 @@ describe("hosted member activation progress", () => {
   });
 
   it("returns false when no activation wake has been recorded", async () => {
-    mocks.readLatestHostedWakeLifecycleByKind.mockResolvedValue({
+    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue({
       eventId: "evt_activation",
       state: "quarantined",
     });

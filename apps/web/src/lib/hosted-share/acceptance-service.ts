@@ -7,9 +7,9 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
-  materializeHostedExecutionWakeTx,
-} from "../hosted-wake/lifecycle";
-import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
+  materializeHostedIngressEnvelopeTx,
+} from "../hosted-ingress/lifecycle";
+import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
@@ -141,7 +141,7 @@ export async function acceptHostedShareLink(input: {
           },
         });
 
-    await materializeHostedExecutionWakeTx({
+    await materializeHostedIngressEnvelopeTx({
       wake: buildHostedShareAcceptanceWake({
         acceptedAt: acceptedAt.toISOString(),
         eventId,
@@ -168,7 +168,7 @@ export async function acceptHostedShareLink(input: {
     };
   }
 
-  void handoffHostedExecutionWakeBestEffort({
+  void nudgeHostedRunBestEffort({
     context: "hosted-share.acceptance",
     eventId: claim.eventId,
     prisma,

@@ -4,9 +4,9 @@ import type {
 } from "@prisma/client";
 
 import {
-  readHostedWakeLifecycleState,
-  type HostedWakeLifecycleState,
-} from "../hosted-wake/lifecycle";
+  readHostedIngressLifecycleState,
+  type HostedIngressLifecycleState,
+} from "../hosted-ingress/lifecycle";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import { hashHostedShareCode, normalizeOptionalString } from "./shared-identifiers";
@@ -109,8 +109,8 @@ export async function readHostedShareWakeLifecycleState(input: {
   eventId: string;
   memberId: string;
   prisma: HostedSharePrismaClient;
-}): Promise<HostedWakeLifecycleState | null> {
-  return readHostedWakeLifecycleState({
+}): Promise<HostedIngressLifecycleState | null> {
+  return readHostedIngressLifecycleState({
     eventId: input.eventId,
     prisma: input.prisma,
     userId: input.memberId,
@@ -122,7 +122,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
   memberId: string;
   prisma: HostedSharePrismaClient;
   shareId: string;
-}): Promise<HostedWakeLifecycleState | null> {
+}): Promise<HostedIngressLifecycleState | null> {
   const state = await readHostedShareWakeLifecycleState({
     eventId: input.eventId,
     memberId: input.memberId,

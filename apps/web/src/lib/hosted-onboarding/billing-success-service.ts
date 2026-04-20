@@ -5,7 +5,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { handoffHostedExecutionWakeBestEffort } from "../hosted-wake/control";
+import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
 import { getPrisma } from "../prisma";
 import {
   coerceStripeObjectId,
@@ -68,7 +68,7 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   });
 
   if (hostedExecutionEventId) {
-    await handoffHostedExecutionWakeBestEffort({
+    await nudgeHostedRunBestEffort({
       context: "billing-success.redirect",
       eventId: hostedExecutionEventId,
       prisma,

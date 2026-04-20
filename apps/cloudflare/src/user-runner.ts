@@ -879,7 +879,7 @@ export class HostedUserRunner {
 
     return await decryptHostedIngressPayloadCiphertext({
       ciphertext: payloadCiphertext,
-      environment: this.env.hostedWakeEncryption,
+      environment: this.env.hostedIngressEncryption,
       userId,
     });
   }

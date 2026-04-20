@@ -1,15 +1,15 @@
-import { encodeHostedWakeStoredPayload } from "./payload";
+import { encodeHostedIngressStoredPayload } from "./payload";
 import type {
   HostedExecutionCursorRow,
-  HostedWakeEventRow,
-  HostedWakeMutationTx,
-  HostedWakePayloadRow,
-  HostedWakeRow,
-  HostedWakeStoreClient,
+  HostedIngressEventAliasRow,
+  HostedIngressMutationTx,
+  HostedIngressPayloadRow,
+  HostedIngressEventRow,
+  HostedIngressStoreClient,
 } from "./store.types";
 
 export async function ensureHostedExecutionCursorRowTx(input: {
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
 }): Promise<HostedExecutionCursorRow> {
   return input.tx.hostedExecutionCursor.upsert({
@@ -23,36 +23,36 @@ export async function ensureHostedExecutionCursorRowTx(input: {
   });
 }
 
-export async function writeHostedWakePayloadStorageTx(input: {
-  payload: ReturnType<typeof encodeHostedWakeStoredPayload>;
+export async function writeHostedIngressPayloadStorageTx(input: {
+  payload: ReturnType<typeof encodeHostedIngressStoredPayload>;
   payloadSchema: string;
-  tx: HostedWakeMutationTx;
+  tx: HostedIngressMutationTx;
+  ingressEventId: string;
   userId: string;
-  wakeId: string;
 }): Promise<void> {
   if (input.payload.storage === "inline") {
-    await input.tx.hostedWakePayload.deleteMany({
+    await input.tx.hostedIngressPayload.deleteMany({
       where: {
-        wakeId: input.wakeId,
+        ingressEventId: input.ingressEventId,
       },
     });
     return;
   }
 
   if (!input.payload.payloadRefCiphertext) {
-    throw new TypeError("Hosted wake payload spill storage requires ciphertext.");
+    throw new TypeError("Hosted ingress payload spill storage requires ciphertext.");
   }
 
-  await input.tx.hostedWakePayload.upsert({
+  await input.tx.hostedIngressPayload.upsert({
     where: {
-      wakeId: input.wakeId,
+      ingressEventId: input.ingressEventId,
     },
     create: {
+      ingressEventId: input.ingressEventId,
       payloadBytes: input.payload.payloadBytes,
       payloadCiphertext: input.payload.payloadRefCiphertext,
       payloadSchema: input.payloadSchema,
       userId: input.userId,
-      wakeId: input.wakeId,
     },
     update: {
       payloadBytes: input.payload.payloadBytes,
@@ -63,9 +63,9 @@ export async function writeHostedWakePayloadStorageTx(input: {
   });
 }
 
-export function resolveHostedWakePayloadCiphertextSync(
-  record: HostedWakeRow,
-  payloadRow: HostedWakePayloadRow | null,
+export function resolveHostedIngressPayloadCiphertextSync(
+  record: HostedIngressEventRow,
+  payloadRow: HostedIngressPayloadRow | null,
 ): string | null {
   if (record.payloadInlineCiphertext) {
     return record.payloadInlineCiphertext;
@@ -78,14 +78,14 @@ export function resolveHostedWakePayloadCiphertextSync(
   return payloadRow.payloadCiphertext;
 }
 
-export async function readHostedWakePayloadRowByWakeIdTx(input: {
-  tx: HostedWakeStoreClient;
+export async function readHostedIngressPayloadRowByWakeIdTx(input: {
+  tx: HostedIngressStoreClient;
+  ingressEventId: string;
   userId: string;
-  wakeId: string;
-}): Promise<HostedWakePayloadRow | null> {
-  const row = await input.tx.hostedWakePayload.findUnique({
+}): Promise<HostedIngressPayloadRow | null> {
+  const row = await input.tx.hostedIngressPayload.findUnique({
     where: {
-      wakeId: input.wakeId,
+      ingressEventId: input.ingressEventId,
     },
   });
 
@@ -96,29 +96,29 @@ export async function readHostedWakePayloadRowByWakeIdTx(input: {
   return row;
 }
 
-export async function readHostedWakePayloadRowsByWakeIdTx(input: {
-  tx: HostedWakeStoreClient;
+export async function readHostedIngressPayloadRowsByWakeIdTx(input: {
+  tx: HostedIngressStoreClient;
   userId: string;
-  wakeIds: string[];
-}): Promise<Map<string, HostedWakePayloadRow>> {
-  if (input.wakeIds.length === 0) {
+  ingressEventIds: string[];
+}): Promise<Map<string, HostedIngressPayloadRow>> {
+  if (input.ingressEventIds.length === 0) {
     return new Map();
   }
 
-  const rows = await input.tx.hostedWakePayload.findMany({
+  const rows = await input.tx.hostedIngressPayload.findMany({
     where: {
-      userId: input.userId,
-      wakeId: {
-        in: input.wakeIds,
+      ingressEventId: {
+        in: input.ingressEventIds,
       },
+      userId: input.userId,
     },
   });
 
-  return new Map(rows.map((row) => [row.wakeId, row]));
+  return new Map(rows.map((row) => [row.ingressEventId, row]));
 }
 
 export async function lockHostedExecutionCursorRowTx(input: {
-  tx: HostedWakeMutationTx;
+  tx: HostedIngressMutationTx;
   userId: string;
 }): Promise<void> {
   const rows = await input.tx.$queryRaw<Array<{ user_id: string }>>`
@@ -133,8 +133,8 @@ export async function lockHostedExecutionCursorRowTx(input: {
   }
 }
 
-export async function allocateHostedWakeSeqTx(input: {
-  tx: HostedWakeMutationTx;
+export async function allocateHostedIngressSeqTx(input: {
+  tx: HostedIngressMutationTx;
   userId: string;
 }): Promise<bigint> {
   const rows = await input.tx.$queryRaw<Array<{ seq: bigint }>>`
@@ -153,7 +153,7 @@ export async function allocateHostedWakeSeqTx(input: {
 }
 
 export async function bumpHostedExecutionCursorVersionTx(input: {
-  tx: HostedWakeMutationTx;
+  tx: HostedIngressMutationTx;
   userId: string;
 }): Promise<void> {
   await input.tx.hostedExecutionCursor.update({
@@ -168,16 +168,16 @@ export async function bumpHostedExecutionCursorVersionTx(input: {
   });
 }
 
-export async function findHostedWakeByDedupeKeyTx(input: {
+export async function findHostedIngressByDedupeKeyTx(input: {
   dedupeKey: string | null;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
-}): Promise<HostedWakeRow | null> {
+}): Promise<HostedIngressEventRow | null> {
   if (!input.dedupeKey) {
     return null;
   }
 
-  return input.tx.hostedWake.findUnique({
+  return input.tx.hostedIngressEvent.findUnique({
     where: {
       userId_dedupeKey: {
         dedupeKey: input.dedupeKey,
@@ -187,18 +187,18 @@ export async function findHostedWakeByDedupeKeyTx(input: {
   });
 }
 
-export async function findHostedWakeByEventIdTx(input: {
+export async function findHostedIngressByEventIdTx(input: {
   eventId: string;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
-}): Promise<HostedWakeRow | null> {
+}): Promise<HostedIngressEventRow | null> {
   const eventId = input.eventId.trim();
 
   if (!eventId) {
     return null;
   }
 
-  const event = await findHostedWakeEventByEventIdTx({
+  const event = await findHostedIngressEventAliasByEventIdTx({
     eventId,
     tx: input.tx,
     userId: input.userId,
@@ -208,54 +208,54 @@ export async function findHostedWakeByEventIdTx(input: {
     return null;
   }
 
-  const wake = await input.tx.hostedWake.findUnique({
+  const ingressEvent = await input.tx.hostedIngressEvent.findUnique({
     where: {
-      id: event.wakeId,
+      id: event.ingressEventId,
     },
   });
 
-  if (input.userId && wake && wake.userId !== input.userId) {
+  if (input.userId && ingressEvent && ingressEvent.userId !== input.userId) {
     return null;
   }
 
-  return wake;
+  return ingressEvent;
 }
 
-export async function createHostedWakeEventTx(input: {
+export async function createHostedIngressEventAliasTx(input: {
   eventId: string;
+  ingressEventId: string;
   replacedByEventId?: string | null;
-  tx: HostedWakeMutationTx;
+  tx: HostedIngressMutationTx;
   userId: string;
-  wakeId: string;
-}): Promise<HostedWakeEventRow> {
+}): Promise<HostedIngressEventAliasRow> {
   const eventId = input.eventId.trim();
 
   if (!eventId) {
-    throw new TypeError("Hosted wake eventId must not be blank.");
+    throw new TypeError("Hosted ingress eventId must not be blank.");
   }
 
-  return input.tx.hostedWakeEvent.create({
+  return input.tx.hostedIngressEventAlias.create({
     data: {
       eventId,
+      ingressEventId: input.ingressEventId,
       replacedByEventId: input.replacedByEventId ?? null,
       userId: input.userId,
-      wakeId: input.wakeId,
     },
   });
 }
 
-export async function findHostedWakeEventByEventIdTx(input: {
+export async function findHostedIngressEventAliasByEventIdTx(input: {
   eventId: string;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
-}): Promise<HostedWakeEventRow | null> {
+}): Promise<HostedIngressEventAliasRow | null> {
   const eventId = input.eventId.trim();
 
   if (!eventId) {
     return null;
   }
 
-  return input.tx.hostedWakeEvent.findUnique({
+  return input.tx.hostedIngressEventAlias.findUnique({
     where: {
       userId_eventId: {
         eventId,
@@ -265,16 +265,16 @@ export async function findHostedWakeEventByEventIdTx(input: {
   });
 }
 
-export async function findCurrentHostedWakeEventByWakeIdTx(input: {
-  tx: HostedWakeStoreClient;
+export async function findCurrentHostedIngressEventAliasByWakeIdTx(input: {
+  tx: HostedIngressStoreClient;
+  ingressEventId: string;
   userId: string;
-  wakeId: string;
-}): Promise<HostedWakeEventRow | null> {
-  return input.tx.hostedWakeEvent.findFirst({
+}): Promise<HostedIngressEventAliasRow | null> {
+  return input.tx.hostedIngressEventAlias.findFirst({
     where: {
+      ingressEventId: input.ingressEventId,
       replacedByEventId: null,
       userId: input.userId,
-      wakeId: input.wakeId,
     },
     orderBy: {
       createdAt: "desc",
@@ -282,13 +282,13 @@ export async function findCurrentHostedWakeEventByWakeIdTx(input: {
   });
 }
 
-export async function replaceHostedWakeEventTx(input: {
+export async function replaceHostedIngressEventAliasTx(input: {
   eventId: string;
   replacedByEventId: string;
-  tx: HostedWakeMutationTx;
+  tx: HostedIngressMutationTx;
   userId: string;
 }): Promise<boolean> {
-  const updated = await input.tx.hostedWakeEvent.updateMany({
+  const updated = await input.tx.hostedIngressEventAlias.updateMany({
     where: {
       eventId: input.eventId,
       replacedByEventId: null,
@@ -304,9 +304,9 @@ export async function replaceHostedWakeEventTx(input: {
 
 export async function findUncommittedWakeByCoalescingKeyTx(input: {
   coalescingKey: string | null;
-  tx: HostedWakeMutationTx;
+  tx: HostedIngressMutationTx;
   userId: string;
-}): Promise<HostedWakeRow | null> {
+}): Promise<HostedIngressEventRow | null> {
   if (!input.coalescingKey) {
     return null;
   }
@@ -316,13 +316,15 @@ export async function findUncommittedWakeByCoalescingKeyTx(input: {
     userId: input.userId,
   });
 
-  return input.tx.hostedWake.findFirst({
+  return input.tx.hostedIngressEvent.findFirst({
     where: {
       coalescingKey: input.coalescingKey,
+      runId: null,
       quarantinedAt: null,
       seq: {
         gt: cursor.committedSeq,
       },
+      state: "pending",
       userId: input.userId,
     },
     orderBy: {
@@ -331,8 +333,8 @@ export async function findUncommittedWakeByCoalescingKeyTx(input: {
   });
 }
 
-export function assertHostedWakeUserMatch(
-  wake: HostedWakeRow,
+export function assertHostedIngressUserMatch(
+  wake: HostedIngressEventRow,
   userId: string,
   dedupeKey: string,
 ): void {
@@ -341,12 +343,12 @@ export function assertHostedWakeUserMatch(
   }
 
   throw new Error(
-    `Hosted wake dedupe key ${JSON.stringify(dedupeKey)} is already owned by ${wake.userId}, not ${userId}.`,
+    `Hosted ingress dedupe key ${JSON.stringify(dedupeKey)} is already owned by ${wake.userId}, not ${userId}.`,
   );
 }
 
-export function resolveHostedWakeEventId(
-  wake: Pick<HostedWakeRow, "dedupeKey" | "id">,
+export function resolveHostedIngressEventAliasId(
+  wake: Pick<HostedIngressEventRow, "dedupeKey" | "id">,
 ): string {
   return wake.dedupeKey ?? wake.id;
 }

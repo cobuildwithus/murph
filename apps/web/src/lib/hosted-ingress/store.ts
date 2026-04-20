@@ -5,49 +5,49 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   ensureHostedExecutionCursorRowTx,
-  findCurrentHostedWakeEventByWakeIdTx,
-  findHostedWakeEventByEventIdTx,
-  resolveHostedWakeEventId,
+  findCurrentHostedIngressEventAliasByWakeIdTx,
+  findHostedIngressEventAliasByEventIdTx,
+  resolveHostedIngressEventAliasId,
 } from "./store-data";
 import {
   projectHostedExecutionCursorRecord,
-  resolveHostedWakeLifecycleStateTx,
+  resolveHostedIngressLifecycleStateTx,
 } from "./store-projections";
 import type {
-  HostedWakeEventRow,
-  HostedWakeLifecycleRecord,
-  HostedWakeRow,
-  HostedWakeStoreClient,
+  HostedIngressEventAliasRow,
+  HostedIngressLifecycleRecord,
+  HostedIngressEventRow,
+  HostedIngressStoreClient,
 } from "./store.types";
 
 export type {
-  AppendHostedWakeInput,
-  AppendHostedWakeResult,
-  HostedWakeLifecycleRecord,
+  AppendHostedIngressInput,
+  AppendHostedIngressResult,
+  HostedIngressLifecycleRecord,
 } from "./store.types";
 export {
   appendHostedCoalescingWakeTx,
   appendHostedOrderedWakeTx,
-  appendHostedWakeTx,
+  appendHostedIngressTx,
 } from "./store-append";
 export { ensureHostedExecutionCursorRowTx } from "./store-data";
 export {
   projectHostedExecutionCursorRecord,
-  projectHostedWakeRecord,
+  projectHostedIngressEvent,
 } from "./store-projections";
 
 
-export async function findHostedWakeEventIdByEventIdTx(input: {
+export async function findHostedIngressEventAliasIdByEventIdTx(input: {
   eventId: string;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
 }): Promise<string | null> {
-  const event = await findHostedWakeEventByEventIdTx(input);
-  return event?.wakeId ?? null;
+  const event = await findHostedIngressEventAliasByEventIdTx(input);
+  return event?.ingressEventId ?? null;
 }
 
 export async function readHostedExecutionCursor(input: {
-  prisma?: HostedWakeStoreClient;
+  prisma?: HostedIngressStoreClient;
   userId: string;
 }): Promise<HostedExecutionCursorState> {
   const prisma = input.prisma ?? getPrisma();
@@ -59,8 +59,8 @@ export async function readHostedExecutionCursor(input: {
   return projectHostedExecutionCursorRecord(cursor);
 }
 
-export async function countPendingHostedWakes(input: {
-  prisma?: HostedWakeStoreClient;
+export async function countPendingHostedIngressEvents(input: {
+  prisma?: HostedIngressStoreClient;
   userId: string;
 }): Promise<number> {
   const prisma = input.prisma ?? getPrisma();
@@ -69,7 +69,7 @@ export async function countPendingHostedWakes(input: {
     userId: input.userId,
   });
 
-  return prisma.hostedWake.count({
+  return prisma.hostedIngressEvent.count({
     where: {
       completedAt: null,
       quarantinedAt: null,
@@ -84,12 +84,12 @@ export async function countPendingHostedWakes(input: {
   });
 }
 
-export async function readHostedWakeLifecycleByEventIdTx(input: {
+export async function readHostedIngressLifecycleByEventIdTx(input: {
   eventId: string;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
-}): Promise<HostedWakeLifecycleRecord | null> {
-  const resolved = await resolveHostedWakeEventResolutionTx(input);
+}): Promise<HostedIngressLifecycleRecord | null> {
+  const resolved = await resolveHostedIngressEventAliasResolutionTx(input);
 
   if (!resolved) {
     return null;
@@ -100,37 +100,37 @@ export async function readHostedWakeLifecycleByEventIdTx(input: {
     replacedByEventId: resolved.event.replacedByEventId,
     state: resolved.event.replacedByEventId
       ? "replaced"
-      : await resolveHostedWakeLifecycleStateTx({
+      : await resolveHostedIngressLifecycleStateTx({
         record: resolved.wake,
         tx: input.tx,
       }),
   };
 }
 
-export async function readHostedWakeLifecycleByDedupeKeyTx(input: {
+export async function readHostedIngressLifecycleByDedupeKeyTx(input: {
   dedupeKey: string;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
-}): Promise<HostedWakeLifecycleRecord | null> {
-  return readHostedWakeLifecycleByEventIdTx({
+}): Promise<HostedIngressLifecycleRecord | null> {
+  return readHostedIngressLifecycleByEventIdTx({
     eventId: input.dedupeKey,
     tx: input.tx,
     userId: input.userId,
   });
 }
 
-export async function readHostedWakeScheduleByEventIdTx(input: {
+export async function readHostedIngressScheduleByEventIdTx(input: {
   eventId: string;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
 }): Promise<{
   eventId: string;
   occurredAt: string;
   seq: string;
-  state: HostedWakeLifecycleRecord["state"];
+  state: HostedIngressLifecycleRecord["state"];
   userId: string;
 } | null> {
-  const resolved = await resolveHostedWakeEventResolutionTx(input);
+  const resolved = await resolveHostedIngressEventAliasResolutionTx(input);
 
   if (!resolved) {
     return null;
@@ -142,7 +142,7 @@ export async function readHostedWakeScheduleByEventIdTx(input: {
     seq: resolved.wake.seq.toString(),
     state: resolved.event.replacedByEventId
       ? "replaced"
-      : await resolveHostedWakeLifecycleStateTx({
+      : await resolveHostedIngressLifecycleStateTx({
         record: resolved.wake,
         tx: input.tx,
       }),
@@ -150,13 +150,13 @@ export async function readHostedWakeScheduleByEventIdTx(input: {
   };
 }
 
-export async function readLatestHostedWakeLifecycleByKind(input: {
+export async function readLatestHostedIngressLifecycleByKind(input: {
   kind: string;
-  prisma?: HostedWakeStoreClient;
+  prisma?: HostedIngressStoreClient;
   userId: string;
-}): Promise<HostedWakeLifecycleRecord | null> {
+}): Promise<HostedIngressLifecycleRecord | null> {
   const prisma = input.prisma ?? getPrisma();
-  const wake = await prisma.hostedWake.findFirst({
+  const wake = await prisma.hostedIngressEvent.findFirst({
     where: {
       kind: input.kind,
       userId: input.userId,
@@ -170,33 +170,33 @@ export async function readLatestHostedWakeLifecycleByKind(input: {
     return null;
   }
 
-  const event = await findCurrentHostedWakeEventByWakeIdTx({
+  const event = await findCurrentHostedIngressEventAliasByWakeIdTx({
+    ingressEventId: wake.id,
     tx: prisma,
     userId: input.userId,
-    wakeId: wake.id,
   });
 
   return {
-    eventId: event?.eventId ?? resolveHostedWakeEventId(wake),
+    eventId: event?.eventId ?? resolveHostedIngressEventAliasId(wake),
     replacedByEventId: event?.replacedByEventId ?? null,
     state: event?.replacedByEventId
       ? "replaced"
-      : await resolveHostedWakeLifecycleStateTx({
+      : await resolveHostedIngressLifecycleStateTx({
         record: wake,
         tx: prisma,
       }),
   };
 }
 
-async function resolveHostedWakeEventResolutionTx(input: {
+async function resolveHostedIngressEventAliasResolutionTx(input: {
   eventId: string;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
 }): Promise<{
-  event: HostedWakeEventRow;
-  wake: HostedWakeRow;
+  event: HostedIngressEventAliasRow;
+  wake: HostedIngressEventRow;
 } | null> {
-  const event = await findHostedWakeEventByEventIdTx({
+  const event = await findHostedIngressEventAliasByEventIdTx({
     eventId: input.eventId,
     tx: input.tx,
     userId: input.userId,
@@ -206,9 +206,9 @@ async function resolveHostedWakeEventResolutionTx(input: {
     return null;
   }
 
-  const wake = await input.tx.hostedWake.findUnique({
+  const wake = await input.tx.hostedIngressEvent.findUnique({
     where: {
-      id: event.wakeId,
+      id: event.ingressEventId,
     },
   });
 

@@ -6,11 +6,11 @@ const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-  materializeHostedExecutionWakeTx: vi.fn(),
+  materializeHostedIngressEnvelopeTx: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
-  materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
+vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
+  materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -47,7 +47,7 @@ describe("hosted onboarding member channel sync", () => {
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
-    mocks.materializeHostedExecutionWakeTx.mockResolvedValue({
+    mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
     });
   });
@@ -132,7 +132,7 @@ describe("hosted onboarding member channel sync", () => {
       userId: "member_123",
     });
 
-    expect(mocks.materializeHostedExecutionWakeTx).toHaveBeenCalledWith({
+    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
       wake: {
         eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         kind: "member.channels.updated",
@@ -153,7 +153,7 @@ describe("hosted onboarding member channel sync", () => {
     const tx = {
       label: "test-prisma-tx",
     };
-    mocks.materializeHostedExecutionWakeTx.mockResolvedValue({
+    mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
     });
 
@@ -177,7 +177,7 @@ describe("hosted onboarding member channel sync", () => {
       userId: "member_123",
     });
 
-    expect(mocks.materializeHostedExecutionWakeTx).toHaveBeenCalledWith({
+    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
       wake: expect.objectContaining({
         eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         kind: "member.channels.updated",
