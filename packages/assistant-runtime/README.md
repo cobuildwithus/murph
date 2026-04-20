@@ -7,7 +7,7 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run one-shot hosted assistant/inbox/device-sync/share-import passes behind an explicit runtime context object
-- keep `conversation.message` ingestion capture-scoped, including inline parser draining and follow-up wake hints on that same lane
+- keep `conversation.message` ingestion capture-scoped, including inline parser draining and same-run local maintenance without materializing web-owned follow-up wakes
 - collect due hosted side effects before the durable commit, then resume their post-commit delivery from committed state
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
 - provide the generic child-launcher env helpers that hosted apps use when they own isolated runner process lifecycle

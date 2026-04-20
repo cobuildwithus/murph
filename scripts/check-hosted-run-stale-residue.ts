@@ -29,15 +29,6 @@ const blockedContentTokens = [
   "pending_commit_json",
   "wake_materialization_hints_json",
 ] as const;
-const grandfatheredContentTokenPaths = new Map<string, ReadonlySet<string>>([
-  [
-    "assistantNextWakeAt",
-    new Set([
-      "packages/assistant-runtime/src/hosted-runtime/execution.ts",
-    ]),
-  ],
-]);
-
 export type HostedRunStaleResidueMatch =
   | {
       kind: "path";
@@ -88,10 +79,6 @@ export function findHostedRunStaleResidueMatches(
   }
 
   for (const blockedContentToken of blockedContentTokens) {
-    if (isGrandfatheredContentTokenPath(normalizedPath, blockedContentToken)) {
-      continue;
-    }
-
     const line = findFirstMatchLine(contents, blockedContentToken);
 
     if (line !== null) {
@@ -128,7 +115,7 @@ export async function main(): Promise<void> {
   }
 
   const lines = [
-    "Found blocked hosted-wake production residue. Keep the live hosted framing run-centric and ingress-centric; grandfathered wake naming is allowed only in tests/history plus the explicit temporary allowlist baked into this guard until the broader naming cleanup lands.",
+    "Found blocked hosted-wake production residue. Keep the live hosted framing run-centric and ingress-centric; legacy wake-by-wake protocol residue is allowed only in tests/history, not production apps/packages source files.",
   ];
 
   for (const match of matches) {
@@ -177,10 +164,6 @@ function normalizeRepoPath(filePath: string): string {
 
 function shouldSkipDirectory(name: string): boolean {
   return skippedDirectoryNames.has(name);
-}
-
-function isGrandfatheredContentTokenPath(filePath: string, token: string): boolean {
-  return grandfatheredContentTokenPaths.get(token)?.has(filePath) ?? false;
 }
 
 function isTestLikePath(relativePath: string): boolean {

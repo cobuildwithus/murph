@@ -440,6 +440,29 @@ export async function commitHostedRunTx(input: {
     };
   }
 
+  const eventResultsValidationError = validateHostedRunEventResults({
+    eventResults: input.eventResults ?? [],
+    expectedIngressEventIds: acquiredIngressEventIds,
+  });
+
+  if (eventResultsValidationError) {
+    const failedRun = await closeHostedRunWithoutCommitTx({
+      cursor,
+      errorCode: eventResultsValidationError,
+      run,
+      status: "failed",
+      tx: input.tx,
+      userId: input.userId,
+    });
+
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+      needsFinalize: false,
+      run: projectHostedRunRecord(failedRun),
+    };
+  }
+
   const nextSnapshotRef = input.preparedSnapshotRef === undefined
     ? cursorSnapshotRefToPrismaJson(cursor.snapshotRef)
     : toNullablePrismaJson(input.preparedSnapshotRef);
@@ -1047,6 +1070,40 @@ async function closeHostedRunWithoutCommitTx(input: {
   });
 }
 
+function validateHostedRunEventResults(input: {
+  eventResults: HostedRunEventResult[];
+  expectedIngressEventIds: string[];
+}): string | null {
+  const expectedIngressEventIds = new Set(input.expectedIngressEventIds);
+  const seenWakeIds = new Set<string>();
+
+  if (input.expectedIngressEventIds.length === 0) {
+    return input.eventResults.length === 0
+      ? null
+      : "HOSTED_RUN_EVENT_RESULTS_UNEXPECTED";
+  }
+
+  for (const result of input.eventResults) {
+    if (seenWakeIds.has(result.wakeId)) {
+      return "HOSTED_RUN_EVENT_RESULTS_DUPLICATE";
+    }
+
+    seenWakeIds.add(result.wakeId);
+
+    if (!expectedIngressEventIds.has(result.wakeId)) {
+      return "HOSTED_RUN_EVENT_RESULTS_UNKNOWN";
+    }
+  }
+
+  for (const ingressEventId of expectedIngressEventIds) {
+    if (!seenWakeIds.has(ingressEventId)) {
+      return "HOSTED_RUN_EVENT_RESULTS_MISSING";
+    }
+  }
+
+  return null;
+}
+
 async function markHostedRunWakesTerminalTx(input: {
   eventResults: HostedRunEventResult[];
   outputCommittedSeq: bigint;
@@ -1069,7 +1126,10 @@ async function markHostedRunWakesTerminalTx(input: {
     }
 
     const result = resultByWakeId.get(wake.id);
-    const state = result?.state ?? (wake.quarantinedAt ? "quarantined" : "completed");
+    if (!result) {
+      throw new Error(`Hosted run result missing for acquired ingress event ${wake.id}.`);
+    }
+    const state = result.state;
 
     await input.tx.hostedIngressEvent.update({
       where: { id: wake.id },

@@ -58,7 +58,7 @@ import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
 const HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET = 8;
 
 interface HostedImmediateMaintenanceDrainState {
-  assistantNextWakeAt: string | null;
+  assistantRuntimeNextWakeAt: string | null;
   assistantPending: boolean;
   deviceSyncNextWakeAt: string | null;
   deviceSyncPending: boolean;
@@ -187,7 +187,7 @@ export async function executeHostedRunDrainForCommit(input: {
   });
   metrics.nextWakeAt = earliestHostedWakeAt(
     metrics.nextWakeAt,
-    drainState.assistantNextWakeAt,
+    drainState.assistantRuntimeNextWakeAt,
     drainState.deviceSyncNextWakeAt,
   );
 
@@ -320,7 +320,7 @@ function createHostedImmediateMaintenanceDrainState(
     && runDrain.triggerKind === "runtime_timer";
 
   return {
-    assistantNextWakeAt: null,
+    assistantRuntimeNextWakeAt: null,
     assistantPending: pendingRuntimeTimerWork,
     deviceSyncNextWakeAt: null,
     deviceSyncPending: pendingRuntimeTimerWork,
@@ -374,12 +374,12 @@ async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {
 
     if (
       input.drainState.assistantPending
-      || isHostedWakeDueNow(input.drainState.assistantNextWakeAt)
+      || isHostedWakeDueNow(input.drainState.assistantRuntimeNextWakeAt)
     ) {
       ranPass = true;
       remainingPassBudget -= 1;
       input.drainState.assistantPending = false;
-      input.drainState.assistantNextWakeAt = null;
+      input.drainState.assistantRuntimeNextWakeAt = null;
 
       const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
         executionContext: input.executionContext,
@@ -388,7 +388,7 @@ async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {
         wake: input.wake,
       });
       mergeHostedRunDrainMaintenanceMetrics(input.metrics, assistantMetrics);
-      input.drainState.assistantNextWakeAt = assistantMetrics.nextWakeAt;
+      input.drainState.assistantRuntimeNextWakeAt = assistantMetrics.nextWakeAt;
     }
 
     if (
@@ -428,7 +428,7 @@ async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {
     wake: input.wake,
     level: "warn",
     details: {
-      assistantNextWakeAt: input.drainState.assistantNextWakeAt,
+      assistantRuntimeNextWakeAt: input.drainState.assistantRuntimeNextWakeAt,
       assistantPending: input.drainState.assistantPending,
       deviceSyncNextWakeAt: input.drainState.deviceSyncNextWakeAt,
       deviceSyncPending: input.drainState.deviceSyncPending,
@@ -449,7 +449,7 @@ function hasHostedImmediateMaintenanceWork(
   return (
     drainState.assistantPending ||
     drainState.deviceSyncPending ||
-    isHostedWakeDueNow(drainState.assistantNextWakeAt) ||
+    isHostedWakeDueNow(drainState.assistantRuntimeNextWakeAt) ||
     isHostedWakeDueNow(drainState.deviceSyncNextWakeAt)
   );
 }

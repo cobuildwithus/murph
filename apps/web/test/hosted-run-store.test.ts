@@ -526,6 +526,95 @@ describe("commitHostedRunTx", () => {
     });
   });
 
+  it("fails closed when an acquired ingress event result is missing", async () => {
+    const cursor = buildCursorRow();
+    const runToken = "run-token.missing-event-result";
+    const run = buildRunRow({
+      eventSeqs: ["10", "11"],
+      runToken,
+      wakeIds: ["wake_10", "wake_11"],
+    });
+    const hostedExecutionCursorUpdateMany = vi.fn();
+    const hostedWakeUpdate = vi.fn();
+    const hostedWakeUpdateMany = vi.fn(async () => ({ count: 2 }));
+    const hostedRunUpdate = vi.fn(async ({ data }: {
+      data: {
+        errorClass: string;
+        errorCode: string;
+        failedAt: Date;
+        status: "failed";
+        updatedAt: Date;
+      };
+      where: { id: string };
+    }) => ({
+      ...run,
+      errorClass: data.errorClass,
+      errorCode: data.errorCode,
+      failedAt: data.failedAt,
+      status: data.status,
+      updatedAt: data.updatedAt,
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedExecutionCursor: {
+        updateMany: hostedExecutionCursorUpdateMany,
+      },
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        update: hostedRunUpdate,
+      },
+      hostedIngressEvent: {
+        update: hostedWakeUpdate,
+        updateMany: hostedWakeUpdateMany,
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+
+    const result = await commitHostedRunTx({
+      eventResults: [
+        {
+          state: "completed",
+          wakeId: "wake_10",
+        },
+      ],
+      expectedCursorVersion: 3n,
+      finalizeRequired: false,
+      outputCommittedSeq: 11n,
+      runId: run.id,
+      runToken,
+      tx,
+      userId: run.userId,
+    });
+
+    expect(result.committed).toBe(false);
+    expect(result.needsFinalize).toBe(false);
+    expect(result.run).toMatchObject({
+      errorCode: "HOSTED_RUN_EVENT_RESULTS_MISSING",
+      inputCommittedSeq: "9",
+      status: "failed",
+    });
+    expect(hostedExecutionCursorUpdateMany).not.toHaveBeenCalled();
+    expect(hostedWakeUpdate).not.toHaveBeenCalled();
+    expect(hostedWakeUpdateMany).toHaveBeenCalledWith({
+      data: {
+        runId: null,
+        state: "pending",
+      },
+      where: {
+        runId: run.id,
+        seq: { gt: 9n },
+        state: "running",
+        userId: run.userId,
+      },
+    });
+    expect(hostedRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        errorCode: "HOSTED_RUN_EVENT_RESULTS_MISSING",
+      }),
+      where: { id: run.id },
+    }));
+  });
+
   it("keeps committed runs in committed_needs_finalize when finalizeRequired is true", async () => {
     const initialCursor = buildCursorRow();
     const committedCursor = buildCursorRow({
