@@ -332,6 +332,14 @@ describe("hosted wake parser contracts", () => {
       runToken: "run_token_123",
     });
 
+    expect(() => parseHostedRunLogRequest({
+      component: "runtime",
+      level: "info",
+      message: "prepared snapshot",
+      phase: "prepare",
+      runId: "run-1",
+    })).toThrow("Hosted run log request runToken must be a non-empty string.");
+
     expect(parseHostedRunLogResponse({
       logged: true,
       log: {

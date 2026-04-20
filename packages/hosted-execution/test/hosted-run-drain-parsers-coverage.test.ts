@@ -130,7 +130,7 @@ describe("hosted run drain parser coverage", () => {
       expectedCursorVersion: "4",
       failureClass: "timeout",
       failureCode: "request_timeout",
-      finalizeRequired: null,
+      finalizeRequired: false,
       nextRuntimeWakeAt: null,
       nextRuntimeWakeReason: null,
       outputCommittedSeq: "25",
@@ -142,7 +142,7 @@ describe("hosted run drain parser coverage", () => {
       expectedCursorVersion: "4",
       failureClass: "timeout",
       failureCode: "request_timeout",
-      finalizeRequired: null,
+      finalizeRequired: false,
       nextRuntimeWakeAt: null,
       nextRuntimeWakeReason: null,
       outputCommittedSeq: "25",
@@ -151,6 +151,15 @@ describe("hosted run drain parser coverage", () => {
       runId: "run-1",
       runToken: "run_token_123",
     });
+  });
+
+  it("requires finalizeRequired on hosted run commit requests", () => {
+    expect(() => parseHostedRunCommitRequest({
+      expectedCursorVersion: "4",
+      outputCommittedSeq: "25",
+      runId: "run-1",
+      runToken: "run_token_123",
+    })).toThrow(/finalizeRequired/u);
   });
 
   it("accepts run status responses with optional logs and runs", () => {

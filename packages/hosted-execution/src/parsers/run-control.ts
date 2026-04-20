@@ -292,13 +292,10 @@ export function parseHostedRunCommitRequest(value: unknown): HostedRunCommitRequ
             "Hosted run commit request failureCode",
           ),
         }),
-    ...(record.finalizeRequired === undefined
-      ? {}
-      : {
-          finalizeRequired: record.finalizeRequired === null
-            ? null
-            : requireBoolean(record.finalizeRequired, "Hosted run commit request finalizeRequired"),
-        }),
+    finalizeRequired: requireBoolean(
+      record.finalizeRequired,
+      "Hosted run commit request finalizeRequired",
+    ),
     ...(record.nextRuntimeWakeAt === undefined
       ? {}
       : {
