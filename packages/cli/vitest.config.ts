@@ -1,17 +1,6 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { defineConfig } from "vitest/config";
-
-import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
-import {
-  createVitestWorkspaceRuntimeAliases,
-  resolveWorkspaceSourceEntries,
-} from "../../config/workspace-source-resolution.js";
+import { createMurphPackageVitestConfig } from "../../config/vitest-package.js";
 import { cliVitestCoverage } from "./vitest.workspace.ts";
 
-const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/assistantd": "../assistantd/src/index.ts",
   "@murphai/assistant-cli": "../assistant-cli/src/index.ts",
@@ -36,18 +25,9 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   murph: "./src/index.ts",
 } as const;
 
-export default defineConfig({
-  resolve: {
-    alias: createVitestWorkspaceRuntimeAliases(
-      resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
-    ),
-  },
-  test: {
-    ...murphVitestNoTimeouts,
-    name: "cli",
-    environment: "node",
-    ...resolveMurphVitestConcurrency(),
-    include: ["test/**/*.test.ts"],
-    coverage: cliVitestCoverage,
-  },
+export default createMurphPackageVitestConfig({
+  configUrl: import.meta.url,
+  name: "cli",
+  workspaceSourceEntryRelativePaths: WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
+  coverage: cliVitestCoverage,
 });
