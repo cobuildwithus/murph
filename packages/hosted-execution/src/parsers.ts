@@ -3,8 +3,6 @@ import {
   sharePackSchema,
   type SharePack,
 } from "@murphai/contracts";
-import {
-} from "@murphai/device-syncd/hosted-runtime";
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import {
