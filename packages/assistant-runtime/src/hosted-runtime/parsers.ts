@@ -2,11 +2,7 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
 import {
-  createRuntimeTimerSyntheticWake,
-} from "@murphai/hosted-execution";
-import {
   parseHostedRuntimeDrainRequest,
-  parseHostedRuntimeEvent,
   parseHostedExecutionRunnerRequest,
 } from "@murphai/hosted-execution/parsers";
 
@@ -40,34 +36,17 @@ export function parseHostedAssistantRuntimeJobRequest(
     throw new TypeError("Hosted assistant runtime job request.runDrain is required.");
   }
 
+  if (record.wake !== undefined) {
+    throw new TypeError(
+      "Hosted assistant runtime job request.wake is no longer supported; use request.runDrain.",
+    );
+  }
+
   const runDrain = parseHostedRuntimeDrainRequest(record.runDrain);
-  const request = parseHostedExecutionRunnerRequest({
+  return parseHostedExecutionRunnerRequest({
     ...record,
     runDrain,
-    wake: record.wake === undefined
-      ? runDrain.events[0]?.wake ?? createRuntimeTimerSyntheticWake(runDrain)
-      : parseHostedRuntimeEvent(record.wake),
   });
-
-  const parsed: HostedAssistantRuntimeJobRequest = {
-    bundle: request.bundle,
-    runDrain,
-    wake: request.wake,
-  };
-
-  if (request.currentBundleRef !== undefined) {
-    parsed.currentBundleRef = request.currentBundleRef;
-  }
-
-  if (request.run !== undefined) {
-    parsed.run = request.run;
-  }
-
-  if (request.sharePack !== undefined) {
-    parsed.sharePack = request.sharePack;
-  }
-
-  return parsed;
 }
 
 export function parseHostedAssistantRuntimeConfig(

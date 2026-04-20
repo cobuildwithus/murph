@@ -57,19 +57,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        wake: {
-          eventId: "evt_123",
-          firstContact: {
-            channel: "linq",
-            identityId: "hbidx:phone:v1:test",
-            threadId: "chat_123",
-            threadIsDirect: true,
-          },
-          kind: "member.activated",
-          memberChannels: defaultMemberChannels,
-          occurredAt: "2026-04-01T00:00:00.000Z",
-          userId: "member_123",
-        },
       },
       runtime: {
         userEnv: {
@@ -101,6 +88,11 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_materialize_linq_home",
+          startedAt: "2026-04-01T00:00:01.000Z",
+        },
         runDrain: {
           acquiredAt: "2026-04-01T00:00:01.000Z",
           events: [
@@ -129,20 +121,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        wake: {
-          eventId: "evt_materialize_linq_home",
-          firstContact: {
-            channel: "linq",
-            fromPhoneNumber: "+15550001111",
-            identityId: "hbidx:phone:v1:test",
-            kind: "linq-materialize-home-thread",
-            toPhoneNumber: "+15550002222",
-          },
-          kind: "member.activated",
-          memberChannels: defaultMemberChannels,
-          occurredAt: "2026-04-01T00:00:00.000Z",
-          userId: "member_123",
-        },
       },
     });
 
@@ -166,6 +144,11 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_bad_user_env",
+          startedAt: "2026-04-01T00:00:01.000Z",
+        },
         runDrain: {
           acquiredAt: "2026-04-01T00:00:01.000Z",
           events: [
@@ -187,13 +170,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        wake: {
-          eventId: "evt_123",
-          kind: "member.activated",
-          memberChannels: defaultMemberChannels,
-          occurredAt: "2026-04-01T00:00:00.000Z",
-          userId: "member_123",
-        },
       },
       runtime: {
         userEnv: {
@@ -207,6 +183,11 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_removed_runtime_fields",
+          startedAt: "2026-04-01T00:00:01.000Z",
+        },
         runDrain: {
           acquiredAt: "2026-04-01T00:00:01.000Z",
           events: [
@@ -228,13 +209,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        wake: {
-          eventId: "evt_123",
-          kind: "member.activated",
-          memberChannels: defaultMemberChannels,
-          occurredAt: "2026-04-01T00:00:00.000Z",
-          userId: "member_123",
-        },
       },
       runtime: {
         webControlPlane: {
@@ -248,6 +222,11 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_123",
+          startedAt: "2026-04-01T00:00:01.000Z",
+        },
         runDrain: {
           acquiredAt: "2026-04-01T00:00:01.000Z",
           events: [],
@@ -255,13 +234,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           inputCursorVersion: "4",
           resumeFinalize: true,
           runId: "run_123",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        wake: {
-          eventId: "hosted-run:run_123",
-          kind: "runtime.timer",
-          occurredAt: "2026-04-01T00:00:01.000Z",
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
@@ -277,7 +249,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(parsed.request.runDrain.resumeFinalize).toBe(true);
   });
 
-  it("accepts currentBundleRef without request.run when runDrain is present", () => {
+  it("accepts currentBundleRef on run-drain requests", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: "vault-bundle",
@@ -286,6 +258,11 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           key: "bundles/user/vault.json",
           size: 42,
           updatedAt: "2026-04-01T00:00:02.000Z",
+        },
+        run: {
+          attempt: 1,
+          runId: "run_missing_run",
+          startedAt: "2026-04-01T00:00:01.000Z",
         },
         runDrain: {
           acquiredAt: "2026-04-01T00:00:01.000Z",
@@ -296,17 +273,39 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
+      },
+    });
+
+    expect(parsed.request.currentBundleRef?.key).toBe("bundles/user/vault.json");
+  });
+
+  it("rejects legacy request.wake when runDrain is present", () => {
+    expect(() => parseHostedAssistantRuntimeJobInput({
+      request: {
+        bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_legacy_wake",
+          startedAt: "2026-04-01T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-01T00:00:01.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_legacy_wake",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
         wake: {
-          eventId: "hosted-run:run_missing_run",
+          eventId: "hosted-run:run_legacy_wake",
           kind: "runtime.timer",
           occurredAt: "2026-04-01T00:00:01.000Z",
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
       },
-    });
-
-    expect(parsed.request.currentBundleRef?.key).toBe("bundles/user/vault.json");
+    })).toThrow(/request\.wake is no longer supported/i);
   });
 
   it("rejects missing runDrain on runtime job inputs", () => {

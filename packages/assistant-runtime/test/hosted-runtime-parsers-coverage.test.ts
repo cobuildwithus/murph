@@ -109,6 +109,11 @@ describe("hosted runtime parser coverage", () => {
   it("parses run-drain finalize requests", () => {
     const parsed = parseHostedAssistantRuntimeJobRequest({
       bundle: null,
+      run: {
+        attempt: 1,
+        runId: "run_123",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      },
       runDrain: {
         acquiredAt: "2026-04-08T00:00:00.000Z",
         events: [],
@@ -116,13 +121,6 @@ describe("hosted runtime parser coverage", () => {
         inputCursorVersion: "4",
         resumeFinalize: true,
         runId: "run_123",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      wake: {
-        eventId: "hosted-run:run_123",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
@@ -156,7 +154,11 @@ describe("hosted runtime parser coverage", () => {
   it("rejects invalid run-drain finalize flags", () => {
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      wake: buildMemberActivatedWake("evt_invalid_resume_finalize"),
+      run: {
+        attempt: 1,
+        runId: "run_123",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      },
       runDrain: {
         acquiredAt: "2026-04-08T00:00:00.000Z",
         events: [],
@@ -168,6 +170,33 @@ describe("hosted runtime parser coverage", () => {
         userId: "member_123",
       },
     })).toThrow(/resumeFinalize must be a boolean/u);
+  });
+
+  it("rejects legacy request.wake once runDrain is present", () => {
+    expect(() => parseHostedAssistantRuntimeJobRequest({
+      bundle: null,
+      run: {
+        attempt: 1,
+        runId: "run_legacy_wake",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      },
+      runDrain: {
+        acquiredAt: "2026-04-08T00:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "24",
+        inputCursorVersion: "4",
+        runId: "run_legacy_wake",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      wake: {
+        eventId: "hosted-run:run_legacy_wake",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    })).toThrow(/request\.wake is no longer supported/u);
   });
 
   it("rejects the remaining removed runtime callback override fields", () => {

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHostedExecutionAssistantCronTickWake } from "../src/builders.ts";
-import { HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA } from "../src/contracts.ts";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionRuntimeTimerWake,
+} from "../src/builders.ts";
+import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "../src/contracts.ts";
 import {
   parseHostedExecutionRunnerRequest,
+  parseHostedRuntimeEvent,
   parseHostedRunAcquireResponse,
   parseHostedRunCommitRequest,
   parseHostedRunStatusResponse,
@@ -45,12 +49,6 @@ describe("hosted run drain parser coverage", () => {
         resumeFinalize: true,
         runId: "run_123",
         triggerKind: "runtime_timer",
-      },
-      wake: {
-        eventId: "evt_123",
-        kind: "assistant.cron.tick",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
         userId: "user_123",
       },
     })).toEqual({
@@ -80,15 +78,51 @@ describe("hosted run drain parser coverage", () => {
         resumeFinalize: true,
         runId: "run_123",
         triggerKind: "runtime_timer",
-      },
-      wake: {
-        eventId: "evt_123",
-        kind: "assistant.cron.tick",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
         userId: "user_123",
       },
     });
+  });
+
+  it("parses internal runtime.timer wakes without treating them as hosted ingress wakes", () => {
+    expect(parseHostedRuntimeEvent({
+      eventId: "hosted-run:run_456",
+      kind: "runtime.timer",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "user_123",
+    })).toEqual(buildHostedExecutionRuntimeTimerWake({
+      eventId: "hosted-run:run_456",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "user_123",
+    }));
+  });
+
+  it("rejects legacy top-level runner wake fields", () => {
+    expect(() => parseHostedExecutionRunnerRequest({
+      bundle: "bundle-ref-123",
+      run: {
+        attempt: 2,
+        runId: "run_legacy_wake",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      },
+      runDrain: {
+        acquiredAt: "2026-04-08T00:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "24",
+        inputCursorVersion: "4",
+        runId: "run_legacy_wake",
+        triggerKind: "runtime_timer",
+        userId: "user_123",
+      },
+      wake: {
+        eventId: "hosted-run:run_legacy_wake",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "user_123",
+      },
+    })).toThrow(/request\.wake is no longer supported/u);
   });
 
   it("parses hosted run requests that include commit failure fields", () => {
@@ -142,7 +176,7 @@ describe("hosted run drain parser coverage", () => {
           occurredAt: "2026-04-17T00:00:00.000Z",
           payloadBytes: 64,
           payloadCiphertext: "ciphertext:wake-1",
-          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+          payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
           seq: "12",
           updatedAt: "2026-04-17T00:00:00.000Z",
           userId: "member-1",
@@ -173,7 +207,7 @@ describe("hosted run drain parser coverage", () => {
           occurredAt: "2026-04-17T00:00:00.000Z",
           payloadBytes: 64,
           payloadCiphertext: "ciphertext:wake-1",
-          payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+          payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
           seq: "12",
           updatedAt: "2026-04-17T00:00:00.000Z",
           userId: "member-1",

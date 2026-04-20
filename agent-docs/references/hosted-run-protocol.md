@@ -38,6 +38,8 @@ finalize side effects from web-visible HostedRun recovery state
 
 The external ingress ledger is ingress-only. It is not an executor-facing runtime protocol. Internal runtime follow-ups stay inside runtime state and surface only as `nextRuntimeWakeAt`.
 
+Runtime job requests are `runDrain`-shaped. They carry `request.run` plus `request.runDrain`; they do not carry an independent `request.wake` seam.
+
 ## Why
 
 Cloudflare is intentionally hard to treat as the primary support/debug surface. Run state that operators need to answer “what happened?” must be visible in web/Postgres as redacted coordination metadata instead of being hidden in Durable Object state, encrypted snapshots, or container logs.
@@ -75,6 +77,10 @@ The run protocol preserves the existing correctness spine from the ingress ledge
 ## Runtime timers
 
 `nextRuntimeWakeAt` is a cursor projection from private runtime state. It is not an instruction for web to create an `assistant.cron.tick` row. When `nextRuntimeWakeAt` is due and there are no external events, `acquire hosted run` may return a zero-event `runtime_timer` run and let the runtime decide what is due.
+
+If executor/runtime plumbing needs a wake-shaped object for logs or callback wiring, it must use an internal-only `kind = "runtime.timer"` representation. That object is not persisted ingress, not a durable contract between web and runtime, and not a synonym for `assistant.cron.tick`.
+
+`assistant.cron.tick` remains an ingress event kind for explicit external/manual/admin scheduling flows. It is not the internal continuation mechanism for zero-event runtime timers.
 
 `nextRuntimeWakeAt` is the only hosted cursor wake projection. Internal assistant/parser/device-sync follow-ups stay runtime-local and surface only as this redacted due-time hint. There is no second cursor-level follow-up hint and no internal web-materialized assistant/parser follow-up lane.
 
