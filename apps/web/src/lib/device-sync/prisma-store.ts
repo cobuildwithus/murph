@@ -210,6 +210,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.agentSessions.authenticateAgentSessionByTokenHash(tokenHash, now);
   }
 
+  async touchAgentSession(input: {
+    sessionId: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<HostedAgentSessionRecord> {
+    return this.agentSessions.touchAgentSession(input);
+  }
+
   async rotateAgentSession(input: {
     sessionId: string;
     tokenHash: string;

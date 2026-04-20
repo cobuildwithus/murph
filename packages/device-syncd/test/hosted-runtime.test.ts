@@ -263,10 +263,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
   it("keeps plain bearer-token phrasing while still redacting token-like values", () => {
     expect(
       sanitizeHostedRuntimeErrorText(
-        "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+        "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
       ),
     ).toBe(
-      "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+      "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
     );
 
     expect(

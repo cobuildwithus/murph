@@ -27,6 +27,18 @@ export { shouldRejectHostedEmailIngressFailure } from "./hosted-email/ingress-po
 export { HostedEmailSendValidationError, sendHostedEmailMessage } from "./hosted-email/transport.ts";
 
 const HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024;
+const HOSTED_EMAIL_RAW_MESSAGE_OBJECT_PREFIX = "hosted-email/messages";
+
+export class HostedEmailRawMessageMissingError extends Error {
+  readonly code = "email-raw-message-missing";
+
+  constructor(input: { rawMessageKey: string; userId: string }) {
+    super(
+      `Hosted email message fetch failed for ${input.userId}/${input.rawMessageKey}.`,
+    );
+    this.name = "HostedEmailRawMessageMissingError";
+  }
+}
 
 export interface HostedEmailWorkerRequest {
   headers?: Headers;
@@ -51,7 +63,7 @@ export async function readHostedEmailRawMessage(input: {
     input.rawMessageKey,
   );
 
-  return await readEncryptedR2Payload({
+  const rawMessage = await readEncryptedR2Payload({
     aad: buildHostedStorageAad({
       key: objectKey,
       purpose: "email-raw",
@@ -65,6 +77,8 @@ export async function readHostedEmailRawMessage(input: {
     key: objectKey,
     scope: "email-raw",
   });
+
+  return rawMessage;
 }
 
 export async function writeHostedEmailRawMessage(input: {
@@ -233,7 +247,7 @@ async function hostedEmailRawMessageObjectKey(
     value: `message:${userId}:${rawMessageKey}`,
   });
 
-  return `transient/hosted-email/messages/${userSegment}/${messageSegment}.eml`;
+  return `${HOSTED_EMAIL_RAW_MESSAGE_OBJECT_PREFIX}/${userSegment}/${messageSegment}.eml`;
 }
 
 async function sha256Hex(input: Uint8Array): Promise<string> {

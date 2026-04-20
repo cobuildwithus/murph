@@ -25,6 +25,10 @@ import {
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import { HostedGatewayProjectionCache } from "./gateway-projection-cache.js";
+import {
+  HostedEmailRawMessageMissingError,
+  readHostedEmailRawMessage,
+} from "./hosted-email.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
   createHostedUserKeyStore,
@@ -62,18 +66,19 @@ import {
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
-type HostedWakeDrainState = HostedIngressLifecycleState;
+type HostedRunDrainState = HostedIngressLifecycleState;
 
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
 const HOSTED_WAKE_NUDGE_RETRY_DELAY_MS = 5_000;
 // Preserve the previous effective drain cap of 32 fetched batches * 64 wakes each
 // now that every successful cursor advance forces a refetch before the next wake.
 const MAX_HOSTED_WAKE_DRAIN_ROUNDS = DEFAULT_HOSTED_WAKE_BATCH_LIMIT * 32;
+const HOSTED_WAKE_QUARANTINE_EMAIL_RAW_MESSAGE_MISSING = "email-raw-message-missing";
 const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
-interface HostedWakeDrainInternalResult extends HostedRunDrainResult {
-  exitState: HostedWakeDrainState | null;
+interface HostedRunDrainLoopResult extends HostedRunDrainResult {
+  exitState: HostedRunDrainState | null;
 }
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
@@ -95,7 +100,7 @@ export class HostedUserRunner {
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStore>;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
-  private wakeDrainLock: Promise<void> | null = null;
+  private runDrainLock: Promise<void> | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -266,10 +271,22 @@ export class HostedUserRunner {
   }
 
   async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
+    if (this.runDrainLock !== null) {
+      return {
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: true,
+      };
+    }
+
+    await this.wakeScheduler.syncNextWake({
+      preferredWakeAt: new Date().toISOString(),
+    });
+
     return {
       accepted: true,
-      alarmScheduled: false,
-      alreadyRunning: this.wakeDrainLock !== null,
+      alarmScheduled: true,
+      alreadyRunning: false,
     };
   }
 
@@ -282,12 +299,12 @@ export class HostedUserRunner {
 
   private async drainHostedRunsInternal(input: {
     targetSeqHint?: string | null;
-  } = {}): Promise<HostedWakeDrainInternalResult> {
+  } = {}): Promise<HostedRunDrainLoopResult> {
     const userId = await this.requireBoundUserId();
     await this.stateStore.bootstrapUser(userId);
     let targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
     let committedSeq: string | null = null;
-    let exitState: HostedWakeDrainState | null = null;
+    let exitState: HostedRunDrainState | null = null;
 
     for (let round = 0; round < MAX_HOSTED_WAKE_DRAIN_ROUNDS; round += 1) {
       const acquired = await acquireHostedRunFromWeb({
@@ -302,7 +319,7 @@ export class HostedUserRunner {
       });
 
       committedSeq = acquired.cursor.committedSeq;
-      await this.syncHostedWakeBundleCacheToCursor(acquired.cursor.snapshotRef);
+      await this.syncRunnerBundleCacheToCursor(acquired.cursor.snapshotRef);
       await this.wakeScheduler.syncNextWake({
         preferredWakeAt: acquired.cursor.nextRuntimeWakeAt ?? null,
       });
@@ -329,7 +346,7 @@ export class HostedUserRunner {
         : await this.prepareAndCommitAcquiredHostedRun({ acquired, userId });
 
       committedSeq = outcome.cursor.committedSeq;
-      await this.syncHostedWakeBundleCacheToCursor(outcome.cursor.snapshotRef);
+      await this.syncRunnerBundleCacheToCursor(outcome.cursor.snapshotRef);
       await this.wakeScheduler.syncNextWake({
         preferredWakeAt: outcome.cursor.nextRuntimeWakeAt ?? null,
       });
@@ -391,7 +408,7 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<{
     cursor: HostedExecutionCursorState;
-    state: HostedWakeDrainState;
+    state: HostedRunDrainState;
   }> {
     const run = input.acquired.run;
     const runToken = input.acquired.runToken;
@@ -449,13 +466,7 @@ export class HostedUserRunner {
         timeoutMs: this.env.runnerTimeoutMs,
       });
 
-      let cursor = commit.cursor;
-      if (commit.committed) {
-        await this.cleanupCommittedHostedWakesLocally({
-          cursor,
-          wake: null,
-        });
-      }
+      const cursor = commit.cursor;
 
       this.recordHostedRunBreadcrumb({
         level: commit.committed ? "info" : "warn",
@@ -550,7 +561,7 @@ export class HostedUserRunner {
 
     if (!commit.committed || !commit.run) {
       if (execution.cursorSnapshotRef) {
-        await this.syncHostedWakeBundleCacheToCursor(commit.cursor.snapshotRef);
+        await this.syncRunnerBundleCacheToCursor(commit.cursor.snapshotRef);
       }
       return {
         cursor: commit.cursor,
@@ -561,16 +572,32 @@ export class HostedUserRunner {
     let cursor = commit.cursor;
 
     if (commit.needsFinalize) {
-      await this.syncHostedWakeBundleCacheToCursor(cursor.snapshotRef);
-      const finalized = await this.finalizeAcquiredHostedRun({
-        acquired: {
-          ...input.acquired,
-          cursor,
-          events: [],
-          resumeFinalize: true,
-          run: commit.run,
-          runToken,
+      await this.syncRunnerBundleCacheToCursor(cursor.snapshotRef);
+      const resumeFinalizeAcquire = await acquireHostedRunFromWeb({
+        baseUrl: this.readHostedWebControlBaseUrl(),
+        body: {
+          executorKind: "cloudflare-container",
+          triggerKind: "retry_finalize",
         },
+        boundUserId: input.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+      if (
+        !resumeFinalizeAcquire.acquired
+        || resumeFinalizeAcquire.resumeFinalize !== true
+        || !resumeFinalizeAcquire.run
+        || !resumeFinalizeAcquire.runToken
+        || resumeFinalizeAcquire.run.id !== commit.run.id
+        || resumeFinalizeAcquire.run.status !== "finalizing"
+      ) {
+        return {
+          cursor: resumeFinalizeAcquire.cursor,
+          state: "backpressured",
+        };
+      }
+      const finalized = await this.finalizeAcquiredHostedRun({
+        acquired: resumeFinalizeAcquire,
         userId: input.userId,
       });
       cursor = finalized.cursor;
@@ -600,7 +627,12 @@ export class HostedUserRunner {
   }> {
     const run = input.acquired.run;
     const runToken = input.acquired.runToken;
-    if (!run || !runToken) {
+    if (
+      !run
+      || !runToken
+      || input.acquired.resumeFinalize !== true
+      || run.status !== "finalizing"
+    ) {
       return {
         cursor: input.acquired.cursor,
         state: "backpressured",
@@ -846,6 +878,35 @@ export class HostedUserRunner {
         continue;
       }
 
+      try {
+        await this.assertHostedWakeRuntimeInputsAvailable(hostedWake);
+      } catch (error) {
+        if (!(error instanceof HostedEmailRawMessageMissingError)) {
+          throw error;
+        }
+
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            hostedRunId: input.run.id,
+            quarantineCode: HOSTED_WAKE_QUARANTINE_EMAIL_RAW_MESSAGE_MISSING,
+            wakeId: wake.id,
+            wakeSeq: wake.seq,
+          },
+          error,
+          level: "warn",
+          message: `Hosted run event seq ${wake.seq} is missing its raw email payload and will be quarantined at run commit.`,
+          phase: "wake.running",
+          userId: input.userId,
+        });
+        eventResults.push({
+          quarantineCode: HOSTED_WAKE_QUARANTINE_EMAIL_RAW_MESSAGE_MISSING,
+          state: "quarantined",
+          wakeId: wake.id,
+        });
+        continue;
+      }
+
       events.push({
         seq: wake.seq,
         ...(sharePack ? { sharePack } : {}),
@@ -865,6 +926,31 @@ export class HostedUserRunner {
       outputCommittedSeq: outputCommittedSeq.toString(),
       primaryWake,
     };
+  }
+
+  private async assertHostedWakeRuntimeInputsAvailable(
+    wake: HostedIngressEnvelope,
+  ): Promise<void> {
+    if (wake.kind !== "conversation.message" || wake.message.channel !== "email") {
+      return;
+    }
+
+    const { crypto } = await this.ensureRunnerStores(wake.userId);
+    const rawMessage = await readHostedEmailRawMessage({
+      bucket: this.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+      rawMessageKey: wake.message.rawMessageKey,
+      userId: wake.userId,
+    });
+
+    if (!rawMessage) {
+      throw new HostedEmailRawMessageMissingError({
+        rawMessageKey: wake.message.rawMessageKey,
+        userId: wake.userId,
+      });
+    }
   }
 
   private async decryptHostedWakeExecutionPayload(

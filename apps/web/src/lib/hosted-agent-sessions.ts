@@ -6,7 +6,7 @@ import {
   type HostedAgentSessionAuthResult,
   type HostedAgentSessionRecord,
 } from "./device-sync/prisma-store";
-import { sha256Hex, toIsoTimestamp } from "./device-sync/shared";
+import { sha256Hex, toIsoTimestamp } from "./primitives";
 
 const HOSTED_AGENT_SESSION_TTL_MS = 24 * 60 * 60_000;
 
@@ -28,6 +28,11 @@ export interface HostedAgentSessionStore {
     reason: string;
     replacedBySessionId?: string | null;
   }): Promise<HostedAgentSessionRecord | null>;
+  touchAgentSession(input: {
+    sessionId: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<HostedAgentSessionRecord>;
   rotateAgentSession(input: {
     sessionId: string;
     tokenHash: string;
@@ -71,15 +76,14 @@ export class HostedAgentSessionService {
   }
 
   async requireAgentSession(): Promise<HostedAgentSessionRecord> {
-    const header = this.request.headers.get("authorization") ?? "";
-    const [scheme, rawToken] = header.split(/\s+/u);
+    const { scheme, token } = this.readBearerAuthorization();
 
-    if (scheme?.toLowerCase() !== "bearer" || !rawToken) {
+    if (scheme !== "bearer" || !token) {
       throw createHostedAgentAuthRequiredError(this.pairPath, this.messages.required);
     }
 
     const auth = await this.store.authenticateAgentSessionByTokenHash(
-      sha256Hex(rawToken),
+      sha256Hex(token),
       toIsoTimestamp(new Date()),
     );
 
@@ -155,6 +159,31 @@ export class HostedAgentSessionService {
     };
   }
 
+  async touchAgentSession(
+    session: HostedAgentSessionRecord,
+    now: string,
+  ): Promise<HostedAgentSessionBearer> {
+    const { scheme, token } = this.readBearerAuthorization();
+
+    if (scheme !== "bearer" || !token) {
+      throw createHostedAgentAuthInvalidError(this.messages.invalid);
+    }
+
+    const touched = await this.store.touchAgentSession({
+      sessionId: session.id,
+      now,
+      expiresAt: resolveHostedAgentSessionExpiry(now),
+    });
+
+    return {
+      id: touched.id,
+      label: touched.label,
+      createdAt: touched.createdAt,
+      expiresAt: touched.expiresAt,
+      bearerToken: token,
+    };
+  }
+
   async rotateAgentSession(
     session: HostedAgentSessionRecord,
     now: string,
@@ -175,6 +204,15 @@ export class HostedAgentSessionService {
       bearerToken: token.token,
     };
   }
+
+  private readBearerAuthorization(): { scheme: string | null; token: string | null } {
+    const header = this.request.headers.get("authorization") ?? "";
+    const [scheme, token] = header.split(/\s+/u);
+    return {
+      scheme: scheme?.toLowerCase() ?? null,
+      token: token ?? null,
+    };
+  }
 }
 
 function createHostedAgentAuthRequiredError(pairPath: string, message?: string) {
@@ -190,8 +228,7 @@ function createHostedAgentAuthExpiredError(message?: string) {
   return deviceSyncError({
     code: "AGENT_AUTH_EXPIRED",
     message:
-      message
-      ?? "Hosted agent bearer token expired. Pair again or keep using the most recent bearer issued for this session.",
+      message ?? "Hosted agent bearer token expired. Pair again to create a new bearer token.",
     retryable: false,
     httpStatus: 401,
   });

@@ -91,6 +91,45 @@ export class PrismaHostedAgentSessionStore {
     };
   }
 
+  async touchAgentSession(input: {
+    sessionId: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<HostedAgentSessionRecord> {
+    return this.prisma.$transaction(async (tx) => {
+      const touched = await tx.deviceAgentSession.updateMany({
+        where: {
+          id: input.sessionId,
+          revokedAt: null,
+          expiresAt: {
+            gt: new Date(input.now),
+          },
+        },
+        data: {
+          expiresAt: new Date(input.expiresAt),
+          lastSeenAt: new Date(input.now),
+          updatedAt: new Date(input.now),
+        },
+      });
+
+      if (touched.count !== 1) {
+        throw createInactiveAgentSessionError();
+      }
+
+      const record = await tx.deviceAgentSession.findUnique({
+        where: {
+          id: input.sessionId,
+        },
+      });
+
+      if (!record) {
+        throw createInactiveAgentSessionError();
+      }
+
+      return mapHostedAgentSessionRecord(record);
+    });
+  }
+
   async rotateAgentSession(input: {
     sessionId: string;
     tokenHash: string;
@@ -111,12 +150,7 @@ export class PrismaHostedAgentSessionStore {
       });
 
       if (!existing) {
-        throw deviceSyncError({
-          code: "AGENT_AUTH_INVALID",
-          message: "Hosted device-sync agent bearer token is no longer active.",
-          retryable: false,
-          httpStatus: 401,
-        });
+        throw createInactiveAgentSessionError();
       }
 
       const revoked = await tx.deviceAgentSession.updateMany({
@@ -136,12 +170,7 @@ export class PrismaHostedAgentSessionStore {
       });
 
       if (revoked.count !== 1) {
-        throw deviceSyncError({
-          code: "AGENT_AUTH_INVALID",
-          message: "Hosted device-sync agent bearer token is no longer active.",
-          retryable: false,
-          httpStatus: 401,
-        });
+        throw createInactiveAgentSessionError();
       }
 
       const record = await tx.deviceAgentSession.create({
@@ -215,4 +244,13 @@ export function generateHostedAgentBearerToken(): { token: string; tokenHash: st
   const token = `hbds_agent_${randomBytes(32).toString("base64url")}`;
   const tokenHash = createHash("sha256").update(token).digest("hex");
   return { token, tokenHash };
+}
+
+function createInactiveAgentSessionError() {
+  return deviceSyncError({
+    code: "AGENT_AUTH_INVALID",
+    message: "Hosted device-sync agent bearer token is no longer active.",
+    retryable: false,
+    httpStatus: 401,
+  });
 }

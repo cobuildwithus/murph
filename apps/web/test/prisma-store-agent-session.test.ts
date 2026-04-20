@@ -230,6 +230,45 @@ describe("PrismaDeviceSyncControlPlaneStore agent sessions", () => {
       userId: "user-123",
     });
   });
+
+  it("touches active sessions in place so the same bearer stays valid", async () => {
+    const { sessions, store } = createSessionStore([
+      {
+        id: "dsa_active",
+        userId: "user-123",
+        label: "Mac mini",
+        tokenHash: "hash-active",
+        createdAt: new Date("2026-03-25T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+        expiresAt: new Date("2026-03-26T00:00:00.000Z"),
+        lastSeenAt: new Date("2026-03-25T00:00:00.000Z"),
+        revokedAt: null,
+        revokeReason: null,
+        replacedBySessionId: null,
+      },
+    ]);
+
+    const touched = await store.touchAgentSession({
+      sessionId: "dsa_active",
+      now: "2026-03-25T01:00:00.000Z",
+      expiresAt: "2026-03-26T01:00:00.000Z",
+    });
+
+    expect(touched).toMatchObject({
+      id: "dsa_active",
+      expiresAt: "2026-03-26T01:00:00.000Z",
+      lastSeenAt: "2026-03-25T01:00:00.000Z",
+      revokedAt: null,
+      revokeReason: null,
+      replacedBySessionId: null,
+    });
+    expect(sessions.get("dsa_active")).toMatchObject({
+      tokenHash: "hash-active",
+      revokeReason: null,
+      replacedBySessionId: null,
+    });
+    expect(sessions.get("dsa_active")?.expiresAt.toISOString()).toBe("2026-03-26T01:00:00.000Z");
+  });
 });
 
 function findSessionByTokenHash(

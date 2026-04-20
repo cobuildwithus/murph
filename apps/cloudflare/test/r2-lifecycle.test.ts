@@ -46,7 +46,7 @@ describe("r2 lifecycle helpers", () => {
 });
 
 describe("R2 transient lifecycle rules", () => {
-  it("covers the privacy-first transient backstops for hosted execution artifacts", () => {
+  it("does not expire durable hosted raw email payloads via bucket lifecycle rules", () => {
     const config = JSON.parse(
       readFileSync(new URL("../r2-bundles-lifecycle.json", import.meta.url), "utf8"),
     ) as {
@@ -68,7 +68,8 @@ describe("R2 transient lifecycle rules", () => {
       ]),
     );
 
-    expect(maxAgeByPrefix.get("transient/hosted-email/messages/")).toBe(3600);
+    expect(config.rules).toEqual([]);
+    expect(maxAgeByPrefix.has("hosted-email/messages/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/hosted-email/threads/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/execution-journal/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/side-effects/")).toBe(false);

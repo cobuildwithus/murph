@@ -15,6 +15,7 @@ import type {
   HostedAgentSessionRecord,
   HostedPrismaTransactionClient,
 } from "@/src/lib/device-sync/prisma-store";
+import { sha256Hex } from "@/src/lib/primitives";
 
 const SESSION: HostedAgentSessionRecord = {
   id: "session-1",
@@ -50,8 +51,8 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         create: vi.fn(async () => ({ id: 1 })),
       },
     };
-    const rotateAgentSession = vi.fn(async () => {
-      throw new Error("session rotation should not run when refresh fails");
+    const touchAgentSession = vi.fn(async () => {
+      throw new Error("session touch should not run when refresh fails");
     });
     const transactionClient: HostedPrismaTransactionClient = Object.assign(Object.create(null), tx);
     const store: PrismaDeviceSyncControlPlaneStore = Object.assign(
@@ -134,7 +135,7 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         ): Promise<TResult> {
           return callback(transactionClient);
         },
-        rotateAgentSession,
+        touchAgentSession,
       },
     );
     const registry = createDeviceSyncRegistry([createWhoopProvider()]);
@@ -182,11 +183,208 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         userId: "user-1",
       },
     });
-    expect(rotateAgentSession).not.toHaveBeenCalled();
+    expect(touchAgentSession).not.toHaveBeenCalled();
   });
 });
 
-function createWhoopProvider(): DeviceSyncProvider {
+describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("lets export-token-bundle retry with the original bearer after a lost response", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const firstService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const firstSession = await firstService.requireAgentSession();
+      const firstExport = await firstService.exportTokenBundle(firstSession, "conn-1");
+
+      expect(firstExport.agentSession).toMatchObject({
+        id: SESSION.id,
+        bearerToken,
+        expiresAt: "2026-04-02T00:10:00.000Z",
+      });
+
+      vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
+      const retryService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const retrySession = await retryService.requireAgentSession();
+      await expect(retryService.exportTokenBundle(retrySession, "conn-1")).resolves.toMatchObject({
+        agentSession: {
+          id: SESSION.id,
+          bearerToken,
+          expiresAt: "2026-04-02T00:15:00.000Z",
+        },
+        tokenBundle: {
+          tokenVersion: 2,
+        },
+      });
+      expect(harness.sessionState.revokedAt).toBeNull();
+      expect(harness.audits).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets refresh-token-bundle retry with the original bearer after a lost response", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const firstService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const firstSession = await firstService.requireAgentSession();
+      const firstRefresh = await firstService.refreshTokenBundle(firstSession, "conn-1", {
+        expectedTokenVersion: 2,
+      });
+
+      expect(firstRefresh).toMatchObject({
+        refreshed: false,
+        tokenVersionChanged: false,
+        agentSession: {
+          id: SESSION.id,
+          bearerToken,
+          expiresAt: "2026-04-02T00:10:00.000Z",
+        },
+      });
+
+      vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
+      const retryService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const retrySession = await retryService.requireAgentSession();
+      await expect(retryService.refreshTokenBundle(retrySession, "conn-1", {
+        expectedTokenVersion: 2,
+      })).resolves.toMatchObject({
+        refreshed: false,
+        tokenVersionChanged: false,
+        agentSession: {
+          id: SESSION.id,
+          bearerToken,
+          expiresAt: "2026-04-02T00:15:00.000Z",
+        },
+        tokenBundle: {
+          tokenVersion: 2,
+        },
+      });
+      expect(harness.sessionState.revokedAt).toBeNull();
+      expect(harness.audits).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets refresh-token-bundle retry with the original bearer after a performed refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "access-token-refreshed",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: "refresh-token-refreshed",
+      }));
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const firstService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const firstSession = await firstService.requireAgentSession();
+      const firstRefresh = await firstService.refreshTokenBundle(firstSession, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      });
+
+      expect(firstRefresh).toMatchObject({
+        refreshed: true,
+        tokenVersionChanged: true,
+        agentSession: {
+          id: SESSION.id,
+          bearerToken,
+          expiresAt: "2026-04-02T00:10:00.000Z",
+        },
+        tokenBundle: {
+          accessToken: "access-token-refreshed",
+          refreshToken: "refresh-token-refreshed",
+          tokenVersion: 3,
+        },
+      });
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
+      const retryService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const retrySession = await retryService.requireAgentSession();
+      await expect(retryService.refreshTokenBundle(retrySession, "conn-1", {
+        expectedTokenVersion: 2,
+      })).resolves.toMatchObject({
+        refreshed: false,
+        tokenVersionChanged: true,
+        agentSession: {
+          id: SESSION.id,
+          bearerToken,
+          expiresAt: "2026-04-02T00:15:00.000Z",
+        },
+        tokenBundle: {
+          accessToken: "access-token-refreshed",
+          refreshToken: "refresh-token-refreshed",
+          tokenVersion: 3,
+        },
+      });
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+      expect(harness.sessionState.revokedAt).toBeNull();
+      expect(harness.audits).toHaveLength(3);
+      expect(harness.audits[2]).toMatchObject({
+        action: "token_exported",
+        channel: "agent_refresh",
+        expectedTokenVersion: 2,
+        refreshOutcome: "skipped_version_mismatch",
+        tokenVersion: 3,
+        tokenVersionChanged: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+function createWhoopProvider(input: {
+  refreshTokens?: DeviceSyncProvider["refreshTokens"];
+} = {}): DeviceSyncProvider {
   return {
     provider: WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider,
     descriptor: {
@@ -200,14 +398,14 @@ function createWhoopProvider(): DeviceSyncProvider {
     async exchangeAuthorizationCode() {
       throw new Error("not used");
     },
-    async refreshTokens() {
+    refreshTokens: input.refreshTokens ?? (async () => {
       throw deviceSyncError({
         code: "WHOOP_REFRESH_TOKEN_MISSING",
         message: "WHOOP refresh token is missing.",
         retryable: false,
         accountStatus: "reauthorization_required",
       });
-    },
+    }),
     async executeJob() {
       return {};
     },
@@ -223,7 +421,7 @@ function createConnectionRecord() {
     displayName: "WHOOP User",
     status: "active",
     scopes: ["offline"],
-    accessTokenExpiresAt: new Date("2026-04-01T00:20:00.000Z"),
+    accessTokenExpiresAt: new Date("2026-04-01T00:30:00.000Z"),
     metadataJson: {},
     connectedAt: new Date("2026-03-20T00:00:00.000Z"),
     lastWebhookAt: null,
@@ -233,7 +431,195 @@ function createConnectionRecord() {
     lastErrorCode: null,
     lastErrorMessage: null,
     nextReconcileAt: null,
+    accessToken: "access-token",
+    refreshToken: "refresh-token",
+    keyVersion: "v1",
+    tokenVersion: 2,
     createdAt: new Date("2026-03-20T00:00:00.000Z"),
     updatedAt: new Date("2026-03-20T00:00:00.000Z"),
+  };
+}
+
+function createAgentRequest(url: string, bearerToken: string): Request {
+  return new Request(url, {
+    headers: {
+      authorization: `Bearer ${bearerToken}`,
+    },
+  });
+}
+
+type MutableSessionState = HostedAgentSessionRecord & {
+  tokenHash: string;
+};
+
+function createRetrySafeStoreHarness(bearerToken: string): {
+  audits: Array<Record<string, unknown>>;
+  sessionState: MutableSessionState;
+  store: PrismaDeviceSyncControlPlaneStore;
+} {
+  const sessionState: MutableSessionState = {
+    ...SESSION,
+    tokenHash: sha256Hex(bearerToken),
+  };
+  const audits: Array<Record<string, unknown>> = [];
+  const connection = createConnectionRecord();
+  let publicConnection = {
+    ...connection,
+    accessTokenExpiresAt: connection.accessTokenExpiresAt.toISOString(),
+    connectedAt: connection.connectedAt.toISOString(),
+    createdAt: connection.createdAt.toISOString(),
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastSyncStartedAt: null,
+    lastWebhookAt: null,
+    nextReconcileAt: null,
+    updatedAt: connection.updatedAt.toISOString(),
+  };
+  let storedConnection = {
+    ...publicConnection,
+    accessToken: connection.accessToken,
+    refreshToken: connection.refreshToken,
+    keyVersion: connection.keyVersion,
+    tokenVersion: connection.tokenVersion,
+  };
+
+  const store: PrismaDeviceSyncControlPlaneStore = Object.assign(
+    Object.create(PrismaDeviceSyncControlPlaneStore.prototype),
+    {
+      async authenticateAgentSessionByTokenHash(tokenHash: string, now: string) {
+        if (tokenHash !== sessionState.tokenHash) {
+          return {
+            status: "missing" as const,
+            session: null,
+          };
+        }
+
+        if (sessionState.revokedAt) {
+          return {
+            status: "revoked" as const,
+            session: cloneSessionState(sessionState),
+          };
+        }
+
+        if (Date.parse(sessionState.expiresAt) <= Date.parse(now)) {
+          sessionState.revokedAt = now;
+          sessionState.revokeReason = "expired";
+          sessionState.updatedAt = now;
+          return {
+            status: "expired" as const,
+            session: cloneSessionState(sessionState),
+          };
+        }
+
+        sessionState.lastSeenAt = now;
+        sessionState.updatedAt = now;
+        return {
+          status: "active" as const,
+          session: cloneSessionState(sessionState),
+        };
+      },
+      async touchAgentSession(input: { sessionId: string; now: string; expiresAt: string }) {
+        if (input.sessionId !== sessionState.id || sessionState.revokedAt) {
+          throw deviceSyncError({
+            code: "AGENT_AUTH_INVALID",
+            message: "Hosted device-sync agent bearer token is no longer active.",
+            retryable: false,
+            httpStatus: 401,
+          });
+        }
+
+        sessionState.lastSeenAt = input.now;
+        sessionState.updatedAt = input.now;
+        sessionState.expiresAt = input.expiresAt;
+        return cloneSessionState(sessionState);
+      },
+      async createTokenAudit(input: Record<string, unknown>) {
+        audits.push(input);
+        return {
+          id: audits.length,
+          ...input,
+        };
+      },
+      async getConnectionForUser(userId: string, connectionId: string) {
+        return userId === SESSION.userId && connectionId === connection.id ? { ...publicConnection } : null;
+      },
+      async getStoredConnectionAccountForUser(userId: string, connectionId: string) {
+        return userId === SESSION.userId && connectionId === connection.id ? { ...storedConnection } : null;
+      },
+      async persistStoredConnectionTokenBundle(input: {
+        connectionId: string;
+        externalAccountId: string;
+        provider: string;
+        tokenBundle: {
+          accessToken: string;
+          accessTokenExpiresAt: string | null;
+          keyVersion: string;
+          refreshToken: string | null;
+          tokenVersion: number;
+        };
+      }) {
+        if (input.connectionId !== connection.id) {
+          return;
+        }
+
+        storedConnection = {
+          ...storedConnection,
+          accessToken: input.tokenBundle.accessToken,
+          accessTokenExpiresAt:
+            input.tokenBundle.accessTokenExpiresAt ?? storedConnection.accessTokenExpiresAt,
+          keyVersion: input.tokenBundle.keyVersion,
+          refreshToken: input.tokenBundle.refreshToken ?? storedConnection.refreshToken,
+          tokenVersion: input.tokenBundle.tokenVersion,
+          updatedAt: sessionState.updatedAt,
+        };
+      },
+      async syncDurableConnectionState(account: typeof publicConnection) {
+        publicConnection = {
+          ...publicConnection,
+          ...account,
+        };
+        storedConnection = {
+          ...storedConnection,
+          ...account,
+        };
+      },
+      async withConnectionRefreshLock<TResult>(
+        _connectionId: string,
+        callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+      ): Promise<TResult> {
+        const transactionClient: HostedPrismaTransactionClient = Object.assign(
+          Object.create(null),
+          {
+            deviceConnection: {
+              findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+                where.id === connection.id && where.userId === SESSION.userId ? { id: connection.id } : null,
+            },
+          },
+        );
+
+        return callback(transactionClient);
+      },
+    },
+  );
+
+  return {
+    audits,
+    sessionState,
+    store,
+  };
+}
+
+function cloneSessionState(sessionState: MutableSessionState): HostedAgentSessionRecord {
+  return {
+    id: sessionState.id,
+    userId: sessionState.userId,
+    label: sessionState.label,
+    createdAt: sessionState.createdAt,
+    updatedAt: sessionState.updatedAt,
+    expiresAt: sessionState.expiresAt,
+    lastSeenAt: sessionState.lastSeenAt,
+    revokedAt: sessionState.revokedAt,
+    revokeReason: sessionState.revokeReason,
+    replacedBySessionId: sessionState.replacedBySessionId,
   };
 }
