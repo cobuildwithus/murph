@@ -129,7 +129,7 @@ export async function commitHostedRunToWeb(input: {
   timeoutMs: number | null;
 }): Promise<HostedRunCommitResponse> {
   return requestHostedWebControlPlaneJson({
-    body: JSON.stringify(input.body),
+    body: JSON.stringify(requireExplicitHostedRunCommitFinalizeRequired(input.body)),
     description: "Hosted run commit",
     input,
     parse: parseHostedRunCommitResponse,
@@ -293,4 +293,14 @@ function requireHostedWebControlBaseUrl(value: string): string {
   }
 
   return normalized;
+}
+
+function requireExplicitHostedRunCommitFinalizeRequired(
+  body: HostedRunCommitRequest,
+): HostedRunCommitRequest {
+  if (typeof body.finalizeRequired !== "boolean") {
+    throw new TypeError("Hosted run commit finalizeRequired must be provided explicitly.");
+  }
+
+  return body;
 }
