@@ -198,13 +198,22 @@ describe("hosted deploy automation helpers", () => {
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
   });
 
-  it("keeps the checked-in wrangler scaffold aligned with generated durable object config", async () => {
+  it("keeps the checked-in wrangler scaffold aligned with generated container sizing and durable object config", async () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
     });
     const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
+      containers: Array<{
+        class_name: string;
+        instance_type: {
+          disk_mb: number;
+          memory_mib: number;
+          vcpu: number;
+        };
+        max_instances: number;
+      }>;
       durable_objects: {
         bindings: Array<{
           class_name: string;
@@ -219,6 +228,15 @@ describe("hosted deploy automation helpers", () => {
     const checkedInConfig = parseJsoncObject(
       await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
     ) as {
+      containers: Array<{
+        class_name: string;
+        instance_type: {
+          disk_mb: number;
+          memory_mib: number;
+          vcpu: number;
+        };
+        max_instances: number;
+      }>;
       durable_objects: {
         bindings: Array<{
           class_name: string;
@@ -231,8 +249,29 @@ describe("hosted deploy automation helpers", () => {
       }>;
     };
 
+    expect(checkedInConfig.containers).toHaveLength(1);
+    expect(checkedInConfig.containers[0]).toMatchObject({
+      class_name: generatedConfig.containers[0]?.class_name,
+      instance_type: generatedConfig.containers[0]?.instance_type,
+      max_instances: generatedConfig.containers[0]?.max_instances,
+    });
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
+  });
+
+  it("keeps the hosted deploy workflow fallback container defaults and summary aligned", async () => {
+    const workflow = await readFile(
+      new URL("../../../.github/workflows/deploy-cloudflare-hosted.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain(
+      "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
+    );
+    expect(workflow).toContain(
+      "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
+    );
+    expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
   });
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {

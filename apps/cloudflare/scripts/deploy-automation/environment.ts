@@ -11,8 +11,6 @@ import {
   normalizeOptionalString,
   requireConfiguredString,
 } from "./shared.ts";
-const DEFAULT_CONTAINER_INSTANCE_TYPE: NamedContainerInstanceType = "standard-1";
-const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 1;
 // Device-sync stays worker-only and is serialized into resolvedConfig instead of
@@ -44,6 +42,13 @@ export interface HostedContainerCustomInstanceType {
 export type HostedContainerInstanceType =
   | NamedContainerInstanceType
   | HostedContainerCustomInstanceType;
+
+const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
+  disk_mb: 6000,
+  memory_mib: 3072,
+  vcpu: 1,
+};
+const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 
 export interface HostedDeployAutomationEnvironment {
   allowedRunnerSecretKeys: string | null;

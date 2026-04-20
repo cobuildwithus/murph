@@ -21,8 +21,12 @@ function createDeployEnvironment() {
     bundlesPreviewBucketName: "bundles-preview",
     platformEnvelopeKeyId: "v1",
     compatibilityDate: "2026-03-27",
-    containerInstanceType: "standard-1" as const,
-    containerMaxInstances: 50,
+    containerInstanceType: {
+      disk_mb: 6000,
+      memory_mib: 3072,
+      vcpu: 1,
+    },
+    containerMaxInstances: 1000,
     logHeadSamplingRate: 1,
     maxEventAttempts: "3",
     retryDelayMs: "30000",
@@ -364,6 +368,12 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
+    expect(container.instance_type).toEqual({
+      disk_mb: 6000,
+      memory_mib: 3072,
+      vcpu: 1,
+    });
+    expect(container.max_instances).toBe(1000);
   });
 
   it("keeps only the prepared runner bundle from .deploy in the app-local Docker context", async () => {
