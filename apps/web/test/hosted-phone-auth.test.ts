@@ -431,7 +431,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
-    assert.match(markup, /class="[^"]*h-14[^"]*w-full[^"]*"/);
+    assert.match(markup, /class="[^"]*h-11[^"]*w-full[^"]*"/);
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
@@ -1092,10 +1092,7 @@ describe("HostedPhoneAuth", () => {
     assert.equal(harness.shortcutProps.length, 1);
     await harness.shortcutProps[0].onSendCode();
 
-    assert.equal(harness.requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.match(String(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.url), /\/invites\/invite-code\/send-code$/);
-    assert.equal(harness.controller.sendVerificationCode.mock.calls[0]?.[0], "+14044092523");
-    assert.equal(harness.finalizeInvitePhoneCodeSendConfirmation.mock.calls[0]?.[0]?.sendAttemptId, "attempt-id");
+    assert.equal(harness.controller.handleInviteSendCode.mock.calls.length, 1);
     assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);
   });
 
@@ -1116,15 +1113,14 @@ describe("HostedPhoneAuth", () => {
     assert.equal(harness.flowProps.length, 1);
     await harness.flowProps[0].onResendCode();
 
-    assert.equal(harness.requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.match(String(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.url), /\/invites\/invite-code\/send-code$/);
-    assert.equal(harness.controller.sendVerificationCode.mock.calls[0]?.[0], "+14044092523");
+    assert.equal(harness.controller.handleInviteSendCode.mock.calls.length, 1);
     assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);
   });
 
   it("falls back to manual entry when the invite shortcut phone is unavailable", async () => {
     const setManualEntryVisible = vi.fn();
     const harness = await loadHostedInvitePhoneAuthHarness({
+      inviteSendResult: "manual-entry-required",
       ReactMock: async () => {
         const actual = await vi.importActual<typeof import("react")>("react");
         return {
@@ -1134,11 +1130,6 @@ describe("HostedPhoneAuth", () => {
           },
         };
       },
-      requestErrorFactory: (HostedOnboardingApiError) =>
-        new HostedOnboardingApiError({
-          code: "SIGNUP_PHONE_UNAVAILABLE",
-          message: "Enter the number that messaged Murph to continue.",
-        }),
     });
 
     renderToStaticMarkup(
@@ -1150,19 +1141,15 @@ describe("HostedPhoneAuth", () => {
     assert.equal(harness.shortcutProps.length, 1);
     await harness.shortcutProps[0].onSendCode();
 
-    assert.deepEqual(harness.controller.resetPhoneAuthFlow.mock.calls.length, 1);
+    assert.deepEqual(harness.controller.handleInviteSendCode.mock.calls.length, 1);
     assert.deepEqual(setManualEntryVisible.mock.calls, [[true]]);
-    assert.equal(
-      harness.controller.setErrorMessage.mock.calls.at(-1)?.[0],
-      "Enter the number that messaged Murph to continue.",
-    );
   });
 });
 
 async function loadHostedInvitePhoneAuthHarness(input?: {
   activeAttempt?: { maskedPhoneNumber: string; phoneNumber: string } | null;
+  inviteSendResult?: "error" | "manual-entry-required" | "sent";
   ReactMock?: () => Promise<Record<string, unknown>>;
-  requestErrorFactory?: (HostedOnboardingApiError: new (input: { code?: string | null; message: string }) => Error) => Error;
 }) {
   vi.resetModules();
 
@@ -1172,48 +1159,17 @@ async function loadHostedInvitePhoneAuthHarness(input?: {
 
   const shortcutProps: Array<{ onSendCode: () => Promise<void>; onUseDifferentNumber: () => void }> = [];
   const flowProps: Array<{ onResendCode: () => Promise<void>; onUseDifferentNumber: () => void }> = [];
-  const controller = createHostedInvitePhoneAuthControllerHarness(input?.activeAttempt ?? null);
-
-  class HostedOnboardingApiError extends Error {
-    readonly code: string | null;
-
-    constructor(input: { code?: string | null; message: string }) {
-      super(input.message);
-      this.name = "HostedOnboardingApiError";
-      this.code = input.code ?? null;
-    }
-  }
-
-  const requestHostedOnboardingJson = vi.fn();
-  if (input?.requestErrorFactory) {
-    requestHostedOnboardingJson.mockRejectedValue(input.requestErrorFactory(HostedOnboardingApiError));
-  } else {
-    requestHostedOnboardingJson.mockResolvedValue({
-      phoneNumber: "+14044092523",
-      sendAttemptId: "attempt-id",
-    });
-  }
-
-  const abortInvitePhoneCodeSend = vi.fn().mockResolvedValue(true);
-  const finalizeInvitePhoneCodeSendConfirmation = vi.fn().mockResolvedValue(undefined);
+  const controller = createHostedInvitePhoneAuthControllerHarness(
+    input?.activeAttempt ?? null,
+    input?.inviteSendResult,
+  );
   const flushPendingInvitePhoneCodeMutation = vi.fn().mockResolvedValue(undefined);
-  const queuePendingInvitePhoneCodeMutation = vi.fn();
 
   vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-controller", () => ({
     useHostedPhoneAuthController: () => controller,
   }));
-  vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
-    HostedOnboardingApiError,
-    requestHostedOnboardingJson,
-  }));
   vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-support", () => ({
-    abortInvitePhoneCodeSend,
-    finalizeInvitePhoneCodeSendConfirmation,
     flushPendingInvitePhoneCodeMutation,
-    queuePendingInvitePhoneCodeMutation,
-    toErrorMessage(error: unknown, fallback: string) {
-      return error instanceof Error && error.message ? error.message : fallback;
-    },
   }));
   vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-step-views", () => ({
     HostedInviteShortcutStep(props: { onSendCode: () => Promise<void>; onUseDifferentNumber: () => void }) {
@@ -1235,19 +1191,16 @@ async function loadHostedInvitePhoneAuthHarness(input?: {
 
   return {
     HostedInvitePhoneAuth,
-    abortInvitePhoneCodeSend,
     controller,
-    finalizeInvitePhoneCodeSendConfirmation,
     flowProps,
     flushPendingInvitePhoneCodeMutation,
-    queuePendingInvitePhoneCodeMutation,
-    requestHostedOnboardingJson,
     shortcutProps,
   };
 }
 
 function createHostedInvitePhoneAuthControllerHarness(
   activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null,
+  inviteSendResult: "error" | "manual-entry-required" | "sent" = "sent",
 ) {
   return {
     authenticatedLoadingBody: "loading body",
@@ -1257,13 +1210,11 @@ function createHostedInvitePhoneAuthControllerHarness(
     errorMessage: null,
     flowDisabled: false,
     handleContinueAuthenticated: vi.fn(),
+    handleInviteSendCode: vi.fn().mockResolvedValue(inviteSendResult),
     handleLogout: vi.fn(),
     handleResendCode: vi.fn(),
     pendingAction: null,
-    resetPhoneAuthFlow: vi.fn(),
-    sendVerificationCode: vi.fn().mockResolvedValue(undefined),
-    setErrorMessage: vi.fn(),
-    setPendingAction: vi.fn(),
+    handleResetPhoneAuthFlow: vi.fn(),
     sharedFlowProps: {
       activeAttempt,
       code: "",

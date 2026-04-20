@@ -28,17 +28,26 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import type { HostedPrivyClientSessionInput } from "./hosted-auth-completion";
 
 import {
+  abortInvitePhoneCodeSend,
   createHostedPhoneVerificationAttempt,
+  finalizeInvitePhoneCodeSendConfirmation,
   finalizeHostedPhoneLink,
   finalizeHostedPrivyVerification,
+  flushPendingInvitePhoneCodeMutation,
   isHostedPhoneVerificationCodeComplete,
   normalizeHostedPhoneVerificationCode,
+  queuePendingInvitePhoneCodeMutation,
   readSubmittedPhoneNumber,
   resolveHostedPhoneResendTarget,
   resolveHostedPhoneSubmission,
+  runHostedPhonePendingAction,
   runHostedPrivyFinalizationAttempt,
   toErrorMessage,
 } from "./hosted-phone-auth-support";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "./client-api";
 import {
   HOSTED_PHONE_COUNTRY_OPTIONS,
 } from "./hosted-phone-country-options";
@@ -60,6 +69,8 @@ interface HostedPhoneAuthControllerInput {
   onSignOut?: () => Promise<void> | void;
   suppressAuthenticatedSessionIssue?: boolean;
 }
+
+type HostedInviteSendCodeResult = "error" | "manual-entry-required" | "sent";
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
@@ -231,7 +242,6 @@ export function useHostedPhoneAuthController({
 
   async function handleSendCode(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    setErrorMessage(null);
 
     const submission = resolveHostedPhoneSubmission({
       countryDialCode: selectedPhoneCountry.dialCode,
@@ -243,24 +253,28 @@ export function useHostedPhoneAuthController({
       setPhoneNumber(submission.draftPhoneNumber);
     }
 
-    if (!submission.normalizedPhoneNumber) {
+    const nextPhoneNumber = submission.normalizedPhoneNumber;
+
+    if (!nextPhoneNumber) {
       setErrorMessage(
         `Enter a valid phone number for ${selectedPhoneCountry.label}.`,
       );
       return;
     }
 
-    setPendingAction("send-code");
-
-    try {
-      await sendVerificationCode(submission.normalizedPhoneNumber);
-    } catch (error) {
-      setErrorMessage(
-        toErrorMessage(error, "We could not send a verification code."),
-      );
-    } finally {
-      setPendingAction(null);
-    }
+    await runHostedPhonePendingAction({
+      action: "send-code",
+      onBeforeAction: () => {
+        setErrorMessage(null);
+      },
+      onError: (error) => {
+        setErrorMessage(
+          toErrorMessage(error, "We could not send a verification code."),
+        );
+      },
+      run: () => sendVerificationCode(nextPhoneNumber),
+      setPendingAction,
+    });
   }
 
   async function sendVerificationCode(nextPhoneNumber: string) {
@@ -277,22 +291,90 @@ export function useHostedPhoneAuthController({
     });
 
     if (resendTarget.kind === "active-attempt") {
-      setErrorMessage(null);
-      setPendingAction("send-code");
-
-      try {
-        await sendVerificationCode(resendTarget.phoneNumber);
-      } catch (error) {
-        setErrorMessage(
-          toErrorMessage(error, "We could not send a verification code."),
-        );
-      } finally {
-        setPendingAction(null);
-      }
+      await runHostedPhonePendingAction({
+        action: "send-code",
+        onBeforeAction: () => {
+          setErrorMessage(null);
+        },
+        onError: (error) => {
+          setErrorMessage(
+            toErrorMessage(error, "We could not send a verification code."),
+          );
+        },
+        run: () => sendVerificationCode(resendTarget.phoneNumber),
+        setPendingAction,
+      });
       return;
     }
 
     await handleSendCode();
+  }
+
+  async function handleInviteSendCode(): Promise<HostedInviteSendCodeResult> {
+    if (!inviteCode) {
+      return "error";
+    }
+
+    let result: HostedInviteSendCodeResult = "sent";
+
+    const sendResult = await runHostedPhonePendingAction({
+      action: "send-code",
+      onBeforeAction: () => {
+        setErrorMessage(null);
+      },
+      onError: (error) => {
+        if (
+          error instanceof HostedOnboardingApiError
+          && error.code === "SIGNUP_PHONE_UNAVAILABLE"
+        ) {
+          result = "manual-entry-required";
+          resetPhoneAuthFlow();
+          setErrorMessage("Enter the number that messaged Murph to continue.");
+          return;
+        }
+
+        result = "error";
+        setErrorMessage(
+          toErrorMessage(error, "We could not send a verification code."),
+        );
+      },
+      run: async () => {
+        await flushPendingInvitePhoneCodeMutation(inviteCode);
+        const payload = await requestHostedOnboardingJson<{
+          phoneNumber: string;
+          sendAttemptId: string;
+        }>({
+          method: "POST",
+          url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
+        });
+
+        try {
+          await sendVerificationCode(payload.phoneNumber);
+        } catch (error) {
+          const abortSucceeded = await abortInvitePhoneCodeSend({
+            inviteCode,
+            sendAttemptId: payload.sendAttemptId,
+          });
+          if (!abortSucceeded) {
+            queuePendingInvitePhoneCodeMutation({
+              inviteCode,
+              kind: "abort",
+              sendAttemptId: payload.sendAttemptId,
+            });
+          }
+          throw error;
+        }
+
+        void finalizeInvitePhoneCodeSendConfirmation({
+          inviteCode,
+          sendAttemptId: payload.sendAttemptId,
+        });
+        return "sent" as const;
+      },
+      setPendingAction,
+    });
+
+    return sendResult ?? result;
   }
 
   async function handleVerifyCode(submittedCode = normalizedVerificationCode) {
@@ -344,23 +426,26 @@ export function useHostedPhoneAuthController({
   }
 
   async function handleLogout() {
-    setErrorMessage(null);
-    updateFinalizationState("idle");
-    setPendingAction("logout");
-
-    try {
-      await logout();
-      await onSignOut?.();
-      resetPhoneAuthFlow();
-      setPhoneCountryCode(initialPhoneCountryCode);
-      setPhoneNumber("");
-    } catch (error) {
-      setErrorMessage(
-        toErrorMessage(error, "We could not sign you out cleanly."),
-      );
-    } finally {
-      setPendingAction(null);
-    }
+    await runHostedPhonePendingAction({
+      action: "logout",
+      onBeforeAction: () => {
+        setErrorMessage(null);
+        updateFinalizationState("idle");
+      },
+      onError: (error) => {
+        setErrorMessage(
+          toErrorMessage(error, "We could not sign you out cleanly."),
+        );
+      },
+      run: async () => {
+        await logout();
+        await onSignOut?.();
+        resetPhoneAuthFlow();
+        setPhoneCountryCode(initialPhoneCountryCode);
+        setPhoneNumber("");
+      },
+      setPendingAction,
+    });
   }
 
   async function runHostedPrivyFinalization(
@@ -402,16 +487,13 @@ export function useHostedPhoneAuthController({
     authenticatedView,
     errorMessage,
     flowDisabled,
+    handleInviteSendCode,
     pendingAction,
-    sendVerificationCode,
-    setErrorMessage,
-    setPendingAction,
     sharedFlowProps,
     handleContinueAuthenticated,
     handleLogout,
     handleResetPhoneAuthFlow,
     handleResendCode,
-    resetPhoneAuthFlow,
   };
 }
 

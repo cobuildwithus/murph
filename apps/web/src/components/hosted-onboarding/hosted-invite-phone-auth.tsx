@@ -3,32 +3,16 @@
 import { useEffect, useState } from "react";
 
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
-
-import {
-  HostedOnboardingApiError,
-  requestHostedOnboardingJson,
-} from "./client-api";
 import { useHostedPhoneAuthController } from "./hosted-phone-auth-controller";
 import {
   HostedInviteShortcutStep,
 } from "./hosted-phone-auth-step-views";
-import {
-  abortInvitePhoneCodeSend,
-  finalizeInvitePhoneCodeSendConfirmation,
-  flushPendingInvitePhoneCodeMutation,
-  queuePendingInvitePhoneCodeMutation,
-  toErrorMessage,
-} from "./hosted-phone-auth-support";
+import { flushPendingInvitePhoneCodeMutation } from "./hosted-phone-auth-support";
 import {
   HostedPhoneAuthFlow,
   HostedPhoneAuthScaffold,
 } from "./hosted-phone-auth-views";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
-
-interface InvitePhoneCodePayload {
-  phoneNumber: string;
-  sendAttemptId: string;
-}
 
 interface HostedInvitePhoneAuthProps {
   inviteCode: string;
@@ -59,48 +43,10 @@ export function HostedInvitePhoneAuth({
   }, [inviteCode]);
 
   async function handleInviteSendCode() {
-    controller.setErrorMessage(null);
-    controller.setPendingAction("send-code");
+    const result = await controller.handleInviteSendCode();
 
-    try {
-      await flushPendingInvitePhoneCodeMutation(inviteCode);
-      const payload = await requestHostedOnboardingJson<InvitePhoneCodePayload>({
-        method: "POST",
-        url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
-      });
-
-      try {
-        await controller.sendVerificationCode(payload.phoneNumber);
-      } catch (error) {
-        const abortSucceeded = await abortInvitePhoneCodeSend({
-          inviteCode,
-          sendAttemptId: payload.sendAttemptId,
-        });
-        if (!abortSucceeded) {
-          queuePendingInvitePhoneCodeMutation({
-            inviteCode,
-            kind: "abort",
-            sendAttemptId: payload.sendAttemptId,
-          });
-        }
-        throw error;
-      }
-
-      void finalizeInvitePhoneCodeSendConfirmation({
-        inviteCode,
-        sendAttemptId: payload.sendAttemptId,
-      });
-    } catch (error) {
-      if (error instanceof HostedOnboardingApiError && error.code === "SIGNUP_PHONE_UNAVAILABLE") {
-        controller.resetPhoneAuthFlow();
-        setManualEntryVisible(true);
-        controller.setErrorMessage("Enter the number that messaged Murph to continue.");
-        return;
-      }
-
-      controller.setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
-    } finally {
-      controller.setPendingAction(null);
+    if (result === "manual-entry-required") {
+      setManualEntryVisible(true);
     }
   }
 
@@ -114,7 +60,7 @@ export function HostedInvitePhoneAuth({
   }
 
   function handleUseDifferentNumber() {
-    controller.resetPhoneAuthFlow();
+    controller.handleResetPhoneAuthFlow();
     setManualEntryVisible(true);
   }
 

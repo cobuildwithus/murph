@@ -19,6 +19,31 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
 }));
 
 describe("hosted phone auth support", () => {
+  it("clears the pending action after a handled pending-action failure", async () => {
+    const { runHostedPhonePendingAction } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    const pendingActions: Array<string | null> = [];
+    const errors: unknown[] = [];
+
+    const result = await runHostedPhonePendingAction({
+      action: "send-code",
+      onError(error) {
+        errors.push(error);
+      },
+      run: async () => {
+        throw new Error("send failed");
+      },
+      setPendingAction(action) {
+        pendingActions.push(action);
+      },
+    });
+
+    expect(result).toBeNull();
+    expect(errors).toHaveLength(1);
+    expect(pendingActions).toEqual(["send-code", null]);
+  });
+
   it("syncs a linked phone from settings without client-authored email state", async () => {
     const { requestHostedPhoneLinkSyncWithRetry } = await import(
       "@/src/components/hosted-onboarding/hosted-phone-auth-support"
