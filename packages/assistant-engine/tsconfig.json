@@ -14,13 +14,7 @@
       "path": "../runtime-state"
     },
     {
-      "path": "../hosted-execution"
-    },
-    {
       "path": "../inbox-services"
-    },
-    {
-      "path": "../device-syncd"
     },
     {
       "path": "../core/tsconfig.build.json"
@@ -29,28 +23,16 @@
       "path": "../gateway-core"
     },
     {
-      "path": "../gateway-local"
-    },
-    {
       "path": "../operator-config"
     },
     {
-      "path": "../importers"
-    },
-    {
       "path": "../messaging-ingress"
-    },
-    {
-      "path": "../inboxd"
     },
     {
       "path": "../query"
     },
     {
       "path": "../vault-usecases"
-    },
-    {
-      "path": "../parsers"
     }
   ],
   "include": [
