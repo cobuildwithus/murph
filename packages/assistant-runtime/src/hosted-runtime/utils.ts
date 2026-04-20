@@ -33,3 +33,18 @@ export function resolveHostedWake(
 
   throw new TypeError("Hosted wake input must include wake or runDrain.");
 }
+
+export function computeHostedRunElapsedMs(
+  run: { startedAt?: string | null } | null | undefined,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
+}

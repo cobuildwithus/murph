@@ -19,6 +19,7 @@ import {
 import type {
   HostedAssistantRuntimeJobInput,
 } from "./models.ts";
+import { computeHostedRunElapsedMs } from "./utils.ts";
 
 type HostedTypingHandle = {
   stop(): Promise<void>;
@@ -281,21 +282,6 @@ function createAsyncHostedTypingIndicator(input: {
       }
     },
   };
-}
-
-function computeHostedRunElapsedMs(
-  run: HostedAssistantRuntimeJobInput["request"]["run"] | null,
-): number | null {
-  if (!run?.startedAt) {
-    return null;
-  }
-
-  const startedAtMs = Date.parse(run.startedAt);
-  if (!Number.isFinite(startedAtMs)) {
-    return null;
-  }
-
-  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function buildHostedTelegramTypingLogDetails(target: string): Record<string, boolean | string> {

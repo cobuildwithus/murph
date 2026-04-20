@@ -1,12 +1,15 @@
 import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
+import { computeHostedRunElapsedMs } from "@murphai/assistant-runtime";
 import {
   parseHostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  createRuntimeTimerSyntheticWake,
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
+  type HostedRuntimeEvent,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 
@@ -148,7 +151,7 @@ export class RunnerContainer extends Container {
   private async invokeHostedExecution(
     input: HostedExecutionContainerInvokeInput,
   ): Promise<HostedAssistantRuntimeJobResult> {
-    const wake = input.job.request.wake;
+    const wake = resolveHostedRunnerRequestWake(input.job.request);
     const run = input.job.request.run ?? null;
     const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
       this.environment,
@@ -241,7 +244,7 @@ export class RunnerContainer extends Container {
     input: HostedExecutionContainerInvokeInput,
   ): Promise<string> {
     const readinessStartedAt = Date.now();
-    const wake = input.job.request.wake;
+    const wake = resolveHostedRunnerRequestWake(input.job.request);
     const run = input.job.request.run ?? null;
     const status = readContainerStatus(await this.getState());
 
@@ -354,7 +357,7 @@ export class RunnerContainer extends Container {
     userId: string,
     internalWorkerProxyToken: string,
     input: {
-      wake: HostedAssistantRuntimeJobInput["request"]["wake"];
+      wake: HostedRuntimeEvent;
       run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
     },
   ): Promise<void> {
@@ -850,19 +853,11 @@ function readErrorMessage(error: unknown): string | null {
   return null;
 }
 
-function computeHostedRunElapsedMs(
-  run: HostedAssistantRuntimeJobInput["request"]["run"] | null,
-): number | null {
-  if (!run?.startedAt) {
-    return null;
-  }
-
-  const startedAtMs = Date.parse(run.startedAt);
-  if (!Number.isFinite(startedAtMs)) {
-    return null;
-  }
-
-  return Math.max(0, Date.now() - startedAtMs);
+function resolveHostedRunnerRequestWake(
+  request: HostedAssistantRuntimeJobInput["request"],
+): HostedRuntimeEvent {
+  const [firstEvent] = request.runDrain.events;
+  return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(request.runDrain);
 }
 
 function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {
