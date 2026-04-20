@@ -56,6 +56,7 @@
     "review:gpt:delay": "bash scripts/review-gpt.sh delay",
     "review:gpt:schedule": "bash scripts/review-gpt.sh delay",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
+    "research": "bash scripts/research.sh",
     "chatgpt:thread:export": "bash scripts/review-gpt-cli.sh thread export --format json --filter-output exportPath",
     "chatgpt:thread:download": "bash scripts/review-gpt-cli.sh thread download --format json --filter-output downloadedFile",
     "chatgpt:thread:watch": "bash scripts/review-gpt-cli.sh thread wake --no-poll-until-complete --format json",
