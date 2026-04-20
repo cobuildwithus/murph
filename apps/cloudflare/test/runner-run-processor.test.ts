@@ -5,9 +5,9 @@ import type {
   HostedRunRecord,
 } from "@murphai/hosted-execution/contracts";
 import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import type { BrowserVaultSnapshot } from "@murphai/query/browser";
+import { createBrowserVaultReplica, createVaultReadModel } from "@murphai/query/browser";
 
-import { createHostedBrowserVaultSnapshotStore } from "../src/browser-vault-store.ts";
+import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
 import {
   RunnerRunProcessor,
   recordHostedRunBreadcrumbInWebBestEffort,
@@ -19,6 +19,74 @@ import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+function createHostedRunRecord(input: {
+  runId: string;
+  status?: HostedRunRecord["status"];
+  userId?: string;
+}): HostedRunRecord {
+  return {
+    acquiredAt: "2026-04-20T09:00:00.000Z",
+    attempt: 1,
+    createdAt: "2026-04-20T09:00:00.000Z",
+    eventCount: 0,
+    eventKinds: [],
+    eventSeqs: [],
+    executorKind: "cloudflare-container",
+    id: input.runId,
+    ingressEventIds: [],
+    inputCommittedSeq: "10",
+    inputCursorVersion: "cursor-v1",
+    status: input.status ?? "acquired",
+    triggerKind: "runtime_timer",
+    updatedAt: "2026-04-20T09:00:00.000Z",
+    userId: input.userId ?? "user_123",
+  };
+}
+
+function createRuntimeTimerWake(userId = "user_123"): HostedExecutionRuntimeTimerWake {
+  return {
+    eventId: "runtime-timer",
+    kind: "runtime.timer",
+    occurredAt: "2026-04-20T09:00:00.000Z",
+    triggerKind: "runtime_timer",
+    userId,
+  };
+}
+
+function createReplicaPersistenceProcessor(input: {
+  bucket: MemoryEncryptedR2Bucket;
+  rootKey: Uint8Array;
+}): RunnerRunProcessor {
+  return new RunnerRunProcessor({
+    applyHostedTransition: vi.fn(),
+    bucket: input.bucket as never,
+    ensureRunnerStores: vi.fn().mockResolvedValue({
+      crypto: {
+        rootKey: input.rootKey,
+        rootKeyId: "k-current",
+      },
+    }),
+    env: {
+      runnerTimeoutMs: 60_000,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: "{\"kty\":\"EC\"}",
+      },
+    },
+    hostedWebBaseUrl: null,
+    readRunnerRuntimeConfigSource: () => ({}),
+    runnerContainerNamespace: null,
+    runnerRuntimeEnvSource: {},
+    stateStore: {
+      beginRun: vi.fn().mockResolvedValue(undefined),
+      completeRun: vi.fn().mockResolvedValue(undefined),
+      failRun: vi.fn(),
+      recordRunPhase: vi.fn().mockResolvedValue({}),
+    },
+    runtimeAlarmScheduler: {},
+  } as never);
+}
 
 describe("runner wake processor delivery summaries", () => {
   it("includes the first non-sent delivery message in the finalize summary", () => {
@@ -253,30 +321,10 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     (processor as any).persistCompletedRunnerResult = vi.fn().mockResolvedValue(null);
     (processor as any).readRecentActiveRunLease = vi.fn().mockResolvedValue(null);
 
-    const run: HostedRunRecord = {
-      acquiredAt: "2026-04-20T09:00:00.000Z",
-      attempt: 1,
-      createdAt: "2026-04-20T09:00:00.000Z",
-      eventCount: 0,
-      eventKinds: [],
-      eventSeqs: [],
-      executorKind: "cloudflare-container",
-      id: "run_123",
-      inputCommittedSeq: "10",
-      inputCursorVersion: "cursor-v1",
-      status: "acquired",
-      triggerKind: "runtime_timer",
-      updatedAt: "2026-04-20T09:00:00.000Z",
-      userId: "user_123",
-      ingressEventIds: [],
-    };
-    const primaryWake: HostedExecutionRuntimeTimerWake = {
-      eventId: "runtime-timer",
-      kind: "runtime.timer",
-      occurredAt: "2026-04-20T09:00:00.000Z",
-      triggerKind: "runtime_timer",
-      userId: "user_123",
-    };
+    const run = createHostedRunRecord({
+      runId: "run_123",
+    });
+    const primaryWake = createRuntimeTimerWake();
 
     const result = await processor.executeRunDrain({
       currentBundleRef: null,
@@ -302,74 +350,36 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     expect(completeRun).toHaveBeenCalledTimes(1);
   });
 
-  it("deletes stale browser-vault snapshot sidecars when a completed run returns no snapshot", async () => {
+  it("leaves existing browser-vault replica objects untouched when a completed run returns no replica", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(33);
-    const snapshotStore = createHostedBrowserVaultSnapshotStore({
+    const replicaStore = createHostedBrowserVaultReplicaStore({
       bucket,
-      key: rootKey,
-      keyId: "k-current",
+      rootKey,
     });
 
-    await snapshotStore.writeBrowserVaultSnapshot("user_123", {
-      generatedAt: "2026-04-20T09:00:00.000Z",
-      history: {
-        timeline: [],
-      },
-      overview: {
-        metrics: [],
-        recentJournals: [],
-        trackedExperiments: [],
-        weeklySampleSummaries: [],
-      },
-      schema: "murph.browser-vault-dashboard-snapshot.v2",
-      signals: {
-        activity: [],
-        assistantSummary: {
-          highlights: [],
-          latestDate: null,
-        },
-        bodyState: [],
-        recovery: [],
-        sleep: [],
-        sourceHealth: [],
-      },
-      sourceVersion: "c".repeat(64),
-    } satisfies BrowserVaultSnapshot);
-
-    const processor = new RunnerRunProcessor({
-      applyHostedTransition: vi.fn(),
-      bucket: bucket as never,
-      ensureRunnerStores: vi.fn().mockResolvedValue({
-        crypto: {
-          rootKey,
-          rootKeyId: "k-current",
-        },
+    const existingReplicaRef = await replicaStore.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
+        generatedAt: "2026-04-20T09:00:00.000Z",
+        sourceBundleHash: "c".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: null,
+          vaultRoot: "browser://vault",
+        }),
       }),
-      env: {
-        runnerTimeoutMs: 60_000,
-        webCallbackSigning: {
-          keyId: "v1",
-          privateKeyJwkJson: "{\"kty\":\"EC\"}",
-        },
-      },
-      hostedWebBaseUrl: null,
-      readRunnerRuntimeConfigSource: () => ({}),
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      stateStore: {
-        beginRun: vi.fn().mockResolvedValue(undefined),
-        completeRun: vi.fn().mockResolvedValue(undefined),
-        failRun: vi.fn(),
-        recordRunPhase: vi.fn().mockResolvedValue({}),
-      },
-      runtimeAlarmScheduler: {},
-    } as never);
+      userId: "user_123",
+    });
+
+    const processor = createReplicaPersistenceProcessor({
+      bucket,
+      rootKey,
+    });
 
     (processor as any).advanceRunPhase = vi.fn().mockResolvedValue({});
     (processor as any).invokeRunner = vi.fn().mockResolvedValue({
       assistantDeliveryOutcomes: [],
-      browserVaultSnapshot: null,
+      browserVaultReplica: null,
       finalGatewayProjectionSnapshot: null,
       phase: "completed",
       result: {
@@ -384,32 +394,12 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     (processor as any).persistCompletedRunnerResult = vi.fn().mockResolvedValue(null);
     (processor as any).readRecentActiveRunLease = vi.fn().mockResolvedValue(null);
 
-    const run: HostedRunRecord = {
-      acquiredAt: "2026-04-20T09:00:00.000Z",
-      attempt: 1,
-      createdAt: "2026-04-20T09:00:00.000Z",
-      eventCount: 0,
-      eventKinds: [],
-      eventSeqs: [],
-      executorKind: "cloudflare-container",
-      id: "run_456",
-      inputCommittedSeq: "10",
-      inputCursorVersion: "cursor-v1",
-      status: "acquired",
-      triggerKind: "runtime_timer",
-      updatedAt: "2026-04-20T09:00:00.000Z",
-      userId: "user_123",
-      ingressEventIds: [],
-    };
-    const primaryWake: HostedExecutionRuntimeTimerWake = {
-      eventId: "runtime-timer",
-      kind: "runtime.timer",
-      occurredAt: "2026-04-20T09:00:00.000Z",
-      triggerKind: "runtime_timer",
-      userId: "user_123",
-    };
+    const run = createHostedRunRecord({
+      runId: "run_456",
+    });
+    const primaryWake = createRuntimeTimerWake();
 
-    await processor.executeRunDrain({
+    const result = await processor.executeRunDrain({
       currentBundleRef: null,
       events: [],
       primaryWake,
@@ -417,7 +407,77 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       runToken: "run-token",
     });
 
-    await expect(snapshotStore.readBrowserVaultSnapshotEnvelope("user_123")).resolves.toBeNull();
-    expect(bucket.deleted).toHaveLength(1);
+    expect(result).toMatchObject({
+      browserVaultReplicaRef: null,
+      finalizeRequired: false,
+      state: "completed",
+    });
+    await expect(replicaStore.readBrowserVaultReplicaEnvelope(existingReplicaRef)).resolves.not.toBeNull();
+    expect(bucket.deleted).toEqual([]);
+  });
+});
+
+describe("RunnerRunProcessor.finalizeRunDrain", () => {
+  it("leaves existing browser-vault replica objects untouched when finalization returns no replica", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const rootKey = createTestRootKey(35);
+    const replicaStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+    });
+
+    const existingReplicaRef = await replicaStore.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
+        generatedAt: "2026-04-20T09:00:00.000Z",
+        sourceBundleHash: "d".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: null,
+          vaultRoot: "browser://vault",
+        }),
+      }),
+      userId: "user_123",
+    });
+
+    const processor = createReplicaPersistenceProcessor({
+      bucket,
+      rootKey,
+    });
+
+    (processor as any).advanceRunPhase = vi.fn().mockResolvedValue({});
+    (processor as any).invokeRunner = vi.fn().mockResolvedValue({
+      assistantDeliveryOutcomes: [],
+      browserVaultReplica: null,
+      finalGatewayProjectionSnapshot: null,
+      phase: "completed",
+      result: {
+        bundle: "bundle-encoded",
+        result: {
+          eventsHandled: 0,
+          nextWakeAt: null,
+          summary: "Finalized hosted run side effects.",
+        },
+      },
+    });
+    (processor as any).persistCompletedRunnerResult = vi.fn().mockResolvedValue(null);
+
+    const result = await processor.finalizeRunDrain({
+      currentBundleRef: null,
+      primaryWake: createRuntimeTimerWake(),
+      run: createHostedRunRecord({
+        runId: "run_789",
+        status: "finalizing",
+      }),
+      runToken: "run-token",
+    });
+
+    expect(result).toMatchObject({
+      browserVaultReplicaRef: null,
+      cursorSnapshotRef: null,
+      finalizeRequired: false,
+      state: "completed",
+    });
+    await expect(replicaStore.readBrowserVaultReplicaEnvelope(existingReplicaRef)).resolves.not.toBeNull();
+    expect(bucket.deleted).toEqual([]);
   });
 });
