@@ -27,6 +27,30 @@ describe("workspace source resolution", () => {
     );
   });
 
+  it("does not alias the root specifier for subpath-only workspace packages", () => {
+    const aliases = createVitestWorkspaceRuntimeAliases(
+      resolveHostedWebWorkspaceSourceEntries(path.join(repoRoot, "apps/web")),
+    );
+
+    expect(resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control")).toBeNull();
+    expect(resolveAliasReplacement(aliases, "@murphai/messaging-ingress")).toBeNull();
+    expect(resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/client")).toBe(
+      path.join(repoRoot, "packages/cloudflare-hosted-control/src/client.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/cloudflare-hosted-control/routes")).toBe(
+      path.join(repoRoot, "packages/cloudflare-hosted-control/src/routes.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/messaging-ingress/linq-webhook")).toBe(
+      path.join(repoRoot, "packages/messaging-ingress/src/linq-webhook.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/messaging-ingress/telegram-webhook")).toBe(
+      path.join(repoRoot, "packages/messaging-ingress/src/telegram-webhook.ts"),
+    );
+    expect(
+      resolveAliasReplacement(aliases, "@murphai/messaging-ingress/telegram-webhook-payload"),
+    ).toBe(path.join(repoRoot, "packages/messaging-ingress/src/telegram-webhook-payload.ts"));
+  });
+
   it("does not alias private workspace internals through wildcard subpath fallbacks", () => {
     const aliases = createVitestWorkspaceRuntimeAliases(
       resolveHostedWebWorkspaceSourceEntries(path.join(repoRoot, "apps/web")),
