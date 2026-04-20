@@ -505,7 +505,6 @@ export class RunnerWakeProcessor {
         currentBundleRef: bundleState.bundleRef,
         run,
         runDrain,
-        wake: primaryWake,
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
         configSource: this.dependencies.readRunnerRuntimeConfigSource(),

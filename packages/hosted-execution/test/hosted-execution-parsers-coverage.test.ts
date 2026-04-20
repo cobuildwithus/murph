@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 import {
+  buildHostedExecutionRuntimeTimerWake,
+} from "../src/builders.ts";
+import {
   parseHostedExecutionEvent,
-  parseHostedExecutionWakeDrainResult,
-  parseHostedExecutionWakeNudgeResult,
   parseHostedExecutionRunnerRequest,
   parseHostedExecutionRunnerResult,
   parseHostedExecutionSharePack,
   parseHostedExecutionTimelineEntries,
+  parseHostedRuntimeEvent,
+  parseHostedRunDrainResult,
+  parseHostedRunNudgeResult,
   parseHostedExecutionUserStatus,
   parseHostedRunAcquireRequest,
   parseHostedRunFinalizeRequest,
@@ -28,64 +32,169 @@ const DEFAULT_MEMBER_CHANNELS = {
 
 describe("hosted execution parsers coverage", () => {
   describe("runner request validation", () => {
-    it("parses non-share runner requests with run context", () => {
+    it("parses run-shaped runner requests with run context", () => {
       expect(parseHostedExecutionRunnerRequest({
         bundle: "bundle-ref-123",
+        currentBundleRef: TEST_BUNDLE_REF,
         run: {
           attempt: 2,
           runId: "run_123",
           startedAt: "2026-04-08T00:00:01.000Z",
         },
-        wake: {
-          eventId: "evt_123",
-          kind: "assistant.cron.tick",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "runtime_timer",
           userId: "user_123",
         },
       })).toEqual({
         bundle: "bundle-ref-123",
+        currentBundleRef: TEST_BUNDLE_REF,
         run: {
           attempt: 2,
           runId: "run_123",
           startedAt: "2026-04-08T00:00:01.000Z",
         },
-        wake: {
-          eventId: "evt_123",
-          kind: "assistant.cron.tick",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "runtime_timer",
           userId: "user_123",
         },
       });
     });
 
-    it("rejects share packs on non-share wakes", () => {
-      expect(() =>
-        parseHostedExecutionRunnerRequest({
-          bundle: null,
-          sharePack: {
-            ownerUserId: "user_123",
-            pack: TEST_HOSTED_SHARE_PACK,
-            shareId: "share_123",
-          },
-          wake: {
-            eventId: "evt_123",
-            kind: "assistant.cron.tick",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            reason: "alarm",
-            userId: "user_123",
-          },
-        }),
-      ).toThrow(/sharePack is only supported/i);
+    it("parses internal runtime.timer wakes without widening the ingress contract", () => {
+      expect(parseHostedRuntimeEvent({
+        eventId: "hosted-run:run_123",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "user_123",
+      })).toEqual(buildHostedExecutionRuntimeTimerWake({
+        eventId: "hosted-run:run_123",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "user_123",
+      }));
     });
 
-    it("rejects runner requests that omit wake and parses nullable acquire fields", () => {
-      expect(() =>
-        parseHostedExecutionRunnerRequest({
-          bundle: null,
-        }),
-      ).toThrow(/must include wake/i);
+    it("parses hydrated share packs on run-drain events", () => {
+      expect(parseHostedExecutionRunnerRequest({
+        bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_123",
+          startedAt: "2026-04-08T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [
+            {
+              seq: "24",
+              sharePack: {
+                ownerUserId: "owner_123",
+                pack: TEST_HOSTED_SHARE_PACK,
+                shareId: "share_123",
+              },
+              wake: {
+                eventId: "evt_123",
+                kind: "vault.share.accepted",
+                occurredAt: "2026-04-08T00:00:00.000Z",
+                share: {
+                  ownerUserId: "owner_123",
+                  shareId: "share_123",
+                },
+                userId: "user_123",
+              },
+              wakeId: "wake_24",
+            },
+          ],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "external_ingress",
+          userId: "user_123",
+        },
+      })).toEqual({
+        bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_123",
+          startedAt: "2026-04-08T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [
+            {
+              seq: "24",
+              sharePack: {
+                ownerUserId: "owner_123",
+                pack: TEST_HOSTED_SHARE_PACK,
+                shareId: "share_123",
+              },
+              wake: {
+                eventId: "evt_123",
+                kind: "vault.share.accepted",
+                occurredAt: "2026-04-08T00:00:00.000Z",
+                share: {
+                  ownerUserId: "owner_123",
+                  shareId: "share_123",
+                },
+                userId: "user_123",
+              },
+              wakeId: "wake_24",
+            },
+          ],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "external_ingress",
+          userId: "user_123",
+        },
+      });
+    });
+
+    it("accepts runtime-timer runner requests and parses nullable acquire fields", () => {
+      expect(parseHostedExecutionRunnerRequest({
+        bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_999",
+          startedAt: "2026-04-08T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_999",
+          triggerKind: "runtime_timer",
+          userId: "user_123",
+        },
+      })).toEqual({
+        bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_999",
+          startedAt: "2026-04-08T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_999",
+          triggerKind: "runtime_timer",
+          userId: "user_123",
+        },
+      });
 
       expect(parseHostedRunAcquireRequest({
         executorKind: null,
@@ -100,40 +209,54 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
-    it("rejects mismatched share-pack owner and share ids", () => {
-      const baseRequest = {
+    it("rejects legacy top-level wake and sharePack fields", () => {
+      expect(() => parseHostedExecutionRunnerRequest({
         bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_legacy_wake",
+          startedAt: "2026-04-08T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_legacy_wake",
+          triggerKind: "runtime_timer",
+          userId: "user_123",
+        },
+        wake: {
+          eventId: "hosted-run:run_legacy_wake",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "user_123",
+        },
+      })).toThrow(/request\.wake is no longer supported/u);
+
+      expect(() => parseHostedExecutionRunnerRequest({
+        bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_legacy_share_pack",
+          startedAt: "2026-04-08T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_legacy_share_pack",
+          triggerKind: "runtime_timer",
+          userId: "user_123",
+        },
         sharePack: {
-          ownerUserId: "owner_999",
+          ownerUserId: "owner_123",
           pack: TEST_HOSTED_SHARE_PACK,
           shareId: "share_123",
         },
-        wake: {
-          eventId: "evt_123",
-          kind: "vault.share.accepted" as const,
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          share: {
-            ownerUserId: "owner_123",
-            shareId: "share_123",
-          },
-          userId: "user_123",
-        },
-      };
-
-      expect(() => parseHostedExecutionRunnerRequest(baseRequest)).toThrow(
-        /ownerUserId must match/i,
-      );
-
-      expect(() =>
-        parseHostedExecutionRunnerRequest({
-          ...baseRequest,
-          sharePack: {
-            ...baseRequest.sharePack,
-            ownerUserId: "owner_123",
-            shareId: "share_999",
-          },
-        }),
-      ).toThrow(/shareId must match/i);
+      })).toThrow(/request\.sharePack is no longer supported/u);
     });
 
     it("parses runner results", () => {
@@ -242,7 +365,7 @@ describe("hosted execution parsers coverage", () => {
     });
 
     it("parses dedicated wake drain results", () => {
-      expect(parseHostedExecutionWakeDrainResult({
+      expect(parseHostedRunDrainResult({
         committedSeq: "24",
         requestedTargetSeq: "25",
         targetReached: false,
@@ -254,7 +377,7 @@ describe("hosted execution parsers coverage", () => {
     });
 
     it("parses dedicated wake nudge results", () => {
-      expect(parseHostedExecutionWakeNudgeResult({
+      expect(parseHostedRunNudgeResult({
         accepted: true,
         alarmScheduled: false,
         alreadyRunning: true,

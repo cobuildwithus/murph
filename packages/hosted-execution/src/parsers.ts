@@ -152,13 +152,6 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
         memberId: userId,
         occurredAt,
       });
-    case "assistant.cron.tick":
-      return buildHostedExecutionAssistantCronTickWake({
-        eventId,
-        occurredAt,
-        reason: parseHostedExecutionCronReason(record.reason),
-        userId,
-      });
     case "device-sync.wake":
       return buildHostedExecutionDeviceSyncWake({
         ...(record.connectionId === undefined
@@ -337,39 +330,15 @@ function parseHostedExecutionLinqConversationMessagePart(
 
 export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {
   const record = requireObject(value, "Hosted execution runner request");
-  const wake = parseHostedRuntimeEvent(record.wake);
-  const runDrain = record.runDrain === undefined
-    ? undefined
-    : record.runDrain === null
-      ? null
-      : parseHostedRuntimeDrainRequest(record.runDrain);
-  const sharePack = record.sharePack === undefined
-    ? undefined
-    : record.sharePack === null
-      ? null
-      : parseHostedExecutionRunnerSharePack(record.sharePack);
-
-  if (wake.kind === "vault.share.accepted") {
-    if (!sharePack) {
-      throw new TypeError(
-        "Hosted execution runner request.sharePack is required for vault.share.accepted wakes.",
-      );
-    }
-
-    if (sharePack.ownerUserId !== wake.share.ownerUserId) {
-      throw new TypeError(
-        "Hosted execution runner request.sharePack ownerUserId must match wake.share.ownerUserId.",
-      );
-    }
-
-    if (sharePack.shareId !== wake.share.shareId) {
-      throw new TypeError(
-        "Hosted execution runner request.sharePack shareId must match wake.share.shareId.",
-      );
-    }
-  } else if (sharePack !== undefined) {
+  if (record.wake !== undefined) {
     throw new TypeError(
-      "Hosted execution runner request.sharePack is only supported for vault.share.accepted wakes.",
+      "Hosted execution runner request.wake is no longer supported; use runDrain.",
+    );
+  }
+
+  if (record.sharePack !== undefined) {
+    throw new TypeError(
+      "Hosted execution runner request.sharePack is no longer supported; use runDrain.events[].sharePack.",
     );
   }
 
@@ -378,7 +347,8 @@ export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecuti
       record.bundle,
       "Hosted execution runner request bundle",
     ),
-    wake,
+    run: parseHostedExecutionRunContext(record.run),
+    runDrain: parseHostedRuntimeDrainRequest(record.runDrain),
   };
 
   if (record.currentBundleRef !== undefined) {
@@ -388,18 +358,6 @@ export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecuti
           record.currentBundleRef,
           "Hosted execution runner request currentBundleRef",
         );
-  }
-
-  if (runDrain !== undefined) {
-    request.runDrain = runDrain;
-  }
-
-  if (record.run !== undefined) {
-    request.run = record.run === null ? null : parseHostedExecutionRunContext(record.run);
-  }
-
-  if (sharePack !== undefined) {
-    request.sharePack = sharePack;
   }
 
   return request;
@@ -414,6 +372,15 @@ export function parseHostedRuntimeEvent(value: unknown): HostedRuntimeEvent {
       eventId: requireString(record.eventId, "Hosted execution runner wake eventId"),
       occurredAt: requireString(record.occurredAt, "Hosted execution runner wake occurredAt"),
       triggerKind: parseHostedRunTriggerKind(record.triggerKind),
+      userId: requireString(record.userId, "Hosted execution runner wake userId"),
+    });
+  }
+
+  if (kind === "assistant.cron.tick") {
+    return buildHostedExecutionAssistantCronTickWake({
+      eventId: requireString(record.eventId, "Hosted execution runner wake eventId"),
+      occurredAt: requireString(record.occurredAt, "Hosted execution runner wake occurredAt"),
+      reason: parseHostedExecutionCronReason(record.reason),
       userId: requireString(record.userId, "Hosted execution runner wake userId"),
     });
   }

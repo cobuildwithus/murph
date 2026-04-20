@@ -39,8 +39,10 @@ import {
   type HostedExecutionBundlePayload,
   type HostedExecutionFirstContactTarget,
   type HostedExecutionMemberChannels,
+  type HostedExecutionRunnerSharePack,
   type HostedExecutionTelegramMessage,
   type HostedIngressEnvelope,
+  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 
 const hostedCliMocks = vi.hoisted(() => ({
@@ -207,9 +209,12 @@ type NodeRunnerTestInput =
     };
   } & Omit<
     HostedAssistantRuntimeJobInput["request"],
-    "bundle" | "currentBundleRef" | "runDrain"
+    "bundle" | "currentBundleRef" | "run" | "runDrain"
   > & {
+    run?: HostedAssistantRuntimeJobInput["request"]["run"];
     runDrain?: HostedAssistantRuntimeJobInput["request"]["runDrain"];
+    sharePack?: HostedExecutionRunnerSharePack | null;
+    wake: HostedRuntimeEvent;
   };
 
 async function snapshotHostedExecutionContext(
@@ -344,6 +349,8 @@ async function runHostedExecutionJob(
     forwardedEnv,
     internalWorkerProxyToken,
     userEnv,
+    sharePack,
+    wake,
     ...request
   } = input;
   const runtime: HostedAssistantRuntimeConfig = {
@@ -352,38 +359,45 @@ async function runHostedExecutionJob(
     ...(userEnv === undefined ? {} : { userEnv }),
   };
   const runDrain = request.runDrain ?? (
-    request.wake.kind === "runtime.timer"
+    wake.kind === "runtime.timer"
       ? {
           acquiredAt: "2026-03-26T12:00:00.000Z",
           events: [],
           inputCommittedSeq: "0",
           inputCursorVersion: "0",
           runId: request.run?.runId ?? "run_test",
-          triggerKind: request.wake.triggerKind,
-          userId: request.wake.userId,
+          triggerKind: wake.triggerKind,
+          userId: wake.userId,
         }
       : {
           acquiredAt: "2026-03-26T12:00:00.000Z",
           events: [
             {
+              ...(sharePack === undefined ? {} : { sharePack }),
               seq: "0",
-              wake: request.wake,
-              wakeId: `wake_${request.wake.eventId}`,
+              wake,
+              wakeId: `wake_${wake.eventId}`,
             },
           ],
           inputCommittedSeq: "0",
           inputCursorVersion: "0",
           runId: request.run?.runId ?? "run_test",
           triggerKind: "external_ingress" as const,
-          userId: request.wake.userId,
+          userId: wake.userId,
         }
   );
+  const run = request.run ?? {
+    attempt: 1,
+    runId: runDrain.runId,
+    startedAt: "2026-03-26T12:00:00.000Z",
+  };
   const normalizedRequest: HostedAssistantRuntimeJobInput["request"] = {
     ...request,
     bundle:
       bundles === null || typeof bundles === "string"
         ? bundles
         : (bundles.vault ?? bundles.agentState),
+    run,
     runDrain,
     ...(commit === undefined ? {} : {
       currentBundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
@@ -413,9 +427,9 @@ async function runHostedExecutionJob(
           inputCommittedSeq: "0",
           inputCursorVersion: "0",
           resumeFinalize: true,
-          runId: normalizedRequest.run?.runId ?? "run_finalize",
+          runId: normalizedRequest.run.runId,
           triggerKind: "runtime_timer",
-          userId: normalizedRequest.wake.userId,
+          userId: wake.userId,
         },
       },
       ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
@@ -1802,6 +1816,11 @@ describe("runHostedExecutionJob", () => {
     await expect(runHostedExecutionJob({
       request: {
         bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_proxy_transport_only",
+          startedAt: "2026-03-29T10:05:00.000Z",
+        },
         runDrain: {
           acquiredAt: "2026-03-29T10:05:00.000Z",
           events: [],
@@ -1811,12 +1830,6 @@ describe("runHostedExecutionJob", () => {
           triggerKind: "runtime_timer",
           userId: "member_proxy_transport_only",
         },
-        wake: createActivationWake({
-          eventId: "evt_proxy_transport_only",
-          memberChannels: MEMBER_CHANNELS_NONE,
-          occurredAt: "2026-03-29T10:05:00.000Z",
-          userId: "member_proxy_transport_only",
-        }),
       },
     }, {
       internalWorkerProxyToken: "proxy-token",
@@ -2013,7 +2026,7 @@ describe("runHostedExecutionJob", () => {
         startedInvocationCount += 1;
       },
       runIsolated: async (input) => {
-        const userId = input.job.request.wake.userId;
+        const userId = input.job.request.runDrain.userId;
         const runtime = input.job.runtime ?? {};
         seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
         if (input.job.request.runDrain?.resumeFinalize === true) {
