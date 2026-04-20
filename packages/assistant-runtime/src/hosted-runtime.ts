@@ -239,14 +239,13 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       },
     );
   } catch (error) {
-    const wake = resolveHostedWake(input.request);
     emitHostedExecutionStructuredLog({
       component: "runtime",
-      wake,
       error,
       message: "Hosted runtime failed.",
       phase: "failed",
       run: input.request.run ?? null,
+      ...(input.request.runDrain ? { wake: resolveHostedWake(input.request) } : {}),
     });
     throw error;
   } finally {
@@ -349,7 +348,6 @@ function buildHostedRuntimeStartDetails(
       usageExportBound: Boolean(runtime.platform.usageExportPort),
     },
     runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    sharePackAttached: input.request.sharePack !== undefined,
     userEnvCategories: {
       modelCredentialConfigured: hasAnyHostedRuntimeConfigKey(runtime.userEnv, [
         "ANTHROPIC_API_KEY",

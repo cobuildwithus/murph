@@ -16,6 +16,39 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     vi.restoreAllMocks();
   });
 
+  function createCronJobRequest(eventId: string) {
+    const wake = buildHostedExecutionAssistantCronTickWake({
+      eventId,
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      reason: "manual",
+      userId: "member_123",
+    });
+
+    return {
+      bundle: null,
+      run: {
+        attempt: 1,
+        runId: "run_123",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      },
+      runDrain: {
+        acquiredAt: "2026-04-08T00:00:00.000Z",
+        events: [
+          {
+            seq: "1",
+            wake,
+            wakeId: `wake_${eventId}`,
+          },
+        ],
+        inputCommittedSeq: "1",
+        inputCursorVersion: "1",
+        runId: "run_123",
+        triggerKind: "external_ingress" as const,
+        userId: "member_123",
+      },
+    };
+  }
+
   it("kills the child process group after a successful run so descendants cannot survive warm reuse", async () => {
     const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
     const module = await import("../src/node-runner-isolated.ts");
@@ -50,15 +83,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     const result = await module.runHostedExecutionJobIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: {
-        request: {
-          bundle: null,
-          wake: buildHostedExecutionAssistantCronTickWake({
-            eventId: "evt_child_cleanup",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            reason: "manual",
-            userId: "member_123",
-          }),
-        },
+        request: createCronJobRequest("evt_child_cleanup"),
         runtime: {
           forwardedEnv: {},
           userEnv: {},
@@ -130,15 +155,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     await module.runHostedExecutionJobIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: {
-        request: {
-          bundle: null,
-          wake: buildHostedExecutionAssistantCronTickWake({
-            eventId: "evt_child_env",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            reason: "manual",
-            userId: "member_123",
-          }),
-        },
+        request: createCronJobRequest("evt_child_env"),
         runtime: {
           forwardedEnv: {
             HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
@@ -195,15 +212,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     const result = await module.runHostedExecutionJobIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: {
-        request: {
-          bundle: null,
-          wake: buildHostedExecutionAssistantCronTickWake({
-            eventId: "evt_child_phase_optional",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            reason: "manual",
-            userId: "member_123",
-          }),
-        },
+        request: createCronJobRequest("evt_child_phase_optional"),
         runtime: {
           forwardedEnv: {},
           userEnv: {},
