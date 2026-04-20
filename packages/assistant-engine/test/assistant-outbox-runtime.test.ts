@@ -197,26 +197,36 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it('reconciles confirmation-pending deliveries or reschedules them for retry', async () => {
+  it('reconciles stale persisted deliveries without resending them', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-reconcile-')
     vi.useFakeTimers()
 
     const reconciledSeed = await createIntent(vaultRoot, {
+      channel: 'linq',
       createdAt: '2026-04-08T01:00:00.000Z',
+      explicitTarget: 'linq-thread-reconcile-a',
+      identityId: 'phone_lookup_reconcile_a',
       message: 'needs reconciliation',
+      threadId: 'linq-thread-reconcile-a',
       sessionId: 'session-reconcile-a',
+      replyToMessageId: 'linq-msg-reconcile-a',
       turnId: 'turn-reconcile-a',
     })
     await saveAssistantOutboxIntent(vaultRoot, {
       ...reconciledSeed,
       attemptCount: 1,
       delivery: createDelivery({
+        channel: 'linq',
         idempotencyKey: 'existing-idempotency',
         providerMessageId: 'provider-pending',
+        providerThreadId: 'linq-thread-reconcile-a',
         sentAt: '2026-04-08T01:01:00.000Z',
+        target: 'linq-thread-reconcile-a',
+        targetKind: 'thread',
       }),
       deliveryConfirmationPending: true,
       deliveryIdempotencyKey: 'existing-idempotency',
+      deliveryTransportIdempotent: true,
       lastAttemptAt: '2026-04-08T01:01:00.000Z',
       lastError: createConfirmationPendingError(),
       nextAttemptAt: null,
@@ -228,9 +238,13 @@ describe('assistant outbox runtime', () => {
       dispatchHooks: {
         resolveDeliveredIntent: async () =>
           createDelivery({
+            channel: 'linq',
             idempotencyKey: 'existing-idempotency',
             providerMessageId: 'provider-reconciled',
+            providerThreadId: 'linq-thread-reconcile-a',
             sentAt: '2026-04-08T01:03:00.000Z',
+            target: 'linq-thread-reconcile-a',
+            targetKind: 'thread',
           }),
       },
       intentId: reconciledSeed.intentId,
@@ -242,22 +256,32 @@ describe('assistant outbox runtime', () => {
     expect(reconciled.intent.delivery?.providerMessageId).toBe('provider-reconciled')
     expect(reconciled.intent.deliveryConfirmationPending).toBe(false)
 
-    const retrySeed = await createIntent(vaultRoot, {
+    const persistedRetrySeed = await createIntent(vaultRoot, {
+      channel: 'linq',
       createdAt: '2026-04-08T02:00:00.000Z',
+      explicitTarget: 'linq-thread-reconcile-b',
+      identityId: 'phone_lookup_reconcile_b',
       message: 'still pending confirmation',
+      threadId: 'linq-thread-reconcile-b',
       sessionId: 'session-reconcile-b',
+      replyToMessageId: 'linq-msg-reconcile-b',
       turnId: 'turn-reconcile-b',
     })
     await saveAssistantOutboxIntent(vaultRoot, {
-      ...retrySeed,
+      ...persistedRetrySeed,
       attemptCount: 2,
       delivery: createDelivery({
+        channel: 'linq',
         idempotencyKey: 'pending-idempotency',
         providerMessageId: 'provider-still-pending',
+        providerThreadId: 'linq-thread-reconcile-b',
         sentAt: '2026-04-08T02:01:00.000Z',
+        target: 'linq-thread-reconcile-b',
+        targetKind: 'thread',
       }),
       deliveryConfirmationPending: true,
       deliveryIdempotencyKey: 'pending-idempotency',
+      deliveryTransportIdempotent: true,
       lastAttemptAt: '2026-04-08T02:01:00.000Z',
       lastError: createConfirmationPendingError(),
       nextAttemptAt: null,
@@ -267,20 +291,20 @@ describe('assistant outbox runtime', () => {
 
     vi.setSystemTime(new Date('2026-04-08T02:20:00.000Z'))
 
-    const retried = await dispatchAssistantOutboxIntent({
+    const reconciledFromPersistedDelivery = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
         resolveDeliveredIntent: async () => null,
       },
-      intentId: retrySeed.intentId,
+      intentId: persistedRetrySeed.intentId,
       now: new Date('2026-04-08T02:20:00.000Z'),
       vault: vaultRoot,
     })
-    expect(retried.intent.status).toBe('retryable')
-    expect(retried.intent.deliveryConfirmationPending).toBe(false)
-    expect(retried.intent.lastError?.code).toBe(
-      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    expect(reconciledFromPersistedDelivery.deliveryError).toBeNull()
+    expect(reconciledFromPersistedDelivery.intent.status).toBe('sent')
+    expect(reconciledFromPersistedDelivery.intent.deliveryConfirmationPending).toBe(false)
+    expect(reconciledFromPersistedDelivery.intent.delivery?.providerMessageId).toBe(
+      'provider-still-pending',
     )
-    expect(retried.intent.nextAttemptAt).toBe('2026-04-08T02:22:00.000Z')
   })
 
   it('delivers immediately, reuses sent dedupe hits, and supports queue-only mode', async () => {
@@ -1106,12 +1130,6 @@ describe('assistant outbox runtime', () => {
       outboxIntentId: null,
       session: undefined,
     })
-    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
-      Object.assign(new Error('temporary network outage'), {
-        code: 'REQUEST_FAILED',
-      }),
-    )
-
     vi.setSystemTime(new Date('2026-04-08T05:20:00.000Z'))
 
     const drained = await drainAssistantOutboxLocal({
@@ -1121,8 +1139,8 @@ describe('assistant outbox runtime', () => {
     })
     expect(drained).toEqual({
       attempted: 2,
-      failed: 0,
-      queued: 1,
+      failed: 1,
+      queued: 0,
       sent: 1,
     })
 
@@ -1159,11 +1177,11 @@ describe('assistant outbox runtime', () => {
     const summary = await buildAssistantOutboxSummary(vaultRoot)
     expect(summary).toEqual({
       abandoned: 1,
-      failed: 1,
-      nextAttemptAt: '2026-04-08T05:22:00.000Z',
-      oldestPendingAt: staleSending.createdAt,
+      failed: 2,
+      nextAttemptAt: '2026-04-08T06:00:00.000Z',
+      oldestPendingAt: futureRetryable.createdAt,
       pending: 0,
-      retryable: 2,
+      retryable: 1,
       sending: 0,
       sent: 1,
       total: 5,
@@ -1194,6 +1212,7 @@ async function createIntent(
     explicitTarget: string | null
     identityId: string | null
     message: string
+    replyToMessageId: string | null
     sessionId: string
     threadId: string | null
     threadIsDirect: boolean | null
@@ -1214,6 +1233,7 @@ async function createIntent(
     explicitTarget: overrides.explicitTarget ?? null,
     identityId: overrides.identityId ?? 'participant-1',
     message: overrides.message ?? `${sessionId}:${turnId}:message`,
+    replyToMessageId: overrides.replyToMessageId ?? null,
     sessionId,
     threadId: overrides.threadId ?? 'thread-1',
     threadIsDirect: overrides.threadIsDirect ?? true,

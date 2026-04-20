@@ -11,10 +11,15 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, readOptionalJsonObject } from "@/src/lib/http";
+import {
+  hasHostedMemberActiveAccess,
+  isHostedMemberSuspended,
+} from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   readHostedMemberEmailAuthorization,
+  readHostedMemberCoreState,
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -40,10 +45,15 @@ export const POST = withJsonError(async (request: Request) => {
   const aliasKey = body.aliasKey?.trim() ?? "";
 
   if (aliasKey) {
-    const memberId = await readHostedMemberIdByReplyAliasLookupKey({
+    const candidateMemberId = await readHostedMemberIdByReplyAliasLookupKey({
       prisma,
       replyAliasLookupKey: aliasKey,
     });
+    const memberId = await resolveHostedEmailRouteMemberUserId({
+      memberId: candidateMemberId,
+      prisma,
+    });
+
     if (!memberId) {
       return jsonOk({ userId: null });
     }
@@ -70,14 +80,44 @@ export const POST = withJsonError(async (request: Request) => {
     hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
     headerFrom: body.headerFrom,
   });
-  const userId = senderAddress
+  const candidateMemberId = senderAddress
     ? await readHostedMemberIdByAuthorizedDirectPublicSenderAddress({
       address: senderAddress,
       prisma,
     })
     : null;
+  const userId = await resolveHostedEmailRouteMemberUserId({
+    memberId: candidateMemberId,
+    prisma,
+  });
 
   return jsonOk({
     userId,
   });
 });
+
+async function resolveHostedEmailRouteMemberUserId(input: {
+  memberId: string | null;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<string | null> {
+  if (!input.memberId) {
+    return null;
+  }
+
+  const member = await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  if (!member) {
+    return null;
+  }
+
+  return !isHostedMemberSuspended(member.suspendedAt)
+    && hasHostedMemberActiveAccess({
+      billingStatus: member.billingStatus,
+      suspendedAt: member.suspendedAt,
+    })
+    ? input.memberId
+    : null;
+}

@@ -641,12 +641,14 @@ describe("hosted device-sync runtime", () => {
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 2);
       assert.deepEqual(
-        jobs.map((job) => ({
-          availableAt: job.availableAt,
-          dedupeKey: job.dedupeKey,
-          kind: job.kind,
-          status: job.status,
-        })),
+        jobs
+          .map((job) => ({
+            availableAt: job.availableAt,
+            dedupeKey: job.dedupeKey,
+            kind: job.kind,
+            status: job.status,
+          }))
+          .sort((left, right) => String(left.dedupeKey).localeCompare(String(right.dedupeKey))),
         [
           {
             availableAt: "2026-04-04T10:05:00.000Z",
