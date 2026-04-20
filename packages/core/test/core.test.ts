@@ -4161,8 +4161,7 @@ test("importSamples retries reuse stable transform ids and avoid duplicating can
     ],
   };
 
-  const first = await importSamples(input);
-  const second = await importSamples(input);
+  const [first, second] = await Promise.all([importSamples(input), importSamples(input)]);
   const shardRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: first.shardPaths[0] as string,

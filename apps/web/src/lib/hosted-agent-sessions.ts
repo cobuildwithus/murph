@@ -205,7 +205,7 @@ export class HostedAgentSessionService {
     };
   }
 
-  private readBearerAuthorization(): { scheme: string | null; token: string | null } {
+  readBearerAuthorization(): { scheme: string | null; token: string | null } {
     const header = this.request.headers.get("authorization") ?? "";
     const [scheme, token] = header.split(/\s+/u);
     return {
