@@ -40,9 +40,6 @@ const HOSTED_RUN_ACTIVE_STALE_AFTER_MS = 15 * 60 * 1000;
 const MAX_HOSTED_RUN_EVENT_LIMIT = 256;
 const HOSTED_RUN_ACTIVE_STATUSES = new Set<HostedRunStatus>([
   "acquired",
-  "running",
-  "prepared",
-  "finalizing",
 ]);
 const HOSTED_RUN_FINALIZE_RESUMABLE_STATUS: HostedRunStatus = "committed_needs_finalize";
 const DEFAULT_HOSTED_RUN_EXECUTOR_KIND: HostedRunExecutorKind = "cloudflare-container";
@@ -264,7 +261,7 @@ export async function commitHostedRunTx(input: {
   await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const cursor = await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const run = await readHostedRunForMutationTx({
-    allowedStatuses: ["acquired", "running", "prepared"],
+    allowedStatuses: ["acquired"],
     runId: input.runId,
     runToken: input.runToken,
     tx: input.tx,
@@ -364,6 +361,24 @@ export async function commitHostedRunTx(input: {
     const failedRun = await closeHostedRunWithoutCommitTx({
       cursor,
       errorCode: "HOSTED_RUN_OUTPUT_SEQ_OUTSIDE_ACQUIRED_RANGE",
+      run,
+      status: "failed",
+      tx: input.tx,
+      userId: input.userId,
+    });
+
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+      needsFinalize: false,
+      run: projectHostedRunRecord(failedRun),
+    };
+  }
+
+  if (input.outputCommittedSeq !== highestAcquiredSeq) {
+    const failedRun = await closeHostedRunWithoutCommitTx({
+      cursor,
+      errorCode: "HOSTED_RUN_PARTIAL_COMMIT_UNSUPPORTED",
       run,
       status: "failed",
       tx: input.tx,
@@ -490,7 +505,7 @@ export async function finalizeHostedRunTx(input: {
   await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const cursor = await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const run = await readHostedRunForMutationTx({
-    allowedStatuses: [HOSTED_RUN_FINALIZE_RESUMABLE_STATUS, "finalizing"],
+    allowedStatuses: [HOSTED_RUN_FINALIZE_RESUMABLE_STATUS],
     runId: input.runId,
     runToken: input.runToken,
     tx: input.tx,
@@ -1135,10 +1150,7 @@ function parseHostedRunExecutorKindForProjection(value: string): HostedRunExecut
 function parseHostedRunStatusForProjection(value: string): HostedRunStatus {
   switch (value) {
     case "acquired":
-    case "running":
-    case "prepared":
     case "committed_needs_finalize":
-    case "finalizing":
     case "finalized":
     case "failed":
     case "superseded":
