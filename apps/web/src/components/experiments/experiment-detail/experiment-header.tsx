@@ -31,6 +31,12 @@ export function ExperimentHeader({
   completionPercent,
   description,
 }: ExperimentHeaderProps) {
+  const isActive = status === "active";
+  const isPaused = status === "paused";
+  const isFinished = status === "finished";
+  const isStopped = status === "stopped";
+  const inBaseline = baselineDays > 0 && day != null && day <= baselineDays;
+
   return (
     <div className="flex flex-col gap-7">
       {/* Breadcrumb */}
@@ -71,21 +77,47 @@ export function ExperimentHeader({
                 </span>
               </>
             )}
-            {status === "active" && day && (
+            {isActive && (
               <>
                 <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
                 <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-chart-5">
                   <span className="size-1.5 rounded-full bg-amber-500" />
-                  Day {day} of {durationDays}
+                  {day
+                    ? inBaseline
+                      ? `Baseline day ${day} of ${baselineDays}`
+                      : `Day ${day} of ${durationDays}`
+                    : "Active run"}
                 </span>
               </>
             )}
-            {status === "finished" && dateRange && (
+            {isPaused && (
+              <>
+                <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-muted-foreground" />
+                  {day
+                    ? inBaseline
+                      ? `Paused during baseline day ${day} of ${baselineDays}`
+                      : `Paused on day ${day} of ${durationDays}`
+                    : "Paused"}
+                </span>
+              </>
+            )}
+            {isFinished && (
               <>
                 <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
                 <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-ring">
                   <span className="size-1.5 rounded-full bg-ring" />
-                  {dateRange}
+                  {dateRange ?? "Finished"}
+                </span>
+              </>
+            )}
+            {isStopped && (
+              <>
+                <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-muted-foreground" />
+                  {dateRange ?? "Stopped"}
                 </span>
               </>
             )}
@@ -119,7 +151,7 @@ export function ExperimentHeader({
           </div>
         )}
 
-        {status === "active" && completionPercent != null && (
+        {isActive && completionPercent != null && (
           <div className="relative flex size-16 shrink-0 items-center justify-center">
             <svg viewBox="0 0 36 36" className="size-16 -rotate-90">
               <path

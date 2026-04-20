@@ -21,6 +21,15 @@ Hosted device-sync provider registration is intentionally shared with
 `@murphai/device-syncd/config`; `apps/web` should reuse that assembly path
 instead of maintaining an app-local provider list or provider-config object.
 
+## Experiment detail data sources
+
+The experiment detail page composes two narrow data sources:
+
+- Health Commons is the public protocol source of truth. Server components resolve the generated catalog entity and pass a typed `ExperimentProtocol` into the page.
+- The browser vault is the private run source. Client components decrypt the dashboard snapshot in-browser, project a matching `ExperimentRunProjection`, and overlay only private status, timeline, next-step, and outcome fields.
+
+The UI receives the composed `Experiment` view model, but public protocol prose, citations, and commons revisions are never copied into private run state.
+
 ## Core responsibilities
 
 - Garmin, Oura, Strava, and WHOOP OAuth start/callback flows
@@ -246,7 +255,7 @@ pnpm --dir apps/web prisma:migrate:deploy
 
 The hosted schema now includes the canonical member slices, hosted email
 authorization, hosted share payload ownership, device-sync web ownership
-models, plus the canonical hosted execution ingress, cursor, and run-recovery fence.
+models, the anonymized hosted assistant-runtime issue sink, plus the canonical hosted execution ingress, cursor, and run-recovery fence.
 The checked-in Prisma history is now a single greenfield baseline migration
 that matches the current hosted schema. If you have an older local database
 from the superseded incremental chain, reset it before reapplying migrations.

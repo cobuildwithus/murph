@@ -1,4 +1,8 @@
+import type { ReactNode } from "react";
+
+import type { BrowserVaultStatus } from "@/src/lib/browser-vault/context";
 import type { Experiment } from "@/src/types/experiments";
+import { Button } from "@/src/components/ui/button";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { NextStepCard } from "@/src/components/next-step-card";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -8,41 +12,101 @@ import { ExperimentTimeline } from "./experiment-timeline";
 
 interface ResultsTabProps {
   experiment: Experiment;
+  onPrivateRunRetry?: () => Promise<void>;
+  privateRunError: string | null;
+  privateRunStatus: BrowserVaultStatus;
 }
 
-export function ResultsTab({ experiment }: ResultsTabProps) {
+export function ResultsTab({
+  experiment,
+  onPrivateRunRetry,
+  privateRunError,
+  privateRunStatus,
+}: ResultsTabProps) {
   const isActive = experiment.status === "active";
+  const isPaused = experiment.status === "paused";
   const isFinished = experiment.status === "finished";
-
-  const hasPersonalResultData =
-    experiment.signals.length > 0 ||
-    experiment.trends.length > 0 ||
-    experiment.timeline.length > 0;
+  const isStopped = experiment.status === "stopped";
+  const isRunnable = isActive || isPaused;
+  const hasPrivateRun = Boolean(experiment.privateRun);
+  const hasPersonalOutcomeData = experiment.signals.length > 0 || experiment.trends.length > 0;
+  const currentDay = experiment.day ?? 0;
+  const activeTotalDays = Math.max(1, experiment.durationDays - experiment.baselineDays);
+  const inBaseline = experiment.baselineDays > 0
+    && currentDay > 0
+    && currentDay <= experiment.baselineDays;
+  const activeDay = !inBaseline && currentDay > 0
+    ? Math.max(1, currentDay - experiment.baselineDays)
+    : null;
+  const baselineLabel = experiment.baselineDays > 0
+    ? inBaseline
+      ? `Baseline · Day ${currentDay} of ${experiment.baselineDays}`
+      : `Baseline · ${experiment.baselineDays}d ${currentDay > experiment.baselineDays ? "✓" : ""}`
+    : "Baseline · 0d ✓";
+  const protocolLabel = inBaseline
+    ? "Protocol · Not started"
+    : isPaused
+      ? activeDay
+        ? `Paused · Day ${activeDay} of ${activeTotalDays}`
+        : "Paused"
+      : activeDay
+        ? `Active · Day ${activeDay} of ${activeTotalDays}`
+        : "Active";
 
   return (
     <div className="flex flex-col gap-10">
-      {!hasPersonalResultData && !isFinished && (
-        <div className="rounded-xl border border-border bg-card p-6">
-          <h3 className="font-serif text-xl font-semibold text-foreground">
-            No personal results yet
-          </h3>
-          <p className="mt-2 text-sm leading-5 text-muted-foreground">
-            This page is showing Health Commons protocol data. Once a private experiment run is started, baseline, session, and outcome summaries can bind to the exact protocol revision here.
-          </p>
-        </div>
+      {!hasPrivateRun && privateRunStatus === "loading" && (
+        <ResultsEmptyState
+          title="Loading your private run"
+          body="The public protocol is loaded. Murph is checking your encrypted browser-vault snapshot for an active or finished run linked to this protocol."
+        />
       )}
 
-      {isActive && (
+      {!hasPrivateRun && privateRunStatus === "error" && (
+        <ResultsEmptyState
+          title="Protocol loaded, private run unavailable"
+          body={privateRunError ?? "Your private experiment state could not be decrypted right now. The protocol details are still available."}
+          action={onPrivateRunRetry
+            ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
+            : null}
+        />
+      )}
+
+      {!hasPrivateRun && privateRunStatus === "ready" && (
+        <ResultsEmptyState
+          title="No private run yet"
+          body="This page is showing Health Commons protocol data. Once you start this experiment, your browser-vault run state can attach here without copying the public protocol data."
+        />
+      )}
+
+      {hasPrivateRun && !hasPersonalOutcomeData && (
+        <ResultsEmptyState
+          title={isFinished
+            ? "No biomarker comparison exported yet"
+            : isPaused
+              ? "Private run paused"
+              : isStopped
+                ? "Private run stopped"
+                : "Private run linked"}
+          body={isFinished
+            ? "This run is present in your browser vault, but the dashboard snapshot does not include enough baseline-vs-protocol biomarker data yet."
+            : isPaused
+              ? "This private run is still in your browser vault, but it is paused. Resume it there to continue the protocol and export outcome comparisons later."
+              : isStopped
+                ? "This private run remains in your browser vault, but it was stopped before a browser-vault comparison was exported to the dashboard."
+                : "This private run is attached to the exact Health Commons protocol revision. Outcome cards will appear when the browser-vault snapshot includes measured comparisons."}
+        />
+      )}
+
+      {isRunnable && (
         <ExperimentProgress
-          baselineDays={experiment.baselineDays}
-          baselineComplete
-          activeDay={experiment.day ?? 1}
-          activeTotalDays={experiment.durationDays - experiment.baselineDays}
+          baselineLabel={baselineLabel}
+          protocolLabel={protocolLabel}
           overallPercent={experiment.completionPercent ?? 0}
         />
       )}
 
-      {isActive && experiment.nextStep && (
+      {isRunnable && experiment.nextStep && (
         <NextStepCard
           title={experiment.nextStep.title}
           when={experiment.nextStep.when}
@@ -91,13 +155,15 @@ export function ResultsTab({ experiment }: ResultsTabProps) {
         </div>
       )}
 
-      {isActive && (
+      {isRunnable && (
         <div className="flex flex-col gap-2">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Conclusions
           </span>
           <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-            Available after experiment ends on Apr 5
+            {experiment.analysisAvailableOn
+              ? `Available after ${formatResultsDate(experiment.analysisAvailableOn)}`
+              : "Available after the protocol window closes."}
           </div>
         </div>
       )}
@@ -119,4 +185,43 @@ export function ResultsTab({ experiment }: ResultsTabProps) {
       )}
     </div>
   );
+}
+
+function ResultsEmptyState({
+  action,
+  title,
+  body,
+}: {
+  action?: ReactNode;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-serif text-xl font-semibold text-foreground">
+            {title}
+          </h3>
+          <p className="mt-2 text-sm leading-5 text-muted-foreground">
+            {body}
+          </p>
+        </div>
+        {action}
+      </div>
+    </div>
+  );
+}
+
+function formatResultsDate(value: string): string {
+  const parsed = new Date(`${value}T12:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(parsed);
 }

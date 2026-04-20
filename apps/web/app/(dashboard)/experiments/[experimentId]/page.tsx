@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { resolveHealthCommonsExperimentDetail } from "@/src/lib/health-commons/experiment-detail";
+import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import { ExperimentDetailClient } from "./experiment-detail-client";
 
 export default async function ExperimentDetailPage({
@@ -9,11 +9,11 @@ export default async function ExperimentDetailPage({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  const experiment = resolveHealthCommonsExperimentDetail(experimentId);
+  const protocol = resolveHealthCommonsExperimentProtocol(experimentId);
 
-  if (!experiment) {
+  if (!protocol) {
     notFound();
   }
 
-  return <ExperimentDetailClient experiment={experiment} />;
+  return <ExperimentDetailClient protocol={protocol} />;
 }

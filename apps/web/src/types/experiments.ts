@@ -1,4 +1,4 @@
-export type ExperimentStatus = "active" | "finished" | "upcoming";
+export type ExperimentStatus = "active" | "paused" | "finished" | "stopped" | "upcoming";
 
 export interface Expert {
   initials: string;
@@ -39,78 +39,119 @@ export interface TrendData {
   delta: string;
 }
 
-export interface Experiment {
+export interface ExperimentSignal {
+  label: string;
+  value: string;
+  unit?: string;
+  delta: string;
+  direction: "up" | "down" | "neutral";
+  expected: string;
+  baseline?: string;
+  description?: string;
+}
+
+export interface ExperimentSafety {
+  cautionLevel: number;
+  whoShouldAvoid: string[];
+  precautions: string[];
+}
+
+export interface ExperimentProtocolStep {
+  number: number;
+  title: string;
+  detail: string;
+}
+
+export interface ExperimentResearchStat {
+  label: string;
+  value: string | number;
+}
+
+export interface ExperimentCommonsReference {
+  aliases: string[];
+  catalogHash: string;
+  key: string;
+  pageRevisionId: string;
+  recipeHash: string | null;
+  routeId: string;
+  runSpecRevisionId: string | null;
+  slug: string;
+}
+
+export interface ExperimentNextStep {
+  title: string;
+  when: string;
+  instructions?: string;
+  context?: string;
+  nextSession?: string;
+}
+
+export interface ExperimentConclusionSection {
+  title: string;
+  variant: "positive" | "neutral" | "insight" | "recommendation";
+  items: { icon: string; text: string }[];
+}
+
+export interface ExperimentProtocol {
   id: string;
   title: string;
   category: string;
-  status: ExperimentStatus;
   image: string;
   matchPercent?: number;
   durationDays: number;
   baselineDays: number;
   studyCount: number;
-  day?: number;
-  completionPercent?: number;
-  dateRange?: string;
   evidenceLevel: number;
   evidenceLabel: string;
   description: string;
-  expectedSignals: {
-    label: string;
-    value: string;
-    unit?: string;
-    delta: string;
-    direction: "up" | "down" | "neutral";
-    expected: string;
-    baseline?: string;
-    description?: string;
-  }[];
-  protocol: { number: number; title: string; detail: string }[];
+  expectedSignals: ExperimentSignal[];
+  protocol: ExperimentProtocolStep[];
   whyItWorks: string;
   experts: Expert[];
-  researchStats: {
-    label: string;
-    value: string | number;
-  }[];
+  researchStats: ExperimentResearchStat[];
   studies: Study[];
   podcastLinks?: { label: string; url: string }[];
-  safety: {
-    cautionLevel: number;
-    whoShouldAvoid: string[];
-    precautions: string[];
-  };
-  signals: {
-    label: string;
-    value: string;
-    unit?: string;
-    delta: string;
-    direction: "up" | "down" | "neutral";
-    expected: string;
-    baseline?: string;
-  }[];
+  safety: ExperimentSafety;
+  commons?: ExperimentCommonsReference;
+}
+
+export interface ExperimentRunProjection {
+  id: string;
+  source: "browser-vault";
+  snapshotGeneratedAt: string;
+  slug: string | null;
+  status: Exclude<ExperimentStatus, "upcoming">;
+  statusLabel: string;
+  startedOn: string | null;
+  tags: string[];
+  title: string;
+  day?: number;
+  completionPercent?: number;
+  dateRange?: string;
+  analysisAvailableOn?: string;
+  signals: ExperimentSignal[];
   trends: TrendData[];
   timeline: TimelineEvent[];
-  commons?: {
-    catalogHash: string;
-    key: string;
-    pageRevisionId: string;
-    recipeHash: string | null;
-    runSpecRevisionId: string | null;
-  };
-  nextStep?: {
-    title: string;
-    when: string;
-    instructions?: string;
-    context?: string;
-    nextSession?: string;
-  };
+  nextStep?: ExperimentNextStep;
   summary?: string;
   summaryDetail?: string;
-  conclusions?: {
-    title: string;
-    variant: "positive" | "neutral" | "insight" | "recommendation";
-    items: { icon: string; text: string }[];
-  }[];
+  conclusions?: ExperimentConclusionSection[];
+}
+
+export interface Experiment extends ExperimentProtocol {
+  status: ExperimentStatus;
+  day?: number;
+  completionPercent?: number;
+  dateRange?: string;
+  analysisAvailableOn?: string;
+  signals: ExperimentSignal[];
+  trends: TrendData[];
+  timeline: TimelineEvent[];
+  privateRun?: ExperimentRunProjection;
+  nextStep?: ExperimentNextStep;
+  summary?: string;
+  summaryDetail?: string;
+  conclusions?: ExperimentConclusionSection[];
 }
 
 export interface HealthDomain {

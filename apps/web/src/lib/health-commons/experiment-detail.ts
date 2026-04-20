@@ -6,7 +6,7 @@ import type {
   HealthCommonsSource,
 } from "@murphai/contracts/health-commons";
 
-import type { Experiment, Expert, Study } from "@/src/types/experiments";
+import type { ExperimentProtocol, Expert, Study } from "@/src/types/experiments";
 import { healthCommonsCatalog, type HealthCommonsCatalogReader, type HealthCommonsEntity } from "./catalog";
 
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
@@ -60,10 +60,10 @@ const BIOMARKER_DISPLAY_HINTS: Record<string, {
   },
 };
 
-export function resolveHealthCommonsExperimentDetail(
+export function resolveHealthCommonsExperimentProtocol(
   experimentId: string,
   catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
-): Experiment | null {
+): ExperimentProtocol | null {
   const protocol = catalog.findByRouteId({
     entityType: "protocol_variant",
     routeId: normalizeExperimentRouteId(experimentId),
@@ -87,7 +87,8 @@ function normalizeExperimentRouteId(value: string): string {
 function toExperimentDetail(
   protocol: HealthCommonsCatalogEntity,
   catalog: HealthCommonsCatalogReader,
-): Experiment {
+): ExperimentProtocol {
+  const routeId = toExperimentId(protocol);
   const testPlan = protocol.testPlans?.[0] ?? null;
   const protocolSpec = protocol.protocol;
   const safety = protocol.safety;
@@ -105,10 +106,9 @@ function toExperimentDetail(
   const claims = protocol.claims ?? [];
 
   return {
-    id: toExperimentId(protocol),
+    id: routeId,
     title: protocol.title,
     category: formatCategory(protocol.categories?.[0] ?? protocol.entityType),
-    status: "upcoming",
     image: FINNISH_SAUNA_IMAGE,
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
@@ -126,15 +126,15 @@ function toExperimentDetail(
       .slice(0, 6)
       .map(toStudy),
     safety: toSafety(safety),
-    signals: [],
-    trends: [],
-    timeline: [],
     commons: {
+      aliases: buildProtocolRouteAliases(protocol),
       catalogHash: catalog.catalogHash,
       key: protocol.key,
       pageRevisionId: protocol.revision.pageRevisionId,
       recipeHash: protocol.revision.recipeHash ?? null,
+      routeId,
       runSpecRevisionId: protocol.revision.runSpecRevisionId ?? null,
+      slug: protocol.slug,
     },
   };
 }
@@ -145,6 +145,16 @@ function toExperimentId(protocol: HealthCommonsCatalogEntity): string {
   }
 
   return protocol.slug.split("/").at(-1) ?? protocol.slug;
+}
+
+function buildProtocolRouteAliases(protocol: HealthCommonsCatalogEntity): string[] {
+  return uniqueStrings([
+    toExperimentId(protocol),
+    protocol.key,
+    protocol.key.replace(/^protocol_variant:/u, ""),
+    protocol.slug,
+    protocol.slug.split("/").at(-1) ?? null,
+  ]);
 }
 
 function listProtocolBiomarkers(
@@ -172,7 +182,7 @@ function listProtocolBiomarkers(
   });
 }
 
-function toExpectedSignal(biomarker: HealthCommonsEntity): Experiment["expectedSignals"][number] {
+function toExpectedSignal(biomarker: HealthCommonsEntity): ExperimentProtocol["expectedSignals"][number] {
   const hint = BIOMARKER_DISPLAY_HINTS[biomarker.key] ?? {
     direction: "neutral" as const,
     expected: "Worth watching",
@@ -188,7 +198,7 @@ function toExpectedSignal(biomarker: HealthCommonsEntity): Experiment["expectedS
   };
 }
 
-function toProtocolSteps(protocol: HealthCommonsProtocolSpec | undefined): Experiment["protocol"] {
+function toProtocolSteps(protocol: HealthCommonsProtocolSpec | undefined): ExperimentProtocol["protocol"] {
   if (!protocol) {
     return [];
   }
@@ -293,7 +303,7 @@ function sourceKindToStudyType(source: HealthCommonsSource | undefined): Study["
 
 function toResearchStats(
   citedSources: readonly HealthCommonsEntity[],
-): Experiment["researchStats"] {
+): ExperimentProtocol["researchStats"] {
   const reviewCount = citedSources.filter((entity) => entity.source?.kind === "review").length;
   const journalArticleCount = citedSources.filter(
     (entity) => entity.source?.kind === "journal_article",
@@ -317,7 +327,7 @@ function toResearchStats(
   ];
 }
 
-function toSafety(safety: HealthCommonsSafety | undefined): Experiment["safety"] {
+function toSafety(safety: HealthCommonsSafety | undefined): ExperimentProtocol["safety"] {
   if (!safety) {
     return {
       cautionLevel: 3,
@@ -437,4 +447,10 @@ function summarizeBody(body: string): string {
     .join(" ");
 
   return normalized.length <= 360 ? normalized : `${normalized.slice(0, 357)}...`;
+}
+
+function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string =>
+    typeof value === "string" && value.trim().length > 0
+  ))];
 }
