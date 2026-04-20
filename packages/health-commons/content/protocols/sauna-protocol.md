@@ -4,7 +4,7 @@ entityType: disambiguation
 key: disambiguation:sauna-protocol
 slug: protocols/sauna-protocol
 title: Sauna Protocol
-summary: Disambiguation page for sauna protocol searches that could mean dry sauna, infrared sauna, Murph's Finnish dry-sauna experiment, or an external named protocol.
+summary: Disambiguation page for sauna protocol searches that could mean dry sauna, infrared sauna, Murph's Finnish dry-sauna experiment, or Bryan Johnson's source-attributed routine.
 status: draft
 quality: usable
 aliases:
@@ -24,8 +24,8 @@ options:
     description: Separate sauna family for infrared heat exposure.
   -
     key: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    label: Bryan Johnson Sauna Protocol
-    description: External named protocol placeholder pending dose and evidence review.
+    label: Bryan Johnson Blueprint Sauna
+    description: External named daily dry-sauna routine; 20 minutes at 200 F with groin cooling, plus a later high-burden core-temperature-threshold experiment.
 relations:
   -
     type: related_protocol
