@@ -229,6 +229,12 @@ export function verifyWorkspaceImportPolicy({
   specifier,
 }) {
   const isTestFile = isTestSourceFile(filePath);
+  if (
+    isWorkspacePackageSpecifier(specifier)
+    && importsEmptyBindingsFromSpecifier(source, specifier)
+  ) {
+    return `${path.relative(repoRoot, filePath)} uses empty import ${JSON.stringify(specifier)}; remove the workspace package import or replace it with explicit bindings so package boundaries do not accumulate hidden side-effect edges.`;
+  }
 
   if (specifier === "@murphai/device-syncd" && sourceMember !== "packages/device-syncd") {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; internal workspace consumers must use @murphai/device-syncd/public-ingress, @murphai/device-syncd/client, or another explicit subpath so they do not depend on the daemon root convenience surface.`;
@@ -579,6 +585,19 @@ function isTestSourceFile(filePath) {
   return /(?:^|[\\/])(test|tests)[\\/].*\.[cm]?[jt]sx?$|\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(
     path.relative(repoRoot, filePath),
   );
+}
+
+function isWorkspacePackageSpecifier(specifier) {
+  return specifier.startsWith("@murphai/");
+}
+
+function importsEmptyBindingsFromSpecifier(source, specifier) {
+  const optionalTrivia = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n\r]*(?:\r?\n|$))*`;
+
+  return new RegExp(
+    String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?\{${optionalTrivia}\}${optionalTrivia}from${optionalTrivia}["']${escapeRegExp(specifier)}["']`,
+    "mu",
+  ).test(source);
 }
 
 function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
