@@ -1,10 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { SQLInputValue } from "node:sqlite";
 
-import {
-  serializeHostedExecutionBundleRef,
-  type HostedExecutionBundleRef,
-} from "@murphai/runtime-state";
+import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
@@ -90,14 +87,8 @@ class SqliteDurableObjectSqlStorage {
   }
 }
 
-function createRunnerStateStoreHarness(setup?: (db: DatabaseSync) => void): {
-  db: DatabaseSync;
-  store: RunnerStateStore;
-} {
-  const db = new DatabaseSync(":memory:");
-  setup?.(db);
-
-  const state: DurableObjectStateLike = {
+function createDurableObjectState(db: DatabaseSync): DurableObjectStateLike {
+  return {
     storage: {
       deleteAlarm: async () => {},
       get: async () => undefined,
@@ -107,11 +98,23 @@ function createRunnerStateStoreHarness(setup?: (db: DatabaseSync) => void): {
       sql: new SqliteDurableObjectSqlStorage(db),
     },
   };
+}
+
+function createRunnerStateStoreHarness(setup?: (db: DatabaseSync) => void): {
+  db: DatabaseSync;
+  store: RunnerStateStore;
+} {
+  const db = new DatabaseSync(":memory:");
+  setup?.(db);
 
   return {
     db,
-    store: new RunnerStateStore(state),
+    store: new RunnerStateStore(createDurableObjectState(db)),
   };
+}
+
+function createRunnerStateStoreFromDb(db: DatabaseSync): RunnerStateStore {
+  return new RunnerStateStore(createDurableObjectState(db));
 }
 
 function makeBundleRef(key: string): HostedExecutionBundleRef {
@@ -120,20 +123,6 @@ function makeBundleRef(key: string): HostedExecutionBundleRef {
     key,
     size: key.length,
     updatedAt: "2026-04-02T00:00:00.000Z",
-  };
-}
-
-function readRunnerMetaBundleState(db: DatabaseSync): {
-  bundle_ref_json: string | null;
-  bundle_version: number;
-} {
-  return db.prepare(`
-    SELECT bundle_ref_json, bundle_version
-    FROM runner_meta
-    WHERE singleton = 1
-  `).get() as {
-    bundle_ref_json: string | null;
-    bundle_version: number;
   };
 }
 
@@ -151,8 +140,8 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
   return row?.name === "runner_bundle_slots";
 }
 
-describe("RunnerStateStore bundle metadata", () => {
-  it("fails closed when the legacy split runner bundle schema is still present", async () => {
+describe("RunnerStateStore bundle cache", () => {
+  it("fails closed when the legacy split runner bundle schema is still present", () => {
     const setupLegacyBundleSchema = (database: DatabaseSync) => {
       database.exec(`
         DROP TABLE IF EXISTS runner_meta;
@@ -181,113 +170,55 @@ describe("RunnerStateStore bundle metadata", () => {
     expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
     expect(runnerBundleSlotsTableExists(db)).toBe(true);
     expect(() => createRunnerStateStoreHarness(setupLegacyBundleSchema)).toThrow(
-      /runner_meta schema is unsupported; missing bundle_ref_json, bundle_version, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at/u,
+      /runner_meta schema is unsupported; missing active_run_event_id, active_run_id, active_run_attempt, active_run_started_at/u,
     );
   });
 
-  it("keeps compare-and-swap bundle versions on runner_meta", async () => {
+  it("keeps the warm bundle ref cache in memory only", async () => {
     const currentVaultRef = makeBundleRef("vault/current");
-    const nextVaultRef = makeBundleRef("vault/next");
     const { db, store } = createRunnerStateStoreHarness();
-    await store.bootstrapUser("user-cas");
+    await store.bootstrapUser("user-cache");
 
-    const initial = await store.compareAndSwapBundleRefs({
-      expectedVersion: 0,
-      nextBundleRef: currentVaultRef,
+    const cached = await store.syncBundleRefCache(currentVaultRef);
+    expect(cached.bundleRef).toEqual(currentVaultRef);
+    await expect(store.readBundleMetaState()).resolves.toEqual({
+      bundleRef: currentVaultRef,
+      bundleVersion: 0,
     });
-    expect(initial.applied).toBe(true);
-    expect(initial.record.bundleRef).toEqual(currentVaultRef);
-    expect(initial.record.bundleVersion).toBe(1);
-    expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
-      bundle_version: 1,
-    });
+    expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
+    expect(readRunnerMetaColumns(db)).not.toContain("bundle_version");
 
-    const swapped = await store.compareAndSwapBundleRefs({
-      expectedVersion: initial.record.bundleVersion,
-      nextBundleRef: nextVaultRef,
+    const coldStore = createRunnerStateStoreFromDb(db);
+    await coldStore.bootstrapUser("user-cache");
+    await expect(coldStore.readState()).resolves.toMatchObject({
+      bundleRef: null,
+      userId: "user-cache",
     });
-    expect(swapped.applied).toBe(true);
-    expect(swapped.record.bundleVersion).toBe(2);
-    expect(swapped.record.bundleRef).toEqual(nextVaultRef);
-
-    const rejected = await store.compareAndSwapBundleRefs({
-      expectedVersion: initial.record.bundleVersion,
-      nextBundleRef: swapped.record.bundleRef,
-    });
-    expect(rejected.applied).toBe(false);
-    expect(rejected.record.bundleVersion).toBe(2);
   });
 
-  it("treats repeated cursor syncs of the same bundle ref as a no-op for the local version", async () => {
+  it("updates the warm cache without persisting bundle metadata into SQLite", async () => {
     const currentVaultRef = makeBundleRef("vault/current");
     const nextVaultRef = makeBundleRef("vault/next");
     const { db, store } = createRunnerStateStoreHarness();
     await store.bootstrapUser("user-cache");
 
-    const firstSync = await store.syncBundleRefCache(currentVaultRef);
-    expect(firstSync.bundleVersion).toBe(1);
-    expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
-      bundle_version: 1,
+    await expect(store.syncBundleRefCache(currentVaultRef)).resolves.toMatchObject({
+      bundleRef: currentVaultRef,
+    });
+    await expect(store.syncBundleRefCache(nextVaultRef)).resolves.toMatchObject({
+      bundleRef: nextVaultRef,
     });
 
-    const repeatedSync = await store.syncBundleRefCache(currentVaultRef);
-    expect(repeatedSync.bundleVersion).toBe(1);
-    expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: serializeHostedExecutionBundleRef(currentVaultRef),
-      bundle_version: 1,
-    });
-
-    const changedSync = await store.syncBundleRefCache(nextVaultRef);
-    expect(changedSync.bundleVersion).toBe(2);
-    expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: serializeHostedExecutionBundleRef(nextVaultRef),
-      bundle_version: 2,
-    });
-  });
-
-  it("fails closed on malformed bundle refs without rewriting them", async () => {
-    const vaultRef = makeBundleRef("vault/current");
-    const { db, store } = createRunnerStateStoreHarness();
-    await store.bootstrapUser("user-malformed");
-    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
-
-    db.prepare(`
-      UPDATE runner_meta
-      SET bundle_ref_json = ?, bundle_version = ?
+    expect(db.prepare(`
+      SELECT user_id, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at
+      FROM runner_meta
       WHERE singleton = 1
-    `).run(malformedBundleRefJson, 7);
-
-    await expect(store.readState()).rejects.toThrow(
-      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
-    );
-    expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: malformedBundleRefJson,
-      bundle_version: 7,
-    });
-
-    await expect(store.readBundleMetaStateForMutation()).rejects.toThrow(
-      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
-    );
-    await expect(store.compareAndSwapBundleRefs({
-      expectedVersion: 7,
-      nextBundleRef: vaultRef,
-    })).rejects.toThrow(
-      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
-    );
-    await expect(store.compareAndSwapBundleRefs({
-      expectedVersion: 7,
-      nextBundleRef: null,
-    })).rejects.toThrow(
-      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
-    );
-    await expect(store.syncBundleRefCache(vaultRef)).rejects.toThrow(
-      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
-    );
-    expect(readRunnerMetaBundleState(db)).toEqual({
-      bundle_ref_json: malformedBundleRefJson,
-      bundle_version: 7,
+    `).get()).toEqual({
+      user_id: "user-cache",
+      active_run_event_id: null,
+      active_run_id: null,
+      active_run_attempt: null,
+      active_run_started_at: null,
     });
   });
 });
