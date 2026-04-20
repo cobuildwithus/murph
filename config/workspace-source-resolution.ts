@@ -94,15 +94,22 @@ export function createVitestWorkspaceRuntimeAliases(
   };
 
   for (const [specifier, entryPath] of Object.entries(entries)) {
-    appendAlias(specifier, entryPath);
-
     if (!isPackageRootSpecifier(specifier)) {
+      appendAlias(specifier, entryPath);
       continue;
+    }
+
+    const packageDir = resolveWorkspacePackageDir(entryPath);
+    const packageJson = readWorkspacePackageJson(packageDir);
+
+    if (workspacePackageAllowsRootSpecifier(packageJson)) {
+      appendAlias(specifier, entryPath);
     }
 
     for (const [subpathSpecifier, subpathEntryPath] of resolvePackageExportSourceEntries(
       specifier,
-      entryPath,
+      packageDir,
+      packageJson,
     )) {
       appendAlias(subpathSpecifier, subpathEntryPath);
     }
@@ -193,10 +200,9 @@ function isPackageRootSpecifier(specifier: string): boolean {
 
 function resolvePackageExportSourceEntries(
   packageName: string,
-  entryPath: string,
+  packageDir: string,
+  packageJson: Record<string, unknown>,
 ): Array<readonly [string, string]> {
-  const packageDir = resolveWorkspacePackageDir(entryPath);
-  const packageJson = readWorkspacePackageJson(packageDir);
   const exportsField = packageJson.exports;
   if (!exportsField || typeof exportsField !== "object" || Array.isArray(exportsField)) {
     return [];
@@ -220,6 +226,28 @@ function resolvePackageExportSourceEntries(
   }
 
   return aliases;
+}
+
+function workspacePackageAllowsRootSpecifier(packageJson: Record<string, unknown>): boolean {
+  if (!("exports" in packageJson)) {
+    return true;
+  }
+
+  const exportsField = packageJson.exports;
+  if (typeof exportsField === "string" || Array.isArray(exportsField)) {
+    return true;
+  }
+
+  if (!exportsField || typeof exportsField !== "object") {
+    return false;
+  }
+
+  const exportKeys = Object.keys(exportsField);
+  if (exportKeys.some((key) => !key.startsWith("."))) {
+    return true;
+  }
+
+  return Object.hasOwn(exportsField, ".");
 }
 
 function resolveWorkspacePackageDir(entryPath: string): string {

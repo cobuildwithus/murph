@@ -76,6 +76,16 @@ export async function verifyAssistantRuntimePublicSourceSurface(failures) {
 export async function verifyFocusedOwnerSourceSurfaces(failures) {
   const deletedCompatibilityFiles = [
     {
+      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "index.ts"),
+      message:
+        "packages/messaging-ingress/src/index.ts exists; messaging-ingress is subpath-only and must not revive a package-root barrel beside its explicit provider entrypoints.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "cloudflare-hosted-control", "src", "index.ts"),
+      message:
+        "packages/cloudflare-hosted-control/src/index.ts exists; cloudflare-hosted-control is subpath-only and must not revive a package-root barrel beside its explicit client and route entrypoints.",
+    },
+    {
       path: path.join(repoRoot, "packages", "operator-config", "src", "knowledge-contracts.ts"),
       message:
         "packages/operator-config/src/knowledge-contracts.ts exists; knowledge result contracts are owned by @murphai/query and must not return through an operator-config compatibility shim.",
@@ -262,22 +272,6 @@ export async function verifyFocusedOwnerSourceSurfaces(failures) {
           specifier: "./knowledge-cli-contracts.js",
           message:
             "packages/cli/src/vault-cli-command-manifest.ts imports ./knowledge-cli-contracts.js; CLI manifest metadata should reference query-owned knowledge schemas directly instead of a local alias boundary.",
-        },
-      ],
-      predicate: sourceMentionsSpecifier,
-    },
-    {
-      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "index.ts"),
-      failures: [
-        {
-          specifier: "./telegram-webhook.ts",
-          message:
-            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook.ts; Telegram ingress must stay on explicit telegram-webhook and telegram-webhook-payload subpaths instead of drifting back through a package-root barrel.",
-        },
-        {
-          specifier: "./telegram-webhook-payload.ts",
-          message:
-            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook-payload.ts; messaging-ingress must keep Telegram ingress on explicit subpaths instead of leaking raw payload parsing through a package-root barrel.",
         },
       ],
       predicate: sourceMentionsSpecifier,

@@ -24,6 +24,16 @@ export async function verifyWorkspacePackageExports(failures) {
         failures.push(failure);
       }
     }
+
+    if (
+      isSubpathOnlyRootFallbackPackage(packageJson.name)
+      && !workspacePackageAllowsRootSpecifier(packageJson)
+      && ("main" in packageJson || "types" in packageJson)
+    ) {
+      failures.push(
+        `${path.relative(repoRoot, packageJsonPath)} declares main/types even though the package does not export "."; subpath-only workspace packages must not keep a root fallback entrypoint.`,
+      );
+    }
   }
 }
 
@@ -157,6 +167,34 @@ export async function verifyWorkspacePackageExportTargets(failures) {
   }
 }
 
+function workspacePackageAllowsRootSpecifier(packageJson) {
+  if (!("exports" in packageJson)) {
+    return true;
+  }
+
+  const exportsField = packageJson.exports;
+  if (typeof exportsField === "string" || Array.isArray(exportsField)) {
+    return true;
+  }
+
+  if (!exportsField || typeof exportsField !== "object") {
+    return false;
+  }
+
+  const exportKeys = Object.keys(exportsField);
+  if (exportKeys.some((key) => !key.startsWith("."))) {
+    return true;
+  }
+
+  return Object.hasOwn(exportsField, ".");
+}
+
+function isSubpathOnlyRootFallbackPackage(packageName) {
+  return (
+    packageName === "@murphai/messaging-ingress"
+    || packageName === "@murphai/cloudflare-hosted-control"
+  );
+}
 
 function listWorkspaceExportTargets(exportsField) {
   if (!exportsField || typeof exportsField !== "object" || Array.isArray(exportsField)) {

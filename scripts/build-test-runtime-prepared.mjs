@@ -83,7 +83,9 @@ const workspaceSmokePackages = [
 const baseSmokeImportPaths = [
   "packages/contracts/dist/index.js",
   "packages/hosted-execution/dist/index.js",
-  "packages/messaging-ingress/dist/index.js",
+  "packages/messaging-ingress/dist/linq-webhook.js",
+  "packages/messaging-ingress/dist/telegram-webhook.js",
+  "packages/messaging-ingress/dist/telegram-webhook-payload.js",
   "packages/runtime-state/dist/index.js",
   "packages/operator-config/dist/index.js",
   "packages/assistant-engine/dist/index.js",

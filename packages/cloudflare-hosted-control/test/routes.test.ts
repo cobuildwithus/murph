@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,12 +31,17 @@ describe("cloudflare hosted control routes", () => {
     );
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
       exports?: Record<string, unknown>;
+      main?: string;
+      types?: string;
     };
 
     expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
       "./client",
       "./routes",
     ]);
+    expect(packageJson).not.toHaveProperty("main");
+    expect(packageJson).not.toHaveProperty("types");
+    await expect(access(new URL("../src/index.ts", import.meta.url))).rejects.toThrow();
   });
 
   it("rejects removed subpaths while keeping the surviving ones importable", async () => {

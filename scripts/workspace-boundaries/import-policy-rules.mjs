@@ -43,6 +43,18 @@ export async function verifyTsconfigPathMappings(failures) {
             `${path.relative(repoRoot, tsconfigPath)} maps ${specifier} to sibling build output ${path.relative(repoRoot, resolvedTarget)}; internal workspace consumers must resolve other packages from source.`,
           );
         }
+
+        if (
+          targetMember !== null
+          && await specifierDoesNotAllowRootFallbackAlias({
+            specifier,
+            targetMember,
+          })
+        ) {
+          failures.push(
+            `${path.relative(repoRoot, tsconfigPath)} maps ${specifier} to ${path.relative(repoRoot, resolvedTarget)}, but ${targetMember} is a subpath-only workspace package; keep source path mappings on its declared public subpaths instead of a root alias.`,
+          );
+        }
       }
     }
   }
@@ -194,6 +206,34 @@ function workspacePackageAllowsRootSpecifier(packageJson) {
   return Object.hasOwn(exportsField, ".");
 }
 
+async function specifierDoesNotAllowRootFallbackAlias({
+  specifier,
+  targetMember,
+}) {
+  if (targetMember === null || specifier.includes("*")) {
+    return false;
+  }
+
+  const packageJson = await readWorkspaceMemberPackageJson(targetMember);
+
+  if (!packageJson || typeof packageJson.name !== "string") {
+    return false;
+  }
+
+  return (
+    isSubpathOnlyRootFallbackPackage(packageJson.name)
+    && specifier === packageJson.name
+    && !workspacePackageAllowsRootSpecifier(packageJson)
+  );
+}
+
+function isSubpathOnlyRootFallbackPackage(packageName) {
+  return (
+    packageName === "@murphai/messaging-ingress"
+    || packageName === "@murphai/cloudflare-hosted-control"
+  );
+}
+
 async function verifyWorkspaceDependencyDeclaration({
   filePath,
   isTestFile,
@@ -229,6 +269,7 @@ export function verifyWorkspaceImportPolicy({
   specifier,
 }) {
   const isTestFile = isTestSourceFile(filePath);
+
   if (
     isWorkspacePackageSpecifier(specifier)
     && importsEmptyBindingsFromSpecifier(source, specifier)
