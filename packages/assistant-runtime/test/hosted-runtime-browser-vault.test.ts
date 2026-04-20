@@ -7,9 +7,29 @@ import { afterEach, test } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 
-import { exportHostedBrowserVaultSnapshot } from "../src/hosted-runtime/browser-vault.ts";
+import { exportHostedBrowserVaultReplica } from "../src/hosted-runtime/browser-vault.ts";
 
 const tempRoots: string[] = [];
+
+interface BrowserVaultReplicaLike {
+  entities: Array<{
+    attributes: Record<string, unknown>;
+    bodyPreview: string | null;
+    family: string;
+    id: string;
+    title: string | null;
+  }>;
+  schema: string;
+  searchRows: Array<{
+    text: string;
+  }>;
+  source: {
+    sourceBundleHash: string;
+  };
+  timelineRows: Array<{
+    id: string;
+  }>;
+}
 
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((vaultRoot) =>
@@ -17,7 +37,7 @@ afterEach(async () => {
   ));
 });
 
-test("exports a hosted browser vault snapshot from the tolerant vault read", async () => {
+test("exports a hosted browser vault replica from the tolerant vault read", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-browser-vault-"));
   tempRoots.push(vaultRoot);
 
@@ -46,15 +66,16 @@ Felt steadier after a full night of sleep.
     "utf8",
   );
 
-  const snapshot = await exportHostedBrowserVaultSnapshot({
-    sourceVersion: "source_123",
+  const replica: BrowserVaultReplicaLike = await exportHostedBrowserVaultReplica({
+    sourceBundleHash: "a".repeat(64),
     vaultRoot,
   });
 
-  assert.equal(snapshot.schema, "murph.browser-vault-dashboard-snapshot.v2");
-  assert.equal(snapshot.sourceVersion, "source_123");
-  assert.equal(snapshot.overview.metrics[0]?.label, "entities");
-  assert.ok(Array.isArray(snapshot.history.timeline));
+  assert.equal(replica.schema, "murph.browser-vault-replica.v1");
+  assert.equal(replica.source.sourceBundleHash, "a".repeat(64));
+  assert.equal(replica.entities.some((entity) => entity.title === "Travel recovery note"), true);
+  assert.equal(replica.searchRows.some((row) => row.text.includes("steadier")), true);
+  assert.ok(Array.isArray(replica.timelineRows));
 });
 
 test("hosted browser vault export minimizes experiments while preserving allowed event and registry families", async () => {
@@ -196,16 +217,29 @@ schedule: nightly
     "utf8",
   );
 
-  const snapshot = await exportHostedBrowserVaultSnapshot({
-    sourceVersion: "source_456",
+  const replica: BrowserVaultReplicaLike = await exportHostedBrowserVaultReplica({
+    sourceBundleHash: "b".repeat(64),
     vaultRoot,
   });
+  const longExperiment = replica.entities.find((entity) => entity.title === "Long Preview");
+  const shortExperiment = replica.entities.find((entity) => entity.title === "Short Preview");
+  const emptyExperiment = replica.entities.find((entity) => entity.title === "Empty Preview");
+  const conditionEntity = replica.entities.find((entity) => entity.family === "condition");
 
-  assert.equal(snapshot.sourceVersion, "source_456");
-  assert.equal(snapshot.overview.metrics.find((metric) => metric.label === "registries")?.value, 3);
-  assert.equal(snapshot.overview.trackedExperiments[0]?.title, "Long Preview");
-  assert.match(snapshot.overview.trackedExperiments[0]?.summary ?? "", /\.\.\.$/u);
-  assert.equal(snapshot.overview.trackedExperiments[1]?.summary, "Short hosted preview.");
-  assert.equal(snapshot.overview.trackedExperiments[2]?.summary, null);
-  assert.equal(snapshot.history.timeline.some((entry) => entry.id === "evt_hosted_browser_vault_01"), true);
+  assert.equal(replica.source.sourceBundleHash, "b".repeat(64));
+  assert.equal(
+    replica.entities.filter((entity) =>
+      entity.family === "condition" ||
+      entity.family === "goal" ||
+      entity.family === "protocol"
+    ).length,
+    3,
+  );
+  assert.match(longExperiment?.bodyPreview ?? "", /\.\.\.$/u);
+  assert.equal(shortExperiment?.bodyPreview, "Short hosted preview.");
+  assert.equal(emptyExperiment?.bodyPreview, null);
+  assert.deepEqual(conditionEntity?.attributes, {});
+  assert.equal(conditionEntity?.bodyPreview, null);
+  assert.equal(replica.searchRows.some((row) => row.text.includes("Sensitive note")), false);
+  assert.equal(replica.timelineRows.some((entry) => entry.id === "evt_hosted_browser_vault_01"), true);
 });
