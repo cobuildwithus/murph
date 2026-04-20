@@ -59,6 +59,7 @@ import {
   materializeExportPack,
   normalizeIssues,
   optionalStringArray,
+  readRawImportManifest,
   recordPath,
   requirePayloadObjectField,
   toGenericListItem,
@@ -836,6 +837,74 @@ describe("record service seams", () => {
           name: "VaultCliError",
           code: "invalid_path",
           message: 'Vault-relative path "../outside/workout.csv" escapes the selected vault root.',
+        },
+      );
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("shared raw import manifest reader preserves missing and invalid manifest errors", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "vault-usecases-manifest-errors-"));
+    const invalidJsonManifestFile = "raw/documents/2026/04/doc_invalid_json/manifest.json";
+    const arrayManifestFile = "raw/documents/2026/04/doc_array/manifest.json";
+    const schemaMismatchManifestFile = "raw/documents/2026/04/doc_schema/manifest.json";
+
+    try {
+      await writeManifestFile(vaultRoot, invalidJsonManifestFile, {
+        schemaVersion: "murph.raw-import-manifest.v1",
+      });
+      await writeFile(
+        path.join(vaultRoot, invalidJsonManifestFile),
+        "{\n",
+        "utf8",
+      );
+
+      await mkdir(path.dirname(path.join(vaultRoot, arrayManifestFile)), { recursive: true });
+      await writeFile(
+        path.join(vaultRoot, arrayManifestFile),
+        `${JSON.stringify(["not", "an", "object"], null, 2)}\n`,
+        "utf8",
+      );
+
+      await writeManifestFile(vaultRoot, schemaMismatchManifestFile, {
+        schemaVersion: "murph.raw-import-manifest.v1",
+        importId: "doc_schema",
+      });
+
+      await assert.rejects(
+        () => readRawImportManifest(vaultRoot, "raw/documents/2026/04/doc_missing/manifest.json"),
+        {
+          name: "VaultCliError",
+          code: "manifest_missing",
+          message: 'Manifest file "raw/documents/2026/04/doc_missing/manifest.json" is missing from the vault.',
+        },
+      );
+
+      await assert.rejects(
+        () => readRawImportManifest(vaultRoot, invalidJsonManifestFile),
+        {
+          name: "VaultCliError",
+          code: "manifest_invalid",
+          message: `Manifest file "${invalidJsonManifestFile}" is not valid JSON.`,
+        },
+      );
+
+      await assert.rejects(
+        () => readRawImportManifest(vaultRoot, arrayManifestFile),
+        {
+          name: "VaultCliError",
+          code: "manifest_invalid",
+          message: `Manifest file "${arrayManifestFile}" must contain a JSON object.`,
+        },
+      );
+
+      await assert.rejects(
+        () => readRawImportManifest(vaultRoot, schemaMismatchManifestFile),
+        {
+          name: "VaultCliError",
+          code: "manifest_invalid",
+          message: `Manifest file "${schemaMismatchManifestFile}" does not match the raw import manifest contract.`,
         },
       );
     } finally {
