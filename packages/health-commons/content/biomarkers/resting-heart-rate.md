@@ -4,8 +4,8 @@ entityType: biomarker
 key: biomarker:resting-heart-rate
 slug: biomarkers/resting-heart-rate
 title: Resting Heart Rate
-summary: A resting pulse marker that can help users interpret recovery, fitness, illness, stress, and protocol response trends without treating one number as a verdict.
-status: draft
+summary: A resting pulse marker that gives Murph a widely available, legible primary endpoint for the first dry-sauna experiment.
+status: field-testing
 quality: usable
 aliases:
   - RHR
@@ -18,15 +18,34 @@ relations:
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+  -
+    type: cites
+    target: source_artifact:pmid-32814462
+  -
+    type: cites
+    target: source_artifact:pmid-29269746
+  -
+    type: cites
+    target: source_artifact:pmid-31331560
+  -
+    type: cites
+    target: source_artifact:pmid-34622026
 measurementContexts:
   - overnight_wearable
   - morning_resting_manual
 unit: bpm
 interpretationFrame:
-  principle: Trend beats a single value.
-  caveat: Device windows and smoothing differ, so compare like with like.
+  principle: Trend beats a single value, and baseline-versus-intervention averages are more useful than a dramatic one-off reading.
+  caveat: Device windows, smoothing, illness, alcohol, travel, and hard training can all move resting heart rate.
 ---
 
-Resting heart rate is the primary Murph v1 endpoint for the dry-sauna experiment because it is widely available across wearable providers and usually easier to explain than noisier recovery scores.
+Resting heart rate is Murph's primary v1 dry-sauna endpoint because it is available on most consumer wearables and easier to explain than composite recovery scores.
 
-Murph should compare RHR against the user's own baseline, annotate confounders such as illness, alcohol, heavy training, travel, and poor sleep, and avoid treating a single morning value as a verdict.
+A useful Murph read usually looks like this:
+
+- compare a stable **7-day baseline average** against the **14-day intervention average**,
+- keep exercise load, bedtime, alcohol, and illness notes visible,
+- do not overreact to the morning after a stressful day or a poor night of sleep,
+- prefer like-for-like device readings rather than mixing devices or measurement contexts.
+
+Resting heart rate is not a complete picture of cardiovascular health. It is simply one of the cleanest consumer-facing markers for a first bounded self-experiment.

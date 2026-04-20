@@ -104,6 +104,28 @@
     },
     {
       "affectedFields": [
+        "artifacts/sauna/research-artifacts.json",
+        "packages/health-commons/src/hash-artifact.ts",
+        "packages/health-commons/README.md",
+        ".gitignore"
+      ],
+      "changeId": "chg_2026_04_20_sauna_cloudflare_article_onboarding",
+      "changeType": "artifact_change",
+      "editSummary": "Expanded the sauna artifact manifest and added local hash/staging helpers for legally reviewed Cloudflare R2 article uploads.",
+      "entityKey": "source_artifact:sauna-bibliography-2026-04-18",
+      "minor": false,
+      "rationale": "Murph now needs a practical operator path for adding article PDFs to Cloudflare R2 without committing them to Git and without bypassing rights review.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:sauna-bibliography-2026-04-18",
+        "source_artifact:pmid-29849692",
+        "source_artifact:mayo-2018-sauna-review",
+        "source_artifact:pmid-38577299"
+      ]
+    },
+    {
+      "affectedFields": [
         "key",
         "slug",
         "relations",
@@ -118,6 +140,34 @@
       "reviewStatus": "accepted",
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": []
+    },
+    {
+      "affectedFields": [
+        "relations",
+        "claims",
+        "researchCoverage",
+        "sessionLoggingFields",
+        "confoundersToTrack",
+        "testPlans",
+        "body"
+      ],
+      "changeId": "chg_2026_04_20_sauna_research_base_expansion",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the canonical dry-sauna protocol with a much larger structured research base, optional morning blood pressure tracking, and a bibliography-backed evidence map.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "Murph's sauna research corpus is now large enough to expose source-bucket structure, null evidence, and protocol-design guardrails directly on the canonical page instead of relying on a handful of seed citations.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:sauna-bibliography-2026-04-18",
+        "source_artifact:pmid-16871826",
+        "source_artifact:pmid-29849692",
+        "source_artifact:pmid-32814462",
+        "source_artifact:pmid-38577299",
+        "source_artifact:pmid-41032138",
+        "source_artifact:pmid-40611569"
+      ]
     }
   ]
 }

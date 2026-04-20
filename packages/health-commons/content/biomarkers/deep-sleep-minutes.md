@@ -25,3 +25,5 @@ interpretationFrame:
 ---
 
 Deep sleep minutes can be shown as a secondary context marker, but Murph should not over-weight it when deciding whether a dry-sauna protocol worked for a person.
+
+If a user sees a strong, repeated deep-sleep signal alongside other markers, it can be worth noting. But Murph should still anchor interpretation in broader sleep continuity and cardiovascular signals first.
