@@ -178,6 +178,22 @@ export function createHostedUserKeyStoreFromEnvironment(input: {
   });
 }
 
+export function requireHostedUserCryptoContextFromEnvironment(input: {
+  auditLog?: ((record: HostedUserKeyAuditRecord) => Promise<void> | void) | null;
+  bucket: R2BucketLike;
+  environment: HostedExecutionEnvironment;
+  reason: string;
+  userId: string;
+}): Promise<HostedUserCryptoContext> {
+  return createHostedUserKeyStoreFromEnvironment({
+    auditLog: input.auditLog ?? null,
+    bucket: input.bucket,
+    environment: input.environment,
+  }).requireUserCryptoContext(input.userId, {
+    reason: input.reason,
+  });
+}
+
 async function resolveHostedUserCryptoContext(input: {
   auditLog: ((record: HostedUserKeyAuditRecord) => Promise<void> | void) | null;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
