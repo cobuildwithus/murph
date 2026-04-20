@@ -17,7 +17,6 @@ import {
   isHealthQueryableRecordId,
 } from "../health-cli-descriptors.js"
 import { loadJsonInputObject } from "../json-input.js"
-import { isJsonObject } from "../commands/query-record-command-helpers.js"
 import {
   describeQueryLookupConstraint,
   inferQueryIdEntityKind,
@@ -178,7 +177,7 @@ export async function readRawImportManifest(
     )
   }
 
-  if (!isJsonObject(manifest)) {
+  if (!isPlainObject(manifest)) {
     throw new VaultCliError(
       "manifest_invalid",
       `Manifest file "${manifestFile}" must contain a JSON object.`,
