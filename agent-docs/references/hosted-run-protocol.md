@@ -4,10 +4,11 @@ Last verified: 2026-04-20
 
 ## Decision
 
-Hosted execution should converge on a run-centric protocol:
+Hosted execution is hard-cut to a run-centric protocol:
 
 - `apps/web` owns external ingress ordering, the runtime cursor, snapshot refs, and redacted run recovery state.
-- The executor adapter, currently Cloudflare and later potentially a TEE runner, owns no canonical queue or recovery truth.
+- `HostedWake` remains the external ingress ledger until/unless it is renamed to `HostedIngressEvent`.
+- The executor adapter, currently Cloudflare and later potentially a TEE runner, owns no canonical queue or recovery truth and must invoke runtime execution through `runDrain`.
 - The private runtime owns internal assistant/parser/scheduler follow-up decisions while it is running.
 - Encrypted snapshots and oversized payloads remain in blob storage.
 
@@ -22,11 +23,11 @@ finalize hosted run side effects
 record redacted run logs/status
 ```
 
-The old wake-by-wake protocol remains a compatibility lane while callers migrate, but it should not be extended with new runtime-internal work kinds.
+There is no legacy wake-by-wake runtime execution lane. Do not describe or preserve a `materialize` / `unseen` / `terminal` / `commit` / `finalize` fallback for hosted executor jobs, including the deleted web/Cloudflare handoff loop.
 
-## Current migration state
+## Current protocol
 
-The Cloudflare runner should prefer the run adapter path:
+All hosted executor jobs must use `runDrain`:
 
 ```text
 acquire hosted run
@@ -35,13 +36,13 @@ commit prepared snapshot through web CAS
 finalize side effects from web-visible HostedRun recovery state
 ```
 
-The legacy materialize/fetch/terminal/commit/finalize wake loop is retained only as a fallback compatibility lane. New runtime-internal follow-ups should be expressed as local runtime work plus `nextRuntimeWakeAt`, not as web-materialized assistant/parser wakes.
+`HostedWake` is ingress-only. It is not an executor-facing runtime protocol. Internal runtime follow-ups stay inside runtime state and surface only as `nextRuntimeWakeAt`.
 
 ## Why
 
 Cloudflare is intentionally hard to treat as the primary support/debug surface. Run state that operators need to answer “what happened?” must be visible in web/Postgres as redacted coordination metadata instead of being hidden in Durable Object state, encrypted snapshots, or container logs.
 
-The run protocol preserves the existing correctness spine from the canonical hosted wake work: web-owned cursor, cursor-version CAS, encrypted payloads, encrypted snapshots, and Cloudflare as execution-only. It removes the highest-friction seam: internal assistant follow-up work should not have to materialize back into the web wake queue before the current drain can observe it.
+The run protocol preserves the existing correctness spine from the ingress ledger and hosted run CAS flow: web-owned cursor, cursor-version CAS, encrypted payloads, encrypted snapshots, and Cloudflare as execution-only. It removes the highest-friction seam: internal assistant follow-up work must not materialize back into a web-owned wake loop before the current drain can observe it.
 
 ## Ownership rules
 
@@ -61,6 +62,7 @@ The run protocol preserves the existing correctness spine from the canonical hos
 - assistant session state
 - inbox/parser/scheduler/outbox local state
 - immediate internal follow-up drain decisions
+- no web-materialized assistant/parser follow-up rows
 
 ### Cloudflare owns
 
@@ -68,12 +70,13 @@ The run protocol preserves the existing correctness spine from the canonical hos
 - alarm/nudge acceleration
 - short-lived active-run guardrails
 - no canonical queue/cursor/finalize recovery truth
+- no wake-by-wake execution lifecycle state
 
 ## Runtime timers
 
 `nextRuntimeWakeAt` is a cursor projection from private runtime state. It is not an instruction for web to create an `assistant.cron.tick` row. When `nextRuntimeWakeAt` is due and there are no external events, `acquire hosted run` may return a zero-event `runtime_timer` run and let the runtime decide what is due.
 
-`nextRuntimeWakeAt` is the only hosted cursor wake projection. Internal assistant/parser/device-sync follow-ups stay runtime-local and surface only as this redacted due-time hint.
+`nextRuntimeWakeAt` is the only hosted cursor wake projection. Internal assistant/parser/device-sync follow-ups stay runtime-local and surface only as this redacted due-time hint. There is no `assistantNextWakeAt`, no `wakeMaterializationHints`, and no internal web-materialized assistant/parser follow-up lane.
 
 ## Finalize recovery
 
@@ -86,7 +89,7 @@ HostedRun.outputCommittedSeq = ...
 HostedRun.outputCursorVersion = ...
 ```
 
-A later executor can acquire/resume that run and finalize it from web-visible recovery state. Durable Objects do not persist pending-commit or wake-materialization recovery truth; they keep only short-lived active-run and alarm/addressing state.
+A later executor can acquire/resume that run and finalize it from web-visible recovery state. Durable Objects do not persist pending-commit state, fetch-proof lifecycle state, or wake-materialization recovery truth; they keep only short-lived active-run and alarm/addressing state.
 
 ## Observability
 
