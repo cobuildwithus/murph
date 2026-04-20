@@ -1,6 +1,6 @@
 # Data Model Seams
 
-Last verified: 2026-04-14
+Last verified: 2026-04-20
 
 ## Implemented in this patch
 
@@ -298,24 +298,24 @@ This patch:
 **Main refactor risk:** do not answer future caller needs by reviving a wide `HostedMemberAggregate` or by leaking encrypted/blind-index columns through the lookup surface.
 The seam stays healthy only if the lookup result remains nested and privacy-minimized.
 
-### 17. Keep hosted execution status centered on the web-owned wake/cursor lifecycle
+### 17. Keep hosted execution status centered on the web-owned run/cursor lifecycle
 
 **Seam:** `apps/web/src/lib/hosted-wake/store.ts`, `apps/web/src/lib/hosted-wake/dispatch.ts`, `packages/hosted-execution/src/contracts.ts`, `apps/cloudflare/src/user-runner.ts`
 
 Hosted execution used to translate across overlapping outbox, queue-presence,
-and dispatch-state models. The current tree is simpler: web-owned
-`HostedWake` / `HostedExecutionCursor` rows are the canonical queue and cursor
-truth, while Cloudflare status is a consumer-facing projection over that
-lifecycle plus local execution residue.
+and dispatch-state models. The current tree is simpler: web-owned external
+ingress ordering plus `HostedExecutionCursor` and `HostedRun` are the
+canonical ordering/fence/recovery truth, while Cloudflare status is a
+consumer-facing projection over that lifecycle plus local execution residue.
 
 **Why this is simpler:** ordering, committed high-water, and snapshot fences now
-live with the canonical wake/cursor owner instead of being split across a web
-outbox and a Cloudflare queue model.
+live with the cursor owner and finalize recovery lives with the hosted-run
+owner instead of being split across a web outbox and a Cloudflare queue model.
 
-**Main refactor risk:** do not let Cloudflare status output grow a second wake
-ownership seam. The only queue-depth field should stay wake-native
-(`pendingWakeCount`), and the canonical owner remains the web-owned
-`HostedWake` / `HostedExecutionCursor` seam.
+**Main refactor risk:** do not let Cloudflare status output grow a second
+execution ownership seam. Queue-depth and recovery fields should stay
+web-owned, with Cloudflare exposing only a projection over that source of
+truth.
 
 ### 18. Keep device-sync wake hint subshapes with the device-sync runtime owner
 
@@ -456,17 +456,17 @@ It already does the thing the higher-leverage findings above still need to do.
 
 **Main failure mode if changed poorly:** spreading these definitions back across query, assistant-engine, and CLI would recreate exactly the taxonomy drift and duplicate command metadata the repo has been paying down elsewhere.
 
-#### B. Keep hosted wake payload ownership split between shared wake contracts and the web-owned storage helper
+#### B. Keep hosted ingress payload ownership split between shared ingress contracts and the web-owned storage helper
 
 **Seam:** `packages/hosted-execution/src/{contracts,builders,parsers}.ts`, `apps/web/src/lib/hosted-wake/payload.ts`
 
 This seam is already simple and composable enough.
-`@murphai/hosted-execution` owns the shared wake kinds, payload schemas, and
-normalization helpers, while the web-owned `HostedWake` store owns the
-ciphertext inline-vs-reference storage policy for durable wake rows.
+`@murphai/hosted-execution` owns the shared external-ingress kinds, payload
+schemas, and normalization helpers, while the web-owned ingress store owns the
+ciphertext inline-vs-reference storage policy for durable ingress rows.
 
 **Why keep it:** this split keeps the shared contract vendor-neutral while
-leaving inline-vs-ref storage policy with the canonical queue owner instead of
+leaving inline-vs-ref storage policy with the web-owned ingress owner instead of
 reintroducing a second outbox or Cloudflare-owned payload seam.
 
 **Main failure mode if changed poorly:** reintroducing a dispatch/outbox payload
