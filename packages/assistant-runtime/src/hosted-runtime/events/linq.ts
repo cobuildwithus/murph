@@ -1,4 +1,4 @@
-import type { LinqAttachmentDownloadDriver } from "@murphai/inboxd/connectors/linq/normalize";
+import type { LinqAttachmentDownloadDriver } from "@murphai/inboxd/connectors/hosted-conversation";
 
 export const HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 5_000;
 const HOSTED_LINQ_ATTACHMENT_CDN_HOST = "cdn.linqapp.com";

@@ -3,20 +3,15 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
-  resolveHostedEmailSelfAddresses,
 } from "@murphai/hosted-execution";
 import {
-  normalizeParsedEmailMessage,
-} from "@murphai/inboxd/connectors/email/normalize-parsed";
+  resolveHostedEmailSelfAddresses,
+} from "@murphai/hosted-execution/hosted-email";
 import {
-  parseRawEmailMessage,
-} from "@murphai/inboxd/connectors/email/parsed";
-import {
-  normalizeHostedLinqConversationMessage,
-} from "@murphai/inboxd/connectors/linq/normalize";
-import {
-  normalizeHostedTelegramMessage,
-} from "@murphai/inboxd/connectors/telegram/normalize";
+  normalizeHostedEmailConversationCapture,
+  normalizeHostedLinqConversationCapture,
+  normalizeHostedTelegramConversationCapture,
+} from "@murphai/inboxd/connectors/hosted-conversation";
 import {
   createParsedInboxPipeline,
   openInboxRuntime,
@@ -79,7 +74,7 @@ async function normalizeHostedConversationMessageWake(input: {
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
-    return normalizeHostedLinqConversationMessage({
+    return normalizeHostedLinqConversationCapture({
       accountId: input.wake.message.phoneLookupKey,
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
       downloadDriver: createHostedLinqAttachmentDownloadDriver(),
@@ -89,7 +84,7 @@ async function normalizeHostedConversationMessageWake(input: {
   }
 
   if (isHostedTelegramConversationMessageWake(input.wake)) {
-    return normalizeHostedTelegramMessage({
+    return normalizeHostedTelegramConversationCapture({
       accountId: "bot",
       downloadDriver: createHostedTelegramAttachmentDownloadDriver(),
       externalId: input.wake.eventId,
@@ -104,12 +99,11 @@ async function normalizeHostedConversationMessageWake(input: {
       input.wake,
       input.runtime.platform.effectsPort,
     );
-    const parsedMessage = parseRawEmailMessage(bytes);
 
-    return normalizeParsedEmailMessage({
+    return normalizeHostedEmailConversationCapture({
       accountAddress: input.wake.message.identityId,
       accountId: input.wake.message.identityId,
-      message: parsedMessage,
+      rawMessage: bytes,
       selfAddresses: resolveHostedEmailSelfAddresses({
         extra: [input.wake.message.selfAddress],
         senderIdentity: input.wake.message.identityId,

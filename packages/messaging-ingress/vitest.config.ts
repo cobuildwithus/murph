@@ -17,7 +17,7 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murphai/messaging-ingress": "./src/index.ts",
+  "@murphai/messaging-ingress": "./package.json",
 } as const;
 
 export default defineConfig({

@@ -8,11 +8,11 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 >;
 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/src/index.ts",
+  "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/package.json",
   "@murphai/contracts": "../../packages/contracts/src/index.ts",
   "@murphai/gateway-core": "../../packages/gateway-core/src/index.ts",
   "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
-  "@murphai/messaging-ingress": "../../packages/messaging-ingress/src/index.ts",
+  "@murphai/messaging-ingress": "../../packages/messaging-ingress/package.json",
   "@murphai/runtime-state": "../../packages/runtime-state/src/index.ts",
   "@murphai/query": "../../packages/query/src/index.ts",
   "@murphai/core": "../../packages/core/src/index.ts",
@@ -43,10 +43,17 @@ export function resolveWorkspaceSourceEntries<T extends WorkspaceSourceEntryRela
   entryRelativePaths: T,
 ): WorkspaceSourceEntries<T> {
   return Object.fromEntries(
-    Object.entries(entryRelativePaths).map(([packageName, relativeEntryPath]) => [
-      packageName,
-      path.resolve(workspaceDir, relativeEntryPath),
-    ]),
+    Object.entries(entryRelativePaths).map(([packageName, relativeEntryPath]) => {
+      const resolvedPath = path.resolve(workspaceDir, relativeEntryPath);
+
+      if (!fs.existsSync(resolvedPath)) {
+        throw new Error(
+          `Workspace source entry ${packageName} points at missing path ${resolvedPath}.`,
+        );
+      }
+
+      return [packageName, resolvedPath];
+    }),
   ) as WorkspaceSourceEntries<T>;
 }
 
