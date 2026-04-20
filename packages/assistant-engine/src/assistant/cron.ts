@@ -1603,9 +1603,7 @@ async function executeClaimedAssistantCronJob(input: {
       sessionId = result.session.sessionId
       response = result.response ?? result.decision.privateSummary
     }
-    if (status === 'failed') {
-      status = 'succeeded'
-    }
+    status = 'succeeded'
   } catch (error) {
     errorText = errorMessage(error)
     status = 'failed'
@@ -1902,7 +1900,7 @@ function resolveCanonicalAssistantCronOccurrenceAt(
   return computeAssistantCronNextRunAt(
     resolveAssistantCronResolvedSchedule({
       schedule: source.schedule,
-      timeZone: source.kind === 'automation' ? source.timeZone : source.timeZone,
+      timeZone: source.timeZone,
     }),
     new Date(anchorAt),
   )
@@ -1932,10 +1930,7 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
   return computeAssistantCronNextRunAt(
     resolveAssistantCronResolvedSchedule({
       schedule: input.source.schedule,
-      timeZone:
-        input.source.kind === 'automation'
-          ? input.source.timeZone
-          : input.source.timeZone,
+      timeZone: input.source.timeZone,
     }),
     new Date(anchorAt),
   )
