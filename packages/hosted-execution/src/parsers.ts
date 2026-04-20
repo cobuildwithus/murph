@@ -10,6 +10,12 @@ import {
 } from "./contracts.ts";
 
 import type {
+  HostedExecutionAssistantNotificationDelivery,
+  HostedExecutionAssistantNotificationDeliveryDispatchMode,
+  HostedExecutionAssistantNotificationDeliverySource,
+  HostedExecutionAssistantNotificationFirstContactPolicy,
+  HostedExecutionAssistantNotificationRequestedPayload,
+  HostedExecutionAssistantNotificationResponsePolicy,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
@@ -19,7 +25,6 @@ import type {
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
   HostedExecutionLinqConversationMessagePayload,
-  HostedExecutionMemberActivatedEvent,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerSharePack,
   HostedExecutionRunnerResult,
@@ -43,6 +48,7 @@ import {
   isHostedExecutionRunPhase,
 } from "./observability.ts";
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -128,13 +134,6 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
       });
     case "member.activated":
       return buildHostedExecutionMemberActivatedWake({
-        ...(record.firstContact === undefined
-          ? {}
-          : {
-              firstContact: record.firstContact === null
-                ? null
-                : parseHostedExecutionFirstContactTarget(record.firstContact),
-            }),
         eventId,
         memberChannels: parseHostedExecutionMemberChannels(
           record.memberChannels,
@@ -151,6 +150,16 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
           "Hosted execution wake member.channels.updated memberChannels",
         ),
         memberId: userId,
+        occurredAt,
+      });
+    case "assistant.notification.requested":
+      return buildHostedExecutionAssistantNotificationRequestedWake({
+        eventId,
+        memberId: userId,
+        notification: parseHostedExecutionAssistantNotificationRequestedPayload(
+          record.notification,
+          "Hosted execution wake assistant.notification.requested notification",
+        ),
         occurredAt,
       });
     case "device-sync.wake":
@@ -608,13 +617,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
   switch (kind) {
     case "member.activated":
       return {
-        ...(record.firstContact === undefined
-          ? {}
-          : {
-              firstContact: record.firstContact === null
-                ? null
-                : parseHostedExecutionFirstContactTarget(record.firstContact),
-            }),
         kind,
         memberChannels: parseHostedExecutionMemberChannels(
           record.memberChannels,
@@ -631,6 +633,15 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       } satisfies HostedExecutionMemberChannelsUpdatedEvent;
+    case "assistant.notification.requested":
+      return {
+        kind,
+        notification: parseHostedExecutionAssistantNotificationRequestedPayload(
+          record.notification,
+          "Hosted execution assistant.notification.requested notification",
+        ),
+        userId,
+      };
     case "device-sync.wake":
       return {
         ...(record.connectionId === undefined
@@ -669,74 +680,175 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
   }
 }
 
-function parseHostedExecutionFirstContactTarget(
+function parseHostedExecutionAssistantNotificationRequestedPayload(
   value: unknown,
-): HostedExecutionMemberActivatedEvent["firstContact"] {
-  const record = requireObject(value, "Hosted execution member.activated firstContact");
-  const kind = record.kind === undefined
-    ? "thread"
-    : requireString(record.kind, "Hosted execution member.activated firstContact kind");
+  label: string,
+): HostedExecutionAssistantNotificationRequestedPayload {
+  const record = requireObject(value, label);
 
-  if (kind === "linq-materialize-home-thread") {
-    const channel = requireString(
-      record.channel,
-      "Hosted execution member.activated firstContact channel",
-    );
+  return {
+    ...(record.deliveryDedupeToken === undefined
+      ? {}
+      : {
+          deliveryDedupeToken: readNullableString(
+            record.deliveryDedupeToken,
+            `${label}.deliveryDedupeToken`,
+          ),
+        }),
+    ...(record.deliveryDispatchMode === undefined
+      ? {}
+      : {
+          deliveryDispatchMode: record.deliveryDispatchMode === null
+            ? null
+            : parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
+                record.deliveryDispatchMode,
+                `${label}.deliveryDispatchMode`,
+              ),
+        }),
+    ...(record.deliveryIdempotencyKey === undefined
+      ? {}
+      : {
+          deliveryIdempotencyKey: readNullableString(
+            record.deliveryIdempotencyKey,
+            `${label}.deliveryIdempotencyKey`,
+          ),
+        }),
+    ...(record.firstContact === undefined
+      ? {}
+      : {
+          firstContact: record.firstContact === null
+            ? null
+            : parseHostedExecutionAssistantNotificationFirstContactPolicy(
+                record.firstContact,
+                `${label}.firstContact`,
+              ),
+        }),
+    instructions: requireString(record.instructions, `${label}.instructions`),
+    ...(record.responsePolicy === undefined
+      ? {}
+      : {
+          responsePolicy: record.responsePolicy === null
+            ? null
+            : parseHostedExecutionAssistantNotificationResponsePolicy(
+                record.responsePolicy,
+                `${label}.responsePolicy`,
+              ),
+        }),
+    route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
 
-    if (channel !== "linq") {
-      throw new TypeError(
-        "Hosted execution member.activated firstContact kind linq-materialize-home-thread requires channel linq.",
-      );
-    }
+function parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationDeliveryDispatchMode {
+  const mode = requireString(value, label);
 
-    return {
-      channel,
-      fromPhoneNumber: requireString(
-        record.fromPhoneNumber,
-        "Hosted execution member.activated firstContact fromPhoneNumber",
-      ),
-      identityId: requireString(
-        record.identityId,
-        "Hosted execution member.activated firstContact identityId",
-      ),
-      kind,
-      toPhoneNumber: requireString(
-        record.toPhoneNumber,
-        "Hosted execution member.activated firstContact toPhoneNumber",
-      ),
-    };
+  if (mode !== "immediate" && mode !== "queue-only") {
+    throw new TypeError(`${label} is invalid.`);
   }
 
-  if (kind !== "thread") {
-    throw new TypeError("Hosted execution member.activated firstContact kind is invalid.");
+  return mode;
+}
+
+function parseHostedExecutionAssistantNotificationResponsePolicy(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationResponsePolicy {
+  const record = requireObject(value, label);
+  const kind = requireString(record.kind, `${label}.kind`);
+
+  switch (kind) {
+    case "allow_send_or_skip":
+    case "require_send":
+      return { kind };
+    case "require_send_exact_text":
+      return {
+        kind,
+        text: requireString(record.text, `${label}.text`),
+      };
+    default:
+      throw new TypeError(`${label}.kind is invalid.`);
   }
+}
 
-  const channel = requireString(
-    record.channel,
-    "Hosted execution member.activated firstContact channel",
-  );
+function parseHostedExecutionAssistantNotificationFirstContactPolicy(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationFirstContactPolicy {
+  const record = requireObject(value, label);
 
-  if (channel !== "email" && channel !== "linq" && channel !== "telegram") {
-    throw new TypeError("Hosted execution member.activated firstContact channel is invalid.");
+  return {
+    markSeenOnDeliveryAccepted: requireBoolean(
+      record.markSeenOnDeliveryAccepted,
+      `${label}.markSeenOnDeliveryAccepted`,
+    ),
+  };
+}
+
+function parseHostedExecutionAssistantNotificationRoute(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationRequestedPayload["route"] {
+  const record = requireObject(value, label);
+  const channel = parseHostedConversationMessageChannel(record.channel, `${label}.channel`);
+
+  return {
+    actorId: readNullableString(record.actorId, `${label}.actorId`),
+    channel,
+    delivery: parseHostedExecutionAssistantNotificationDelivery(
+      record.delivery,
+      `${label}.delivery`,
+    ),
+    identityId: readNullableString(record.identityId, `${label}.identityId`),
+    threadId: readNullableString(record.threadId, `${label}.threadId`),
+    threadIsDirect: record.threadIsDirect === null
+      ? null
+      : requireBoolean(record.threadIsDirect, `${label}.threadIsDirect`),
+  };
+}
+
+function parseHostedExecutionAssistantNotificationDelivery(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationDelivery {
+  const record = requireObject(value, label);
+  const kind = requireString(record.kind, `${label}.kind`);
+
+  if (kind !== "explicit" && kind !== "participant" && kind !== "thread") {
+    throw new TypeError(`${label}.kind is invalid.`);
   }
 
   return {
-    channel,
-    identityId: record.identityId === null
-      ? null
-      : requireString(
-          record.identityId,
-          "Hosted execution member.activated firstContact identityId",
-        ),
-    ...(record.kind === undefined ? {} : { kind }),
-    threadId: requireString(
-      record.threadId,
-      "Hosted execution member.activated firstContact threadId",
-    ),
-    threadIsDirect: requireBoolean(
-      record.threadIsDirect,
-      "Hosted execution member.activated firstContact threadIsDirect",
-    ),
+    kind,
+    ...(record.source === undefined
+      ? {}
+      : {
+          source: record.source === null
+            ? null
+            : parseHostedExecutionAssistantNotificationDeliverySource(
+                record.source,
+                `${label}.source`,
+              ),
+        }),
+    target: requireString(record.target, `${label}.target`),
+  };
+}
+
+function parseHostedExecutionAssistantNotificationDeliverySource(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationDeliverySource {
+  const record = requireObject(value, label);
+  const kind = requireString(record.kind, `${label}.kind`);
+
+  if (kind !== "linq") {
+    throw new TypeError(`${label}.kind is invalid.`);
+  }
+
+  return {
+    fromPhoneNumber: requireString(record.fromPhoneNumber, `${label}.fromPhoneNumber`),
+    kind,
   };
 }
 

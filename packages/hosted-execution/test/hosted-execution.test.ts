@@ -122,6 +122,7 @@ describe("hosted execution coverage gaps", () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
       "member.channels.updated",
+      "assistant.notification.requested",
       "device-sync.wake",
       "vault.share.accepted",
     ]);

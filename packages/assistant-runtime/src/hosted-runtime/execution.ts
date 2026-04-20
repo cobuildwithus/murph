@@ -490,6 +490,7 @@ async function runHostedSystemWakeFollowupExecution(input: {
           vaultRoot: input.vaultRoot,
           wake: input.wake,
         });
+      case "assistant.notification.requested":
       case "member.activated":
       case "member.channels.updated":
       case "vault.share.accepted":

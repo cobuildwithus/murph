@@ -62,6 +62,7 @@ export function buildResolveAssistantSessionInput(
         : directness === 'group'
           ? false
           : undefined
+  const deliveryKind = input.deliveryKind ?? undefined
 
   const defaultSandbox =
     providerConfig.provider === 'codex-cli'
@@ -82,6 +83,7 @@ export function buildResolveAssistantSessionInput(
     ...(participantId !== undefined ? { actorId: participantId } : {}),
     ...(threadId !== undefined ? { threadId } : {}),
     ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
+    ...(deliveryKind !== undefined ? { deliveryKind } : {}),
     target,
     provider: providerConfig.provider,
     model: providerConfig.model,

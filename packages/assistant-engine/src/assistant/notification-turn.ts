@@ -25,9 +25,17 @@ import {
 } from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 import type {
+  AssistantDeliveryOutcome,
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
+import { finalizeAssistantTurnFromDeliveryOutcome } from './delivery-service.js'
+import {
+  hasAssistantSeenFirstContact,
+  markAssistantFirstContactSeen,
+  resolveAssistantFirstContactStateDocIds,
+} from './first-contact.js'
+import { normalizeAssistantDeliveryError } from './outbox.js'
 import { normalizeNullableString, normalizeRequiredText } from './shared.js'
 
 const assistantNotificationSkipDecisionSchema = z
@@ -61,6 +69,15 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
+export type AssistantNotificationResponsePolicy =
+  | { kind: 'allow_send_or_skip' }
+  | { kind: 'require_send' }
+  | { kind: 'require_send_exact_text'; text: string }
+
+export interface AssistantNotificationFirstContactPolicy {
+  markSeenOnDeliveryAccepted: boolean
+}
+
 export interface AssistantNotificationInput
   extends AssistantSessionResolutionFields,
     Pick<
@@ -68,7 +85,9 @@ export interface AssistantNotificationInput
       | 'abortSignal'
       | 'codexCommand'
       | 'deliveryDispatchMode'
+      | 'deliveryIdempotencyKey'
       | 'deliveryReplyToMessageId'
+      | 'deliverySource'
       | 'deliverySubject'
       | 'deliveryTarget'
       | 'executionContext'
@@ -81,7 +100,9 @@ export interface AssistantNotificationInput
       | 'workingDirectory'
     > {
   deliveryDedupeToken?: string | null
+  firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  responsePolicy?: AssistantNotificationResponsePolicy | null
 }
 
 export interface AssistantNotificationResult {
@@ -114,6 +135,30 @@ export async function sendAssistantNotificationLocal(
         message: messageInput,
       })
       const sharedPlan = await resolveAssistantTurnSharedPlan(messageInput, resolved)
+      const firstContactDocIds = resolveAssistantNotificationFirstContactDocIds({
+        input: messageInput,
+        session: resolved.session,
+        sharedPlan,
+      })
+
+      if (
+        input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+        firstContactDocIds.length > 0 &&
+        await hasAssistantSeenFirstContact({
+          docIds: firstContactDocIds,
+          vault: input.vault,
+        })
+      ) {
+        return {
+          decision: {
+            kind: 'skip',
+            privateSummary: 'First-contact notification already accepted for this route.',
+          },
+          response: null,
+          session: resolved.session,
+        }
+      }
+
       const routes = prioritizeAssistantRoutesForRichUserMessageContent({
         routes: resolveAssistantTurnRoutes(messageInput, defaults, resolved),
         userMessageContent: null,
@@ -140,9 +185,12 @@ export async function sendAssistantNotificationLocal(
         turnId,
         vault: input.vault,
       })
+      const responsePolicy: AssistantNotificationResponsePolicy =
+        input.responsePolicy ?? { kind: 'allow_send_or_skip' }
       const decision = parseAssistantNotificationDecision(providerResult.response)
 
       if (decision.kind === 'skip') {
+        assertAssistantNotificationSkipAllowed(responsePolicy)
         return {
           decision,
           response: null,
@@ -163,6 +211,25 @@ export async function sendAssistantNotificationLocal(
         }).text,
         'notification response',
       )
+      assertAssistantNotificationSendAllowed({
+        policy: responsePolicy,
+        text: sanitizedResponse,
+      })
+
+      const primaryRoute = routes[0] ?? null
+      const state = createAssistantRuntimeStateService(input.vault)
+      await state.turns.createReceipt({
+        sessionId: providerResult.session.sessionId,
+        provider: primaryRoute?.provider ?? providerResult.session.provider,
+        providerModel:
+          primaryRoute?.providerOptions.model
+          ?? providerResult.session.providerOptions.model
+          ?? null,
+        prompt: messageInput.prompt,
+        deliveryRequested: true,
+        turnId,
+      })
+
       const savedSession = await persistAssistantTurnAndSession({
         assistantTranscriptText: sanitizedResponse,
         input: messageInput,
@@ -174,7 +241,7 @@ export async function sendAssistantNotificationLocal(
         turnCreatedAt,
         turnId,
       })
-      await deliverAssistantNotificationMessage({
+      const deliveryOutcome = await deliverAssistantNotificationMessage({
         dedupeToken: input.deliveryDedupeToken ?? null,
         decisionSubject: decision.subject ?? null,
         input: messageInput,
@@ -183,6 +250,31 @@ export async function sendAssistantNotificationLocal(
         sharedPlan,
         turnId,
       })
+      await finalizeAssistantTurnFromDeliveryOutcome({
+        outcome: deliveryOutcome,
+        response: sanitizedResponse,
+        turnId,
+        vault: input.vault,
+      })
+      if (
+        input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+        (deliveryOutcome.kind === 'sent' || deliveryOutcome.kind === 'queued')
+      ) {
+        await markAssistantFirstContactSeen({
+          docIds: resolveAssistantNotificationFirstContactDocIds({
+            input: messageInput,
+            session: deliveryOutcome.session,
+            sharedPlan,
+          }),
+          seenAt: new Date().toISOString(),
+          vault: input.vault,
+        })
+      }
+      await state.status.refreshSnapshot()
+
+      if (deliveryOutcome.kind === 'failed') {
+        throw deliveryOutcome.error
+      }
 
       return {
         decision: {
@@ -190,7 +282,7 @@ export async function sendAssistantNotificationLocal(
           text: sanitizedResponse,
         },
         response: sanitizedResponse,
-        session: savedSession,
+        session: deliveryOutcome.session,
       }
     },
   })
@@ -199,7 +291,13 @@ export async function sendAssistantNotificationLocal(
 function buildAssistantNotificationMessageInput(
   input: AssistantNotificationInput,
 ): AssistantMessageInput {
-  const { instructions: _instructions, ...sessionInput } = input
+  const {
+    deliveryDedupeToken: _deliveryDedupeToken,
+    firstContactPolicy: _firstContactPolicy,
+    instructions: _instructions,
+    responsePolicy: _responsePolicy,
+    ...sessionInput
+  } = input
 
   return {
     ...sessionInput,
@@ -207,7 +305,9 @@ function buildAssistantNotificationMessageInput(
     codexCommand: input.codexCommand,
     deliverResponse: true,
     deliveryDispatchMode: input.deliveryDispatchMode,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId ?? null,
+    deliverySource: input.deliverySource ?? null,
     deliverySubject: input.deliverySubject ?? null,
     deliveryTarget: input.deliveryTarget ?? null,
     executionContext: input.executionContext,
@@ -218,6 +318,7 @@ function buildAssistantNotificationMessageInput(
     operatorAuthority: input.operatorAuthority,
     persistUserPromptOnFailure: false,
     prompt: normalizeRequiredText(input.instructions, 'instructions'),
+    receiptMetadata: null,
     showThinkingTraces: input.showThinkingTraces,
     turnTrigger: input.turnTrigger ?? 'automation-cron',
     userMessageContent: null,
@@ -233,7 +334,7 @@ async function deliverAssistantNotificationMessage(input: {
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
-}): Promise<void> {
+}): Promise<AssistantDeliveryOutcome> {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
   const explicitTarget = audience.explicitTarget ?? input.input.deliveryTarget ?? null
@@ -249,6 +350,8 @@ async function deliverAssistantNotificationMessage(input: {
     sessionId: input.session.sessionId,
     message: input.message,
     dedupeToken: input.dedupeToken,
+    deliveryIdempotencyKey: input.input.deliveryIdempotencyKey ?? null,
+    deliverySource: input.input.deliverySource ?? null,
     channel: audience.channel ?? input.session.binding.channel,
     identityId: audience.identityId ?? input.session.binding.identityId,
     actorId: audience.actorId ?? input.session.binding.actorId,
@@ -264,15 +367,88 @@ async function deliverAssistantNotificationMessage(input: {
 
   switch (outcome.kind) {
     case 'sent':
+      return {
+        kind: 'sent',
+        delivery: outcome.delivery,
+        intentId: outcome.intent.intentId,
+        session: outcome.session ?? input.session,
+      }
     case 'queued':
-      return
+      return {
+        kind: 'queued',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        session: outcome.session ?? input.session,
+      }
     case 'failed':
-      throw outcome.deliveryError
+      return {
+        kind: 'failed',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        session: outcome.session ?? input.session,
+      }
     default:
+      return {
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(
+          new VaultCliError(
+            'ASSISTANT_DELIVERY_FAILED',
+            'Assistant outbound delivery did not complete successfully.',
+          ),
+        ),
+        intentId: null,
+        session: input.session,
+      }
+  }
+}
+
+function resolveAssistantNotificationFirstContactDocIds(input: {
+  input: AssistantMessageInput
+  session: AssistantSession
+  sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
+}): string[] {
+  const audience = input.sharedPlan.conversationPolicy.audience
+  return resolveAssistantFirstContactStateDocIds({
+    actorId: audience.actorId ?? input.session.binding.actorId,
+    channel: audience.channel ?? input.session.binding.channel ?? input.input.channel ?? null,
+    identityId: audience.identityId ?? input.session.binding.identityId ?? input.input.identityId ?? null,
+    threadId: audience.threadId ?? input.session.binding.threadId ?? input.input.threadId ?? null,
+    threadIsDirect:
+      audience.threadIsDirect ?? input.session.binding.threadIsDirect ?? input.input.threadIsDirect ?? null,
+  })
+}
+
+function assertAssistantNotificationSkipAllowed(
+  policy: AssistantNotificationResponsePolicy,
+): void {
+  if (policy.kind === 'allow_send_or_skip') {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
+    'Assistant notification turn skipped despite a required send policy.',
+  )
+}
+
+function assertAssistantNotificationSendAllowed(input: {
+  policy: AssistantNotificationResponsePolicy
+  text: string
+}): void {
+  switch (input.policy.kind) {
+    case 'allow_send_or_skip':
+    case 'require_send':
+      return
+    case 'require_send_exact_text': {
+      if (input.text === input.policy.text) {
+        return
+      }
+
       throw new VaultCliError(
-        'ASSISTANT_DELIVERY_FAILED',
-        'Assistant outbound delivery did not complete successfully.',
+        'ASSISTANT_NOTIFICATION_EXACT_TEXT_MISMATCH',
+        'Assistant notification turn did not produce the required exact response text.',
       )
+    }
   }
 }
 

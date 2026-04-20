@@ -2,7 +2,9 @@ import type {
   AssistantApprovalPolicy,
   AssistantAskResult,
   AssistantChatProvider,
+  AssistantBindingDeliveryKind,
   AssistantDeliveryError,
+  AssistantDeliverySource,
   AssistantProviderFailoverRoute,
   AssistantProviderSessionOptions,
   AssistantSandbox,
@@ -41,6 +43,7 @@ export interface AssistantSessionResolutionFields {
   baseUrl?: string | null
   channel?: string | null
   codexHome?: string | null
+  deliveryKind?: AssistantBindingDeliveryKind | null
   conversation?: ConversationRef | null
   headers?: Record<string, string> | null
   identityId?: string | null
@@ -67,7 +70,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  deliveryIdempotencyKey?: string | null
   deliveryReplyToMessageId?: string | null
+  deliverySource?: AssistantDeliverySource | null
   deliverySubject?: string | null
   deliveryTarget?: string | null
   executionContext?: AssistantExecutionContext | null

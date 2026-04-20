@@ -511,7 +511,9 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
 
   assert.equal(sent.length, 1)
   assertAssistantOutboxDispatch(sent[0], {
+    fromPhoneNumber: null,
     target: 'chat_123',
+    targetKind: 'thread',
     message: 'Linq thread reply.',
     replyToMessageId: null,
   })
@@ -559,7 +561,9 @@ test('deliverAssistantMessage forwards Linq reply anchors when one is available'
 
   assert.equal(sent.length, 1)
   assertAssistantOutboxDispatch(sent[0], {
+    fromPhoneNumber: null,
     target: 'chat_123',
+    targetKind: 'thread',
     message: 'Anchored Linq reply.',
     replyToMessageId: 'msg_parent_123',
   })

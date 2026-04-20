@@ -52,8 +52,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      firstContact: {
+      welcomeRoute: {
+        actorId: "+15551234567",
         channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home",
+        },
         identityId: "hbidx:phone:v1:test",
         threadId: "chat_home",
         threadIsDirect: true,
@@ -91,8 +96,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      firstContact: {
+      welcomeRoute: {
+        actorId: "+15551234567",
         channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_pending",
+        },
         identityId: "hbidx:phone:v1:test",
         threadId: "chat_pending",
         threadIsDirect: true,
@@ -130,12 +140,20 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      firstContact: {
+      welcomeRoute: {
+        actorId: "+15551234567",
         channel: "linq",
-        fromPhoneNumber: "+15550100002",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550100002",
+            kind: "linq",
+          },
+          target: "+15551234567",
+        },
         identityId: "hbidx:phone:v1:test",
-        kind: "linq-materialize-home-thread",
-        toPhoneNumber: "+15551234567",
+        threadId: null,
+        threadIsDirect: true,
       },
     });
 

@@ -6,17 +6,17 @@ import {
 } from "./hosted-member-routing-store";
 import { chooseHostedLinqConversationRecipientPhone } from "./linq-routing-policy";
 import {
-  resolveHostedMemberFirstContactTarget,
+  type HostedMemberAssistantNotificationRoute,
+  resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
 import { normalizePhoneNumber } from "./phone";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { hostedOnboardingError } from "./errors";
-import type { HostedExecutionMemberActivatedEvent } from "@murphai/hosted-execution";
 import type { Prisma } from "@prisma/client";
 
 export interface HostedMemberActivationLinqRouteResolution {
-  firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
+  welcomeRoute: HostedMemberAssistantNotificationRoute;
 }
 
 export async function resolveHostedMemberActivationLinqRoute(input: {
@@ -28,6 +28,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     identity: input.member.identity,
     routing,
   });
+  const memberPhoneNumber = input.member.identity?.phoneNumber ?? null;
 
   if (routing?.linqChatId) {
     if (routing.pendingLinqChatId) {
@@ -41,8 +42,9 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     }
 
     return {
-      firstContact: resolveHostedMemberFirstContactTarget({
+      welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: routing.linqChatId,
+        memberPhoneNumber,
         messaging,
       }),
     };
@@ -69,8 +71,9 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     });
 
     return {
-      firstContact: resolveHostedMemberFirstContactTarget({
+      welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
         linqChatId: routing.pendingLinqChatId,
+        memberPhoneNumber,
         messaging,
       }),
     };
@@ -83,8 +86,6 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
       httpStatus: 500,
     });
   }
-
-  const memberPhoneNumber = input.member.identity?.phoneNumber;
 
   if (!memberPhoneNumber) {
     throw hostedOnboardingError({
@@ -102,7 +103,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   });
 
   return {
-    firstContact: resolveHostedMemberFirstContactTarget({
+    welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
       linqChatId: null,
       linqRecipientPhone: targetRecipientPhone,
       memberPhoneNumber,

@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
-  queueAssistantFirstContactWelcome: vi.fn(),
+  sendAssistantNotification: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -22,7 +22,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
-  queueAssistantFirstContactWelcome: mocks.queueAssistantFirstContactWelcome,
+  sendAssistantNotification: mocks.sendAssistantNotification,
 }));
 
 vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 describe("hosted runtime event coverage", () => {
-  it("treats activation without first contact as a noop welcome path", async () => {
+  it("treats activation wakes as a noop ingress lane", async () => {
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "evt_member_activated",
       memberId: "member_123",
@@ -115,7 +115,7 @@ describe("hosted runtime event coverage", () => {
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
     });
 
-    expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
@@ -213,6 +213,6 @@ describe("hosted runtime event coverage", () => {
         runtimeEnv: {},
         vaultRoot: "/tmp/assistant-runtime-events-coverage",
       }),
-    ).rejects.toThrow(/Unexpected hosted execution event/u);
+    ).rejects.toThrow(/Unsupported hosted system wake kind\./u);
   });
 });

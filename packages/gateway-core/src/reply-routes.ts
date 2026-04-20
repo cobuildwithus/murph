@@ -70,6 +70,20 @@ export function inferThreadFirstGatewayReplyRoute(
   }
 
   const conversation = normalizeGatewayReplyRouteContext(input.conversation)
+  if (input.deliveryKind === 'thread' && conversation.threadId) {
+    return {
+      kind: 'thread',
+      target: conversation.threadId,
+    }
+  }
+
+  if (input.deliveryKind === 'participant' && conversation.participantId) {
+    return {
+      kind: 'participant',
+      target: conversation.participantId,
+    }
+  }
+
   if (conversation.threadId) {
     return {
       kind: 'thread',

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
-  queueAssistantFirstContactWelcome: vi.fn(),
+  sendAssistantNotification: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -29,7 +30,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
-  queueAssistantFirstContactWelcome: mocks.queueAssistantFirstContactWelcome,
+  sendAssistantNotification: mocks.sendAssistantNotification,
 }));
 
 vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
@@ -83,7 +84,7 @@ afterEach(() => {
 });
 
 describe("executeHostedIngressEvent", () => {
-  it("queues the welcome message for activation first contact and returns noop wake metrics", async () => {
+  it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
       assistantConfigured: true,
@@ -96,19 +97,32 @@ describe("executeHostedIngressEvent", () => {
     };
     mocks.prepareHostedWakeContext.mockResolvedValue(bootstrapResult);
 
-    const wake = buildHostedExecutionMemberActivatedWake({
-      eventId: "evt_member_activated",
-      firstContact: {
-        channel: "linq",
-        identityId: "hbidx:phone:v1:test",
-        threadId: "thread_123",
-        threadIsDirect: true,
-      },
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification",
       memberId: "member_123",
-      memberChannels: {
-        email: true,
-        linq: true,
-        telegram: true,
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
@@ -132,25 +146,40 @@ describe("executeHostedIngressEvent", () => {
       },
       runtime.resolvedConfig,
     );
-    expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
-      actorId: null,
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
+      actorId: "+15550002222",
       channel: "linq",
+      deliveryDedupeToken: "signup-welcome:member_123",
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: "signup-welcome:member_123",
+      deliveryKind: "thread",
+      deliverySource: null,
+      deliveryTarget: null,
       executionContext,
+      firstContactPolicy: {
+        markSeenOnDeliveryAccepted: true,
+      },
       identityId: "hbidx:phone:v1:test",
+      instructions: "Send exactly the signup welcome.",
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: "Welcome to Murph.",
+      },
       threadId: "thread_123",
       threadIsDirect: true,
+      turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });
     assert.deepEqual(result, {
       bootstrapResult,
       conversationMetrics: null,
-      ingressLane: "member-activated",
+      ingressLane: "assistant-notification",
       shareImportResult: null,
       shareImportTitle: null,
     });
   });
 
-  it("rehydrates execution context after bootstrap before queuing first contact", async () => {
+  it("rehydrates execution context after bootstrap before sending notifications", async () => {
     const hydratedExecutionContext = {
       hosted: {
         defaultTarget: {
@@ -170,19 +199,22 @@ describe("executeHostedIngressEvent", () => {
     };
     mocks.hydrateHostedExecutionDefaultTarget.mockResolvedValue(hydratedExecutionContext);
 
-    const wake = buildHostedExecutionMemberActivatedWake({
-      eventId: "evt_member_activated_rehydrate",
-      firstContact: {
-        channel: "linq",
-        identityId: "hbidx:phone:v1:test",
-        threadId: "thread_123",
-        threadIsDirect: true,
-      },
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_rehydrate",
       memberId: "member_123",
-      memberChannels: {
-        email: true,
-        linq: true,
-        telegram: true,
+      notification: {
+        instructions: "Send exactly the signup welcome.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
@@ -198,32 +230,49 @@ describe("executeHostedIngressEvent", () => {
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       executionContext,
     );
-    expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
-      actorId: null,
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
+      actorId: "+15550002222",
       channel: "linq",
+      deliveryDedupeToken: null,
+      deliveryDispatchMode: undefined,
+      deliveryIdempotencyKey: null,
+      deliveryKind: "thread",
+      deliverySource: null,
+      deliveryTarget: null,
       executionContext: hydratedExecutionContext,
+      firstContactPolicy: null,
       identityId: "hbidx:phone:v1:test",
+      instructions: "Send exactly the signup welcome.",
+      responsePolicy: null,
       threadId: "thread_123",
       threadIsDirect: true,
+      turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });
   });
 
-  it("passes Linq home-thread materialization first-contact data through unchanged", async () => {
-    const wake = buildHostedExecutionMemberActivatedWake({
-      eventId: "evt_member_activated_materialize_linq_home",
-      firstContact: {
-        channel: "linq",
-        fromPhoneNumber: "+15550001111",
-        identityId: "hbidx:phone:v1:test",
-        kind: "linq-materialize-home-thread",
-        toPhoneNumber: "+15550002222",
-      },
+  it("passes participant delivery notification data through unchanged", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_materialize_linq_home",
       memberId: "member_123",
-      memberChannels: {
-        email: true,
-        linq: true,
-        telegram: true,
+      notification: {
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        instructions: "Send exactly the signup welcome.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            source: {
+              fromPhoneNumber: "+15550001111",
+              kind: "linq",
+            },
+            target: "+15550002222",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
@@ -236,13 +285,26 @@ describe("executeHostedIngressEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
-    expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
+      actorId: "+15550002222",
       channel: "linq",
+      deliveryDedupeToken: null,
+      deliveryDispatchMode: undefined,
+      deliveryIdempotencyKey: "signup-welcome:member_123",
+      deliveryKind: "participant",
+      deliverySource: {
+        fromPhoneNumber: "+15550001111",
+        kind: "linq",
+      },
+      deliveryTarget: null,
       executionContext,
-      fromPhoneNumber: "+15550001111",
+      firstContactPolicy: null,
       identityId: "hbidx:phone:v1:test",
-      kind: "linq-materialize-home-thread",
-      toPhoneNumber: "+15550002222",
+      instructions: "Send exactly the signup welcome.",
+      responsePolicy: null,
+      threadId: null,
+      threadIsDirect: true,
+      turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });
   });
@@ -358,7 +420,7 @@ describe("executeHostedIngressEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
-    expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,

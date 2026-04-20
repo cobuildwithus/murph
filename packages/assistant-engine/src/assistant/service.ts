@@ -6,8 +6,6 @@ import type {
 } from './service-contracts.js'
 import {
   openAssistantConversationLocal,
-  queueAssistantFirstContactWelcomeLocal,
-  sendAssistantFirstContactWelcomeLocal,
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
@@ -16,8 +14,6 @@ import { sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal } 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
   openAssistantConversationLocal,
-  queueAssistantFirstContactWelcomeLocal,
-  sendAssistantFirstContactWelcomeLocal,
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
@@ -31,7 +27,9 @@ export type {
 } from './service-contracts.js'
 export type {
   AssistantNotificationDecision,
+  AssistantNotificationFirstContactPolicy,
   AssistantNotificationInput,
+  AssistantNotificationResponsePolicy,
   AssistantNotificationResult,
 } from './notification-turn.js'
 
@@ -57,18 +55,6 @@ export async function sendAssistantNotification(
   input: import('./notification-turn.js').AssistantNotificationInput,
 ) {
   return sendAssistantNotificationTurnLocal(input)
-}
-
-export async function queueAssistantFirstContactWelcome(
-  input: import('./first-contact-welcome-delivery.js').AssistantFirstContactWelcomeInput,
-) {
-  return queueAssistantFirstContactWelcomeLocal(input)
-}
-
-export async function sendAssistantFirstContactWelcome(
-  input: import('./first-contact-welcome-delivery.js').AssistantFirstContactWelcomeInput,
-) {
-  return sendAssistantFirstContactWelcomeLocal(input)
 }
 
 export async function updateAssistantSessionOptions(input: {

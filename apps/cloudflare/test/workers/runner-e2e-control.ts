@@ -287,10 +287,7 @@ function buildSyntheticAssistantDeliveryEffects(
 ) {
   const wake = resolvePrimaryWake(request);
 
-  if (
-    wake.kind !== "member.activated"
-    || wake.firstContact == null
-  ) {
+  if (wake.kind !== "assistant.notification.requested") {
     return [];
   }
 
@@ -299,7 +296,7 @@ function buildSyntheticAssistantDeliveryEffects(
   return [
     {
       effectId,
-      fingerprint: `first-contact:${wake.eventId}`,
+      fingerprint: `signup-welcome:${wake.eventId}`,
       kind: "assistant.delivery" as const,
       payload: {
         actorId: "actor_123",

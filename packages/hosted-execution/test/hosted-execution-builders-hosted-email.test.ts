@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
 
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
@@ -33,29 +34,77 @@ const defaultMemberChannels = {
 } as const;
 
 describe("hosted execution wake builders", () => {
-  it("preserves optional member activation first-contact data when present", () => {
-    const wake = buildHostedExecutionMemberActivatedWake({
-      eventId: "member-activated-1",
+  it("deep-copies assistant notification payloads when building notification wakes", () => {
+    const notification = {
+      deliveryDispatchMode: "queue-only" as const,
+      deliveryDedupeToken: "signup-welcome:user_123",
+      deliveryIdempotencyKey: "signup-welcome:user_123",
       firstContact: {
-        channel: "email",
-        identityId: "assistant@example.com",
-        threadId: "thread_123",
+        markSeenOnDeliveryAccepted: true,
+      },
+      instructions: "Send the Murph signup welcome.",
+      responsePolicy: {
+        kind: "require_send_exact_text" as const,
+        text: "Welcome to Murph.",
+      },
+      route: {
+        actorId: "+15551234567",
+        channel: "linq" as const,
+        delivery: {
+          kind: "participant" as const,
+          source: {
+            fromPhoneNumber: "+15550001111",
+            kind: "linq" as const,
+          },
+          target: "+15551234567",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: null,
         threadIsDirect: true,
       },
+    };
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant-notification-1",
       memberId: "user_123",
-      memberChannels: defaultMemberChannels,
+      notification,
       occurredAt,
     });
 
+    notification.firstContact.markSeenOnDeliveryAccepted = false;
+    notification.responsePolicy.text = "mutated";
+    notification.route.delivery.source!.fromPhoneNumber = "+15550009999";
+
     expect(wake).toMatchObject({
-      eventId: "member-activated-1",
-      firstContact: {
-        channel: "email",
-        identityId: "assistant@example.com",
-        threadId: "thread_123",
-        threadIsDirect: true,
+      eventId: "assistant-notification-1",
+      kind: "assistant.notification.requested",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:user_123",
+        deliveryIdempotencyKey: "signup-welcome:user_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send the Murph signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: "+15551234567",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            source: {
+              fromPhoneNumber: "+15550001111",
+              kind: "linq",
+            },
+            target: "+15551234567",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
       },
-      kind: "member.activated",
       userId: "user_123",
     });
   });

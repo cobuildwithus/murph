@@ -25,37 +25,69 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("parses Linq first-contact targets that materialize a home thread on welcome delivery", () => {
+  it("parses assistant notification requests with participant delivery routes", () => {
     expect(
       parseHostedExecutionEvent({
-        firstContact: {
-          channel: "linq",
-          fromPhoneNumber: "+15550001111",
-          identityId: "hbidx:phone:v1:test",
-          kind: "linq-materialize-home-thread",
-          toPhoneNumber: "+15550002222",
-        },
-        kind: "member.activated",
-        memberChannels: {
-          email: false,
-          linq: true,
-          telegram: false,
+        kind: "assistant.notification.requested",
+        notification: {
+          deliveryDispatchMode: "queue-only",
+          deliveryDedupeToken: "signup-welcome:user-1",
+          deliveryIdempotencyKey: "signup-welcome:user-1",
+          firstContact: {
+            markSeenOnDeliveryAccepted: true,
+          },
+          instructions: "Send exactly the signup welcome.",
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: "Welcome to Murph.",
+          },
+          route: {
+            actorId: "+15550002222",
+            channel: "linq",
+            delivery: {
+              kind: "participant",
+              source: {
+                fromPhoneNumber: "+15550001111",
+                kind: "linq",
+              },
+              target: "+15550002222",
+            },
+            identityId: "hbidx:phone:v1:test",
+            threadId: null,
+            threadIsDirect: true,
+          },
         },
         userId: "user-1",
       }),
     ).toEqual({
-      firstContact: {
-        channel: "linq",
-        fromPhoneNumber: "+15550001111",
-        identityId: "hbidx:phone:v1:test",
-        kind: "linq-materialize-home-thread",
-        toPhoneNumber: "+15550002222",
-      },
-      kind: "member.activated",
-      memberChannels: {
-        email: false,
-        linq: true,
-        telegram: false,
+      kind: "assistant.notification.requested",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:user-1",
+        deliveryIdempotencyKey: "signup-welcome:user-1",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            source: {
+              fromPhoneNumber: "+15550001111",
+              kind: "linq",
+            },
+            target: "+15550002222",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
       },
       userId: "user-1",
     });
@@ -157,25 +189,27 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("rejects non-Linq channels for Linq home-thread materialization targets", () => {
+  it("rejects invalid assistant notification route channels", () => {
     expect(() =>
       parseHostedExecutionEvent({
-        firstContact: {
-          channel: "email",
-          fromPhoneNumber: "+15550001111",
-          identityId: "assistant@example.com",
-          kind: "linq-materialize-home-thread",
-          toPhoneNumber: "+15550002222",
-        },
-        kind: "member.activated",
-        memberChannels: {
-          email: true,
-          linq: false,
-          telegram: false,
+        kind: "assistant.notification.requested",
+        notification: {
+          instructions: "Send the Murph signup welcome.",
+          route: {
+            actorId: null,
+            channel: "sms",
+            delivery: {
+              kind: "thread",
+              target: "thread_123",
+            },
+            identityId: "assistant@example.com",
+            threadId: "thread_123",
+            threadIsDirect: true,
+          },
         },
         userId: "user-1",
       }),
-    ).toThrow(/requires channel linq/i);
+    ).toThrow(/channel is invalid/i);
   });
 
   it("rejects legacy provider message event kinds", () => {

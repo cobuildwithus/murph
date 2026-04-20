@@ -9,6 +9,7 @@ import {
   type AssistantBindingDelivery,
   type AssistantBindingDeliveryKind,
   type AssistantChannelDeliveryTargetKind,
+  type AssistantDeliverySource,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 
@@ -48,6 +49,7 @@ export interface AssistantChannelDependencies {
         providerMessageId?: string | null
         providerThreadId?: string | null
         target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
       }
     | void
   >
@@ -63,6 +65,7 @@ export interface AssistantChannelDependencies {
         providerMessageId?: string | null
         providerThreadId?: string | null
         target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
       }
     | void
   >
@@ -111,6 +114,7 @@ export interface AssistantChannelAdapter {
     input: {
       actorId: string | null
       bindingDelivery: AssistantBindingDelivery | null
+      deliverySource?: AssistantDeliverySource | null
       explicitTarget: string | null
       idempotencyKey?: string | null
       identityId: string | null
@@ -138,6 +142,7 @@ export interface AssistantChannelAdapterSpec {
   sendMessage: (input: {
     actorId: string | null
     candidate: AssistantDeliveryCandidate
+    deliverySource?: AssistantDeliverySource | null
     dependencies: AssistantChannelDependencies
     idempotencyKey?: string | null
     identityId: string | null
@@ -149,6 +154,7 @@ export interface AssistantChannelAdapterSpec {
         providerMessageId?: string | null
         providerThreadId?: string | null
         target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
       }
     | void
   >

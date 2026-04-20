@@ -85,13 +85,15 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ actorId, candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
+  async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, message, replyToMessageId }) {
     const send = dependencies.sendLinq ?? sendLinqMessage
     let delivered
     try {
       delivered = await send({
+        fromPhoneNumber: deliverySource?.kind === 'linq' ? deliverySource.fromPhoneNumber : null,
         idempotencyKey: idempotencyKey ?? null,
         target: candidate.target,
+        targetKind: candidate.kind,
         message,
         replyToMessageId: replyToMessageId ?? null,
       })
@@ -111,13 +113,43 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       delivered = recovered
     }
 
+    const deliveredTarget = readDeliveredTarget(delivered)
+    const providerThreadId = readDeliveredProviderThreadId(delivered)
+    if (candidate.kind === 'participant' && !deliveredTarget && !providerThreadId) {
+      throw createAssistantDeliveryConfirmationPendingError(
+        new VaultCliError(
+          'ASSISTANT_LINQ_CHAT_ID_REQUIRED',
+          'Materialized Linq participant delivery did not return a chat id.',
+        ),
+      )
+    }
+
     return {
-      target: readDeliveredTarget(delivered) ?? candidate.target,
+      target: deliveredTarget ?? providerThreadId ?? candidate.target,
+      targetKind: inferDeliveredLinqTargetKind(candidate.kind, delivered),
       providerMessageId: readDeliveredProviderMessageId(delivered),
-      providerThreadId: readDeliveredProviderThreadId(delivered),
+      providerThreadId: providerThreadId ?? deliveredTarget,
     }
   },
 })
+
+function inferDeliveredLinqTargetKind(
+  requestedKind: string,
+  delivered:
+    | {
+        providerThreadId?: string | null
+        target?: string | null
+      }
+    | void,
+): 'explicit' | 'participant' | 'thread' | null {
+  if (requestedKind !== 'participant') {
+    return null
+  }
+
+  const providerThreadId = readDeliveredProviderThreadId(delivered)
+  const deliveredTarget = readDeliveredTarget(delivered)
+  return providerThreadId || deliveredTarget ? 'thread' : null
+}
 
 const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'email',
