@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { selectBrowserVaultHistory } from "@murphai/query/browser";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -20,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/src/components/ui/table";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
   formatConfidenceLabel,
   formatIsoDate,
@@ -29,8 +30,18 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function HistoryPage() {
-  const { error, refresh, snapshot, status } = useBrowserVault();
-  const timeline = useMemo(() => snapshot?.history.timeline ?? [], [snapshot]);
+  return (
+    <BrowserVaultProvider>
+      <HistoryPageContent />
+    </BrowserVaultProvider>
+  );
+}
+
+function HistoryPageContent() {
+  const { client, error, refresh, status } = useBrowserVault();
+  const history = useMemo(() => client ? selectBrowserVaultHistory(client) : null, [client]);
+  const timeline = history?.timeline ?? [];
+  const canRenderContent = status === "empty" || client !== null;
 
   return (
     <div className="flex flex-col gap-8">
@@ -47,7 +58,7 @@ export default function HistoryPage() {
           </p>
         </div>
         <div className="text-sm text-muted-foreground">
-          {snapshot ? `Updated ${formatIsoDate(snapshot.generatedAt)}` : "No history available yet."}
+          {client ? `Updated ${formatIsoDate(client.replica.generatedAt)}` : "No history available yet."}
         </div>
       </div>
 
@@ -76,7 +87,7 @@ export default function HistoryPage() {
         </Alert>
       ) : null}
 
-      {status === "ready" && timeline.length === 0 ? (
+      {canRenderContent && timeline.length === 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>No timeline entries yet</CardTitle>
@@ -87,7 +98,7 @@ export default function HistoryPage() {
         </Card>
       ) : null}
 
-      {status === "ready" && timeline.length > 0 ? (
+      {canRenderContent && timeline.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>{timeline.length} recent timeline entries</CardTitle>

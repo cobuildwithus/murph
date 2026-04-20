@@ -1,6 +1,7 @@
 import {
   isActiveOverviewExperimentStatus,
-  type BrowserVaultSnapshot,
+  selectBrowserVaultTrackedExperiments,
+  type BrowserVaultQueryClient,
   type OverviewExperiment,
 } from "@murphai/query/browser";
 
@@ -25,19 +26,19 @@ const STOPPED_EXPERIMENT_STATUSES = new Set([
 ]);
 
 export interface ResolveBrowserVaultExperimentRunInput {
+  client: BrowserVaultQueryClient | null;
   protocol: ExperimentProtocol;
-  snapshot: BrowserVaultSnapshot | null;
 }
 
 export function resolveBrowserVaultExperimentRun({
+  client,
   protocol,
-  snapshot,
 }: ResolveBrowserVaultExperimentRunInput): ExperimentRunProjection | null {
-  if (!snapshot) {
+  if (!client) {
     return null;
   }
 
-  const trackedExperiment = findTrackedExperiment(snapshot, protocol);
+  const trackedExperiment = findTrackedExperiment(client, protocol);
   if (!trackedExperiment) {
     return null;
   }
@@ -48,7 +49,7 @@ export function resolveBrowserVaultExperimentRun({
   }
 
   const startedOn = extractIsoDate(trackedExperiment.startedOn);
-  const referenceDate = extractIsoDate(snapshot.generatedAt) ?? todayIsoDate();
+  const referenceDate = extractIsoDate(client.replica.generatedAt) ?? todayIsoDate();
   const durationDays = normalizeDayCount(protocol.durationDays, 1);
   const baselineDays = Math.min(
     normalizeDayCount(protocol.baselineDays, 0),
@@ -69,7 +70,7 @@ export function resolveBrowserVaultExperimentRun({
   return {
     id: trackedExperiment.id,
     source: "browser-vault",
-    snapshotGeneratedAt: snapshot.generatedAt,
+    snapshotGeneratedAt: client.replica.generatedAt,
     slug: trackedExperiment.slug,
     status,
     statusLabel: formatStatusLabel(trackedExperiment.status, status),
@@ -119,12 +120,12 @@ export function resolveBrowserVaultExperimentRun({
 }
 
 function findTrackedExperiment(
-  snapshot: BrowserVaultSnapshot,
+  client: BrowserVaultQueryClient,
   protocol: ExperimentProtocol,
 ): OverviewExperiment | null {
   const protocolKeys = buildProtocolLookupKeys(protocol);
 
-  return snapshot.overview.trackedExperiments.find((entry) =>
+  return selectBrowserVaultTrackedExperiments(client).find((entry) =>
     listTrackedExperimentLookupValues(entry).some((value) =>
       protocolKeys.has(normalizeLookupKey(value))
     )

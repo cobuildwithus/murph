@@ -16,9 +16,13 @@ import type {
   HostedRunStatusResponse,
   HostedRunTriggerKind,
   HostedIngressSnapshotRef,
+  HostedBrowserVaultReplicaCursorRef,
 } from "@murphai/hosted-execution/contracts";
 import { normalizeHostedExecutionOperatorMessage } from "@murphai/hosted-execution";
-import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedBrowserVaultReplicaRef,
+  parseHostedExecutionCursorSnapshotRef,
+} from "@murphai/hosted-execution/parsers";
 
 import { sanitizeJsonLogString } from "../http";
 import { getPrisma } from "../prisma";
@@ -273,6 +277,7 @@ export async function commitHostedRun(input: {
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: bigint;
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   preparedSnapshotRef?: HostedIngressSnapshotRef;
   prisma?: PrismaClient;
   redactedSummary?: unknown | null;
@@ -294,6 +299,7 @@ export async function commitHostedRunTx(input: {
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: bigint;
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   preparedSnapshotRef?: HostedIngressSnapshotRef;
   redactedSummary?: unknown | null;
   runId: string;
@@ -452,6 +458,9 @@ export async function commitHostedRunTx(input: {
   const nextSnapshotRef = input.preparedSnapshotRef === undefined
     ? cursorSnapshotRefToPrismaJson(cursor.snapshotRef)
     : toNullablePrismaJson(input.preparedSnapshotRef);
+  const nextBrowserVaultReplicaRef = input.browserVaultReplicaRef === undefined
+    ? cursorBrowserVaultReplicaRefToPrismaJson(cursor.browserVaultReplicaRef)
+    : toNullablePrismaJson(input.browserVaultReplicaRef);
   const nextRuntimeWakeAt = input.nextRuntimeWakeAt === undefined
     ? cursor.nextRuntimeWakeAt
     : normalizeHostedRunWakeAt(input.nextRuntimeWakeAt);
@@ -467,6 +476,7 @@ export async function commitHostedRunTx(input: {
     data: {
       committedSeq: input.outputCommittedSeq,
       nextRuntimeWakeAt,
+      browserVaultReplicaRef: nextBrowserVaultReplicaRef,
       nextRuntimeWakeReason,
       snapshotRef: nextSnapshotRef,
       version: { increment: 1 },
@@ -532,6 +542,7 @@ export async function commitHostedRunTx(input: {
 }
 
 export async function finalizeHostedRun(input: {
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   finalSnapshotRef: HostedIngressSnapshotRef;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
@@ -547,6 +558,7 @@ export async function finalizeHostedRun(input: {
 }
 
 export async function finalizeHostedRunTx(input: {
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   finalSnapshotRef: HostedIngressSnapshotRef;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
@@ -607,6 +619,9 @@ export async function finalizeHostedRunTx(input: {
   }
 
   const finalSnapshotRef = toNullablePrismaJson(input.finalSnapshotRef);
+  const finalBrowserVaultReplicaRef = input.browserVaultReplicaRef === undefined
+    ? cursorBrowserVaultReplicaRefToPrismaJson(cursor.browserVaultReplicaRef)
+    : toNullablePrismaJson(input.browserVaultReplicaRef);
   const nextRuntimeWakeAt = input.nextRuntimeWakeAt === undefined
     ? cursor.nextRuntimeWakeAt
     : normalizeHostedRunWakeAt(input.nextRuntimeWakeAt);
@@ -621,6 +636,7 @@ export async function finalizeHostedRunTx(input: {
     },
     data: {
       nextRuntimeWakeAt,
+      browserVaultReplicaRef: finalBrowserVaultReplicaRef,
       nextRuntimeWakeReason,
       snapshotRef: finalSnapshotRef,
       version: { increment: 1 },
@@ -664,6 +680,20 @@ export async function finalizeHostedRunTx(input: {
     finalized: true,
     run: projectHostedRunRecord(updatedRun),
   };
+}
+
+
+export async function readHostedExecutionCursorForUser(input: {
+  prisma?: HostedRunStoreClient;
+  userId: string;
+}) {
+  const prisma = input.prisma ?? getPrisma();
+  const cursor = await ensureHostedExecutionCursorRowTx({
+    tx: prisma,
+    userId: input.userId,
+  });
+
+  return projectHostedExecutionCursorRecord(cursor);
 }
 
 export async function releaseHostedRunFinalize(input: {
@@ -1312,6 +1342,12 @@ function cursorSnapshotRefToPrismaJson(value: HostedExecutionCursorRow["snapshot
   }
 
   return toNullablePrismaJson(parseHostedExecutionCursorSnapshotRef(value));
+}
+
+function cursorBrowserVaultReplicaRefToPrismaJson(
+  value: HostedExecutionCursorRow["browserVaultReplicaRef"],
+): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return toNullablePrismaJson(parseHostedBrowserVaultReplicaRef(value));
 }
 
 function toNullablePrismaJson(value: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull {

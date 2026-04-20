@@ -16,7 +16,7 @@ import type {
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
-import type { BrowserVaultSnapshot } from "@murphai/query/browser";
+import type { BrowserVaultReplica } from "@murphai/query/browser";
 
 export interface HostedAssistantRuntimeChannelCapabilities {
   emailSendReady: boolean;
@@ -125,7 +125,7 @@ export interface HostedAssistantRuntimePreparedJobResult {
 
 export interface HostedAssistantRuntimeCompletedJobResult {
   assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
-  browserVaultSnapshot?: BrowserVaultSnapshot | null;
+  browserVaultReplica?: BrowserVaultReplica | null;
   finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   phase?: "completed";
   result: HostedExecutionRunnerResult;

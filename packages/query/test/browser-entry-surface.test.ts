@@ -7,9 +7,12 @@ import * as queryBrowser from "@murphai/query/browser";
 
 test("@murphai/query keeps browser-vault-only helpers on the browser subpath", () => {
   for (const exportName of [
-    "BROWSER_VAULT_SNAPSHOT_SCHEMA",
-    "createBrowserVaultSnapshot",
-    "parseBrowserVaultSnapshot",
+    "BROWSER_VAULT_REPLICA_SCHEMA",
+    "createBrowserVaultQueryClient",
+    "createBrowserVaultReplica",
+    "parseBrowserVaultReplica",
+    "selectBrowserVaultOverview",
+    "selectBrowserVaultSignals",
   ]) {
     assert.equal(exportName in queryRoot, false);
     assert.equal(exportName in queryBrowser, true);

@@ -1,7 +1,7 @@
 import {
-  createBrowserVaultSnapshot,
+  createBrowserVaultReplica,
   createVaultReadModel,
-  type BrowserVaultSnapshot,
+  type BrowserVaultReplica,
 } from "@murphai/query/browser";
 import {
   readVaultTolerant,
@@ -24,10 +24,10 @@ const HOSTED_BROWSER_VAULT_ENTITY_FAMILIES = new Set<CanonicalEntityFamily>([
 ]);
 const HOSTED_BROWSER_VAULT_BODY_PREVIEW_LIMIT = 280;
 
-export async function exportHostedBrowserVaultSnapshot(input: {
-  sourceVersion: string;
+export async function exportHostedBrowserVaultReplica(input: {
+  sourceBundleHash: string;
   vaultRoot: string;
-}): Promise<BrowserVaultSnapshot> {
+}): Promise<BrowserVaultReplica> {
   const vault = await readVaultTolerant(input.vaultRoot);
   const projectedVault = createVaultReadModel({
     entities: projectHostedBrowserVaultEntities(vault.entities),
@@ -35,8 +35,8 @@ export async function exportHostedBrowserVaultSnapshot(input: {
     vaultRoot: vault.vaultRoot,
   });
 
-  return createBrowserVaultSnapshot({
-    sourceVersion: input.sourceVersion,
+  return createBrowserVaultReplica({
+    sourceBundleHash: input.sourceBundleHash,
     vault: projectedVault,
   });
 }

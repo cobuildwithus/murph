@@ -22,8 +22,8 @@ function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
   switch (scope) {
     case "artifact":
       return "Hosted artifact envelope";
-    case "browser-vault-snapshot":
-      return "Hosted browser vault snapshot envelope";
+    case "browser-vault-replica":
+      return "Hosted browser vault replica envelope";
     case "bundle":
       return "Hosted bundle envelope";
     case "email-raw":

@@ -1,6 +1,11 @@
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
-import type { HostedExecutionCursorState } from "../contracts.ts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
+  type HostedBrowserVaultReplicaCursorRef,
+  type HostedBrowserVaultReplicaRef,
+  type HostedExecutionCursorState,
+} from "../contracts.ts";
 import type {
   HostedExecutionBundlePayload,
   HostedExecutionBundleRefState,
@@ -8,6 +13,7 @@ import type {
 import {
   requireBigIntString,
   requireObject,
+  requireNumber,
   requireString,
   readNullableString,
   readNullableStringValue,
@@ -32,6 +38,38 @@ export function parseHostedExecutionCursorSnapshotRef(
   label = "Hosted execution cursor snapshotRef",
 ): HostedExecutionBundleRefState {
   return parseHostedExecutionBundleRef(value === undefined ? null : value, label);
+}
+
+
+export function parseHostedBrowserVaultReplicaRef(
+  value: unknown,
+  label = "Hosted browser vault replica ref",
+): HostedBrowserVaultReplicaCursorRef {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+  const schema = requireString(record.schema, `${label}.schema`);
+  const replicaSchema = requireString(record.replicaSchema, `${label}.replicaSchema`);
+
+  if (schema !== HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA) {
+    throw new TypeError(`${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA}.`);
+  }
+  if (replicaSchema !== "murph.browser-vault-replica.v1") {
+    throw new TypeError(`${label}.replicaSchema must be murph.browser-vault-replica.v1.`);
+  }
+
+  return {
+    byteLength: requireNumber(record.byteLength, `${label}.byteLength`),
+    dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
+    generatedAt: requireString(record.generatedAt, `${label}.generatedAt`),
+    keyId: requireString(record.keyId, `${label}.keyId`),
+    objectKey: requireString(record.objectKey, `${label}.objectKey`),
+    replicaSchema,
+    schema,
+    sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
+  } satisfies HostedBrowserVaultReplicaRef;
 }
 
 export function parseHostedExecutionCursorState(
@@ -60,6 +98,14 @@ export function parseHostedExecutionCursorState(
           nextRuntimeWakeReason: readNullableString(
             record.nextRuntimeWakeReason,
             "Hosted execution cursor state nextRuntimeWakeReason",
+          ),
+        }),
+    ...(record.browserVaultReplicaRef === undefined
+      ? {}
+      : {
+          browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(
+            record.browserVaultReplicaRef,
+            "Hosted execution cursor state browserVaultReplicaRef",
           ),
         }),
     snapshotRef: parseHostedExecutionCursorSnapshotRef(

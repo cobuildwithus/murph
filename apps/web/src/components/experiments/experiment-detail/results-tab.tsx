@@ -72,10 +72,20 @@ export function ResultsTab({
         />
       )}
 
-      {!hasPrivateRun && privateRunStatus === "ready" && (
+      {!hasPrivateRun && (privateRunStatus === "ready" || privateRunStatus === "empty") && (
         <ResultsEmptyState
           title="No private run yet"
           body="This page is showing Health Commons protocol data. Once you start this experiment, your browser-vault run state can attach here without copying the public protocol data."
+        />
+      )}
+
+      {hasPrivateRun && privateRunError && (
+        <ResultsEmptyState
+          title="Private run loaded, refresh unavailable"
+          body={privateRunError}
+          action={onPrivateRunRetry
+            ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
+            : null}
         />
       )}
 

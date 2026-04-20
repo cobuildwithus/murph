@@ -1,74 +1,63 @@
-import { parseHostedCipherEnvelope, type HostedCipherEnvelope } from "@murphai/runtime-state";
-
-import { buildHostedStorageAad } from "./crypto-context.js";
 import {
-  writeEncryptedR2Payload,
-  type EncryptedR2BucketLike,
-} from "./crypto.js";
-import { hostedBrowserVaultSnapshotObjectKey } from "./storage-paths.js";
+  buildHostedStorageAad as buildRuntimeHostedStorageAad,
+  deriveHostedStorageKey,
+  parseHostedCipherEnvelope,
+  type HostedCipherEnvelope,
+} from "@murphai/runtime-state";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
+  type HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/contracts";
 
+import { writeEncryptedR2Payload, type EncryptedR2BucketLike } from "./crypto.js";
+import { hostedBrowserVaultReplicaObjectKey } from "./storage-paths.js";
+
+const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica.v1";
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
 
-type HostedBrowserVaultSnapshotBucketLike = EncryptedR2BucketLike & {
-  delete?(key: string): Promise<void>;
-};
+type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike;
 
-export interface HostedBrowserVaultSnapshotStorageRef {
-  aadFields: {
-    key: string;
-    purpose: "browser-vault-snapshot";
-    userId: string;
-  };
+export interface BrowserVaultReplicaAadFields {
+  dataVersion: string;
   objectKey: string;
-}
-
-export interface HostedBrowserVaultSnapshotStore {
-  deleteBrowserVaultSnapshot(userId: string): Promise<void>;
-  readBrowserVaultSnapshotEnvelope(userId: string): Promise<HostedCipherEnvelope | null>;
-  writeBrowserVaultSnapshot(userId: string, snapshot: unknown): Promise<void>;
-}
-
-export async function resolveHostedBrowserVaultSnapshotStorageRef(input: {
-  rootKey: Uint8Array;
+  purpose: "browser-vault-replica";
+  schema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
+  sourceBundleHash: string;
   userId: string;
-}): Promise<HostedBrowserVaultSnapshotStorageRef> {
-  const objectKey = await hostedBrowserVaultSnapshotObjectKey(input.rootKey, input.userId);
+}
 
+export interface HostedBrowserVaultReplicaStore {
+  deriveBrowserVaultReplicaKey(ref: HostedBrowserVaultReplicaRef): Promise<Uint8Array>;
+  readBrowserVaultReplicaEnvelope(ref: HostedBrowserVaultReplicaRef): Promise<HostedCipherEnvelope | null>;
+  writeBrowserVaultReplica(input: { replica: unknown; userId: string }): Promise<HostedBrowserVaultReplicaRef>;
+}
+
+export function createBrowserVaultReplicaAadFields(input: {
+  ref: HostedBrowserVaultReplicaRef;
+  userId: string;
+}): BrowserVaultReplicaAadFields {
   return {
-    aadFields: {
-      key: objectKey,
-      purpose: "browser-vault-snapshot",
-      userId: input.userId,
-    },
-    objectKey,
+    dataVersion: input.ref.dataVersion,
+    objectKey: input.ref.objectKey,
+    purpose: "browser-vault-replica",
+    schema: BROWSER_VAULT_REPLICA_SCHEMA,
+    sourceBundleHash: input.ref.sourceBundleHash,
+    userId: input.userId,
   };
 }
 
-export function createHostedBrowserVaultSnapshotStore(input: {
-  bucket: HostedBrowserVaultSnapshotBucketLike;
-  key: Uint8Array;
-  keyId: string;
-}): HostedBrowserVaultSnapshotStore {
+export function createHostedBrowserVaultReplicaStore(input: {
+  bucket: HostedBrowserVaultReplicaBucketLike;
+  rootKey: Uint8Array;
+}): HostedBrowserVaultReplicaStore {
   return {
-    async deleteBrowserVaultSnapshot(userId) {
-      if (!input.bucket.delete) {
-        return;
-      }
-
-      const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
-        rootKey: input.key,
-        userId,
-      });
-      await input.bucket.delete(storageRef.objectKey);
+    async deriveBrowserVaultReplicaKey(ref) {
+      return deriveBrowserVaultReplicaKey(input.rootKey, ref);
     },
 
-    async readBrowserVaultSnapshotEnvelope(userId) {
-      const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
-        rootKey: input.key,
-        userId,
-      });
-      const object = await input.bucket.get(storageRef.objectKey);
+    async readBrowserVaultReplicaEnvelope(ref) {
+      const object = await input.bucket.get(ref.objectKey);
 
       if (!object) {
         return null;
@@ -76,24 +65,104 @@ export function createHostedBrowserVaultSnapshotStore(input: {
 
       return parseHostedCipherEnvelope(
         JSON.parse(utf8Decoder.decode(await object.arrayBuffer())) as unknown,
-        "Hosted browser vault snapshot envelope",
+        "Hosted browser vault replica envelope",
       );
     },
 
-    async writeBrowserVaultSnapshot(userId, snapshot) {
-      const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
-        rootKey: input.key,
+    async writeBrowserVaultReplica({ replica, userId }) {
+      const parsed = parseBrowserVaultReplicaStorageInput(replica);
+      const objectKey = await hostedBrowserVaultReplicaObjectKey({
+        dataVersion: parsed.source.dataVersion,
+        rootKey: input.rootKey,
         userId,
       });
+      const ref: HostedBrowserVaultReplicaRef = {
+        byteLength: utf8Encoder.encode(JSON.stringify(replica)).byteLength,
+        dataVersion: parsed.source.dataVersion,
+        generatedAt: parsed.generatedAt,
+        keyId: createBrowserVaultReplicaKeyId(parsed.source.dataVersion),
+        objectKey,
+        replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
+        sourceBundleHash: parsed.source.sourceBundleHash,
+      };
+      const replicaKey = await deriveBrowserVaultReplicaKey(input.rootKey, ref);
+
+      const aadFields = createBrowserVaultReplicaAadFields({ ref, userId });
+
       await writeEncryptedR2Payload({
-        aad: buildHostedStorageAad(storageRef.aadFields),
+        aad: buildRuntimeHostedStorageAad({
+          dataVersion: aadFields.dataVersion,
+          objectKey: aadFields.objectKey,
+          purpose: aadFields.purpose,
+          schema: aadFields.schema,
+          sourceBundleHash: aadFields.sourceBundleHash,
+          userId: aadFields.userId,
+        }),
         bucket: input.bucket,
-        cryptoKey: input.key,
-        key: storageRef.objectKey,
-        keyId: input.keyId,
-        plaintext: utf8Encoder.encode(JSON.stringify(snapshot)),
-        scope: "browser-vault-snapshot",
+        cryptoKey: replicaKey,
+        key: objectKey,
+        keyId: ref.keyId,
+        plaintext: utf8Encoder.encode(JSON.stringify(replica)),
+        scope: "browser-vault-replica",
       });
+
+      return ref;
     },
   };
+}
+
+async function deriveBrowserVaultReplicaKey(
+  rootKey: Uint8Array,
+  ref: HostedBrowserVaultReplicaRef,
+): Promise<Uint8Array> {
+  return deriveHostedStorageKey(
+    rootKey,
+    `id:browser-vault-replica:${ref.sourceBundleHash}:${ref.dataVersion}`,
+  );
+}
+
+function createBrowserVaultReplicaKeyId(dataVersion: string): string {
+  return `browser-vault-replica:${dataVersion.slice(0, 32)}`;
+}
+
+function parseBrowserVaultReplicaStorageInput(value: unknown): {
+  generatedAt: string;
+  source: {
+    dataVersion: string;
+    sourceBundleHash: string;
+  };
+} {
+  const record = requireRecord(value, "Browser vault replica");
+  const schema = requireString(record.schema, "Browser vault replica schema");
+
+  if (schema !== BROWSER_VAULT_REPLICA_SCHEMA) {
+    throw new TypeError(`Browser vault replica schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
+  }
+
+  const source = requireRecord(record.source, "Browser vault replica source");
+
+  return {
+    generatedAt: requireString(record.generatedAt, "Browser vault replica generatedAt"),
+    source: {
+      dataVersion: requireString(source.dataVersion, "Browser vault replica dataVersion"),
+      sourceBundleHash: requireString(source.sourceBundleHash, "Browser vault replica sourceBundleHash"),
+    },
+  };
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }

@@ -535,6 +535,7 @@ export class HostedUserRunner {
               nextRuntimeWakeReason: execution.nextRuntimeWakeAt ? "runtime" : null,
             }),
         outputCommittedSeq: resolved.outputCommittedSeq,
+        browserVaultReplicaRef: execution.finalizeRequired ? undefined : execution.browserVaultReplicaRef ?? null,
         preparedSnapshotRef: execution.cursorSnapshotRef,
         redactedSummary: execution.redactedSummary ?? null,
         runId: run.id,
@@ -685,6 +686,7 @@ export class HostedUserRunner {
     const finalized = await finalizeHostedRunInWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
       body: {
+        browserVaultReplicaRef: execution.browserVaultReplicaRef ?? null,
         finalSnapshotRef: execution.cursorSnapshotRef,
         ...(execution.nextRuntimeWakeAt === undefined
           ? {}

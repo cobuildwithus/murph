@@ -366,12 +366,29 @@ export const HOSTED_INGRESS_PAYLOAD_SCHEMAS = [
 export type HostedIngressPayloadSchema =
   (typeof HOSTED_INGRESS_PAYLOAD_SCHEMAS)[number];
 
+
+export const HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA = "murph.hosted-browser-vault-replica-ref.v1";
+
+export interface HostedBrowserVaultReplicaRef {
+  byteLength: number;
+  dataVersion: string;
+  generatedAt: string;
+  keyId: string;
+  objectKey: string;
+  replicaSchema: "murph.browser-vault-replica.v1";
+  schema: typeof HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA;
+  sourceBundleHash: string;
+}
+
+export type HostedBrowserVaultReplicaCursorRef = HostedBrowserVaultReplicaRef | null;
+
 export interface HostedExecutionCursorState {
   committedSeq: string;
   createdAt: string;
   nextSeq: string;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   snapshotRef: HostedIngressSnapshotRef;
   updatedAt: string;
   userId: string;
@@ -537,6 +554,7 @@ export interface HostedRunCommitRequest {
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: string;
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   preparedSnapshotRef?: HostedIngressSnapshotRef;
   redactedSummary?: unknown | null;
   runId: string;
@@ -551,6 +569,7 @@ export interface HostedRunCommitResponse {
 }
 
 export interface HostedRunFinalizeRequest {
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   finalSnapshotRef: HostedIngressSnapshotRef;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;

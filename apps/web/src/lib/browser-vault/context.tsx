@@ -13,23 +13,28 @@ import {
   buildHostedStorageAad,
   decryptHostedStoragePayload,
   generateHostedUserRecipientKeyPair,
+  parseHostedBrowserSessionKeyEnvelope,
   parseHostedCipherEnvelope,
-  parseHostedUserRootKeyEnvelope,
-  unwrapHostedUserRootKeyForKind,
+  unwrapHostedBrowserSessionKey,
+  type HostedBrowserSessionKeyEnvelope,
   type HostedCipherEnvelope,
-  type HostedUserRootKeyEnvelope,
 } from "@murphai/runtime-state";
 import {
-  parseBrowserVaultSnapshot,
-  type BrowserVaultSnapshot,
+  createBrowserVaultQueryClient,
+  parseBrowserVaultReplica,
+  type BrowserVaultQueryClient,
 } from "@murphai/query/browser";
+import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
+import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 
-export type BrowserVaultStatus = "loading" | "ready" | "error";
+export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
 
 export interface BrowserVaultContextValue {
+  client: BrowserVaultQueryClient | null;
+  dataVersion: string | null;
   error: string | null;
+  ref: HostedBrowserVaultReplicaRef | null;
   refresh(): Promise<void>;
-  snapshot: BrowserVaultSnapshot | null;
   status: BrowserVaultStatus;
 }
 
@@ -39,35 +44,68 @@ const textDecoder = new TextDecoder();
 export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<BrowserVaultSnapshot | null>(null);
+  const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
+  const [ref, setRef] = useState<HostedBrowserVaultReplicaRef | null>(null);
+
+  const dataVersion = ref?.dataVersion ?? null;
 
   const load = useCallback(async () => {
     setStatus("loading");
     setError(null);
 
     try {
-      const next = await loadBrowserVaultSnapshot();
-      setSnapshot(next);
+      const result = await loadBrowserVaultReplica(dataVersion);
+
+      if (result.state === "not_modified") {
+        setRef(result.replicaRef);
+        setStatus(client ? "ready" : "empty");
+        return;
+      }
+
+      if (result.state === "empty") {
+        setClient(null);
+        setRef(null);
+        setStatus("empty");
+        return;
+      }
+
+      setClient(result.client);
+      setRef(result.replicaRef);
       setStatus("ready");
     } catch (loadError) {
-      setSnapshot(null);
       setStatus("error");
       setError(normalizeBrowserVaultError(loadError));
     }
-  }, []);
+  }, [client, dataVersion]);
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
       try {
-        const next = await loadBrowserVaultSnapshot();
+        const result = await loadBrowserVaultReplica(null);
 
         if (cancelled) {
           return;
         }
 
-        setSnapshot(next);
+        if (result.state === "empty") {
+          setClient(null);
+          setRef(null);
+          setStatus("empty");
+          setError(null);
+          return;
+        }
+
+        if (result.state === "not_modified") {
+          setStatus("empty");
+          setError(null);
+          setRef(result.replicaRef);
+          return;
+        }
+
+        setClient(result.client);
+        setRef(result.replicaRef);
         setStatus("ready");
         setError(null);
       } catch (loadError) {
@@ -75,7 +113,6 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        setSnapshot(null);
         setStatus("error");
         setError(normalizeBrowserVaultError(loadError));
       }
@@ -87,11 +124,13 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<BrowserVaultContextValue>(() => ({
+    client,
+    dataVersion,
     error,
+    ref,
     refresh: load,
-    snapshot,
     status,
-  }), [error, load, snapshot, status]);
+  }), [client, dataVersion, error, load, ref, status]);
 
   return (
     <BrowserVaultContext.Provider value={value}>
@@ -110,11 +149,17 @@ export function useBrowserVault(): BrowserVaultContextValue {
   return value;
 }
 
-async function loadBrowserVaultSnapshot(): Promise<BrowserVaultSnapshot> {
+type BrowserVaultSessionLoadResult =
+  | { state: "empty" }
+  | { replicaRef: HostedBrowserVaultReplicaRef; state: "not_modified" }
+  | { client: BrowserVaultQueryClient; replicaRef: HostedBrowserVaultReplicaRef; state: "ready" };
+
+async function loadBrowserVaultReplica(knownDataVersion: string | null): Promise<BrowserVaultSessionLoadResult> {
   const { privateKeyJwk, publicKeyJwk } = await generateHostedUserRecipientKeyPair();
   const response = await fetch("/api/browser-vault/session", {
     body: JSON.stringify({
       browserPublicKeyJwk: publicKeyJwk,
+      knownDataVersion,
     }),
     credentials: "same-origin",
     headers: {
@@ -128,91 +173,159 @@ async function loadBrowserVaultSnapshot(): Promise<BrowserVaultSnapshot> {
   }
 
   const session = parseBrowserVaultSessionResponse(await response.json());
-  const rootKeyEnvelope = session.rootKeyEnvelope;
-  const snapshotAad = session.snapshotAad;
-  const snapshotEnvelope = session.snapshotEnvelope;
 
-  if (rootKeyEnvelope === null && snapshotEnvelope === null && snapshotAad === null) {
-    throw new Error(
-      "Browser vault session is missing the hosted snapshot sidecar.",
-    );
+  if (session.state === "empty") {
+    return { state: "empty" };
   }
 
-  if (rootKeyEnvelope === null || snapshotEnvelope === null || snapshotAad === null) {
-    throw new Error(
-      "Browser vault session must include rootKeyEnvelope, snapshotEnvelope, and snapshotAad together.",
-    );
+  if (session.state === "not_modified") {
+    return {
+      replicaRef: session.replicaRef,
+      state: "not_modified",
+    };
   }
 
-  const rootKey = await unwrapHostedUserRootKeyForKind({
-    envelope: rootKeyEnvelope,
-    kind: "user-unlock",
+  const replicaKey = await unwrapHostedBrowserSessionKey({
+    envelope: session.replicaKeyEnvelope,
     recipientPrivateKeyJwk: privateKeyJwk,
   });
   const plaintext = await decryptHostedStoragePayload({
     aad: buildHostedStorageAad({
-      key: snapshotAad.key,
-      purpose: snapshotAad.purpose,
-      userId: snapshotAad.userId,
+      dataVersion: session.replicaAad.dataVersion,
+      objectKey: session.replicaAad.objectKey,
+      purpose: session.replicaAad.purpose,
+      schema: session.replicaAad.schema,
+      sourceBundleHash: session.replicaAad.sourceBundleHash,
+      userId: session.replicaAad.userId,
     }),
-    envelope: snapshotEnvelope,
-    expectedKeyId: rootKeyEnvelope.rootKeyId,
-    key: rootKey,
-    scope: "browser-vault-snapshot",
+    envelope: session.encryptedReplica,
+    expectedKeyId: session.replicaRef.keyId,
+    key: replicaKey,
+    scope: "browser-vault-replica",
   });
-  return parseBrowserVaultSnapshot(
+  const replica = parseBrowserVaultReplica(
     JSON.parse(textDecoder.decode(plaintext)) as unknown,
   );
-}
 
-function parseBrowserVaultSessionResponse(value: unknown): {
-  rootKeyEnvelope: HostedUserRootKeyEnvelope | null;
-  snapshotAad: BrowserVaultSnapshotAad | null;
-  snapshotEnvelope: HostedCipherEnvelope | null;
-} {
-  const record = requireRecord(value, "Browser vault session response");
-
-  return {
-    rootKeyEnvelope: record.rootKeyEnvelope === null || record.rootKeyEnvelope === undefined
-      ? null
-      : parseHostedUserRootKeyEnvelope(
-        record.rootKeyEnvelope,
-        "Browser vault session response rootKeyEnvelope",
-      ),
-    snapshotAad: record.snapshotAad === null || record.snapshotAad === undefined
-      ? null
-      : parseBrowserVaultSnapshotAad(
-        record.snapshotAad,
-        "Browser vault session response snapshotAad",
-      ),
-    snapshotEnvelope: record.snapshotEnvelope === null || record.snapshotEnvelope === undefined
-      ? null
-      : parseHostedCipherEnvelope(
-        record.snapshotEnvelope,
-        "Browser vault session response snapshotEnvelope",
-      ),
-  };
-}
-
-interface BrowserVaultSnapshotAad {
-  key: string;
-  purpose: "browser-vault-snapshot";
-  userId: string;
-}
-
-function parseBrowserVaultSnapshotAad(value: unknown, label: string): BrowserVaultSnapshotAad {
-  const record = requireRecord(value, label);
-  const purpose = requireNonEmptyString(record.purpose, `${label}.purpose`);
-
-  if (purpose !== "browser-vault-snapshot") {
-    throw new TypeError(`${label}.purpose must be browser-vault-snapshot.`);
+  if (replica.source.dataVersion !== session.replicaRef.dataVersion) {
+    throw new Error("Browser vault replica dataVersion did not match its session ref.");
   }
 
   return {
-    key: requireNonEmptyString(record.key, `${label}.key`),
+    client: createBrowserVaultQueryClient(replica),
+    replicaRef: session.replicaRef,
+    state: "ready",
+  };
+}
+
+type BrowserVaultSessionResponse =
+  | {
+      encryptedReplica: null;
+      replicaAad: null;
+      replicaKeyEnvelope: null;
+      replicaRef: null;
+      state: "empty";
+    }
+  | {
+      encryptedReplica: null;
+      replicaAad: null;
+      replicaKeyEnvelope: null;
+      replicaRef: HostedBrowserVaultReplicaRef;
+      state: "not_modified";
+    }
+  | {
+      encryptedReplica: HostedCipherEnvelope;
+      replicaAad: BrowserVaultReplicaAad;
+      replicaKeyEnvelope: HostedBrowserSessionKeyEnvelope;
+      replicaRef: HostedBrowserVaultReplicaRef;
+      state: "ready";
+    };
+
+function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSessionResponse {
+  const record = requireRecord(value, "Browser vault session response");
+  const state = requireNonEmptyString(record.state, "Browser vault session response state");
+
+  if (state === "empty") {
+    return {
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state,
+    };
+  }
+
+  if (state === "not_modified") {
+    return {
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: parseRequiredReplicaRef(record.replicaRef, "Browser vault session response replicaRef"),
+      state,
+    };
+  }
+
+  if (state !== "ready") {
+    throw new TypeError("Browser vault session response state must be empty, not_modified, or ready.");
+  }
+
+  return {
+    encryptedReplica: parseHostedCipherEnvelope(
+      record.encryptedReplica,
+      "Browser vault session response encryptedReplica",
+    ),
+    replicaAad: parseBrowserVaultReplicaAad(
+      record.replicaAad,
+      "Browser vault session response replicaAad",
+    ),
+    replicaKeyEnvelope: parseHostedBrowserSessionKeyEnvelope(
+      record.replicaKeyEnvelope,
+      "Browser vault session response replicaKeyEnvelope",
+    ),
+    replicaRef: parseRequiredReplicaRef(record.replicaRef, "Browser vault session response replicaRef"),
+    state,
+  };
+}
+
+interface BrowserVaultReplicaAad {
+  dataVersion: string;
+  objectKey: string;
+  purpose: "browser-vault-replica";
+  schema: "murph.browser-vault-replica.v1";
+  sourceBundleHash: string;
+  userId: string;
+}
+
+function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaultReplicaAad {
+  const record = requireRecord(value, label);
+  const purpose = requireNonEmptyString(record.purpose, `${label}.purpose`);
+  const schema = requireNonEmptyString(record.schema, `${label}.schema`);
+
+  if (purpose !== "browser-vault-replica") {
+    throw new TypeError(`${label}.purpose must be browser-vault-replica.`);
+  }
+  if (schema !== "murph.browser-vault-replica.v1") {
+    throw new TypeError(`${label}.schema must be murph.browser-vault-replica.v1.`);
+  }
+
+  return {
+    dataVersion: requireNonEmptyString(record.dataVersion, `${label}.dataVersion`),
+    objectKey: requireNonEmptyString(record.objectKey, `${label}.objectKey`),
     purpose,
+    schema,
+    sourceBundleHash: requireNonEmptyString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireNonEmptyString(record.userId, `${label}.userId`),
   };
+}
+
+function parseRequiredReplicaRef(value: unknown, label: string): HostedBrowserVaultReplicaRef {
+  const ref = parseHostedBrowserVaultReplicaRef(value, label);
+
+  if (!ref) {
+    throw new TypeError(`${label} must not be null.`);
+  }
+
+  return ref;
 }
 
 async function readJsonErrorMessage(response: Response): Promise<string> {

@@ -100,6 +100,9 @@
       "@murphai/query": [
         "packages/query/src/index.ts"
       ],
+      "@murphai/query/browser": [
+        "packages/query/src/browser.ts"
+      ],
       "@murphai/query/entity-families": [
         "packages/query/src/entity-families.ts"
       ],

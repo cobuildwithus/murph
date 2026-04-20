@@ -68,6 +68,7 @@ import {
 import {
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
+  parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionCursorSnapshotRef,
 } from "./parsers/cursor.ts";
 import {
@@ -85,6 +86,7 @@ import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 export {
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
+  parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionCursorSnapshotRef,
   parseHostedExecutionCursorState,
 } from "./parsers/cursor.ts";

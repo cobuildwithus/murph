@@ -11,6 +11,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const body = parseHostedRunFinalizeRequest(await readOptionalJsonObject(request));
   const response = await finalizeHostedRun({
+    browserVaultReplicaRef: "browserVaultReplicaRef" in body ? body.browserVaultReplicaRef ?? null : undefined,
     finalSnapshotRef: body.finalSnapshotRef,
     nextRuntimeWakeAt: "nextRuntimeWakeAt" in body ? body.nextRuntimeWakeAt ?? null : undefined,
     nextRuntimeWakeReason: "nextRuntimeWakeReason" in body ? body.nextRuntimeWakeReason ?? null : undefined,
