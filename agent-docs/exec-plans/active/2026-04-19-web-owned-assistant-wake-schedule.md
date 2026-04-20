@@ -34,7 +34,7 @@ Remove the remaining Durable Object ownership of assistant future due-work so `/
 
 ## Notes
 
-- The clean end state is a web-owned `assistantNextWakeAt` projection updated transactionally with cursor commit.
-- Cloudflare may still keep local alarm timing as an acceleration cache, but missing or stale DO hints must not lose due assistant work.
-- The projection must represent the whole assistant lane wake, not only cron jobs, because hosted assistant retries and recovery also feed `assistantWakeAt`.
-- The current runner stack also uses the finalize route/proof flow; the assistant wake projection is now forwarded through both initial commit and finalize publish paths so the canonical cursor stays authoritative after bundle finalization.
+- The clean end state is the cursor-owned `nextRuntimeWakeAt` projection updated transactionally with hosted-run commit/finalize.
+- Cloudflare may still keep local alarm timing as an acceleration cache, but missing or stale DO hints must not lose due private runtime work.
+- The projection represents the whole private runtime wake lane, not only assistant cron jobs, because assistant retries, device-sync work, and recovery can all feed the same due-time hint.
+- The current run-centric stack forwards the runtime wake projection through both commit and finalize so the canonical cursor stays authoritative after bundle finalization.

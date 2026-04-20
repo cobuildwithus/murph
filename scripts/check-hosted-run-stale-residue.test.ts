@@ -73,12 +73,19 @@ describe("check-hosted-run-stale-residue", () => {
     );
   });
 
-  it("allows the explicit temporary production grandfather for assistantNextWakeAt", () => {
+  it("flags stale assistantNextWakeAt residue in assistant-runtime production code", () => {
     expect(
       findHostedRunStaleResidueMatches(
         "packages/assistant-runtime/src/hosted-runtime/execution.ts",
         "const assistantNextWakeAt = nextRuntimeWakeAt;",
       ),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        kind: "content",
+        filePath: "packages/assistant-runtime/src/hosted-runtime/execution.ts",
+        matched: "assistantNextWakeAt",
+        line: 1,
+      },
+    ]);
   });
 });
