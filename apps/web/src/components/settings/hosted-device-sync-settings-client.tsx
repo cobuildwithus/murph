@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,

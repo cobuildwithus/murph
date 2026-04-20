@@ -8,9 +8,9 @@ import {
 } from "@privy-io/react-auth";
 import { useRef, useState, type FormEvent } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
+import { Input } from "@/src/components/ui/input";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 
 import {

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -123,16 +124,24 @@ async function runSmokeChecks(input: {
   return {
     childCwd: process.cwd(),
     murphBin,
-    normalizedTranscript: normalizedParse.text,
+    normalizedTranscriptMatchesExpectedSnippet: transcriptMatchesExpectedSnippet(
+      normalizedParse.text,
+      input.expectedTranscriptSnippet,
+    ),
     normalizedTranscriptProviderId: normalizedParse.providerId,
+    normalizedTranscriptSha256: sha256Hex(normalizedParse.text),
     operatorHomeRoot: process.env.HOME ?? "",
     reportedVaultId,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliBin,
     vaultRoot: input.vaultRoot,
     vaultShowBytes: Buffer.byteLength(vaultShowOutput, "utf8"),
-    wavTranscript: wavParse.text,
+    wavTranscriptMatchesExpectedSnippet: transcriptMatchesExpectedSnippet(
+      wavParse.text,
+      input.expectedTranscriptSnippet,
+    ),
     wavTranscriptProviderId: wavParse.providerId,
+    wavTranscriptSha256: sha256Hex(wavParse.text),
   };
 }
 
@@ -219,6 +228,16 @@ function assertTranscriptSnippet(
       `Hosted runner smoke ${label} transcript did not include the expected snippet: ${expectedSnippet}`,
     );
   }
+}
+
+function transcriptMatchesExpectedSnippet(transcript: string, expectedSnippet: string | null): boolean {
+  return expectedSnippet
+    ? transcript.toLowerCase().includes(expectedSnippet.toLowerCase())
+    : transcript.trim().length > 0;
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 async function assertPathExists(filePath: string): Promise<void> {

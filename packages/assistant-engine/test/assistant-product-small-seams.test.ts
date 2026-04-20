@@ -20,6 +20,8 @@ import {
   shouldExposeSensitiveHealthContext,
 } from '../src/assistant/conversation-policy.ts'
 import {
+  recordAssistantRuntimeIssue,
+  recordAssistantToolFailureRuntimeIssues,
   recordAssistantStrippedDevNoteRuntimeIssue,
   resolveAssistantDiagnosticsPolicy,
 } from '../src/assistant/issue-reporting.ts'
@@ -726,6 +728,384 @@ describe('assistant product small seams', () => {
     expect(JSON.stringify(writtenRecord)).not.toContain('[DEV]')
     expect(JSON.stringify(writtenRecord)).not.toContain('token abc123')
     expect(JSON.stringify(writtenRecord)).not.toContain('/tmp/private-path')
+  })
+
+  it('resolves diagnostics policy overrides and fully disabled issue reporting', () => {
+    const visiblePolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'email',
+      env: {
+        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'true',
+      },
+      executionContext: null,
+    })
+    expect(visiblePolicy).toMatchObject({
+      devNotesVisibleToUser: true,
+      environment: 'local',
+      issueReportingMode: 'local-visible',
+      privateIssueCaptureEnabled: true,
+      surface: 'email',
+    })
+
+    const disabledPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'email',
+      env: {
+        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'off',
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'false',
+      },
+      executionContext: null,
+    })
+    expect(disabledPolicy).toMatchObject({
+      devNotesVisibleToUser: false,
+      environment: 'local',
+      issueReportingMode: 'off',
+      privateIssueCaptureEnabled: false,
+      surface: 'email',
+    })
+
+    const invalidEnvPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'local',
+      env: {
+        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'maybe',
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'sometimes',
+      },
+      executionContext: null,
+    })
+    expect(invalidEnvPolicy).toMatchObject({
+      devNotesVisibleToUser: true,
+      environment: 'local',
+      issueReportingMode: 'local-visible',
+      privateIssueCaptureEnabled: true,
+      surface: 'local',
+    })
+  })
+
+  it('skips runtime issue writes when private capture is disabled', async () => {
+    const disabledPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'email',
+      env: {
+        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'false',
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'no',
+      },
+      executionContext: null,
+    })
+
+    await recordAssistantRuntimeIssue({
+      issue: {
+        component: 'assistant.tool',
+        issueKind: 'tool_error',
+        phase: 'tool_call',
+        severity: 'warning',
+        summary: 'This write should be skipped.',
+      },
+      policy: disabledPolicy,
+      vault: '/vaults/test',
+    })
+
+    await recordAssistantToolFailureRuntimeIssues({
+      policy: disabledPolicy,
+      rawToolEvents: [
+        {
+          type: 'assistant.tool.failed',
+        },
+      ],
+      vault: '/vaults/test',
+    })
+
+    expect(
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+    ).not.toHaveBeenCalled()
+  })
+
+  it('sanitizes runtime issue records before persisting them', async () => {
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValue(undefined)
+
+    const policy = resolveAssistantDiagnosticsPolicy({
+      channel: ' email ',
+      env: {
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'true',
+      },
+      executionContext: null,
+    })
+
+    const sensitiveSummary = [
+      'foo@example.com',
+      '+1 (555) 777-9999',
+      'https://example.com/private/log',
+      '/Users/example/private/notes.txt',
+      'C:\\Temp\\secret.txt',
+      'authorization=secret-value',
+      'Repeated summary text '.repeat(20).trim(),
+    ].join(' ')
+
+    const details = Object.fromEntries([
+      ['bool', false],
+      ['nullable', null],
+      ['finite', 42],
+      ['infinite', Number.POSITIVE_INFINITY],
+      [
+        'string',
+        [
+          'token=top-secret',
+          'foo@example.com',
+          '+1 (555) 333-4444',
+          'https://example.com/traces',
+          '/Users/example/private/trace.log',
+          'C:\\Temp\\trace.log',
+        ].join(' '),
+      ],
+      [
+        'array',
+        [
+          null,
+          false,
+          5,
+          Number.NaN,
+          'bar@example.com',
+          {
+            authorization: 'Bearer top-secret-token',
+            path: '/tmp/private-file',
+          },
+          [],
+        ],
+      ],
+      [
+        'object',
+        {
+          authorization: 'Bearer nested-token',
+          nestedEmail: 'baz@example.com',
+          nestedPath: '/Users/example/private/object.log',
+          nestedPhone: '+1 (555) 111-2222',
+          nestedUrl: 'file:///tmp/object.log',
+        },
+      ],
+      ['9bad', 'ignored'],
+      ...Array.from({ length: 30 }, (_, index) => [
+        `extra${String(index).padStart(2, '0')}`,
+        index,
+      ]),
+    ])
+
+    await recordAssistantRuntimeIssue({
+      issue: {
+        component: ' !!! ',
+        details,
+        errorCode: ' E_TIMEOUT ',
+        issueKind: 'tool_error',
+        operation: ' web.fetch ',
+        phase: 'tool_call',
+        severity: 'warning',
+        summary: sensitiveSummary,
+      },
+      policy,
+      vault: '/vaults/test',
+    })
+
+    await recordAssistantRuntimeIssue({
+      issue: {
+        component: 'assistant.cleanup',
+        issueKind: 'timeout',
+        operation: ' cleanup ',
+        phase: 'vault_write',
+        severity: 'warning',
+        summary: 'No extra details.',
+      },
+      policy,
+      vault: '/vaults/test',
+    })
+
+    expect(
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+    ).toHaveBeenCalledTimes(2)
+
+    const firstCall =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[0]?.[0]
+    const secondCall =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[1]?.[0]
+
+    expect(firstCall).toMatchObject({
+      vault: '/vaults/test',
+      record: expect.objectContaining({
+        component: 'assistant-runtime',
+        environment: 'local',
+        errorCode: 'E_TIMEOUT',
+        issueKind: 'tool_error',
+        operation: 'web.fetch',
+        phase: 'tool_call',
+        severity: 'warning',
+        surface: 'email',
+      }),
+    })
+
+    const writtenRecord = firstCall?.record as {
+      details: Record<string, unknown>
+      summary: string
+    }
+    expect(writtenRecord.summary).toContain('[email]')
+    expect(writtenRecord.summary).toContain('[number]')
+    expect(writtenRecord.summary).toContain('[url]')
+    expect(writtenRecord.summary).toContain('[path]')
+    expect(writtenRecord.summary.endsWith('…')).toBe(true)
+    expect(writtenRecord.details).toMatchObject({
+      array: expect.arrayContaining([
+        null,
+        false,
+        5,
+        '[email]',
+        {
+          authorization: '[REDACTED]',
+          path: '[path]',
+        },
+      ]),
+      bool: false,
+      extra00: 0,
+      extra17: 17,
+      finite: 42,
+      nullable: null,
+      object: {
+        authorization: '[REDACTED]',
+        nestedEmail: '[email]',
+        nestedPath: '[path]',
+        nestedPhone: '[number]',
+        nestedUrl: '[url]',
+      },
+    })
+    expect(writtenRecord.details.string).toContain('[email]')
+    expect(writtenRecord.details.string).toContain('[number]')
+    expect(writtenRecord.details.string).toContain('[url]')
+    expect(writtenRecord.details.string).toContain('[path]')
+    expect(writtenRecord.details.string).toContain('[REDACTED]')
+    expect(writtenRecord.details).not.toHaveProperty('9bad')
+    expect(writtenRecord.details).not.toHaveProperty('infinite')
+    expect(writtenRecord.details).not.toHaveProperty('extra18')
+    expect(JSON.stringify(writtenRecord)).not.toContain('top-secret')
+    expect(JSON.stringify(writtenRecord)).not.toContain('foo@example.com')
+    expect(JSON.stringify(writtenRecord)).not.toContain('/Users/example/private')
+
+    expect(secondCall).toMatchObject({
+      vault: '/vaults/test',
+      record: expect.objectContaining({
+        component: 'assistant.cleanup',
+        details: {},
+        issueKind: 'timeout',
+        operation: 'cleanup',
+      }),
+    })
+  })
+
+  it('extracts and classifies tool failure runtime issues from provider events', async () => {
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValue(undefined)
+
+    const policy = resolveAssistantDiagnosticsPolicy({
+      channel: 'email',
+      env: {
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'true',
+      },
+      executionContext: null,
+    })
+
+    await recordAssistantToolFailureRuntimeIssues({
+      policy,
+      rawToolEvents: [
+        null,
+        [],
+        'not-an-event',
+        {
+          type: 'assistant.tool.started',
+        },
+        {
+          errorCode: 'SCHEMA_INVALID',
+          errorMessage: 'provider rejected invalid payload',
+          input: {
+            ' contact id ': '1',
+            'bad key!': '2',
+          },
+          mode: ' sync ',
+          sequence: 1,
+          tool: ' Lookup Contacts ',
+          type: 'assistant.tool.failed',
+        },
+        {
+          errorMessage: 'request timed out before deadline',
+          input: 'not-an-object',
+          mode: 5,
+          sequence: '2',
+          tool: '   ',
+          type: 'assistant.tool.failed',
+        },
+        {
+          errorCode: 'E_REMOTE',
+          errorMessage: 42,
+          input: {
+            z: 'last',
+            a: 'first',
+          },
+          mode: 'async',
+          sequence: 3,
+          tool: 'notes/export',
+          type: 'assistant.tool.failed',
+        },
+      ],
+      vault: '/vaults/test',
+    })
+
+    expect(
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+    ).toHaveBeenCalledTimes(3)
+
+    const schemaCall =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[0]?.[0]
+    const timeoutCall =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[1]?.[0]
+    const genericCall =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[2]?.[0]
+
+    expect(schemaCall).toMatchObject({
+      vault: '/vaults/test',
+      record: expect.objectContaining({
+        component: 'assistant.tool',
+        details: {
+          inputKeys: ['bad-key', 'contact-id'],
+          mode: 'sync',
+          sequence: 1,
+        },
+        errorCode: 'SCHEMA_INVALID',
+        issueKind: 'schema_rejection',
+        operation: 'Lookup-Contacts',
+        phase: 'tool_call',
+        severity: 'warning',
+        summary: 'Assistant tool Lookup-Contacts failed during provider turn.',
+      }),
+    })
+
+    expect(timeoutCall).toMatchObject({
+      vault: '/vaults/test',
+      record: expect.objectContaining({
+        details: {
+          inputKeys: [],
+          mode: null,
+          sequence: null,
+        },
+        errorCode: null,
+        issueKind: 'timeout',
+        operation: 'unknown-tool',
+        summary: 'Assistant tool unknown-tool failed during provider turn.',
+      }),
+    })
+
+    expect(genericCall).toMatchObject({
+      vault: '/vaults/test',
+      record: expect.objectContaining({
+        details: {
+          inputKeys: ['a', 'z'],
+          mode: 'async',
+          sequence: 3,
+        },
+        errorCode: 'E_REMOTE',
+        issueKind: 'tool_error',
+        operation: 'notes-export',
+        summary: 'Assistant tool notes-export failed during provider turn.',
+      }),
+    })
   })
 
   it('builds execution plans from explicit targets and rejects missing targets', async () => {

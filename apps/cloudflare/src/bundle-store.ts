@@ -45,10 +45,8 @@ export interface HostedArtifactStore {
   writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
 }
 
-export interface HostedRunnerSecretsStore {
-  clearRunnerSecrets(userId: string): Promise<void>;
+export interface HostedRunnerSecretsReader {
   readRunnerSecrets(userId: string): Promise<Uint8Array | null>;
-  writeRunnerSecrets(userId: string, plaintext: Uint8Array): Promise<void>;
 }
 
 export function describeHostedBundleBytesRef(
@@ -250,22 +248,13 @@ export function createHostedArtifactStore(input: {
   };
 }
 
-export function createHostedRunnerSecretsStore(input: {
+export function createHostedRunnerSecretsReader(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
-}): HostedRunnerSecretsStore {
+}): HostedRunnerSecretsReader {
   return {
-    async clearRunnerSecrets(userId) {
-      if (!input.bucket.delete) {
-        return;
-      }
-
-      const key = await hostedRunnerSecretsObjectKey(input.key, userId);
-      await input.bucket.delete(key);
-    },
-
     async readRunnerSecrets(userId) {
       const key = await hostedRunnerSecretsObjectKey(input.key, userId);
       return readEncryptedR2Payload({
@@ -280,23 +269,6 @@ export function createHostedRunnerSecretsStore(input: {
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key,
-        scope: "runner-secrets",
-      });
-    },
-
-    async writeRunnerSecrets(userId, plaintext) {
-      const key = await hostedRunnerSecretsObjectKey(input.key, userId);
-      await writeEncryptedR2Payload({
-        aad: buildHostedStorageAad({
-          key,
-          purpose: "runner-secrets",
-          userId,
-        }),
-        bucket: input.bucket,
-        cryptoKey: input.key,
-        key,
-        keyId: input.keyId,
-        plaintext,
         scope: "runner-secrets",
       });
     },

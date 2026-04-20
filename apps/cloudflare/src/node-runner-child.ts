@@ -70,7 +70,7 @@ export async function runHostedExecutionChild(
       input.job,
       {
         platform: buildHostedExecutionRuntimePlatform({
-          boundUserId: input.job.request.wake.userId,
+          boundUserId: input.job.request.runDrain.userId,
           commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
           internalWorkerProxyToken: input.internalWorkerProxyToken,
           localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,

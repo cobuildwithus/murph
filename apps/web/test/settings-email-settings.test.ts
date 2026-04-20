@@ -14,7 +14,7 @@ vi.mock("@privy-io/react-auth", () => ({
   useUpdateEmail: mocks.useUpdateEmail,
 }));
 
-vi.mock("@/components/ui/dialog", () => ({
+vi.mock("@/src/components/ui/dialog", () => ({
   Dialog(input: { children: React.ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) {
     return React.createElement("div", {
       "data-dialog-open": String(input.open ?? false),

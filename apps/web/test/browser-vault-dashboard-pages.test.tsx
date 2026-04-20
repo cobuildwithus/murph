@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
-import type { FrontmatterMap } from "@murphai/query";
 
 import {
   createBrowserVaultQueryClient,
@@ -173,7 +172,7 @@ async function createFixtureClient(input: {
           body: "Short walks are helping with afternoon energy.\n",
           frontmatter: {
             summary: "Short walks are helping with afternoon energy.",
-          } satisfies FrontmatterMap,
+          } satisfies NonNullable<BrowserVaultEntity["frontmatter"]>,
           date: "2026-04-18",
           experimentSlug: input.experimentSlug ?? "light-morning-walk",
           occurredAt: "2026-04-18T08:00:00.000Z",

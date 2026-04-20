@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
 import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";

@@ -1,13 +1,19 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/src/components/ui/badge";
+import { Button } from "@/src/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/src/components/ui/card";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/src/components/ui/dialog";
 import {
   formatAbsoluteTime,
   formatRelativeTime,
@@ -35,7 +41,7 @@ export function HostedDeviceSyncSettingsContent(props: {
               Connect your wearables. Disconnect or reconnect any time.
             </p>
           </div>
-          <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing} variant="outline" size="md">
+          <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing} variant="outline">
             {props.isRefreshing ? "Refreshing..." : "Refresh status"}
           </Button>
         </div>
@@ -85,7 +91,7 @@ export function HostedDeviceSyncSettingsStatusCard(props: {
       </CardHeader>
       {props.actionLabel && props.onAction ? (
         <CardContent>
-          <Button type="button" onClick={() => void props.onAction?.()} disabled={props.disabled} variant="outline" size="md">
+          <Button type="button" onClick={() => void props.onAction?.()} disabled={props.disabled} variant="outline">
             {props.disabled ? "Refreshing..." : props.actionLabel}
           </Button>
         </CardContent>
@@ -141,7 +147,6 @@ function HostedDeviceSyncSourceCard(props: {
               type="button"
               onClick={() => void props.onConnect(props.source)}
               disabled={connectBusy || disconnectBusy}
-              size="md"
             >
               {connectBusy ? `${props.source.primaryAction.label}...` : props.source.primaryAction.label}
             </Button>
@@ -152,7 +157,6 @@ function HostedDeviceSyncSourceCard(props: {
               onClick={() => props.onDisconnectTargetChange(props.source)}
               disabled={connectBusy || disconnectBusy}
               variant="outline"
-              size="md"
             >
               {disconnectBusy ? "Disconnecting..." : props.source.secondaryAction.label}
             </Button>

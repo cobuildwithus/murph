@@ -269,13 +269,13 @@ async function resolveHostedEmailRouteUserId(input: {
     );
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
-      details: {
+      details: buildHostedEmailRouteLogDetails({
+        envelopeFrom: input.context.envelopeFrom,
+        headerFrom: input.context.headerFrom,
         operation: "resolve-route-user-id",
         path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
-        envelopeFrom: input.context.envelopeFrom ?? null,
-        headerFrom: input.context.headerFrom ?? null,
-        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
-      },
+        webControlBaseUrl: input.context.webControlBaseUrl,
+      }),
       error: wrappedError,
       level: "warn",
       message: "Hosted email route resolution request failed.",
@@ -294,14 +294,14 @@ async function resolveHostedEmailRouteUserId(input: {
     );
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
-      details: {
+      details: buildHostedEmailRouteLogDetails({
+        envelopeFrom: input.context.envelopeFrom,
+        headerFrom: input.context.headerFrom,
         operation: "resolve-route-user-id",
         path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
         responseStatus: response.status,
-        envelopeFrom: input.context.envelopeFrom ?? null,
-        headerFrom: input.context.headerFrom ?? null,
-        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
-      },
+        webControlBaseUrl: input.context.webControlBaseUrl,
+      }),
       error,
       level: "warn",
       message: "Hosted email route resolution response returned non-OK.",
@@ -320,14 +320,14 @@ async function resolveHostedEmailRouteUserId(input: {
     );
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
-      details: {
+      details: buildHostedEmailRouteLogDetails({
+        envelopeFrom: input.context.envelopeFrom,
+        headerFrom: input.context.headerFrom,
         operation: "resolve-route-user-id",
         path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
         responseStatus: response.status,
-        envelopeFrom: input.context.envelopeFrom ?? null,
-        headerFrom: input.context.headerFrom ?? null,
-        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
-      },
+        webControlBaseUrl: input.context.webControlBaseUrl,
+      }),
       error: wrappedError,
       level: "warn",
       message: "Hosted email route resolution returned invalid JSON.",
@@ -350,14 +350,14 @@ async function resolveHostedEmailRouteUserId(input: {
     );
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
-      details: {
+      details: buildHostedEmailRouteLogDetails({
+        envelopeFrom: input.context.envelopeFrom,
+        headerFrom: input.context.headerFrom,
         operation: "resolve-route-user-id",
         path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
         responseStatus: response.status,
-        envelopeFrom: input.context.envelopeFrom ?? null,
-        headerFrom: input.context.headerFrom ?? null,
-        webControlOrigin: readHostedWebControlOrigin(input.context.webControlBaseUrl),
-      },
+        webControlBaseUrl: input.context.webControlBaseUrl,
+      }),
       error,
       level: "warn",
       message: "Hosted email route resolution returned an invalid payload.",
@@ -380,6 +380,26 @@ function readHostedWebControlOrigin(value: string | null | undefined): string | 
   } catch {
     return null;
   }
+}
+
+function buildHostedEmailRouteLogDetails(input: {
+  envelopeFrom?: string | null;
+  headerFrom?: string | null;
+  operation: string;
+  path: string;
+  responseStatus?: number;
+  webControlBaseUrl?: string | null;
+}): Record<string, number | string | boolean> {
+  return {
+    hasEnvelopeFrom: Boolean(input.envelopeFrom),
+    hasHeaderFrom: Boolean(input.headerFrom),
+    operation: input.operation,
+    path: input.path,
+    ...(input.responseStatus === undefined ? {} : { responseStatus: input.responseStatus }),
+    ...(readHostedWebControlOrigin(input.webControlBaseUrl)
+      ? { webControlOrigin: readHostedWebControlOrigin(input.webControlBaseUrl) as string }
+      : {}),
+  };
 }
 
 function formatHostedEmailRouteErrorDetails(error: unknown): string {

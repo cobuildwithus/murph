@@ -8,7 +8,7 @@ import {
 } from "@privy-io/react-auth";
 import { useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 
 import {

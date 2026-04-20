@@ -1,9 +1,9 @@
 import type { ReactNode, Ref } from "react";
 import { useId } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
-import { Label } from "@/components/ui/label";
+import { Label } from "@/src/components/ui/label";
 
 const CODE_LENGTH = 6;
 

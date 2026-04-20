@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+  HOSTED_INGRESS_PAYLOAD_SCHEMA,
 } from "../src/contracts.js";
 import {
   buildHostedExecutionEmailConversationMessageWake,
@@ -9,8 +9,8 @@ import {
 } from "../src/builders.js";
 import {
   parseHostedExecutionEvent,
-  parseHostedWakeExecutionPayload,
-  parseHostedWakeAppendResponse,
+  parseHostedIngressPayload,
+  parseHostedIngressAppendResponse,
 } from "../src/parsers.js";
 
 describe("hosted wake contract parsers", () => {
@@ -24,7 +24,7 @@ describe("hosted wake contract parsers", () => {
       userId: "user-123",
     });
 
-    expect(parseHostedWakeAppendResponse({
+    expect(parseHostedIngressAppendResponse({
       duplicate: false,
       inserted: true,
       updatedExisting: false,
@@ -37,7 +37,7 @@ describe("hosted wake contract parsers", () => {
         occurredAt: wake.occurredAt,
         payloadBytes: 96,
         payloadCiphertext: "ciphertext:wake-123",
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "42",
@@ -79,11 +79,11 @@ describe("hosted wake contract parsers", () => {
       userId: "user-123",
     });
 
-    expect(parseHostedWakeExecutionPayload({
+    expect(parseHostedIngressPayload({
       decryptedPayload: wake,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
   });
@@ -98,11 +98,11 @@ describe("hosted wake contract parsers", () => {
       userId: "user-123",
     });
 
-    expect(parseHostedWakeExecutionPayload({
+    expect(parseHostedIngressPayload({
       decryptedPayload: wake,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
   });

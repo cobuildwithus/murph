@@ -609,6 +609,55 @@ describe('assistant CLI tool capability seam', () => {
         input: { captureId: 'cap_123', requestId: 'req_123', vault: vaultRoot },
       },
     ])
+    inboxCalls.length = 0
+
+    const inboxToolsWithoutRequestId = createInboxPromotionToolDefinitions(
+      createToolContext({
+        captureId: 'cap_123',
+        inboxServices,
+        vault: vaultRoot,
+        vaultServices,
+      }),
+    )
+    await executeTool(inboxToolsWithoutRequestId, 'inbox.promote.meal', {
+      captureId: 'cap_123',
+    })
+    await executeTool(inboxToolsWithoutRequestId, 'inbox.promote.document', {
+      captureId: 'cap_123',
+    })
+    await executeTool(inboxToolsWithoutRequestId, 'inbox.promote.journal', {
+      captureId: 'cap_123',
+    })
+    await executeTool(inboxToolsWithoutRequestId, 'inbox.promote.experimentNote', {
+      captureId: 'cap_123',
+    })
+    expect(inboxCalls).toEqual([
+      {
+        name: 'promoteMeal',
+        input: {
+          captureId: 'cap_123',
+          note: undefined,
+          occurredAt: undefined,
+          source: undefined,
+          ingredients: undefined,
+          nutrition: undefined,
+          requestId: null,
+          vault: vaultRoot,
+        },
+      },
+      {
+        name: 'promoteDocument',
+        input: { captureId: 'cap_123', requestId: null, vault: vaultRoot },
+      },
+      {
+        name: 'promoteJournal',
+        input: { captureId: 'cap_123', requestId: null, vault: vaultRoot },
+      },
+      {
+        name: 'promoteExperimentNote',
+        input: { captureId: 'cap_123', requestId: null, vault: vaultRoot },
+      },
+    ])
 
     const queryTools = createVaultQueryToolDefinitions(context)
     expect(await executeTool(queryTools, 'vault.show', { id: 'journal:2026-03-13' })).toMatchObject({
@@ -966,6 +1015,27 @@ describe('assistant CLI tool capability seam', () => {
     })
 
     expect(createInboxPromotionToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
+    expect(
+      createInboxPromotionToolDefinitions(
+        createToolContext({
+          captureId: 'cap_123',
+          vault: vaultRoot,
+        }),
+      ),
+    ).toEqual([])
+    expect(
+      createInboxPromotionToolDefinitions(
+        createToolContext({
+          inboxServices: assumeInboxServices({
+            promoteDocument: vi.fn(),
+            promoteExperimentNote: vi.fn(),
+            promoteJournal: vi.fn(),
+            promoteMeal: vi.fn(),
+          }),
+          vault: vaultRoot,
+        }),
+      ),
+    ).toEqual([])
     expect(createVaultQueryToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
     expect(createCanonicalVaultWriteToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
     expect(createHealthUpsertToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])

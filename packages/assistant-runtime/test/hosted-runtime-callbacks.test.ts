@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
@@ -54,10 +54,10 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const HOSTED_WAKE = {
-  wake: buildHostedExecutionAssistantCronTickWake({
+  wake: buildHostedExecutionRuntimeTimerWake({
     eventId: "evt_123",
     occurredAt: "2026-04-08T00:00:00.000Z",
-    reason: "manual",
+    triggerKind: "runtime_timer",
     userId: "member_123",
   }),
   vaultRoot: "/tmp/hosted-vault",

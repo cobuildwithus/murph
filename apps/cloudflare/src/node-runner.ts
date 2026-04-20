@@ -95,7 +95,7 @@ export function createHostedExecutionJobRunner(
       ? null
       : readEnvironment();
     const runtimePlatform = buildRuntimePlatform({
-      boundUserId: input.request.wake.userId,
+      boundUserId: input.request.runDrain.userId,
       commitTimeoutMs: runtime.commitTimeoutMs,
       internalWorkerProxyToken,
       localInternalProxyBaseUrl,

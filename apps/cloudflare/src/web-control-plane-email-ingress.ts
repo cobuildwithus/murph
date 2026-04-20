@@ -1,9 +1,9 @@
 import type {
-  HostedWakeAppendResponse,
+  HostedIngressAppendResponse,
   HostedEmailIngressWakeAppendRequest,
 } from "@murphai/hosted-execution";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
-import { parseHostedWakeAppendResponse } from "@murphai/hosted-execution/parsers";
+import { parseHostedIngressAppendResponse } from "@murphai/hosted-execution/parsers";
 
 import {
   fetchHostedExecutionWebControlPlaneResponse,
@@ -19,7 +19,7 @@ export async function appendHostedEmailIngressWakeInWeb(input: {
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
   fetchImpl?: typeof fetch;
   timeoutMs: number | null;
-}): Promise<HostedWakeAppendResponse> {
+}): Promise<HostedIngressAppendResponse> {
   let response: Response;
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
@@ -78,5 +78,5 @@ export async function appendHostedEmailIngressWakeInWeb(input: {
     throw error;
   }
 
-  return parseHostedWakeAppendResponse(await response.json());
+  return parseHostedIngressAppendResponse(await response.json());
 }

@@ -55,10 +55,13 @@ async function main(): Promise<void> {
   console.log(`murphBin=${result.murphBin}`);
   console.log(`vaultCliBin=${result.vaultCliBin}`);
   console.log(`reportedVaultId=${result.reportedVaultId}`);
+  console.log(`vaultShowBytes=${result.vaultShowBytes}`);
   console.log(`wavTranscriptProviderId=${result.wavTranscriptProviderId}`);
-  console.log(`wavTranscript=${JSON.stringify(result.wavTranscript)}`);
+  console.log(`wavTranscriptSha256=${result.wavTranscriptSha256}`);
+  console.log(`wavTranscriptMatchesExpectedSnippet=${result.wavTranscriptMatchesExpectedSnippet}`);
   console.log(`normalizedTranscriptProviderId=${result.normalizedTranscriptProviderId}`);
-  console.log(`normalizedTranscript=${JSON.stringify(result.normalizedTranscript)}`);
+  console.log(`normalizedTranscriptSha256=${result.normalizedTranscriptSha256}`);
+  console.log(`normalizedTranscriptMatchesExpectedSnippet=${result.normalizedTranscriptMatchesExpectedSnippet}`);
 }
 
 async function runDockerCommand(args: string[], stdinText: string): Promise<string> {

@@ -1,5 +1,11 @@
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/src/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/src/components/ui/card";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
 import { ShareLinkClient } from "./share-link-client";
