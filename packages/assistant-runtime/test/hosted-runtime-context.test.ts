@@ -5,7 +5,7 @@ import path from "node:path";
 import { beforeEach, test, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
@@ -61,11 +61,11 @@ function buildLegacyWake(input: {
   occurredAt: string;
 }) {
   switch (input.event.kind) {
-    case "assistant.cron.tick":
-      return buildHostedExecutionAssistantCronTickWake({
+    case "device-sync.wake":
+      return buildHostedExecutionDeviceSyncWake({
         eventId: input.eventId,
         occurredAt: input.occurredAt,
-        reason: input.event.reason as "alarm" | "device-sync" | "manual",
+        reason: input.event.reason as "connected" | "disconnected" | "reauthorization_required" | "reconcile_due" | "webhook_hint",
         userId: input.event.userId ?? "member_123",
       });
     case "member.activated":
@@ -306,8 +306,8 @@ test("hosted wake context still requires member activation bootstrap before foll
           vaultRoot,
           buildLegacyWake({
             event: {
-              kind: "assistant.cron.tick",
-              reason: "manual",
+              kind: "device-sync.wake",
+              reason: "connected",
               userId: "member_123",
             },
             eventId: "evt_tick_without_bootstrap",
@@ -746,10 +746,10 @@ test("hosted wake context does not change auto-reply state on non-channel follow
         vaultRoot,
         buildLegacyWake({
           event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId: "member_123",
-          },
+              kind: "device-sync.wake",
+              reason: "connected",
+              userId: "member_123",
+            },
           eventId: "evt_tick_after_bootstrap",
           occurredAt: "2026-03-28T09:10:00.000Z",
         }),

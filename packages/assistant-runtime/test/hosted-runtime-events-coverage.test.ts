@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionVaultShareAcceptedWake,
@@ -45,7 +44,7 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
   handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
-import { executeHostedWakeEvent } from "../src/hosted-runtime/events.ts";
+import { executeHostedIngressEventAlias } from "../src/hosted-runtime/events.ts";
 import {
   createHostedRuntimeEffectsPortStub,
   createHostedRuntimeResolvedConfig,
@@ -108,7 +107,7 @@ describe("hosted runtime event coverage", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    const result = await executeHostedWakeEvent({
+    const result = await executeHostedIngressEventAlias({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -126,14 +125,8 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
-  it("returns noop metrics for assistant cron ticks and device-sync wakes", async () => {
+  it("returns noop metrics for device-sync wakes", async () => {
     const runtime = createRuntime();
-    const cronWake = buildHostedExecutionAssistantCronTickWake({
-      eventId: "evt_cron",
-      occurredAt: "2026-04-08T00:05:00.000Z",
-      reason: "alarm",
-      userId: "member_123",
-    });
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake",
       occurredAt: "2026-04-08T00:10:00.000Z",
@@ -142,23 +135,7 @@ describe("hosted runtime event coverage", () => {
     });
 
     await expect(
-      executeHostedWakeEvent({
-        wake: cronWake,
-        executionContext,
-        runtime,
-        runtimeEnv: {},
-        vaultRoot: "/tmp/assistant-runtime-events-coverage",
-      }),
-    ).resolves.toEqual({
-      bootstrapResult: null,
-      conversationMetrics: null,
-      followupExecution: "assistant-cron",
-      shareImportResult: null,
-      shareImportTitle: null,
-    });
-
-    await expect(
-      executeHostedWakeEvent({
+      executeHostedIngressEventAlias({
         wake: deviceSyncWake,
         executionContext,
         runtime,
@@ -199,7 +176,7 @@ describe("hosted runtime event coverage", () => {
       shareId: "share_123",
     };
 
-    const result = await executeHostedWakeEvent({
+    const result = await executeHostedIngressEventAlias({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -224,7 +201,7 @@ describe("hosted runtime event coverage", () => {
 
   it("fails closed on unexpected wake kinds", async () => {
     await expect(
-      executeHostedWakeEvent({
+      executeHostedIngressEventAlias({
         wake: {
           kind: "unexpected.event",
           eventId: "evt_unexpected",

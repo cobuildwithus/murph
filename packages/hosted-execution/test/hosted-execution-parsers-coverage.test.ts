@@ -439,7 +439,7 @@ describe("hosted execution parsers coverage", () => {
   });
 
   describe("event variants", () => {
-    it("parses member activation, cron, and device-sync event payloads", () => {
+    it("parses member activation and device-sync event payloads", () => {
       const memberEvent = parseHostedExecutionEvent({
         firstContact: {
           channel: "telegram",
@@ -449,11 +449,6 @@ describe("hosted execution parsers coverage", () => {
         },
         kind: "member.activated",
         memberChannels: DEFAULT_MEMBER_CHANNELS,
-        userId: "user_123",
-      });
-      const cronEvent = parseHostedExecutionEvent({
-        kind: "assistant.cron.tick",
-        reason: "device-sync",
         userId: "user_123",
       });
       const deviceSyncEvent = parseHostedExecutionEvent({
@@ -488,11 +483,6 @@ describe("hosted execution parsers coverage", () => {
       });
 
       expect(memberEvent.kind).toBe("member.activated");
-      expect(cronEvent).toEqual({
-        kind: "assistant.cron.tick",
-        reason: "device-sync",
-        userId: "user_123",
-      });
       expect(deviceSyncEvent.kind).toBe("device-sync.wake");
     });
 
@@ -520,6 +510,14 @@ describe("hosted execution parsers coverage", () => {
     });
 
     it("rejects invalid event-level values", () => {
+      expect(() =>
+        parseHostedExecutionEvent({
+          kind: "assistant.cron.tick",
+          reason: "device-sync",
+          userId: "user_123",
+        }),
+      ).toThrow(/Unsupported hosted execution event kind/i);
+
       expect(() =>
         parseHostedExecutionEvent({
           kind: "unsupported.event",

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
@@ -286,15 +285,6 @@ describe("summarizeWake", () => {
         expected: "Persisted hosted email capture on the hosted conversation lane.",
       },
       {
-        wake: buildHostedExecutionAssistantCronTickWake({
-          eventId: "evt_cron",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "alarm",
-          userId: "member_123",
-        }),
-        expected: "Processed assistant cron tick (alarm) on the hosted assistant lane.",
-      },
-      {
         wake: buildHostedExecutionDeviceSyncWake({
           eventId: "evt_wake",
           occurredAt: "2026-04-08T00:00:00.000Z",
@@ -314,9 +304,7 @@ describe("summarizeWake", () => {
           deviceSyncSkipped: false,
           followupExecution: entry.wake.kind === "conversation.message"
             ? "conversation-message"
-            : entry.wake.kind === "assistant.cron.tick"
-              ? "assistant-cron"
-              : "device-sync",
+            : "device-sync",
           nextWakeAt: null,
           parserProcessed: 1,
           shareImportResult: null,

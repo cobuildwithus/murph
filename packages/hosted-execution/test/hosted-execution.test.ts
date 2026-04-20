@@ -15,7 +15,7 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
-  HOSTED_WAKE_LIFECYCLE_STATES,
+  HOSTED_INGRESS_LIFECYCLE_STATES,
   HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "../src/contracts.ts";
@@ -49,7 +49,7 @@ describe("hosted execution coverage gaps", () => {
         encodeHostedExecutionSignedRequestPayload({
           method: " patch ",
           nonce: "  nonce_abc  ",
-          path: "internal/hosted-wake",
+          path: "internal/hosted-ingress",
           payload: "{\"ok\":true}",
           search: "limit=10&sort=desc",
           timestamp: "2026-04-07T00:00:00.000Z",
@@ -59,7 +59,7 @@ describe("hosted execution coverage gaps", () => {
     ).toBe(JSON.stringify([
       "2026-04-07T00:00:00.000Z",
       "PATCH",
-      "/internal/hosted-wake",
+      "/internal/hosted-ingress",
       "?limit=10&sort=desc",
       "user_123",
       "nonce_abc",
@@ -122,11 +122,10 @@ describe("hosted execution coverage gaps", () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
       "member.channels.updated",
-      "assistant.cron.tick",
       "device-sync.wake",
       "vault.share.accepted",
     ]);
-    expect(HOSTED_WAKE_LIFECYCLE_STATES).toEqual([
+    expect(HOSTED_INGRESS_LIFECYCLE_STATES).toEqual([
       "queued",
       "backpressured",
       "completed",
@@ -135,6 +134,7 @@ describe("hosted execution coverage gaps", () => {
     ]);
     expect(HOSTED_RUN_STATUSES).toEqual([
       "acquired",
+      "finalizing",
       "committed_needs_finalize",
       "finalized",
       "failed",

@@ -1,11 +1,11 @@
 import type {
-  HostedExecutionAssistantCronTickEvent,
   HostedExecutionAssistantCronTickWake,
   HostedExecutionConversationMessagePayload,
   HostedExecutionConversationMessageWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionEmailConversationMessagePayload,
+  HostedExecutionLegacyCronReason,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
   HostedExecutionLinqConversationMessagePart,
@@ -13,8 +13,10 @@ import type {
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
+  HostedExecutionRuntimeTimerWake,
   HostedExecutionTelegramMessage,
   HostedExecutionTelegramConversationMessagePayload,
+  HostedRunTriggerKind,
   HostedExecutionVaultShareAcceptedEvent,
   HostedExecutionVaultShareAcceptedWake,
 } from "./contracts.ts";
@@ -184,7 +186,7 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
 export function buildHostedExecutionAssistantCronTickWake(input: {
   eventId: string;
   occurredAt: string;
-  reason: HostedExecutionAssistantCronTickEvent["reason"];
+  reason: HostedExecutionLegacyCronReason;
   userId: string;
 }): HostedExecutionAssistantCronTickWake {
   return {
@@ -194,6 +196,36 @@ export function buildHostedExecutionAssistantCronTickWake(input: {
     reason: input.reason,
     userId: input.userId,
   };
+}
+
+export function buildHostedExecutionRuntimeTimerWake(input: {
+  eventId: string;
+  occurredAt: string;
+  triggerKind: HostedRunTriggerKind;
+  userId: string;
+}): HostedExecutionRuntimeTimerWake {
+  return {
+    eventId: input.eventId,
+    kind: "runtime.timer",
+    occurredAt: input.occurredAt,
+    triggerKind: input.triggerKind,
+    userId: input.userId,
+  };
+}
+
+export function createRuntimeTimerSyntheticWake(input: {
+  acquiredAt: string;
+  runId: string;
+  triggerKind: HostedRunTriggerKind;
+  userId: string;
+}): HostedExecutionRuntimeTimerWake {
+  // Runtime timers are internal continuation context, not persisted ingress rows.
+  return buildHostedExecutionRuntimeTimerWake({
+    eventId: `hosted-run:${input.runId}`,
+    occurredAt: input.acquiredAt,
+    triggerKind: input.triggerKind,
+    userId: input.userId,
+  });
 }
 
 export function buildHostedExecutionDeviceSyncWake(input: {

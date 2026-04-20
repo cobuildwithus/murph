@@ -36,7 +36,7 @@ import {
 } from "./context.ts";
 import { executeHostedIngressEventAlias } from "./events.ts";
 import {
-  runHostedAssistantCronWakeLane,
+  runHostedAssistantRuntimeTimerLane,
   runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
 } from "./maintenance.ts";
@@ -145,7 +145,7 @@ export async function executeHostedRunDrainForCommit(input: {
   }
 
   if (shouldRunAssistantAutomation) {
-    const assistantMetrics = await runHostedAssistantCronWakeLane({
+    const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
       executionContext: wakeExecutionContext,
       requestId: `${runDrain.runId}:assistant`,
       vaultRoot: input.restored.vaultRoot,
@@ -351,13 +351,6 @@ async function runHostedSystemWakeFollowupExecution(input: {
   );
   const maintenanceMetrics = await (() => {
     switch (input.wake.kind) {
-      case "assistant.cron.tick":
-        return runHostedAssistantCronWakeLane({
-          executionContext: wakeExecutionContext,
-          requestId: input.requestId,
-          vaultRoot: input.vaultRoot,
-          wake: input.wake,
-        });
       case "device-sync.wake":
         return runHostedDeviceSyncWakeLane({
           deviceSyncPort: input.runtime.platform.deviceSyncPort,

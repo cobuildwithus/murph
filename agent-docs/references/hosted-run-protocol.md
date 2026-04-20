@@ -80,7 +80,7 @@ The run protocol preserves the existing correctness spine from the ingress ledge
 
 If executor/runtime plumbing needs a wake-shaped object for logs or callback wiring, it must use an internal-only `kind = "runtime.timer"` representation. That object is not persisted ingress, not a durable contract between web and runtime, and not a synonym for `assistant.cron.tick`.
 
-`assistant.cron.tick` remains an ingress event kind for explicit external/manual/admin scheduling flows. It is not the internal continuation mechanism for zero-event runtime timers.
+For greenfield hosted execution, `assistant.cron.tick` is deprecated. Web must not append it as ordinary ingress, and persisted hosted-run/event contracts must not depend on it. If any legacy compatibility still exists during migration, treat it as runtime-internal only and not as a web-produced or durable ingress kind.
 
 `nextRuntimeWakeAt` is the only hosted cursor wake projection. Internal assistant/parser/device-sync follow-ups stay runtime-local and surface only as this redacted due-time hint. There is no second cursor-level follow-up hint and no internal web-materialized assistant/parser follow-up lane.
 
