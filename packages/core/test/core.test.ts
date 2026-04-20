@@ -134,6 +134,15 @@ function readFileMode(stats: { mode: number }): number {
   return stats.mode & 0o777;
 }
 
+function readRequiredPrototypeMethod<TMethod extends (...args: never[]) => unknown>(
+  instance: object,
+  name: string,
+): TMethod {
+  const value = Reflect.get(Object.getPrototypeOf(instance), name);
+  assert.equal(typeof value, "function");
+  return value as TMethod;
+}
+
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
@@ -3226,6 +3235,169 @@ test("WriteBatch rolls back earlier writes when a later staged action fails duri
     operation.actions.filter((action) => action.state === "rolled_back").length,
     1,
   );
+});
+
+test("WriteBatch keeps committed canonical writes when post-commit stage cleanup fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "post_commit_cleanup_failure",
+    summary: "Leave staging residue when cleanup fails after commit",
+  });
+  const targetRelativePath = "notes/post-commit-cleanup.txt";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const stageRootAbsolutePath = path.join(vaultRoot, batch.stageRootRelativePath);
+  const originalCleanupStageArtifacts = readRequiredPrototypeMethod<
+    () => Promise<void>
+  >(batch, "cleanupStageArtifacts");
+
+  await batch.stageTextWrite(targetRelativePath, "committed\n", {
+    overwrite: false,
+  });
+
+  Reflect.set(Object.getPrototypeOf(batch), "cleanupStageArtifacts", async function cleanupStageArtifactsWithFailure() {
+    throw new Error("injected cleanup failure");
+  });
+
+  try {
+    await batch.commit();
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "cleanupStageArtifacts", originalCleanupStageArtifacts);
+  }
+
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "committed\n");
+  assert.equal(await fs.access(stageRootAbsolutePath).then(() => true, () => false), true);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "committed");
+  assert.equal(operation.error?.message, "injected cleanup failure");
+  assert.equal(operation.actions[0]?.state, "applied");
+});
+
+test("WriteBatch rolls back applied canonical writes when guard receipt persistence fails before commit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const coreAbsolutePath = path.join(vaultRoot, "CORE.md");
+  const originalCore = await fs.readFile(coreAbsolutePath, "utf8");
+  const parsedCore = parseFrontmatterDocument(originalCore);
+  const lockAbsolutePath = path.join(vaultRoot, ".runtime/locks/canonical-write");
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "guard_receipt_failure",
+    summary: "Roll back applied writes when guard receipt persistence fails",
+  });
+  const updatedCore = stringifyFrontmatterDocument({
+    attributes: {
+      ...parsedCore.attributes,
+      title: "Guard Receipt Failure Test",
+      updatedAt: "2026-03-16T12:05:00.000Z",
+    },
+    body: parsedCore.body.replace(/^# .*$/mu, "# Guard Receipt Failure Test"),
+  });
+  const originalPersistGuardReceiptIfConfigured = readRequiredPrototypeMethod<
+    () => Promise<void>
+  >(batch, "persistGuardReceiptIfConfigured");
+
+  await batch.stageTextWrite("CORE.md", updatedCore, {
+    overwrite: true,
+  });
+
+  Reflect.set(
+    Object.getPrototypeOf(batch),
+    "persistGuardReceiptIfConfigured",
+    async function persistGuardReceiptWithFailure() {
+      throw new Error("injected guard receipt failure");
+    },
+  );
+
+  try {
+    await assert.rejects(() => batch.commit(), /injected guard receipt failure/u);
+  } finally {
+    Reflect.set(
+      Object.getPrototypeOf(batch),
+      "persistGuardReceiptIfConfigured",
+      originalPersistGuardReceiptIfConfigured,
+    );
+  }
+
+  assert.equal(await fs.readFile(coreAbsolutePath, "utf8"), originalCore);
+  assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), false);
+  assert.equal(await fs.access(lockAbsolutePath).then(() => true, () => false), false);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "rolled_back");
+  assert.equal(operation.error?.message, "injected guard receipt failure");
+  assert.equal(operation.actions[0]?.state, "rolled_back");
+});
+
+test("WriteBatch removes guard receipts when committed-status persistence fails after the receipt write", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const receiptRoot = await makeTempDirectory("murph-guard-receipts");
+  const previousReceiptRoot = process.env.MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR;
+  await initializeVault({ vaultRoot });
+
+  const coreAbsolutePath = path.join(vaultRoot, "CORE.md");
+  const originalCore = await fs.readFile(coreAbsolutePath, "utf8");
+  const parsedCore = parseFrontmatterDocument(originalCore);
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "committed_status_persist_failure",
+    summary: "Remove guard receipts when committed-status persistence fails",
+  });
+  const updatedCore = stringifyFrontmatterDocument({
+    attributes: {
+      ...parsedCore.attributes,
+      title: "Committed Status Persist Failure Test",
+      updatedAt: "2026-03-16T12:10:00.000Z",
+    },
+    body: parsedCore.body.replace(/^# .*$/mu, "# Committed Status Persist Failure Test"),
+  });
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  let committedPersistFailed = false;
+
+  process.env.MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR = receiptRoot;
+
+  await batch.stageTextWrite("CORE.md", updatedCore, {
+    overwrite: true,
+  });
+
+  Reflect.set(Object.getPrototypeOf(batch), "persist", async function persistWithCommittedFailure(this: object) {
+    const record = Reflect.get(this, "record");
+    if (
+      !committedPersistFailed &&
+      typeof record === "object" &&
+      record !== null &&
+      Reflect.get(record, "status") === "committed"
+    ) {
+      committedPersistFailed = true;
+      throw new Error("injected committed-status persist failure");
+    }
+
+    return originalPersist.call(this);
+  });
+
+  try {
+    await assert.rejects(() => batch.commit(), /injected committed-status persist failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+    if (previousReceiptRoot === undefined) {
+      delete process.env.MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR;
+    } else {
+      process.env.MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR = previousReceiptRoot;
+    }
+  }
+
+  assert.equal(await fs.readFile(coreAbsolutePath, "utf8"), originalCore);
+  assert.equal(await fs.access(path.join(receiptRoot, `${batch.operationId}.json`)).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(receiptRoot, batch.operationId)).then(() => true, () => false), false);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "rolled_back");
+  assert.equal(operation.error?.message, "injected committed-status persist failure");
+  assert.equal(operation.actions[0]?.state, "rolled_back");
 });
 
 test("applyCanonicalWriteBatch rolls back vault summary writes when a later text write fails", async () => {
