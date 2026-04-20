@@ -29,6 +29,7 @@
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
+    "@murphai/health-commons": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/query": "workspace:*",

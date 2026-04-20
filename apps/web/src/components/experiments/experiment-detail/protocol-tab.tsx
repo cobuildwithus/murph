@@ -23,7 +23,7 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
   return (
     <div className="flex flex-col gap-10">
 
-      <div className="flex gap-4 pt-2">
+      <div className="grid gap-4 pt-2 md:grid-cols-2 xl:grid-cols-3">
         {expectedSignals.map((signal) => (
           <ExpectedSignalCard
             key={signal.label}
@@ -36,7 +36,7 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
       </div>
 
       {/* Protocol steps + Why It Works */}
-      <div className="flex gap-10">
+      <div className="flex flex-col gap-10 xl:flex-row">
         <div className="flex grow shrink basis-0 flex-col gap-5">
           <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
             PROTOCOL
@@ -76,38 +76,32 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
       </div>
 
       {/* Recommended by */}
-      <div className="flex flex-col gap-3.5">
-        <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
-          RECOMMENDED BY
-        </span>
-        <div className="flex gap-3.5">
-          {experts.map((expert) => (
-            <ExpertCard key={expert.name} {...expert} />
-          ))}
+      {experts.length > 0 && (
+        <div className="flex flex-col gap-3.5">
+          <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
+            RECOMMENDED BY
+          </span>
+          <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
+            {experts.map((expert) => (
+              <ExpertCard key={expert.name} {...expert} />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Research */}
       <div className="flex flex-col gap-5">
         <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
           RESEARCH
         </span>
-        <div className="flex gap-4">
-          {[
-            { value: researchStats.studies, label: "STUDIES" },
-            {
-              value: researchStats.participants.toLocaleString(),
-              label: "PARTICIPANTS",
-            },
-            { value: researchStats.yearsFollowUp, label: "YEARS MAX FOLLOW-UP" },
-            { value: researchStats.evidenceLevel, label: "EVIDENCE LEVEL" },
-          ].map((stat) => (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {researchStats.map((stat) => (
             <div
               key={stat.label}
               className="flex grow shrink basis-0 flex-col items-center gap-1 rounded-xl border border-secondary/25 bg-card/90 p-5"
             >
               <span className="font-serif text-[32px]/10 font-semibold text-foreground">
-                {stat.value}
+                {typeof stat.value === "number" ? stat.value.toLocaleString() : stat.value}
               </span>
               <span className="font-mono text-[10px]/3 tracking-[0.08em] text-chart-5">
                 {stat.label}
@@ -117,15 +111,17 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         </div>
 
         {/* Study cards - unified container */}
-        <div className="overflow-hidden rounded-xl border border-secondary/25 bg-card/90">
-          {studies.map((study, i) => (
-            <StudyCard
-              key={study.title}
-              {...study}
-              last={i === studies.length - 1}
-            />
-          ))}
-        </div>
+        {studies.length > 0 && (
+          <div className="overflow-hidden rounded-xl border border-secondary/25 bg-card/90">
+            {studies.map((study, i) => (
+              <StudyCard
+                key={study.title}
+                {...study}
+                last={i === studies.length - 1}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Podcast links */}

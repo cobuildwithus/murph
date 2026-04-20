@@ -10,6 +10,7 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/package.json",
   "@murphai/contracts": "../../packages/contracts/src/index.ts",
+  "@murphai/health-commons": "../../packages/health-commons/src/index.ts",
   "@murphai/gateway-core": "../../packages/gateway-core/src/index.ts",
   "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
   "@murphai/messaging-ingress": "../../packages/messaging-ingress/package.json",
@@ -24,6 +25,11 @@ export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
 
 type VitestAlias = {
   find: RegExp;
+  replacement: string;
+};
+
+type PackageExportSourceEntry = {
+  find: RegExp | string;
   replacement: string;
 };
 
@@ -87,15 +93,18 @@ export function createVitestWorkspaceRuntimeAliases(
   const aliases: VitestAlias[] = [];
   const seen = new Set<string>();
 
-  const appendAlias = (specifier: string, replacement: string) => {
-    const key = `${specifier}\u0000${replacement}`;
+  const appendAlias = (specifier: RegExp | string, replacement: string) => {
+    const find = typeof specifier === "string"
+      ? new RegExp(`^${escapeRegExp(specifier)}$`)
+      : specifier;
+    const key = `${find.source}\u0000${replacement}`;
     if (seen.has(key)) {
       return;
     }
 
     seen.add(key);
     aliases.push({
-      find: new RegExp(`^${escapeRegExp(specifier)}$`),
+      find,
       replacement,
     });
   };
@@ -113,12 +122,12 @@ export function createVitestWorkspaceRuntimeAliases(
       appendAlias(specifier, entryPath);
     }
 
-    for (const [subpathSpecifier, subpathEntryPath] of resolvePackageExportSourceEntries(
+    for (const { find, replacement } of resolvePackageExportSourceEntries(
       specifier,
       packageDir,
       packageJson,
     )) {
-      appendAlias(subpathSpecifier, subpathEntryPath);
+      appendAlias(find, replacement);
     }
   }
 
@@ -209,15 +218,15 @@ function resolvePackageExportSourceEntries(
   packageName: string,
   packageDir: string,
   packageJson: Record<string, unknown>,
-): Array<readonly [string, string]> {
+): PackageExportSourceEntry[] {
   const exportsField = packageJson.exports;
   if (!exportsField || typeof exportsField !== "object" || Array.isArray(exportsField)) {
     return [];
   }
 
-  const aliases: Array<readonly [string, string]> = [];
+  const aliases: PackageExportSourceEntry[] = [];
   for (const [exportKey, exportValue] of Object.entries(exportsField)) {
-    if (exportKey === "." || !exportKey.startsWith("./") || exportKey.includes("*")) {
+    if (exportKey === "." || !exportKey.startsWith("./")) {
       continue;
     }
 
@@ -226,10 +235,22 @@ function resolvePackageExportSourceEntries(
       continue;
     }
 
-    aliases.push([
-      `${packageName}/${exportKey.slice(2)}`,
-      resolveWorkspaceSourcePathFromExportTarget(packageDir, exportTarget),
-    ]);
+    if (exportKey.includes("*")) {
+      if (countOccurrences(exportKey, "*") !== 1 || countOccurrences(exportTarget, "*") !== 1) {
+        continue;
+      }
+
+      aliases.push({
+        find: new RegExp(`^${escapeRegExp(`${packageName}/${exportKey.slice(2)}`).replace("\\*", "(.+)")}$`),
+        replacement: resolveWorkspacePathFromPackageExportTarget(packageDir, exportTarget).replace("*", "$1"),
+      });
+      continue;
+    }
+
+    aliases.push({
+      find: `${packageName}/${exportKey.slice(2)}`,
+      replacement: resolveWorkspacePathFromPackageExportTarget(packageDir, exportTarget),
+    });
   }
 
   return aliases;
@@ -298,11 +319,9 @@ function resolvePackageExportDefaultTarget(value: unknown): string | null {
   return null;
 }
 
-function resolveWorkspaceSourcePathFromExportTarget(packageDir: string, exportTarget: string): string {
+function resolveWorkspacePathFromPackageExportTarget(packageDir: string, exportTarget: string): string {
   if (!exportTarget.startsWith("./dist/")) {
-    throw new Error(
-      `Workspace source resolution only supports dist-backed package exports, received ${exportTarget}.`,
-    );
+    return path.resolve(packageDir, exportTarget.replace(/^\.\//u, ""));
   }
 
   const sourceRelativePath = exportTarget
