@@ -313,6 +313,7 @@ describe('channel helper seams', () => {
         kind: 'participant',
         target: 'participant-7',
       },
+      deliverySource: null,
       dependencies: {},
       idempotencyKey: 'idem-7',
       identityId: 'identity-7',
@@ -474,10 +475,12 @@ describe('channel helper seams', () => {
       },
     )
     expect(sendLinq).toHaveBeenCalledWith({
+      fromPhoneNumber: null,
       idempotencyKey: 'idem-linq',
       message: 'linq hello',
       replyToMessageId: null,
       target: 'thread-linq-11',
+      targetKind: 'thread',
     })
     expect(linqDelivery).toMatchObject({
       channel: 'linq',

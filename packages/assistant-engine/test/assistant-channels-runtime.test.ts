@@ -543,10 +543,12 @@ describe('assistant channels runtime seam', () => {
       fetchImplementation: undefined,
     })
     expect(sendLinq).toHaveBeenNthCalledWith(1, {
+      fromPhoneNumber: null,
       idempotencyKey: 'idem-stale-thread',
       message: 'hello again',
       replyToMessageId: 'reply-9',
       target: ' stale-chat ',
+      targetKind: 'thread',
     })
     expect(sendLinq).toHaveBeenNthCalledWith(2, {
       fromPhoneNumber: '+15550000',
@@ -657,10 +659,12 @@ describe('assistant channels runtime seam', () => {
 
     expect(sendLinq).toHaveBeenCalledTimes(1)
     expect(sendLinq).toHaveBeenCalledWith({
+      fromPhoneNumber: null,
       idempotencyKey: 'idem-stale-thread',
       message: 'hello again',
       replyToMessageId: 'reply-9',
       target: 'stale-chat',
+      targetKind: 'explicit',
     })
   })
 
