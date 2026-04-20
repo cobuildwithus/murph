@@ -32,7 +32,6 @@ import {
 import {
   completeHostedRunDrainAfterCommit,
   executeHostedRunDrainForCommit,
-  executeHostedWakeForCommit,
 } from "./hosted-runtime/execution.ts";
 import {
   startHostedWakeTypingIndicator,
@@ -108,6 +107,14 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
   let workspaceRoot: string | null = null;
 
   try {
+    const { runDrain } = input.request;
+
+    if (!runDrain) {
+      throw new TypeError(
+        "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
+      );
+    }
+
     const wake = resolveHostedWake(input.request);
     const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
     emitHostedExecutionStructuredLog({
@@ -173,7 +180,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         });
 
         try {
-          if (input.request.runDrain?.resumeFinalize) {
+          if (runDrain.resumeFinalize) {
             const finalResult = await completeHostedRunDrainAfterCommit({
               materializedArtifactPaths,
               run: input.request.run ?? null,
@@ -197,39 +204,22 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
             return finalResult;
           }
 
-          const committedExecution = input.request.runDrain
-            ? await executeHostedRunDrainForCommit({
-                artifactMaterializer: incomingBundle
-                  ? createHostedArtifactMaterializer({
-                      artifactResolver,
-                      bundle: incomingBundle,
-                      materializedArtifactPaths,
-                      workspaceRoot: nextWorkspaceRoot,
-                    })
-                  : null,
-                materializedArtifactPaths,
-                request: input.request,
-                restored,
-                runtime,
-                executionContext,
-                runtimeEnv,
-              })
-            : await executeHostedWakeForCommit({
-                artifactMaterializer: incomingBundle
-                  ? createHostedArtifactMaterializer({
-                      artifactResolver,
-                      bundle: incomingBundle,
-                      materializedArtifactPaths,
-                      workspaceRoot: nextWorkspaceRoot,
-                    })
-                  : null,
-                materializedArtifactPaths,
-                request: input.request,
-                restored,
-                runtime,
-                executionContext,
-                runtimeEnv,
-              });
+          const committedExecution = await executeHostedRunDrainForCommit({
+            artifactMaterializer: incomingBundle
+              ? createHostedArtifactMaterializer({
+                  artifactResolver,
+                  bundle: incomingBundle,
+                  materializedArtifactPaths,
+                  workspaceRoot: nextWorkspaceRoot,
+                })
+              : null,
+            materializedArtifactPaths,
+            request: input.request,
+            restored,
+            runtime,
+            executionContext,
+            runtimeEnv,
+          });
 
           return {
             committedAssistantDeliveryEffects:
@@ -353,13 +343,13 @@ function buildHostedRuntimeStartDetails(
       ]),
     },
     forwardedEnvKeyCount: Object.keys(runtime.forwardedEnv).length,
-      platformBindings: {
-        artifactStoreBound: Boolean(runtime.platform.artifactStore),
-        effectsPortBound: Boolean(runtime.platform.effectsPort),
-        usageExportBound: Boolean(runtime.platform.usageExportPort),
-      },
+    platformBindings: {
+      artifactStoreBound: Boolean(runtime.platform.artifactStore),
+      effectsPortBound: Boolean(runtime.platform.effectsPort),
+      usageExportBound: Boolean(runtime.platform.usageExportPort),
+    },
     runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    sharePackAttached: Boolean(input.request.sharePack),
+    sharePackAttached: input.request.sharePack !== undefined,
     userEnvCategories: {
       modelCredentialConfigured: hasAnyHostedRuntimeConfigKey(runtime.userEnv, [
         "ANTHROPIC_API_KEY",

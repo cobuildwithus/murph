@@ -6,11 +6,11 @@ import {
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import {
-  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-  HOSTED_WAKE_PAYLOAD_SCHEMAS,
-  HOSTED_WAKE_BEHAVIORS,
+  HOSTED_INGRESS_PAYLOAD_SCHEMA,
+  HOSTED_INGRESS_PAYLOAD_SCHEMAS,
+  HOSTED_INGRESS_BEHAVIORS,
   isHostedConversationMessageChannel,
-  isHostedExecutionWakeKind,
+  isHostedIngressKind,
 } from "./contracts.ts";
 
 import type {
@@ -18,8 +18,9 @@ import type {
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
-  HostedExecutionWake,
-  HostedExecutionWakeKind,
+  HostedRuntimeEvent,
+  HostedIngressEnvelope,
+  HostedIngressKind,
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
   HostedExecutionCursorState,
@@ -30,14 +31,14 @@ import type {
   HostedExecutionRunnerResult,
   HostedExecutionShareReference,
   HostedExecutionUserStatus,
-  HostedExecutionWakeDrainResult,
-  HostedExecutionWakeNudgeResult,
+  HostedRunDrainResult,
+  HostedRunNudgeResult,
   HostedExecutionVaultShareAcceptedEvent,
-  HostedWakeBehavior,
-  HostedWakeAppendResponse,
-  HostedWakeLifecycleState,
-  HostedWakePayloadSchema,
-  HostedWakeRecord,
+  HostedIngressBehavior,
+  HostedIngressAppendResponse,
+  HostedIngressLifecycleState,
+  HostedIngressPayloadSchema,
+  HostedIngressEvent,
   HostedRunAcquireRequest,
   HostedRunAcquireResponse,
   HostedRunCommitRequest,
@@ -85,6 +86,7 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionVaultShareAcceptedWake,
 } from "./builders.ts";
@@ -108,9 +110,9 @@ import {
 } from "./parsers/device-sync.ts";
 import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
-export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
+export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelope {
   const record = requireObject(value, "Hosted execution wake");
-  const kind = parseHostedExecutionWakeKind(record.kind, "Hosted execution wake kind");
+  const kind = parseHostedIngressKind(record.kind, "Hosted execution wake kind");
   const eventId = requireString(record.eventId, "Hosted execution wake eventId");
   const occurredAt = requireString(record.occurredAt, "Hosted execution wake occurredAt");
   const userId = requireString(record.userId, "Hosted execution wake userId");
@@ -335,9 +337,7 @@ function parseHostedExecutionLinqConversationMessagePart(
 
 export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {
   const record = requireObject(value, "Hosted execution runner request");
-  const wake = record.wake === undefined
-    ? null
-    : parseHostedExecutionWake(record.wake);
+  const wake = parseHostedRuntimeEvent(record.wake);
   const runDrain = record.runDrain === undefined
     ? undefined
     : record.runDrain === null
@@ -348,10 +348,6 @@ export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecuti
     : record.sharePack === null
       ? null
       : parseHostedExecutionRunnerSharePack(record.sharePack);
-
-  if (!wake) {
-    throw new TypeError("Hosted execution runner request must include wake.");
-  }
 
   if (wake.kind === "vault.share.accepted") {
     if (!sharePack) {
@@ -377,18 +373,52 @@ export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecuti
     );
   }
 
-  return {
+  const request: HostedExecutionRunnerRequest = {
     bundle: parseHostedExecutionBundlePayload(
       record.bundle,
       "Hosted execution runner request bundle",
     ),
-    ...(runDrain === undefined ? {} : { runDrain }),
     wake,
-    ...(record.run === undefined ? {} : {
-      run: record.run === null ? null : parseHostedExecutionRunContext(record.run),
-    }),
-    ...(sharePack === undefined ? {} : { sharePack }),
   };
+
+  if (record.currentBundleRef !== undefined) {
+    request.currentBundleRef = record.currentBundleRef === null
+      ? null
+      : parseHostedExecutionBundleRef(
+          record.currentBundleRef,
+          "Hosted execution runner request currentBundleRef",
+        );
+  }
+
+  if (runDrain !== undefined) {
+    request.runDrain = runDrain;
+  }
+
+  if (record.run !== undefined) {
+    request.run = record.run === null ? null : parseHostedExecutionRunContext(record.run);
+  }
+
+  if (sharePack !== undefined) {
+    request.sharePack = sharePack;
+  }
+
+  return request;
+}
+
+export function parseHostedRuntimeEvent(value: unknown): HostedRuntimeEvent {
+  const record = requireObject(value, "Hosted execution runner wake");
+  const kind = requireString(record.kind, "Hosted execution runner wake kind");
+
+  if (kind === "runtime.timer") {
+    return buildHostedExecutionRuntimeTimerWake({
+      eventId: requireString(record.eventId, "Hosted execution runner wake eventId"),
+      occurredAt: requireString(record.occurredAt, "Hosted execution runner wake occurredAt"),
+      triggerKind: parseHostedRunTriggerKind(record.triggerKind),
+      userId: requireString(record.userId, "Hosted execution runner wake userId"),
+    });
+  }
+
+  return parseHostedIngressEnvelope(record);
 }
 
 export function parseHostedRuntimeDrainRequest(
@@ -423,6 +453,7 @@ export function parseHostedRuntimeDrainRequest(
         }),
     runId: requireString(record.runId, "Hosted runtime drain request runId"),
     triggerKind: parseHostedRunTriggerKind(record.triggerKind),
+    userId: requireString(record.userId, "Hosted runtime drain request userId"),
   };
 }
 
@@ -441,7 +472,7 @@ export function parseHostedRuntimeDrainEvent(
             ? null
             : parseHostedExecutionRunnerSharePack(record.sharePack),
         }),
-    wake: parseHostedExecutionWake(record.wake),
+    wake: parseHostedIngressEnvelope(record.wake),
     wakeId: requireString(record.wakeId, `${label}.wakeId`),
   };
 }
@@ -502,9 +533,9 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
   };
 }
 
-export function parseHostedExecutionWakeDrainResult(
+export function parseHostedRunDrainResult(
   value: unknown,
-): HostedExecutionWakeDrainResult {
+): HostedRunDrainResult {
   const record = requireObject(value, "Hosted execution wake drain result");
 
   return {
@@ -523,9 +554,9 @@ export function parseHostedExecutionWakeDrainResult(
   };
 }
 
-export function parseHostedExecutionWakeNudgeResult(
+export function parseHostedRunNudgeResult(
   value: unknown,
-): HostedExecutionWakeNudgeResult {
+): HostedRunNudgeResult {
   const record = requireObject(value, "Hosted execution wake nudge result");
 
   return {
@@ -919,7 +950,7 @@ export function parseHostedRunAcquireResponse(value: unknown): HostedRunAcquireR
     acquired: requireBoolean(record.acquired, "Hosted run acquire response acquired"),
     cursor: parseHostedExecutionCursorState(record.cursor),
     events: requireArray(record.events, "Hosted run acquire response events")
-      .map((entry) => parseHostedWakeRecord(entry)),
+      .map((entry) => parseHostedIngressEvent(entry)),
     pendingWakeCount: requireNumber(
       record.pendingWakeCount,
       "Hosted run acquire response pendingWakeCount",
@@ -1280,22 +1311,22 @@ export function parseHostedRunStatusResponse(value: unknown): HostedRunStatusRes
   };
 }
 
-export function parseHostedWakeRecord(
+export function parseHostedIngressEvent(
   value: unknown,
-): HostedWakeRecord {
+): HostedIngressEvent {
   const record = requireObject(value, "Hosted wake record");
-  const kind = parseHostedExecutionWakeKind(record.kind, "Hosted wake record kind");
-  const payloadSchema = parseHostedWakePayloadSchema(record.payloadSchema);
+  const kind = parseHostedIngressKind(record.kind, "Hosted wake record kind");
+  const payloadSchema = parseHostedIngressPayloadSchema(record.payloadSchema);
   const opaquePayloadTransport = readHostedWakeOpaquePayloadTransport(record);
 
-  if (payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
+  if (payloadSchema !== HOSTED_INGRESS_PAYLOAD_SCHEMA) {
     throw new TypeError(
       "Hosted wake record requires the execution payload schema.",
     );
   }
 
   return {
-    behavior: parseHostedWakeBehavior(record.behavior),
+    behavior: parseHostedIngressBehavior(record.behavior),
     coalescingKey: readOptionalNullableString(
       record.coalescingKey,
       "Hosted wake record coalescingKey",
@@ -1321,18 +1352,18 @@ export function parseHostedWakeRecord(
   };
 }
 
-export function parseHostedWakeExecutionPayload(input: {
+export function parseHostedIngressPayload(input: {
   decryptedPayload?: unknown;
-  kind: HostedExecutionWakeKind;
+  kind: HostedIngressKind;
   occurredAt: string;
-  payloadSchema: HostedWakePayloadSchema;
+  payloadSchema: HostedIngressPayloadSchema;
   userId: string;
-}): HostedExecutionWake {
-  if (input.payloadSchema !== HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA) {
+}): HostedIngressEnvelope {
+  if (input.payloadSchema !== HOSTED_INGRESS_PAYLOAD_SCHEMA) {
     throw new TypeError("Hosted wake payload requires the execution payload schema.");
   }
 
-  const wake = parseHostedExecutionWake(input.decryptedPayload);
+  const wake = parseHostedIngressEnvelope(input.decryptedPayload);
 
   if (wake.userId !== input.userId) {
     throw new TypeError("Hosted wake payload userId must match the wake record.");
@@ -1351,7 +1382,7 @@ export function parseHostedWakeExecutionPayload(input: {
 
 function readHostedWakeOpaquePayloadTransport(
   record: Record<string, unknown>,
-): Pick<HostedWakeRecord, "payloadBytes" | "payloadCiphertext"> {
+): Pick<HostedIngressEvent, "payloadBytes" | "payloadCiphertext"> {
   return {
     ...(record.payloadBytes === undefined
       ? {}
@@ -1372,9 +1403,9 @@ function readHostedWakeOpaquePayloadTransport(
   };
 }
 
-export function parseHostedWakeAppendResponse(
+export function parseHostedIngressAppendResponse(
   value: unknown,
-): HostedWakeAppendResponse {
+): HostedIngressAppendResponse {
   const record = requireObject(value, "Hosted wake append response");
 
   return {
@@ -1384,15 +1415,15 @@ export function parseHostedWakeAppendResponse(
       record.updatedExisting,
       "Hosted wake append response updatedExisting",
     ),
-    wake: parseHostedWakeRecord(record.wake),
+    wake: parseHostedIngressEvent(record.wake),
   };
 }
 
-function parseHostedWakeBehavior(value: unknown): HostedWakeBehavior {
+function parseHostedIngressBehavior(value: unknown): HostedIngressBehavior {
   const behavior = requireString(value, "Hosted wake record behavior");
 
-  if (HOSTED_WAKE_BEHAVIORS.includes(behavior as HostedWakeBehavior)) {
-    return behavior as HostedWakeBehavior;
+  if (HOSTED_INGRESS_BEHAVIORS.includes(behavior as HostedIngressBehavior)) {
+    return behavior as HostedIngressBehavior;
   }
 
   throw new TypeError(`Unsupported hosted wake behavior: ${behavior}`);
@@ -1411,24 +1442,24 @@ function parseHostedConversationMessageChannel(
   return channel;
 }
 
-function parseHostedExecutionWakeKind(
+function parseHostedIngressKind(
   value: unknown,
   label: string,
-): HostedExecutionWakeKind {
+): HostedIngressKind {
   const kind = requireString(value, label);
 
-  if (!isHostedExecutionWakeKind(kind)) {
+  if (!isHostedIngressKind(kind)) {
     throw new TypeError(`${label} is invalid.`);
   }
 
   return kind;
 }
 
-function parseHostedWakePayloadSchema(value: unknown): HostedWakePayloadSchema {
+function parseHostedIngressPayloadSchema(value: unknown): HostedIngressPayloadSchema {
   const schema = requireString(value, "Hosted wake record payloadSchema");
 
-  if (HOSTED_WAKE_PAYLOAD_SCHEMAS.includes(schema as HostedWakePayloadSchema)) {
-    return schema as HostedWakePayloadSchema;
+  if (HOSTED_INGRESS_PAYLOAD_SCHEMAS.includes(schema as HostedIngressPayloadSchema)) {
+    return schema as HostedIngressPayloadSchema;
   }
 
   throw new TypeError(`Unsupported hosted wake payload schema: ${schema}`);

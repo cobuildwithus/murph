@@ -2,7 +2,11 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
 import {
-  parseHostedExecutionBundleRef,
+  createRuntimeTimerSyntheticWake,
+} from "@murphai/hosted-execution";
+import {
+  parseHostedRuntimeDrainRequest,
+  parseHostedRuntimeEvent,
   parseHostedExecutionRunnerRequest,
 } from "@murphai/hosted-execution/parsers";
 
@@ -31,22 +35,39 @@ export function parseHostedAssistantRuntimeJobRequest(
   value: unknown,
 ): HostedAssistantRuntimeJobRequest {
   const record = requireObject(value, "Hosted assistant runtime job request");
-  const request = parseHostedExecutionRunnerRequest(record);
-  return {
+
+  if (record.runDrain === undefined || record.runDrain === null) {
+    throw new TypeError("Hosted assistant runtime job request.runDrain is required.");
+  }
+
+  const runDrain = parseHostedRuntimeDrainRequest(record.runDrain);
+  const request = parseHostedExecutionRunnerRequest({
+    ...record,
+    runDrain,
+    wake: record.wake === undefined
+      ? runDrain.events[0]?.wake ?? createRuntimeTimerSyntheticWake(runDrain)
+      : parseHostedRuntimeEvent(record.wake),
+  });
+
+  const parsed: HostedAssistantRuntimeJobRequest = {
     bundle: request.bundle,
-    ...(request.runDrain === undefined ? {} : { runDrain: request.runDrain }),
+    runDrain,
     wake: request.wake,
-    ...(request.run === undefined ? {} : { run: request.run }),
-    ...(request.sharePack === undefined ? {} : { sharePack: request.sharePack }),
-    ...(record.currentBundleRef === undefined
-      ? {}
-      : {
-          currentBundleRef: parseHostedExecutionBundleRef(
-            record.currentBundleRef,
-            "Hosted assistant runtime job request.currentBundleRef",
-          ),
-        }),
   };
+
+  if (request.currentBundleRef !== undefined) {
+    parsed.currentBundleRef = request.currentBundleRef;
+  }
+
+  if (request.run !== undefined) {
+    parsed.run = request.run;
+  }
+
+  if (request.sharePack !== undefined) {
+    parsed.sharePack = request.sharePack;
+  }
+
+  return parsed;
 }
 
 export function parseHostedAssistantRuntimeConfig(

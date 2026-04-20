@@ -8,9 +8,10 @@ import {
 } from "@murphai/runtime-state/node";
 import type {
   HostedExecutionRunContext,
+  HostedRuntimeEvent,
   HostedExecutionRunnerResult,
   HostedRuntimeDrainRequest,
-  HostedExecutionWake,
+  HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -33,7 +34,7 @@ import {
 import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
-import { executeHostedWakeEvent } from "./events.ts";
+import { executeHostedIngressEventAlias } from "./events.ts";
 import {
   runHostedAssistantCronWakeLane,
   runHostedDeviceSyncWakeLane,
@@ -44,153 +45,14 @@ import type {
   HostedAssistantRuntimeJobRequest,
   HostedCommittedExecutionState,
   HostedRestoredExecutionContext,
-  HostedWakeFollowupExecution,
   HostedMaintenanceMetrics,
   HostedRunDrainMetrics,
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
-import { summarizeWake } from "./summary.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
 import { resolveHostedWake } from "./utils.ts";
-
-export async function executeHostedWakeForCommit(input: {
-  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
-  executionContext: AssistantExecutionContext;
-  materializedArtifactPaths?: ReadonlySet<string>;
-  request: HostedAssistantRuntimeJobRequest;
-  restored: HostedRestoredExecutionContext;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
-  >;
-  runtimeEnv: Readonly<Record<string, string>>;
-}): Promise<HostedCommittedExecutionState> {
-  const wake = resolveHostedWake(input.request);
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    wake,
-    details: {
-      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    },
-    message: "Hosted runtime executing wake handlers.",
-    phase: "wake.running",
-    run: input.request.run ?? null,
-  });
-  const wakeHandlingStartedAtMs = Date.now();
-  const wakeExecutionContext = await resolveHostedWakeExecutionContext(
-    input.executionContext,
-  );
-  const wakeMetrics = await executeHostedWakeEvent({
-    wake,
-    executionContext: wakeExecutionContext,
-    runtime: input.runtime,
-    runtimeEnv: input.runtimeEnv,
-    sharePack: input.request.sharePack ?? null,
-    vaultRoot: input.restored.vaultRoot,
-  });
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    wake,
-    details: {
-      wakeHandlerLatencyMs: Date.now() - wakeHandlingStartedAtMs,
-      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    },
-    message: "Hosted runtime finished wake handlers.",
-    phase: "wake.running",
-    run: input.request.run ?? null,
-  });
-  const maintenanceMetrics = await runHostedWakeFollowupExecution({
-    artifactMaterializer: input.artifactMaterializer ?? null,
-    bootstrapResult: wakeMetrics.bootstrapResult,
-    conversationMetrics: wakeMetrics.conversationMetrics,
-    executionContext: wakeExecutionContext,
-    followupExecution: wakeMetrics.followupExecution,
-    requestId: wake.eventId,
-    run: input.request.run ?? null,
-    runtime: input.runtime,
-    vaultRoot: input.restored.vaultRoot,
-    wake,
-  });
-  const snapshotStartedAtMs = Date.now();
-  const committedSnapshot = await snapshotHostedExecutionContext({
-    artifactSink: createHostedArtifactUploadSink({
-      artifactStore: input.runtime.platform.artifactStore,
-      knownArtifactHashes: collectHostedBundleArtifactHashes(
-        decodeHostedBundleBase64(input.request.bundle),
-      ),
-    }),
-    operatorHomeRoot: input.restored.operatorHomeRoot,
-    preservedArtifacts: collectPreservedHostedArtifacts({
-      bytes: decodeHostedBundleBase64(input.request.bundle),
-      materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
-    }),
-    vaultRoot: input.restored.vaultRoot,
-  });
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    wake,
-    details: {
-      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-      snapshotLatencyMs: Date.now() - snapshotStartedAtMs,
-    },
-    message: "Hosted runtime snapshotted execution context.",
-    phase: "commit.recorded",
-    run: input.request.run ?? null,
-  });
-  const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
-    input.restored.vaultRoot,
-  );
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    wake,
-    details: {
-      committedAssistantDeliveryEffectCount: String(committedAssistantDeliveryEffects.length),
-      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    },
-    message: "Hosted runtime collected committed assistant delivery effects.",
-    phase: "commit.recorded",
-    run: input.request.run ?? null,
-  });
-  const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
-    input.restored.vaultRoot,
-    {
-      sourceReader: assistantGatewayLocalProjectionSourceReader,
-    },
-  ).catch((error: unknown) => {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      wake,
-      error,
-      level: "warn",
-      details: {
-        runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-      },
-      message:
-        "Hosted runtime could not export the committed gateway projection snapshot; continuing without it.",
-      phase: "commit.recorded",
-      run: input.request.run ?? null,
-    });
-    return null;
-  });
-
-  return {
-    committedGatewayProjectionSnapshot,
-    committedResult: {
-      bundle: encodeHostedBundleBase64(committedSnapshot.bundle),
-      result: {
-        eventsHandled: 1,
-        nextWakeAt: maintenanceMetrics.nextWakeAt,
-        summary: summarizeWake(wake, {
-          ...wakeMetrics,
-          ...maintenanceMetrics,
-        }),
-      },
-    },
-    committedAssistantDeliveryEffects,
-  };
-}
 
 export async function executeHostedRunDrainForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
@@ -204,10 +66,11 @@ export async function executeHostedRunDrainForCommit(input: {
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
-  const runDrain = input.request.runDrain;
-
+  const { runDrain } = input.request;
   if (!runDrain) {
-    return executeHostedWakeForCommit(input);
+    throw new TypeError(
+      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
+    );
   }
 
   const primaryWake = resolveHostedWake(input.request);
@@ -235,12 +98,12 @@ export async function executeHostedRunDrainForCommit(input: {
 
   for (const event of runDrain.events) {
     const wakeHandlingStartedAtMs = Date.now();
-    const wakeMetrics = await executeHostedWakeEvent({
+    const wakeMetrics = await executeHostedIngressEventAlias({
       wake: event.wake,
       executionContext: wakeExecutionContext,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
-      sharePack: event.sharePack ?? input.request.sharePack ?? null,
+      sharePack: event.sharePack ?? null,
       vaultRoot: input.restored.vaultRoot,
     });
     mergeHostedRunDrainWakeMetrics(metrics, wakeMetrics);
@@ -377,13 +240,21 @@ export async function completeHostedRunDrainAfterCommit(input: {
   >;
   restored: HostedRestoredExecutionContext;
   request: HostedAssistantRuntimeJobRequest;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantRuntimeCompletedJobResult> {
+  const { runDrain } = input.request;
+
+  if (!runDrain) {
+    throw new TypeError(
+      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
+    );
+  }
+
   const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
     input.restored.vaultRoot,
   );
 
-  return completeHostedExecutionAfterCommit({
+  return finalizeHostedCommittedRunAfterCommit({
     materializedArtifactPaths: input.materializedArtifactPaths,
     run: input.run ?? null,
     runtime: input.runtime,
@@ -391,13 +262,13 @@ export async function completeHostedRunDrainAfterCommit(input: {
     committedExecution: {
       committedAssistantDeliveryEffects,
       committedGatewayProjectionSnapshot: null,
-      committedResult: {
-        bundle: input.request.bundle,
-        result: {
-          eventsHandled: input.request.runDrain?.events.length ?? 0,
-          summary: "Finalized committed hosted run side effects.",
+        committedResult: {
+          bundle: input.request.bundle,
+          result: {
+            eventsHandled: runDrain.events.length,
+            summary: "Finalized committed hosted run side effects.",
+          },
         },
-      },
     },
     wake: input.wake,
   });
@@ -407,46 +278,6 @@ async function resolveHostedWakeExecutionContext(
   executionContext: AssistantExecutionContext,
 ): Promise<AssistantExecutionContext> {
   return hydrateHostedExecutionDefaultTarget(executionContext);
-}
-
-async function runHostedWakeFollowupExecution(input: {
-  artifactMaterializer: HostedWorkspaceArtifactMaterializer | null;
-  bootstrapResult: Awaited<ReturnType<typeof executeHostedWakeEvent>>["bootstrapResult"];
-  conversationMetrics: Awaited<ReturnType<typeof executeHostedWakeEvent>>["conversationMetrics"];
-  executionContext: AssistantExecutionContext;
-  followupExecution: HostedWakeFollowupExecution;
-  requestId: string;
-  run?: HostedExecutionRunContext | null;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig"
-  >;
-  vaultRoot: string;
-  wake: HostedExecutionWake;
-}): Promise<HostedMaintenanceMetrics> {
-  switch (input.followupExecution) {
-    case "conversation-message":
-      return runHostedConversationWakeFollowupExecution({
-        conversationMetrics: input.conversationMetrics,
-        run: input.run ?? null,
-        runtime: input.runtime,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    case "assistant-cron":
-    case "device-sync":
-    case "member-activated":
-    case "member-channels-updated":
-    case "vault-share-accepted":
-      return runHostedSystemWakeFollowupExecution({
-        executionContext: input.executionContext,
-        requestId: input.requestId,
-        run: input.run ?? null,
-        runtime: input.runtime,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-  }
 }
 
 function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
@@ -464,7 +295,7 @@ function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
 
 function mergeHostedRunDrainWakeMetrics(
   target: HostedRunDrainMetrics,
-  metrics: Awaited<ReturnType<typeof executeHostedWakeEvent>>,
+  metrics: Awaited<ReturnType<typeof executeHostedIngressEventAlias>>,
 ): void {
   target.bootstrapResult ??= metrics.bootstrapResult;
   target.eventsHandled += 1;
@@ -504,7 +335,7 @@ function summarizeHostedRunDrain(
 }
 
 async function runHostedSystemWakeFollowupExecution(input: {
-  wake: HostedExecutionWake;
+  wake: HostedIngressEnvelope;
   executionContext: AssistantExecutionContext;
   requestId: string;
   run?: HostedExecutionRunContext | null;
@@ -565,7 +396,7 @@ async function resolveHostedPreservedWakeMetrics(input: {
   referenceMs?: number;
   run?: HostedExecutionRunContext | null;
   vaultRoot: string;
-  wake: HostedExecutionWake;
+  wake: HostedIngressEnvelope;
 }): Promise<HostedMaintenanceMetrics> {
   const referenceMs = input.referenceMs ?? Date.now();
   const deviceSyncWakeAt = input.includeDeviceSync === false
@@ -587,7 +418,7 @@ async function resolveHostedPreservedWakeMetrics(input: {
 }
 
 async function resolveHostedConversationPreservedWakeMetrics(input: {
-  wake: HostedExecutionWake;
+  wake: HostedIngressEnvelope;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">;
   vaultRoot: string;
@@ -615,38 +446,10 @@ async function resolveHostedConversationPreservedWakeMetrics(input: {
   return preservedMetrics;
 }
 
-async function runHostedConversationWakeFollowupExecution(input: {
-  conversationMetrics: Awaited<ReturnType<typeof executeHostedWakeEvent>>["conversationMetrics"];
-  run?: HostedExecutionRunContext | null;
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "resolvedConfig"
-  >;
-  vaultRoot: string;
-  wake: HostedExecutionWake;
-}): Promise<HostedMaintenanceMetrics> {
-  const assistantWakeAt = new Date().toISOString();
-  const preservedMetrics = await resolveHostedConversationPreservedWakeMetrics({
-    wake: input.wake,
-    run: input.run ?? null,
-    runtime: input.runtime,
-    vaultRoot: input.vaultRoot,
-  });
-
-  return {
-    ...preservedMetrics,
-    nextWakeAt: earliestHostedWakeAt(
-      input.conversationMetrics?.nextWakeAt,
-      assistantWakeAt,
-      preservedMetrics.nextWakeAt,
-    ),
-    parserProcessed: input.conversationMetrics?.parserProcessed ?? 0,
-  };
-}
 
 async function resolveHostedDeviceSyncWakeAt(input: {
   deviceSyncConfig: NormalizedHostedAssistantRuntimeConfig["resolvedConfig"]["deviceSync"];
-  wake: HostedExecutionWake;
+  wake: HostedIngressEnvelope;
   referenceMs: number;
   run?: HostedExecutionRunContext | null;
   vaultRoot: string;
@@ -717,7 +520,7 @@ function normalizeHostedWakeAt(
   return new Date(Math.max(parsedMs, referenceMs)).toISOString();
 }
 
-export async function completeHostedExecutionAfterCommit(input: {
+async function finalizeHostedCommittedRunAfterCommit(input: {
   materializedArtifactPaths?: ReadonlySet<string>;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
@@ -726,7 +529,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantRuntimeCompletedJobResult> {
   emitHostedExecutionStructuredLog({
     component: "runtime",

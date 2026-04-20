@@ -5,6 +5,7 @@ import {
   parseHostedAssistantRuntimeJobInput,
   parseHostedAssistantRuntimeJobRequest,
 } from "../src/hosted-runtime/parsers.ts";
+import { resolveHostedWake } from "../src/hosted-runtime/utils.ts";
 
 const defaultMemberChannels = {
   email: false,
@@ -23,22 +24,21 @@ function buildMemberActivatedWake(eventId: string) {
 }
 
 describe("hosted runtime parser coverage", () => {
-  it("parses nullable commit and run-drain branches without injecting optional runtime state", () => {
-    const parsed = parseHostedAssistantRuntimeJobInput({
+  it("rejects missing or null runDrain on runtime job inputs", () => {
+    expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
         wake: buildMemberActivatedWake("evt_123"),
-        runDrain: null,
       },
-    });
+    })).toThrow(/runDrain is required/u);
 
-    expect(parsed).toEqual({
+    expect(() => parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
         wake: buildMemberActivatedWake("evt_123"),
         runDrain: null,
       },
-    });
+    })).toThrow(/runDrain is required/u);
   });
 
   it("parses nullable runtime config fields and forwarded env records", () => {
@@ -109,7 +109,6 @@ describe("hosted runtime parser coverage", () => {
   it("parses run-drain finalize requests", () => {
     const parsed = parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      wake: buildMemberActivatedWake("evt_run_drain_finalize"),
       runDrain: {
         acquiredAt: "2026-04-08T00:00:00.000Z",
         events: [],
@@ -118,10 +117,25 @@ describe("hosted runtime parser coverage", () => {
         resumeFinalize: true,
         runId: "run_123",
         triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      wake: {
+        eventId: "hosted-run:run_123",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
       },
     });
 
-    expect(parsed.runDrain?.resumeFinalize).toBe(true);
+    expect(resolveHostedWake(parsed)).toEqual({
+      eventId: "hosted-run:run_123",
+      kind: "runtime.timer",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "member_123",
+    });
+    expect(parsed.runDrain.resumeFinalize).toBe(true);
   });
 
   it("rejects invalid runtime numeric fields", () => {
@@ -151,6 +165,7 @@ describe("hosted runtime parser coverage", () => {
         resumeFinalize: "yes",
         runId: "run_123",
         triggerKind: "runtime_timer",
+        userId: "member_123",
       },
     })).toThrow(/resumeFinalize must be a boolean/u);
   });

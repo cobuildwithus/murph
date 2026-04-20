@@ -1,10 +1,15 @@
-import type { HostedExecutionWake } from "@murphai/hosted-execution";
+import {
+  createRuntimeTimerSyntheticWake,
+  type HostedRuntimeEvent,
+  type HostedRuntimeDrainRequest,
+} from "@murphai/hosted-execution";
 
 export interface HostedWakeEnvelope {
-  wake?: HostedExecutionWake;
+  wake?: HostedRuntimeEvent;
+  runDrain?: HostedRuntimeDrainRequest | null;
 }
 
-type HostedWakeSubject = HostedExecutionWake | HostedWakeEnvelope;
+type HostedWakeSubject = HostedRuntimeEvent | HostedWakeEnvelope;
 
 export function assertNever(value: never): never {
   throw new Error(`Unexpected hosted execution event: ${JSON.stringify(value)}`);
@@ -12,7 +17,7 @@ export function assertNever(value: never): never {
 
 export function resolveHostedWake(
   subject: HostedWakeSubject,
-): HostedExecutionWake {
+): HostedRuntimeEvent {
   if ("kind" in subject) {
     return subject;
   }
@@ -21,5 +26,10 @@ export function resolveHostedWake(
     return subject.wake;
   }
 
-  throw new TypeError("Hosted wake input must include wake.");
+  if (subject.runDrain) {
+    const [firstEvent] = subject.runDrain.events;
+    return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(subject.runDrain);
+  }
+
+  throw new TypeError("Hosted wake input must include wake or runDrain.");
 }
