@@ -15,6 +15,7 @@ Options:
   --family <slug>      Health Commons family/path bucket. Defaults to the derived topic slug.
   --slug <slug>        Protocol/page slug. Defaults to the derived topic slug.
   --turns <4|5>        Number of research passes. Defaults to 4.
+  --start-turn <1-5>   Resume from a specific pass. Defaults to 1.
   --chat-url <url>     Resume an existing ChatGPT thread instead of starting a new one.
   --out-dir <dir>      Output directory. Defaults to output-packages/research/<slug>-<timestamp>.
   --smoke-test         Use trivial artifact-return prompts for end-to-end workflow validation.
@@ -89,6 +90,7 @@ topic=""
 family=""
 slug=""
 turns="4"
+start_turn="1"
 chat_url=""
 out_dir=""
 smoke_test=0
@@ -115,6 +117,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --turns)
       turns="${2:-}"
+      shift 2
+      ;;
+    --start-turn)
+      start_turn="${2:-}"
       shift 2
       ;;
     --chat-url)
@@ -157,6 +163,24 @@ done
   echo "--turns must be 4 or 5." >&2
   exit 2
 }
+
+case "$start_turn" in
+  1|2|3|4|5) ;;
+  *)
+    echo "--start-turn must be between 1 and 5." >&2
+    exit 2
+    ;;
+esac
+
+if (( start_turn > turns )); then
+  echo "--start-turn cannot be greater than --turns." >&2
+  exit 2
+fi
+
+if (( start_turn > 1 )) && [[ -z "$chat_url" ]]; then
+  echo "--start-turn greater than 1 requires --chat-url." >&2
+  exit 2
+fi
 
 derived_slug="$(slugify "$topic")"
 [[ -n "$slug" ]] || slug="$derived_slug"
@@ -617,12 +641,23 @@ run_turn() {
   download_turn_artifacts "$turn"
 }
 
-run_turn "01" "discovery"
-run_turn "02" "gap-fill"
-run_turn "03" "synthesis"
-run_turn "04" "landing"
+if (( start_turn <= 1 )); then
+  run_turn "01" "discovery"
+fi
 
-if [[ "$turns" == "5" ]]; then
+if (( start_turn <= 2 )) && (( turns >= 2 )); then
+  run_turn "02" "gap-fill"
+fi
+
+if (( start_turn <= 3 )) && (( turns >= 3 )); then
+  run_turn "03" "synthesis"
+fi
+
+if (( start_turn <= 4 )) && (( turns >= 4 )); then
+  run_turn "04" "landing"
+fi
+
+if [[ "$turns" == "5" ]] && (( start_turn <= 5 )); then
   run_turn "05" "final-audit"
 fi
 
