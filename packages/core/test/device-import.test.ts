@@ -505,8 +505,7 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
     ],
   } as const;
 
-  const first = await importDeviceBatch(input);
-  const second = await importDeviceBatch(input);
+  const [first, second] = await Promise.all([importDeviceBatch(input), importDeviceBatch(input)]);
 
   const eventRecords = (await readJsonlRecords({
     vaultRoot,

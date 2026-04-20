@@ -130,7 +130,7 @@ export class HostedDeviceSyncAgentSessionService {
     return {
       connection,
       tokenBundle,
-      agentSession: await this.touchAgentSession(session, now),
+      agentSession: await this.readCurrentAgentSessionBearer(),
     };
   }
 
@@ -336,7 +336,7 @@ export class HostedDeviceSyncAgentSessionService {
       tokenBundle: result.tokenBundle,
       refreshed: result.refreshed,
       tokenVersionChanged: result.tokenVersionChanged,
-      agentSession: await this.touchAgentSession(session, now),
+      agentSession: await this.readCurrentAgentSessionBearer(),
     };
   }
 
@@ -420,7 +420,25 @@ export class HostedDeviceSyncAgentSessionService {
     return connection;
   }
 
-  private async touchAgentSession(session: HostedAgentSessionRecord, now: string): Promise<HostedAgentSessionBearer> {
-    return this.agentSessions.touchAgentSession(session, now);
+  private async readCurrentAgentSessionBearer(): Promise<HostedAgentSessionBearer> {
+    const session = await this.agentSessions.requireAgentSession();
+    const { scheme, token } = this.agentSessions.readBearerAuthorization();
+
+    if (scheme !== "bearer" || !token) {
+      throw deviceSyncError({
+        code: "AGENT_AUTH_INVALID",
+        message: "Hosted device-sync agent bearer token is invalid or revoked.",
+        retryable: false,
+        httpStatus: 401,
+      });
+    }
+
+    return {
+      id: session.id,
+      label: session.label,
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt,
+      bearerToken: token,
+    };
   }
 }

@@ -212,7 +212,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       expect(firstExport.agentSession).toMatchObject({
         id: SESSION.id,
         bearerToken,
-        expiresAt: "2026-04-02T00:10:00.000Z",
+        expiresAt: SESSION.expiresAt,
       });
 
       vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
@@ -227,7 +227,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         agentSession: {
           id: SESSION.id,
           bearerToken,
-          expiresAt: "2026-04-02T00:15:00.000Z",
+          expiresAt: SESSION.expiresAt,
         },
         tokenBundle: {
           tokenVersion: 2,
@@ -235,6 +235,44 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
       expect(harness.sessionState.revokedAt).toBeNull();
       expect(harness.audits).toHaveLength(2);
+
+      vi.setSystemTime(new Date("2026-04-02T00:05:00.000Z"));
+      const expiredService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      await expect(expiredService.requireAgentSession()).rejects.toMatchObject({
+        code: "AGENT_AUTH_EXPIRED",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks agent-session validity before returning an exported token bundle", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([createWhoopProvider()]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/export-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      harness.sessionState.revokedAt = "2026-04-01T00:10:01.000Z";
+      harness.sessionState.revokeReason = "agent_request";
+      harness.sessionState.updatedAt = "2026-04-01T00:10:01.000Z";
+
+      await expect(service.exportTokenBundle(session, "conn-1")).rejects.toMatchObject({
+        code: "AGENT_AUTH_INVALID",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -265,7 +303,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         agentSession: {
           id: SESSION.id,
           bearerToken,
-          expiresAt: "2026-04-02T00:10:00.000Z",
+          expiresAt: SESSION.expiresAt,
         },
       });
 
@@ -285,7 +323,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         agentSession: {
           id: SESSION.id,
           bearerToken,
-          expiresAt: "2026-04-02T00:15:00.000Z",
+          expiresAt: SESSION.expiresAt,
         },
         tokenBundle: {
           tokenVersion: 2,
@@ -331,7 +369,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         agentSession: {
           id: SESSION.id,
           bearerToken,
-          expiresAt: "2026-04-02T00:10:00.000Z",
+          expiresAt: SESSION.expiresAt,
         },
         tokenBundle: {
           accessToken: "access-token-refreshed",
@@ -357,7 +395,7 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
         agentSession: {
           id: SESSION.id,
           bearerToken,
-          expiresAt: "2026-04-02T00:15:00.000Z",
+          expiresAt: SESSION.expiresAt,
         },
         tokenBundle: {
           accessToken: "access-token-refreshed",
