@@ -68,10 +68,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantCliManifest.exports?.['./assistant-daemon-client'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/automation'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/doctor-security'], undefined)
-  assert.deepEqual(assistantCliManifest.exports?.['./assistant/stop'], {
-    default: './dist/assistant/stop.js',
-    types: './dist/assistant/stop.d.ts',
-  })
+  assert.equal(assistantCliManifest.exports?.['./assistant/stop'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantCliManifest.exports?.['./commands/assistant'] !== undefined, true)
   assert.equal(assistantCliManifest.exports?.['./run-terminal-logging'] !== undefined, true)

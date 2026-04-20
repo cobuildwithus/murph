@@ -11,11 +11,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { asListEnvelope, readRawImportManifest, toListEntity } from './shared.js'
 import {
-  listMeasurementRecords,
-  showMeasurementManifest,
-  showMeasurementRecord,
-} from './measurement-read.js'
-import {
   relativePathEntries,
   relativePathStrings,
 } from './vault-usecase-helpers.js'
@@ -165,21 +160,4 @@ export async function listWorkoutRecords(input: {
 
 export async function showWorkoutManifest(vault: string, lookup: string) {
   return showTrackedWorkoutManifest(vault, lookup, ['activity_session'], 'workout')
-}
-
-export async function showWorkoutMeasurementRecord(vault: string, lookup: string) {
-  return showMeasurementRecord(vault, lookup)
-}
-
-export async function listWorkoutMeasurementRecords(input: {
-  vault: string
-  from?: string
-  to?: string
-  limit?: number
-}) {
-  return listMeasurementRecords(input)
-}
-
-export async function showWorkoutMeasurementManifest(vault: string, lookup: string) {
-  return showMeasurementManifest(vault, lookup)
 }

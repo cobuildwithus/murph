@@ -70,10 +70,10 @@ export function mergeCloudflareLocalEnv(input: {
   const createEnvelopeKey = input.createEnvelopeKey ?? (() => randomBytes(32).toString("base64"));
   const createJwkPair = input.createJwkPair ?? createEcP256JwkPairJson;
   const normalizedOverrides = normalizeOptionalEnvOverrides(input.overrides);
-  const resolvedExisting = stripDeprecatedHostedLocalProxyEnv({
+  const resolvedExisting = {
     ...input.existing,
     ...normalizedOverrides,
-  });
+  };
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
@@ -122,16 +122,6 @@ export function mergeCloudflareLocalEnv(input: {
       ?? "v1",
     HOSTED_WEB_BASE_URL: webOrigin,
   };
-}
-
-function stripDeprecatedHostedLocalProxyEnv(
-  input: Record<string, string>,
-): Record<string, string> {
-  const next = { ...input };
-  delete next.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL;
-  delete next.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN;
-  delete next.HOSTED_EXECUTION_RUNNER_HOST_ALIAS;
-  return next;
 }
 
 function normalizeOptionalEnvOverrides(

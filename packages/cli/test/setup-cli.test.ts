@@ -46,7 +46,7 @@ import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from '@murphai/assistant-engine/assistant-state'
-import { listAssistantCronJobs } from '@murphai/assistant-cli/assistant/cron'
+import { listAssistantCronJobs } from '@murphai/assistant-engine/assistant-cron'
 import {
   buildAssistantProviderDefaultsPatch,
   readOperatorConfig,

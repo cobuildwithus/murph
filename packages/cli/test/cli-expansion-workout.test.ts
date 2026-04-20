@@ -14,7 +14,8 @@ import {
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
-import { addMeasurementRecord, addWorkoutRecord } from '@murphai/vault-usecases/workouts'
+import { addMeasurementRecord } from '@murphai/vault-usecases/measurements'
+import { addWorkoutRecord } from '@murphai/vault-usecases/workouts'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 

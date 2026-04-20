@@ -93,8 +93,10 @@ describe("mergeCloudflareLocalEnv", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
+        HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:9998",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "stale-token",
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:9999",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "192.168.65.2",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "existing-envelope",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackPrivateJwkJson,
       },
@@ -120,11 +122,13 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY).toBe("existing-envelope");
     expect(merged.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK).toContain("generated-d");
     expect(merged.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK).toContain("generated-x");
+    expect(merged.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL).toBe("http://127.0.0.1:9998");
+    expect(merged.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN).toBe("stale-token");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG).toBe("murph");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBe("murph-web");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("development");
     expect(merged.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBe("http://127.0.0.1:8787");
-    expect(merged.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN).toBeUndefined();
+    expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("192.168.65.2");
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://127.0.0.1:3000");
   });
