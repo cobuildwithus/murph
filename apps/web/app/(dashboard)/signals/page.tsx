@@ -1,15 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
-import {
-  buildWearableAssistantSummary,
-  summarizeWearableActivity,
-  summarizeWearableBodyState,
-  summarizeWearableRecovery,
-  summarizeWearableSleep,
-  summarizeWearableSourceHealth,
-} from "@murphai/query/browser";
-
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
@@ -37,13 +27,16 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function SignalsPage() {
-  const { error, refresh, snapshot, status, vault } = useBrowserVault();
-  const assistantSummary = useMemo(() => buildWearableAssistantSummary(vault), [vault]);
-  const sleep = useMemo(() => summarizeWearableSleep(vault, { limit: 5 }), [vault]);
-  const recovery = useMemo(() => summarizeWearableRecovery(vault, { limit: 5 }), [vault]);
-  const activity = useMemo(() => summarizeWearableActivity(vault, { limit: 5 }), [vault]);
-  const bodyState = useMemo(() => summarizeWearableBodyState(vault, { limit: 5 }), [vault]);
-  const sourceHealth = useMemo(() => summarizeWearableSourceHealth(vault, { limit: 10 }), [vault]);
+  const { error, refresh, snapshot, status } = useBrowserVault();
+  const assistantSummary = snapshot?.signals.assistantSummary ?? {
+    highlights: [],
+    latestDate: null,
+  };
+  const sleep = snapshot?.signals.sleep ?? [];
+  const recovery = snapshot?.signals.recovery ?? [];
+  const activity = snapshot?.signals.activity ?? [];
+  const bodyState = snapshot?.signals.bodyState ?? [];
+  const sourceHealth = snapshot?.signals.sourceHealth ?? [];
   const hasWearableData =
     sleep.length > 0 ||
     recovery.length > 0 ||
@@ -62,24 +55,24 @@ export default function SignalsPage() {
             Wearable summaries from your vault
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Cross-provider sleep, recovery, activity, and body-state summaries resolved in the browser.
+            Sleep, recovery, activity, and body metrics when connected data is available.
           </p>
         </div>
         <div className="text-sm text-muted-foreground">
           {assistantSummary.latestDate
             ? `Latest data ${formatIsoDate(assistantSummary.latestDate)}`
             : snapshot
-              ? `Snapshot generated ${formatIsoDate(snapshot.generatedAt)}`
-              : "No signal snapshot yet."}
+              ? `Updated ${formatIsoDate(snapshot.generatedAt)}`
+              : "No signals available yet."}
         </div>
       </div>
 
       {status === "loading" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Building signal summaries</CardTitle>
+            <CardTitle>Loading your signals</CardTitle>
             <CardDescription>
-              Resolving wearable candidates, confidence, and provider health in your browser.
+              Loading recent wearable summaries.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -90,7 +83,7 @@ export default function SignalsPage() {
           <AlertTitle>Could not load signal summaries</AlertTitle>
           <AlertDescription>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{error ?? "The browser vault could not be decrypted."}</span>
+              <span>{error ?? "Your recent signal summaries could not be decrypted."}</span>
               <Button size="sm" variant="outline" onClick={() => void refresh()}>
                 Retry
               </Button>
@@ -104,8 +97,7 @@ export default function SignalsPage() {
           <CardHeader>
             <CardTitle>No wearable signals yet</CardTitle>
             <CardDescription>
-              The latest vault snapshot did not contain enough wearable sample or event data to build sleep,
-              recovery, activity, or body-state summaries.
+              Connect a source or sync more recent data to populate sleep, recovery, activity, and body metrics.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -156,7 +148,7 @@ export default function SignalsPage() {
             <CardHeader>
               <CardTitle>Assistant highlights</CardTitle>
               <CardDescription>
-                Short summaries synthesized directly from the resolved wearable bundle.
+                Recent takeaways generated from the latest signal summaries.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -209,7 +201,7 @@ export default function SignalsPage() {
             <CardHeader>
               <CardTitle>Provider source health</CardTitle>
               <CardDescription>
-                How much each provider contributed to the latest signal summaries.
+                Freshness and contribution by connected provider.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -251,7 +243,7 @@ export default function SignalsPage() {
                 </Table>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-background/40 p-4 text-sm text-muted-foreground">
-                  No provider health diagnostics were available for the latest snapshot.
+                  No provider summary was available.
                 </div>
               )}
             </CardContent>
@@ -303,7 +295,7 @@ function SignalListCard({
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
-        <CardDescription>Latest entries from the resolved wearable summaries.</CardDescription>
+        <CardDescription>Most recent entries included in your dashboard.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {items.length > 0 ? items.map((entry, index) => (

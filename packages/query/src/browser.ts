@@ -21,10 +21,16 @@ export {
   createBrowserVaultSnapshot,
   parseBrowserVaultSnapshot,
 } from "./browser-snapshot.ts";
-export type { BrowserVaultSnapshot } from "./browser-snapshot.ts";
+export type {
+  BrowserVaultHistoryEntry,
+  BrowserVaultOverviewProjection,
+  BrowserVaultSignalsProjection,
+  BrowserVaultSnapshot,
+} from "./browser-snapshot.ts";
 export {
   buildOverviewMetrics,
   isActiveOverviewExperimentStatus,
+  buildOverviewWeeklyStatsFromDailySampleSummaries,
   buildOverviewWeeklyStats,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
@@ -35,6 +41,7 @@ export type {
   OverviewMetric,
   OverviewWeeklyStat,
 } from "./overview.ts";
+export type { DailySampleSummary } from "./summaries.ts";
 export { buildTimeline } from "./timeline.ts";
 export type { TimelineEntry, TimelineFilters } from "./timeline.ts";
 export {

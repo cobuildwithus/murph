@@ -1,10 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  isActiveOverviewExperimentStatus,
-  summarizeOverviewExperiments,
-} from "@murphai/query/browser";
+import { isActiveOverviewExperimentStatus } from "@murphai/query/browser";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -22,10 +19,10 @@ import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/displa
 
 export default function ExperimentsPage() {
   const [search, setSearch] = useState("");
-  const { error, refresh, status, vault } = useBrowserVault();
+  const { error, refresh, snapshot, status } = useBrowserVault();
   const trackedExperiments = useMemo(
-    () => summarizeOverviewExperiments(vault, 12),
-    [vault],
+    () => snapshot?.overview.trackedExperiments ?? [],
+    [snapshot],
   );
   const filteredTrackedExperiments = useMemo(
     () => trackedExperiments.filter((entry) => matchesTrackedExperiment(entry, search)),
@@ -39,69 +36,30 @@ export default function ExperimentsPage() {
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Browser vault snapshot
+            Experiments
           </span>
           <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
             Tracked experiments
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Active and completed experiment entities decrypted from your latest hosted browser snapshot.
+            Active and completed experiments from your recent history.
           </p>
         </div>
         <Input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search tracked experiments..."
+          placeholder="Search experiments"
           className="w-full sm:w-64"
         />
       </div>
 
       <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Snapshot coverage
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {trackedExperiments.length} tracked entities
-          </span>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Active now</CardTitle>
-              <CardDescription>Experiments still in motion in the latest snapshot.</CardDescription>
-            </CardHeader>
-            <CardContent className="font-serif text-3xl font-semibold text-foreground">
-              {activeCount}
-            </CardContent>
-          </Card>
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Completed</CardTitle>
-              <CardDescription>Finished experiments that remain queryable from the snapshot.</CardDescription>
-            </CardHeader>
-            <CardContent className="font-serif text-3xl font-semibold text-foreground">
-              {completedCount}
-            </CardContent>
-          </Card>
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Matching search</CardTitle>
-              <CardDescription>Tracked entities currently surfaced by the local filter.</CardDescription>
-            </CardHeader>
-            <CardContent className="font-serif text-3xl font-semibold text-foreground">
-              {filteredTrackedExperiments.length}
-            </CardContent>
-          </Card>
-        </div>
-
         {status === "loading" ? (
           <Card>
             <CardHeader>
-              <CardTitle>Loading tracked experiments</CardTitle>
+              <CardTitle>Loading experiments</CardTitle>
               <CardDescription>
-                Creating your browser vault session and reading experiment entities locally.
+                Loading your recent experiments.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -109,10 +67,10 @@ export default function ExperimentsPage() {
 
         {status === "error" ? (
           <Alert variant="destructive">
-            <AlertTitle>Could not load your tracked experiments</AlertTitle>
+            <AlertTitle>Could not load your experiments</AlertTitle>
             <AlertDescription>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <span>{error ?? "The browser vault session could not be created."}</span>
+                <span>{error ?? "Your experiment list could not be decrypted."}</span>
                 <Button size="sm" variant="outline" onClick={() => void refresh()}>
                   Retry
                 </Button>
@@ -121,14 +79,57 @@ export default function ExperimentsPage() {
           </Alert>
         ) : null}
 
+        {status === "ready" ? (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Overview
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {trackedExperiments.length} tracked experiments
+              </span>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>Active now</CardTitle>
+                  <CardDescription>Experiments currently in motion.</CardDescription>
+                </CardHeader>
+                <CardContent className="font-serif text-3xl font-semibold text-foreground">
+                  {activeCount}
+                </CardContent>
+              </Card>
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>Completed</CardTitle>
+                  <CardDescription>Finished experiments still shown here.</CardDescription>
+                </CardHeader>
+                <CardContent className="font-serif text-3xl font-semibold text-foreground">
+                  {completedCount}
+                </CardContent>
+              </Card>
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>Matching search</CardTitle>
+                  <CardDescription>Results surfaced by the current filter.</CardDescription>
+                </CardHeader>
+                <CardContent className="font-serif text-3xl font-semibold text-foreground">
+                  {filteredTrackedExperiments.length}
+                </CardContent>
+              </Card>
+            </div>
+          </>
+        ) : null}
+
         {status === "ready" && filteredTrackedExperiments.length === 0 ? (
           <Card>
             <CardHeader>
               <CardTitle>No tracked experiments matched</CardTitle>
               <CardDescription>
                 {trackedExperiments.length === 0
-                  ? "The latest browser snapshot did not include any experiment entities yet."
-                  : "Try a different search term to surface your tracked experiment entities."}
+                  ? "No tracked experiments are available yet."
+                  : "Try a different search term to find the experiment you want."}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -141,7 +142,7 @@ export default function ExperimentsPage() {
                 <CardHeader>
                   <CardTitle>{entry.title}</CardTitle>
                   <CardDescription>
-                    {entry.startedOn ? `Started ${formatIsoDate(entry.startedOn)}` : "No start date in snapshot."}
+                    {entry.startedOn ? `Started ${formatIsoDate(entry.startedOn)}` : "No recorded start date."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-3">
@@ -152,7 +153,7 @@ export default function ExperimentsPage() {
                     {entry.slug ? <Badge variant="secondary">{entry.slug}</Badge> : null}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {entry.summary ?? "No summary text was available for this experiment entity."}
+                    {entry.summary ?? "No summary text was available for this experiment."}
                   </p>
                   {entry.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-2">

@@ -5,6 +5,7 @@ export interface DailySampleSummary {
   date: string;
   stream: string;
   sampleCount: number;
+  numericSampleCount: number;
   units: string[];
   unit: string | null;
   minValue: number | null;
@@ -88,6 +89,7 @@ export function summarizeDailySamples(
     }
 
     if (numericValue !== null) {
+      summary.numericSampleCount += 1;
       values.push(numericValue);
     }
   }
@@ -117,6 +119,7 @@ function getOrCreateSummaryGroup(
       date,
       stream,
       sampleCount: 0,
+      numericSampleCount: 0,
       units: [],
       unit: null,
       minValue: null,
