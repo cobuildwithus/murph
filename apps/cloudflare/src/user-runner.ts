@@ -1,8 +1,9 @@
 import type {
   HostedExecutionCursorState,
-  HostedExecutionWakeDrainResult,
-  HostedExecutionWakeNudgeResult,
-  HostedExecutionWake,
+  HostedRuntimeEvent,
+  HostedRunDrainResult,
+  HostedRunNudgeResult,
+  HostedIngressEnvelope,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import type {
@@ -10,15 +11,16 @@ import type {
   HostedRunEventResult,
   HostedRunRecord,
   HostedRuntimeDrainEvent,
-  HostedWakeLifecycleState,
+  HostedIngressLifecycleState,
 } from "@murphai/hosted-execution/contracts";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
+  createRuntimeTimerSyntheticWake,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
   parseHostedExecutionCursorSnapshotRef,
-  parseHostedWakeExecutionPayload,
+  parseHostedIngressPayload,
 } from "@murphai/hosted-execution/parsers";
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
@@ -30,8 +32,8 @@ import {
   type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
 import {
-  decryptHostedWakePayloadCiphertext,
-} from "./hosted-wake-encryption.ts";
+  decryptHostedIngressPayloadCiphertext,
+} from "./hosted-ingress-encryption.ts";
 import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -45,6 +47,7 @@ import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
   RunnerWakeProcessor,
   HostedExecutionObsoleteRunResultError,
+  recordHostedRunBreadcrumbInWebBestEffort,
   type RunnerUserStores,
 } from "./user-runner/runner-wake-processor.js";
 import type { RunnerLeaseOwnerInput } from "./user-runner/runner-state-store.js";
@@ -59,7 +62,7 @@ import {
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
-type HostedWakeDrainState = HostedWakeLifecycleState;
+type HostedWakeDrainState = HostedIngressLifecycleState;
 
 const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
 const HOSTED_WAKE_NUDGE_RETRY_DELAY_MS = 5_000;
@@ -69,7 +72,7 @@ const MAX_HOSTED_WAKE_DRAIN_ROUNDS = DEFAULT_HOSTED_WAKE_BATCH_LIMIT * 32;
 const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_USER_MISMATCH = "wake-user-mismatch";
 
-interface HostedWakeDrainInternalResult extends HostedExecutionWakeDrainResult {
+interface HostedWakeDrainInternalResult extends HostedRunDrainResult {
   exitState: HostedWakeDrainState | null;
 }
 
@@ -196,7 +199,7 @@ export class HostedUserRunner {
   }
 
   private async ensureManagedUserCryptoForActivationWakeIfNeeded(
-    wake: HostedExecutionWake,
+    wake: HostedRuntimeEvent,
   ): Promise<void> {
     if (wake.kind !== "member.activated") {
       return;
@@ -240,7 +243,7 @@ export class HostedUserRunner {
     }
 
     try {
-      const drainResult = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal());
+      const drainResult = await this.withWakeDrainLock(async () => this.drainHostedRunsInternal());
       if (shouldScheduleHostedWakeRetryAlarm(drainResult)) {
         await this.scheduleHostedWakeRetryAlarm();
       }
@@ -262,7 +265,7 @@ export class HostedUserRunner {
     return this.composeUserStatus(record);
   }
 
-  async nudgeHostedWakes(): Promise<HostedExecutionWakeNudgeResult> {
+  async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
     return {
       accepted: true,
       alarmScheduled: false,
@@ -270,14 +273,14 @@ export class HostedUserRunner {
     };
   }
 
-  async wakeHostedWakes(input: {
+  async drainHostedRuns(input: {
     targetSeqHint?: string | null;
-  } = {}): Promise<HostedExecutionWakeDrainResult> {
-    const result = await this.withWakeDrainLock(async () => this.wakeHostedWakesInternal(input));
-    return toHostedExecutionWakeDrainResult(result);
+  } = {}): Promise<HostedRunDrainResult> {
+    const result = await this.withWakeDrainLock(async () => this.drainHostedRunsInternal(input));
+    return toHostedRunDrainResult(result);
   }
 
-  private async wakeHostedWakesInternal(input: {
+  private async drainHostedRunsInternal(input: {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedWakeDrainInternalResult> {
     const userId = await this.requireBoundUserId();
@@ -308,6 +311,19 @@ export class HostedUserRunner {
         break;
       }
 
+      this.recordHostedRunBreadcrumb({
+        message: "Cloudflare acquired a hosted run from the web-owned run ledger.",
+        phase: "acquired",
+        redacted: {
+          eventCount: acquired.events.length,
+          resumeFinalize: acquired.resumeFinalize,
+          triggerKind: acquired.run.triggerKind,
+        },
+        run: acquired.run,
+        runToken: acquired.runToken,
+        userId,
+      });
+
       const outcome = acquired.resumeFinalize
         ? await this.finalizeAcquiredHostedRun({ acquired, userId })
         : await this.prepareAndCommitAcquiredHostedRun({ acquired, userId });
@@ -324,7 +340,8 @@ export class HostedUserRunner {
       }
 
       if (
-        acquired.events.length < DEFAULT_HOSTED_WAKE_BATCH_LIMIT
+        !acquired.resumeFinalize
+        && acquired.events.length < DEFAULT_HOSTED_WAKE_BATCH_LIMIT
         && (!targetSeqHint || BigInt(committedSeq) >= targetSeqHint)
         && !hostedWakeHintDueNow(outcome.cursor.nextRuntimeWakeAt)
       ) {
@@ -339,6 +356,34 @@ export class HostedUserRunner {
       requestedTargetSeq: targetSeqHint?.toString() ?? null,
       targetReached: targetSeqHint === null || BigInt(finalCommittedSeq) >= targetSeqHint,
     };
+  }
+
+  private recordHostedRunBreadcrumb(input: {
+    level?: "info" | "warn" | "error";
+    message: string;
+    phase: string;
+    redacted?: Record<string, unknown> | null;
+    run: HostedRunRecord;
+    runToken?: string | null;
+    userId: string;
+    wakeEventId?: string;
+  }): void {
+    void recordHostedRunBreadcrumbInWebBestEffort({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      callbackSigning: this.env.webCallbackSigning,
+      level: input.level,
+      message: input.message,
+      phase: input.phase,
+      redacted: input.redacted,
+      run: {
+        attempt: input.run.attempt,
+        runId: input.run.id,
+        startedAt: input.run.acquiredAt,
+      },
+      runToken: input.runToken,
+      userId: input.userId,
+      wakeEventId: input.wakeEventId ?? `hosted-run:${input.run.id}`,
+    });
   }
 
   private async prepareAndCommitAcquiredHostedRun(input: {
@@ -363,9 +408,26 @@ export class HostedUserRunner {
       userId: input.userId,
     });
     const primaryWake = resolved.primaryWake
-      ?? this.createHostedRunSyntheticWake({ run, userId: input.userId });
+      ?? createRuntimeTimerSyntheticWake({
+        acquiredAt: run.acquiredAt,
+        runId: run.id,
+        triggerKind: run.triggerKind,
+        userId: input.userId,
+      });
 
     if (resolved.events.length === 0 && input.acquired.events.length > 0) {
+      this.recordHostedRunBreadcrumb({
+        message: "Cloudflare attempted to commit the acquired hosted run.",
+        phase: "commit_attempted",
+        redacted: {
+          commitKind: "quarantine",
+          quarantinedEventCount: input.acquired.events.length,
+          validEventCount: 0,
+        },
+        run,
+        runToken,
+        userId: input.userId,
+      });
       const commit = await commitHostedRunToWeb({
         baseUrl: this.readHostedWebControlBaseUrl(),
         body: {
@@ -395,6 +457,22 @@ export class HostedUserRunner {
         });
       }
 
+      this.recordHostedRunBreadcrumb({
+        level: commit.committed ? "info" : "warn",
+        message: commit.committed
+          ? "Cloudflare won the hosted run commit."
+          : "Cloudflare lost the hosted run commit.",
+        phase: commit.committed ? "commit_won" : "commit_lost",
+        redacted: {
+          commitKind: "quarantine",
+          quarantinedEventCount: input.acquired.events.length,
+          validEventCount: 0,
+        },
+        run,
+        runToken,
+        userId: input.userId,
+      });
+
       return {
         cursor,
         state: commit.committed ? "completed" : "backpressured",
@@ -406,6 +484,7 @@ export class HostedUserRunner {
       events: resolved.events,
       primaryWake,
       run,
+      runToken,
     });
 
     if (execution.state !== "completed") {
@@ -418,6 +497,18 @@ export class HostedUserRunner {
       });
     }
 
+    this.recordHostedRunBreadcrumb({
+      message: "Cloudflare attempted to commit the acquired hosted run.",
+      phase: "commit_attempted",
+      redacted: {
+        commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
+        eventCount: resolved.events.length,
+        preparedSnapshotPresent: execution.cursorSnapshotRef !== null,
+      },
+      run,
+      runToken,
+      userId: input.userId,
+    });
     const commit = await commitHostedRunToWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
       body: {
@@ -439,6 +530,22 @@ export class HostedUserRunner {
       boundUserId: input.userId,
       callbackSigning: this.env.webCallbackSigning,
       timeoutMs: this.env.runnerTimeoutMs,
+    });
+
+    this.recordHostedRunBreadcrumb({
+      level: commit.committed ? "info" : "warn",
+      message: commit.committed
+        ? "Cloudflare won the hosted run commit."
+        : "Cloudflare lost the hosted run commit.",
+      phase: commit.committed ? "commit_won" : "commit_lost",
+      redacted: {
+        commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
+        eventCount: resolved.events.length,
+        needsFinalize: commit.needsFinalize,
+      },
+      run,
+      runToken,
+      userId: input.userId,
     });
 
     if (!commit.committed || !commit.run) {
@@ -501,9 +608,25 @@ export class HostedUserRunner {
     }
 
     await this.syncHostedWakeBundleCacheToCursor(input.acquired.cursor.snapshotRef);
-    const execution = await this.wakeProcessor.finalizeRunDrain({
-      primaryWake: this.createHostedRunSyntheticWake({ run, userId: input.userId }),
+    this.recordHostedRunBreadcrumb({
+      message: "Cloudflare started hosted run finalization from the prepared snapshot.",
+      phase: "finalize_started",
+      redacted: {
+        resumeFinalize: input.acquired.resumeFinalize,
+      },
       run,
+      runToken,
+      userId: input.userId,
+    });
+    const execution = await this.wakeProcessor.finalizeRunDrain({
+      primaryWake: createRuntimeTimerSyntheticWake({
+        acquiredAt: run.acquiredAt,
+        runId: run.id,
+        triggerKind: run.triggerKind,
+        userId: input.userId,
+      }),
+      run,
+      runToken,
     });
 
     if (execution.state !== "completed") {
@@ -532,6 +655,19 @@ export class HostedUserRunner {
       timeoutMs: this.env.runnerTimeoutMs,
     });
 
+    this.recordHostedRunBreadcrumb({
+      level: finalized.finalized ? "info" : "warn",
+      message: "Cloudflare finished hosted run finalization.",
+      phase: "finalize_finished",
+      redacted: {
+        finalized: finalized.finalized,
+        nextRuntimeWakeScheduled: execution.nextRuntimeWakeAt !== null,
+      },
+      run,
+      runToken,
+      userId: input.userId,
+    });
+
     return {
       cursor: finalized.cursor,
       state: finalized.finalized ? "completed" : "backpressured",
@@ -542,7 +678,7 @@ export class HostedUserRunner {
     TCursor extends HostedExecutionCursorState,
   >(input: {
     cursor: TCursor;
-    wake: HostedExecutionWake | null;
+    wake: HostedIngressEnvelope | null;
   }): Promise<TCursor> {
     return input.cursor;
   }
@@ -557,6 +693,17 @@ export class HostedUserRunner {
     cursor: HostedExecutionCursorState;
     state: HostedWakeDrainState;
   }> {
+    this.recordHostedRunBreadcrumb({
+      message: "Cloudflare attempted to commit the acquired hosted run.",
+      phase: "commit_attempted",
+      redacted: {
+        commitKind: "failure",
+        failureCode: input.failureCode,
+      },
+      run: input.run,
+      runToken: input.runToken,
+      userId: input.userId,
+    });
     const commit = await commitHostedRunToWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
       body: {
@@ -574,6 +721,21 @@ export class HostedUserRunner {
       timeoutMs: this.env.runnerTimeoutMs,
     });
 
+    this.recordHostedRunBreadcrumb({
+      level: commit.committed ? "info" : "warn",
+      message: commit.committed
+        ? "Cloudflare won the hosted run commit."
+        : "Cloudflare lost the hosted run commit.",
+      phase: commit.committed ? "commit_won" : "commit_lost",
+      redacted: {
+        commitKind: "failure",
+        failureCode: input.failureCode,
+      },
+      run: input.run,
+      runToken: input.runToken,
+      userId: input.userId,
+    });
+
     return {
       cursor: commit.cursor,
       state: "backpressured",
@@ -588,20 +750,20 @@ export class HostedUserRunner {
     eventResults: HostedRunEventResult[];
     events: HostedRuntimeDrainEvent[];
     outputCommittedSeq: string;
-    primaryWake: HostedExecutionWake | null;
+    primaryWake: HostedRuntimeEvent | null;
   }> {
     const eventResults: HostedRunEventResult[] = [];
     const events: HostedRuntimeDrainEvent[] = [];
     let outputCommittedSeq = BigInt(input.acquired.cursor.committedSeq);
-    let primaryWake: HostedExecutionWake | null = null;
+    let primaryWake: HostedRuntimeEvent | null = null;
 
     for (const wake of input.acquired.events) {
       outputCommittedSeq = maxHostedWakeSeqHint(outputCommittedSeq, BigInt(wake.seq)) ?? outputCommittedSeq;
-      let hostedWake: HostedExecutionWake;
+      let hostedWake: HostedIngressEnvelope;
 
       try {
         const decryptedPayload = await this.decryptHostedWakeExecutionPayload(wake, input.userId);
-        hostedWake = parseHostedWakeExecutionPayload({
+        hostedWake = parseHostedIngressPayload({
           decryptedPayload,
           kind: wake.kind,
           occurredAt: wake.occurredAt,
@@ -715,24 +877,11 @@ export class HostedUserRunner {
       throw new TypeError("Hosted wake payload ciphertext is required.");
     }
 
-    return await decryptHostedWakePayloadCiphertext({
+    return await decryptHostedIngressPayloadCiphertext({
       ciphertext: payloadCiphertext,
       environment: this.env.hostedWakeEncryption,
       userId,
     });
-  }
-
-  private createHostedRunSyntheticWake(input: {
-    run: HostedRunRecord;
-    userId: string;
-  }): HostedExecutionWake {
-    return {
-      eventId: `hosted-run:${input.run.id}`,
-      kind: "assistant.cron.tick",
-      occurredAt: new Date().toISOString(),
-      reason: input.run.triggerKind === "runtime_timer" ? "alarm" : "manual",
-      userId: input.userId,
-    };
   }
 
   private async syncHostedWakeBundleCacheToCursor(
@@ -961,9 +1110,9 @@ export class HostedUserRunner {
   }
 }
 
-function toHostedExecutionWakeDrainResult(
+function toHostedRunDrainResult(
   input: HostedWakeDrainInternalResult,
-): HostedExecutionWakeDrainResult {
+): HostedRunDrainResult {
   return {
     committedSeq: input.committedSeq,
     requestedTargetSeq: input.requestedTargetSeq,
