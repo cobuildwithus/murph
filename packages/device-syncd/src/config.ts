@@ -1,256 +1,44 @@
 import {
-  assertListenerPort,
   assertLoopbackListenerHost,
   assertUnbracketedListenerHost,
 } from "@murphai/runtime-state";
 
 import {
+  DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS,
   DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS,
+  DEVICE_SYNC_HOST_ENV_KEYS,
+  DEVICE_SYNC_PORT_ENV_KEYS,
+  DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS,
+  DEVICE_SYNC_PUBLIC_HOST_ENV_KEYS,
+  DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS,
+  DEVICE_SYNC_SCHEDULER_POLL_MS_ENV_KEYS,
   DEVICE_SYNC_SECRET_ENV_KEYS,
-} from "./client.ts";
+  DEVICE_SYNC_SESSION_TTL_MS_ENV_KEYS,
+  DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS,
+  DEVICE_SYNC_VAULT_ROOT_ENV_KEYS,
+  DEVICE_SYNC_WORKER_BATCH_SIZE_ENV_KEYS,
+  DEVICE_SYNC_WORKER_LEASE_MS_ENV_KEYS,
+  DEVICE_SYNC_WORKER_POLL_MS_ENV_KEYS,
+} from "./config/env-keys.ts";
+import {
+  parseCsvEnv,
+  parseIntegerEnv,
+  parsePortEnv,
+  optionalEnv,
+  requireEnv,
+} from "./config/provider-configs.ts";
+import { createConfiguredDeviceSyncProviders } from "./config/provider-factory.ts";
 
-import { createGarminDeviceSyncProvider } from "./providers/garmin.ts";
-import { createOuraDeviceSyncProvider } from "./providers/oura.ts";
-import { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
-import { createStravaDeviceSyncProvider } from "./providers/strava.ts";
-import { createDeviceSyncRegistry } from "./registry.ts";
-import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.ts";
+import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 
-import type { GarminDeviceSyncProviderConfig } from "./providers/garmin.ts";
-import type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
-import type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
-import type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
+import type { DeviceSyncEnvSource } from "./config/provider-configs.ts";
+import type { DeviceSyncHttpConfig, DeviceSyncLogger } from "./types.ts";
 import type { CreateDeviceSyncServiceInput } from "./service.ts";
-import type {
-  DeviceSyncHttpConfig,
-  DeviceSyncLogger,
-  DeviceSyncProvider,
-  DeviceSyncRegistry,
-  DeviceSyncServiceConfig,
-} from "./types.ts";
 
 export interface LoadedDeviceSyncEnvironment {
   service: CreateDeviceSyncServiceInput;
   http: DeviceSyncHttpConfig;
 }
-
-export interface ConfiguredDeviceSyncProviderConfigByKey {
-  garmin: GarminDeviceSyncProviderConfig;
-  oura: OuraDeviceSyncProviderConfig;
-  whoop: WhoopDeviceSyncProviderConfig;
-  strava: StravaDeviceSyncProviderConfig;
-}
-
-export interface SerializableConfiguredDeviceSyncProviderConfigByKey {
-  garmin: Omit<GarminDeviceSyncProviderConfig, "fetchImpl">;
-  oura: Omit<OuraDeviceSyncProviderConfig, "fetchImpl" | "webhookVerificationToken">;
-  whoop: Omit<WhoopDeviceSyncProviderConfig, "fetchImpl">;
-  strava: Omit<StravaDeviceSyncProviderConfig, "fetchImpl" | "webhookVerifyToken">;
-}
-
-export type ConfiguredDeviceSyncProviderKey = keyof ConfiguredDeviceSyncProviderConfigByKey;
-export type ConfiguredDeviceSyncProviderConfigs = Partial<ConfiguredDeviceSyncProviderConfigByKey>;
-export type SerializableConfiguredDeviceSyncProviderConfigs =
-  Partial<SerializableConfiguredDeviceSyncProviderConfigByKey>;
-export interface ConfiguredDeviceSyncRuntimeConfig {
-  providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
-  publicBaseUrl: string;
-  secret: string;
-}
-
-type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
-type ConfiguredDeviceSyncProviderPresence =
-  Partial<Record<ConfiguredDeviceSyncProviderKey, unknown>>;
-
-type ConfiguredDeviceSyncProviderConfigHandler<
-  TKey extends ConfiguredDeviceSyncProviderKey,
-> = {
-  create(config: ConfiguredDeviceSyncProviderConfigByKey[TKey]): DeviceSyncProvider;
-  read(env: DeviceSyncEnvSource): ConfiguredDeviceSyncProviderConfigByKey[TKey] | null;
-  clone(
-    config: ConfiguredDeviceSyncProviderConfigByKey[TKey],
-  ): SerializableConfiguredDeviceSyncProviderConfigByKey[TKey];
-  parseSerializable(
-    value: unknown,
-    label: string,
-  ): SerializableConfiguredDeviceSyncProviderConfigByKey[TKey];
-};
-
-const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
-  "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
-] as const;
-const DEVICE_SYNC_HOST_ENV_KEYS = ["DEVICE_SYNC_HOST"] as const;
-const DEVICE_SYNC_PORT_ENV_KEYS = ["DEVICE_SYNC_PORT"] as const;
-const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS = [
-  "DEVICE_SYNC_PUBLIC_BASE_URL",
-] as const;
-const DEVICE_SYNC_PUBLIC_HOST_ENV_KEYS = [
-  "DEVICE_SYNC_PUBLIC_HOST",
-] as const;
-const DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS = [
-  "DEVICE_SYNC_PUBLIC_PORT",
-] as const;
-const DEVICE_SYNC_SCHEDULER_POLL_MS_ENV_KEYS = [
-  "DEVICE_SYNC_SCHEDULER_POLL_MS",
-] as const;
-const DEVICE_SYNC_SESSION_TTL_MS_ENV_KEYS = [
-  "DEVICE_SYNC_SESSION_TTL_MS",
-] as const;
-const DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS = [
-  "DEVICE_SYNC_STATE_DB_PATH",
-] as const;
-const DEVICE_SYNC_VAULT_ROOT_ENV_KEYS = ["DEVICE_SYNC_VAULT_ROOT"] as const;
-const DEVICE_SYNC_WORKER_BATCH_SIZE_ENV_KEYS = [
-  "DEVICE_SYNC_WORKER_BATCH_SIZE",
-] as const;
-const DEVICE_SYNC_WORKER_LEASE_MS_ENV_KEYS = [
-  "DEVICE_SYNC_WORKER_LEASE_MS",
-] as const;
-const DEVICE_SYNC_WORKER_POLL_MS_ENV_KEYS = [
-  "DEVICE_SYNC_WORKER_POLL_MS",
-] as const;
-const GARMIN_API_BASE_URL_ENV_KEYS = ["GARMIN_API_BASE_URL"] as const;
-const GARMIN_AUTH_BASE_URL_ENV_KEYS = ["GARMIN_AUTH_BASE_URL"] as const;
-const GARMIN_BACKFILL_DAYS_ENV_KEYS = ["GARMIN_BACKFILL_DAYS"] as const;
-const GARMIN_CLIENT_ID_ENV_KEYS = ["GARMIN_CLIENT_ID"] as const;
-const GARMIN_CLIENT_SECRET_ENV_KEYS = ["GARMIN_CLIENT_SECRET"] as const;
-const GARMIN_TOKEN_BASE_URL_ENV_KEYS = ["GARMIN_TOKEN_BASE_URL"] as const;
-const GARMIN_RECONCILE_DAYS_ENV_KEYS = [
-  "GARMIN_RECONCILE_DAYS",
-] as const;
-const GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS = [
-  "GARMIN_RECONCILE_INTERVAL_MS",
-] as const;
-const GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS = [
-  "GARMIN_REQUEST_TIMEOUT_MS",
-] as const;
-const OURA_API_BASE_URL_ENV_KEYS = ["OURA_API_BASE_URL"] as const;
-const OURA_AUTH_BASE_URL_ENV_KEYS = ["OURA_AUTH_BASE_URL"] as const;
-const OURA_BACKFILL_DAYS_ENV_KEYS = ["OURA_BACKFILL_DAYS"] as const;
-const OURA_CLIENT_ID_ENV_KEYS = ["OURA_CLIENT_ID"] as const;
-const OURA_CLIENT_SECRET_ENV_KEYS = ["OURA_CLIENT_SECRET"] as const;
-const OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS = ["OURA_WEBHOOK_VERIFICATION_TOKEN"] as const;
-const OURA_RECONCILE_DAYS_ENV_KEYS = [
-  "OURA_RECONCILE_DAYS",
-] as const;
-const OURA_RECONCILE_INTERVAL_MS_ENV_KEYS = [
-  "OURA_RECONCILE_INTERVAL_MS",
-] as const;
-const OURA_REQUEST_TIMEOUT_MS_ENV_KEYS = [
-  "OURA_REQUEST_TIMEOUT_MS",
-] as const;
-const OURA_SCOPES_ENV_KEYS = ["OURA_SCOPES"] as const;
-const OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS = [
-  "OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
-] as const;
-const WHOOP_BACKFILL_DAYS_ENV_KEYS = ["WHOOP_BACKFILL_DAYS"] as const;
-const WHOOP_BASE_URL_ENV_KEYS = ["WHOOP_BASE_URL"] as const;
-const WHOOP_CLIENT_ID_ENV_KEYS = ["WHOOP_CLIENT_ID"] as const;
-const WHOOP_CLIENT_SECRET_ENV_KEYS = ["WHOOP_CLIENT_SECRET"] as const;
-const WHOOP_RECONCILE_DAYS_ENV_KEYS = [
-  "WHOOP_RECONCILE_DAYS",
-] as const;
-const WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS = [
-  "WHOOP_RECONCILE_INTERVAL_MS",
-] as const;
-const WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS = [
-  "WHOOP_REQUEST_TIMEOUT_MS",
-] as const;
-const WHOOP_SCOPES_ENV_KEYS = ["WHOOP_SCOPES"] as const;
-const WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS = [
-  "WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
-] as const;
-const STRAVA_API_BASE_URL_ENV_KEYS = ["STRAVA_API_BASE_URL"] as const;
-const STRAVA_AUTH_BASE_URL_ENV_KEYS = ["STRAVA_AUTH_BASE_URL"] as const;
-const STRAVA_BACKFILL_DAYS_ENV_KEYS = ["STRAVA_BACKFILL_DAYS"] as const;
-const STRAVA_CLIENT_ID_ENV_KEYS = ["STRAVA_CLIENT_ID"] as const;
-const STRAVA_CLIENT_SECRET_ENV_KEYS = ["STRAVA_CLIENT_SECRET"] as const;
-const STRAVA_RECONCILE_DAYS_ENV_KEYS = [
-  "STRAVA_RECONCILE_DAYS",
-] as const;
-const STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS = [
-  "STRAVA_RECONCILE_INTERVAL_MS",
-] as const;
-const STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS = [
-  "STRAVA_REQUEST_TIMEOUT_MS",
-] as const;
-const STRAVA_SCOPES_ENV_KEYS = ["STRAVA_SCOPES"] as const;
-const STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS = [
-  "STRAVA_WEBHOOK_VERIFY_TOKEN",
-] as const;
-const DEVICE_SYNC_RUNTIME_CONFIG_KEYS = [
-  "providerConfigs",
-  "publicBaseUrl",
-  "secret",
-] as const;
-
-const GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
-  ...GARMIN_CLIENT_ID_ENV_KEYS,
-  ...GARMIN_CLIENT_SECRET_ENV_KEYS,
-] as const;
-const GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS = [
-  ...GARMIN_API_BASE_URL_ENV_KEYS,
-  ...GARMIN_AUTH_BASE_URL_ENV_KEYS,
-  ...GARMIN_BACKFILL_DAYS_ENV_KEYS,
-  ...GARMIN_RECONCILE_DAYS_ENV_KEYS,
-  ...GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  ...GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  ...GARMIN_TOKEN_BASE_URL_ENV_KEYS,
-] as const;
-const OURA_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
-  ...OURA_CLIENT_ID_ENV_KEYS,
-  ...OURA_CLIENT_SECRET_ENV_KEYS,
-] as const;
-const OURA_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS = [
-  ...OURA_API_BASE_URL_ENV_KEYS,
-  ...OURA_AUTH_BASE_URL_ENV_KEYS,
-  ...OURA_BACKFILL_DAYS_ENV_KEYS,
-  ...OURA_RECONCILE_DAYS_ENV_KEYS,
-  ...OURA_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  ...OURA_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  ...OURA_SCOPES_ENV_KEYS,
-  ...OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
-] as const;
-const WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
-  ...WHOOP_CLIENT_ID_ENV_KEYS,
-  ...WHOOP_CLIENT_SECRET_ENV_KEYS,
-] as const;
-const STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS = [
-  ...STRAVA_CLIENT_ID_ENV_KEYS,
-  ...STRAVA_CLIENT_SECRET_ENV_KEYS,
-] as const;
-const WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS = [
-  ...WHOOP_BACKFILL_DAYS_ENV_KEYS,
-  ...WHOOP_BASE_URL_ENV_KEYS,
-  ...WHOOP_RECONCILE_DAYS_ENV_KEYS,
-  ...WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  ...WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  ...WHOOP_SCOPES_ENV_KEYS,
-  ...WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
-] as const;
-const STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS = [
-  ...STRAVA_API_BASE_URL_ENV_KEYS,
-  ...STRAVA_AUTH_BASE_URL_ENV_KEYS,
-  ...STRAVA_BACKFILL_DAYS_ENV_KEYS,
-  ...STRAVA_RECONCILE_DAYS_ENV_KEYS,
-  ...STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  ...STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  ...STRAVA_SCOPES_ENV_KEYS,
-] as const;
-
-export const deviceSyncProviderRuntimeSecretEnvKeys = Object.freeze([
-  ...GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
-  ...OURA_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
-  ...WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
-  ...STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_SECRET_ENV_KEYS,
-]);
-
-export const deviceSyncProviderRuntimeVariableEnvKeys = Object.freeze([
-  ...GARMIN_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
-  ...OURA_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
-  ...WHOOP_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
-  ...STRAVA_DEVICE_SYNC_PROVIDER_RUNTIME_VARIABLE_ENV_KEYS,
-]);
 
 export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env): LoadedDeviceSyncEnvironment {
   const vaultRoot = requireEnv(env, DEVICE_SYNC_VAULT_ROOT_ENV_KEYS);
@@ -273,23 +61,21 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
     );
   }
 
-  const serviceConfig: DeviceSyncServiceConfig = {
-    vaultRoot,
-    publicBaseUrl,
-    allowedReturnOrigins: parseCsvEnv(env, DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS),
-    stateDatabasePath: optionalEnv(env, DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS),
-    sessionTtlMs: parseIntegerEnv(env, DEVICE_SYNC_SESSION_TTL_MS_ENV_KEYS),
-    workerLeaseMs: parseIntegerEnv(env, DEVICE_SYNC_WORKER_LEASE_MS_ENV_KEYS),
-    workerPollMs: parseIntegerEnv(env, DEVICE_SYNC_WORKER_POLL_MS_ENV_KEYS),
-    workerBatchSize: parseIntegerEnv(env, DEVICE_SYNC_WORKER_BATCH_SIZE_ENV_KEYS),
-    schedulerPollMs: parseIntegerEnv(env, DEVICE_SYNC_SCHEDULER_POLL_MS_ENV_KEYS),
-    log: logger,
-  };
-
   return {
     service: {
       secret,
-      config: serviceConfig,
+      config: {
+        vaultRoot,
+        publicBaseUrl,
+        allowedReturnOrigins: parseCsvEnv(env, DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS),
+        stateDatabasePath: optionalEnv(env, DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS),
+        sessionTtlMs: parseIntegerEnv(env, DEVICE_SYNC_SESSION_TTL_MS_ENV_KEYS),
+        workerLeaseMs: parseIntegerEnv(env, DEVICE_SYNC_WORKER_LEASE_MS_ENV_KEYS),
+        workerPollMs: parseIntegerEnv(env, DEVICE_SYNC_WORKER_POLL_MS_ENV_KEYS),
+        workerBatchSize: parseIntegerEnv(env, DEVICE_SYNC_WORKER_BATCH_SIZE_ENV_KEYS),
+        schedulerPollMs: parseIntegerEnv(env, DEVICE_SYNC_SCHEDULER_POLL_MS_ENV_KEYS),
+        log: logger,
+      },
       providers,
     },
     http: {
@@ -318,690 +104,9 @@ export function createConsoleDeviceSyncLogger(consoleLike: Console = console): D
   };
 }
 
-export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): DeviceSyncProvider[] {
-  return createConfiguredDeviceSyncProvidersFromConfigs(
-    readConfiguredDeviceSyncProviderConfigs(env),
-  );
-}
-
-export function createConfiguredDeviceSyncRegistry(
+function readOptionalPublicListener(
   env: DeviceSyncEnvSource,
-): DeviceSyncRegistry {
-  return createConfiguredDeviceSyncRegistryFromConfigs(
-    readConfiguredDeviceSyncProviderConfigs(env),
-  );
-}
-
-export function createConfiguredDeviceSyncProvidersFromConfigs(
-  configs: ConfiguredDeviceSyncProviderConfigs,
-): DeviceSyncProvider[] {
-  const providers: DeviceSyncProvider[] = [];
-
-  for (const provider of listConfiguredDeviceSyncProviderNames(configs)) {
-    const config = configs[provider];
-
-    if (!config) {
-      continue;
-    }
-
-    providers.push(createConfiguredDeviceSyncProviderFromConfig(provider, config));
-  }
-
-  return providers;
-}
-
-export function createConfiguredDeviceSyncRegistryFromConfigs(
-  configs: ConfiguredDeviceSyncProviderConfigs,
-): DeviceSyncRegistry {
-  return createDeviceSyncRegistry(
-    createConfiguredDeviceSyncProvidersFromConfigs(configs),
-  );
-}
-
-export function readConfiguredDeviceSyncProviderConfigs(
-  env: DeviceSyncEnvSource,
-): ConfiguredDeviceSyncProviderConfigs {
-  const configs: ConfiguredDeviceSyncProviderConfigs = {};
-
-  for (const provider of configuredDeviceSyncProviderKeys) {
-    const config = configuredDeviceSyncProviderConfigHandlers[provider].read(env);
-
-    if (config) {
-      configs[provider] = config as never;
-    }
-  }
-
-  return configs;
-}
-
-export function readConfiguredDeviceSyncRuntimeConfig(
-  env: DeviceSyncEnvSource,
-): ConfiguredDeviceSyncRuntimeConfig | null {
-  const providerConfigs = cloneSerializableConfiguredDeviceSyncProviderConfigs(
-    readConfiguredDeviceSyncProviderConfigs(env),
-  );
-  const publicBaseUrl = optionalEnv(env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS);
-  const secret = optionalEnv(env, DEVICE_SYNC_SECRET_ENV_KEYS);
-
-  if (!publicBaseUrl || !secret || !hasConfiguredDeviceSyncProviderConfigs(providerConfigs)) {
-    return null;
-  }
-
-  return {
-    providerConfigs,
-    publicBaseUrl,
-    secret,
-  };
-}
-
-export function parseConfiguredDeviceSyncRuntimeConfig(
-  value: unknown,
-  label: string,
-): ConfiguredDeviceSyncRuntimeConfig {
-  const record = requireSerializableDeviceSyncRuntimeConfigRecord(value, label);
-
-  return {
-    providerConfigs: parseSerializableConfiguredDeviceSyncProviderConfigs(
-      record.providerConfigs,
-      `${label}.providerConfigs`,
-    ),
-    publicBaseUrl: requireSerializableString(record.publicBaseUrl, `${label}.publicBaseUrl`),
-    secret: requireSerializableString(record.secret, `${label}.secret`),
-  };
-}
-
-export function cloneConfiguredDeviceSyncRuntimeConfig(
-  config: ConfiguredDeviceSyncRuntimeConfig,
-): ConfiguredDeviceSyncRuntimeConfig {
-  return {
-    providerConfigs: cloneSerializableConfiguredDeviceSyncProviderConfigs(config.providerConfigs),
-    publicBaseUrl: config.publicBaseUrl,
-    secret: config.secret,
-  };
-}
-
-export function hasConfiguredDeviceSyncProviderConfigs(
-  configs: ConfiguredDeviceSyncProviderPresence,
-): boolean {
-  return listConfiguredDeviceSyncProviderNames(configs).length > 0;
-}
-
-export function listConfiguredDeviceSyncProviderNames(
-  configs: ConfiguredDeviceSyncProviderPresence,
-): ConfiguredDeviceSyncProviderKey[] {
-  return configuredDeviceSyncProviderKeys.filter((provider) => configs[provider] !== undefined);
-}
-
-// Hosted runner envelopes keep only the serializable runtime subset of provider config.
-// Provider-owned admin secrets such as webhook verification tokens stay on the control plane.
-export function cloneSerializableConfiguredDeviceSyncProviderConfigs(
-  configs: ConfiguredDeviceSyncProviderConfigs,
-): SerializableConfiguredDeviceSyncProviderConfigs {
-  const cloned: SerializableConfiguredDeviceSyncProviderConfigs = {};
-
-  for (const provider of listConfiguredDeviceSyncProviderNames(configs)) {
-    const config = configs[provider];
-
-    if (!config) {
-      continue;
-    }
-
-    cloned[provider] = cloneSerializableConfiguredDeviceSyncProviderConfig(provider, config) as never;
-  }
-
-  return cloned;
-}
-
-export function parseSerializableConfiguredDeviceSyncProviderConfigs(
-  value: unknown,
-  label: string,
-): SerializableConfiguredDeviceSyncProviderConfigs {
-  const record = requireSerializableConfiguredDeviceSyncProviderConfigsRecord(value, label);
-  const configs: SerializableConfiguredDeviceSyncProviderConfigs = {};
-
-  for (const provider of configuredDeviceSyncProviderKeys) {
-    const providerValue = record[provider];
-
-    if (providerValue === undefined) {
-      continue;
-    }
-
-    configs[provider] = parseSerializableConfiguredDeviceSyncProviderConfig(
-      provider,
-      providerValue,
-      `${label}.${provider}`,
-    ) as never;
-  }
-
-  return configs;
-}
-
-export function readConfiguredGarminDeviceSyncProviderConfig(
-  env: DeviceSyncEnvSource,
-): GarminDeviceSyncProviderConfig | null {
-  const credentials = readOptionalCredentialPair(
-    env,
-    GARMIN_CLIENT_ID_ENV_KEYS,
-    GARMIN_CLIENT_SECRET_ENV_KEYS,
-    "Garmin",
-  );
-
-  if (!credentials) {
-    return null;
-  }
-
-  return {
-    clientId: credentials.clientId,
-    clientSecret: credentials.clientSecret,
-    authBaseUrl: optionalEnv(env, GARMIN_AUTH_BASE_URL_ENV_KEYS),
-    tokenBaseUrl: optionalEnv(env, GARMIN_TOKEN_BASE_URL_ENV_KEYS),
-    apiBaseUrl: optionalEnv(env, GARMIN_API_BASE_URL_ENV_KEYS),
-    backfillDays: parseIntegerEnv(env, GARMIN_BACKFILL_DAYS_ENV_KEYS),
-    reconcileDays: parseIntegerEnv(env, GARMIN_RECONCILE_DAYS_ENV_KEYS),
-    reconcileIntervalMs: parseIntegerEnv(env, GARMIN_RECONCILE_INTERVAL_MS_ENV_KEYS),
-    requestTimeoutMs: parseIntegerEnv(env, GARMIN_REQUEST_TIMEOUT_MS_ENV_KEYS),
-  };
-}
-
-export function readConfiguredWhoopDeviceSyncProviderConfig(
-  env: DeviceSyncEnvSource,
-): WhoopDeviceSyncProviderConfig | null {
-  const credentials = readOptionalCredentialPair(
-    env,
-    WHOOP_CLIENT_ID_ENV_KEYS,
-    WHOOP_CLIENT_SECRET_ENV_KEYS,
-    "WHOOP",
-  );
-
-  if (!credentials) {
-    return null;
-  }
-
-  return {
-    clientId: credentials.clientId,
-    clientSecret: credentials.clientSecret,
-    baseUrl: optionalEnv(env, WHOOP_BASE_URL_ENV_KEYS),
-    scopes: parseCsvEnv(env, WHOOP_SCOPES_ENV_KEYS),
-    backfillDays: parseIntegerEnv(env, WHOOP_BACKFILL_DAYS_ENV_KEYS),
-    reconcileDays: parseIntegerEnv(env, WHOOP_RECONCILE_DAYS_ENV_KEYS),
-    reconcileIntervalMs: parseIntegerEnv(env, WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS),
-    webhookTimestampToleranceMs: parseIntegerEnv(env, WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-    requestTimeoutMs: parseIntegerEnv(env, WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS),
-  };
-}
-
-export function readConfiguredOuraDeviceSyncProviderConfig(
-  env: DeviceSyncEnvSource,
-): OuraDeviceSyncProviderConfig | null {
-  const credentials = readOptionalCredentialPair(
-    env,
-    OURA_CLIENT_ID_ENV_KEYS,
-    OURA_CLIENT_SECRET_ENV_KEYS,
-    "Oura",
-  );
-
-  if (!credentials) {
-    return null;
-  }
-
-  return {
-    clientId: credentials.clientId,
-    clientSecret: credentials.clientSecret,
-    authBaseUrl: optionalEnv(env, OURA_AUTH_BASE_URL_ENV_KEYS),
-    apiBaseUrl: optionalEnv(env, OURA_API_BASE_URL_ENV_KEYS),
-    scopes: parseCsvEnv(env, OURA_SCOPES_ENV_KEYS),
-    backfillDays: parseIntegerEnv(env, OURA_BACKFILL_DAYS_ENV_KEYS),
-    reconcileDays: parseIntegerEnv(env, OURA_RECONCILE_DAYS_ENV_KEYS),
-    reconcileIntervalMs: parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS),
-    webhookTimestampToleranceMs: parseIntegerEnv(env, OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-    requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
-    webhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
-  };
-}
-
-export function readConfiguredStravaDeviceSyncProviderConfig(
-  env: DeviceSyncEnvSource,
-): StravaDeviceSyncProviderConfig | null {
-  const credentials = readOptionalCredentialPair(
-    env,
-    STRAVA_CLIENT_ID_ENV_KEYS,
-    STRAVA_CLIENT_SECRET_ENV_KEYS,
-    "Strava",
-  );
-
-  if (!credentials) {
-    return null;
-  }
-
-  return {
-    clientId: credentials.clientId,
-    clientSecret: credentials.clientSecret,
-    authBaseUrl: optionalEnv(env, STRAVA_AUTH_BASE_URL_ENV_KEYS),
-    apiBaseUrl: optionalEnv(env, STRAVA_API_BASE_URL_ENV_KEYS),
-    scopes: parseCsvEnv(env, STRAVA_SCOPES_ENV_KEYS),
-    backfillDays: parseIntegerEnv(env, STRAVA_BACKFILL_DAYS_ENV_KEYS),
-    reconcileDays: parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS),
-    reconcileIntervalMs: parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS),
-    requestTimeoutMs: parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS),
-    webhookVerifyToken: optionalEnv(env, STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS),
-  };
-}
-
-const configuredDeviceSyncProviderConfigHandlers: {
-  [TKey in ConfiguredDeviceSyncProviderKey]: ConfiguredDeviceSyncProviderConfigHandler<TKey>;
-} = {
-  garmin: {
-    create: createGarminDeviceSyncProvider,
-    read: readConfiguredGarminDeviceSyncProviderConfig,
-    clone: cloneGarminDeviceSyncProviderConfig,
-    parseSerializable: parseSerializableGarminDeviceSyncProviderConfig,
-  },
-  oura: {
-    create: createOuraDeviceSyncProvider,
-    read: readConfiguredOuraDeviceSyncProviderConfig,
-    clone: cloneOuraDeviceSyncProviderConfig,
-    parseSerializable: parseSerializableOuraDeviceSyncProviderConfig,
-  },
-  whoop: {
-    create: createWhoopDeviceSyncProvider,
-    read: readConfiguredWhoopDeviceSyncProviderConfig,
-    clone: cloneWhoopDeviceSyncProviderConfig,
-    parseSerializable: parseSerializableWhoopDeviceSyncProviderConfig,
-  },
-  strava: {
-    create: createStravaDeviceSyncProvider,
-    read: readConfiguredStravaDeviceSyncProviderConfig,
-    clone: cloneStravaDeviceSyncProviderConfig,
-    parseSerializable: parseSerializableStravaDeviceSyncProviderConfig,
-  },
-};
-
-export const configuredDeviceSyncProviderKeys = Object.freeze(
-  Object.keys(configuredDeviceSyncProviderConfigHandlers) as ConfiguredDeviceSyncProviderKey[],
-);
-
-const GARMIN_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
-  "apiBaseUrl",
-  "authBaseUrl",
-  "backfillDays",
-  "clientId",
-  "clientSecret",
-  "reconcileDays",
-  "reconcileIntervalMs",
-  "requestTimeoutMs",
-  "tokenBaseUrl",
-] as const satisfies readonly (keyof GarminDeviceSyncProviderConfig)[];
-
-const OURA_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
-  "apiBaseUrl",
-  "authBaseUrl",
-  "backfillDays",
-  "clientId",
-  "clientSecret",
-  "reconcileDays",
-  "reconcileIntervalMs",
-  "requestTimeoutMs",
-  "scopes",
-  "webhookTimestampToleranceMs",
-] as const satisfies readonly (keyof OuraDeviceSyncProviderConfig)[];
-
-const STRAVA_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
-  "apiBaseUrl",
-  "authBaseUrl",
-  "backfillDays",
-  "clientId",
-  "clientSecret",
-  "reconcileDays",
-  "reconcileIntervalMs",
-  "requestTimeoutMs",
-  "scopes",
-] as const satisfies readonly (keyof StravaDeviceSyncProviderConfig)[];
-
-const WHOOP_SERIALIZABLE_PROVIDER_CONFIG_KEYS = [
-  "backfillDays",
-  "baseUrl",
-  "clientId",
-  "clientSecret",
-  "reconcileDays",
-  "reconcileIntervalMs",
-  "requestTimeoutMs",
-  "scopes",
-  "webhookTimestampToleranceMs",
-] as const satisfies readonly (keyof WhoopDeviceSyncProviderConfig)[];
-
-function createConfiguredDeviceSyncProviderFromConfig(
-  provider: ConfiguredDeviceSyncProviderKey,
-  config: ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey],
-): DeviceSyncProvider {
-  const handler = configuredDeviceSyncProviderConfigHandlers[provider] as ConfiguredDeviceSyncProviderConfigHandler<ConfiguredDeviceSyncProviderKey>;
-  return handler.create(config);
-}
-
-function cloneSerializableConfiguredDeviceSyncProviderConfig(
-  provider: ConfiguredDeviceSyncProviderKey,
-  config: ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey],
-): ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey] {
-  const handler = configuredDeviceSyncProviderConfigHandlers[provider] as ConfiguredDeviceSyncProviderConfigHandler<ConfiguredDeviceSyncProviderKey>;
-  return handler.clone(config);
-}
-
-function parseSerializableConfiguredDeviceSyncProviderConfig(
-  provider: ConfiguredDeviceSyncProviderKey,
-  value: unknown,
-  label: string,
-): ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey] {
-  const handler = configuredDeviceSyncProviderConfigHandlers[provider] as ConfiguredDeviceSyncProviderConfigHandler<ConfiguredDeviceSyncProviderKey>;
-  return handler.parseSerializable(value, label);
-}
-
-function cloneGarminDeviceSyncProviderConfig(
-  config: GarminDeviceSyncProviderConfig,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["garmin"] {
-  return cloneSerializableProviderConfig(config, GARMIN_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
-}
-
-function cloneOuraDeviceSyncProviderConfig(
-  config: OuraDeviceSyncProviderConfig,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["oura"] {
-  return cloneSerializableProviderConfig(config, OURA_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
-}
-
-function cloneStravaDeviceSyncProviderConfig(
-  config: StravaDeviceSyncProviderConfig,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["strava"] {
-  return cloneSerializableProviderConfig(config, STRAVA_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
-}
-
-function cloneWhoopDeviceSyncProviderConfig(
-  config: WhoopDeviceSyncProviderConfig,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["whoop"] {
-  return cloneSerializableProviderConfig(config, WHOOP_SERIALIZABLE_PROVIDER_CONFIG_KEYS);
-}
-
-function parseSerializableGarminDeviceSyncProviderConfig(
-  value: unknown,
-  label: string,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["garmin"] {
-  const record = requireSerializableProviderConfigRecord(
-    value,
-    label,
-    [
-      "apiBaseUrl",
-      "authBaseUrl",
-      "backfillDays",
-      "clientId",
-      "clientSecret",
-      "reconcileDays",
-      "reconcileIntervalMs",
-      "requestTimeoutMs",
-      "tokenBaseUrl",
-    ],
-  );
-
-  return {
-    apiBaseUrl: parseSerializableOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
-    authBaseUrl: parseSerializableOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
-    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
-    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
-    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
-    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
-    reconcileIntervalMs: parseSerializableOptionalNumber(
-      record.reconcileIntervalMs,
-      `${label}.reconcileIntervalMs`,
-    ),
-    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
-    tokenBaseUrl: parseSerializableOptionalString(record.tokenBaseUrl, `${label}.tokenBaseUrl`),
-  };
-}
-
-function parseSerializableOuraDeviceSyncProviderConfig(
-  value: unknown,
-  label: string,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["oura"] {
-  const record = requireSerializableProviderConfigRecord(
-    value,
-    label,
-    [
-      "apiBaseUrl",
-      "authBaseUrl",
-      "backfillDays",
-      "clientId",
-      "clientSecret",
-      "reconcileDays",
-      "reconcileIntervalMs",
-      "requestTimeoutMs",
-      "scopes",
-      "webhookTimestampToleranceMs",
-    ],
-  );
-
-  return {
-    apiBaseUrl: parseSerializableOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
-    authBaseUrl: parseSerializableOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
-    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
-    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
-    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
-    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
-    reconcileIntervalMs: parseSerializableOptionalNumber(
-      record.reconcileIntervalMs,
-      `${label}.reconcileIntervalMs`,
-    ),
-    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
-    scopes: parseSerializableOptionalStringArray(record.scopes, `${label}.scopes`),
-    webhookTimestampToleranceMs: parseSerializableOptionalNumber(
-      record.webhookTimestampToleranceMs,
-      `${label}.webhookTimestampToleranceMs`,
-    ),
-  };
-}
-
-function parseSerializableStravaDeviceSyncProviderConfig(
-  value: unknown,
-  label: string,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["strava"] {
-  const record = requireSerializableProviderConfigRecord(
-    value,
-    label,
-    [
-      "apiBaseUrl",
-      "authBaseUrl",
-      "backfillDays",
-      "clientId",
-      "clientSecret",
-      "reconcileDays",
-      "reconcileIntervalMs",
-      "requestTimeoutMs",
-      "scopes",
-    ],
-  );
-
-  return {
-    apiBaseUrl: parseSerializableOptionalString(record.apiBaseUrl, `${label}.apiBaseUrl`),
-    authBaseUrl: parseSerializableOptionalString(record.authBaseUrl, `${label}.authBaseUrl`),
-    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
-    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
-    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
-    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
-    reconcileIntervalMs: parseSerializableOptionalNumber(
-      record.reconcileIntervalMs,
-      `${label}.reconcileIntervalMs`,
-    ),
-    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
-    scopes: parseSerializableOptionalStringArray(record.scopes, `${label}.scopes`),
-  };
-}
-
-function parseSerializableWhoopDeviceSyncProviderConfig(
-  value: unknown,
-  label: string,
-): SerializableConfiguredDeviceSyncProviderConfigByKey["whoop"] {
-  const record = requireSerializableProviderConfigRecord(
-    value,
-    label,
-    [
-      "backfillDays",
-      "baseUrl",
-      "clientId",
-      "clientSecret",
-      "reconcileDays",
-      "reconcileIntervalMs",
-      "requestTimeoutMs",
-      "scopes",
-      "webhookTimestampToleranceMs",
-    ],
-  );
-
-  return {
-    backfillDays: parseSerializableOptionalNumber(record.backfillDays, `${label}.backfillDays`),
-    baseUrl: parseSerializableOptionalString(record.baseUrl, `${label}.baseUrl`),
-    clientId: requireSerializableString(record.clientId, `${label}.clientId`),
-    clientSecret: requireSerializableString(record.clientSecret, `${label}.clientSecret`),
-    reconcileDays: parseSerializableOptionalNumber(record.reconcileDays, `${label}.reconcileDays`),
-    reconcileIntervalMs: parseSerializableOptionalNumber(
-      record.reconcileIntervalMs,
-      `${label}.reconcileIntervalMs`,
-    ),
-    requestTimeoutMs: parseSerializableOptionalNumber(record.requestTimeoutMs, `${label}.requestTimeoutMs`),
-    scopes: parseSerializableOptionalStringArray(record.scopes, `${label}.scopes`),
-    webhookTimestampToleranceMs: parseSerializableOptionalNumber(
-      record.webhookTimestampToleranceMs,
-      `${label}.webhookTimestampToleranceMs`,
-    ),
-  };
-}
-
-function requireSerializableConfiguredDeviceSyncProviderConfigsRecord(
-  value: unknown,
-  label: string,
-): Record<string, unknown> {
-  const record = requireSerializableConfigObject(value, label);
-  const supportedProviders = new Set<string>(configuredDeviceSyncProviderKeys);
-
-  for (const key of Object.keys(record)) {
-    if (!supportedProviders.has(key)) {
-      throw new TypeError(`${label}.${key} is not a supported device-sync provider config.`);
-    }
-  }
-
-  return record;
-}
-
-function requireSerializableDeviceSyncRuntimeConfigRecord(
-  value: unknown,
-  label: string,
-): Record<string, unknown> {
-  const record = requireSerializableConfigObject(value, label);
-  const supportedKeys = new Set<string>(DEVICE_SYNC_RUNTIME_CONFIG_KEYS);
-
-  for (const key of Object.keys(record)) {
-    if (!supportedKeys.has(key)) {
-      throw new TypeError(`${label}.${key} is not supported in serialized runtime config.`);
-    }
-  }
-
-  return record;
-}
-
-function requireSerializableProviderConfigRecord(
-  value: unknown,
-  label: string,
-  allowedKeys: readonly string[],
-): Record<string, unknown> {
-  const record = requireSerializableConfigObject(value, label);
-  const supportedKeys = new Set(allowedKeys);
-
-  if (record.fetchImpl !== undefined) {
-    throw new TypeError(`${label}.fetchImpl is not supported in serialized runtime config.`);
-  }
-
-  if (record.webhookVerificationToken !== undefined) {
-    throw new TypeError(
-      `${label}.webhookVerificationToken is a provider-owned admin secret and is not supported in serialized runtime config.`,
-    );
-  }
-
-  if (record.webhookVerifyToken !== undefined) {
-    throw new TypeError(
-      `${label}.webhookVerifyToken is a provider-owned admin secret and is not supported in serialized runtime config.`,
-    );
-  }
-
-  for (const key of Object.keys(record)) {
-    if (!supportedKeys.has(key)) {
-      throw new TypeError(`${label}.${key} is not a supported serialized provider config field.`);
-    }
-  }
-
-  return record;
-}
-
-function cloneSerializableProviderConfig<
-  TConfig extends object,
-  const TKeys extends readonly (keyof TConfig)[],
->(
-  config: TConfig,
-  keys: TKeys,
-): Pick<TConfig, TKeys[number]> {
-  const cloned = {} as Pick<TConfig, TKeys[number]>;
-
-  for (const key of keys) {
-    const value = config[key];
-
-    if (value === undefined) {
-      continue;
-    }
-
-    cloned[key] = (Array.isArray(value) ? [...value] : value) as Pick<TConfig, TKeys[number]>[typeof key];
-  }
-
-  return cloned;
-}
-
-function requireSerializableConfigObject(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function requireSerializableString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
-  }
-
-  return value;
-}
-
-function parseSerializableOptionalString(value: unknown, label: string): string | undefined {
-  return value === undefined ? undefined : requireSerializableString(value, label);
-}
-
-function parseSerializableOptionalNumber(value: unknown, label: string): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
-  }
-
-  return value;
-}
-
-function parseSerializableOptionalStringArray(value: unknown, label: string): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array of strings.`);
-  }
-
-  return value.map((entry, index) => requireSerializableString(entry, `${label}[${index}]`));
-}
-
-function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttpConfig, "publicHost" | "publicPort"> {
+): Pick<DeviceSyncHttpConfig, "publicHost" | "publicPort"> {
   const publicHost = optionalEnv(env, DEVICE_SYNC_PUBLIC_HOST_ENV_KEYS);
   const publicPort = parsePortEnv(env, DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS);
 
@@ -1026,93 +131,45 @@ function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttp
   };
 }
 
-function readOptionalCredentialPair(
-  env: DeviceSyncEnvSource,
-  clientIdKeys: readonly string[],
-  clientSecretKeys: readonly string[],
-  providerLabel: string,
-): { clientId: string; clientSecret: string } | null {
-  const clientId = optionalEnv(env, clientIdKeys);
-  const clientSecret = optionalEnv(env, clientSecretKeys);
+export {
+  DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS,
+  DEVICE_SYNC_SECRET_ENV_KEYS,
+  deviceSyncProviderRuntimeSecretEnvKeys,
+  deviceSyncProviderRuntimeVariableEnvKeys,
+} from "./config/env-keys.ts";
+export {
+  configuredDeviceSyncProviderKeys,
+  hasConfiguredDeviceSyncProviderConfigs,
+  listConfiguredDeviceSyncProviderNames,
+  readConfiguredDeviceSyncProviderConfigs,
+  readConfiguredGarminDeviceSyncProviderConfig,
+  readConfiguredOuraDeviceSyncProviderConfig,
+  readConfiguredStravaDeviceSyncProviderConfig,
+  readConfiguredWhoopDeviceSyncProviderConfig,
+} from "./config/provider-configs.ts";
+export {
+  createConfiguredDeviceSyncProviders,
+  createConfiguredDeviceSyncProvidersFromConfigs,
+  createConfiguredDeviceSyncRegistry,
+  createConfiguredDeviceSyncRegistryFromConfigs,
+} from "./config/provider-factory.ts";
+export {
+  cloneSerializableConfiguredDeviceSyncProviderConfigs,
+  parseSerializableConfiguredDeviceSyncProviderConfigs,
+} from "./config/serializable-provider-configs.ts";
+export {
+  cloneConfiguredDeviceSyncRuntimeConfig,
+  parseConfiguredDeviceSyncRuntimeConfig,
+  readConfiguredDeviceSyncRuntimeConfig,
+} from "./config/runtime-config.ts";
 
-  if (!clientId && !clientSecret) {
-    return null;
-  }
-
-  if (!clientId || !clientSecret) {
-    throw new TypeError(
-      `${providerLabel} configuration is incomplete. Set ${clientIdKeys[0]} and ${clientSecretKeys[0]} together.`,
-    );
-  }
-
-  return { clientId, clientSecret };
-}
-
-function requireEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string {
-  const value = optionalEnv(env, keys);
-
-  if (!value) {
-    throw new TypeError(`Missing required environment variable. Set one of: ${keys.join(", ")}`);
-  }
-
-  return value;
-}
-
-function optionalEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string | undefined {
-  for (const key of keys) {
-    const value = normalizeString(env[key]);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-function parseIntegerEnv(env: DeviceSyncEnvSource, keys: readonly string[]): number | undefined {
-  const value = optionalEnv(env, keys);
-
-  if (!value) {
-    return undefined;
-  }
-
-  return parseDecimalInteger(value, keys[0]);
-}
-
-function parsePortEnv(env: DeviceSyncEnvSource, keys: readonly string[]): number | undefined {
-  const parsed = parseIntegerEnv(env, keys);
-
-  if (parsed === undefined) {
-    return undefined;
-  }
-
-  assertListenerPort(
-    parsed,
-    `Environment variable ${keys[0]} must be an integer between 0 and 65535.`,
-    { allowZero: true },
-  );
-
-  return parsed;
-}
-
-function parseDecimalInteger(value: string, key: string): number {
-  if (!/^\d+$/u.test(value)) {
-    throw new TypeError(`Environment variable ${key} must be an integer.`);
-  }
-
-  return Number.parseInt(value, 10);
-}
-
-function parseCsvEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string[] | undefined {
-  const value = optionalEnv(env, keys);
-
-  if (!value) {
-    return undefined;
-  }
-
-  return value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
+export type {
+  ConfiguredDeviceSyncProviderConfigByKey,
+  ConfiguredDeviceSyncProviderConfigs,
+  ConfiguredDeviceSyncProviderKey,
+} from "./config/provider-configs.ts";
+export type {
+  SerializableConfiguredDeviceSyncProviderConfigByKey,
+  SerializableConfiguredDeviceSyncProviderConfigs,
+} from "./config/serializable-provider-configs.ts";
+export type { ConfiguredDeviceSyncRuntimeConfig } from "./config/runtime-config.ts";
