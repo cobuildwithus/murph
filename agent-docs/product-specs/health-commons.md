@@ -31,6 +31,12 @@ The storage primitive is a typed wiki page. Product/domain nouns map onto page r
 
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
 
+## Family Key Style
+
+Prefer user-facing experiment-family keys for modalities people recognize in the product. Use `experiment_family:dry-sauna` and `experiment_family:infrared-sauna` as sibling families under the broader `experiment_family:sauna` parent instead of hiding them under nested keys such as `experiment_family:sauna/finnish-dry`.
+
+This keeps browse, search, disambiguation, and future forks easier to understand while preserving typed parent links for the broader passive-heat graph. Old nested keys should be represented as redirects, not duplicated active pages.
+
 ## Versioning
 
 Generated entities carry:

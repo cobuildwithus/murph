@@ -10,11 +10,11 @@
       "storage": "cloudflare-r2",
       "objectKey": "commons/research/sauna/pmid-25705824/source.pdf",
       "localPath": "research-artifacts/sauna/pmid-25705824.pdf",
-      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/25705824/",
       "contentType": "application/pdf",
       "rightsStatus": "permission_required",
       "redistributable": false,
-      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution."
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/25705824/"
     },
     {
       "artifactId": "art_pmid_29849692_pdf",
@@ -26,7 +26,99 @@
       "contentType": "application/pdf",
       "rightsStatus": "permission_required",
       "redistributable": false,
-      "accessNotes": "Placeholder only. Upload is intentionally blocked until rights are cleared."
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/29849692/"
+    },
+    {
+      "artifactId": "art_mayo_2018_sauna_review_pdf",
+      "sourceKey": "source_artifact:mayo-2018-sauna-review",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/mayo-2018-sauna-review/source.pdf",
+      "localPath": "research-artifacts/sauna/mayo-2018-sauna-review.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://www.mayoclinicproceedings.org/article/S0025-6196(18)30275-1/fulltext"
+    },
+    {
+      "artifactId": "art_pmid_32814462_pdf",
+      "sourceKey": "source_artifact:pmid-32814462",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-32814462/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-32814462.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/32814462/"
+    },
+    {
+      "artifactId": "art_pmid_38577299_pdf",
+      "sourceKey": "source_artifact:pmid-38577299",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-38577299/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-38577299.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/38577299/"
+    },
+    {
+      "artifactId": "art_pmid_28633297_pdf",
+      "sourceKey": "source_artifact:pmid-28633297",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-28633297/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-28633297.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/28633297/"
+    },
+    {
+      "artifactId": "art_pmid_35785965_pdf",
+      "sourceKey": "source_artifact:pmid-35785965",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-35785965/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-35785965.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/35785965/"
+    },
+    {
+      "artifactId": "art_pmid_37650138_pdf",
+      "sourceKey": "source_artifact:pmid-37650138",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-37650138/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-37650138.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/37650138/"
+    },
+    {
+      "artifactId": "art_pmid_40611569_pdf",
+      "sourceKey": "source_artifact:pmid-40611569",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-40611569/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-40611569.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/40611569/"
     }
   ]
 }

@@ -1,10 +1,10 @@
 ---
 schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
-key: protocol_variant:sauna/finnish-dry/bryan-johnson-blueprint
-slug: protocols/sauna/finnish-dry/bryan-johnson-blueprint
+key: protocol_variant:dry-sauna/bryan-johnson-blueprint
+slug: protocols/dry-sauna/bryan-johnson-blueprint
 title: Bryan Johnson Sauna Protocol
-summary: Temporary external named protocol placeholder so the commons can distinguish attributed protocols from Murph canonical variants.
+summary: External named dry-sauna protocol placeholder. It is intentionally separated from the Murph canonical protocol until exact dose, source, and evidence claims are reviewed.
 status: draft
 quality: stub
 aliases:
@@ -16,10 +16,10 @@ categories:
 relations:
   -
     type: parent_family
-    target: experiment_family:sauna/finnish-dry
+    target: experiment_family:dry-sauna
   -
     type: related_protocol
-    target: protocol_variant:sauna/finnish-dry/murph-standard-3x-week
+    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
 lineage:
   relationship: external_named_protocol
   rationale: External named protocol placeholder; replace temporary dose metadata after source review.
@@ -28,7 +28,7 @@ attribution:
   sourceUrl: https://blueprint.bryanjohnson.com/
   note: Temporary attribution placeholder; verify exact instructions before marking reviewed.
 protocol:
-  doseSignature: External named sauna protocol placeholder · dose pending review
+  doseSignature: External named dry-sauna protocol placeholder - dose pending review
   frequency:
     sessionsPerWeek: 3
   durationMinutes:

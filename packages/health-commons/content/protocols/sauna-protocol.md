@@ -4,20 +4,32 @@ entityType: disambiguation
 key: disambiguation:sauna-protocol
 slug: protocols/sauna-protocol
 title: Sauna Protocol
-summary: Disambiguation page for sauna protocol searches that might refer to Murph Finnish dry sauna, external named protocols, or future infrared/steam variants.
+summary: Disambiguation page for sauna protocol searches that could mean dry sauna, infrared sauna, Murph's Finnish dry-sauna experiment, or an external named protocol.
 status: draft
-quality: stub
+quality: usable
 aliases:
   - sauna protocol
 options:
   -
-    key: protocol_variant:sauna/finnish-dry/murph-standard-3x-week
-    label: Murph Finnish Dry Sauna
-    description: Canonical Murph seed protocol for Finnish dry sauna.
+    key: experiment_family:dry-sauna
+    label: Dry Sauna
+    description: User-facing family for traditional high-temperature dry-sauna protocols, including Finnish dry sauna.
   -
-    key: protocol_variant:sauna/finnish-dry/bryan-johnson-blueprint
+    key: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    label: Murph Finnish Dry Sauna
+    description: Canonical Murph field-test protocol for dry sauna.
+  -
+    key: experiment_family:infrared-sauna
+    label: Infrared Sauna
+    description: Separate sauna family for infrared heat exposure.
+  -
+    key: protocol_variant:dry-sauna/bryan-johnson-blueprint
     label: Bryan Johnson Sauna Protocol
     description: External named protocol placeholder pending dose and evidence review.
+relations:
+  -
+    type: related_protocol
+    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
 ---
 
-Use this page when a user says “sauna protocol” and the system needs to choose among multiple sauna variants.
+Use this page when a user says "sauna protocol" and the system needs to choose among multiple sauna families or named recipes.
