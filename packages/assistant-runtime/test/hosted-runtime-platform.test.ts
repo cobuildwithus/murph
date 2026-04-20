@@ -10,7 +10,10 @@ import {
 } from "@murphai/runtime-state/node";
 
 import { normalizeHostedAssistantRuntimeConfig } from "../src/hosted-runtime/environment.ts";
-import { parseHostedRuntimeUsageRecordResponse } from "../src/hosted-runtime/platform.ts";
+import {
+  parseHostedRuntimeIssueRecordResponse,
+  parseHostedRuntimeUsageRecordResponse,
+} from "../src/hosted-runtime/platform.ts";
 import { exportHostedPendingAssistantUsage } from "../src/hosted-runtime/usage.ts";
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
@@ -66,6 +69,29 @@ test("hosted runtime usage parser rejects non-string or blank usage ids", () => 
       usageIds: ["   "],
     }),
     /usageIds must be a string array of non-empty values/u,
+  );
+});
+
+test("hosted runtime issue parser accepts a non-negative integer count and trims issue ids", () => {
+  assert.deepEqual(
+    parseHostedRuntimeIssueRecordResponse({
+      issueIds: [" issue_1 ", "issue_2"],
+      recorded: 2,
+    }),
+    {
+      issueIds: ["issue_1", "issue_2"],
+      recorded: 2,
+    },
+  );
+});
+
+test("hosted runtime issue parser rejects non-array issue ids", () => {
+  assert.throws(
+    () => parseHostedRuntimeIssueRecordResponse({
+      issueIds: "issue_1",
+      recorded: 1,
+    }),
+    /issueIds must be a string array of non-empty values/u,
   );
 });
 

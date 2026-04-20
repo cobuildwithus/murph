@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
 export function HostedTelegramSettingsContent(props: {
@@ -39,7 +39,7 @@ export function HostedTelegramSettingsContent(props: {
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy} size="md">
+        <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy}>
           {isLinkingTelegram ? "Linking..." : currentTelegram ? "Relink Telegram" : "Link Telegram"}
         </Button>
         {currentTelegram ? (
@@ -48,13 +48,12 @@ export function HostedTelegramSettingsContent(props: {
             onClick={() => void props.onSyncTelegram()}
             disabled={isBusy}
             variant="outline"
-            size="md"
           >
             {isSyncingTelegram ? "Saving..." : "Save connection"}
           </Button>
         ) : null}
         {botLink ? (
-          <Button render={<a href={botLink} target="_blank" rel="noreferrer" />} nativeButton={false} variant="outline" size="md">
+          <Button render={<a href={botLink} target="_blank" rel="noreferrer" />} nativeButton={false} variant="outline">
             Open Telegram bot
           </Button>
         ) : null}

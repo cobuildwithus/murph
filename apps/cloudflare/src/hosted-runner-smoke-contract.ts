@@ -10,16 +10,18 @@ export interface HostedRunnerSmokeInput {
 export interface HostedRunnerSmokeResult {
   childCwd: string;
   murphBin: string;
-  normalizedTranscript: string;
+  normalizedTranscriptMatchesExpectedSnippet: boolean;
   normalizedTranscriptProviderId: string;
+  normalizedTranscriptSha256: string;
   operatorHomeRoot: string;
   reportedVaultId: string;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
   vaultCliBin: string;
   vaultRoot: string;
   vaultShowBytes: number;
-  wavTranscript: string;
+  wavTranscriptMatchesExpectedSnippet: boolean;
   wavTranscriptProviderId: string;
+  wavTranscriptSha256: string;
 }
 
 export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeInput {
@@ -54,13 +56,17 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
   return {
     childCwd: readNonEmptyString(record.childCwd, "Hosted runner smoke result.childCwd"),
     murphBin: readNonEmptyString(record.murphBin, "Hosted runner smoke result.murphBin"),
-    normalizedTranscript: readNonEmptyString(
-      record.normalizedTranscript,
-      "Hosted runner smoke result.normalizedTranscript",
+    normalizedTranscriptMatchesExpectedSnippet: readBoolean(
+      record.normalizedTranscriptMatchesExpectedSnippet,
+      "Hosted runner smoke result.normalizedTranscriptMatchesExpectedSnippet",
     ),
     normalizedTranscriptProviderId: readNonEmptyString(
       record.normalizedTranscriptProviderId,
       "Hosted runner smoke result.normalizedTranscriptProviderId",
+    ),
+    normalizedTranscriptSha256: readNonEmptyString(
+      record.normalizedTranscriptSha256,
+      "Hosted runner smoke result.normalizedTranscriptSha256",
     ),
     operatorHomeRoot: readNonEmptyString(
       record.operatorHomeRoot,
@@ -80,13 +86,17 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.vaultShowBytes,
       "Hosted runner smoke result.vaultShowBytes",
     ),
-    wavTranscript: readNonEmptyString(
-      record.wavTranscript,
-      "Hosted runner smoke result.wavTranscript",
+    wavTranscriptMatchesExpectedSnippet: readBoolean(
+      record.wavTranscriptMatchesExpectedSnippet,
+      "Hosted runner smoke result.wavTranscriptMatchesExpectedSnippet",
     ),
     wavTranscriptProviderId: readNonEmptyString(
       record.wavTranscriptProviderId,
       "Hosted runner smoke result.wavTranscriptProviderId",
+    ),
+    wavTranscriptSha256: readNonEmptyString(
+      record.wavTranscriptSha256,
+      "Hosted runner smoke result.wavTranscriptSha256",
     ),
   };
 }
@@ -102,6 +112,14 @@ function readObjectRecord(value: unknown, label: string): Record<string, unknown
 function readFiniteNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new TypeError(`${label} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function readBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
   }
 
   return value;

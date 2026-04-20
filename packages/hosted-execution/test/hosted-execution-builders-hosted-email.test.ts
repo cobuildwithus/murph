@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionVaultShareAcceptedWake,
@@ -201,17 +201,17 @@ describe("hosted execution wake builders", () => {
 
   it("builds direct system wakes", () => {
     expect(
-      buildHostedExecutionAssistantCronTickWake({
-        eventId: "cron-1",
+      buildHostedExecutionRuntimeTimerWake({
+        eventId: "timer-1",
         occurredAt,
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "user_123",
       }),
     ).toEqual({
-      eventId: "cron-1",
-      kind: "assistant.cron.tick",
+      eventId: "timer-1",
+      kind: "runtime.timer",
       occurredAt,
-      reason: "manual",
+      triggerKind: "runtime_timer",
       userId: "user_123",
     });
 

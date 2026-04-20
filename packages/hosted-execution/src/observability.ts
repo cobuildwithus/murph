@@ -120,7 +120,7 @@ export interface HostedExecutionStructuredLogRecord {
   userId: string | null;
 }
 
-interface HostedExecutionWakeLike {
+interface HostedIngressEnvelopeLike {
   eventId?: string | null;
 }
 
@@ -149,7 +149,7 @@ export interface HostedExecutionStructuredLogInput {
   run?: HostedExecutionRunContext | null;
   time?: string;
   userId?: string | null;
-  wake?: HostedExecutionWakeLike | null;
+  wake?: HostedIngressEnvelopeLike | null;
 }
 
 export function isHostedExecutionRunPhase(value: unknown): value is HostedExecutionRunPhase {

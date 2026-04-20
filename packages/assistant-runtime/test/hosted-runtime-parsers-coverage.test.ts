@@ -126,7 +126,7 @@ describe("hosted runtime parser coverage", () => {
       },
     });
 
-    expect(resolveHostedWake(parsed)).toEqual({
+    expect(resolveHostedWake(parsed.runDrain)).toEqual({
       eventId: "hosted-run:run_123",
       kind: "runtime.timer",
       occurredAt: "2026-04-08T00:00:00.000Z",
@@ -197,6 +197,34 @@ describe("hosted runtime parser coverage", () => {
         userId: "member_123",
       },
     })).toThrow(/request\.wake is no longer supported/u);
+  });
+
+  it("derives a synthetic runtime-timer wake from empty run-drain requests", () => {
+    const parsed = parseHostedAssistantRuntimeJobRequest({
+      bundle: null,
+      run: {
+        attempt: 1,
+        runId: "run_empty_drain",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      },
+      runDrain: {
+        acquiredAt: "2026-04-08T00:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "24",
+        inputCursorVersion: "4",
+        runId: "run_empty_drain",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(resolveHostedWake(parsed.runDrain)).toEqual({
+      eventId: "hosted-run:run_empty_drain",
+      kind: "runtime.timer",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "member_123",
+    });
   });
 
   it("rejects the remaining removed runtime callback override fields", () => {

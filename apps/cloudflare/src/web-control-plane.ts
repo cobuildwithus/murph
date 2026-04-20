@@ -11,6 +11,8 @@ import {
   type HostedRunFinalizeResponse,
   type HostedRunLogRequest,
   type HostedRunLogResponse,
+  type HostedRunReleaseFinalizeRequest,
+  type HostedRunReleaseFinalizeResponse,
   type HostedRunStatusRequest,
   type HostedRunStatusResponse,
 } from "@murphai/hosted-execution/contracts";
@@ -19,6 +21,7 @@ import {
   parseHostedRunCommitResponse,
   parseHostedRunFinalizeResponse,
   parseHostedRunLogResponse,
+  parseHostedRunReleaseFinalizeResponse,
   parseHostedRunStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -101,6 +104,7 @@ const HOSTED_WEB_HOSTED_RUN_ACQUIRE_PATH = "/api/internal/hosted-run/acquire";
 const HOSTED_WEB_HOSTED_RUN_COMMIT_PATH = "/api/internal/hosted-run/commit";
 const HOSTED_WEB_HOSTED_RUN_FINALIZE_PATH = "/api/internal/hosted-run/finalize";
 const HOSTED_WEB_HOSTED_RUN_LOG_PATH = "/api/internal/hosted-run/log";
+const HOSTED_WEB_HOSTED_RUN_RELEASE_FINALIZE_PATH = "/api/internal/hosted-run/release-finalize";
 const HOSTED_WEB_HOSTED_RUN_STATUS_PATH = "/api/internal/hosted-run/status";
 
 export async function acquireHostedRunFromWeb(input: {
@@ -168,6 +172,23 @@ export async function recordHostedRunLogInWeb(input: {
     input,
     parse: parseHostedRunLogResponse,
     path: HOSTED_WEB_HOSTED_RUN_LOG_PATH,
+  });
+}
+
+export async function releaseHostedRunFinalizeInWeb(input: {
+  baseUrl: string;
+  body: HostedRunReleaseFinalizeRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunReleaseFinalizeResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body),
+    description: "Hosted run release-finalize",
+    input,
+    parse: parseHostedRunReleaseFinalizeResponse,
+    path: HOSTED_WEB_HOSTED_RUN_RELEASE_FINALIZE_PATH,
   });
 }
 

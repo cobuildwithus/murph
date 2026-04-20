@@ -19,7 +19,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionWake,
+  HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeDeviceSyncPort,
@@ -39,7 +39,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
   if (!client) {
@@ -108,7 +108,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
 }): Promise<void> {
   if (!input.state.snapshot) {
     return;
@@ -169,7 +169,7 @@ function resolveHostedDeviceSyncRuntimeClientForUser(
 }
 
 function applyHostedDeviceSyncWakeHint(input: {
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
 }): void {

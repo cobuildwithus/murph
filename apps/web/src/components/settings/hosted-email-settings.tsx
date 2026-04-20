@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 import { useHostedEmailSettingsController } from "./hosted-email-settings-controller";
 import {

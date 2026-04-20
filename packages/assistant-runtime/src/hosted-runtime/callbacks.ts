@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionWake,
+  HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -67,7 +67,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   vaultRoot: string;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantDeliveryOutcome[]> {
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
@@ -96,7 +96,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }
 
 async function deliverHostedCommittedAssistantDelivery(input: {
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   userId: string;
@@ -186,7 +186,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
   now: Date;
   userId: string;
   vaultRoot: string;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantDeliveryOutcome | null> {
   const intent = input.mirrorState.intent;
   if (!intent) {
@@ -361,7 +361,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
 
 function emitHostedAssistantDeliveryDispatchSuccess(input: {
   delivery: AssistantChannelDelivery;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
   effect: HostedAssistantDeliveryEffect;
   userId: string;
 }): void {
@@ -394,7 +394,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
     | "missing-result"
     | "retryable"
     | "sending";
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
   effect: HostedAssistantDeliveryEffect;
   retryable: boolean;
   userId: string;
@@ -426,7 +426,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
   dispatchResult: Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>>;
   userId: string;
   vaultRoot: string;
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantDeliveryOutcome> {
   const { assistantDeliveryEffect, dispatchResult } = input;
   const delivery = dispatchResult.intent.delivery

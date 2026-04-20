@@ -1,17 +1,17 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/src/components/ui/dialog";
+import { Input } from "@/src/components/ui/input";
+import { Label } from "@/src/components/ui/label";
 import type { HostedPrivyEmailAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedPrivyEmailAccountVerified } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/src/components/ui/alert";
 
 export function HostedEmailSettingsContent(props: {
   currentEmail: HostedPrivyEmailAccount | null;
@@ -57,7 +57,7 @@ export function HostedEmailSettingsContent(props: {
 
       {currentVerifiedEmail ? (
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={() => void onSyncVerifiedEmail()} disabled={isBusy} variant="outline" size="md">
+          <Button type="button" onClick={() => void onSyncVerifiedEmail()} disabled={isBusy} variant="outline">
             {isSyncingEmailRoute ? "Saving..." : "Save verified email"}
           </Button>
         </div>
@@ -76,7 +76,7 @@ export function HostedEmailSettingsContent(props: {
             onChange={(event) => onChangeEmailAddress(event.currentTarget.value)}
             className="h-10 px-3.5 text-sm"
           />
-          <Button type="button" onClick={() => void onSendCode()} disabled={isBusy} size="md" className="shrink-0">
+          <Button type="button" onClick={() => void onSendCode()} disabled={isBusy} className="shrink-0">
             {isSyncingEmailRoute
               ? "Syncing..."
               : isSendingCode
@@ -151,10 +151,10 @@ export function HostedEmailVerificationDialog(props: {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <Button type="button" onClick={() => void props.onVerifyCode()} disabled={props.isBusy} size="md">
+          <Button type="button" onClick={() => void props.onVerifyCode()} disabled={props.isBusy}>
             {props.isSubmittingCode ? "Verifying..." : "Verify email"}
           </Button>
-          <Button type="button" onClick={() => void props.onResendCode()} disabled={props.isBusy} variant="outline" size="md">
+          <Button type="button" onClick={() => void props.onResendCode()} disabled={props.isBusy} variant="outline">
             {props.isSendingCode ? "Sending code..." : "Resend code"}
           </Button>
         </div>

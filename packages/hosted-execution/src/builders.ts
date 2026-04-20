@@ -1,11 +1,9 @@
 import type {
-  HostedExecutionAssistantCronTickWake,
   HostedExecutionConversationMessagePayload,
   HostedExecutionConversationMessageWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionEmailConversationMessagePayload,
-  HostedExecutionLegacyCronReason,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
   HostedExecutionLinqConversationMessagePart,
@@ -180,21 +178,6 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
     memberChannels: { ...input.memberChannels },
     occurredAt: input.occurredAt,
     userId: input.memberId,
-  };
-}
-
-export function buildHostedExecutionAssistantCronTickWake(input: {
-  eventId: string;
-  occurredAt: string;
-  reason: HostedExecutionLegacyCronReason;
-  userId: string;
-}): HostedExecutionAssistantCronTickWake {
-  return {
-    eventId: input.eventId,
-    kind: "assistant.cron.tick",
-    occurredAt: input.occurredAt,
-    reason: input.reason,
-    userId: input.userId,
   };
 }
 

@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   hostedAuthPanel: vi.fn(),
 }));
 
-vi.mock("@/components/ui/dialog", async () => {
+vi.mock("@/src/components/ui/dialog", async () => {
   const React = await import("react");
   const DialogOpenContext = React.createContext(false);
 

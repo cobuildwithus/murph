@@ -3,8 +3,8 @@
 import { useUser } from "@privy-io/react-auth";
 import { useMemo, useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
 import {
   extractHostedPrivyPhoneAccount,
   resolveHostedPrivyLinkedAccounts,

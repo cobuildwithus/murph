@@ -1,6 +1,6 @@
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 
 import { describeHostedSharePreview, formatHostedSharePreviewSummary } from "./hosted-share-preview";
 

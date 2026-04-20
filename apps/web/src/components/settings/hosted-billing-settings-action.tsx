@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -44,7 +44,7 @@ export function HostedBillingSettingsAction() {
       ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal} size="md">
+        <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal}>
           {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
         </Button>
       </div>
