@@ -44,7 +44,7 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
   handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
-import { executeHostedIngressEventAlias } from "../src/hosted-runtime/events.ts";
+import { executeHostedIngressEvent } from "../src/hosted-runtime/events.ts";
 import {
   createHostedRuntimeEffectsPortStub,
   createHostedRuntimeResolvedConfig,
@@ -107,7 +107,7 @@ describe("hosted runtime event coverage", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    const result = await executeHostedIngressEventAlias({
+    const result = await executeHostedIngressEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -119,7 +119,7 @@ describe("hosted runtime event coverage", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "member-activated",
+      ingressLane: "member-activated",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -135,7 +135,7 @@ describe("hosted runtime event coverage", () => {
     });
 
     await expect(
-      executeHostedIngressEventAlias({
+      executeHostedIngressEvent({
         wake: deviceSyncWake,
         executionContext,
         runtime,
@@ -145,7 +145,7 @@ describe("hosted runtime event coverage", () => {
     ).resolves.toEqual({
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "device-sync",
+      ingressLane: "device-sync",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -176,7 +176,7 @@ describe("hosted runtime event coverage", () => {
       shareId: "share_123",
     };
 
-    const result = await executeHostedIngressEventAlias({
+    const result = await executeHostedIngressEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -193,7 +193,7 @@ describe("hosted runtime event coverage", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "vault-share-accepted",
+      ingressLane: "vault-share-accepted",
       shareImportResult: "imported",
       shareImportTitle: "Shared export",
     });
@@ -201,7 +201,7 @@ describe("hosted runtime event coverage", () => {
 
   it("fails closed on unexpected wake kinds", async () => {
     await expect(
-      executeHostedIngressEventAlias({
+      executeHostedIngressEvent({
         wake: {
           kind: "unexpected.event",
           eventId: "evt_unexpected",

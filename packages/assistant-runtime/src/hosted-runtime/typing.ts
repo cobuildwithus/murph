@@ -27,18 +27,18 @@ type HostedTypingHandle = {
 
 type HostedLinqTypingOperation = "typing_start" | "typing_stop";
 
-type HostedWakeTypingIndicator = {
+type HostedRunTypingIndicator = {
   channelLabel: "Linq" | "Telegram";
   startLogDetails?: Record<string, boolean | string>;
   stopLogDetails?: Record<string, boolean | string>;
   stop(): Promise<void>;
 };
 
-export function startHostedWakeTypingIndicator(input: {
+export function startHostedRunTypingIndicator(input: {
   wake: HostedRuntimeEvent;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-}): HostedWakeTypingIndicator | null {
+}): HostedRunTypingIndicator | null {
   const wake = input.wake;
 
   if (wake.kind !== "conversation.message") {
@@ -46,14 +46,14 @@ export function startHostedWakeTypingIndicator(input: {
   }
 
   if (isHostedLinqConversationMessageWake(wake)) {
-    return startHostedLinqWakeTypingIndicator({
+    return startHostedLinqRunTypingIndicator({
       ...input,
       wake,
     });
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
-    return startHostedTelegramWakeTypingIndicator({
+    return startHostedTelegramRunTypingIndicator({
       ...input,
       wake,
     });
@@ -62,9 +62,9 @@ export function startHostedWakeTypingIndicator(input: {
   return null;
 }
 
-export async function stopHostedWakeTypingIndicator(input: {
+export async function stopHostedRunTypingIndicator(input: {
   wake: HostedRuntimeEvent;
-  typingIndicator: HostedWakeTypingIndicator | null;
+  typingIndicator: HostedRunTypingIndicator | null;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): Promise<void> {
   if (!input.typingIndicator) {
@@ -87,7 +87,7 @@ export async function stopHostedWakeTypingIndicator(input: {
   }
 }
 
-function startHostedLinqWakeTypingIndicator(input: {
+function startHostedLinqRunTypingIndicator(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   wake: HostedExecutionConversationMessageWake & {
@@ -98,7 +98,7 @@ function startHostedLinqWakeTypingIndicator(input: {
       };
     };
   };
-}): HostedWakeTypingIndicator | null {
+}): HostedRunTypingIndicator | null {
   const env = input.runtimeEnv as NodeJS.ProcessEnv;
   const chatId = input.wake.message.linqMessage.chatId.trim();
   if (chatId.length === 0) {
@@ -147,13 +147,13 @@ function startHostedLinqWakeTypingIndicator(input: {
   });
 }
 
-function startHostedTelegramWakeTypingIndicator(input: {
+function startHostedTelegramRunTypingIndicator(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   wake: HostedExecutionConversationMessageWake & {
     message: { channel: "telegram"; telegramMessage: { threadId: string } };
   };
-}): HostedWakeTypingIndicator | null {
+}): HostedRunTypingIndicator | null {
   const target = input.wake.message.telegramMessage.threadId;
   const startLogDetails = buildHostedTelegramTypingLogDetails(target);
   emitHostedExecutionStructuredLog({
@@ -193,13 +193,13 @@ function buildHostedLinqTypingLogDetails(
 }
 
 function createAsyncHostedTypingIndicator(input: {
-  channelLabel: HostedWakeTypingIndicator["channelLabel"];
+  channelLabel: HostedRunTypingIndicator["channelLabel"];
   wake: HostedRuntimeEvent;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   startLogDetails?: Record<string, boolean | string>;
   stopLogDetails?: Record<string, boolean | string>;
   start(): Promise<HostedTypingHandle>;
-}): HostedWakeTypingIndicator {
+}): HostedRunTypingIndicator {
   let activeIndicator: HostedTypingHandle | null = null;
   let stopRequested = false;
   let stopPromise: Promise<void> | null = null;

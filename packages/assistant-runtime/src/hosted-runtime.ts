@@ -34,8 +34,8 @@ import {
   executeHostedRunDrainForCommit,
 } from "./hosted-runtime/execution.ts";
 import {
-  startHostedWakeTypingIndicator,
-  stopHostedWakeTypingIndicator,
+  startHostedRunTypingIndicator,
+  stopHostedRunTypingIndicator,
 } from "./hosted-runtime/typing.ts";
 import type {
   HostedAssistantRuntimeJobResult,
@@ -45,7 +45,10 @@ import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
 import {
+  classifyHostedRuntimeEnvCategories,
   computeHostedRunElapsedMs,
+  HOSTED_RUNTIME_FORWARDED_ENV_CATEGORY_KEYS,
+  HOSTED_RUNTIME_USER_ENV_CATEGORY_KEYS,
   resolveHostedWake,
 } from "./hosted-runtime/utils.ts";
 export {
@@ -112,14 +115,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 
   try {
     const { runDrain } = input.request;
-
-    if (!runDrain) {
-      throw new TypeError(
-        "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
-      );
-    }
-
-    const wake = resolveHostedWake(input.request);
+    const wake = resolveHostedWake(runDrain);
     const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
     emitHostedExecutionStructuredLog({
       component: "runtime",
@@ -177,7 +173,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         vaultRoot: restored.vaultRoot,
       },
       async () => {
-        const typingIndicator = startHostedWakeTypingIndicator({
+        const typingIndicator = startHostedRunTypingIndicator({
           wake,
           runtimeEnv,
           run: input.request.run ?? null,
@@ -234,7 +230,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
             result: committedExecution.committedResult,
           };
         } finally {
-          await stopHostedWakeTypingIndicator({
+          await stopHostedRunTypingIndicator({
             wake,
             typingIndicator,
             run: input.request.run ?? null,
@@ -249,7 +245,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       message: "Hosted runtime failed.",
       phase: "failed",
       run: input.request.run ?? null,
-      ...(input.request.runDrain ? { wake: resolveHostedWake(input.request) } : {}),
+      wake: resolveHostedWake(input.request.runDrain),
     });
     throw error;
   } finally {
@@ -299,52 +295,10 @@ function buildHostedRuntimeStartDetails(
       publicBaseUrlConfigured: Boolean(runtime.resolvedConfig.deviceSync?.publicBaseUrl),
       secretConfigured: Boolean(runtime.resolvedConfig.deviceSync?.secret),
     },
-    forwardedEnvCategories: {
-      assistantConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
-        "ANTHROPIC_API_KEY",
-        "CEREBRAS_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "FIREWORKS_API_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_GENERATIVE_AI_API_KEY",
-        "GROQ_API_KEY",
-        "MISTRAL_API_KEY",
-        "OPENAI_API_KEY",
-        "OPENROUTER_API_KEY",
-        "PERPLEXITY_API_KEY",
-        "TOGETHER_API_KEY",
-        "VERCEL_AI_API_KEY",
-        "VENICE_API_KEY",
-        "XAI_API_KEY",
-      ]),
-      hostedEmailConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
-        "HOSTED_EMAIL_DOMAIN",
-        "HOSTED_EMAIL_FROM_ADDRESS",
-        "HOSTED_EMAIL_LOCAL_PART",
-      ]),
-      linqConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
-        "LINQ_API_BASE_URL",
-        "LINQ_API_TOKEN",
-        "LINQ_WEBHOOK_SECRET",
-      ]),
-      parserToolingConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
-        "FFMPEG_COMMAND",
-        "WHISPER_COMMAND",
-        "WHISPER_MODEL_PATH",
-      ]),
-      telegramConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
-        "TELEGRAM_API_BASE_URL",
-        "TELEGRAM_BOT_TOKEN",
-        "TELEGRAM_BOT_USERNAME",
-        "TELEGRAM_FILE_BASE_URL",
-      ]),
-      webSearchConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
-        "BRAVE_API_KEY",
-        "MURPH_WEB_FETCH_ENABLED",
-        "MURPH_WEB_SEARCH_MAX_RESULTS",
-        "MURPH_WEB_SEARCH_PROVIDER",
-      ]),
-    },
+    forwardedEnvCategories: classifyHostedRuntimeEnvCategories(
+      runtime.forwardedEnv,
+      HOSTED_RUNTIME_FORWARDED_ENV_CATEGORY_KEYS,
+    ),
     forwardedEnvKeyCount: Object.keys(runtime.forwardedEnv).length,
     platformBindings: {
       artifactStoreBound: Boolean(runtime.platform.artifactStore),
@@ -352,40 +306,10 @@ function buildHostedRuntimeStartDetails(
       usageExportBound: Boolean(runtime.platform.usageExportPort),
     },
     runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    userEnvCategories: {
-      modelCredentialConfigured: hasAnyHostedRuntimeConfigKey(runtime.userEnv, [
-        "ANTHROPIC_API_KEY",
-        "BRAVE_API_KEY",
-        "CEREBRAS_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "FIREWORKS_API_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_GENERATIVE_AI_API_KEY",
-        "GROQ_API_KEY",
-        "HF_TOKEN",
-        "HUGGINGFACEHUB_API_TOKEN",
-        "HUGGINGFACE_API_KEY",
-        "HUGGING_FACE_HUB_TOKEN",
-        "LITELLM_PROXY_API_KEY",
-        "MISTRAL_API_KEY",
-        "NVIDIA_API_KEY",
-        "NGC_API_KEY",
-        "OPENAI_API_KEY",
-        "OPENROUTER_API_KEY",
-        "PERPLEXITY_API_KEY",
-        "TOGETHER_API_KEY",
-        "VERCEL_AI_API_KEY",
-        "VENICE_API_KEY",
-        "XAI_API_KEY",
-      ]),
-    },
+    userEnvCategories: classifyHostedRuntimeEnvCategories(
+      runtime.userEnv,
+      HOSTED_RUNTIME_USER_ENV_CATEGORY_KEYS,
+    ),
     userEnvKeyCount: Object.keys(runtime.userEnv).length,
   };
-}
-
-function hasAnyHostedRuntimeConfigKey(
-  source: Readonly<Record<string, string>>,
-  keys: readonly string[],
-): boolean {
-  return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }

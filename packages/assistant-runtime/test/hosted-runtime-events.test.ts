@@ -40,7 +40,7 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
   handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
-import { executeHostedWakeEvent } from "../src/hosted-runtime/events.ts";
+import { executeHostedIngressEvent } from "../src/hosted-runtime/events.ts";
 
 const executionContext = {
   hosted: {
@@ -82,7 +82,7 @@ afterEach(() => {
   });
 });
 
-describe("executeHostedWakeEvent", () => {
+describe("executeHostedIngressEvent", () => {
   it("queues the welcome message for activation first contact and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
@@ -114,7 +114,7 @@ describe("executeHostedWakeEvent", () => {
     });
 
     const runtime = createRuntime();
-    const result = await executeHostedWakeEvent({
+    const result = await executeHostedIngressEvent({
       wake,
       executionContext,
       runtime,
@@ -144,7 +144,7 @@ describe("executeHostedWakeEvent", () => {
     assert.deepEqual(result, {
       bootstrapResult,
       conversationMetrics: null,
-      followupExecution: "member-activated",
+      ingressLane: "member-activated",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -187,7 +187,7 @@ describe("executeHostedWakeEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedWakeEvent({
+    await executeHostedIngressEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -228,7 +228,7 @@ describe("executeHostedWakeEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedWakeEvent({
+    await executeHostedIngressEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -266,7 +266,7 @@ describe("executeHostedWakeEvent", () => {
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    const linqResult = await executeHostedWakeEvent({
+    const linqResult = await executeHostedIngressEvent({
       wake: linqWake,
       executionContext,
       runtime,
@@ -285,7 +285,7 @@ describe("executeHostedWakeEvent", () => {
       },
       userId: "member_123",
     });
-    await executeHostedWakeEvent({
+    await executeHostedIngressEvent({
       wake: telegramWake,
       executionContext,
       runtime,
@@ -301,7 +301,7 @@ describe("executeHostedWakeEvent", () => {
       selfAddress: "user@example.com",
       userId: "member_123",
     });
-    await executeHostedWakeEvent({
+    await executeHostedIngressEvent({
       wake: emailWake,
       executionContext,
       runtime,
@@ -332,7 +332,7 @@ describe("executeHostedWakeEvent", () => {
         nextWakeAt: null,
         parserProcessed: 0,
       },
-      followupExecution: "conversation-message",
+      ingressLane: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -350,7 +350,7 @@ describe("executeHostedWakeEvent", () => {
       occurredAt: "2026-04-08T00:03:00.000Z",
     });
 
-    const result = await executeHostedWakeEvent({
+    const result = await executeHostedIngressEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -362,7 +362,7 @@ describe("executeHostedWakeEvent", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      followupExecution: "member-channels-updated",
+      ingressLane: "member-channels-updated",
       shareImportResult: null,
       shareImportTitle: null,
     });
@@ -380,7 +380,7 @@ describe("executeHostedWakeEvent", () => {
     });
 
     await expect(
-      executeHostedWakeEvent({
+      executeHostedIngressEvent({
         wake,
         executionContext,
         runtime: createRuntime(),

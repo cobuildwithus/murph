@@ -1,16 +1,16 @@
 import { importSharePackIntoVault } from "@murphai/core";
 import type {
   HostedExecutionRunnerSharePack,
-  HostedExecutionWake,
+  HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 
-import type { HostedWakeEffect } from "../models.ts";
+import type { HostedIngressEffect } from "../models.ts";
 
 export async function handleHostedShareAcceptedWake(input: {
-  wake: Extract<HostedExecutionWake, { kind: "vault.share.accepted" }>;
+  wake: Extract<HostedIngressEnvelope, { kind: "vault.share.accepted" }>;
   sharePack: HostedExecutionRunnerSharePack;
   vaultRoot: string;
-}): Promise<HostedWakeEffect> {
+}): Promise<HostedIngressEffect> {
   if (input.sharePack.ownerUserId !== input.wake.share.ownerUserId) {
     throw new TypeError("Hosted share pack ownerUserId must match the canonical share reference.");
   }
