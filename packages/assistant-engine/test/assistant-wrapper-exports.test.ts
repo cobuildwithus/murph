@@ -164,47 +164,18 @@ function expectNamedExports(
 }
 
 describe('assistant-engine wrapper exports', () => {
-  it('exposes only the explicit deep assistant subpaths the repo imports today', async () => {
+  it('does not expose implementation-shaped assistant/* public subpaths', async () => {
     const packageManifest = JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
     ) as {
       exports?: Record<string, { default?: string; types?: string } | undefined>
     }
 
-    const explicitAssistantSubpaths = [
-      'automation/artifacts',
-      'automation/prompt-builder',
-      'automation/shared',
-      'bindings',
-      'channel-adapters',
-      'conversation-policy',
-      'cron/store',
-      'diagnostics',
-      'failover',
-      'fault-injection',
-      'memory',
-      'provider-turn-recovery',
-      'quarantine',
-      'receipts',
-      'redaction',
-      'reply-sanitizer',
-      'runtime-budgets',
-      'runtime-events',
-      'runtime-write-lock',
-      'state',
-      'state-ids',
-      'store/persistence',
-      'turns',
-    ] as const
+    const implementationShapedAssistantExports = Object.keys(
+      packageManifest.exports ?? {},
+    ).filter((exportKey) => exportKey.startsWith('./assistant/'))
 
-    for (const subpath of explicitAssistantSubpaths) {
-      expect(packageManifest.exports?.[`./assistant/${subpath}`]).toEqual({
-        types: `./dist/assistant/${subpath}.d.ts`,
-        default: `./dist/assistant/${subpath}.js`,
-      })
-    }
-
-    expect(packageManifest.exports?.['./assistant/*']).toBeUndefined()
+    expect(implementationShapedAssistantExports).toEqual([])
   })
 
   for (const [moduleName, moduleExports, expectedExports] of wrapperCases) {
