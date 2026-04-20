@@ -3,8 +3,8 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import {
-  handoffHostedExecutionWakeBestEffort,
-} from "../hosted-wake/control";
+  nudgeHostedRunBestEffort,
+} from "../hosted-ingress/control";
 import { hostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import {
@@ -75,7 +75,7 @@ export async function handleHostedStripeWebhook(input: {
     if (hostedExecutionEventId && hostedExecutionMemberId) {
       if (input.defer) {
         await input.defer(async () => {
-          await handoffHostedExecutionWakeBestEffort({
+          await nudgeHostedRunBestEffort({
             context: "stripe.webhook",
             eventId: hostedExecutionEventId,
             prisma,
@@ -83,7 +83,7 @@ export async function handleHostedStripeWebhook(input: {
           });
         });
       } else {
-        await handoffHostedExecutionWakeBestEffort({
+        await nudgeHostedRunBestEffort({
           context: "stripe.webhook",
           eventId: hostedExecutionEventId,
           prisma,

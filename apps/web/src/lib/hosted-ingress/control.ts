@@ -1,42 +1,42 @@
 import type { PrismaClient } from "@prisma/client";
-import type { HostedExecutionWakeNudgeResult } from "@murphai/hosted-execution";
+import type { HostedRunNudgeResult } from "@murphai/hosted-execution";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
 
-export async function nudgeHostedWakeUser(input: {
+export async function nudgeHostedRunUser(input: {
   timeoutMs?: number;
   userId: string;
-}): Promise<HostedExecutionWakeNudgeResult | null> {
+}): Promise<HostedRunNudgeResult | null> {
   const client = readHostedExecutionControlClientIfConfigured(input.timeoutMs);
 
   if (!client) {
     return null;
   }
 
-  return await client.nudgeUserRunner(input.userId);
+  return await client.nudgeUserRun(input.userId);
 }
 
-export async function nudgeHostedWakeUserBestEffort(input: {
+export async function nudgeHostedRunUserBestEffort(input: {
   context?: string;
   timeoutMs?: number;
   userId: string;
 }): Promise<boolean> {
   try {
-    const result = await nudgeHostedWakeUser(input);
+    const result = await nudgeHostedRunUser(input);
     return result?.accepted ?? false;
   } catch (error) {
     console.error(
       input.context
-        ? `Hosted wake handoff failed (${input.context}).`
-        : "Hosted wake handoff failed.",
+        ? `Hosted run nudge failed (${input.context}).`
+        : "Hosted run nudge failed.",
       formatHostedExecutionSafeLogError(error),
     );
     return false;
   }
 }
 
-export async function handoffHostedExecutionWakeBestEffort(input: {
+export async function nudgeHostedRunBestEffort(input: {
   context?: string;
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
@@ -44,7 +44,7 @@ export async function handoffHostedExecutionWakeBestEffort(input: {
   timeoutMs?: number;
   userId: string;
 }): Promise<void> {
-  const nudge = () => nudgeHostedWakeUserBestEffort({
+  const nudge = () => nudgeHostedRunUserBestEffort({
     context: input.context,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
@@ -62,14 +62,13 @@ export async function handoffHostedExecutionWakeBestEffort(input: {
   } catch (error) {
     console.error(
       input.context
-        ? `Hosted wake handoff failed (${input.context}).`
-        : "Hosted wake handoff failed.",
+        ? `Hosted run nudge failed (${input.context}).`
+        : "Hosted run nudge failed.",
       formatHostedExecutionSafeLogError(error),
     );
   }
 }
 
-// Compatibility aliases for existing callers/tests while the wake surface
-// transitions from drain semantics to simple nudges.
-export const triggerHostedWakeUser = nudgeHostedWakeUser;
-export const triggerHostedWakeUserBestEffort = nudgeHostedWakeUserBestEffort;
+// Compatibility aliases for callers that still use the older trigger naming.
+export const triggerHostedRunUser = nudgeHostedRunUser;
+export const triggerHostedRunUserBestEffort = nudgeHostedRunUserBestEffort;

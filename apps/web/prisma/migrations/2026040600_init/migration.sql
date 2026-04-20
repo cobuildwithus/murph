@@ -11,7 +11,7 @@ CREATE TYPE "HostedStripeEventStatus" AS ENUM ('pending', 'processing', 'complet
 CREATE TYPE "HostedRevnetIssuanceStatus" AS ENUM ('pending', 'submitting', 'submitted', 'confirmed', 'failed');
 
 -- CreateEnum
-CREATE TYPE "HostedWakeBehavior" AS ENUM ('ordered', 'coalescing');
+CREATE TYPE "HostedIngressBehavior" AS ENUM ('ordered', 'coalescing');
 
 -- CreateTable
 CREATE TABLE "device_connection" (
@@ -242,13 +242,13 @@ CREATE TABLE "hosted_execution_cursor" (
 );
 
 -- CreateTable
-CREATE TABLE "hosted_wake" (
+CREATE TABLE "hosted_ingress_event" (
     "id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
     "run_id" TEXT,
     "seq" BIGINT NOT NULL,
     "kind" TEXT NOT NULL,
-    "behavior" "HostedWakeBehavior" NOT NULL,
+    "behavior" "HostedIngressBehavior" NOT NULL,
     "state" TEXT NOT NULL DEFAULT 'pending',
     "dedupe_key" TEXT,
     "coalescing_key" TEXT,
@@ -263,7 +263,7 @@ CREATE TABLE "hosted_wake" (
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "hosted_wake_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "hosted_ingress_event_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -323,20 +323,20 @@ CREATE TABLE "hosted_run_log" (
 );
 
 -- CreateTable
-CREATE TABLE "hosted_wake_event" (
+CREATE TABLE "hosted_ingress_event_alias" (
     "event_id" TEXT NOT NULL,
-    "wake_id" TEXT NOT NULL,
+    "ingress_event_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
     "replaced_by_event_id" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "hosted_wake_event_pkey" PRIMARY KEY ("user_id","event_id")
+    CONSTRAINT "hosted_ingress_event_alias_pkey" PRIMARY KEY ("user_id","event_id")
 );
 
 -- CreateTable
-CREATE TABLE "hosted_wake_payload" (
-    "wake_id" TEXT NOT NULL,
+CREATE TABLE "hosted_ingress_payload" (
+    "ingress_event_id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
     "payload_ciphertext" TEXT NOT NULL,
     "payload_schema" TEXT NOT NULL,
@@ -344,7 +344,7 @@ CREATE TABLE "hosted_wake_payload" (
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "hosted_wake_payload_pkey" PRIMARY KEY ("wake_id")
+    CONSTRAINT "hosted_ingress_payload_pkey" PRIMARY KEY ("ingress_event_id")
 );
 
 -- CreateTable
@@ -631,25 +631,25 @@ CREATE UNIQUE INDEX "hosted_member_email_authorization_verified_email_lookup_key
 CREATE UNIQUE INDEX "hosted_member_email_authorization_direct_public_sender_look_key" ON "hosted_member_email_authorization"("direct_public_sender_lookup_key");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_user_id_seq_idx" ON "hosted_wake"("user_id", "seq");
+CREATE INDEX "hosted_ingress_event_user_id_seq_idx" ON "hosted_ingress_event"("user_id", "seq");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_user_id_state_seq_idx" ON "hosted_wake"("user_id", "state", "seq");
+CREATE INDEX "hosted_ingress_event_user_id_state_seq_idx" ON "hosted_ingress_event"("user_id", "state", "seq");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_run_id_idx" ON "hosted_wake"("run_id");
+CREATE INDEX "hosted_ingress_event_run_id_idx" ON "hosted_ingress_event"("run_id");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_user_id_coalescing_key_seq_idx" ON "hosted_wake"("user_id", "coalescing_key", "seq");
+CREATE INDEX "hosted_ingress_event_user_id_coalescing_key_seq_idx" ON "hosted_ingress_event"("user_id", "coalescing_key", "seq");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_user_id_kind_seq_idx" ON "hosted_wake"("user_id", "kind", "seq");
+CREATE INDEX "hosted_ingress_event_user_id_kind_seq_idx" ON "hosted_ingress_event"("user_id", "kind", "seq");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_wake_user_id_seq_key" ON "hosted_wake"("user_id", "seq");
+CREATE UNIQUE INDEX "hosted_ingress_event_user_id_seq_key" ON "hosted_ingress_event"("user_id", "seq");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key");
+CREATE UNIQUE INDEX "hosted_ingress_event_user_id_dedupe_key_key" ON "hosted_ingress_event"("user_id", "dedupe_key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_run_run_token_hash_key" ON "hosted_run"("run_token_hash");
@@ -676,19 +676,19 @@ CREATE INDEX "hosted_run_log_run_id_at_idx" ON "hosted_run_log"("run_id", "at");
 CREATE INDEX "hosted_run_log_level_at_idx" ON "hosted_run_log"("level", "at");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id");
+CREATE INDEX "hosted_ingress_event_alias_event_id_idx" ON "hosted_ingress_event_alias"("event_id");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_event_user_id_idx" ON "hosted_wake_event"("user_id");
+CREATE INDEX "hosted_ingress_event_alias_user_id_idx" ON "hosted_ingress_event_alias"("user_id");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_event_user_id_replaced_by_event_id_idx" ON "hosted_wake_event"("user_id", "replaced_by_event_id");
+CREATE INDEX "hosted_ingress_event_alias_user_id_replaced_by_event_id_idx" ON "hosted_ingress_event_alias"("user_id", "replaced_by_event_id");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_event_wake_id_idx" ON "hosted_wake_event"("wake_id");
+CREATE INDEX "hosted_ingress_event_alias_ingress_event_id_idx" ON "hosted_ingress_event_alias"("ingress_event_id");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_payload_user_id_idx" ON "hosted_wake_payload"("user_id");
+CREATE INDEX "hosted_ingress_payload_user_id_idx" ON "hosted_ingress_payload"("user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_invite_invite_code_key" ON "hosted_invite"("invite_code");
@@ -811,10 +811,10 @@ ALTER TABLE "hosted_member_email_authorization" ADD CONSTRAINT "hosted_member_em
 ALTER TABLE "hosted_execution_cursor" ADD CONSTRAINT "hosted_execution_cursor_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "hosted_ingress_event" ADD CONSTRAINT "hosted_ingress_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "hosted_ingress_event" ADD CONSTRAINT "hosted_ingress_event_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_run" ADD CONSTRAINT "hosted_run_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -826,16 +826,16 @@ ALTER TABLE "hosted_run_log" ADD CONSTRAINT "hosted_run_log_user_id_fkey" FOREIG
 ALTER TABLE "hosted_run_log" ADD CONSTRAINT "hosted_run_log_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_invite" ADD CONSTRAINT "hosted_invite_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;

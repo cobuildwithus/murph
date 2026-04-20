@@ -17,15 +17,15 @@ const mocks = vi.hoisted(() => {
     finishHostedOnboardingTiming: vi.fn(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
-    nudgeHostedWakeUserBestEffort: vi.fn(async () => true),
+    nudgeHostedRunUserBestEffort: vi.fn(async () => true),
     sendHostedLinqChatMessage: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
       step,
     })),
-    readHostedWakeTarget: vi.fn(async () => null),
-    materializeHostedExecutionWakeTx: vi.fn(async (input: {
+    readHostedIngressTarget: vi.fn(async () => null),
+    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       eventId?: string;
       wake?: { eventId: string };
@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => {
         ? input.eventId
         : input.dispatch?.eventId ?? input.wake?.eventId;
       if (!eventId) {
-        throw new Error("Expected a hosted wake append eventId.");
+        throw new Error("Expected a hosted ingress append eventId.");
       }
       return {
         eventId,
@@ -46,15 +46,15 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-wake/lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-wake/lifecycle")>(
-    "@/src/lib/hosted-wake/lifecycle",
+vi.mock("@/src/lib/hosted-ingress/lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-ingress/lifecycle")>(
+    "@/src/lib/hosted-ingress/lifecycle",
   );
 
   return {
     ...actual,
-    materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
-    readHostedWakeTarget: mocks.readHostedWakeTarget,
+    materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
+    readHostedIngressTarget: mocks.readHostedIngressTarget,
   };
 });
 
@@ -66,9 +66,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   resolveHostedLinqDayUtc: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionWakeBestEffort: vi.fn(async () => "wake"),
-  nudgeHostedWakeUserBestEffort: mocks.nudgeHostedWakeUserBestEffort,
+vi.mock("@/src/lib/hosted-ingress/control", () => ({
+  nudgeHostedRunBestEffort: vi.fn(async () => "wake"),
+  nudgeHostedRunUserBestEffort: mocks.nudgeHostedRunUserBestEffort,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -168,7 +168,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
-    mocks.nudgeHostedWakeUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunUserBestEffort.mockResolvedValue(true);
   });
 
   it("reuses an existing transaction when dispatching active-member Linq messages", async () => {
@@ -226,7 +226,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
       userId: "member_123",
     });
@@ -328,11 +328,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
       userId: "member_123",
     });

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readHostedWakeLifecycleState: vi.fn(),
+  readHostedIngressLifecycleState: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-wake/lifecycle", () => ({
-  readHostedWakeLifecycleState: mocks.readHostedWakeLifecycleState,
+vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
+  readHostedIngressLifecycleState: mocks.readHostedIngressLifecycleState,
 }));
 
 import { reconcileHostedShareAcceptanceLifecycle } from "@/src/lib/hosted-share/shared-acceptance";
@@ -15,9 +15,9 @@ describe("hosted share acceptance lifecycle", () => {
     vi.clearAllMocks();
   });
 
-  it("finalizes a claimed share from the wake-backed lifecycle", async () => {
+  it("finalizes a claimed share from the ingress-backed lifecycle", async () => {
     const prisma = createHostedSharePrisma();
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("completed");
+    mocks.readHostedIngressLifecycleState.mockResolvedValue("completed");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -29,9 +29,9 @@ describe("hosted share acceptance lifecycle", () => {
     expect(prisma.share.lastEventId).toBe("evt_share");
   });
 
-  it("releases a claimed share when the wake-backed lifecycle is quarantined", async () => {
+  it("releases a claimed share when the ingress-backed lifecycle is quarantined", async () => {
     const prisma = createHostedSharePrisma();
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("quarantined");
+    mocks.readHostedIngressLifecycleState.mockResolvedValue("quarantined");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -42,9 +42,9 @@ describe("hosted share acceptance lifecycle", () => {
     expectReleased(prisma.share);
   });
 
-  it("releases a claimed share when the wake-backed lifecycle is replaced", async () => {
+  it("releases a claimed share when the ingress-backed lifecycle is replaced", async () => {
     const prisma = createHostedSharePrisma();
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("replaced");
+    mocks.readHostedIngressLifecycleState.mockResolvedValue("replaced");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -55,9 +55,9 @@ describe("hosted share acceptance lifecycle", () => {
     expectReleased(prisma.share);
   });
 
-  it("releases a claimed share when the canonical wake row is absent", async () => {
+  it("releases a claimed share when the canonical ingress row is absent", async () => {
     const prisma = createHostedSharePrisma();
-    mocks.readHostedWakeLifecycleState.mockResolvedValue(null);
+    mocks.readHostedIngressLifecycleState.mockResolvedValue(null);
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",

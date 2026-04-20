@@ -7,28 +7,28 @@ const AES_GCM_ALGORITHM = "AES-GCM";
 const HKDF_HASH = "SHA-256";
 const GCM_IV_BYTES = 12;
 const GCM_AUTH_TAG_BYTES = 16;
-const HOSTED_WAKE_ENCRYPTION_KEY_BYTES = 32;
-// Keep this salt aligned with the web-owned hosted secret codec until the wake codec
-// is extracted into a shared package. A mismatch here makes every hosted wake payload
+const HOSTED_INGRESS_ENCRYPTION_KEY_BYTES = 32;
+// Keep this salt aligned with the web-owned hosted secret codec until the ingress codec
+// is extracted into a shared package. A mismatch here makes hosted ingress payloads
 // undecryptable across the web/worker boundary.
-const HOSTED_WAKE_SCOPE_SALT = new TextEncoder().encode("murph.hosted.device-sync.secret.v1");
+const HOSTED_INGRESS_SCOPE_SALT = new TextEncoder().encode("murph.hosted.device-sync.secret.v1");
 const BASE64_CANONICAL_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const BASE64URL_CANONICAL_PATTERN = /^[A-Za-z0-9_-]*$/u;
-const HOSTED_WAKE_INLINE_PAYLOAD_FIELD = "hosted-wake-inline-payload";
-const HOSTED_WAKE_REF_PAYLOAD_FIELD = "hosted-wake-ref-payload";
+const HOSTED_INGRESS_INLINE_PAYLOAD_FIELD = "hosted-ingress-inline-payload";
+const HOSTED_INGRESS_REF_PAYLOAD_FIELD = "hosted-ingress-ref-payload";
 
-export interface HostedWakeEncryptionEnvironment {
+export interface HostedIngressEncryptionEnvironment {
   key: Uint8Array;
   keyVersion: string;
   keysByVersion: Readonly<Record<string, Uint8Array>>;
 }
 
-export function readHostedWakeEncryptionEnvironment(
+export function readHostedIngressEncryptionEnvironment(
   source: StringEnvSource = process.env,
-): HostedWakeEncryptionEnvironment {
-  const encryptionKey = decodeHostedWakeEncryptionKey(
-    requireHostedWakeEncryptionString(
+): HostedIngressEncryptionEnvironment {
+  const encryptionKey = decodeHostedIngressEncryptionKey(
+    requireHostedIngressEncryptionString(
       source.HOSTED_WAKE_ENCRYPTION_KEY,
       "HOSTED_WAKE_ENCRYPTION_KEY",
     ),
@@ -38,7 +38,7 @@ export function readHostedWakeEncryptionEnvironment(
   return {
     key: encryptionKey,
     keyVersion,
-    keysByVersion: decodeHostedWakeEncryptionKeyring({
+    keysByVersion: decodeHostedIngressEncryptionKeyring({
       currentKey: encryptionKey,
       currentKeyVersion: keyVersion,
       keyringJson: normalizeOptionalString(source.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON),
@@ -47,20 +47,20 @@ export function readHostedWakeEncryptionEnvironment(
   };
 }
 
-export async function decryptHostedWakePayloadCiphertext(input: {
+export async function decryptHostedIngressPayloadCiphertext(input: {
   ciphertext: string;
-  environment: HostedWakeEncryptionEnvironment;
+  environment: HostedIngressEncryptionEnvironment;
   userId: string;
 }): Promise<unknown> {
   const fields = [
-    HOSTED_WAKE_INLINE_PAYLOAD_FIELD,
-    HOSTED_WAKE_REF_PAYLOAD_FIELD,
+    HOSTED_INGRESS_INLINE_PAYLOAD_FIELD,
+    HOSTED_INGRESS_REF_PAYLOAD_FIELD,
   ] as const;
   let lastError: unknown = null;
 
   for (const field of fields) {
     try {
-      const plaintext = await decryptHostedWakeCiphertext({
+      const plaintext = await decryptHostedIngressCiphertext({
         ciphertext: input.ciphertext,
         environment: input.environment,
         field,
@@ -75,10 +75,10 @@ export async function decryptHostedWakePayloadCiphertext(input: {
 
   throw lastError instanceof Error
     ? lastError
-    : new TypeError("Hosted wake payload ciphertext is invalid.");
+    : new TypeError("Hosted ingress payload ciphertext is invalid.");
 }
 
-function requireHostedWakeEncryptionString(
+function requireHostedIngressEncryptionString(
   value: string | null | undefined,
   label: string,
 ): string {
@@ -96,11 +96,11 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return normalized ? normalized : null;
 }
 
-function decodeHostedWakeEncryptionKey(value: string): Uint8Array {
+function decodeHostedIngressEncryptionKey(value: string): Uint8Array {
   const normalized = value.trim();
 
   if (!normalized) {
-    throw new TypeError("Hosted wake encryption key must not be empty.");
+    throw new TypeError("Hosted ingress encryption key must not be empty.");
   }
 
   if (/^[0-9a-f]{64}$/iu.test(normalized)) {
@@ -109,19 +109,19 @@ function decodeHostedWakeEncryptionKey(value: string): Uint8Array {
 
   const decoded = decodeStrictBase64(
     normalizeBase64Url(normalized),
-    "Hosted wake encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
+    "Hosted ingress encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
   );
 
-  if (decoded.byteLength !== HOSTED_WAKE_ENCRYPTION_KEY_BYTES) {
+  if (decoded.byteLength !== HOSTED_INGRESS_ENCRYPTION_KEY_BYTES) {
     throw new TypeError(
-      "Hosted wake encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
+      "Hosted ingress encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
     );
   }
 
   return decoded;
 }
 
-function decodeHostedWakeEncryptionKeyring(input: {
+function decodeHostedIngressEncryptionKeyring(input: {
   currentKey: Uint8Array;
   currentKeyVersion: string;
   keyringJson: string | null;
@@ -155,7 +155,7 @@ function decodeHostedWakeEncryptionKeyring(input: {
         throw new TypeError(`${input.label} entry ${version} must be a non-empty encoded key.`);
       }
 
-      keysByVersion[version] = decodeHostedWakeEncryptionKey(encodedKey);
+      keysByVersion[version] = decodeHostedIngressEncryptionKey(encodedKey);
     }
   }
 
@@ -172,9 +172,9 @@ function decodeHostedWakeEncryptionKeyring(input: {
   return keysByVersion;
 }
 
-async function decryptHostedWakeCiphertext(input: {
+async function decryptHostedIngressCiphertext(input: {
   ciphertext: string;
-  environment: HostedWakeEncryptionEnvironment;
+  environment: HostedIngressEncryptionEnvironment;
   field: string;
   userId: string;
 }): Promise<string> {
@@ -187,30 +187,30 @@ async function decryptHostedWakeCiphertext(input: {
     || !tagText
     || ciphertextText === undefined
   ) {
-    throw new TypeError("Encrypted hosted wake payload is malformed.");
+    throw new TypeError("Encrypted hosted ingress payload is malformed.");
   }
 
   const key = input.environment.keysByVersion[payloadKeyVersion];
 
   if (!key) {
     throw new TypeError(
-      `Encrypted hosted wake payload references unknown key version ${payloadKeyVersion}.`,
+      `Encrypted hosted ingress payload references unknown key version ${payloadKeyVersion}.`,
     );
   }
 
-  const scopedKey = await deriveHostedWakeScopeKey(
+  const scopedKey = await deriveHostedIngressScopeKey(
     key,
-    `hosted-wake-payload:${input.field}`,
+    `hosted-ingress-payload:${input.field}`,
   );
-  const iv = decodeStrictBase64Url(ivText, "Encrypted hosted wake payload is malformed.");
-  const authTag = decodeStrictBase64Url(tagText, "Encrypted hosted wake payload is malformed.");
+  const iv = decodeStrictBase64Url(ivText, "Encrypted hosted ingress payload is malformed.");
+  const authTag = decodeStrictBase64Url(tagText, "Encrypted hosted ingress payload is malformed.");
   const ciphertext = decodeStrictBase64Url(
     ciphertextText,
-    "Encrypted hosted wake payload is malformed.",
+    "Encrypted hosted ingress payload is malformed.",
   );
 
   if (iv.byteLength !== GCM_IV_BYTES || authTag.byteLength !== GCM_AUTH_TAG_BYTES) {
-    throw new TypeError("Encrypted hosted wake payload is malformed.");
+    throw new TypeError("Encrypted hosted ingress payload is malformed.");
   }
 
   const keyHandle = await crypto.subtle.importKey(
@@ -222,7 +222,7 @@ async function decryptHostedWakeCiphertext(input: {
   );
   const plaintext = await crypto.subtle.decrypt(
     {
-      additionalData: toArrayBuffer(buildHostedWakeFieldAad({
+      additionalData: toArrayBuffer(buildHostedIngressFieldAad({
         field: input.field,
         userId: input.userId,
       })),
@@ -237,18 +237,18 @@ async function decryptHostedWakeCiphertext(input: {
   return new TextDecoder().decode(plaintext);
 }
 
-function buildHostedWakeFieldAad(input: {
+function buildHostedIngressFieldAad(input: {
   field: string;
   userId: string;
 }): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({
     field: input.field,
     memberId: input.userId,
-    purpose: "hosted-wake-payload",
+    purpose: "hosted-ingress-payload",
   }));
 }
 
-async function deriveHostedWakeScopeKey(
+async function deriveHostedIngressScopeKey(
   rootKey: Uint8Array,
   scope: string,
 ): Promise<Uint8Array> {
@@ -264,10 +264,10 @@ async function deriveHostedWakeScopeKey(
       hash: HKDF_HASH,
       info: toArrayBuffer(new TextEncoder().encode(scope)),
       name: "HKDF",
-      salt: toArrayBuffer(HOSTED_WAKE_SCOPE_SALT),
+      salt: toArrayBuffer(HOSTED_INGRESS_SCOPE_SALT),
     },
     keyMaterial,
-    HOSTED_WAKE_ENCRYPTION_KEY_BYTES * 8,
+    HOSTED_INGRESS_ENCRYPTION_KEY_BYTES * 8,
   );
 
   return new Uint8Array(derivedBits);

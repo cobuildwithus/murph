@@ -8,8 +8,8 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  parseHostedExecutionWakeNudgeResult,
-  type HostedExecutionWakeNudgeResult,
+  parseHostedRunNudgeResult,
+  type HostedRunNudgeResult,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
@@ -20,7 +20,7 @@ import {
 import {
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserStatusPath,
-  buildCloudflareHostedControlUserWakePath,
+  buildCloudflareHostedControlUserRunPath,
 } from "./routes.ts";
 
 export type CloudflareHostedControlBrowserVaultSession =
@@ -47,7 +47,7 @@ export interface CloudflareHostedControlClient {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk,
   ): Promise<CloudflareHostedControlBrowserVaultSession>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
-  nudgeUserRunner(userId: string): Promise<HostedExecutionWakeNudgeResult>;
+  nudgeUserRun(userId: string): Promise<HostedRunNudgeResult>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -105,15 +105,15 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    nudgeUserRunner(userId) {
+    nudgeUserRun(userId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
         boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
-        label: "wake",
-        parse: parseHostedExecutionWakeNudgeResult,
-        path: buildCloudflareHostedControlUserWakePath(userId),
+        label: "run",
+        parse: parseHostedRunNudgeResult,
+        path: buildCloudflareHostedControlUserRunPath(userId),
         request: {
           body: "{}",
           headers: {

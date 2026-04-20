@@ -20,7 +20,7 @@ import type {
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import {
   buildHostedExecutionAssistantCronTickWake,
-  type HostedExecutionWake,
+  type HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -230,11 +230,11 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("does not expose the removed manual-run route", async () => {
+  it("does not expose the removed wake route", async () => {
     const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/wake", {
         method: "POST",
       })),
       createWorkerEnv(stub),
@@ -412,14 +412,14 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("accepts wake nudges immediately and drains in waitUntil", async () => {
+  it("accepts run nudges immediately and drains in waitUntil", async () => {
     const stub = createUserRunnerStub({
-      nudgeHostedWakes: vi.fn(async () => ({
+      nudgeHostedRun: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: false,
         alreadyRunning: true,
       })),
-      wakeHostedWakes: vi.fn(async () => ({
+      drainHostedRuns: vi.fn(async () => ({
         committedSeq: "0",
         requestedTargetSeq: null,
         targetReached: true,
@@ -431,7 +431,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/wake", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
         body: JSON.stringify({ ignored: true }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -448,8 +448,8 @@ describe("cloudflare worker routes", () => {
       alarmScheduled: false,
       alreadyRunning: true,
     });
-    expect(stub.nudgeHostedWakes).toHaveBeenCalledTimes(1);
-    expect(stub.wakeHostedWakes).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
+    expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalledTimes(1);
     await Promise.all(backgroundTasks);
   });
@@ -656,9 +656,9 @@ describe("cloudflare worker routes", () => {
     expect(deleteResponse.status).toBe(404);
   });
 
-  it("keeps removed manual-run paths absent while protected outbound routes preserve existing method ordering", async () => {
+  it("keeps removed wake paths absent while protected outbound routes preserve existing method ordering", async () => {
     const removedRunResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/run", {
+      new Request("https://runner.example.test/internal/users/member_123/wake", {
         method: "GET",
       }),
       createWorkerEnv(),
@@ -858,7 +858,7 @@ function createBucketStore() {
   };
 }
 
-function createWake(eventId: string): HostedExecutionWake {
+function createWake(eventId: string): HostedIngressEnvelope {
   return buildHostedExecutionAssistantCronTickWake({
     eventId,
     occurredAt: "2026-04-16T10:00:00.000Z",
@@ -918,7 +918,7 @@ async function resolveHostedUserCryptoContextForTest(
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
     bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
-    nudgeHostedWakes: vi.fn(async () => ({
+    nudgeHostedRun: vi.fn(async () => ({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
@@ -933,7 +933,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       pendingWakeCount: 0,
       userId: "member_123",
     })),
-    wakeHostedWakes: vi.fn(async () => ({
+    drainHostedRuns: vi.fn(async () => ({
       committedSeq: "0",
       requestedTargetSeq: null,
       targetReached: true,
@@ -972,7 +972,7 @@ async function createSignedJsonControlRequest(
 
 async function createSignedWakeRequest(
   path: string,
-  wake: HostedExecutionWake,
+  wake: HostedIngressEnvelope,
   input: {
     aud?: string;
     boundUserId?: string | null;

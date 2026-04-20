@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readHostedWakeLifecycleState: vi.fn(),
+  readHostedIngressLifecycleState: vi.fn(),
 }));
 
-vi.mock("../hosted-wake/lifecycle", () => ({
-  readHostedWakeLifecycleState: mocks.readHostedWakeLifecycleState,
+vi.mock("../hosted-ingress/lifecycle", () => ({
+  readHostedIngressLifecycleState: mocks.readHostedIngressLifecycleState,
 }));
 
 import { reconcileHostedShareAcceptanceLifecycle } from "./shared";
@@ -22,7 +22,7 @@ describe("hosted share lifecycle reconciliation", () => {
         lastEventId: "evt_share",
       },
     });
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("completed");
+    mocks.readHostedIngressLifecycleState.mockResolvedValue("completed");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -41,7 +41,7 @@ describe("hosted share lifecycle reconciliation", () => {
         lastEventId: "evt_share",
       },
     });
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("quarantined");
+    mocks.readHostedIngressLifecycleState.mockResolvedValue("quarantined");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",
@@ -61,7 +61,7 @@ describe("hosted share lifecycle reconciliation", () => {
         lastEventId: "evt_share",
       },
     });
-    mocks.readHostedWakeLifecycleState.mockResolvedValue("replaced");
+    mocks.readHostedIngressLifecycleState.mockResolvedValue("replaced");
 
     await expect(reconcileHostedShareAcceptanceLifecycle({
       eventId: "evt_share",

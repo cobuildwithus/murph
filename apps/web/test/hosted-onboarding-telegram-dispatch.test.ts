@@ -5,8 +5,8 @@ const mocks = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
-    nudgeHostedWakeUserBestEffort: vi.fn(async () => true),
-    readHostedWakeTarget: vi.fn(async () => null),
+    nudgeHostedRunUserBestEffort: vi.fn(async () => true),
+    readHostedIngressTarget: vi.fn(async () => null),
     runtimeEnv: {
       contactPrivacyKeyring: {
         currentVersion: "v1",
@@ -40,7 +40,7 @@ const mocks = vi.hoisted(() => {
       telegramBotUsername: "murph_bot",
       telegramWebhookSecret: null as string | null,
     },
-    materializeHostedExecutionWakeTx: vi.fn(async (input: {
+    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       eventId?: string;
       wake?: { eventId: string };
@@ -50,7 +50,7 @@ const mocks = vi.hoisted(() => {
         ? input.eventId
         : input.dispatch?.eventId ?? input.wake?.eventId;
       if (!eventId) {
-        throw new Error("Expected a hosted wake append eventId.");
+        throw new Error("Expected a hosted ingress append eventId.");
       }
       return {
         eventId,
@@ -61,15 +61,15 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-wake/lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-wake/lifecycle")>(
-    "@/src/lib/hosted-wake/lifecycle",
+vi.mock("@/src/lib/hosted-ingress/lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-ingress/lifecycle")>(
+    "@/src/lib/hosted-ingress/lifecycle",
   );
 
   return {
     ...actual,
-    materializeHostedExecutionWakeTx: mocks.materializeHostedExecutionWakeTx,
-    readHostedWakeTarget: mocks.readHostedWakeTarget,
+    materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
+    readHostedIngressTarget: mocks.readHostedIngressTarget,
   };
 });
 
@@ -102,9 +102,9 @@ vi.mock("@/src/lib/prisma", () => ({
   }),
 }));
 
-vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionWakeBestEffort: vi.fn(async () => "wake"),
-  nudgeHostedWakeUserBestEffort: mocks.nudgeHostedWakeUserBestEffort,
+vi.mock("@/src/lib/hosted-ingress/control", () => ({
+  nudgeHostedRunBestEffort: vi.fn(async () => "wake"),
+  nudgeHostedRunUserBestEffort: mocks.nudgeHostedRunUserBestEffort,
 }));
 
 import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -114,7 +114,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     vi.clearAllMocks();
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
-    mocks.nudgeHostedWakeUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunUserBestEffort.mockResolvedValue(true);
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 
@@ -190,7 +190,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
-    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
       userId: "member_telegram_123",
     });
@@ -258,11 +258,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
       userId: "member_telegram_123",
     });
@@ -325,15 +325,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       reason: "wake-appended-active-member",
     });
     expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedWakeUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
       userId: "member_telegram_123",
     });
-    expect(mocks.nudgeHostedWakeUserBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("accepts Telegram webhooks whose secret header is missing", async () => {

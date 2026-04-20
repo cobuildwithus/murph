@@ -3,10 +3,10 @@ import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 
 import {
-  decodeHostedWakeStoredPayload,
-  encodeHostedWakeStoredPayload,
-  HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES,
-} from "@/src/lib/hosted-wake/payload";
+  decodeHostedIngressStoredPayload,
+  encodeHostedIngressStoredPayload,
+  HOSTED_INGRESS_MAX_INLINE_PAYLOAD_BYTES,
+} from "@/src/lib/hosted-ingress/payload";
 
 describe("Hosted wake payload storage", () => {
   it("keeps small payloads inline and decryptable", () => {
@@ -17,7 +17,7 @@ describe("Hosted wake payload storage", () => {
         ok: true,
       },
     };
-    const encoded = encodeHostedWakeStoredPayload({
+    const encoded = encodeHostedIngressStoredPayload({
       userId: "member-inline",
       value,
     });
@@ -26,7 +26,7 @@ describe("Hosted wake payload storage", () => {
     expect(encoded.payloadInlineCiphertext).toEqual(expect.any(String));
     expect(encoded.payloadRefCiphertext).toBeNull();
     expect(encoded.payloadBytes).toBe(Buffer.byteLength(JSON.stringify(value), "utf8"));
-    expect(decodeHostedWakeStoredPayload({
+    expect(decodeHostedIngressStoredPayload({
       payloadInlineCiphertext: encoded.payloadInlineCiphertext,
       userId: "member-inline",
     })).toEqual(value);
@@ -35,9 +35,9 @@ describe("Hosted wake payload storage", () => {
   it("spills oversized payloads to ref ciphertext and round-trips them", () => {
     const value = {
       kind: "conversation.message",
-      text: "x".repeat(HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES + 256),
+      text: "x".repeat(HOSTED_INGRESS_MAX_INLINE_PAYLOAD_BYTES + 256),
     };
-    const encoded = encodeHostedWakeStoredPayload({
+    const encoded = encodeHostedIngressStoredPayload({
       userId: "member-spill",
       value,
     });
@@ -45,14 +45,14 @@ describe("Hosted wake payload storage", () => {
     expect(encoded.storage).toBe("ref");
     expect(encoded.payloadInlineCiphertext).toBeNull();
     expect(encoded.payloadRefCiphertext).toEqual(expect.any(String));
-    expect(encoded.payloadBytes).toBeGreaterThan(HOSTED_WAKE_MAX_INLINE_PAYLOAD_BYTES);
-    expect(decodeHostedWakeStoredPayload({
+    expect(encoded.payloadBytes).toBeGreaterThan(HOSTED_INGRESS_MAX_INLINE_PAYLOAD_BYTES);
+    expect(decodeHostedIngressStoredPayload({
       payloadRefCiphertext: encoded.payloadRefCiphertext,
       userId: "member-spill",
     })).toEqual(value);
   });
 
   it("returns null when no encrypted payload is present", () => {
-    expect(decodeHostedWakeStoredPayload({ userId: "member-empty" })).toBeNull();
+    expect(decodeHostedIngressStoredPayload({ userId: "member-empty" })).toBeNull();
   });
 });

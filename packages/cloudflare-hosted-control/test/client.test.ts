@@ -19,7 +19,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
       "getStatus",
-      "nudgeUserRunner",
+      "nudgeUserRun",
     ]);
   });
 
@@ -201,7 +201,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("posts wake requests without a synchronous drain contract", async () => {
+  it("posts run requests without a synchronous drain contract", async () => {
     let observedRequest: ObservedRequest | null = null;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
@@ -217,14 +217,14 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     await expect(
-      client.nudgeUserRunner("user_123"),
+      client.nudgeUserRun("user_123"),
     ).resolves.toEqual(createWakeNudgeResult({
       accepted: true,
       alreadyRunning: true,
     }));
 
     const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/wake");
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/run");
     expect(request.init?.method).toBe("POST");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");

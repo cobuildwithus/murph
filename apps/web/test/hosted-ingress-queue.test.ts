@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-  buildHostedExecutionAssistantCronTickWake,
+  HOSTED_INGRESS_PAYLOAD_SCHEMA,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 
@@ -10,17 +10,17 @@ const mocks = vi.hoisted(() => ({
   appendHostedOrderedWakeTx: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-wake/store", () => ({
+vi.mock("@/src/lib/hosted-ingress/store", () => ({
   appendHostedCoalescingWakeTx: mocks.appendHostedCoalescingWakeTx,
   appendHostedOrderedWakeTx: mocks.appendHostedOrderedWakeTx,
-  findHostedWakeEventIdByEventIdTx: vi.fn(),
-  readHostedWakeLifecycleByEventIdTx: vi.fn(),
-  readHostedWakeScheduleByEventIdTx: vi.fn(),
+  findHostedIngressEventAliasIdByEventIdTx: vi.fn(),
+  readHostedIngressLifecycleByEventIdTx: vi.fn(),
+  readHostedIngressScheduleByEventIdTx: vi.fn(),
 }));
 
-import { materializeHostedExecutionWakeTx } from "@/src/lib/hosted-wake/lifecycle";
+import { materializeHostedIngressEnvelopeTx } from "@/src/lib/hosted-ingress/lifecycle";
 
-describe("materializeHostedExecutionWakeTx", () => {
+describe("materializeHostedIngressEnvelopeTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.appendHostedOrderedWakeTx.mockResolvedValue({
@@ -33,7 +33,7 @@ describe("materializeHostedExecutionWakeTx", () => {
         id: "wake_1",
         kind: "conversation.message",
         occurredAt: "2026-04-18T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
         seq: "1",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
@@ -47,9 +47,9 @@ describe("materializeHostedExecutionWakeTx", () => {
         behavior: "coalescing",
         createdAt: "2026-04-18T00:00:00.000Z",
         id: "wake_2",
-        kind: "assistant.cron.tick",
+        kind: "device-sync.wake",
         occurredAt: "2026-04-18T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
         seq: "2",
         updatedAt: "2026-04-18T00:00:00.000Z",
         userId: "member_123",
@@ -77,7 +77,7 @@ describe("materializeHostedExecutionWakeTx", () => {
       userId: "member_123",
     });
 
-    await materializeHostedExecutionWakeTx({
+    await materializeHostedIngressEnvelopeTx({
       wake,
       tx: {} as never,
     });
@@ -88,7 +88,7 @@ describe("materializeHostedExecutionWakeTx", () => {
       kind: "conversation.message",
       occurredAt: "2026-04-18T00:00:00.000Z",
       payload: wake,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: "member_123",
     }));
     expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -98,59 +98,46 @@ describe("materializeHostedExecutionWakeTx", () => {
     }));
   });
 
-  it("coalesces assistant cron wakes by user instead of defaulting to ordered appends", async () => {
-    const wake = buildHostedExecutionAssistantCronTickWake({
-      eventId: "evt_tick",
+  it("coalesces device-sync wakes by user instead of defaulting to ordered appends", async () => {
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "evt_device_sync",
       occurredAt: "2026-04-18T00:00:00.000Z",
-      reason: "alarm",
+      reason: "connected",
       userId: "member_123",
     });
 
-    await materializeHostedExecutionWakeTx({
+    await materializeHostedIngressEnvelopeTx({
       wake,
       tx: {} as never,
     });
 
     expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
-      coalescingKey: "assistant.cron.tick:member_123",
-      dedupeKey: "evt_tick",
-      eventId: "evt_tick",
-      kind: "assistant.cron.tick",
+      coalescingKey: "device-sync.wake:member_123:global",
+      dedupeKey: "evt_device_sync",
+      eventId: "evt_device_sync",
+      kind: "device-sync.wake",
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "member_123",
     }));
     expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
-      kind: "assistant.cron.tick",
+      kind: "device-sync.wake",
     }));
   });
 
-  it("persists assistant cron wakes with the full canonical wake payload", async () => {
-    const wake = buildHostedExecutionAssistantCronTickWake({
+  it("rejects assistant cron ticks as persisted ingress", async () => {
+    const wake = {
       eventId: "evt_tick_full_payload",
+      kind: "assistant.cron.tick" as const,
       occurredAt: "2026-04-18T00:00:00.000Z",
       reason: "manual",
       userId: "member_123",
-    });
+    };
 
-    await materializeHostedExecutionWakeTx({
+    await expect(materializeHostedIngressEnvelopeTx({
       wake,
       tx: {} as never,
-    });
-
-    expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
-      coalescingKey: "assistant.cron.tick:member_123",
-      dedupeKey: "evt_tick_full_payload",
-      eventId: "evt_tick_full_payload",
-      kind: "assistant.cron.tick",
-      occurredAt: "2026-04-18T00:00:00.000Z",
-      payload: wake,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-      userId: "member_123",
-    }));
-    expect(mocks.appendHostedCoalescingWakeTx).not.toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({
-        event: expect.anything(),
-      }),
-    }));
+    } as never)).rejects.toThrow(/no longer accepts assistant\.cron\.tick/i);
+    expect(mocks.appendHostedCoalescingWakeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedOrderedWakeTx).not.toHaveBeenCalled();
   });
 });

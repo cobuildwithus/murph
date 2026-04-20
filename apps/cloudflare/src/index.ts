@@ -10,8 +10,8 @@ import {
   wrapHostedUserRootKeyRecipient,
 } from "@murphai/runtime-state";
 import {
-  type HostedExecutionWakeDrainResult,
-  type HostedExecutionWakeNudgeResult,
+  type HostedRunDrainResult,
+  type HostedRunNudgeResult,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
@@ -97,14 +97,14 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     beforeMethod(context, params) {
-      return requireBoundInternalRouteUser(context, params, "user-wake");
+      return requireBoundInternalRouteUser(context, params, "user-run");
     },
     async handle(context, params) {
-      return handleWakeRoute(context, params.userId);
+      return handleRunRoute(context, params.userId);
     },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/wake$/u),
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/run$/u),
     methods: ["POST"],
-    name: "user-wake",
+    name: "user-run",
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -206,14 +206,14 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.status();
   }
 
-  async nudgeHostedWakes(): Promise<HostedExecutionWakeNudgeResult> {
-    return this.runner.nudgeHostedWakes();
+  async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
+    return this.runner.nudgeHostedRun();
   }
 
-  async wakeHostedWakes(input?: {
+  async drainHostedRuns(input?: {
     targetSeqHint?: string | null;
-  }): Promise<HostedExecutionWakeDrainResult> {
-    return this.runner.wakeHostedWakes(input);
+  }): Promise<HostedRunDrainResult> {
+    return this.runner.drainHostedRuns(input);
   }
 
   async fetch(): Promise<Response> {
@@ -336,7 +336,7 @@ async function handleStatusRoute(
   return json(await stub.status());
 }
 
-async function handleWakeRoute(
+async function handleRunRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
@@ -347,25 +347,25 @@ async function handleWakeRoute(
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
-        reason: "wake-request-body-invalid",
-        routeName: "user-wake",
+        reason: "run-request-body-invalid",
+        routeName: "user-run",
       }, context.request, userId),
       error,
       level: "warn",
-      message: "Hosted worker wake route rejected an invalid request body.",
+      message: "Hosted worker run route rejected an invalid request body.",
       phase: "failed",
       userId,
     });
     throw error;
   }
   const stub = await resolveUserRunnerStub(context.env, userId);
-  const nudgeResult = await stub.nudgeHostedWakes();
-  const drainPromise = stub.wakeHostedWakes().catch((error) => {
+  const nudgeResult = await stub.nudgeHostedRun();
+  const drainPromise = stub.drainHostedRuns().catch((error) => {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       error,
       level: "warn",
-      message: "Hosted wake nudge background drain failed after the nudge was accepted.",
+      message: "Hosted run nudge background drain failed after the nudge was accepted.",
       phase: "wake.running",
       userId,
     });

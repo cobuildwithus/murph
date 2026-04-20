@@ -11,13 +11,13 @@ const shareHarness = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     issueHostedInviteForPhone: vi.fn(),
-    readHostedWakeLifecycleState: vi.fn(async (input: {
+    readHostedIngressLifecycleState: vi.fn(async (input: {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
       userId: string;
     }) =>
       input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? null),
-    materializeHostedExecutionWakeTx: vi.fn(async (input: {
+    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
       wake: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
@@ -33,7 +33,7 @@ const shareHarness = vi.hoisted(() => {
         eventId: input.wake.eventId,
       };
     }),
-    handoffHostedExecutionWakeBestEffort: vi.fn(async (input: {
+    nudgeHostedRunBestEffort: vi.fn(async (input: {
       eventId: string;
       prisma?: unknown;
       userId: string;
@@ -50,15 +50,15 @@ const shareHarness = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-wake/lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-wake/lifecycle")>(
-    "@/src/lib/hosted-wake/lifecycle",
+vi.mock("@/src/lib/hosted-ingress/lifecycle", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-ingress/lifecycle")>(
+    "@/src/lib/hosted-ingress/lifecycle",
   );
 
   return {
     ...actual,
-    materializeHostedExecutionWakeTx: shareHarness.materializeHostedExecutionWakeTx,
-    readHostedWakeLifecycleState: shareHarness.readHostedWakeLifecycleState,
+    materializeHostedIngressEnvelopeTx: shareHarness.materializeHostedIngressEnvelopeTx,
+    readHostedIngressLifecycleState: shareHarness.readHostedIngressLifecycleState,
   };
 });
 vi.mock("@/src/lib/prisma", () => ({
@@ -66,8 +66,8 @@ vi.mock("@/src/lib/prisma", () => ({
     throw new Error("Unexpected getPrisma call in hosted-share-service.test.ts");
   }),
 }));
-vi.mock("@/src/lib/hosted-wake/control", () => ({
-  handoffHostedExecutionWakeBestEffort: shareHarness.handoffHostedExecutionWakeBestEffort,
+vi.mock("@/src/lib/hosted-ingress/control", () => ({
+  nudgeHostedRunBestEffort: shareHarness.nudgeHostedRunBestEffort,
 }));
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   issueHostedInviteForPhone: shareHarness.issueHostedInviteForPhone,
@@ -133,14 +133,14 @@ describe("hosted share service", () => {
     shareHarness.issueHostedInviteForPhone.mockRejectedValue(
       new Error("Unexpected invite issuance in hosted share service test."),
     );
-    shareHarness.readHostedWakeLifecycleState.mockReset();
-    shareHarness.readHostedWakeLifecycleState.mockImplementation(async (input: {
+    shareHarness.readHostedIngressLifecycleState.mockReset();
+    shareHarness.readHostedIngressLifecycleState.mockImplementation(async (input: {
       eventId: string;
       prisma?: { outboxRows?: WakeDispatchRecord[] };
     }) =>
       input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? null);
-    shareHarness.materializeHostedExecutionWakeTx.mockReset();
-    shareHarness.materializeHostedExecutionWakeTx.mockImplementation(async (input: {
+    shareHarness.materializeHostedIngressEnvelopeTx.mockReset();
+    shareHarness.materializeHostedIngressEnvelopeTx.mockImplementation(async (input: {
       wake: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {

@@ -6,13 +6,13 @@ import {
 import {
   buildHostedExecutionMemberActivatedWake,
   type HostedExecutionMemberActivatedEvent,
-  type HostedExecutionWake,
+  type HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 
 import {
-  findHostedWakeByEventIdTx,
-  materializeHostedExecutionWakeTx,
-} from "../hosted-wake/lifecycle";
+  findHostedIngressByEventIdTx,
+  materializeHostedIngressEnvelopeTx,
+} from "../hosted-ingress/lifecycle";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
@@ -91,7 +91,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       sourceEventId: input.sourceEventId,
       sourceType: input.sourceType,
     });
-    const appendedWake = await materializeHostedExecutionWakeTx({
+    const appendedWake = await materializeHostedIngressEnvelopeTx({
       wake,
       tx: input.prisma,
     });
@@ -168,7 +168,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const existingWakeEventId = await findHostedWakeByEventIdTx({
+  const existingWakeEventId = await findHostedIngressByEventIdTx({
     eventId: activationEventId,
     tx: input.prisma,
     userId: currentMember.core.id,
@@ -216,7 +216,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const appendedWake = await materializeHostedExecutionWakeTx({
+  const appendedWake = await materializeHostedIngressEnvelopeTx({
     wake,
     tx: input.prisma,
   });
@@ -323,7 +323,7 @@ function buildHostedMemberActivationWakeForMember(input: {
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedMemberActivationWake({
     emailLinked: input.emailLinked,
     firstContact: input.firstContact,
@@ -349,7 +349,7 @@ function buildHostedMemberActivationWake(input: {
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedMemberActivationEventId(input),
     firstContact: (input.firstContact ?? buildHostedMemberActivationFirstContact({

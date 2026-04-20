@@ -20,7 +20,7 @@ import {
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "./linq-routing-policy";
-import { materializeHostedExecutionWakeTx } from "../hosted-wake/lifecycle";
+import { materializeHostedIngressEnvelopeTx } from "../hosted-ingress/lifecycle";
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
@@ -159,7 +159,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await materializeHostedExecutionWakeTx({
+    await materializeHostedIngressEnvelopeTx({
       wake: buildHostedExecutionLinqConversationMessageWake({
         eventId: input.event.event_id,
         linqMessage: {

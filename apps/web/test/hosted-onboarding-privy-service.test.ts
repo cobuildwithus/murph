@@ -933,7 +933,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
     | undefined;
-  const hostedWake = prismaWithQueryRaw.hostedWake as unknown as
+  const hostedIngressEvent = prismaWithQueryRaw.hostedIngressEvent as unknown as
     | {
         findFirst?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
@@ -1262,11 +1262,11 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
     }
   }
 
-  if (!("hostedWake" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedWake) {
-    Object.defineProperty(prismaWithQueryRaw, "hostedWake", {
+  if (!("hostedIngressEvent" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedIngressEvent) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedIngressEvent", {
       configurable: true,
       value: {
-        ...(hostedWake ?? {}),
+        ...(hostedIngressEvent ?? {}),
         findFirst: vi.fn(async () => null),
       },
     });
