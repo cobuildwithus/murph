@@ -126,7 +126,7 @@ const TEST_CHAT_RESULT = {
   session: TEST_SESSION,
 } satisfies AssistantChatResult
 
-test('package manifest exposes only the intentional assistant stop, command, and runtime logging subpaths', async () => {
+test('package manifest exposes only the intentional assistant command and runtime logging subpaths', async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as {
@@ -143,10 +143,6 @@ test('package manifest exposes only the intentional assistant stop, command, and
   assert.equal(packageManifest.type, 'module')
   assert.equal(packageManifest.main, './dist/index.js')
   assert.equal(packageManifest.types, './dist/index.d.ts')
-  assert.deepEqual(packageManifest.exports?.['./assistant/stop'], {
-    types: './dist/assistant/stop.d.ts',
-    default: './dist/assistant/stop.js',
-  })
   assert.deepEqual(packageManifest.exports?.['./commands/assistant'], {
     types: './dist/commands/assistant.d.ts',
     default: './dist/commands/assistant.js',
@@ -156,7 +152,6 @@ test('package manifest exposes only the intentional assistant stop, command, and
     default: './dist/run-terminal-logging.js',
   })
   assert.deepEqual(Object.keys(packageManifest.exports ?? {}), [
-    './assistant/stop',
     './commands/assistant',
     './run-terminal-logging',
   ])
@@ -168,6 +163,7 @@ test('package manifest exposes only the intentional assistant stop, command, and
   assert.equal(packageManifest.exports?.['./assistant/runtime'], undefined)
   assert.equal(packageManifest.exports?.['./assistant/service'], undefined)
   assert.equal(packageManifest.exports?.['./assistant/status'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/stop'], undefined)
   assert.equal(packageManifest.exports?.['./assistant/store'], undefined)
   assert.equal(packageManifest.exports?.['./assistant/ui/chat-controller-state'], undefined)
   assert.equal(packageManifest.exports?.['./assistant/ui/composer-editor'], undefined)
