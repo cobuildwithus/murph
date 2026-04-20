@@ -76,11 +76,11 @@ The run protocol preserves the existing correctness spine from the ingress ledge
 
 ## Runtime timers
 
-`nextRuntimeWakeAt` is a cursor projection from private runtime state. It is not an instruction for web to create an `assistant.cron.tick` row. When `nextRuntimeWakeAt` is due and there are no external events, `acquire hosted run` may return a zero-event `runtime_timer` run and let the runtime decide what is due.
+`nextRuntimeWakeAt` is a cursor projection from private runtime state. It is not an instruction for web to create any persisted timer ingress row. When `nextRuntimeWakeAt` is due and there are no external events, `acquire hosted run` may return a zero-event `runtime_timer` run and let the runtime decide what is due.
 
-If executor/runtime plumbing needs a wake-shaped object for logs or callback wiring, it must use an internal-only `kind = "runtime.timer"` representation. That object is not persisted ingress, not a durable contract between web and runtime, and not a synonym for `assistant.cron.tick`.
+If executor/runtime plumbing needs a wake-shaped object for logs or callback wiring, it must use an internal-only `kind = "runtime.timer"` representation. That object is not persisted ingress and not a durable contract between web and runtime.
 
-For greenfield hosted execution, `assistant.cron.tick` is deprecated. Web must not append it as ordinary ingress, and persisted hosted-run/event contracts must not depend on it. If any legacy compatibility still exists during migration, treat it as runtime-internal only and not as a web-produced or durable ingress kind.
+No hosted timer ingress kind exists. Private runtime timers use `runtime.timer` only. If explicit external/manual/admin scheduling is ever needed, it must use a separate external command kind rather than reusing private runtime-timer semantics.
 
 `nextRuntimeWakeAt` is the only hosted cursor wake projection. Internal assistant/parser/device-sync follow-ups stay runtime-local and surface only as this redacted due-time hint. There is no second cursor-level follow-up hint and no internal web-materialized assistant/parser follow-up lane.
 

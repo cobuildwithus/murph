@@ -6,6 +6,7 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_INGRESS_PAYLOAD_SCHEMA,
+  isHostedIngressKind,
 } from "@murphai/hosted-execution";
 
 import {
@@ -39,14 +40,13 @@ export async function appendHostedIngressEnvelopePayloadTx(input: {
   wake: HostedIngressEnvelope;
 }): Promise<AppendHostedIngressResult> {
   const { wake } = input;
-  if ((wake as { kind: string }).kind === "assistant.cron.tick") {
+  if (!isHostedIngressKind(wake.kind)) {
     throw new TypeError(
-      "Hosted ingress no longer accepts assistant.cron.tick; use runDrain-triggered runtime timers.",
+      "Hosted ingress accepts only canonical external ingress kinds.",
     );
   }
 
   switch (wake.kind) {
-    case "device-sync.wake":
     case "member.channels.updated":
       return appendHostedCoalescingIngressEnvelopeTx({
         coalescingKey: buildHostedIngressCoalescingKey(wake),

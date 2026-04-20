@@ -157,16 +157,6 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("rejects assistant cron ticks as hosted execution events", () => {
-    expect(() =>
-      parseHostedExecutionEvent({
-        kind: "assistant.cron.tick",
-        reason: "timer",
-        userId: "user-1",
-      }),
-    ).toThrow(/Unsupported hosted execution event kind/i);
-  });
-
   it("rejects non-Linq channels for Linq home-thread materialization targets", () => {
     expect(() =>
       parseHostedExecutionEvent({

@@ -5,7 +5,7 @@ import {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
 import { json } from "../json.ts";
-import { createHostedUserKeyStore } from "../user-key-store.js";
+import { createHostedUserKeyStoreFromEnvironment } from "../user-key-store.js";
 import type {
   WorkerBootstrapUserRunnerStubLike,
   WorkerEnvironmentContract,
@@ -30,19 +30,9 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 }) {
   await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
 
-  return createHostedUserKeyStore({
-    automationRecipientKeyId: input.environment.automationRecipientKeyId,
-    automationRecipientPrivateKey: input.environment.automationRecipientPrivateKey,
-    automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
-    automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
+  return createHostedUserKeyStoreFromEnvironment({
     bucket: input.bucket,
-    envelopeEncryptionKey: input.environment.platformEnvelopeKey,
-    envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
-    envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
-    recoveryRecipientKeyId: input.environment.recoveryRecipientKeyId,
-    recoveryRecipientPublicKey: input.environment.recoveryRecipientPublicKey,
-    teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
-    teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
+    environment: input.environment,
   }).requireUserCryptoContext(input.userId, {
     reason: "runner-outbound-access",
   });

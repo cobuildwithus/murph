@@ -375,12 +375,6 @@ export function parseHostedRuntimeEvent(value: unknown): HostedRuntimeEvent {
     });
   }
 
-  if (kind === "assistant.cron.tick") {
-    throw new TypeError(
-      "Hosted execution runner wake assistant.cron.tick is no longer supported; use runtime.timer.",
-    );
-  }
-
   return parseHostedIngressEnvelope(record);
 }
 

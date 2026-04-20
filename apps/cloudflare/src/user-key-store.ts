@@ -17,6 +17,7 @@ import {
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";
 import { readEncryptedR2Payload, writeEncryptedR2Json } from "./crypto.js";
+import type { HostedExecutionEnvironment } from "./env.ts";
 
 export interface HostedUserCryptoContext {
   envelope: HostedUserRootKeyEnvelope;
@@ -153,6 +154,28 @@ export function createHostedUserKeyStore(input: {
       });
     },
   };
+}
+
+export function createHostedUserKeyStoreFromEnvironment(input: {
+  auditLog?: ((record: HostedUserKeyAuditRecord) => Promise<void> | void) | null;
+  bucket: R2BucketLike;
+  environment: HostedExecutionEnvironment;
+}): HostedUserKeyStore {
+  return createHostedUserKeyStore({
+    auditLog: input.auditLog ?? null,
+    automationRecipientKeyId: input.environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: input.environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
+    bucket: input.bucket,
+    envelopeEncryptionKey: input.environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
+    recoveryRecipientKeyId: input.environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: input.environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
+  });
 }
 
 async function resolveHostedUserCryptoContext(input: {
