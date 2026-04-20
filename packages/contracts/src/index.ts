@@ -5,6 +5,7 @@ export * from "./event-lifecycle.ts";
 export * from "./examples.ts";
 export * from "./frontmatter.ts";
 export * from "./health-entities.ts";
+export * from "./health-commons.ts";
 export * from "./ids.ts";
 export * from "./automation.ts";
 export * from "./memory.ts";

@@ -1,0 +1,24 @@
+{
+  "changes": [
+    {
+      "affectedFields": [
+        "protocol",
+        "testPlans",
+        "claims",
+        "safety",
+        "lineage"
+      ],
+      "changeId": "chg_2026_04_20_health_commons_seed",
+      "changeType": "seed",
+      "editSummary": "Seeded the first Health Commons protocol-variant page shape.",
+      "entityKey": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      "minor": false,
+      "rationale": "Lock the page, lineage, claim, test-plan, and artifact-manifest architecture before adding canonical sauna content.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-25705824"
+      ]
+    }
+  ]
+}

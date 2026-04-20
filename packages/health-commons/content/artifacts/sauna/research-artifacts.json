@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "murph.commons.artifact-manifest.v1",
+  "manifestKey": "source_artifact:sauna/research-artifacts",
+  "description": "Manifest stubs for sauna research artifacts. Do not place journal PDFs in Git; upload legally cleared files to Cloudflare R2 after hash and rights review.",
+  "artifacts": [
+    {
+      "artifactId": "art_pmid_25705824_pdf",
+      "sourceKey": "source_artifact:pmid-25705824",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-25705824/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-25705824.pdf",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/25705824/",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution."
+    },
+    {
+      "artifactId": "art_pmid_29849692_pdf",
+      "sourceKey": "source_artifact:pmid-29849692",
+      "kind": "pdf",
+      "storage": "cloudflare-r2",
+      "objectKey": "commons/research/sauna/pmid-29849692/source.pdf",
+      "localPath": "research-artifacts/sauna/pmid-29849692.pdf",
+      "contentType": "application/pdf",
+      "rightsStatus": "permission_required",
+      "redistributable": false,
+      "accessNotes": "Placeholder only. Upload is intentionally blocked until rights are cleared."
+    }
+  ]
+}
