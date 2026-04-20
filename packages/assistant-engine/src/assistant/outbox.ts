@@ -337,6 +337,14 @@ export async function dispatchAssistantOutboxIntent(input: {
       }
     }
 
+    if (shouldFailClosedAssistantOutboxStaleSendingIntent(intent)) {
+      return {
+        action: 'recover-stale-non-idempotent' as const,
+        intent,
+        intentPath,
+      }
+    }
+
     if (shouldReconcileAssistantOutboxIntent(intent)) {
       return {
         action: 'reconcile' as const,
@@ -380,6 +388,48 @@ export async function dispatchAssistantOutboxIntent(input: {
     return {
       intent: prepared.intent,
       deliveryError: prepared.intent.lastError,
+      session: null,
+    }
+  }
+
+  if (prepared.action === 'recover-stale-non-idempotent') {
+    const recoveredDelivery =
+      (await input.dispatchHooks?.resolveDeliveredIntent?.({
+        intent: prepared.intent,
+        vault: input.vault,
+      })) ??
+      resolvePersistedAssistantOutboxDelivery(prepared.intent)
+    if (recoveredDelivery) {
+      const sentIntent = await markAssistantOutboxIntentSent({
+        delivery: recoveredDelivery,
+        intent: prepared.intent,
+        intentPath: prepared.intentPath,
+        vault: input.vault,
+      })
+
+      return {
+        intent: sentIntent,
+        deliveryError: null,
+        session: null,
+      }
+    }
+
+    const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
+      error: createAssistantDeliveryAmbiguousError(
+        new Error(
+          'Stale non-idempotent outbound delivery had no persisted delivery to reconcile after restart.',
+        ),
+      ),
+      failedAt: now,
+      intent: prepared.intent,
+      intentPath: prepared.intentPath,
+      status: 'failed',
+      vault: input.vault,
+    })
+
+    return {
+      intent: failedIntent,
+      deliveryError: failedIntent.lastError,
       session: null,
     }
   }
@@ -992,17 +1042,47 @@ function shouldReconcileAssistantOutboxIntent(
 }
 
 function resolvePersistedAssistantOutboxDelivery(
-  intent: AssistantOutboxIntent,
+  intent: Pick<
+    AssistantOutboxIntent,
+    | 'delivery'
+    | 'deliveryConfirmationPending'
+    | 'deliveryTransportIdempotent'
+    | 'status'
+  >,
 ): AssistantChannelDelivery | null {
+  if (!intent.delivery) {
+    return null
+  }
+
+  if (
+    intent.status === 'sending' &&
+    !intent.deliveryTransportIdempotent
+  ) {
+    return intent.delivery
+  }
+
   if (
     !intent.deliveryConfirmationPending ||
-    !intent.deliveryTransportIdempotent ||
-    !intent.delivery
+    !intent.deliveryTransportIdempotent
   ) {
     return null
   }
 
   return intent.delivery
+}
+
+function shouldFailClosedAssistantOutboxStaleSendingIntent(
+  intent: Pick<
+    AssistantOutboxIntent,
+    | 'channel'
+    | 'deliveryTransportIdempotent'
+    | 'status'
+  >,
+): boolean {
+  return (
+    intent.status === 'sending' &&
+    !inferAssistantOutboxDeliveryTransportIdempotent(intent)
+  )
 }
 
 function inferAssistantOutboxDeliveryTransportIdempotent(input: Pick<

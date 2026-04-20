@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 
+import { HostedBillingStatus } from "@prisma/client";
 import {
   encodeHostedExecutionSignedRequestPayload,
 } from "@murphai/hosted-execution/auth";
@@ -19,6 +20,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress: vi.fn(),
   readHostedMemberIdByReplyAliasLookupKey: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
+    readHostedMemberCoreState: mocks.readHostedMemberCoreState,
     readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
     readHostedMemberIdByAuthorizedDirectPublicSenderAddress:
       mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
@@ -86,6 +89,9 @@ describe("hosted execution email callback routes", () => {
     vi.clearAllMocks();
     prismaClient = createPrismaMock();
     mocks.getPrisma.mockReturnValue(prismaClient);
+    mocks.readHostedMemberCoreState.mockImplementation(async ({ memberId }: { memberId: string }) =>
+      createHostedMemberCoreState({ id: memberId })
+    );
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue(null);
     mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue(null);
@@ -192,6 +198,10 @@ describe("hosted execution email callback routes", () => {
       memberId: "member_123",
       prisma: prismaClient,
     });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prismaClient,
+    });
     await expect(response.json()).resolves.toEqual({
       userId: "member_123",
     });
@@ -211,6 +221,7 @@ describe("hosted execution email callback routes", () => {
     }));
 
     expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       userId: null,
@@ -247,6 +258,57 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
+  it.each([
+    {
+      billingStatus: HostedBillingStatus.active,
+      label: "suspended",
+      suspendedAt: new Date("2026-04-16T12:00:00.000Z"),
+    },
+    {
+      billingStatus: HostedBillingStatus.canceled,
+      label: "canceled",
+      suspendedAt: null,
+    },
+    {
+      billingStatus: HostedBillingStatus.paused,
+      label: "paused",
+      suspendedAt: null,
+    },
+    {
+      billingStatus: HostedBillingStatus.unpaid,
+      label: "unpaid",
+      suspendedAt: null,
+    },
+  ])(
+    "returns userId null for alias-route resolution when the resolved member is $label",
+    async ({ billingStatus, suspendedAt }) => {
+      mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
+      mocks.readHostedMemberCoreState.mockResolvedValue(createHostedMemberCoreState({
+        billingStatus,
+        id: "member_123",
+        suspendedAt,
+      }));
+
+      const response = await resolveRoute.POST(await createSignedCallbackRequest({
+        body: JSON.stringify({
+          aliasKey: "replyalias1234",
+          envelopeFrom: "owner@example.com",
+          hasRepeatedHeaderFrom: false,
+          headerFrom: "Owner <owner@example.com>",
+        }),
+        path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+        privateJwkJson: currentPrivateJwkJson,
+        userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+      }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        userId: null,
+      });
+    },
+  );
+
   it("accepts a signed direct-public sender resolution callback only for the fixed service principal", async () => {
     mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_456");
 
@@ -266,10 +328,63 @@ describe("hosted execution email callback routes", () => {
       address: "owner@example.com",
       prisma: prismaClient,
     });
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_456",
+      prisma: prismaClient,
+    });
     await expect(response.json()).resolves.toEqual({
       userId: "member_456",
     });
   });
+
+  it.each([
+    {
+      billingStatus: HostedBillingStatus.active,
+      label: "suspended",
+      suspendedAt: new Date("2026-04-16T12:00:00.000Z"),
+    },
+    {
+      billingStatus: HostedBillingStatus.canceled,
+      label: "canceled",
+      suspendedAt: null,
+    },
+    {
+      billingStatus: HostedBillingStatus.paused,
+      label: "paused",
+      suspendedAt: null,
+    },
+    {
+      billingStatus: HostedBillingStatus.unpaid,
+      label: "unpaid",
+      suspendedAt: null,
+    },
+  ])(
+    "returns userId null for direct-public sender resolution when the resolved member is $label",
+    async ({ billingStatus, suspendedAt }) => {
+      mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_456");
+      mocks.readHostedMemberCoreState.mockResolvedValue(createHostedMemberCoreState({
+        billingStatus,
+        id: "member_456",
+        suspendedAt,
+      }));
+
+      const response = await resolveRoute.POST(await createSignedCallbackRequest({
+        body: JSON.stringify({
+          envelopeFrom: "owner@example.com",
+          hasRepeatedHeaderFrom: false,
+          headerFrom: "Owner <owner@example.com>",
+        }),
+        path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+        privateJwkJson: currentPrivateJwkJson,
+        userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+      }));
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        userId: null,
+      });
+    },
+  );
 
   it("rejects route-resolution callbacks from any non-service-principal binding", async () => {
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
@@ -422,4 +537,18 @@ function restoreEnv(key: string, value: string | undefined) {
   }
 
   process.env[key] = value;
+}
+
+function createHostedMemberCoreState(input: {
+  billingStatus?: HostedBillingStatus;
+  id?: string;
+  suspendedAt?: Date | null;
+}) {
+  return {
+    billingStatus: input.billingStatus ?? HostedBillingStatus.active,
+    createdAt: new Date("2026-04-15T12:00:00.000Z"),
+    id: input.id ?? "member_123",
+    suspendedAt: input.suspendedAt ?? null,
+    updatedAt: new Date("2026-04-15T12:00:00.000Z"),
+  };
 }

@@ -144,6 +144,269 @@ describe('assistant outbox thresholds', () => {
     expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
+  it.each([
+    {
+      channel: 'telegram',
+      explicitTarget: null,
+      identityId: 'participant-telegram',
+      replyToMessageId: 'telegram-msg-1',
+      threadId: 'thread-telegram',
+      threadIsDirect: true,
+      target: 'participant-telegram',
+      targetKind: 'participant' as const,
+    },
+    {
+      channel: 'email',
+      explicitTarget: 'user@example.com',
+      identityId: 'sender@example.com',
+      replyToMessageId: 'email-msg-1',
+      threadId: 'thread-email',
+      threadIsDirect: true,
+      target: 'thread-email',
+      targetKind: 'thread' as const,
+    },
+  ])(
+    'reconciles stale non-idempotent $channel sends from persisted delivery without invoking the adapter',
+    async ({
+      channel,
+      explicitTarget,
+      identityId,
+      replyToMessageId,
+      threadId,
+      threadIsDirect,
+      target,
+      targetKind,
+    }) => {
+      const deliverAssistantMessageOverBinding = vi.fn(async () => ({
+        delivery: createDelivery({
+          channel,
+          providerMessageId: 'provider-unexpected-resend',
+          sentAt: '2026-04-08T11:12:00.000Z',
+          target,
+          targetKind,
+        }),
+        deliveryTransportIdempotent: false,
+        session: null,
+      }))
+      const { outbox } = await loadOutboxModule({
+        deliverAssistantMessageOverBinding,
+      })
+      const { vaultRoot } = await createAssistantVault(`assistant-outbox-thresholds-${channel}-stale-reconcile-`)
+      const seeded = await createIntent(outbox, vaultRoot, {
+        channel,
+        createdAt: '2026-04-08T11:00:00.000Z',
+        explicitTarget,
+        identityId,
+        message: `${channel} stale persisted delivery`,
+        replyToMessageId,
+        sessionId: `session-${channel}-stale-reconcile`,
+        threadId,
+        threadIsDirect,
+        turnId: `turn-${channel}-stale-reconcile`,
+      })
+      const persistedDelivery = createDelivery({
+        channel,
+        idempotencyKey: null,
+        providerMessageId: `provider-${channel}-persisted`,
+        providerThreadId: threadId,
+        sentAt: '2026-04-08T11:01:00.000Z',
+        target,
+        targetKind,
+      })
+
+      await outbox.saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        attemptCount: 1,
+        delivery: persistedDelivery,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: persistedDelivery.idempotencyKey,
+        deliveryTransportIdempotent: false,
+        lastAttemptAt: '2026-04-08T11:01:00.000Z',
+        lastError: {
+          code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+          message:
+            'Assistant outbound delivery may have succeeded already and must be reconciled before resend.',
+        },
+        nextAttemptAt: null,
+        status: 'sending',
+        updatedAt: '2026-04-08T11:01:00.000Z',
+      })
+
+      await expect(
+        outbox.dispatchAssistantOutboxIntent({
+          intentId: seeded.intentId,
+          now: new Date('2026-04-08T11:20:00.000Z'),
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        deliveryError: null,
+        intent: {
+          delivery: persistedDelivery,
+          deliveryConfirmationPending: false,
+          intentId: seeded.intentId,
+          sentAt: '2026-04-08T11:01:00.000Z',
+          status: 'sent',
+        },
+        session: null,
+      })
+      expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    {
+      channel: 'telegram',
+      explicitTarget: null,
+      identityId: 'participant-telegram',
+      replyToMessageId: 'telegram-msg-2',
+      threadId: 'thread-telegram',
+      threadIsDirect: true,
+    },
+    {
+      channel: 'email',
+      explicitTarget: 'user@example.com',
+      identityId: 'sender@example.com',
+      replyToMessageId: 'email-msg-2',
+      threadId: 'thread-email',
+      threadIsDirect: true,
+    },
+  ])(
+    'fails stale non-idempotent $channel sends closed when no persisted delivery exists',
+    async ({
+      channel,
+      explicitTarget,
+      identityId,
+      replyToMessageId,
+      threadId,
+      threadIsDirect,
+    }) => {
+      const deliverAssistantMessageOverBinding = vi.fn(async () => ({
+        delivery: createDelivery({
+          channel,
+          providerMessageId: 'provider-unexpected-resend',
+          sentAt: '2026-04-08T11:22:00.000Z',
+        }),
+        deliveryTransportIdempotent: false,
+        session: null,
+      }))
+      const { outbox } = await loadOutboxModule({
+        deliverAssistantMessageOverBinding,
+      })
+      const { vaultRoot } = await createAssistantVault(`assistant-outbox-thresholds-${channel}-stale-blocked-`)
+      const seeded = await createIntent(outbox, vaultRoot, {
+        channel,
+        createdAt: '2026-04-08T11:00:00.000Z',
+        explicitTarget,
+        identityId,
+        message: `${channel} stale missing delivery`,
+        replyToMessageId,
+        sessionId: `session-${channel}-stale-blocked`,
+        threadId,
+        threadIsDirect,
+        turnId: `turn-${channel}-stale-blocked`,
+      })
+
+      await outbox.saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        attemptCount: 1,
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: false,
+        lastAttemptAt: '2026-04-08T11:01:00.000Z',
+        lastError: null,
+        nextAttemptAt: null,
+        status: 'sending',
+        updatedAt: '2026-04-08T11:01:00.000Z',
+      })
+
+      await expect(
+        outbox.dispatchAssistantOutboxIntent({
+          intentId: seeded.intentId,
+          now: new Date('2026-04-08T11:20:00.000Z'),
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        deliveryError: {
+          code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+        },
+        intent: {
+          deliveryConfirmationPending: false,
+          intentId: seeded.intentId,
+          status: 'failed',
+        },
+        session: null,
+      })
+      expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    },
+  )
+
+  it('keeps stale idempotent sends retryable through the adapter path', async () => {
+    const deliverAssistantMessageOverBinding = vi.fn(async () => ({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: 'existing-idempotency',
+        providerMessageId: 'provider-linq-retry',
+        providerThreadId: 'linq-thread-1',
+        sentAt: '2026-04-08T12:01:00.000Z',
+        target: 'linq-thread-1',
+        targetKind: 'thread',
+      }),
+      deliveryTransportIdempotent: true,
+      session: null,
+    }))
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-thresholds-linq-stale-retry-')
+    const seeded = await createIntent(outbox, vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-08T11:00:00.000Z',
+      explicitTarget: 'linq-thread-1',
+      identityId: 'phone_lookup_1',
+      message: 'linq stale retry',
+      replyToMessageId: 'linq-msg-1',
+      sessionId: 'session-linq-stale-retry',
+      threadId: 'linq-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-linq-stale-retry',
+    })
+
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 1,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: 'existing-idempotency',
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T11:01:00.000Z',
+      lastError: null,
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T11:01:00.000Z',
+    })
+
+    await expect(
+      outbox.dispatchAssistantOutboxIntent({
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T12:00:00.000Z'),
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      deliveryError: null,
+      intent: {
+        delivery: {
+          channel: 'linq',
+          providerMessageId: 'provider-linq-retry',
+        },
+        intentId: seeded.intentId,
+        status: 'sent',
+      },
+      session: null,
+    })
+    expect(deliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
   it('returns failed delivery results for permanent outbox errors', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => {
       throw Object.assign(new Error('channel required'), {
@@ -451,22 +714,30 @@ async function createIntent(
   outbox: Awaited<ReturnType<typeof loadOutboxModule>>['outbox'],
   vault: string,
   overrides: Partial<{
+    channel: string
     createdAt: string
+    explicitTarget: string | null
+    identityId: string
     message: string
+    replyToMessageId: string | null
     sessionId: string
+    threadId: string
+    threadIsDirect: boolean
     turnId: string
   }> = {},
 ) {
   const sessionId = overrides.sessionId ?? 'session-test'
   const turnId = overrides.turnId ?? 'turn-test'
   return outbox.createAssistantOutboxIntent({
-    channel: 'telegram',
+    channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
-    identityId: 'participant-1',
+    explicitTarget: overrides.explicitTarget ?? null,
+    identityId: overrides.identityId ?? 'participant-1',
     message: overrides.message ?? 'assistant outbox threshold coverage',
+    replyToMessageId: overrides.replyToMessageId ?? null,
     sessionId,
-    threadId: 'thread-test',
-    threadIsDirect: true,
+    threadId: overrides.threadId ?? 'thread-test',
+    threadIsDirect: overrides.threadIsDirect ?? true,
     turnId,
     vault,
   })

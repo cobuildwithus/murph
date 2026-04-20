@@ -502,26 +502,26 @@ test('drainAssistantOutbox only keeps post-send journal persistence failures ret
       vault: vaultRoot,
     })
     assert.equal(secondDrain.attempted, 1)
-    assert.equal(secondDrain.sent, 0)
-    assert.equal(secondDrain.failed, 1)
+    assert.equal(secondDrain.sent, 1)
+    assert.equal(secondDrain.failed, 0)
     assert.equal(secondDrain.queued, 0)
     assert.equal(
       robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
-      2,
+      1,
     )
 
     const retriedIntents = await listAssistantOutboxIntents(vaultRoot)
-    assert.equal(retriedIntents[0]?.status, 'failed')
-    assert.equal(retriedIntents[0]?.attemptCount, 2)
-    assert.notEqual(retriedIntents[0]?.lastAttemptAt, firstAttemptAt)
+    assert.equal(retriedIntents[0]?.status, 'sent')
+    assert.equal(retriedIntents[0]?.attemptCount, 1)
+    assert.equal(retriedIntents[0]?.lastAttemptAt, firstAttemptAt)
     assert.equal(retriedIntents[0]?.delivery?.channel, 'telegram')
 
     const failedStatus = await getAssistantStatus(vaultRoot)
     assert.equal(failedStatus.outbox.retryable, 0)
-    assert.equal(failedStatus.outbox.failed, 1)
-    assert.equal(failedStatus.outbox.sent, 0)
-    assert.equal(failedStatus.recentTurns[0]?.status, 'failed')
-    assert.equal(failedStatus.recentTurns[0]?.deliveryDisposition, 'failed')
+    assert.equal(failedStatus.outbox.failed, 0)
+    assert.equal(failedStatus.outbox.sent, 1)
+    assert.equal(failedStatus.recentTurns[0]?.status, 'completed')
+    assert.equal(failedStatus.recentTurns[0]?.deliveryDisposition, 'sent')
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
