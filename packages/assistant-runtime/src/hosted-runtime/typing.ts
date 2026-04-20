@@ -3,7 +3,7 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
-  type HostedExecutionWake,
+  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   parseTelegramThreadTarget,
@@ -19,7 +19,6 @@ import {
 import type {
   HostedAssistantRuntimeJobInput,
 } from "./models.ts";
-import { resolveHostedWake } from "./utils.ts";
 
 type HostedTypingHandle = {
   stop(): Promise<void>;
@@ -35,11 +34,15 @@ type HostedWakeTypingIndicator = {
 };
 
 export function startHostedWakeTypingIndicator(input: {
-  wake: HostedAssistantRuntimeJobInput["request"]["wake"];
+  wake: HostedRuntimeEvent;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): HostedWakeTypingIndicator | null {
-  const wake = resolveHostedWake(input);
+  const wake = input.wake;
+
+  if (wake.kind !== "conversation.message") {
+    return null;
+  }
 
   if (isHostedLinqConversationMessageWake(wake)) {
     return startHostedLinqWakeTypingIndicator({
@@ -59,7 +62,7 @@ export function startHostedWakeTypingIndicator(input: {
 }
 
 export async function stopHostedWakeTypingIndicator(input: {
-  wake: HostedAssistantRuntimeJobInput["request"]["wake"];
+  wake: HostedRuntimeEvent;
   typingIndicator: HostedWakeTypingIndicator | null;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): Promise<void> {
@@ -67,15 +70,13 @@ export async function stopHostedWakeTypingIndicator(input: {
     return;
   }
 
-  const wake = resolveHostedWake(input);
-
   try {
     await input.typingIndicator.stop();
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: input.typingIndicator.stopLogDetails,
-      wake,
+      wake: input.wake,
       error,
       level: "warn",
       message: `Hosted ${input.typingIndicator.channelLabel} typing indicator could not be stopped.`,
@@ -192,7 +193,7 @@ function buildHostedLinqTypingLogDetails(
 
 function createAsyncHostedTypingIndicator(input: {
   channelLabel: HostedWakeTypingIndicator["channelLabel"];
-  wake: HostedExecutionWake;
+  wake: HostedRuntimeEvent;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   startLogDetails?: Record<string, boolean | string>;
   stopLogDetails?: Record<string, boolean | string>;

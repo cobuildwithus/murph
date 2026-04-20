@@ -4,12 +4,11 @@ import type {
   ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
 import type {
+  HostedIngressEnvelope,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-  HostedExecutionWake,
   HostedRuntimeDrainRequest,
 } from "@murphai/hosted-execution";
-import type { HostedExecutionBundleRefState } from "@murphai/hosted-execution/bundles";
 import type {
   HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution/side-effects";
@@ -39,9 +38,8 @@ export interface HostedAssistantRuntimeConfig {
 }
 
 export interface HostedAssistantRuntimeJobRequest
-  extends HostedExecutionRunnerRequest {
-  currentBundleRef?: HostedExecutionBundleRefState;
-  runDrain?: HostedRuntimeDrainRequest | null;
+  extends Omit<HostedExecutionRunnerRequest, "runDrain"> {
+  runDrain: HostedRuntimeDrainRequest;
 }
 
 export interface HostedAssistantRuntimeJobInput {
@@ -174,7 +172,7 @@ export type HostedWorkspaceArtifactMaterializer = (
   relativePaths: readonly string[],
 ) => Promise<void>;
 
-export type HostedWakeEvent = HostedExecutionWake;
+export type HostedIngressEventAlias = HostedIngressEnvelope;
 export interface HostedRestoredExecutionContext {
   assistantStateRoot: string;
   operatorHomeRoot: string;

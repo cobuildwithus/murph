@@ -43,8 +43,11 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "vault.share.accepted",
 ] as const;
 
-export type HostedExecutionWakeKind =
+export type HostedIngressKind =
   (typeof HOSTED_EXECUTION_WAKE_KINDS)[number];
+export type HostedExecutionBaseWakeKind =
+  | HostedIngressKind
+  | "runtime.timer";
 
 export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
   "linq",
@@ -157,7 +160,7 @@ export interface HostedExecutionRunnerSharePack {
 export interface HostedRuntimeDrainEvent {
   seq: string;
   sharePack?: HostedExecutionRunnerSharePack | null;
-  wake: HostedExecutionWake;
+  wake: HostedIngressEnvelope;
   wakeId: string;
 }
 
@@ -169,6 +172,7 @@ export interface HostedRuntimeDrainRequest {
   resumeFinalize?: boolean | null;
   runId: string;
   triggerKind: HostedRunTriggerKind;
+  userId: string;
 }
 
 export type HostedExecutionEvent =
@@ -180,7 +184,7 @@ export type HostedExecutionEvent =
 
 export interface HostedExecutionBaseWake {
   eventId: string;
-  kind: HostedExecutionWakeKind;
+  kind: HostedExecutionBaseWakeKind;
   occurredAt: string;
   userId: string;
 }
@@ -282,7 +286,7 @@ export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake
   triggerKind: HostedRunTriggerKind;
 }
 
-export type HostedExecutionWake =
+export type HostedIngressEnvelope =
   | HostedExecutionConversationMessageWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
@@ -290,24 +294,30 @@ export type HostedExecutionWake =
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareAcceptedWake;
 
-export type HostedExecutionRunnerWake =
-  | HostedExecutionWake
+export type HostedRuntimeEvent =
+  | HostedIngressEnvelope
   | HostedExecutionRuntimeTimerWake;
 
-export type HostedExecutionSystemWake = Exclude<
-  HostedExecutionWake,
+export type HostedExecutionWakeKind = HostedIngressKind;
+export type HostedExecutionWake = HostedIngressEnvelope;
+export type HostedExecutionRunnerWake = HostedRuntimeEvent;
+export type HostedExecutionSystemWake = HostedIngressSystemEnvelope;
+
+export type HostedIngressSystemEnvelope = Exclude<
+  HostedIngressEnvelope,
   HostedExecutionConversationMessageWake
 >;
 
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
-export type HostedWakeSnapshotRef = HostedExecutionBundleRefState;
+export type HostedIngressSnapshotRef = HostedExecutionBundleRefState;
 
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
-  runDrain?: HostedRuntimeDrainRequest | null;
-  wake: HostedExecutionRunnerWake;
+  currentBundleRef?: HostedIngressSnapshotRef | null;
   run?: HostedExecutionRunContext | null;
+  runDrain?: HostedRuntimeDrainRequest | null;
   sharePack?: HostedExecutionRunnerSharePack | null;
+  wake: HostedExecutionRunnerWake;
 }
 
 export interface HostedExecutionRunnerResult {
@@ -336,19 +346,19 @@ export interface HostedExecutionUserStatus {
   userId: string;
 }
 
-export interface HostedExecutionWakeDrainResult {
+export interface HostedRunDrainResult {
   committedSeq: string;
   requestedTargetSeq: string | null;
   targetReached: boolean;
 }
 
-export interface HostedExecutionWakeNudgeResult {
+export interface HostedRunNudgeResult {
   accepted: boolean;
   alarmScheduled: boolean;
   alreadyRunning: boolean;
 }
 
-export const HOSTED_WAKE_LIFECYCLE_STATES = [
+export const HOSTED_INGRESS_LIFECYCLE_STATES = [
   "queued",
   "backpressured",
   "completed",
@@ -356,25 +366,25 @@ export const HOSTED_WAKE_LIFECYCLE_STATES = [
   "quarantined",
 ] as const;
 
-export type HostedWakeLifecycleState =
-  (typeof HOSTED_WAKE_LIFECYCLE_STATES)[number];
+export type HostedIngressLifecycleState =
+  (typeof HOSTED_INGRESS_LIFECYCLE_STATES)[number];
 
-export const HOSTED_WAKE_BEHAVIORS = [
+export const HOSTED_INGRESS_BEHAVIORS = [
   "ordered",
   "coalescing",
 ] as const;
 
-export type HostedWakeBehavior =
-  (typeof HOSTED_WAKE_BEHAVIORS)[number];
+export type HostedIngressBehavior =
+  (typeof HOSTED_INGRESS_BEHAVIORS)[number];
 
-export const HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA = "murph.hosted-wake-execution.v1";
+export const HOSTED_INGRESS_PAYLOAD_SCHEMA = "murph.hosted-ingress-execution.v1";
 
-export const HOSTED_WAKE_PAYLOAD_SCHEMAS = [
-  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+export const HOSTED_INGRESS_PAYLOAD_SCHEMAS = [
+  HOSTED_INGRESS_PAYLOAD_SCHEMA,
 ] as const;
 
-export type HostedWakePayloadSchema =
-  (typeof HOSTED_WAKE_PAYLOAD_SCHEMAS)[number];
+export type HostedIngressPayloadSchema =
+  (typeof HOSTED_INGRESS_PAYLOAD_SCHEMAS)[number];
 
 export interface HostedExecutionCursorState {
   committedSeq: string;
@@ -382,14 +392,14 @@ export interface HostedExecutionCursorState {
   nextSeq: string;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
-  snapshotRef: HostedWakeSnapshotRef;
+  snapshotRef: HostedIngressSnapshotRef;
   updatedAt: string;
   userId: string;
   version: string;
 }
 
-interface HostedWakeRecordBase {
-  behavior: HostedWakeBehavior;
+interface HostedIngressEventBase {
+  behavior: HostedIngressBehavior;
   coalescingKey?: string | null;
   createdAt: string;
   dedupeKey?: string | null;
@@ -404,29 +414,30 @@ interface HostedWakeRecordBase {
   userId: string;
 }
 
-export interface HostedConversationMessageWakeRecord extends HostedWakeRecordBase {
+export interface HostedConversationMessageWakeRecord extends HostedIngressEventBase {
   kind: "conversation.message";
-  payloadSchema: typeof HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
+  payloadSchema: typeof HOSTED_INGRESS_PAYLOAD_SCHEMA;
 }
 
-export interface HostedSystemWakeRecord extends HostedWakeRecordBase {
-  kind: HostedExecutionSystemWake["kind"];
-  payloadSchema: typeof HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA;
+export interface HostedSystemWakeRecord extends HostedIngressEventBase {
+  kind: HostedIngressSystemEnvelope["kind"];
+  payloadSchema: typeof HOSTED_INGRESS_PAYLOAD_SCHEMA;
 }
 
-export type HostedWakeRecord =
+export type HostedIngressEvent =
   | HostedConversationMessageWakeRecord
   | HostedSystemWakeRecord;
 
-export interface HostedWakeAppendResponse {
+export interface HostedIngressAppendResponse {
   duplicate: boolean;
   inserted: boolean;
   updatedExisting: boolean;
-  wake: HostedWakeRecord;
+  wake: HostedIngressEvent;
 }
 
 export const HOSTED_RUN_STATUSES = [
   "acquired",
+  "finalizing",
   "committed_needs_finalize",
   "finalized",
   "failed",
@@ -476,18 +487,18 @@ export interface HostedRunRecord {
   attestationRef?: string | null;
   signedResultRef?: string | null;
   failedAt?: string | null;
-  finalSnapshotRef?: HostedWakeSnapshotRef;
+  finalSnapshotRef?: HostedIngressSnapshotRef;
   finalizedAt?: string | null;
   id: string;
   inputCommittedSeq: string;
   inputCursorVersion: string;
-  inputSnapshotRef?: HostedWakeSnapshotRef;
+  inputSnapshotRef?: HostedIngressSnapshotRef;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq?: string | null;
   outputCursorVersion?: string | null;
   preparedAt?: string | null;
-  preparedSnapshotRef?: HostedWakeSnapshotRef;
+  preparedSnapshotRef?: HostedIngressSnapshotRef;
   redactedSummary?: unknown | null;
   startedAt?: string | null;
   status: HostedRunStatus;
@@ -523,7 +534,7 @@ export interface HostedRunAcquireRequest {
 export interface HostedRunAcquireResponse {
   acquired: boolean;
   cursor: HostedExecutionCursorState;
-  events: HostedWakeRecord[];
+  events: HostedIngressEvent[];
   pendingWakeCount: number;
   resumeFinalize: boolean;
   run: HostedRunRecord | null;
@@ -545,7 +556,7 @@ export interface HostedRunCommitRequest {
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: string;
-  preparedSnapshotRef?: HostedWakeSnapshotRef;
+  preparedSnapshotRef?: HostedIngressSnapshotRef;
   redactedSummary?: unknown | null;
   runId: string;
   runToken: string;
@@ -559,7 +570,7 @@ export interface HostedRunCommitResponse {
 }
 
 export interface HostedRunFinalizeRequest {
-  finalSnapshotRef: HostedWakeSnapshotRef;
+  finalSnapshotRef: HostedIngressSnapshotRef;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   redactedSummary?: unknown | null;
@@ -616,10 +627,10 @@ export type HostedExecutionDeviceSyncWakeHint =
 export const HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR =
   "Hosted execution wake handling is not configured.";
 
-export function isHostedExecutionWakeKind(
+export function isHostedIngressKind(
   kind: string,
-): kind is HostedExecutionWakeKind {
-  return HOSTED_EXECUTION_WAKE_KINDS.includes(kind as HostedExecutionWakeKind);
+): kind is HostedIngressKind {
+  return HOSTED_EXECUTION_WAKE_KINDS.includes(kind as HostedIngressKind);
 }
 
 export function isHostedConversationMessageChannel(
@@ -631,25 +642,25 @@ export function isHostedConversationMessageChannel(
 }
 
 export function isHostedConversationMessageWake(
-  wake: HostedExecutionWake,
+  wake: HostedIngressEnvelope,
 ): wake is HostedExecutionConversationMessageWake {
   return wake.kind === "conversation.message";
 }
 
 export function isHostedRuntimeTimerWake(
-  wake: HostedExecutionRunnerWake,
+  wake: HostedRuntimeEvent,
 ): wake is HostedExecutionRuntimeTimerWake {
   return wake.kind === "runtime.timer";
 }
 
 export function isHostedSystemWake(
-  wake: HostedExecutionWake,
-): wake is HostedExecutionSystemWake {
+  wake: HostedIngressEnvelope,
+): wake is HostedIngressSystemEnvelope {
   return wake.kind !== "conversation.message";
 }
 
 export function isHostedLinqConversationMessageWake(
-  wake: HostedExecutionWake,
+  wake: HostedIngressEnvelope,
 ): wake is HostedExecutionConversationMessageWake & {
   message: HostedExecutionLinqConversationMessagePayload;
 } {
@@ -657,7 +668,7 @@ export function isHostedLinqConversationMessageWake(
 }
 
 export function isHostedTelegramConversationMessageWake(
-  wake: HostedExecutionWake,
+  wake: HostedIngressEnvelope,
 ): wake is HostedExecutionConversationMessageWake & {
   message: HostedExecutionTelegramConversationMessagePayload;
 } {
@@ -665,7 +676,7 @@ export function isHostedTelegramConversationMessageWake(
 }
 
 export function isHostedEmailConversationMessageWake(
-  wake: HostedExecutionWake,
+  wake: HostedIngressEnvelope,
 ): wake is HostedExecutionConversationMessageWake & {
   message: HostedExecutionEmailConversationMessagePayload;
 } {

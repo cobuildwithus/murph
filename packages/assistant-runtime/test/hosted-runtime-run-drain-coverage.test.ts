@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedExecutionAssistantCronTickWake, buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionAssistantCronTickWake,
+  buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionRuntimeTimerWake,
+} from "@murphai/hosted-execution";
 
 import {
   createHostedRuntimeArtifactStoreStub,
@@ -19,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   decodeHostedBundleBase64: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
-  executeHostedWakeEvent: vi.fn(),
+  executeHostedIngressEventAlias: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
@@ -78,7 +82,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
-  executeHostedWakeEvent: mocks.executeHostedWakeEvent,
+  executeHostedIngressEventAlias: mocks.executeHostedIngressEventAlias,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
@@ -153,7 +157,7 @@ beforeEach(() => {
     permissions: [],
     schema: "murph.gateway-projection-snapshot.v1",
   });
-  mocks.executeHostedWakeEvent.mockResolvedValue({
+  mocks.executeHostedIngressEventAlias.mockResolvedValue({
     bootstrapResult: null,
     conversationMetrics: null,
     followupExecution: "member-activated",
@@ -188,28 +192,32 @@ beforeEach(() => {
 });
 
 describe("executeHostedRunDrainForCommit", () => {
-  it("falls back to the wake commit path when no run drain is present", async () => {
-    const result = await executeHostedRunDrainForCommit({
-      executionContext: createExecutionContext(),
-      request: {
-        bundle: "incoming-bundle",
-        wake: buildHostedExecutionAssistantCronTickWake({
-          eventId: "evt_no_run_drain",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
-          userId: "member_123",
-        }),
-      },
-      restored: createRestored(),
-      runtime: createRuntime(),
-      runtimeEnv: {},
-    });
+  it("fails closed when runDrain is missing", async () => {
+    await expect(
+      executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          // Bypass the stricter runtime parser/type surface to prove the runtime helper fails closed too.
+          runDrain: undefined as never,
+          wake: buildHostedExecutionAssistantCronTickWake({
+            eventId: "evt_no_run_drain",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            reason: "manual",
+            userId: "member_123",
+          }),
+        },
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      }),
+    ).rejects.toThrow(
+      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
+    );
 
-    expect(mocks.executeHostedWakeEvent).toHaveBeenCalledTimes(1);
-    expect(mocks.runHostedAssistantCronWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.executeHostedIngressEventAlias).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantCronWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
-    expect(result.committedResult.result.eventsHandled).toBe(1);
-    assert.match(result.committedResult.result.summary, /Processed assistant cron tick/u);
   });
 
   it("drains an empty run and schedules runtime maintenance", async () => {
@@ -224,11 +232,12 @@ describe("executeHostedRunDrainForCommit", () => {
           inputCursorVersion: "4",
           runId: "run_123",
           triggerKind: "runtime_timer",
+          userId: "member_123",
         },
-        wake: buildHostedExecutionAssistantCronTickWake({
-          eventId: "evt_empty_run_drain",
+        wake: buildHostedExecutionRuntimeTimerWake({
+          eventId: "hosted-run:run_123",
           occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "alarm",
+          triggerKind: "runtime_timer",
           userId: "member_123",
         }),
       },
@@ -237,7 +246,7 @@ describe("executeHostedRunDrainForCommit", () => {
       runtimeEnv: {},
     });
 
-    expect(mocks.executeHostedWakeEvent).not.toHaveBeenCalled();
+    expect(mocks.executeHostedIngressEventAlias).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantCronWakeLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
@@ -246,7 +255,7 @@ describe("executeHostedRunDrainForCommit", () => {
   });
 
   it("merges run-drain follow-up metrics across conversation and system wakes", async () => {
-    mocks.executeHostedWakeEvent
+    mocks.executeHostedIngressEventAlias
       .mockResolvedValueOnce({
         bootstrapResult: {
           assistantConfigStatus: "missing",
@@ -312,6 +321,7 @@ describe("executeHostedRunDrainForCommit", () => {
           inputCursorVersion: "4",
           runId: "run_123",
           triggerKind: "runtime_timer",
+          userId: "member_123",
         },
         wake: buildHostedExecutionAssistantCronTickWake({
           eventId: "evt_run_drain_followups",
@@ -325,7 +335,7 @@ describe("executeHostedRunDrainForCommit", () => {
       runtimeEnv: {},
     });
 
-    expect(mocks.executeHostedWakeEvent).toHaveBeenCalledTimes(2);
+    expect(mocks.executeHostedIngressEventAlias).toHaveBeenCalledTimes(2);
     expect(mocks.runHostedAssistantCronWakeLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();

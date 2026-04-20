@@ -139,7 +139,7 @@ describe("RunnerContainer", () => {
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://host.docker.internal:4010/.well-known/jwks",
         HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
-        HOSTED_WAKE_ENCRYPTION_KEY: "hosted-wake-key",
+        HOSTED_WAKE_ENCRYPTION_KEY: "hosted-ingress-key",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "web:v3",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
@@ -165,7 +165,7 @@ describe("RunnerContainer", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://host.docker.internal:4010/.well-known/jwks",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-wake-key",
+      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-ingress-key",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "web:v3",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
@@ -953,6 +953,7 @@ describe("RunnerContainer", () => {
         resumeFinalize: true,
         runId: "run_123",
         triggerKind: "runtime_timer" as const,
+        userId: "member_123",
       },
       run: {
         attempt: 2,
@@ -995,6 +996,7 @@ describe("RunnerContainer", () => {
             resumeFinalize: true,
             runId: "run_123",
             triggerKind: "runtime_timer",
+            userId: "member_123",
           },
           run: {
             attempt: 2,
@@ -1167,6 +1169,26 @@ function createRunnerRequest(
 ) {
   return {
     bundle: null,
+    runDrain: {
+      acquiredAt: "2026-03-27T00:00:00.000Z",
+      events: [
+        {
+          seq: "1",
+          wake: buildHostedExecutionAssistantCronTickWake({
+            eventId,
+            occurredAt: "2026-03-27T00:00:00.000Z",
+            reason: "manual",
+            userId: "member_123",
+          }),
+          wakeId: `wake_${eventId}`,
+        },
+      ],
+      inputCommittedSeq: "1",
+      inputCursorVersion: "1",
+      runId: input.run?.runId ?? "run_123",
+      triggerKind: "external_ingress" as const,
+      userId: "member_123",
+    },
     wake: buildHostedExecutionAssistantCronTickWake({
       eventId,
       occurredAt: "2026-03-27T00:00:00.000Z",

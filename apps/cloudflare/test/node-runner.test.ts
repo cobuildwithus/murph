@@ -33,13 +33,14 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionVaultShareAcceptedWake,
   type HostedExecutionBundlePayload,
   type HostedExecutionFirstContactTarget,
   type HostedExecutionMemberChannels,
   type HostedExecutionTelegramMessage,
-  type HostedExecutionWake,
+  type HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 
 const hostedCliMocks = vi.hoisted(() => ({
@@ -100,7 +101,7 @@ function createActivationWake(input: {
   memberChannels: HostedExecutionMemberChannels;
   occurredAt: string;
   userId: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedExecutionMemberActivatedWake({
     eventId: input.eventId,
     ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
@@ -115,7 +116,7 @@ function createChannelsUpdatedWake(input: {
   memberChannels: HostedExecutionMemberChannels;
   occurredAt: string;
   userId: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedExecutionMemberChannelsUpdatedWake({
     eventId: input.eventId,
     memberChannels: input.memberChannels,
@@ -129,8 +130,22 @@ function createCronWake(input: {
   occurredAt: string;
   reason: "alarm" | "manual" | "device-sync";
   userId: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedExecutionAssistantCronTickWake(input);
+}
+
+function createRuntimeTimerWake(input: {
+  eventId: string;
+  occurredAt: string;
+  triggerKind?: "manual_repair" | "retry_finalize" | "runtime_timer";
+  userId: string;
+}) {
+  return buildHostedExecutionRuntimeTimerWake({
+    eventId: input.eventId,
+    occurredAt: input.occurredAt,
+    triggerKind: input.triggerKind ?? "runtime_timer",
+    userId: input.userId,
+  });
 }
 
 function createTelegramWake(input: {
@@ -138,7 +153,7 @@ function createTelegramWake(input: {
   occurredAt: string;
   telegramMessage: HostedExecutionTelegramMessage;
   userId: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedExecutionTelegramConversationMessageWake(input);
 }
 
@@ -149,7 +164,7 @@ function createEmailWake(input: {
   rawMessageKey: string;
   selfAddress?: string | null;
   userId: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedExecutionEmailConversationMessageWake(input);
 }
 
@@ -159,7 +174,7 @@ function createShareAcceptedWake(input: {
   ownerUserId: string;
   shareId: string;
   userId: string;
-}): HostedExecutionWake {
+}): HostedIngressEnvelope {
   return buildHostedExecutionVaultShareAcceptedWake({
     eventId: input.eventId,
     memberId: input.userId,
@@ -190,7 +205,12 @@ type NodeRunnerTestInput =
         vault: HostedAssistantRuntimeJobInput["request"]["currentBundleRef"] | null;
       };
     };
-  } & Omit<HostedAssistantRuntimeJobInput["request"], "bundle" | "currentBundleRef">;
+  } & Omit<
+    HostedAssistantRuntimeJobInput["request"],
+    "bundle" | "currentBundleRef" | "runDrain"
+  > & {
+    runDrain?: HostedAssistantRuntimeJobInput["request"]["runDrain"];
+  };
 
 async function snapshotHostedExecutionContext(
   input: Parameters<typeof snapshotHostedExecutionContextActual>[0],
@@ -331,12 +351,40 @@ async function runHostedExecutionJob(
     ...(forwardedEnv === undefined ? {} : { forwardedEnv }),
     ...(userEnv === undefined ? {} : { userEnv }),
   };
+  const runDrain = request.runDrain ?? (
+    request.wake.kind === "runtime.timer"
+      ? {
+          acquiredAt: "2026-03-26T12:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "0",
+          inputCursorVersion: "0",
+          runId: request.run?.runId ?? "run_test",
+          triggerKind: request.wake.triggerKind,
+          userId: request.wake.userId,
+        }
+      : {
+          acquiredAt: "2026-03-26T12:00:00.000Z",
+          events: [
+            {
+              seq: "0",
+              wake: request.wake,
+              wakeId: `wake_${request.wake.eventId}`,
+            },
+          ],
+          inputCommittedSeq: "0",
+          inputCursorVersion: "0",
+          runId: request.run?.runId ?? "run_test",
+          triggerKind: "external_ingress" as const,
+          userId: request.wake.userId,
+        }
+  );
   const normalizedRequest: HostedAssistantRuntimeJobInput["request"] = {
     ...request,
     bundle:
       bundles === null || typeof bundles === "string"
         ? bundles
         : (bundles.vault ?? bundles.agentState),
+    runDrain,
     ...(commit === undefined ? {} : {
       currentBundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
     }),
@@ -367,6 +415,7 @@ async function runHostedExecutionJob(
           resumeFinalize: true,
           runId: normalizedRequest.run?.runId ?? "run_finalize",
           triggerKind: "runtime_timer",
+          userId: normalizedRequest.wake.userId,
         },
       },
       ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
@@ -1753,6 +1802,15 @@ describe("runHostedExecutionJob", () => {
     await expect(runHostedExecutionJob({
       request: {
         bundle: null,
+        runDrain: {
+          acquiredAt: "2026-03-29T10:05:00.000Z",
+          events: [],
+          inputCommittedSeq: "0",
+          inputCursorVersion: "0",
+          runId: "run_proxy_transport_only",
+          triggerKind: "runtime_timer",
+          userId: "member_proxy_transport_only",
+        },
         wake: createActivationWake({
           eventId: "evt_proxy_transport_only",
           memberChannels: MEMBER_CHANNELS_NONE,
@@ -2338,8 +2396,9 @@ describe("runHostedExecutionJob", () => {
         resumeFinalize: true,
         runId: "run_outbox_resume",
         triggerKind: "runtime_timer",
+        userId: "member_123",
       },
-      wake: createCronWake({ eventId: "evt_outbox_resume", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
+      wake: createRuntimeTimerWake({ eventId: "evt_outbox_resume", occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
     });
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
@@ -2466,8 +2525,9 @@ describe("runHostedExecutionJob", () => {
         resumeFinalize: true,
         runId: "run_outbox_resume_non_idempotent",
         triggerKind: "runtime_timer",
+        userId: "member_123",
       },
-      wake: createCronWake({ eventId: "evt_outbox_resume_non_idempotent", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
+      wake: createRuntimeTimerWake({ eventId: "evt_outbox_resume_non_idempotent", occurredAt: "2026-03-26T12:00:00.000Z", userId: "member_123" }),
     });
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
