@@ -18,7 +18,26 @@ export interface EncryptedR2BucketLike {
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
 
-export async function encryptHostedBundle(input: {
+function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
+  switch (scope) {
+    case "artifact":
+      return "Hosted artifact envelope";
+    case "browser-vault-snapshot":
+      return "Hosted browser vault snapshot envelope";
+    case "bundle":
+      return "Hosted bundle envelope";
+    case "email-raw":
+      return "Hosted email raw message envelope";
+    case "root-key-envelope":
+      return "Hosted user root key envelope";
+    case "root-key-recipient":
+      return "Hosted user root key recipient envelope";
+    case "runner-secrets":
+      return "Hosted runner secrets envelope";
+  }
+}
+
+export async function encryptHostedStorageEnvelope(input: {
   aad?: Uint8Array;
   key: Uint8Array;
   keyId: string;
@@ -34,12 +53,13 @@ export async function encryptHostedBundle(input: {
   });
 }
 
-export async function decryptHostedBundle(input: {
+export async function decryptHostedStorageEnvelope(input: {
   aad?: Uint8Array;
   envelope: HostedCipherEnvelope;
   expectedKeyId?: string;
   key: Uint8Array;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  label?: string;
   scope: HostedStorageScope;
 }): Promise<Uint8Array> {
   return decryptHostedStoragePayload({
@@ -48,6 +68,7 @@ export async function decryptHostedBundle(input: {
     expectedKeyId: input.expectedKeyId,
     key: input.key,
     keysById: input.keysById,
+    label: input.label,
     scope: input.scope,
   });
 }
@@ -55,6 +76,7 @@ export async function decryptHostedBundle(input: {
 export async function readEncryptedR2Payload(input: {
   aad?: Uint8Array;
   bucket: EncryptedR2BucketLike;
+  callerLabel?: string;
   cryptoKey: Uint8Array;
   cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
   expectedKeyId?: string;
@@ -69,15 +91,16 @@ export async function readEncryptedR2Payload(input: {
 
   const envelope = parseHostedCipherEnvelope(
     JSON.parse(utf8Decoder.decode(await object.arrayBuffer())) as unknown,
-    "Hosted bundle envelope",
+    input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
   );
 
-  return decryptHostedBundle({
+  return decryptHostedStorageEnvelope({
     aad: input.aad,
     envelope,
     expectedKeyId: input.expectedKeyId,
     key: input.cryptoKey,
     keysById: input.cryptoKeysById,
+    label: input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
     scope: input.scope,
   });
 }
@@ -91,7 +114,7 @@ export async function writeEncryptedR2Payload(input: {
   plaintext: Uint8Array;
   scope: HostedStorageScope;
 }): Promise<void> {
-  const envelope = await encryptHostedBundle({
+  const envelope = await encryptHostedStorageEnvelope({
     aad: input.aad,
     key: input.cryptoKey,
     keyId: input.keyId,

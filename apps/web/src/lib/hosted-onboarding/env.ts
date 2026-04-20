@@ -1,7 +1,7 @@
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
-import { normalizeNullableString, parseInteger } from "../device-sync/shared";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
+import { normalizeNullableString, parseInteger } from "../primitives";
 import {
   getHostedBillingPlanDefinition,
   HOSTED_BILLING_PLAN_CODES,

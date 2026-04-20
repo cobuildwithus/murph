@@ -162,15 +162,18 @@ export async function decryptHostedStoragePayload(input: {
   expectedKeyId?: string;
   key: Uint8Array;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  label?: string;
   scope: HostedStorageScope;
 }): Promise<Uint8Array> {
+  const label = input.label ?? "Hosted cipher envelope";
+
   if (input.envelope.scope !== input.scope) {
     throw new Error(
-      `Hosted cipher envelope scope mismatch: expected ${input.scope}, got ${input.envelope.scope}.`,
+      `${label} scope mismatch: expected ${input.scope}, got ${input.envelope.scope}.`,
     );
   }
 
-  const rootKey = resolveHostedCipherKey(input);
+  const rootKey = resolveHostedCipherKey(input, label);
   const scopedKey = await deriveHostedStorageKey(rootKey, input.scope);
   const cryptoKey = await importAesKey(scopedKey);
 
@@ -196,13 +199,13 @@ function resolveHostedCipherKey(input: {
   expectedKeyId?: string;
   key: Uint8Array;
   keysById?: Readonly<Record<string, Uint8Array>>;
-}): Uint8Array {
+}, label: string): Uint8Array {
   if (input.keysById) {
     const keyForEnvelope = input.keysById[input.envelope.keyId];
 
     if (!keyForEnvelope) {
       throw new Error(
-        `Hosted cipher envelope keyId mismatch: expected ${input.expectedKeyId ?? "configured keyring"}, got ${input.envelope.keyId}.`,
+        `${label} keyId mismatch: expected ${input.expectedKeyId ?? "configured keyring"}, got ${input.envelope.keyId}.`,
       );
     }
 
@@ -211,7 +214,7 @@ function resolveHostedCipherKey(input: {
 
   if (input.expectedKeyId && input.envelope.keyId !== input.expectedKeyId) {
     throw new Error(
-      `Hosted cipher envelope keyId mismatch: expected ${input.expectedKeyId}, got ${input.envelope.keyId}. No keyring is configured for multi-key decryption.`,
+      `${label} keyId mismatch: expected ${input.expectedKeyId}, got ${input.envelope.keyId}. No keyring is configured for multi-key decryption.`,
     );
   }
 

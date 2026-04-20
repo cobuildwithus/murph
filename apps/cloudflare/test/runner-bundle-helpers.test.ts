@@ -13,7 +13,7 @@ import {
 import {
   buildHostedStorageAad,
 } from "../src/crypto-context.js";
-import { encryptHostedBundle } from "../src/crypto.js";
+import { encryptHostedStorageEnvelope } from "../src/crypto.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
@@ -73,7 +73,7 @@ describe("hosted bundle reads", () => {
       keyId: "v1",
     });
     const ref = await bundleStore.writeBundle("vault", Uint8Array.from(Buffer.from("vault")));
-    const corruptedEnvelope = await encryptHostedBundle({
+    const corruptedEnvelope = await encryptHostedStorageEnvelope({
       aad: buildHostedStorageAad({
         hash: ref.hash,
         key: ref.key,
@@ -107,7 +107,7 @@ describe("hosted bundle reads", () => {
 
     await artifactStore.writeArtifact(artifactSha, artifactBytes);
     const objectKey = await artifactObjectKeyForTest(bundleKey, "member_123", artifactSha);
-    const corruptedEnvelope = await encryptHostedBundle({
+    const corruptedEnvelope = await encryptHostedStorageEnvelope({
       aad: buildHostedStorageAad({
         key: objectKey,
         purpose: "artifact",

@@ -1,4 +1,4 @@
-import { normalizeNullableString } from "../device-sync/shared";
+import { normalizeNullableString } from "../primitives";
 
 function readEnv(source: NodeJS.ProcessEnv, keys: readonly string[]): string | null {
   for (const key of keys) {

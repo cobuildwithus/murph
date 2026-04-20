@@ -20,6 +20,8 @@ const HOSTED_DEVICE_SYNC_DEFAULT_HEADERS = {
 
 export {
   InvalidRouteParamEncodingError,
+  methodNotAllowedJson,
+  postOnlyJson,
   readJsonObject,
   readOptionalJsonObject,
   readRawBodyBuffer,

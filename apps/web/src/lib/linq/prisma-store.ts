@@ -1,12 +1,12 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
-import { generateHostedRandomPrefixedId, toIsoTimestamp } from "../device-sync/shared";
 import {
   createHostedOpaqueIdentifier,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
   readHostedPhoneHint,
 } from "../hosted-onboarding/contact-privacy";
+import { generateHostedRandomPrefixedId, toIsoTimestamp } from "../primitives";
 import { hostedLinqError } from "./errors";
 
 export interface HostedLinqBindingRecord {

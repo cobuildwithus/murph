@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { normalizeNullableString as normalizeDeviceSyncNullableString } from "../device-sync/shared";
+import { normalizeNullableString as normalizeHostedNullableString } from "../primitives";
 
 export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
@@ -34,7 +34,7 @@ export function extractLinqTextMessage(input: unknown): string | null {
       }
 
       const value = (part as { type?: unknown; value?: unknown }).type === "text"
-        ? normalizeDeviceSyncNullableString(
+        ? normalizeHostedNullableString(
             typeof (part as { value?: unknown }).value === "string" ? (part as { value?: string }).value : null,
           )
         : null;
@@ -70,5 +70,5 @@ export function inviteExpiresAt(now: Date, ttlHours: number): Date {
 }
 
 export function normalizeNullableString(value: unknown): string | null {
-  return typeof value === "string" ? normalizeDeviceSyncNullableString(value) : null;
+  return typeof value === "string" ? normalizeHostedNullableString(value) : null;
 }

@@ -1,10 +1,14 @@
-import { createHostedDeviceSyncControlPlane } from "../../../../../src/lib/device-sync/control-plane";
-import { jsonOk, readOptionalJsonObject, withJsonError } from "../../../../../src/lib/device-sync/http";
+import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { jsonOk, postOnlyJson, readOptionalJsonObject, withJsonError } from "@/src/lib/device-sync/http";
+
+export function GET() {
+  return postOnlyJson("Hosted device-sync agent pair routes only allow POST.");
+}
 
 export const POST = withJsonError(async (request: Request) => {
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    controlPlane.assertBrowserMutationOrigin();
-    const body = await readOptionalJsonObject(request);
-    const label = typeof body.label === "string" ? body.label : null;
-    return jsonOk(await controlPlane.pairAgent(label));
+  const controlPlane = createHostedDeviceSyncControlPlane(request);
+  controlPlane.assertBrowserMutationOrigin();
+  const body = await readOptionalJsonObject(request);
+  const label = typeof body.label === "string" ? body.label : null;
+  return jsonOk(await controlPlane.pairAgent(label));
 });

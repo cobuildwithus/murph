@@ -67,6 +67,7 @@ export function jsonOk(
   return linqJsonRouteHelpers.jsonOk(payload, status, headers);
 }
 
+export { methodNotAllowedJson, postOnlyJson } from "../http";
 export { readOptionalJsonObject };
 export const jsonError = linqJsonRouteHelpers.jsonError;
 export const withJsonError = linqJsonRouteHelpers.withJsonError;

@@ -349,6 +349,7 @@ async function readStoredHostedUserRootKeyEnvelope(input: {
         userId: input.userId,
       }),
       bucket: input.bucket,
+      callerLabel: "Hosted user root key envelope",
       cryptoKey: input.envelopeEncryptionKey,
       cryptoKeysById: input.envelopeEncryptionKeysById,
       expectedKeyId: input.envelopeEncryptionKeyId,

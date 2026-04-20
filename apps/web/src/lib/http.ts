@@ -2,10 +2,36 @@ import { Buffer } from "node:buffer";
 
 import { NextResponse } from "next/server";
 
-import { isRecord } from "./device-sync/shared";
+import { isRecord } from "./primitives";
 
 export function jsonOk(payload: unknown, status = 200): NextResponse {
   return NextResponse.json(payload, { status });
+}
+
+export function methodNotAllowedJson(
+  allow: string | readonly string[],
+  message = "Method not allowed.",
+): NextResponse {
+  const allowHeader = typeof allow === "string" ? allow : allow.join(", ");
+
+  return NextResponse.json(
+    {
+      error: {
+        code: "METHOD_NOT_ALLOWED",
+        message,
+      },
+    },
+    {
+      headers: {
+        allow: allowHeader,
+      },
+      status: 405,
+    },
+  );
+}
+
+export function postOnlyJson(message = "This route only allows POST."): NextResponse {
+  return methodNotAllowedJson("POST", message);
 }
 
 export interface JsonErrorMapping {
