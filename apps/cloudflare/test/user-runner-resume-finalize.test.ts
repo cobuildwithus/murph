@@ -3,12 +3,19 @@ import type { SQLInputValue } from "node:sqlite";
 
 import type {
   HostedExecutionCursorState,
+  HostedIngressEnvelope,
   HostedRunAcquireResponse,
   HostedRunCommitResponse,
   HostedRunFinalizeResponse,
   HostedRunRecord,
 } from "@murphai/hosted-execution/contracts";
+import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "@murphai/hosted-execution/contracts";
+import {
+  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
 import { HostedUserRunner } from "../src/user-runner.ts";
+import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import type {
   DurableObjectSqlCursorLike,
@@ -24,6 +31,7 @@ import {
   TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES,
   TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION,
   createHostedExecutionTestEnv,
+  encryptTestHostedIngressPayload,
 } from "./hosted-execution-fixtures.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -287,6 +295,28 @@ function createRunRecord(): HostedRunRecord {
 }
 
 describe("HostedUserRunner resumeFinalize drain", () => {
+  it("nudges by scheduling an immediate alarm when a run is not already draining", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const result = await runner.nudgeHostedRun();
+    const record = await stateStore.readState();
+
+    expect(result).toEqual({
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: false,
+    });
+    expect(record.nextWakeAt).not.toBeNull();
+  });
+
   it("refetches after a successful finalize-resume before declaring the queue drained", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
@@ -465,4 +495,403 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       "commit_won",
     ]);
   });
+
+  it("reacquires finalize-required commits before running finalize side effects", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/acquired",
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/committed",
+      version: "cursor-v2",
+    });
+    const finalizeCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/finalize",
+      version: "cursor-v3",
+    });
+    const finalizedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/finalized",
+      version: "cursor-v4",
+    });
+    const drainedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/drained",
+      version: "cursor-v5",
+    });
+    const acquiredRun = {
+      ...createRunRecord(),
+      status: "acquired" as const,
+      triggerKind: "external_ingress" as const,
+    };
+    const committedRun = {
+      ...acquiredRun,
+      status: "committed_needs_finalize" as const,
+    };
+    const finalizingRun = {
+      ...acquiredRun,
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+
+    const prepareAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [],
+      pendingWakeCount: 1,
+      resumeFinalize: false,
+      run: acquiredRun,
+      runToken: "prepare-token",
+    };
+    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: finalizeCursor,
+      events: [],
+      pendingWakeCount: 1,
+      resumeFinalize: true,
+      run: finalizingRun,
+      runToken: "finalize-token",
+    };
+    const noWorkAcquire: HostedRunAcquireResponse = {
+      acquired: false,
+      cursor: drainedCursor,
+      events: [],
+      pendingWakeCount: 0,
+      resumeFinalize: false,
+      run: null,
+      runToken: null,
+    };
+    const commitResponse: HostedRunCommitResponse = {
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: true,
+      run: committedRun,
+    };
+    const finalizedResponse: HostedRunFinalizeResponse = {
+      cursor: finalizedCursor,
+      finalized: true,
+      run: finalizingRun,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce(prepareAcquire)
+      .mockResolvedValueOnce(resumeFinalizeAcquire)
+      .mockResolvedValueOnce(noWorkAcquire);
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
+    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue(finalizedResponse);
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: committedCursor.snapshotRef,
+      finalizeRequired: true,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: finalizedCursor.snapshotRef,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(3);
+    expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledTimes(1);
+    expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        runId: finalizingRun.id,
+        runToken: "finalize-token",
+      }),
+    }));
+    expect(result).toEqual({
+      committedSeq: drainedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(
+      webControlMocks.recordHostedRunLogInWeb.mock.calls.map(([input]) => input.body.phase),
+    ).toEqual([
+      "acquired",
+      "commit_attempted",
+      "commit_won",
+      "acquired",
+      "finalize_started",
+      "finalize_finished",
+    ]);
+  });
+
+  it("quarantines wakes with missing raw email payloads and keeps draining later contiguous wakes", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const missingRawWake = buildHostedExecutionEmailConversationMessageWake({
+      eventId: "evt_missing_raw",
+      identityId: "assistant@mail.example.test",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+      rawMessageKey: "raw_missing",
+      selfAddress: "reply+user@mail.example.test",
+      userId: "user-resume-finalize",
+    });
+    const laterWake = buildHostedExecutionMemberActivatedWake({
+      eventId: "evt_later",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      memberId: "user-resume-finalize",
+      occurredAt: "2026-04-20T00:01:00.000Z",
+    });
+    const firstAcquireCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/quarantine",
+      version: "cursor-v1",
+    });
+    const secondAcquireCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/later",
+      version: "cursor-v2",
+    });
+    const drainedCursor = createCursorState({
+      committedSeq: "12",
+      nextSeq: "13",
+      snapshotKey: "snapshot/drained",
+      version: "cursor-v3",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+
+    const firstAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: firstAcquireCursor,
+      events: [
+        createAcquireEvent({
+          id: "wake-missing-raw",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: missingRawWake,
+        }),
+      ],
+      pendingWakeCount: 2,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    };
+    const secondAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: secondAcquireCursor,
+      events: [
+        createAcquireEvent({
+          id: "wake-later",
+          seq: "12",
+          userId: "user-resume-finalize",
+          wake: laterWake,
+        }),
+      ],
+      pendingWakeCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    };
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce(firstAcquire)
+      .mockResolvedValueOnce(secondAcquire);
+    webControlMocks.commitHostedRunToWeb
+      .mockResolvedValueOnce({
+        committed: true,
+        cursor: secondAcquireCursor,
+        needsFinalize: false,
+        run,
+      })
+      .mockResolvedValueOnce({
+        committed: true,
+        cursor: drainedCursor,
+        needsFinalize: false,
+        run,
+      });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: drainedCursor.snapshotRef,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns({
+      targetSeqHint: "12",
+    });
+
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(2);
+    expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(2);
+    expect(webControlMocks.commitHostedRunToWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventResults: [
+          {
+            quarantineCode: "email-raw-message-missing",
+            state: "quarantined",
+            wakeId: "wake-missing-raw",
+          },
+        ],
+        outputCommittedSeq: "11",
+      },
+    });
+    expect(wakeProcessorMocks.executeRunDrain).toHaveBeenCalledTimes(1);
+    expect(wakeProcessorMocks.executeRunDrain.mock.calls[0]?.[0]).toMatchObject({
+      events: [
+        {
+          seq: "12",
+          wake: laterWake,
+          wakeId: "wake-later",
+        },
+      ],
+    });
+    expect(result).toEqual({
+      committedSeq: drainedCursor.committedSeq,
+      requestedTargetSeq: "12",
+      targetReached: true,
+    });
+  });
+
+  it("retries when raw email validation fails for reasons other than a missing payload", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const emailWake = buildHostedExecutionEmailConversationMessageWake({
+      eventId: "evt_retry_raw_error",
+      identityId: "assistant@mail.example.test",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+      rawMessageKey: "raw_missing",
+      selfAddress: "reply+user@mail.example.test",
+      userId: "user-resume-finalize",
+    });
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/raw-error",
+      version: "cursor-v1",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+
+    const acquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [
+        createAcquireEvent({
+          id: "wake-raw-error",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: emailWake,
+        }),
+      ],
+      pendingWakeCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    };
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce(acquire);
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    await expect(runner.drainHostedRuns({
+      targetSeqHint: "11",
+    })).rejects.toThrow(/missing envelope/u);
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.commitHostedRunToWeb).not.toHaveBeenCalled();
+    expect(wakeProcessorMocks.executeRunDrain).not.toHaveBeenCalled();
+  });
 });
+
+function createAcquireEvent(input: {
+  id: string;
+  seq: string;
+  userId: string;
+  wake: HostedIngressEnvelope;
+}): HostedRunAcquireResponse["events"][number] {
+  const encrypted = encryptTestHostedIngressPayload({
+    userId: input.userId,
+    value: input.wake,
+  });
+
+  return {
+    behavior: "ordered" as const,
+    createdAt: "2026-04-20T00:00:00.000Z",
+    dedupeKey: null,
+    id: input.id,
+    kind: input.wake.kind,
+    occurredAt: input.wake.occurredAt,
+    payloadBytes: encrypted.payloadBytes,
+    payloadCiphertext: encrypted.payloadCiphertext,
+    payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
+    quarantineCode: null,
+    quarantinedAt: null,
+    seq: input.seq,
+    updatedAt: "2026-04-20T00:00:00.000Z",
+    userId: input.userId,
+  };
+}

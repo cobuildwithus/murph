@@ -31,7 +31,7 @@ Internal control routes:
 - `GET /internal/users/:userId/status`
 
 The supported worker HTTP surface stops at those three control routes plus the public banner and health checks.
-Hosted assistant post-commit delivery recovery now comes from the shared outbox mirror inside the encrypted vault plus web-owned hosted-run recovery state, not a separate assistant-delivery journal route or Durable Object pending-commit seam.
+Hosted assistant post-commit delivery recovery now comes from committed side-effect state inside the encrypted workspace plus the web-owned hosted-run recovery record.
 When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only to bridge local child-runtime requests back onto the same per-run opaque internal-worker proxy token contract used by direct `http://*.worker` requests.
 
 ## Storage Contract
@@ -40,7 +40,7 @@ When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local ho
 - Large files are externalized into separately encrypted artifact blobs in the same bucket.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and encrypted bundle references. Canonical wake ordering, cursor progress, and durable finalize recovery stay web-owned.
-- The checked-in lifecycle rules backstop the short-lived production prefix `transient/hosted-email/messages/`.
+- Hosted raw email payloads now live under a durable encrypted prefix and are deleted after terminal wake cleanup rather than bucket lifecycle expiry.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-secrets blobs, and queue-local execution sidecars. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 
 ## Worker Contract

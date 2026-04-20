@@ -20,7 +20,7 @@ That rendered surface is then used by:
 - `pnpm --dir apps/cloudflare deploy:smoke`
 
 The rendered deploy helper path is the canonical rollout contract. The lower-level version helper still exists for recovery work, and the checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
-Hosted assistant delivery recovery now relies on the shared outbox mirror inside the encrypted vault plus web-owned hosted-run recovery state; the removed runner-side journal seam is no longer part of the deploy surface.
+Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace plus the web-owned hosted-run recovery record.
 
 ## One-Time Cloudflare Setup
 
@@ -30,11 +30,7 @@ Before the first deploy:
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file backstops the production execution-transient blobs that still exist on the live runner path:
-
-- `transient/hosted-email/messages/` expires after 1 hour
-
-Other encrypted objects in `BUNDLES` are intentionally not lifecycle-expired by this file, including workspace snapshots, externalized artifact blobs, runner-secret blobs, and queue-local execution sidecars.
+The checked-in lifecycle file is intentionally empty right now. Hosted raw email payloads are durable encrypted blobs deleted by runner cleanup after terminal completion or quarantine, and the rest of the encrypted objects in `BUNDLES` are intentionally owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 

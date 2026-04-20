@@ -1,17 +1,3 @@
 {
-  "rules": [
-    {
-      "id": "delete-transient-hosted-email-raw-messages-after-1h",
-      "enabled": true,
-      "conditions": {
-        "prefix": "transient/hosted-email/messages/"
-      },
-      "deleteObjectsTransition": {
-        "condition": {
-          "type": "Age",
-          "maxAge": 3600
-        }
-      }
-    }
-  ]
+  "rules": []
 }

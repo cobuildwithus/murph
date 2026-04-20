@@ -34,8 +34,7 @@ const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
 const HOSTED_DEVICE_SYNC_AGENT_AUTH_MESSAGES = {
   required:
     "Hosted device-sync agent routes require a bearer token created by /api/device-sync/agents/pair.",
-  expired:
-    "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+  expired: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
   invalid: "Hosted device-sync agent bearer token is invalid or revoked.",
 } as const;
 
@@ -131,7 +130,7 @@ export class HostedDeviceSyncAgentSessionService {
     return {
       connection,
       tokenBundle,
-      agentSession: await this.rotateAgentSession(session, now),
+      agentSession: await this.touchAgentSession(session, now),
     };
   }
 
@@ -337,7 +336,7 @@ export class HostedDeviceSyncAgentSessionService {
       tokenBundle: result.tokenBundle,
       refreshed: result.refreshed,
       tokenVersionChanged: result.tokenVersionChanged,
-      agentSession: await this.rotateAgentSession(session, now),
+      agentSession: await this.touchAgentSession(session, now),
     };
   }
 
@@ -421,7 +420,7 @@ export class HostedDeviceSyncAgentSessionService {
     return connection;
   }
 
-  private async rotateAgentSession(session: HostedAgentSessionRecord, now: string): Promise<HostedAgentSessionBearer> {
-    return this.agentSessions.rotateAgentSession(session, now);
+  private async touchAgentSession(session: HostedAgentSessionRecord, now: string): Promise<HostedAgentSessionBearer> {
+    return this.agentSessions.touchAgentSession(session, now);
   }
 }
