@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "from": "protocol_variant:finnish-sauna",
+      "reason": "Renamed to hierarchical protocol key.",
+      "to": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week"
+    }
+  ]
+}

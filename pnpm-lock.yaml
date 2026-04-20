@@ -509,6 +509,25 @@ importers:
         specifier: workspace:*
         version: link:../runtime-state
 
+  packages/health-commons:
+    dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^25.5.0
+        version: 25.5.0
+      tsx:
+        specifier: ^4.20.6
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.2
+        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.0(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+
   packages/hosted-execution:
     dependencies:
       '@murphai/contracts':

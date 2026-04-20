@@ -1,4 +1,10 @@
 import {
+  HEALTH_COMMONS_ENTITY_TYPES,
+  healthCommonsRelationSchema,
+  type HealthCommonsEntityType,
+  type HealthCommonsRelation,
+} from "@murphai/contracts";
+import {
   readMarkdownDocumentOutcome,
   readMarkdownDocument,
   walkRelativeFiles,
@@ -7,24 +13,21 @@ import {
 import {
   asObject,
   firstString,
+  firstStringArray,
   type FrontmatterObject,
 } from "./health/shared.ts";
 
-export type HealthLibraryEntityType =
-  | "mission"
-  | "domain"
-  | "biomarker"
-  | "goal_template"
-  | "experiment_family"
-  | "protocol_variant"
-  | "source_person"
-  | "source_artifact";
+export type HealthLibraryEntityType = HealthCommonsEntityType;
 
 export interface HealthLibraryNode {
+  aliases: string[];
   attributes: FrontmatterObject;
   body: string;
+  categories: string[];
   entityType: HealthLibraryEntityType;
+  key: string;
   relativePath: string;
+  relations: HealthCommonsRelation[];
   slug: string;
   status: string | null;
   summary: string | null;
@@ -32,6 +35,7 @@ export interface HealthLibraryNode {
 }
 
 export interface HealthLibraryGraph {
+  byKey: ReadonlyMap<string, HealthLibraryNode>;
   bySlug: ReadonlyMap<string, HealthLibraryNode>;
   nodes: HealthLibraryNode[];
 }
@@ -49,16 +53,7 @@ export interface HealthLibraryGraphReadResult {
 }
 
 const HEALTH_LIBRARY_ROOT = "bank/library";
-const HEALTH_LIBRARY_ENTITY_TYPES = new Set<HealthLibraryEntityType>([
-  "mission",
-  "domain",
-  "biomarker",
-  "goal_template",
-  "experiment_family",
-  "protocol_variant",
-  "source_person",
-  "source_artifact",
-]);
+const HEALTH_LIBRARY_ENTITY_TYPES = new Set<HealthLibraryEntityType>(HEALTH_COMMONS_ENTITY_TYPES);
 
 export async function readHealthLibraryGraph(
   vaultRoot: string,
@@ -77,6 +72,7 @@ export async function readHealthLibraryGraph(
   nodes.sort((left, right) => left.slug.localeCompare(right.slug));
 
   return {
+    byKey: new Map(nodes.map((node) => [node.key, node])),
     bySlug: new Map(nodes.map((node) => [node.slug, node])),
     nodes,
   };
@@ -110,6 +106,7 @@ export async function readHealthLibraryGraphWithIssues(
 
   return {
     graph: {
+      byKey: new Map(nodes.map((node) => [node.key, node])),
       bySlug: new Map(nodes.map((node) => [node.slug, node])),
       nodes,
     },
@@ -137,15 +134,30 @@ function toHealthLibraryNode(
   }
 
   return {
+    aliases: firstStringArray(source, ["aliases"]),
     attributes,
     body,
+    categories: firstStringArray(source, ["categories"]),
     entityType,
+    key: firstString(source, ["key"]) ?? `${entityType}:${slug}`,
     relativePath,
+    relations: parseRelations(source.relations),
     slug,
     status: firstString(source, ["status"]),
     summary: firstString(source, ["summary"]) ?? summarizeBody(body),
     title: firstString(source, ["title"]) ?? humanizeSlug(slug),
   };
+}
+
+function parseRelations(value: unknown): HealthCommonsRelation[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    const parsed = healthCommonsRelationSchema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  });
 }
 
 function parseHealthLibraryEntityType(

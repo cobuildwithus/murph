@@ -40,6 +40,11 @@
       "import": "./dist/health-entities.js",
       "default": "./dist/health-entities.js"
     },
+    "./health-commons": {
+      "types": "./dist/health-commons.d.ts",
+      "import": "./dist/health-commons.js",
+      "default": "./dist/health-commons.js"
+    },
     "./ids": {
       "types": "./dist/ids.d.ts",
       "import": "./dist/ids.js",
