@@ -168,17 +168,6 @@ export async function bumpHostedExecutionCursorVersionTx(input: {
   });
 }
 
-export async function clearHostedWakeTerminalTx(input: {
-  tx: HostedWakeMutationTx;
-  wakeId: string;
-}): Promise<void> {
-  await input.tx.hostedWakeTerminal.deleteMany({
-    where: {
-      wakeId: input.wakeId,
-    },
-  });
-}
-
 export async function findHostedWakeByDedupeKeyTx(input: {
   dedupeKey: string | null;
   tx: HostedWakeStoreClient;

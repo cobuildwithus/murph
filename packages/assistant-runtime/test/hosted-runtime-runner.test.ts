@@ -62,14 +62,15 @@ function buildLinqWake(eventId: string) {
 
 const mocks = vi.hoisted(() => ({
   completeHostedExecutionAfterCommit: vi.fn(),
+  completeHostedRunDrainAfterCommit: vi.fn(),
   createHostedArtifactResolver: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
+  executeHostedRunDrainForCommit: vi.fn(),
   executeHostedWakeForCommit: vi.fn(),
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
-  resumeHostedCommittedExecution: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
   withHostedProcessEnvironment: vi.fn(),
@@ -102,10 +103,6 @@ vi.mock("@murphai/operator-config/linq-runtime", () => ({
   stopLinqChatTypingIndicator: mocks.stopLinqChatTypingIndicator,
 }));
 
-vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
-  resumeHostedCommittedExecution: mocks.resumeHostedCommittedExecution,
-}));
-
 vi.mock("../src/hosted-runtime/artifacts.ts", async () => {
   const actual = await vi.importActual<typeof import("../src/hosted-runtime/artifacts.ts")>(
     "../src/hosted-runtime/artifacts.ts",
@@ -129,6 +126,8 @@ vi.mock("../src/hosted-runtime/environment.ts", async () => {
 
 vi.mock("../src/hosted-runtime/execution.ts", () => ({
   completeHostedExecutionAfterCommit: mocks.completeHostedExecutionAfterCommit,
+  completeHostedRunDrainAfterCommit: mocks.completeHostedRunDrainAfterCommit,
+  executeHostedRunDrainForCommit: mocks.executeHostedRunDrainForCommit,
   executeHostedWakeForCommit: mocks.executeHostedWakeForCommit,
 }));
 
@@ -246,9 +245,10 @@ beforeEach(() => {
       callback: () => Promise<unknown>,
     ) => callback(),
   );
+  mocks.executeHostedRunDrainForCommit.mockResolvedValue(committedExecution);
   mocks.executeHostedWakeForCommit.mockResolvedValue(committedExecution);
-  mocks.resumeHostedCommittedExecution.mockReturnValue(committedExecution);
   mocks.completeHostedExecutionAfterCommit.mockResolvedValue(finalResult);
+  mocks.completeHostedRunDrainAfterCommit.mockResolvedValue(finalResult);
   mocks.materializeHostedExecutionArtifacts.mockResolvedValue(undefined);
   mocks.startLinqChatTypingIndicator.mockResolvedValue(undefined);
   mocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined);
@@ -349,7 +349,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       provider: "oura",
     });
     expect(mocks.executeHostedWakeForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.resumeHostedCommittedExecution).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
       {
@@ -387,7 +386,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             usageExportBound: false,
           }),
           runElapsedMs: expect.any(Number),
-          resumeFromCommit: false,
           sharePackAttached: false,
           userEnvCategories: {
             modelCredentialConfigured: false,
@@ -622,18 +620,20 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
   });
 
-  it("uses the committed resume payload without re-running dispatch or commit callbacks", async () => {
+  it("uses the committed run-drain finalize payload without re-running dispatch or commit callbacks", async () => {
     const result = await runHostedAssistantRuntimeJobInProcessDetailed(
       {
         request: {
           bundle: "incoming-bundle",
           wake: buildCronWake("evt_resume"),
-          resume: {
-            committedResult: {
-              assistantDeliveryEffects:
-                committedExecution.committedAssistantDeliveryEffects,
-              result: committedExecution.committedResult.result,
-            },
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            resumeFinalize: true,
+            runId: "run_123",
+            triggerKind: "runtime_timer",
           },
         },
       },
@@ -651,9 +651,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
 
     assert.deepEqual(result, finalResult);
-    expect(mocks.resumeHostedCommittedExecution).toHaveBeenCalledTimes(1);
     expect(mocks.executeHostedWakeForCommit).not.toHaveBeenCalled();
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedRunDrainAfterCommit).toHaveBeenCalledTimes(1);
   });
 
   it("swallows Linq typing startup failures and still completes the hosted run", async () => {
@@ -843,8 +842,9 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
   });
 
-  it("fails closed when resume-only post-commit completion fails", async () => {
-    mocks.completeHostedExecutionAfterCommit.mockRejectedValueOnce(
+  it("fails closed when run-drain finalize post-commit completion fails", async () => {
+    mocks.completeHostedRunDrainAfterCommit.mockReset();
+    mocks.completeHostedRunDrainAfterCommit.mockRejectedValueOnce(
       new Error("completion failed"),
     );
 
@@ -854,12 +854,14 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           request: {
             bundle: "incoming-bundle",
             wake: buildCronWake("evt_completion_failure"),
-            resume: {
-              committedResult: {
-                assistantDeliveryEffects:
-                  committedExecution.committedAssistantDeliveryEffects,
-                result: committedExecution.committedResult.result,
-              },
+            runDrain: {
+              acquiredAt: "2026-04-08T00:00:00.000Z",
+              events: [],
+              inputCommittedSeq: "24",
+              inputCursorVersion: "4",
+              resumeFinalize: true,
+              runId: "run_123",
+              triggerKind: "runtime_timer",
             },
           },
         },
@@ -877,9 +879,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       ),
     ).rejects.toThrow(/completion failed/u);
 
-    expect(mocks.resumeHostedCommittedExecution).toHaveBeenCalledTimes(1);
     expect(mocks.executeHostedWakeForCommit).not.toHaveBeenCalled();
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedRunDrainAfterCommit).toHaveBeenCalledTimes(1);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Hosted runtime failed.",
@@ -928,19 +929,21 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
   });
 
   it("returns the bare runner result from the convenience wrapper", async () => {
-    mocks.completeHostedExecutionAfterCommit.mockResolvedValueOnce(finalResult);
+    mocks.completeHostedRunDrainAfterCommit.mockResolvedValueOnce(finalResult);
 
     const result = await runHostedAssistantRuntimeJobInProcess(
       {
         request: {
           bundle: "incoming-bundle",
           wake: buildCronWake("evt_wrapper"),
-          resume: {
-            committedResult: {
-              assistantDeliveryEffects:
-                committedExecution.committedAssistantDeliveryEffects,
-              result: committedExecution.committedResult.result,
-            },
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            resumeFinalize: true,
+            runId: "run_123",
+            triggerKind: "runtime_timer",
           },
         },
       },

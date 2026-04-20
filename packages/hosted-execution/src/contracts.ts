@@ -154,6 +154,23 @@ export interface HostedExecutionRunnerSharePack {
   shareId: string;
 }
 
+export interface HostedRuntimeDrainEvent {
+  seq: string;
+  sharePack?: HostedExecutionRunnerSharePack | null;
+  wake: HostedExecutionWake;
+  wakeId: string;
+}
+
+export interface HostedRuntimeDrainRequest {
+  acquiredAt: string;
+  events: HostedRuntimeDrainEvent[];
+  inputCommittedSeq: string;
+  inputCursorVersion: string;
+  resumeFinalize?: boolean | null;
+  runId: string;
+  triggerKind: HostedRunTriggerKind;
+}
+
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
@@ -268,10 +285,6 @@ export type HostedExecutionWake =
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareAcceptedWake;
 
-export interface HostedWakeMaterializationHints {
-  assistantWakeAt?: string | null;
-  deviceSyncWakeAt?: string | null;
-}
 
 export type HostedExecutionSystemWake = Exclude<
   HostedExecutionWake,
@@ -283,6 +296,7 @@ export type HostedWakeSnapshotRef = HostedExecutionBundleRefState;
 
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
+  runDrain?: HostedRuntimeDrainRequest | null;
   wake: HostedExecutionWake;
   run?: HostedExecutionRunContext | null;
   sharePack?: HostedExecutionRunnerSharePack | null;
@@ -293,7 +307,6 @@ export interface HostedExecutionRunnerResult {
   result: {
     eventsHandled: number;
     nextWakeAt?: string | null;
-    wakeMaterializationHints?: HostedWakeMaterializationHints | null;
     summary: string;
   };
 }
@@ -337,20 +350,6 @@ export const HOSTED_WAKE_LIFECYCLE_STATES = [
 
 export type HostedWakeLifecycleState =
   (typeof HOSTED_WAKE_LIFECYCLE_STATES)[number];
-
-export interface HostedWakeStatus {
-  eventId: string;
-  lastError: string | null;
-  replacedByEventId?: string | null;
-  // `replaced` is a coalescing lifecycle fact, not an executor-submitted terminal receipt.
-  state: HostedWakeLifecycleState;
-  userId: string;
-}
-
-export interface HostedWakeExecutionResult {
-  event: HostedWakeStatus;
-  status: HostedExecutionUserStatus;
-}
 
 export const HOSTED_WAKE_BEHAVIORS = [
   "ordered",
@@ -411,109 +410,11 @@ export type HostedWakeRecord =
   | HostedConversationMessageWakeRecord
   | HostedSystemWakeRecord;
 
-export type HostedFetchedWakeRecord =
-  | (HostedConversationMessageWakeRecord & {
-      fetchProof: string;
-    })
-  | (HostedSystemWakeRecord & {
-      fetchProof: string;
-    });
-
-export interface HostedWakeFetchRequest {
-  limit?: number | null;
-}
-
-export interface HostedWakeFetchResponse {
-  cursor: HostedExecutionCursorState;
-  wakes: HostedFetchedWakeRecord[];
-}
-
-export interface HostedWakeCommitRequest {
-  assistantNextWakeAt?: string | null;
-  committedSeq: string;
-  expectedVersion: string;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  snapshotRef?: HostedWakeSnapshotRef;
-}
-
-export interface HostedWakeCommitResponse {
-  committed: boolean;
-  cursor: HostedExecutionCursorState;
-  finalizeToken?: string | null;
-}
-
-export interface HostedWakeFinalizeRequest {
-  assistantNextWakeAt?: string | null;
-  finalizeToken: string;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  snapshotRef: HostedWakeSnapshotRef;
-}
-
-export interface HostedWakeFinalizeResponse {
-  finalized: boolean;
-  cursor: HostedExecutionCursorState;
-}
-
 export interface HostedWakeAppendResponse {
   duplicate: boolean;
   inserted: boolean;
   updatedExisting: boolean;
   wake: HostedWakeRecord;
-}
-
-export const HOSTED_WAKE_TERMINAL_STATES = [
-  "completed",
-  "quarantined",
-] as const;
-
-export type HostedWakeTerminalState =
-  (typeof HOSTED_WAKE_TERMINAL_STATES)[number];
-
-export interface HostedWakeTerminalRequest {
-  fetchProof: string;
-  state: HostedWakeTerminalState;
-  wakeId: string;
-  wakeSeq: string;
-}
-
-export interface HostedWakeTerminalResponse {
-  recorded: boolean;
-}
-
-export interface HostedWakeMaterializeRequest {}
-
-export interface HostedWakeMaterializeResponse {
-  targetSeqHint: string | null;
-  wakeMaterializationHints: HostedWakeMaterializationHints | null;
-}
-
-export interface HostedWakeQuarantineRequest {
-  fetchProof: string;
-  quarantineCode: string;
-  wakeId: string;
-  wakeSeq: string;
-}
-
-export interface HostedWakeQuarantineResponse {
-  quarantined: boolean;
-}
-
-export interface HostedWakeStatusRequest {
-  eventId?: string | null;
-  fetchProof?: string | null;
-  wakeEventId?: string | null;
-  wakeId?: string | null;
-  wakeSeq?: string | null;
-}
-
-export interface HostedWakeStatusResponse {
-  cursor: HostedExecutionCursorState;
-  fetchProofCurrent?: boolean;
-  replacedByEventId?: string | null;
-  wakeState?: HostedWakeLifecycleState | null;
-  pendingWakeCount: number;
 }
 
 export const HOSTED_RUN_STATUSES = [
@@ -566,6 +467,9 @@ export interface HostedRunRecord {
   eventKinds: string[];
   eventSeqs: string[];
   executorKind: HostedRunExecutorKind;
+  executorCodeDigest?: string | null;
+  attestationRef?: string | null;
+  signedResultRef?: string | null;
   failedAt?: string | null;
   finalSnapshotRef?: HostedWakeSnapshotRef;
   finalizedAt?: string | null;
@@ -603,6 +507,9 @@ export interface HostedRunLogRecord {
 
 export interface HostedRunAcquireRequest {
   executorKind?: HostedRunExecutorKind | null;
+  executorCodeDigest?: string | null;
+  attestationRef?: string | null;
+  signedResultRef?: string | null;
   limit?: number | null;
   now?: string | null;
   triggerKind?: HostedRunTriggerKind | null;
@@ -627,6 +534,8 @@ export interface HostedRunEventResult {
 export interface HostedRunCommitRequest {
   eventResults?: HostedRunEventResult[];
   expectedCursorVersion: string;
+  failureClass?: string | null;
+  failureCode?: string | null;
   finalizeRequired?: boolean | null;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
@@ -692,8 +601,6 @@ export interface HostedRunStatusResponse {
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
-
-export const HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE = "HOSTED_WAKE_FETCH_PROOF_STALE";
 
 export type HostedExecutionDeviceSyncJobHint =
   DeviceSyncHostedExecutionDeviceSyncJobHint;

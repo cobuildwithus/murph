@@ -39,15 +39,14 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
           runId: "run_123",
           startedAt: "2026-04-01T00:00:01.000Z",
         },
-        resume: {
-          committedResult: {
-            result: {
-              eventsHandled: 1,
-              nextWakeAt: null,
-              summary: "completed",
-            },
-            assistantDeliveryEffects: [],
-          },
+        runDrain: {
+          acquiredAt: "2026-04-01T00:00:01.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          resumeFinalize: true,
+          runId: "run_123",
+          triggerKind: "runtime_timer",
         },
       },
       runtime: {
@@ -73,7 +72,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     });
     expect(parsed.request.bundle).toBe("vault-bundle");
     expect(parsed.request.currentBundleRef?.key).toBe("bundles/user/vault.json");
-    expect(parsed.request.resume?.committedResult.assistantDeliveryEffects).toEqual([]);
+    expect(parsed.request.runDrain?.resumeFinalize).toBe(true);
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
   });
 
@@ -154,29 +153,30 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     })).toThrow(/runtime config\.webControlPlane is no longer supported/i);
   });
 
-  it("rejects the removed resume sideEffects alias", () => {
-    expect(() => parseHostedAssistantRuntimeJobInput({
+  it("parses run-drain finalize requests", () => {
+    const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
         wake: {
-          eventId: "evt_legacy_side_effects",
+          eventId: "evt_run_drain_finalize",
           kind: "member.activated",
           memberChannels: defaultMemberChannels,
           occurredAt: "2026-04-01T00:00:00.000Z",
           userId: "member_123",
         },
-        resume: {
-          committedResult: {
-            result: {
-              eventsHandled: 1,
-              nextWakeAt: null,
-              summary: "completed",
-            },
-            sideEffects: [],
-          },
+        runDrain: {
+          acquiredAt: "2026-04-01T00:00:01.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          resumeFinalize: true,
+          runId: "run_123",
+          triggerKind: "runtime_timer",
         },
       },
-    })).toThrow(/committedResult\.sideEffects is no longer supported/i);
+    });
+
+    expect(parsed.request.runDrain?.resumeFinalize).toBe(true);
   });
 
   it("accepts currentBundleRef without request.run", () => {

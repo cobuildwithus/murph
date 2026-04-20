@@ -6,7 +6,6 @@ import {
   allocateHostedWakeSeqTx,
   assertHostedWakeUserMatch,
   bumpHostedExecutionCursorVersionTx,
-  clearHostedWakeTerminalTx,
   createHostedWakeEventTx,
   ensureHostedExecutionCursorRowTx,
   findHostedWakeByDedupeKeyTx,
@@ -154,10 +153,6 @@ export async function appendHostedWakeTx(
           quarantineCode: null,
           quarantinedAt: null,
         },
-      });
-      await clearHostedWakeTerminalTx({
-        tx: input.tx,
-        wakeId: unresolved.id,
       });
       await bumpHostedExecutionCursorVersionTx({
         tx: input.tx,

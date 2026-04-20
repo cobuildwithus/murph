@@ -181,7 +181,7 @@ describe("RunnerStateStore bundle metadata", () => {
     expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
     expect(runnerBundleSlotsTableExists(db)).toBe(true);
     expect(() => createRunnerStateStoreHarness(setupLegacyBundleSchema)).toThrow(
-      /runner_meta schema is unsupported; missing bundle_ref_json, bundle_version, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at, pending_commit_json, wake_materialization_hints_json/u,
+      /runner_meta schema is unsupported; missing bundle_ref_json, bundle_version, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at/u,
     );
   });
 

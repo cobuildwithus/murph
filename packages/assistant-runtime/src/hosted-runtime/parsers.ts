@@ -1,12 +1,6 @@
 import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/config";
-import type {
-  HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
-import {
-  parseHostedAssistantDeliveryEffects,
-} from "@murphai/hosted-execution/side-effects";
 import {
   parseHostedExecutionBundleRef,
   parseHostedExecutionRunnerRequest,
@@ -38,14 +32,9 @@ export function parseHostedAssistantRuntimeJobRequest(
 ): HostedAssistantRuntimeJobRequest {
   const record = requireObject(value, "Hosted assistant runtime job request");
   const request = parseHostedExecutionRunnerRequest(record);
-  const resume = record.resume === undefined
-    ? undefined
-    : record.resume === null
-      ? null
-      : parseHostedAssistantRuntimeResume(record.resume);
-
   return {
     bundle: request.bundle,
+    ...(request.runDrain === undefined ? {} : { runDrain: request.runDrain }),
     wake: request.wake,
     ...(request.run === undefined ? {} : { run: request.run }),
     ...(request.sharePack === undefined ? {} : { sharePack: request.sharePack }),
@@ -57,7 +46,6 @@ export function parseHostedAssistantRuntimeJobRequest(
             "Hosted assistant runtime job request.currentBundleRef",
           ),
         }),
-    ...(resume === undefined ? {} : { resume }),
   };
 }
 
@@ -154,59 +142,6 @@ function parseHostedAssistantRuntimeDeviceSyncConfig(
   return parseConfiguredDeviceSyncRuntimeConfig(value, label);
 }
 
-function parseHostedAssistantRuntimeResume(
-  value: unknown,
-): NonNullable<HostedAssistantRuntimeJobRequest["resume"]> {
-  const record = requireObject(value, "Hosted assistant runtime resume state");
-  const committedResult = requireObject(
-    record.committedResult,
-    "Hosted assistant runtime resume state.committedResult",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    committedResult,
-    "sideEffects",
-    "Hosted assistant runtime resume state.committedResult",
-  );
-
-  return {
-    committedResult: {
-      result: parseHostedExecutionRunnerSummary(
-        committedResult.result,
-        "Hosted assistant runtime resume state.committedResult.result",
-      ),
-      assistantDeliveryEffects: requireHostedAssistantDeliveryEffects(
-        committedResult.assistantDeliveryEffects,
-        "Hosted assistant runtime resume state.committedResult.assistantDeliveryEffects",
-      ),
-    },
-  };
-}
-
-function parseHostedExecutionRunnerSummary(
-  value: unknown,
-  label: string,
-): HostedExecutionRunnerResult["result"] {
-  const record = requireObject(value, label);
-
-  return {
-    eventsHandled: requireNumber(record.eventsHandled, `${label}.eventsHandled`),
-    ...(record.nextWakeAt === undefined
-      ? {}
-      : {
-          nextWakeAt: readNullableString(record.nextWakeAt, `${label}.nextWakeAt`),
-        }),
-    ...(record.wakeMaterializationHints === undefined
-      ? {}
-      : {
-          wakeMaterializationHints: parseHostedWakeMaterializationHints(
-            record.wakeMaterializationHints,
-            `${label}.wakeMaterializationHints`,
-          ),
-        }),
-    summary: requireString(record.summary, `${label}.summary`),
-  };
-}
-
 function parseStringRecord(value: unknown, label: string): Record<string, string> {
   const record = requireObject(value, label);
   const parsed: Record<string, string> = {};
@@ -222,6 +157,16 @@ function parseStringRecord(value: unknown, label: string): Record<string, string
   return parsed;
 }
 
+
+function rejectRemovedHostedAssistantRuntimeField(
+  record: Record<string, unknown>,
+  field: string,
+  label = "Hosted assistant runtime config",
+): void {
+  if (record[field] !== undefined) {
+    throw new TypeError(`${label}.${field} is no longer supported.`);
+  }
+}
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -262,57 +207,4 @@ function readNullableString(value: unknown, label: string): string | null {
   }
 
   return requireString(value, label);
-}
-
-function parseHostedWakeMaterializationHints(
-  value: unknown,
-  label: string,
-): HostedExecutionRunnerResult["result"]["wakeMaterializationHints"] {
-  if (value === null) {
-    return null;
-  }
-
-  const record = requireObject(value, label);
-
-  return {
-    ...(record.assistantWakeAt === undefined
-      ? {}
-      : {
-          assistantWakeAt: readNullableString(
-            record.assistantWakeAt,
-            `${label}.assistantWakeAt`,
-          ),
-        }),
-    ...(record.deviceSyncWakeAt === undefined
-      ? {}
-      : {
-          deviceSyncWakeAt: readNullableString(
-            record.deviceSyncWakeAt,
-            `${label}.deviceSyncWakeAt`,
-          ),
-        }),
-  };
-}
-
-function rejectRemovedHostedAssistantRuntimeField(
-  record: Record<string, unknown>,
-  field: string,
-  label = "Hosted assistant runtime config",
-): void {
-  if (record[field] !== undefined) {
-    throw new TypeError(
-      `${label}.${field} is no longer supported.`,
-    );
-  }
-}
-
-function requireHostedAssistantDeliveryEffects(
-  value: unknown,
-  label: string,
-) {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-
-  return parseHostedAssistantDeliveryEffects(value);
 }

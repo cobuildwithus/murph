@@ -938,7 +938,11 @@ describe("RunnerContainer", () => {
       commit: {
         bundleRef: null,
       },
-      resume: {
+      runDrain: {
+        acquiredAt: "2026-03-27T00:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "1",
+        inputCursorVersion: "1",
         committedResult: {
           assistantDeliveryEffects: [],
           result: {
@@ -946,6 +950,9 @@ describe("RunnerContainer", () => {
             summary: "already committed",
           },
         },
+        resumeFinalize: true,
+        runId: "run_123",
+        triggerKind: "runtime_timer" as const,
       },
       run: {
         attempt: 2,
@@ -980,14 +987,14 @@ describe("RunnerContainer", () => {
       localInternalProxyBaseUrl: null,
       job: {
         request: {
-          resume: {
-            committedResult: {
-              assistantDeliveryEffects: [],
-              result: {
-                eventsHandled: 1,
-                summary: "already committed",
-              },
-            },
+          runDrain: {
+            acquiredAt: "2026-03-27T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "1",
+            inputCursorVersion: "1",
+            resumeFinalize: true,
+            runId: "run_123",
+            triggerKind: "runtime_timer",
           },
           run: {
             attempt: 2,

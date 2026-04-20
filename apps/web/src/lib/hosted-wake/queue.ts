@@ -1,13 +1,11 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
-  HostedExecutionAssistantCronTickEvent,
   HostedExecutionWake,
   HostedWakePayloadSchema,
   HostedWakeLifecycleState,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
-  buildHostedExecutionAssistantCronTickWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -119,47 +117,12 @@ export async function readHostedExecutionWakeLifecycleStateTx(input: {
   return lifecycle?.state ?? null;
 }
 
-export async function materializeHostedAssistantCronWakeTx(input: {
-  eventId?: string;
-  occurredAt: string;
-  reason: HostedExecutionAssistantCronTickEvent["reason"];
-  tx: Prisma.TransactionClient;
-  userId: string;
-}): Promise<AppendHostedWakeResult> {
-  const wake = buildHostedExecutionAssistantCronTickWake({
-    eventId: input.eventId ?? buildHostedAssistantCronWakeEventId(input),
-    occurredAt: input.occurredAt,
-    reason: input.reason,
-    userId: input.userId,
-  });
-
-  return appendHostedExecutionWakePayloadTx({
-    tx: input.tx,
-    wake,
-  });
-}
-
 export function buildHostedExecutionWakeDedupeKey(wake: HostedExecutionWake): string {
   return buildHostedWakeDedupeKey(wake);
 }
 
 export function buildHostedExecutionWakeCoalescingKey(wake: HostedExecutionWake): string {
   return buildHostedWakeCoalescingKey(wake);
-}
-
-export function buildHostedAssistantCronWakeEventId(input: {
-  occurredAt: string;
-  reason: HostedExecutionAssistantCronTickEvent["reason"];
-  userId: string;
-}): string {
-  const occurredAt = new Date(input.occurredAt);
-
-  if (Number.isNaN(occurredAt.getTime())) {
-    throw new TypeError("Hosted assistant cron wake occurredAt must be a valid ISO-8601 timestamp.");
-  }
-
-  const bucketedOccurredAt = new Date(Math.floor(occurredAt.getTime() / 60_000) * 60_000);
-  return `assistant.cron.tick:${input.userId}:${input.reason}:${bucketedOccurredAt.toISOString()}`;
 }
 
 function buildHostedWakeDedupeKey(wake: HostedExecutionWake): string {

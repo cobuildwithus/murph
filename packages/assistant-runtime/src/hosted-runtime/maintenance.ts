@@ -126,7 +126,6 @@ export async function runHostedAssistantCronWakeLane(input: {
     deviceSyncSkipped: true,
     nextWakeAt,
     parserProcessed: 0,
-    wakeMaterializationHints: createAssistantWakeMaterializationHints(nextWakeAt),
   };
 }
 
@@ -326,7 +325,6 @@ export async function runHostedDeviceSyncWakeLane(input: {
     deviceSyncSkipped: deviceSyncResult.skipped,
     nextWakeAt: deviceSyncResult.nextWakeAt,
     parserProcessed: 0,
-    wakeMaterializationHints: createDeviceSyncWakeMaterializationHints(deviceSyncResult.nextWakeAt),
   };
 }
 
@@ -336,7 +334,6 @@ export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
     deviceSyncSkipped: true,
     nextWakeAt: null,
     parserProcessed: 0,
-    wakeMaterializationHints: null,
   };
 }
 
@@ -379,20 +376,4 @@ function createHostedDeviceSyncRuntime(input: {
     },
     registry,
   });
-}
-
-function createAssistantWakeMaterializationHints(nextWakeAt: string | null): HostedMaintenanceMetrics["wakeMaterializationHints"] {
-  return nextWakeAt
-    ? {
-        assistantWakeAt: nextWakeAt,
-      }
-    : null;
-}
-
-function createDeviceSyncWakeMaterializationHints(nextWakeAt: string | null): HostedMaintenanceMetrics["wakeMaterializationHints"] {
-  return nextWakeAt
-    ? {
-        deviceSyncWakeAt: nextWakeAt,
-      }
-    : null;
 }

@@ -13,6 +13,8 @@ export const POST = withJsonError(async (request: Request) => {
   const response = await commitHostedRun({
     eventResults: body.eventResults,
     expectedCursorVersion: BigInt(body.expectedCursorVersion),
+    failureClass: "failureClass" in body ? body.failureClass ?? null : undefined,
+    failureCode: "failureCode" in body ? body.failureCode ?? null : undefined,
     finalizeRequired: body.finalizeRequired,
     nextRuntimeWakeAt: "nextRuntimeWakeAt" in body ? body.nextRuntimeWakeAt ?? null : undefined,
     nextRuntimeWakeReason: "nextRuntimeWakeReason" in body ? body.nextRuntimeWakeReason ?? null : undefined,

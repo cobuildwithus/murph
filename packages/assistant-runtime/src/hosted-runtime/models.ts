@@ -6,8 +6,8 @@ import type {
 import type {
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-  HostedWakeMaterializationHints,
   HostedExecutionWake,
+  HostedRuntimeDrainRequest,
 } from "@murphai/hosted-execution";
 import type { HostedExecutionBundleRefState } from "@murphai/hosted-execution/bundles";
 import type {
@@ -38,19 +38,10 @@ export interface HostedAssistantRuntimeConfig {
   userEnv?: Readonly<Record<string, string>>;
 }
 
-export interface HostedAssistantRuntimeResumeCommittedResult {
-  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-  result: HostedExecutionRunnerResult["result"];
-}
-
-export interface HostedAssistantRuntimeResumeState {
-  committedResult: HostedAssistantRuntimeResumeCommittedResult;
-}
-
 export interface HostedAssistantRuntimeJobRequest
   extends HostedExecutionRunnerRequest {
   currentBundleRef?: HostedExecutionBundleRefState;
-  resume?: HostedAssistantRuntimeResumeState | null;
+  runDrain?: HostedRuntimeDrainRequest | null;
 }
 
 export interface HostedAssistantRuntimeJobInput {
@@ -86,6 +77,17 @@ export interface HostedCommittedExecutionState {
   committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   committedResult: HostedExecutionRunnerResult;
+}
+
+export interface HostedRunDrainMetrics {
+  bootstrapResult: HostedBootstrapResult | null;
+  deviceSyncProcessed: number;
+  deviceSyncSkipped: boolean;
+  eventsHandled: number;
+  nextWakeAt: string | null;
+  parserProcessed: number;
+  shareImportResult: HostedShareImportResult | null;
+  shareImportTitle: string | null;
 }
 
 export type HostedAssistantDeliveryOutcomeStatus =
@@ -166,7 +168,6 @@ export interface HostedMaintenanceMetrics {
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;
   parserProcessed: number;
-  wakeMaterializationHints: HostedWakeMaterializationHints | null;
 }
 
 export type HostedWorkspaceArtifactMaterializer = (

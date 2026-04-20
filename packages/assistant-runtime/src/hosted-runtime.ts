@@ -22,9 +22,6 @@ import {
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 
 import {
-  resumeHostedCommittedExecution,
-} from "./hosted-runtime/callbacks.ts";
-import {
   createHostedArtifactMaterializer,
   createHostedArtifactResolver,
 } from "./hosted-runtime/artifacts.ts";
@@ -33,7 +30,8 @@ import {
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
 import {
-  completeHostedExecutionAfterCommit,
+  completeHostedRunDrainAfterCommit,
+  executeHostedRunDrainForCommit,
   executeHostedWakeForCommit,
 } from "./hosted-runtime/execution.ts";
 import {
@@ -175,55 +173,72 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         });
 
         try {
-          if (!input.request.resume?.committedResult) {
-            const committedExecution = await executeHostedWakeForCommit({
-              artifactMaterializer: incomingBundle
-                ? createHostedArtifactMaterializer({
-                    artifactResolver,
-                    bundle: incomingBundle,
-                    materializedArtifactPaths,
-                    workspaceRoot: nextWorkspaceRoot,
-                  })
-                : null,
+          if (input.request.runDrain?.resumeFinalize) {
+            const finalResult = await completeHostedRunDrainAfterCommit({
               materializedArtifactPaths,
-              request: input.request,
-              restored,
+              run: input.request.run ?? null,
               runtime,
-              executionContext,
-              runtimeEnv,
+              restored,
+              request: input.request,
+              wake,
             });
 
-            return {
-              committedAssistantDeliveryEffects:
-                committedExecution.committedAssistantDeliveryEffects,
-              committedGatewayProjectionSnapshot:
-                committedExecution.committedGatewayProjectionSnapshot ?? null,
-              phase: "committed",
-              result: committedExecution.committedResult,
-            };
+            emitHostedExecutionStructuredLog({
+              component: "runtime",
+              wake,
+              details: {
+                runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+              },
+              message: "Hosted runtime completed run-drain finalization.",
+              phase: "completed",
+              run: input.request.run ?? null,
+            });
+
+            return finalResult;
           }
 
-          const finalResult = await completeHostedExecutionAfterCommit({
-            materializedArtifactPaths,
-            run: input.request.run ?? null,
-            runtime,
-            restored,
-            committedExecution: resumeHostedCommittedExecution(input.request),
-            wake,
-          });
+          const committedExecution = input.request.runDrain
+            ? await executeHostedRunDrainForCommit({
+                artifactMaterializer: incomingBundle
+                  ? createHostedArtifactMaterializer({
+                      artifactResolver,
+                      bundle: incomingBundle,
+                      materializedArtifactPaths,
+                      workspaceRoot: nextWorkspaceRoot,
+                    })
+                  : null,
+                materializedArtifactPaths,
+                request: input.request,
+                restored,
+                runtime,
+                executionContext,
+                runtimeEnv,
+              })
+            : await executeHostedWakeForCommit({
+                artifactMaterializer: incomingBundle
+                  ? createHostedArtifactMaterializer({
+                      artifactResolver,
+                      bundle: incomingBundle,
+                      materializedArtifactPaths,
+                      workspaceRoot: nextWorkspaceRoot,
+                    })
+                  : null,
+                materializedArtifactPaths,
+                request: input.request,
+                restored,
+                runtime,
+                executionContext,
+                runtimeEnv,
+              });
 
-          emitHostedExecutionStructuredLog({
-            component: "runtime",
-            wake,
-            details: {
-              runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-            },
-            message: "Hosted runtime completed.",
-            phase: "completed",
-            run: input.request.run ?? null,
-          });
-
-          return finalResult;
+          return {
+            committedAssistantDeliveryEffects:
+              committedExecution.committedAssistantDeliveryEffects,
+            committedGatewayProjectionSnapshot:
+              committedExecution.committedGatewayProjectionSnapshot ?? null,
+            phase: "committed",
+            result: committedExecution.committedResult,
+          };
         } finally {
           await stopHostedWakeTypingIndicator({
             wake,
@@ -344,7 +359,6 @@ function buildHostedRuntimeStartDetails(
         usageExportBound: Boolean(runtime.platform.usageExportPort),
       },
     runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-    resumeFromCommit: Boolean(input.request.resume?.committedResult),
     sharePackAttached: Boolean(input.request.sharePack),
     userEnvCategories: {
       modelCredentialConfigured: hasAnyHostedRuntimeConfigKey(runtime.userEnv, [

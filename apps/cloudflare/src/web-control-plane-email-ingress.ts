@@ -10,7 +10,7 @@ import {
 } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
 
-const HOSTED_WEB_HOSTED_WAKE_EMAIL_INGRESS_PATH = "/api/internal/hosted-wake/email-ingress";
+const HOSTED_WEB_HOSTED_WAKE_EMAIL_INGRESS_PATH = "/api/internal/hosted-run/email-ingress";
 
 export async function appendHostedEmailIngressWakeInWeb(input: {
   baseUrl: string;

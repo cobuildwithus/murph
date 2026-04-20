@@ -23,12 +23,12 @@ function buildMemberActivatedWake(eventId: string) {
 }
 
 describe("hosted runtime parser coverage", () => {
-  it("parses nullable commit and resume branches without injecting optional runtime state", () => {
+  it("parses nullable commit and run-drain branches without injecting optional runtime state", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
         wake: buildMemberActivatedWake("evt_123"),
-        resume: null,
+        runDrain: null,
       },
     });
 
@@ -36,7 +36,7 @@ describe("hosted runtime parser coverage", () => {
       request: {
         bundle: null,
         wake: buildMemberActivatedWake("evt_123"),
-        resume: null,
+        runDrain: null,
       },
     });
   });
@@ -106,21 +106,25 @@ describe("hosted runtime parser coverage", () => {
     );
   });
 
-  it("rejects invalid runner summaries and runtime numeric fields", () => {
-    expect(() => parseHostedAssistantRuntimeJobRequest({
+  it("parses run-drain finalize requests", () => {
+    const parsed = parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      wake: buildMemberActivatedWake("evt_invalid_summary"),
-      resume: {
-        committedResult: {
-          result: {
-            eventsHandled: Number.POSITIVE_INFINITY,
-            summary: "",
-          },
-          assistantDeliveryEffects: [],
-        },
+      wake: buildMemberActivatedWake("evt_run_drain_finalize"),
+      runDrain: {
+        acquiredAt: "2026-04-08T00:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "24",
+        inputCursorVersion: "4",
+        resumeFinalize: true,
+        runId: "run_123",
+        triggerKind: "runtime_timer",
       },
-    })).toThrow(/eventsHandled must be a finite number/u);
+    });
 
+    expect(parsed.runDrain?.resumeFinalize).toBe(true);
+  });
+
+  it("rejects invalid runtime numeric fields", () => {
     expect(() => parseHostedAssistantRuntimeConfig({
       commitTimeoutMs: Number.NaN,
     })).toThrow(/commitTimeoutMs must be a finite number/u);
@@ -135,53 +139,20 @@ describe("hosted runtime parser coverage", () => {
     })).toThrow(/emailSendReady must be a boolean/u);
   });
 
-  it("rejects invalid non-null next wake timestamps and empty summaries", () => {
+  it("rejects invalid run-drain finalize flags", () => {
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      wake: buildMemberActivatedWake("evt_invalid_next_wake"),
-      resume: {
-        committedResult: {
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: false,
-            summary: "completed",
-          },
-          assistantDeliveryEffects: [],
-        },
+      wake: buildMemberActivatedWake("evt_invalid_resume_finalize"),
+      runDrain: {
+        acquiredAt: "2026-04-08T00:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "24",
+        inputCursorVersion: "4",
+        resumeFinalize: "yes",
+        runId: "run_123",
+        triggerKind: "runtime_timer",
       },
-    })).toThrow(/nextWakeAt must be a non-empty string/u);
-
-    expect(() => parseHostedAssistantRuntimeJobRequest({
-      bundle: null,
-      wake: buildMemberActivatedWake("evt_empty_summary"),
-      resume: {
-        committedResult: {
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: null,
-            summary: "",
-          },
-          assistantDeliveryEffects: [],
-        },
-      },
-    })).toThrow(/summary must be a non-empty string/u);
-  });
-
-  it("rejects removed resume sideEffects aliases", () => {
-    expect(() => parseHostedAssistantRuntimeJobRequest({
-      bundle: null,
-      wake: buildMemberActivatedWake("evt_removed_side_effects"),
-      resume: {
-        committedResult: {
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: null,
-            summary: "completed",
-          },
-          sideEffects: [],
-        },
-      },
-    })).toThrow(/committedResult\.sideEffects is no longer supported/u);
+    })).toThrow(/resumeFinalize must be a boolean/u);
   });
 
   it("rejects the remaining removed runtime callback override fields", () => {

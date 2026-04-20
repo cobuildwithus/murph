@@ -71,7 +71,7 @@ describe("hosted email ingress route", () => {
       selfAddress: "reply@example.com",
     });
 
-    const { POST } = await import("../app/api/internal/hosted-wake/email-ingress/route");
+    const { POST } = await import("../app/api/internal/hosted-run/email-ingress/route");
     const response = await POST(new Request("https://example.test", { method: "POST" }));
 
     expect(response.status).toBe(200);

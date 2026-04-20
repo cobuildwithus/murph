@@ -48,7 +48,6 @@ vi.mock("@murphai/assistant-engine", () => ({
 import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedCommittedAssistantDeliveriesAfterCommit,
-  resumeHostedCommittedExecution,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -171,28 +170,6 @@ beforeEach(() => {
 });
 
 describe("hosted runtime callbacks", () => {
-  it("rebuilds committed resume state from the request payload", () => {
-    const sideEffect = createEffect();
-
-    const resumed = resumeHostedCommittedExecution({
-      bundle: "bundle_123",
-      wake: HOSTED_WAKE.wake,
-      resume: {
-        committedResult: {
-          assistantDeliveryEffects: [sideEffect],
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: null,
-            summary: "completed",
-          },
-        },
-      },
-    });
-
-    assert.equal(resumed.committedResult.bundle, "bundle_123");
-    assert.deepEqual(resumed.committedAssistantDeliveryEffects, [sideEffect]);
-  });
-
   it("collects dispatchable effects with the committed payload contract", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {

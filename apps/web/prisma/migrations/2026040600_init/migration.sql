@@ -233,7 +233,6 @@ CREATE TABLE "hosted_execution_cursor" (
     "committed_seq" BIGINT NOT NULL DEFAULT 0,
     "next_runtime_wake_at" TIMESTAMP(3),
     "next_runtime_wake_reason" TEXT,
-    "assistant_next_wake_at" TIMESTAMP(3),
     "snapshot_ref" JSONB,
     "version" BIGINT NOT NULL DEFAULT 0,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -272,6 +271,9 @@ CREATE TABLE "hosted_run" (
     "id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
     "executor_kind" TEXT NOT NULL DEFAULT 'cloudflare-container',
+    "executor_code_digest" TEXT,
+    "attestation_ref" TEXT,
+    "signed_result_ref" TEXT,
     "status" TEXT NOT NULL,
     "trigger_kind" TEXT NOT NULL,
     "run_token_hash" TEXT NOT NULL,
@@ -343,20 +345,6 @@ CREATE TABLE "hosted_wake_payload" (
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "hosted_wake_payload_pkey" PRIMARY KEY ("wake_id")
-);
-
--- CreateTable
-CREATE TABLE "hosted_wake_terminal" (
-    "wake_id" TEXT NOT NULL,
-    "user_id" TEXT NOT NULL,
-    "wake_seq" BIGINT NOT NULL,
-    "state" TEXT NOT NULL,
-    "fetched_committed_seq" BIGINT NOT NULL,
-    "fetched_cursor_version" BIGINT NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "hosted_wake_terminal_pkey" PRIMARY KEY ("wake_id")
 );
 
 -- CreateTable
@@ -703,15 +691,6 @@ CREATE INDEX "hosted_wake_event_wake_id_idx" ON "hosted_wake_event"("wake_id");
 CREATE INDEX "hosted_wake_payload_user_id_idx" ON "hosted_wake_payload"("user_id");
 
 -- CreateIndex
-CREATE INDEX "hosted_wake_terminal_user_id_idx" ON "hosted_wake_terminal"("user_id");
-
--- CreateIndex
-CREATE INDEX "hosted_wake_terminal_user_id_wake_seq_idx" ON "hosted_wake_terminal"("user_id", "wake_seq");
-
--- CreateIndex
-CREATE UNIQUE INDEX "hosted_wake_terminal_user_id_wake_seq_key" ON "hosted_wake_terminal"("user_id", "wake_seq");
-
--- CreateIndex
 CREATE UNIQUE INDEX "hosted_invite_invite_code_key" ON "hosted_invite"("invite_code");
 
 -- CreateIndex
@@ -857,12 +836,6 @@ ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_user_id_fk
 
 -- AddForeignKey
 ALTER TABLE "hosted_wake_payload" ADD CONSTRAINT "hosted_wake_payload_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_invite" ADD CONSTRAINT "hosted_invite_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;

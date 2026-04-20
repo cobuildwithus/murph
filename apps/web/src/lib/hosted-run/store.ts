@@ -36,6 +36,7 @@ import type {
 } from "../hosted-wake/store.types";
 
 const DEFAULT_HOSTED_RUN_EVENT_LIMIT = 64;
+const HOSTED_RUN_ACTIVE_STALE_AFTER_MS = 15 * 60 * 1000;
 const MAX_HOSTED_RUN_EVENT_LIMIT = 256;
 const HOSTED_RUN_ACTIVE_STATUSES = new Set<HostedRunStatus>([
   "acquired",
@@ -51,6 +52,9 @@ export type HostedRunMutationTx = Prisma.TransactionClient;
 
 export async function acquireHostedRun(input: {
   executorKind?: HostedRunExecutorKind | null;
+  executorCodeDigest?: string | null;
+  attestationRef?: string | null;
+  signedResultRef?: string | null;
   limit?: number | null;
   now?: Date;
   prisma?: PrismaClient;
@@ -61,6 +65,9 @@ export async function acquireHostedRun(input: {
 
   return prisma.$transaction((tx) => acquireHostedRunTx({
     executorKind: input.executorKind,
+    executorCodeDigest: input.executorCodeDigest,
+    attestationRef: input.attestationRef,
+    signedResultRef: input.signedResultRef,
     limit: input.limit,
     now: input.now,
     triggerKind: input.triggerKind,
@@ -71,6 +78,9 @@ export async function acquireHostedRun(input: {
 
 export async function acquireHostedRunTx(input: {
   executorKind?: HostedRunExecutorKind | null;
+  executorCodeDigest?: string | null;
+  attestationRef?: string | null;
+  signedResultRef?: string | null;
   limit?: number | null;
   now?: Date;
   triggerKind?: HostedRunTriggerKind | null;
@@ -115,14 +125,26 @@ export async function acquireHostedRunTx(input: {
   });
 
   if (activeRun) {
-    return {
-      acquired: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-      events: [],
-      pendingWakeCount: await countPendingHostedWakes({ prisma: input.tx, userId: input.userId }),
-      resumeFinalize: false,
-      run: projectHostedRunRecord(activeRun),
-    };
+    if (isHostedRunActiveStale(activeRun, now)) {
+      await closeHostedRunWithoutCommitTx({
+        cursor,
+        errorClass: "hosted_run_stale",
+        errorCode: "HOSTED_RUN_ACTIVE_STALE",
+        run: activeRun,
+        status: "failed",
+        tx: input.tx,
+        userId: input.userId,
+      });
+    } else {
+      return {
+        acquired: false,
+        cursor: projectHostedExecutionCursorRecord(cursor),
+        events: [],
+        pendingWakeCount: await countPendingHostedWakes({ prisma: input.tx, userId: input.userId }),
+        resumeFinalize: false,
+        run: projectHostedRunRecord(activeRun),
+      };
+    }
   }
 
   const wakeRows = await listContiguousHostedRunWakeRowsTx({
@@ -161,6 +183,9 @@ export async function acquireHostedRunTx(input: {
       eventKindsJson: toPrismaJsonArray(uniqueStrings(wakeRows.map((wake) => wake.kind))),
       eventSeqsJson: toPrismaJsonArray(wakeRows.map((wake) => wake.seq.toString())),
       executorKind: input.executorKind ?? DEFAULT_HOSTED_RUN_EXECUTOR_KIND,
+      executorCodeDigest: normalizeNullableHostedRunString(input.executorCodeDigest),
+      attestationRef: normalizeNullableHostedRunString(input.attestationRef),
+      signedResultRef: normalizeNullableHostedRunString(input.signedResultRef),
       id: randomUUID(),
       inputCommittedSeq: cursor.committedSeq,
       inputCursorVersion: cursor.version,
@@ -200,6 +225,8 @@ export async function acquireHostedRunTx(input: {
 export async function commitHostedRun(input: {
   eventResults?: HostedRunEventResult[];
   expectedCursorVersion: bigint;
+  failureClass?: string | null;
+  failureCode?: string | null;
   finalizeRequired?: boolean | null;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
@@ -219,6 +246,8 @@ export async function commitHostedRun(input: {
 export async function commitHostedRunTx(input: {
   eventResults?: HostedRunEventResult[];
   expectedCursorVersion: bigint;
+  failureClass?: string | null;
+  failureCode?: string | null;
   finalizeRequired?: boolean | null;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
@@ -248,6 +277,26 @@ export async function commitHostedRunTx(input: {
       cursor: projectHostedExecutionCursorRecord(cursor),
       needsFinalize: false,
       run: null,
+    };
+  }
+
+  const failureCode = normalizeHostedRunFailureCode(input.failureCode);
+  if (failureCode) {
+    const failedRun = await closeHostedRunWithoutCommitTx({
+      cursor,
+      errorClass: normalizeHostedRunFailureClass(input.failureClass) ?? "hosted_run_runtime",
+      errorCode: failureCode,
+      run,
+      status: "failed",
+      tx: input.tx,
+      userId: input.userId,
+    });
+
+    return {
+      committed: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+      needsFinalize: false,
+      run: projectHostedRunRecord(failedRun),
     };
   }
 
@@ -636,6 +685,15 @@ export async function readHostedRunStatus(input: {
   };
 }
 
+function isHostedRunActiveStale(
+  run: Parameters<typeof projectHostedRunRecord>[0],
+  now: Date,
+): boolean {
+  const updatedAtMs = run.updatedAt.getTime();
+  return Number.isFinite(updatedAtMs)
+    && now.getTime() - updatedAtMs > HOSTED_RUN_ACTIVE_STALE_AFTER_MS;
+}
+
 function normalizeHostedRunAcquireLimit(value: number | null | undefined): number {
   if (value === null || value === undefined) {
     return DEFAULT_HOSTED_RUN_EVENT_LIMIT;
@@ -768,6 +826,7 @@ async function closeHostedRunFinalizeConflictTx(input: {
 
 async function closeHostedRunWithoutCommitTx(input: {
   cursor: HostedExecutionCursorRow;
+  errorClass?: string | null;
   errorCode: string;
   run: Parameters<typeof projectHostedRunRecord>[0];
   status: Extract<HostedRunStatus, "failed" | "superseded">;
@@ -792,7 +851,7 @@ async function closeHostedRunWithoutCommitTx(input: {
   return input.tx.hostedRun.update({
     where: { id: input.run.id },
     data: {
-      errorClass: "hosted_run_commit",
+      errorClass: input.errorClass ?? "hosted_run_commit",
       errorCode: input.errorCode,
       failedAt: input.status === "failed" ? now : input.run.failedAt,
       status: input.status,
@@ -882,6 +941,21 @@ function normalizeHostedRunWakeReason(value: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeHostedRunFailureClass(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized.slice(0, 128) : null;
+}
+
+function normalizeNullableHostedRunString(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function normalizeHostedRunFailureCode(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized.slice(0, 128) : null;
+}
+
 function normalizeHostedRunWakeQuarantineCode(value: string | null | undefined): string {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : "hosted_run_quarantined";
@@ -955,7 +1029,10 @@ function projectHostedRunRecord(record: {
   eventCount: number;
   eventKindsJson: unknown;
   eventSeqsJson: unknown;
+  executorCodeDigest: string | null;
   executorKind: string;
+  attestationRef: string | null;
+  signedResultRef: string | null;
   failedAt: Date | null;
   finalSnapshotRef: unknown;
   finalizedAt: Date | null;
@@ -988,6 +1065,9 @@ function projectHostedRunRecord(record: {
     eventKinds: readHostedRunStringArray(record.eventKindsJson, "Hosted run eventKindsJson"),
     eventSeqs: readHostedRunStringArray(record.eventSeqsJson, "Hosted run eventSeqsJson"),
     executorKind: parseHostedRunExecutorKindForProjection(record.executorKind),
+    executorCodeDigest: record.executorCodeDigest,
+    attestationRef: record.attestationRef,
+    signedResultRef: record.signedResultRef,
     failedAt: record.failedAt?.toISOString() ?? null,
     finalSnapshotRef: parseHostedRunSnapshotRef(record.finalSnapshotRef),
     finalizedAt: record.finalizedAt?.toISOString() ?? null,

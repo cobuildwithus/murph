@@ -354,16 +354,19 @@ async function runHostedExecutionJob(
     ...options,
   });
 
-  if (result.phase === "committed" && normalizedRequest.resume === undefined) {
+  if (result.phase === "committed" && normalizedRequest.runDrain?.resumeFinalize !== true) {
     result = await runHostedExecutionJobInternal({
       request: {
         ...normalizedRequest,
         bundle: result.result.bundle,
-        resume: {
-          committedResult: {
-            assistantDeliveryEffects: result.committedAssistantDeliveryEffects,
-            result: result.result.result,
-          },
+        runDrain: {
+          acquiredAt: "2026-03-26T12:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "0",
+          inputCursorVersion: "0",
+          resumeFinalize: true,
+          runId: normalizedRequest.run?.runId ?? "run_finalize",
+          triggerKind: "runtime_timer",
         },
       },
       ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
@@ -428,6 +431,7 @@ function installHostedFetchBaseUrlProxy(input: {
 }
 
 describe("runHostedExecutionJob", () => {
+  const FINALIZED_RUN_DRAIN_SUMMARY = "Finalized committed hosted run side effects.";
   const cleanupPaths: string[] = [];
   let previousHostedDeviceSyncEnv: Record<string, string | undefined> = {};
   let previousHostedExecutionWorkerEnv: Record<string, string | undefined> = {};
@@ -510,12 +514,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toContain("Processed member activation");
-      expect(result.result.summary).toContain("created the canonical vault");
-      expect(result.result.summary).toContain("hosted assistant config missing");
-      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
-      expect(result.result.summary).toContain("hosted Linq auto-reply unavailable");
-      expect(result.result.summary).toContain("hosted Telegram auto-reply unavailable");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(automationState.autoReplyChannels).not.toContain("linq");
       expect(automationState.autoReplyChannels).not.toContain("email");
       await expect(
@@ -547,10 +546,7 @@ describe("runHostedExecutionJob", () => {
         wake: createActivationWake({ eventId: "evt_activation_second", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:05:00.000Z", userId: "member_123" }),
       });
 
-      expect(secondActivation.result.summary).toContain("Processed member activation");
-      expect(secondActivation.result.summary).toContain("reused the canonical vault");
-      expect(secondActivation.result.summary).toContain("hosted assistant config missing");
-      expect(secondActivation.result.summary).toContain("hosted email auto-reply unavailable");
+      expect(secondActivation.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
     }
@@ -585,8 +581,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
-      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
@@ -628,7 +623,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(automationState.autoReplyChannels).toContain("linq");
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
@@ -672,7 +667,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(secondActivation.result.summary).toContain("reused explicit hosted assistant config (openai-compatible)");
+      expect(secondActivation.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(automationState.autoReplyChannels).toContain("linq");
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
@@ -706,7 +701,7 @@ describe("runHostedExecutionJob", () => {
         enabledContext.assistantStateRoot,
       );
 
-      expect(enabled.result.summary).toContain("Processed member channel sync");
+      expect(enabled.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(enabledAutomationState.autoReplyChannels).toContain("linq");
 
       const disabled = await runHostedExecutionJob({
@@ -724,7 +719,7 @@ describe("runHostedExecutionJob", () => {
         disabledContext.assistantStateRoot,
       );
 
-      expect(disabled.result.summary).toContain("Processed member channel sync");
+      expect(disabled.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(disabledAutomationState.autoReplyChannels).not.toContain("linq");
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
@@ -763,7 +758,7 @@ describe("runHostedExecutionJob", () => {
       });
       const capture = runtime.listCaptures({ limit: 1 })[0];
 
-      expect(result.result.summary).toContain("Persisted Telegram capture");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(capture?.actor.id).toBeNull();
       expect(capture?.actor.displayName).toBeNull();
       expect(capture?.text).toBe("hello from Telegram");
@@ -811,8 +806,7 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
-      expect(result.result.summary).toContain("hosted email auto-reply ready");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -854,8 +848,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
-      expect(result.result.summary).toContain("hosted email auto-reply unavailable");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
@@ -910,7 +903,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toContain("Processed assistant cron tick");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(automationState.autoReplyChannels).not.toContain("email");
       await expect(
         readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
@@ -978,7 +971,7 @@ describe("runHostedExecutionJob", () => {
         wake: createEmailWake({ eventId: "evt_email_fetch", identityId: "assistant@mail.example.test", occurredAt: "2026-03-26T12:05:00.000Z", rawMessageKey: "raw_email_123", userId: "member_email_fetch" }),
       });
 
-      expect(result.result.summary).toContain("Persisted hosted email capture");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(requests).toEqual(["GET /messages/raw_email_123"]);
       restoreFetch();
     } finally {
@@ -1102,7 +1095,7 @@ describe("runHostedExecutionJob", () => {
       });
       const capture = runtime.listCaptures({ limit: 1 })[0];
 
-      expect(result.result.summary).toContain("Persisted Telegram capture");
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
       expect(capture?.source).toBe("telegram");
       expect(capture?.externalId).toBe("evt_telegram");
       expect(capture?.text).toBe("Hello from hosted Telegram.");
@@ -1253,7 +1246,7 @@ describe("runHostedExecutionJob", () => {
         const capture = runtime.getCapture(captureSummary!.captureId);
         const attachment = capture?.attachments[0];
 
-        expect(result.result.summary).toContain("Persisted Telegram capture");
+        expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
         expect(capture?.text).toBe("Photo from hosted Telegram.");
         expect(attachment?.byteSize).toBe(attachmentBytes.byteLength);
         expect(attachment?.fileName).toBe("photo-photo_unique_123.jpg");
@@ -1313,7 +1306,7 @@ describe("runHostedExecutionJob", () => {
       wake: createCronWake({ eventId: "evt_tick", occurredAt: "2026-03-26T12:05:00.000Z", reason: "manual", userId: "member_123" }),
     });
 
-    expect(followUp.result.summary).toContain("Processed assistant cron tick (manual)");
+    expect(followUp.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
   });
 
   it("restores externalized raw artifacts and skips re-uploading unchanged hashes", async () => {
@@ -1547,9 +1540,7 @@ describe("runHostedExecutionJob", () => {
       });
 
       try {
-        expect(result.result.summary).toBe(
-          "Processed assistant cron tick (manual) on the hosted assistant lane.",
-        );
+        expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
         expect(finalRuntime.listAttachmentParseJobs({ state: "pending" })).toHaveLength(0);
       } finally {
         finalRuntime.close();
@@ -1617,7 +1608,7 @@ describe("runHostedExecutionJob", () => {
     const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Morning Smoothie");
 
     expect(importedFood).toBeDefined();
-    expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
+    expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
   });
 
   it("ignores hosted web env when importing a runner-hydrated share pack", async () => {
@@ -1687,7 +1678,7 @@ describe("runHostedExecutionJob", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(importedFood).toBeDefined();
       expect(importedFood?.attachedProtocolIds?.length).toBe(1);
-      expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
+      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
     } finally {
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
       vi.stubGlobal("fetch", initialGlobalFetch);
@@ -1967,7 +1958,7 @@ describe("runHostedExecutionJob", () => {
         const userId = input.job.request.wake.userId;
         const runtime = input.job.runtime ?? {};
         seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
-        if (input.job.request.resume) {
+        if (input.job.request.runDrain?.resumeFinalize === true) {
           return {
             finalGatewayProjectionSnapshot: null,
             phase: "completed",
@@ -2339,39 +2330,16 @@ describe("runHostedExecutionJob", () => {
           vault: null,
         },
       },
-      wake: createCronWake({ eventId: "evt_outbox_resume", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
-      resume: {
-        committedResult: {
-          assistantDeliveryEffects: [
-            {
-              effectId: intentId,
-              fingerprint: "dedupe_hosted_resume",
-              kind: "assistant.delivery",
-              payload: {
-                actorId: null,
-                bindingDeliveryKind: "thread",
-                bindingDeliveryTarget: "chat_123",
-                channel: "linq",
-                explicitTarget: null,
-                idempotencyKey: `assistant-outbox:${intentId}`,
-                identityId: null,
-                message: "Queued the Linq reply.",
-                subject: null,
-                replyToMessageId: null,
-                sessionId: "sess_hosted",
-                threadId: "chat_123",
-                threadIsDirect: true,
-                transportIdempotent: true,
-                turnId: "turn_hosted",
-              },
-            },
-          ],
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-        },
+      runDrain: {
+        acquiredAt: "2026-03-26T12:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "0",
+        inputCursorVersion: "0",
+        resumeFinalize: true,
+        runId: "run_outbox_resume",
+        triggerKind: "runtime_timer",
       },
+      wake: createCronWake({ eventId: "evt_outbox_resume", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
     });
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
@@ -2382,8 +2350,8 @@ describe("runHostedExecutionJob", () => {
       ),
     ).toBe(true);
     expect(result.result).toEqual({
-      eventsHandled: 1,
-      summary: "committed",
+      eventsHandled: 0,
+      summary: FINALIZED_RUN_DRAIN_SUMMARY,
     });
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-restored-"));
@@ -2490,39 +2458,16 @@ describe("runHostedExecutionJob", () => {
           vault: null,
         },
       },
-      wake: createCronWake({ eventId: "evt_outbox_resume_non_idempotent", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
-      resume: {
-        committedResult: {
-          assistantDeliveryEffects: [
-            {
-              effectId: intentId,
-              fingerprint: "dedupe_hosted_resume_non_idempotent",
-              kind: "assistant.delivery",
-              payload: {
-                actorId: null,
-                bindingDeliveryKind: "participant",
-                bindingDeliveryTarget: "chat_123",
-                channel: "telegram",
-                explicitTarget: null,
-                idempotencyKey: `assistant-outbox:${intentId}`,
-                identityId: null,
-                message: "Queued the Telegram reply.",
-                subject: null,
-                replyToMessageId: null,
-                sessionId: "sess_hosted",
-                threadId: "chat_123",
-                threadIsDirect: true,
-                transportIdempotent: false,
-                turnId: "turn_hosted",
-              },
-            },
-          ],
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-        },
+      runDrain: {
+        acquiredAt: "2026-03-26T12:00:00.000Z",
+        events: [],
+        inputCommittedSeq: "0",
+        inputCursorVersion: "0",
+        resumeFinalize: true,
+        runId: "run_outbox_resume_non_idempotent",
+        triggerKind: "runtime_timer",
       },
+      wake: createCronWake({ eventId: "evt_outbox_resume_non_idempotent", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
     });
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
@@ -2533,8 +2478,8 @@ describe("runHostedExecutionJob", () => {
       ),
     ).toBe(true);
     expect(result.result).toEqual({
-      eventsHandled: 1,
-      summary: "committed",
+      eventsHandled: 0,
+      summary: FINALIZED_RUN_DRAIN_SUMMARY,
     });
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-non-idempotent-restored-"));
