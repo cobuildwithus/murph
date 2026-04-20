@@ -1600,7 +1600,9 @@ describe("hosted device-sync runtime", () => {
           status: "disconnected",
         },
         connectionId: "hosted_conn_disconnect_after_sync",
+        observedTokenVersion: 4,
         observedUpdatedAt: "2026-04-04T09:05:00.000Z",
+        tokenBundle: null,
       });
     } finally {
       service.close();
