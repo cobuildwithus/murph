@@ -14,6 +14,12 @@ import {
   createHostedRuntimeResolvedConfig,
 } from "./hosted-runtime-test-helpers.ts";
 
+const HOSTED_RUN_CONTEXT = {
+  attempt: 1,
+  runId: "run_123",
+  startedAt: "2026-04-08T00:00:00.000Z",
+} as const;
+
 const mocks = vi.hoisted(() => ({
   assistantGatewayLocalProjectionSourceReader: Symbol(
     "assistantGatewayLocalProjectionSourceReader",
@@ -198,14 +204,9 @@ describe("executeHostedRunDrainForCommit", () => {
         executionContext: createExecutionContext(),
         request: {
           bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
           // Bypass the stricter runtime parser/type surface to prove the runtime helper fails closed too.
           runDrain: undefined as never,
-          wake: buildHostedExecutionAssistantCronTickWake({
-            eventId: "evt_no_run_drain",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            reason: "manual",
-            userId: "member_123",
-          }),
         },
         restored: createRestored(),
         runtime: createRuntime(),
@@ -225,6 +226,7 @@ describe("executeHostedRunDrainForCommit", () => {
       executionContext: createExecutionContext(),
       request: {
         bundle: "incoming-bundle",
+        run: HOSTED_RUN_CONTEXT,
         runDrain: {
           acquiredAt: "2026-04-08T00:00:00.000Z",
           events: [],
@@ -234,12 +236,6 @@ describe("executeHostedRunDrainForCommit", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        wake: buildHostedExecutionRuntimeTimerWake({
-          eventId: "hosted-run:run_123",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        }),
       },
       restored: createRestored(),
       runtime: createRuntime(),
@@ -289,6 +285,7 @@ describe("executeHostedRunDrainForCommit", () => {
       executionContext: createExecutionContext(),
       request: {
         bundle: "incoming-bundle",
+        run: HOSTED_RUN_CONTEXT,
         runDrain: {
           acquiredAt: "2026-04-08T00:00:00.000Z",
           events: [
@@ -323,12 +320,6 @@ describe("executeHostedRunDrainForCommit", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        wake: buildHostedExecutionAssistantCronTickWake({
-          eventId: "evt_run_drain_followups",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual",
-          userId: "member_123",
-        }),
       },
       restored: createRestored(),
       runtime: createRuntime(),

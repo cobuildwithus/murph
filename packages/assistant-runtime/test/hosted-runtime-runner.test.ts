@@ -355,7 +355,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             size: 42,
             updatedAt: "2026-04-08T00:00:00.000Z",
           },
-          wake: buildMemberActivatedWake("evt_123"),
           runDrain: createSingleWakeRunDrain(buildMemberActivatedWake("evt_123")),
           run: HOSTED_RUN_CONTEXT,
         },
@@ -422,7 +421,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             usageExportBound: false,
           }),
           runElapsedMs: expect.any(Number),
-          sharePackAttached: false,
           userEnvCategories: {
             modelCredentialConfigured: false,
           },
@@ -480,7 +478,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         {
           request: {
             bundle: "incoming-bundle",
-            wake: buildCronWake("evt_runtime_normalization_failure"),
+            run: HOSTED_RUN_CONTEXT,
             runDrain: createSingleWakeRunDrain(
               buildCronWake("evt_runtime_normalization_failure"),
             ),
@@ -520,8 +518,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         {
           request: {
             bundle: "incoming-bundle",
+            run: HOSTED_RUN_CONTEXT,
             runDrain: undefined as never,
-            wake: buildCronWake("evt_missing_run_drain"),
           },
         },
         {
@@ -555,7 +553,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildCronWake("evt_dedupe_artifacts"),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: createSingleWakeRunDrain(buildCronWake("evt_dedupe_artifacts")),
         },
       },
@@ -596,7 +594,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildLinqWake("evt_linq_typing"),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: createSingleWakeRunDrain(buildLinqWake("evt_linq_typing")),
         },
         runtime: {
@@ -656,7 +654,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildCronWake("evt_no_bundle"),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: createSingleWakeRunDrain(buildCronWake("evt_no_bundle")),
         },
       },
@@ -691,7 +689,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildRuntimeTimerWake("evt_resume"),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: {
             acquiredAt: "2026-04-08T00:00:00.000Z",
             events: [],
@@ -731,7 +729,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildLinqWake("evt_linq_typing_start_failure"),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: createSingleWakeRunDrain(buildLinqWake("evt_linq_typing_start_failure")),
         },
         runtime: {
@@ -801,16 +799,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildHostedExecutionTelegramConversationMessageWake({
-            eventId: "evt_telegram_typing",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            telegramMessage: {
-              messageId: "tg_message_77",
-              schema: "murph.hosted-telegram-message.v1",
-              threadId: "123456",
-            },
-            userId: "member_123",
-          }),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: createSingleWakeRunDrain(buildHostedExecutionTelegramConversationMessageWake({
             eventId: "evt_telegram_typing",
             occurredAt: "2026-04-08T00:00:00.000Z",
@@ -873,16 +862,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildHostedExecutionTelegramConversationMessageWake({
-            eventId: "evt_telegram_typing_start_failure",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            telegramMessage: {
-              messageId: "tg_message_77",
-              schema: "murph.hosted-telegram-message.v1",
-              threadId: "123456",
-            },
-            userId: "member_123",
-          }),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: createSingleWakeRunDrain(
             buildHostedExecutionTelegramConversationMessageWake({
               eventId: "evt_telegram_typing_start_failure",
@@ -937,7 +917,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         {
           request: {
             bundle: "incoming-bundle",
-            wake: buildRuntimeTimerWake("evt_completion_failure"),
+            run: HOSTED_RUN_CONTEXT,
             runDrain: {
               acquiredAt: "2026-04-08T00:00:00.000Z",
               events: [],
@@ -987,7 +967,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         {
           request: {
             bundle: "incoming-bundle",
-            wake: buildMemberActivatedWake("evt_missing_device_sync"),
+            run: HOSTED_RUN_CONTEXT,
             runDrain: createSingleWakeRunDrain(buildMemberActivatedWake("evt_missing_device_sync")),
           },
         },
@@ -1020,7 +1000,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          wake: buildRuntimeTimerWake("evt_wrapper"),
+          run: HOSTED_RUN_CONTEXT,
           runDrain: {
             acquiredAt: "2026-04-08T00:00:00.000Z",
             events: [],

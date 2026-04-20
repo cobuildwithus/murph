@@ -1167,19 +1167,25 @@ function createRunnerRequest(
     };
   } = {},
 ) {
+  const wake = buildHostedExecutionAssistantCronTickWake({
+    eventId,
+    occurredAt: "2026-03-27T00:00:00.000Z",
+    reason: "manual",
+    userId: "member_123",
+  });
   return {
     bundle: null,
+    run: input.run ?? {
+      attempt: 1,
+      runId: "run_123",
+      startedAt: "2026-03-27T00:00:00.000Z",
+    },
     runDrain: {
       acquiredAt: "2026-03-27T00:00:00.000Z",
       events: [
         {
           seq: "1",
-          wake: buildHostedExecutionAssistantCronTickWake({
-            eventId,
-            occurredAt: "2026-03-27T00:00:00.000Z",
-            reason: "manual",
-            userId: "member_123",
-          }),
+          wake,
           wakeId: `wake_${eventId}`,
         },
       ],
@@ -1189,13 +1195,6 @@ function createRunnerRequest(
       triggerKind: "external_ingress" as const,
       userId: "member_123",
     },
-    wake: buildHostedExecutionAssistantCronTickWake({
-      eventId,
-      occurredAt: "2026-03-27T00:00:00.000Z",
-      reason: "manual",
-      userId: "member_123",
-    }),
-    ...(input.run ? { run: input.run } : {}),
   };
 }
 

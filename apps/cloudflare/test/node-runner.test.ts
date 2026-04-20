@@ -359,14 +359,14 @@ async function runHostedExecutionJob(
     ...(userEnv === undefined ? {} : { userEnv }),
   };
   const runDrain = request.runDrain ?? (
-    wake.kind === "runtime.timer"
+    wake.kind === "runtime.timer" || wake.kind === "assistant.cron.tick"
       ? {
           acquiredAt: "2026-03-26T12:00:00.000Z",
           events: [],
           inputCommittedSeq: "0",
           inputCursorVersion: "0",
           runId: request.run?.runId ?? "run_test",
-          triggerKind: wake.triggerKind,
+          triggerKind: wake.kind === "runtime.timer" ? wake.triggerKind : "runtime_timer",
           userId: wake.userId,
         }
       : {
