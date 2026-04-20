@@ -71,9 +71,6 @@ function buildLegacyWake(input: {
     case "member.activated":
       return buildHostedExecutionMemberActivatedWake({
         eventId: input.eventId,
-        firstContact: input.event.firstContact as
-          | Parameters<typeof buildHostedExecutionMemberActivatedWake>[0]["firstContact"]
-          | undefined,
         memberChannels: input.event.memberChannels as typeof DEFAULT_MEMBER_CHANNELS,
         memberId: input.event.userId ?? "member_123",
         occurredAt: input.occurredAt,

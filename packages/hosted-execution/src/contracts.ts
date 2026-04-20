@@ -26,6 +26,7 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
   "member.channels.updated",
+  "assistant.notification.requested",
   "device-sync.wake",
   "vault.share.accepted",
 ] as const;
@@ -37,6 +38,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "conversation.message",
   "member.activated",
   "member.channels.updated",
+  "assistant.notification.requested",
   "device-sync.wake",
   "vault.share.accepted",
 ] as const;
@@ -68,7 +70,6 @@ export interface HostedExecutionMemberChannels {
 }
 
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
-  firstContact?: HostedExecutionFirstContactTarget | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
 }
@@ -78,25 +79,54 @@ export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecuti
   memberChannels: HostedExecutionMemberChannels;
 }
 
-export interface HostedExecutionThreadFirstContactTarget {
-  channel: "email" | "linq" | "telegram";
-  identityId: string | null;
-  kind?: "thread";
-  threadId: string;
-  threadIsDirect: boolean;
-}
+export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
+  | "immediate"
+  | "queue-only";
 
-export interface HostedExecutionLinqMaterializeHomeThreadFirstContactTarget {
-  channel: "linq";
+export type HostedExecutionAssistantNotificationResponsePolicy =
+  | { kind: "allow_send_or_skip" }
+  | { kind: "require_send" }
+  | { kind: "require_send_exact_text"; text: string };
+
+export interface HostedExecutionAssistantNotificationDeliverySource {
   fromPhoneNumber: string;
-  identityId: string;
-  kind: "linq-materialize-home-thread";
-  toPhoneNumber: string;
+  kind: "linq";
 }
 
-export type HostedExecutionFirstContactTarget =
-  | HostedExecutionThreadFirstContactTarget
-  | HostedExecutionLinqMaterializeHomeThreadFirstContactTarget;
+export interface HostedExecutionAssistantNotificationDelivery {
+  kind: "explicit" | "participant" | "thread";
+  source?: HostedExecutionAssistantNotificationDeliverySource | null;
+  target: string;
+}
+
+export interface HostedExecutionAssistantNotificationRoute {
+  actorId: string | null;
+  channel: HostedExecutionConversationMessageChannel;
+  delivery: HostedExecutionAssistantNotificationDelivery;
+  identityId: string | null;
+  threadId: string | null;
+  threadIsDirect: boolean | null;
+}
+
+export interface HostedExecutionAssistantNotificationFirstContactPolicy {
+  markSeenOnDeliveryAccepted: boolean;
+}
+
+export interface HostedExecutionAssistantNotificationRequestedPayload {
+  deliveryDedupeToken?: string | null;
+  deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
+  deliveryIdempotencyKey?: string | null;
+  firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
+  instructions: string;
+  responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
+  route: HostedExecutionAssistantNotificationRoute;
+}
+
+export interface HostedExecutionAssistantNotificationRequestedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "assistant.notification.requested";
+  notification: HostedExecutionAssistantNotificationRequestedPayload;
+}
 
 export const HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA =
   "murph.hosted-telegram-message.v1";
@@ -171,6 +201,7 @@ export interface HostedRuntimeDrainRequest {
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
+  | HostedExecutionAssistantNotificationRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionVaultShareAcceptedEvent;
 
@@ -245,9 +276,14 @@ export interface HostedExecutionConversationMessageWake extends HostedExecutionB
 }
 
 export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseWake {
-  firstContact?: HostedExecutionFirstContactTarget | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+}
+
+export interface HostedExecutionAssistantNotificationRequestedWake
+  extends HostedExecutionBaseWake {
+  kind: "assistant.notification.requested";
+  notification: HostedExecutionAssistantNotificationRequestedPayload;
 }
 
 export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutionBaseWake {
@@ -277,6 +313,7 @@ export type HostedIngressEnvelope =
   | HostedExecutionConversationMessageWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareAcceptedWake;
 

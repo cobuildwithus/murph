@@ -4,8 +4,12 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
+import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
-  type HostedExecutionMemberActivatedEvent,
+  type HostedExecutionAssistantNotificationRoute,
   type HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 
@@ -25,7 +29,7 @@ import {
 } from "./hosted-member-store";
 import { resolveHostedMemberActivationLinqRoute } from "./linq-home-routing";
 import {
-  resolveHostedMemberFirstContactTarget,
+  resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberChannels,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
@@ -79,21 +83,26 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       };
     }
 
-    const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
+    const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
       member: input.member,
       prisma: input.prisma,
     });
-    const wake = buildHostedMemberActivationWakeForMember({
+    const activationWake = buildHostedMemberActivationWakeForMember({
       emailLinked: input.emailLinked ?? false,
-      firstContact: linqRoute.firstContact,
       member: input.member,
       occurredAt: input.occurredAt,
       sourceEventId: input.sourceEventId,
       sourceType: input.sourceType,
     });
-    const appendedWake = await materializeHostedIngressEnvelopeTx({
-      wake,
-      tx: input.prisma,
+    const welcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
+      activationWake,
+      occurredAt: input.occurredAt,
+      route: linqRoute.welcomeRoute,
+    });
+    const appendedWake = await materializeHostedMemberActivationWakesTx({
+      activationWake,
+      prisma: input.prisma,
+      welcomeWake,
     });
 
     finishHostedOnboardingTiming(timing, "completed", {
@@ -175,8 +184,8 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   });
 
   if (
-    input.skipIfBillingAlreadyActive &&
-    currentMember.core.billingStatus === HostedBillingStatus.active
+    input.skipIfBillingAlreadyActive
+    && currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
     if (existingWakeEventId) {
       return {
@@ -204,21 +213,26 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     });
   }
 
-  const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
+  const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
     member: currentMember,
     prisma: input.prisma,
   });
-  const wake = buildHostedMemberActivationWakeForMember({
+  const activationWake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? false,
-    firstContact: linqRoute.firstContact,
     member: currentMember,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const appendedWake = await materializeHostedIngressEnvelopeTx({
-    wake,
-    tx: input.prisma,
+  const welcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
+    activationWake,
+    occurredAt: input.dispatchContext.occurredAt,
+    route: linqRoute.welcomeRoute,
+  });
+  const appendedWake = await materializeHostedMemberActivationWakesTx({
+    activationWake,
+    prisma: input.prisma,
+    welcomeWake,
   });
 
   return {
@@ -228,14 +242,14 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   };
 }
 
-export function buildHostedMemberActivationFirstContact(input: {
+export function buildHostedMemberActivationWelcomeRoute(input: {
   linqChatId: string | null;
   linqRecipientPhone?: string | null;
   memberPhoneNumber?: string | null;
   phoneLookupKey: string | null;
   telegramUserId: string | null;
-}): HostedExecutionMemberActivatedEvent["firstContact"] {
-  return resolveHostedMemberFirstContactTarget({
+}): HostedExecutionAssistantNotificationRoute | null {
+  return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: input.linqChatId,
     linqRecipientPhone: input.linqRecipientPhone ?? null,
     memberPhoneNumber: input.memberPhoneNumber ?? null,
@@ -250,13 +264,13 @@ export function buildHostedMemberActivationFirstContact(input: {
   });
 }
 
-async function resolveHostedMemberActivationFirstContactLinqRoute(input: {
+async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
-}): Promise<{ firstContact: HostedExecutionMemberActivatedEvent["firstContact"] }> {
+}): Promise<{ welcomeRoute: HostedExecutionAssistantNotificationRoute | null }> {
   if (!input.member.identity?.phoneNumber) {
     return {
-      firstContact: buildHostedMemberActivationFirstContact({
+      welcomeRoute: buildHostedMemberActivationWelcomeRoute({
         linqChatId: input.member.routing?.linqChatId ?? null,
         linqRecipientPhone: input.member.routing?.linqRecipientPhone ?? null,
         memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
@@ -316,9 +330,28 @@ function buildHostedInactiveMemberActivationResult(
   };
 }
 
+async function materializeHostedMemberActivationWakesTx(input: {
+  activationWake: HostedIngressEnvelope;
+  prisma: Prisma.TransactionClient;
+  welcomeWake: HostedIngressEnvelope | null;
+}): Promise<{ eventId: string }> {
+  const appendedWake = await materializeHostedIngressEnvelopeTx({
+    wake: input.activationWake,
+    tx: input.prisma,
+  });
+
+  if (input.welcomeWake) {
+    await materializeHostedIngressEnvelopeTx({
+      wake: input.welcomeWake,
+      tx: input.prisma,
+    });
+  }
+
+  return appendedWake;
+}
+
 function buildHostedMemberActivationWakeForMember(input: {
   emailLinked: boolean;
-  firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
   member: HostedMemberSnapshot;
   occurredAt: string;
   sourceEventId: string;
@@ -326,7 +359,6 @@ function buildHostedMemberActivationWakeForMember(input: {
 }): HostedIngressEnvelope {
   return buildHostedMemberActivationWake({
     emailLinked: input.emailLinked,
-    firstContact: input.firstContact,
     memberId: input.member.core.id,
     memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
     phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
@@ -339,9 +371,6 @@ function buildHostedMemberActivationWakeForMember(input: {
 
 function buildHostedMemberActivationWake(input: {
   emailLinked?: boolean;
-  firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
-  linqChatId?: string | null;
-  linqRecipientPhone?: string | null;
   memberId: string;
   memberPhoneNumber?: string | null;
   phoneLookupKey?: string | null;
@@ -352,13 +381,6 @@ function buildHostedMemberActivationWake(input: {
 }): HostedIngressEnvelope {
   return buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedMemberActivationEventId(input),
-    firstContact: (input.firstContact ?? buildHostedMemberActivationFirstContact({
-      linqChatId: input.linqChatId ?? null,
-      linqRecipientPhone: input.linqRecipientPhone ?? null,
-      memberPhoneNumber: input.memberPhoneNumber ?? null,
-      phoneLookupKey: input.phoneLookupKey ?? null,
-      telegramUserId: input.telegramUserId ?? null,
-    })),
     memberChannels: resolveHostedMemberChannels({
       emailLinked: input.emailLinked ?? false,
       identity: {
@@ -371,6 +393,50 @@ function buildHostedMemberActivationWake(input: {
     memberId: input.memberId,
     occurredAt: input.occurredAt,
   });
+}
+
+function buildHostedMemberSignupWelcomeNotificationWake(input: {
+  activationWake: HostedIngressEnvelope;
+  occurredAt: string;
+  route: HostedExecutionAssistantNotificationRoute | null;
+}): HostedIngressEnvelope | null {
+  if (!input.route) {
+    return null;
+  }
+
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
+    memberId: input.activationWake.userId,
+    notification: {
+      deliveryDedupeToken: `signup-welcome:${input.activationWake.userId}`,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: `signup-welcome:${input.activationWake.userId}`,
+      firstContact: {
+        markSeenOnDeliveryAccepted: true,
+      },
+      instructions: buildHostedMemberSignupWelcomeInstructions(),
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      },
+      route: input.route,
+    },
+    occurredAt: input.occurredAt,
+  });
+}
+
+function buildHostedMemberSignupWelcomeInstructions(): string {
+  return [
+    "A new user has completed signup for Murph.",
+    "Send exactly this message and nothing else:",
+    MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+  ].join("\n\n");
+}
+
+function buildHostedMemberSignupWelcomeNotificationEventId(
+  activationWake: HostedIngressEnvelope,
+): string {
+  return `assistant.notification.requested:signup-welcome:${activationWake.userId}:${activationWake.eventId}`;
 }
 
 export function buildHostedMemberActivationEventId(input: {

@@ -4,6 +4,7 @@ import {
   assistantChannelDeliverySchema,
   assistantOutboxIntentSchema,
   type AssistantDeliveryError,
+  type AssistantDeliverySource,
   type AssistantOutboxIntent,
   type AssistantSession,
   type AssistantStatusOutboxSummary,
@@ -13,14 +14,8 @@ import { mergeAssistantBinding } from './bindings.js'
 import {
   getAssistantChannelAdapter,
   normalizeAssistantDeliverySubject,
-  sendLinqMessage,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
-import {
-  markAssistantFirstContactSeen,
-  resolveAssistantFirstContactStateDocIds,
-} from './first-contact.js'
-import { readAssistantFirstContactWelcomeFromPhoneNumber } from './first-contact-welcome-turn-metadata.js'
 import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -29,7 +24,6 @@ import { ensureAssistantState } from './store/persistence.js'
 import { getAssistantSession, resolveAssistantStatePaths, saveAssistantSession } from './store.js'
 import {
   appendAssistantTurnReceiptEvent,
-  readAssistantTurnReceipt,
   updateAssistantTurnReceipt,
 } from './turns.js'
 import {
@@ -94,6 +88,7 @@ export interface AssistantOutboxDispatchPayload {
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   deliveryIdempotencyKey?: string | null
+  deliverySource?: AssistantDeliverySource | null
   explicitTarget?: string | null
   identityId?: string | null
   message: string
@@ -161,6 +156,7 @@ export async function createAssistantOutboxIntent(input: {
   createdAt?: string
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
+  deliverySource?: AssistantDeliverySource | null
   explicitTarget?: string | null
   identityId?: string | null
   message: string
@@ -588,6 +584,7 @@ export async function deliverAssistantOutboxMessage(input: {
   channel?: string | null
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
+  deliverySource?: AssistantDeliverySource | null
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
@@ -608,6 +605,7 @@ export async function deliverAssistantOutboxMessage(input: {
     channel: input.channel,
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliverySource: input.deliverySource ?? null,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     message: input.message,
@@ -682,88 +680,6 @@ export async function deliverAssistantOutboxMessage(input: {
   }
 }
 
-async function maybeDeliverAssistantFirstContactLinqMaterialization(input: {
-  dependencies?: AssistantChannelDependencies
-  payload: AssistantOutboxDispatchPayload
-  vault: string
-}): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>> | null> {
-  if (
-    input.payload.channel !== 'linq' ||
-    input.payload.threadId !== null ||
-    input.payload.bindingDelivery?.kind !== 'participant'
-  ) {
-    return null
-  }
-
-  const receipt = await readAssistantTurnReceipt(input.vault, input.payload.turnId)
-  const fromPhoneNumber = readAssistantFirstContactWelcomeFromPhoneNumber(receipt)
-  if (!fromPhoneNumber) {
-    return null
-  }
-
-  const send = input.dependencies?.sendLinq ?? sendLinqMessage
-  const delivered = await send({
-    fromPhoneNumber,
-    idempotencyKey: input.payload.deliveryIdempotencyKey,
-    message: input.payload.message,
-    replyToMessageId: input.payload.replyToMessageId,
-    target: input.payload.bindingDelivery.target,
-    targetKind: 'participant',
-  })
-  const target =
-    normalizeNullableString(delivered?.target) ??
-    normalizeNullableString(delivered?.providerThreadId)
-  if (!target) {
-    throw createAssistantDeliveryConfirmationPendingError(
-      new VaultCliError(
-        'ASSISTANT_LINQ_CHAT_ID_REQUIRED',
-        'Materialized Linq first-contact delivery did not return a chat id.',
-      ),
-    )
-  }
-
-  const sentAt = new Date().toISOString()
-  const currentSession = await getAssistantSession(input.vault, input.payload.sessionId)
-  const threadIsDirect = currentSession.binding.threadIsDirect ?? input.payload.threadIsDirect ?? true
-  await markAssistantFirstContactSeen({
-    docIds: resolveAssistantFirstContactStateDocIds({
-      actorId: currentSession.binding.actorId,
-      channel: currentSession.binding.channel ?? 'linq',
-      identityId: currentSession.binding.identityId,
-      threadId: target,
-      threadIsDirect,
-    }),
-    seenAt: sentAt,
-    vault: input.vault,
-  })
-  return {
-    delivery: assistantChannelDeliverySchema.parse({
-      channel: 'linq',
-      idempotencyKey: input.payload.deliveryIdempotencyKey,
-      messageLength: input.payload.message.length,
-      providerMessageId: normalizeNullableString(delivered?.providerMessageId),
-      providerThreadId: normalizeNullableString(delivered?.providerThreadId) ?? target,
-      sentAt,
-      target,
-      targetKind: 'thread',
-    }),
-    deliveryDeduplicated: false,
-    deliveryTransportIdempotent: true,
-    outboxIntentId: null,
-    session: {
-      ...currentSession,
-      binding: mergeAssistantBinding(currentSession.binding, {
-        channel: 'linq',
-        deliveryKind: 'thread',
-        deliveryTarget: target,
-        threadId: target,
-        threadIsDirect,
-      }),
-      updatedAt: sentAt,
-    },
-  }
-}
-
 export async function sendAssistantOutboxPayload(input: {
   dependencies?: AssistantChannelDependencies
   payload: AssistantOutboxDispatchPayload
@@ -776,13 +692,14 @@ export async function sendAssistantOutboxPayload(input: {
     subject: input.payload.subject ?? null,
   })
 
-  return await maybeDeliverAssistantFirstContactLinqMaterialization(input)
-    ?? await deliverAssistantMessageOverBinding({
+  return materializeAssistantOutboxDeliveredSession({
+    delivered: await deliverAssistantMessageOverBinding({
       vault: input.vault,
       sessionId: input.payload.sessionId,
       message: input.payload.message,
       subject,
       channel: input.payload.channel,
+      deliverySource: input.payload.deliverySource ?? null,
       idempotencyKey: input.payload.deliveryIdempotencyKey,
       identityId: input.payload.identityId,
       actorId: input.payload.actorId,
@@ -801,7 +718,46 @@ export async function sendAssistantOutboxPayload(input: {
           delivery: input.payload.bindingDelivery ?? null,
         },
       },
-    }, input.dependencies)
+    }, input.dependencies),
+    payload: input.payload,
+    vault: input.vault,
+  })
+}
+
+async function materializeAssistantOutboxDeliveredSession(input: {
+  delivered: Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>
+  payload: AssistantOutboxDispatchPayload
+  vault: string
+}): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
+  if (input.delivered.session) {
+    return input.delivered
+  }
+
+  const delivery = input.delivered.delivery
+  if (
+    delivery.targetKind !== 'thread' ||
+    input.payload.bindingDelivery?.kind !== 'participant' ||
+    input.payload.threadId !== null
+  ) {
+    return input.delivered
+  }
+
+  const currentSession = await getAssistantSession(input.vault, input.payload.sessionId)
+  const threadIsDirect = currentSession.binding.threadIsDirect ?? input.payload.threadIsDirect ?? true
+  return {
+    ...input.delivered,
+    session: {
+      ...currentSession,
+      binding: mergeAssistantBinding(currentSession.binding, {
+        channel: delivery.channel,
+        deliveryKind: 'thread',
+        deliveryTarget: delivery.target,
+        threadId: delivery.target,
+        threadIsDirect,
+      }),
+      updatedAt: delivery.sentAt,
+    },
+  }
 }
 
 export async function drainAssistantOutbox(input: {

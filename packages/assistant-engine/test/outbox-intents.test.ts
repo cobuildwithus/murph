@@ -39,6 +39,7 @@ describe('assistant outbox intent helpers', () => {
         kind: 'thread',
         target: 'chat-123',
       },
+      deliverySource: null,
     })
 
     expect(

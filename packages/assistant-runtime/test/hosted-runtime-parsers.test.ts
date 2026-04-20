@@ -35,15 +35,134 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
             {
               seq: "24",
               wake: {
-                eventId: "evt_123",
-                firstContact: {
-                  channel: "linq",
-                  identityId: "hbidx:phone:v1:test",
-                  threadId: "chat_123",
-                  threadIsDirect: true,
+                eventId: "evt_notification",
+                kind: "assistant.notification.requested",
+                notification: {
+                  deliveryDispatchMode: "queue-only",
+                  deliveryDedupeToken: "signup-welcome:member_123",
+                  deliveryIdempotencyKey: "signup-welcome:member_123",
+                  firstContact: {
+                    markSeenOnDeliveryAccepted: true,
+                  },
+                  instructions: "Send exactly the signup welcome.",
+                  responsePolicy: {
+                    kind: "require_send_exact_text",
+                    text: "Welcome to Murph.",
+                  },
+                  route: {
+                    actorId: "+15550002222",
+                    channel: "linq",
+                    delivery: {
+                      kind: "participant",
+                      source: {
+                        fromPhoneNumber: "+15550001111",
+                        kind: "linq",
+                      },
+                      target: "+15550002222",
+                    },
+                    identityId: "hbidx:phone:v1:test",
+                    threadId: null,
+                    threadIsDirect: true,
+                  },
                 },
-                kind: "member.activated",
-                memberChannels: defaultMemberChannels,
+                occurredAt: "2026-04-01T00:00:00.000Z",
+                userId: "member_123",
+              },
+              ingressEventId: "wake_24",
+            },
+          ],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          resumeFinalize: true,
+          runId: "run_123",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+      },
+      runtime: {
+        userEnv: {
+          OPENAI_API_KEY: "secret",
+        },
+      },
+    });
+
+    expect(resolveHostedWake(parsed.request.runDrain)).toEqual({
+      eventId: "evt_notification",
+      kind: "assistant.notification.requested",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            source: {
+              fromPhoneNumber: "+15550001111",
+              kind: "linq",
+            },
+            target: "+15550002222",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-01T00:00:00.000Z",
+      userId: "member_123",
+    });
+    expect(parsed.request.bundle).toBe("vault-bundle");
+    expect(parsed.request.currentBundleRef?.key).toBe("bundles/user/vault.json");
+    expect(parsed.request.runDrain.resumeFinalize).toBe(true);
+    expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
+  });
+
+  it("parses assistant notification participant delivery with a Linq source", () => {
+    const parsed = parseHostedAssistantRuntimeJobInput({
+      request: {
+        bundle: null,
+        run: {
+          attempt: 1,
+          runId: "run_signup_welcome_notification",
+          startedAt: "2026-04-01T00:00:01.000Z",
+        },
+        runDrain: {
+          acquiredAt: "2026-04-01T00:00:01.000Z",
+          events: [
+            {
+              seq: "24",
+              wake: {
+                eventId: "evt_123",
+                kind: "assistant.notification.requested",
+                notification: {
+                  deliveryDispatchMode: "queue-only",
+                  deliveryIdempotencyKey: "signup-welcome:member_123",
+                  instructions: "Send exactly the signup welcome.",
+                  route: {
+                    actorId: "+15550002222",
+                    channel: "linq",
+                    delivery: {
+                      kind: "participant",
+                      source: {
+                        fromPhoneNumber: "+15550001111",
+                        kind: "linq",
+                      },
+                      target: "+15550002222",
+                    },
+                    identityId: "hbidx:phone:v1:test",
+                    threadId: null,
+                    threadIsDirect: true,
+                  },
+                },
                 occurredAt: "2026-04-01T00:00:00.000Z",
                 userId: "member_123",
               },
@@ -67,74 +186,27 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
 
     expect(resolveHostedWake(parsed.request.runDrain)).toEqual({
       eventId: "evt_123",
-      firstContact: {
-        channel: "linq",
-        identityId: "hbidx:phone:v1:test",
-        threadId: "chat_123",
-        threadIsDirect: true,
-      },
-      kind: "member.activated",
-      memberChannels: defaultMemberChannels,
-      occurredAt: "2026-04-01T00:00:00.000Z",
-      userId: "member_123",
-    });
-    expect(parsed.request.bundle).toBe("vault-bundle");
-    expect(parsed.request.currentBundleRef?.key).toBe("bundles/user/vault.json");
-    expect(parsed.request.runDrain.resumeFinalize).toBe(true);
-    expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
-  });
-
-  it("parses Linq first-contact targets that materialize a home thread on first welcome delivery", () => {
-    const parsed = parseHostedAssistantRuntimeJobInput({
-      request: {
-        bundle: null,
-        run: {
-          attempt: 1,
-          runId: "run_materialize_linq_home",
-          startedAt: "2026-04-01T00:00:01.000Z",
-        },
-        runDrain: {
-          acquiredAt: "2026-04-01T00:00:01.000Z",
-          events: [
-            {
-              seq: "24",
-              wake: {
-                eventId: "evt_materialize_linq_home",
-                firstContact: {
-                  channel: "linq",
-                  fromPhoneNumber: "+15550001111",
-                  identityId: "hbidx:phone:v1:test",
-                  kind: "linq-materialize-home-thread",
-                  toPhoneNumber: "+15550002222",
-                },
-                kind: "member.activated",
-                memberChannels: defaultMemberChannels,
-                occurredAt: "2026-04-01T00:00:00.000Z",
-                userId: "member_123",
-              },
-              ingressEventId: "wake_24",
+      kind: "assistant.notification.requested",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        instructions: "Send exactly the signup welcome.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            source: {
+              fromPhoneNumber: "+15550001111",
+              kind: "linq",
             },
-          ],
-          inputCommittedSeq: "24",
-          inputCursorVersion: "4",
-          runId: "run_materialize_linq_home",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
+            target: "+15550002222",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: null,
+          threadIsDirect: true,
         },
       },
-    });
-
-    expect(resolveHostedWake(parsed.request.runDrain)).toEqual({
-      eventId: "evt_materialize_linq_home",
-      firstContact: {
-        channel: "linq",
-        fromPhoneNumber: "+15550001111",
-        identityId: "hbidx:phone:v1:test",
-        kind: "linq-materialize-home-thread",
-        toPhoneNumber: "+15550002222",
-      },
-      kind: "member.activated",
-      memberChannels: defaultMemberChannels,
       occurredAt: "2026-04-01T00:00:00.000Z",
       userId: "member_123",
     });

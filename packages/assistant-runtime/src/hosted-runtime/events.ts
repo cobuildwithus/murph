@@ -1,11 +1,11 @@
 import type {
+  HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionConversationMessageWake,
-  HostedExecutionFirstContactTarget,
   HostedExecutionRunnerSharePack,
   HostedIngressSystemEnvelope,
   HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
-import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
+import { sendAssistantNotification } from "@murphai/assistant-engine";
 import {
   isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -23,7 +23,6 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
-import { assertNever } from "./utils.ts";
 
 type HostedIngressOutcome = HostedIngressEffect & {
   ingressLane: HostedIngressLane;
@@ -116,15 +115,6 @@ async function executeHostedSystemWake(input: {
 }): Promise<HostedIngressOutcome> {
   switch (input.wake.kind) {
     case "member.activated":
-      if (input.wake.firstContact) {
-        await queueAssistantFirstContactWelcome(
-          buildAssistantFirstContactWelcomeInput(
-            input.wake.firstContact,
-            input.executionContext,
-            input.vaultRoot,
-          ),
-        );
-      }
       return createNoopIngressEffect({
         conversationMetrics: null,
         ingressLane: "member-activated",
@@ -133,6 +123,14 @@ async function executeHostedSystemWake(input: {
       return createNoopIngressEffect({
         conversationMetrics: null,
         ingressLane: "member-channels-updated",
+      });
+    case "assistant.notification.requested":
+      await sendAssistantNotification(
+        buildAssistantNotificationInput(input.wake, input.executionContext, input.vaultRoot),
+      );
+      return createNoopIngressEffect({
+        conversationMetrics: null,
+        ingressLane: "assistant-notification",
       });
     case "device-sync.wake":
       return createNoopIngressEffect({
@@ -154,7 +152,9 @@ async function executeHostedSystemWake(input: {
       };
   }
 
-  return assertNever(input.wake);
+  const exhaustiveWake: never = input.wake;
+  void exhaustiveWake;
+  throw new TypeError('Unsupported hosted system wake kind.');
 }
 
 function createNoopIngressEffect(input: {
@@ -169,30 +169,36 @@ function createNoopIngressEffect(input: {
   };
 }
 
-function buildAssistantFirstContactWelcomeInput(
-  firstContact: HostedExecutionFirstContactTarget,
+function buildAssistantNotificationInput(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
   vault: string,
-): Parameters<typeof queueAssistantFirstContactWelcome>[0] {
-  if (firstContact.kind === "linq-materialize-home-thread") {
-    return {
-      channel: "linq",
-      executionContext,
-      fromPhoneNumber: firstContact.fromPhoneNumber,
-      identityId: firstContact.identityId,
-      kind: firstContact.kind,
-      toPhoneNumber: firstContact.toPhoneNumber,
-      vault,
-    };
-  }
+): Parameters<typeof sendAssistantNotification>[0] {
+  const route = wake.notification.route;
+  const delivery = route.delivery;
 
   return {
-    actorId: null,
-    channel: firstContact.channel,
+    actorId: route.actorId,
+    channel: route.channel,
+    deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
+    deliveryDispatchMode: wake.notification.deliveryDispatchMode ?? undefined,
+    deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
+    deliveryKind: delivery.kind === "explicit" ? null : delivery.kind,
+    deliverySource: delivery.source ?? null,
+    deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
     executionContext,
-    identityId: firstContact.identityId,
-    threadId: firstContact.threadId,
-    threadIsDirect: firstContact.threadIsDirect,
+    firstContactPolicy: wake.notification.firstContact
+      ? {
+          markSeenOnDeliveryAccepted:
+            wake.notification.firstContact.markSeenOnDeliveryAccepted,
+        }
+      : null,
+    identityId: route.identityId,
+    instructions: wake.notification.instructions,
+    responsePolicy: wake.notification.responsePolicy ?? null,
+    threadId: delivery.kind === "thread" ? delivery.target : route.threadId,
+    threadIsDirect: route.threadIsDirect,
+    turnTrigger: "automation-cron",
     vault,
   };
 }

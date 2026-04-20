@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionFirstContactTarget,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
 
@@ -21,7 +21,9 @@ export interface HostedMemberMessagingState {
   telegramThreadId: string | null;
 }
 
-export type HostedMemberFirstContactTarget = HostedExecutionFirstContactTarget | null;
+export type HostedMemberAssistantNotificationRoute =
+  | HostedExecutionAssistantNotificationRoute
+  | null;
 
 export function resolveHostedMemberMessagingState(input: {
   identity: HostedMemberMessagingIdentitySlice | null;
@@ -62,37 +64,56 @@ export function resolveHostedMemberChannels(input: {
   };
 }
 
-export function resolveHostedMemberFirstContactTarget(input: {
+export function resolveHostedMemberAssistantNotificationRoute(input: {
   linqChatId: string | null;
   linqRecipientPhone?: string | null;
   memberPhoneNumber?: string | null;
   messaging: HostedMemberMessagingState;
-}): HostedMemberFirstContactTarget {
+}): HostedMemberAssistantNotificationRoute {
+  const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
+
   if (input.linqChatId && input.messaging.phoneLookupKey) {
     return {
+      actorId: memberPhoneNumber,
       channel: "linq",
+      delivery: {
+        kind: "thread",
+        target: input.linqChatId,
+      },
       identityId: input.messaging.phoneLookupKey,
       threadId: input.linqChatId,
       threadIsDirect: true,
     };
   }
 
-  const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
   const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
 
   if (memberPhoneNumber && linqRecipientPhone && input.messaging.phoneLookupKey) {
     return {
+      actorId: memberPhoneNumber,
       channel: "linq",
-      fromPhoneNumber: linqRecipientPhone,
+      delivery: {
+        kind: "participant",
+        source: {
+          fromPhoneNumber: linqRecipientPhone,
+          kind: "linq",
+        },
+        target: memberPhoneNumber,
+      },
       identityId: input.messaging.phoneLookupKey,
-      kind: "linq-materialize-home-thread",
-      toPhoneNumber: memberPhoneNumber,
+      threadId: null,
+      threadIsDirect: true,
     };
   }
 
   if (input.messaging.telegramThreadId) {
     return {
+      actorId: null,
       channel: "telegram",
+      delivery: {
+        kind: "thread",
+        target: input.messaging.telegramThreadId,
+      },
       identityId: null,
       threadId: input.messaging.telegramThreadId,
       threadIsDirect: true,

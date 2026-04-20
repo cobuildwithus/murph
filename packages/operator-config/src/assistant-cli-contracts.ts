@@ -306,6 +306,15 @@ export const assistantBindingDeliverySchema = z.object({
   target: z.string().min(1),
 })
 
+export const assistantDeliverySourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('linq'),
+      fromPhoneNumber: z.string().min(1),
+    })
+    .strict(),
+])
+
 export const assistantSessionBindingSchema = z.object({
   conversationKey: z.string().min(1).nullable(),
   channel: z.string().min(1).nullable(),
@@ -563,6 +572,7 @@ export const assistantOutboxIntentSchema = z
     threadIsDirect: z.boolean().nullable(),
     replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
+    deliverySource: assistantDeliverySourceSchema.nullable().default(null),
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),
@@ -1139,6 +1149,9 @@ export const assistantAutomationStateSchema = z
 export type AssistantAliasStore = z.infer<typeof assistantAliasStoreSchema>
 export type AssistantBindingDelivery = z.infer<
   typeof assistantBindingDeliverySchema
+>
+export type AssistantDeliverySource = z.infer<
+  typeof assistantDeliverySourceSchema
 >
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema

@@ -43,6 +43,8 @@ export async function deliverAssistantReply(input: {
       response: input.response,
     }).text,
     channel: deliveryChannel,
+    deliveryIdempotencyKey: input.input.deliveryIdempotencyKey ?? null,
+    deliverySource: input.input.deliverySource ?? null,
     identityId: audience?.identityId ?? input.session.binding.identityId,
     actorId: audience?.actorId ?? input.session.binding.actorId,
     threadId: audience?.threadId ?? input.session.binding.threadId,

@@ -450,12 +450,6 @@ describe("hosted execution parsers coverage", () => {
   describe("event variants", () => {
     it("parses member activation and device-sync event payloads", () => {
       const memberEvent = parseHostedExecutionEvent({
-        firstContact: {
-          channel: "telegram",
-          identityId: "identity_123",
-          threadId: "thread_123",
-          threadIsDirect: true,
-        },
         kind: "member.activated",
         memberChannels: DEFAULT_MEMBER_CHANNELS,
         userId: "user_123",
@@ -528,17 +522,24 @@ describe("hosted execution parsers coverage", () => {
 
       expect(() =>
         parseHostedExecutionEvent({
-          firstContact: {
-            channel: "sms",
-            identityId: "identity_123",
-            threadId: "thread_123",
-            threadIsDirect: true,
+          kind: "assistant.notification.requested",
+          notification: {
+            instructions: "Send the Murph signup welcome.",
+            route: {
+              actorId: null,
+              channel: "sms",
+              delivery: {
+                kind: "thread",
+                target: "thread_123",
+              },
+              identityId: "identity_123",
+              threadId: "thread_123",
+              threadIsDirect: true,
+            },
           },
-          kind: "member.activated",
-          memberChannels: DEFAULT_MEMBER_CHANNELS,
           userId: "user_123",
         }),
-      ).toThrow(/firstContact channel is invalid/i);
+      ).toThrow(/channel is invalid/i);
     });
   });
 });

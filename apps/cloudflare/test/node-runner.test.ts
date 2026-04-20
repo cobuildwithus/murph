@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
+import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murphai/core";
 import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@murphai/inboxd";
 import {
@@ -29,6 +30,7 @@ import type {
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -36,7 +38,6 @@ import {
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionVaultShareAcceptedWake,
   type HostedExecutionBundlePayload,
-  type HostedExecutionFirstContactTarget,
   type HostedExecutionMemberChannels,
   type HostedExecutionRunnerSharePack,
   type HostedExecutionTelegramMessage,
@@ -92,22 +93,64 @@ const MEMBER_CHANNELS_LINQ = {
   ...MEMBER_CHANNELS_NONE,
   linq: true,
 } as const;
+const SIGNUP_WELCOME_INSTRUCTIONS = [
+  "A new user has completed signup for Murph.",
+  "Send exactly this message and nothing else:",
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+].join("\n\n");
 let runHostedExecutionJobInternal = createHostedExecutionJobRunner({
   runMode: "in-process",
 });
 
 function createActivationWake(input: {
   eventId: string;
-  firstContact?: HostedExecutionFirstContactTarget | null;
   memberChannels: HostedExecutionMemberChannels;
   occurredAt: string;
   userId: string;
 }): HostedIngressEnvelope {
   return buildHostedExecutionMemberActivatedWake({
     eventId: input.eventId,
-    ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
     memberChannels: input.memberChannels,
     memberId: input.userId,
+    occurredAt: input.occurredAt,
+  });
+}
+
+function createLinqThreadSignupWelcomeWake(input: {
+  eventId: string;
+  identityId: string;
+  occurredAt: string;
+  threadId: string;
+  threadIsDirect: boolean;
+  userId: string;
+}): HostedIngressEnvelope {
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: input.eventId,
+    memberId: input.userId,
+    notification: {
+      deliveryDedupeToken: `signup-welcome:${input.userId}`,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: `signup-welcome:${input.userId}`,
+      firstContact: {
+        markSeenOnDeliveryAccepted: true,
+      },
+      instructions: SIGNUP_WELCOME_INSTRUCTIONS,
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      },
+      route: {
+        actorId: null,
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: input.threadId,
+        },
+        identityId: input.identityId,
+        threadId: input.threadId,
+        threadIsDirect: input.threadIsDirect,
+      },
+    },
     occurredAt: input.occurredAt,
   });
 }
@@ -659,7 +702,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("bootstraps managed Linq auto-reply when activation first contact is a Linq thread", async () => {
+  it("bootstraps managed Linq auto-reply when activation enables the Linq channel", async () => {
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     try {
@@ -670,12 +713,6 @@ describe("runHostedExecutionJob", () => {
         },
         wake: createActivationWake({
           eventId: "evt_activation_linq_bootstrap",
-          firstContact: {
-            channel: "linq",
-            identityId: "hbidx:phone:v1:test",
-            threadId: "chat_123",
-            threadIsDirect: true,
-          },
           memberChannels: MEMBER_CHANNELS_LINQ,
           occurredAt: "2026-03-26T12:00:00.000Z",
           userId: "member_linq_bootstrap",
@@ -708,12 +745,6 @@ describe("runHostedExecutionJob", () => {
         },
         wake: createActivationWake({
           eventId: "evt_activation_linq_bootstrap_first",
-          firstContact: {
-            channel: "linq",
-            identityId: "hbidx:phone:v1:test",
-            threadId: "chat_123",
-            threadIsDirect: true,
-          },
           memberChannels: MEMBER_CHANNELS_LINQ,
           occurredAt: "2026-03-26T12:00:00.000Z",
           userId: "member_linq_bootstrap",

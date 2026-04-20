@@ -15,7 +15,6 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
-import { buildAssistantFirstContactWelcomeTurnMetadata } from '../src/assistant/first-contact-welcome-turn-metadata.ts'
 import {
   hasAssistantSeenFirstContact,
   resolveAssistantFirstContactStateDocIds,
@@ -43,6 +42,13 @@ import { createTempVaultContext } from './test-helpers.ts'
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
   deliverAssistantMessageOverBinding,
 )
+
+const TEST_LINQ_DELIVERY_SOURCE: NonNullable<
+  AssistantOutboxIntent['deliverySource']
+> = {
+  kind: 'linq',
+  fromPhoneNumber: '+15550000',
+}
 
 const tempRoots: string[] = []
 let intentSequence = 0
@@ -521,6 +527,7 @@ describe('assistant outbox runtime', () => {
 
   it('materializes Linq first-contact chats from receipt metadata and upgrades the session binding', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-first-contact-')
+    await useActualOutboundDeliveryImplementation()
 
     await saveAssistantSession(
       vaultRoot,
@@ -542,9 +549,6 @@ describe('assistant outbox runtime', () => {
     )
     await createAssistantTurnReceipt({
       deliveryRequested: true,
-      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
-        fromPhoneNumber: '+15550000',
-      }),
       prompt: 'welcome',
       provider: 'codex-cli',
       providerModel: 'gpt-5.4',
@@ -559,6 +563,7 @@ describe('assistant outbox runtime', () => {
         target: '+15550001',
       },
       channel: 'linq',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
       deliveryIdempotencyKey: 'idem-linq-first-contact',
       identityId: 'phone_lookup_1',
       message: 'welcome',
@@ -591,7 +596,7 @@ describe('assistant outbox runtime', () => {
       target: '+15550001',
       targetKind: 'participant',
     })
-    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
     expect(dispatched.intent.status).toBe('sent')
     expect(dispatched.intent.delivery).toMatchObject({
       channel: 'linq',
@@ -625,6 +630,7 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-first-contact-persist-failure-',
     )
+    await useActualOutboundDeliveryImplementation()
 
     await saveAssistantSession(
       vaultRoot,
@@ -646,9 +652,6 @@ describe('assistant outbox runtime', () => {
     )
     await createAssistantTurnReceipt({
       deliveryRequested: true,
-      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
-        fromPhoneNumber: '+15550000',
-      }),
       prompt: 'welcome',
       provider: 'codex-cli',
       providerModel: 'gpt-5.4',
@@ -663,6 +666,7 @@ describe('assistant outbox runtime', () => {
         target: '+15550001',
       },
       channel: 'linq',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
       deliveryIdempotencyKey: 'idem-linq-first-contact-persist-failure',
       identityId: 'phone_lookup_1',
       message: 'welcome',
@@ -769,6 +773,7 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-first-contact-local-reconcile-',
     )
+    await useActualOutboundDeliveryImplementation()
 
     await saveAssistantSession(
       vaultRoot,
@@ -791,9 +796,6 @@ describe('assistant outbox runtime', () => {
     )
     await createAssistantTurnReceipt({
       deliveryRequested: true,
-      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
-        fromPhoneNumber: '+15550100',
-      }),
       prompt: 'welcome',
       provider: 'codex-cli',
       providerModel: 'gpt-5.4',
@@ -808,6 +810,7 @@ describe('assistant outbox runtime', () => {
         target: '+15550101',
       },
       channel: 'linq',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
       deliveryIdempotencyKey: 'idem-linq-first-contact-local-reconcile',
       identityId: 'phone_lookup_local',
       message: 'welcome',
@@ -902,6 +905,7 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-first-contact-missing-chat-',
     )
+    await useActualOutboundDeliveryImplementation()
 
     await saveAssistantSession(
       vaultRoot,
@@ -923,9 +927,6 @@ describe('assistant outbox runtime', () => {
     )
     await createAssistantTurnReceipt({
       deliveryRequested: true,
-      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
-        fromPhoneNumber: '+15550000',
-      }),
       prompt: 'welcome',
       provider: 'codex-cli',
       providerModel: 'gpt-5.4',
@@ -940,6 +941,7 @@ describe('assistant outbox runtime', () => {
         target: '+15550001',
       },
       channel: 'linq',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
       deliveryIdempotencyKey: 'idem-linq-first-contact-missing-chat',
       identityId: 'phone_lookup_1',
       message: 'welcome',
@@ -987,10 +989,11 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('marks the upgraded Linq thread as first-contact seen when queued materialization delivers', async () => {
+  it('upgrades the Linq thread binding without marking first-contact state on outbox delivery alone', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-first-contact-thread-seen-',
     )
+    await useActualOutboundDeliveryImplementation()
 
     await saveAssistantSession(
       vaultRoot,
@@ -1012,9 +1015,6 @@ describe('assistant outbox runtime', () => {
     )
     await createAssistantTurnReceipt({
       deliveryRequested: true,
-      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
-        fromPhoneNumber: '+15550000',
-      }),
       prompt: 'welcome',
       provider: 'codex-cli',
       providerModel: 'gpt-5.4',
@@ -1029,6 +1029,7 @@ describe('assistant outbox runtime', () => {
         target: '+15550001',
       },
       channel: 'linq',
+      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
       deliveryIdempotencyKey: 'idem-linq-first-contact-thread-seen',
       identityId: 'phone_lookup_1',
       message: 'welcome',
@@ -1076,7 +1077,7 @@ describe('assistant outbox runtime', () => {
         }),
         vault: vaultRoot,
       }),
-    ).resolves.toBe(true)
+    ).resolves.toBe(false)
   })
 
   it('clears prepared dispatches on definite failures and falls back to confirmation-pending retries when cleanup is ambiguous', async () => {
@@ -1304,6 +1305,16 @@ async function createIntent(
     turnId,
     vault,
   })
+}
+
+async function useActualOutboundDeliveryImplementation(): Promise<void> {
+  const actual = await vi.importActual<typeof import('../src/outbound-channel.ts')>(
+    '../src/outbound-channel.ts',
+  )
+  mockedDeliverAssistantMessageOverBinding.mockImplementation(
+    async (input, dependencies) =>
+      await actual.deliverAssistantMessageOverBinding(input, dependencies),
+  )
 }
 
 function createDelivery(

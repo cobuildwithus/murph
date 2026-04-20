@@ -1,13 +1,14 @@
 import type {
   HostedExecutionConversationMessagePayload,
   HostedExecutionConversationMessageWake,
+  HostedExecutionAssistantNotificationRequestedPayload,
+  HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
   HostedExecutionLinqConversationMessagePart,
-  HostedExecutionMemberActivatedEvent,
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
@@ -151,16 +152,56 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
 
 export function buildHostedExecutionMemberActivatedWake(input: {
   eventId: string;
-  firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
   occurredAt: string;
 }): HostedExecutionMemberActivatedWake {
   return {
-    ...(input.firstContact === undefined ? {} : { firstContact: input.firstContact }),
     eventId: input.eventId,
     kind: "member.activated",
     memberChannels: { ...input.memberChannels },
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+function cloneAssistantNotificationPayload(
+  value: HostedExecutionAssistantNotificationRequestedPayload,
+): HostedExecutionAssistantNotificationRequestedPayload {
+  return {
+    ...value,
+    ...(value.firstContact === undefined
+      ? {}
+      : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.responsePolicy === undefined
+      ? {}
+      : { responsePolicy: value.responsePolicy ? { ...value.responsePolicy } : null }),
+    route: {
+      ...value.route,
+      delivery: {
+        ...value.route.delivery,
+        ...(value.route.delivery.source === undefined
+          ? {}
+          : {
+              source: value.route.delivery.source
+                ? { ...value.route.delivery.source }
+                : null,
+            }),
+      },
+    },
+  };
+}
+
+export function buildHostedExecutionAssistantNotificationRequestedWake(input: {
+  eventId: string;
+  memberId: string;
+  notification: HostedExecutionAssistantNotificationRequestedPayload;
+  occurredAt: string;
+}): HostedExecutionAssistantNotificationRequestedWake {
+  return {
+    eventId: input.eventId,
+    kind: "assistant.notification.requested",
+    notification: cloneAssistantNotificationPayload(input.notification),
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

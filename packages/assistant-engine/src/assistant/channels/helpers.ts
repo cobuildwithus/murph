@@ -70,6 +70,7 @@ export function createAssistantChannelAdapter(
       const delivered = await spec.sendMessage({
         actorId: normalizeOptionalText(input.actorId),
         candidate,
+        deliverySource: input.deliverySource ?? null,
         dependencies,
         idempotencyKey,
         identityId: normalizeOptionalText(input.identityId),
@@ -82,7 +83,7 @@ export function createAssistantChannelAdapter(
         channel: spec.channel,
         idempotencyKey,
         target: readDeliveredTarget(delivered) ?? candidate.target,
-        targetKind: candidate.kind,
+        targetKind: readDeliveredTargetKind(delivered) ?? candidate.kind,
         sentAt: new Date().toISOString(),
         messageLength: input.message.length,
         providerMessageId: readDeliveredProviderMessageId(delivered),
@@ -231,6 +232,25 @@ export function readDeliveredTarget(
   return delivered && typeof delivered === 'object'
     ? normalizeOptionalText(delivered.target)
     : null
+}
+
+export function readDeliveredTargetKind(
+  delivered:
+    | {
+        targetKind?: string | null
+      }
+    | void,
+): AssistantDeliveryCandidate['kind'] | null {
+  if (!delivered || typeof delivered !== 'object') {
+    return null
+  }
+
+  const value = normalizeOptionalText(delivered.targetKind)
+  if (value === 'explicit' || value === 'participant' || value === 'thread') {
+    return value
+  }
+
+  return null
 }
 
 export function readDeliveredProviderMessageId(

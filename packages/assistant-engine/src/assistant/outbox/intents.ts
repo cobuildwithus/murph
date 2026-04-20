@@ -8,6 +8,7 @@ export type AssistantOutboxRawTargetIdentityInput = {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
+  deliverySource?: AssistantOutboxIntent['deliverySource']
   explicitTarget?: string | null
   identityId?: string | null
   replyToMessageId?: string | null
@@ -23,6 +24,7 @@ export type AssistantOutboxPersistedTarget = Pick<
   | 'actorId'
   | 'bindingDelivery'
   | 'channel'
+  | 'deliverySource'
   | 'explicitTarget'
   | 'identityId'
   | 'replyToMessageId'
@@ -59,6 +61,7 @@ export function buildAssistantOutboxRawTargetIdentity(
     replyToMessageId: input.replyToMessageId,
     explicitTarget: input.explicitTarget,
     bindingDelivery: input.bindingDelivery,
+    deliverySource: input.deliverySource,
   }
 }
 
@@ -74,6 +77,7 @@ export function buildAssistantOutboxPersistedTarget(
       typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
     replyToMessageId: normalizeNullableString(input.replyToMessageId),
     bindingDelivery: input.bindingDelivery ?? null,
+    deliverySource: input.deliverySource ?? null,
     explicitTarget: normalizeNullableString(input.explicitTarget),
   }
 }
@@ -82,6 +86,7 @@ export function hashAssistantOutboxIdentity(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
+  deliverySource?: AssistantOutboxIntent['deliverySource']
   dedupeToken?: string | null
   explicitTarget?: string | null
   identityId?: string | null
@@ -114,6 +119,7 @@ export function hashAssistantOutboxIdentity(input: {
         replyToMessageId: input.replyToMessageId,
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
+        deliverySource: input.deliverySource,
       }),
     )
     .digest('hex')
@@ -123,6 +129,7 @@ export function hashAssistantOutboxTargetFingerprint(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
+  deliverySource?: AssistantOutboxIntent['deliverySource']
   explicitTarget?: string | null
   identityId?: string | null
   replyToMessageId?: string | null
@@ -138,6 +145,7 @@ export function hashAssistantOutboxTargetFingerprint(input: {
         replyToMessageId: input.replyToMessageId,
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
+        deliverySource: input.deliverySource,
       }),
     )
     .digest('hex')

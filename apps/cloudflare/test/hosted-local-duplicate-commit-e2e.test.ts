@@ -16,12 +16,6 @@ const overlapUserId = "member_overlap_claim_local_e2e";
 const overlapEventId = "evt_serialized_run_loop_claim_local_e2e";
 const activationWake = buildHostedExecutionMemberActivatedWake({
   eventId: `member.activated:stripe.invoice.paid:${userId}:evt_duplicate_local_e2e`,
-  firstContact: {
-    channel: "linq",
-    identityId: `linq:${userId}`,
-    threadId: `thread:${userId}`,
-    threadIsDirect: true,
-  },
   memberId: userId,
   memberChannels: {
     email: false,
@@ -32,12 +26,6 @@ const activationWake = buildHostedExecutionMemberActivatedWake({
 });
 const stabilityActivationWake = buildHostedExecutionMemberActivatedWake({
   eventId: `member.activated:stripe.invoice.paid:${stabilityUserId}:evt_duplicate_local_smoke_stability`,
-  firstContact: {
-    channel: "linq",
-    identityId: `linq:${stabilityUserId}`,
-    threadId: `thread:${stabilityUserId}`,
-    threadIsDirect: true,
-  },
   memberId: stabilityUserId,
   memberChannels: {
     email: false,

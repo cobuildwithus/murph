@@ -87,10 +87,6 @@ import type {
 import { withAssistantTurnLock } from './turn-lock.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
-export {
-  queueAssistantFirstContactWelcomeLocal,
-  sendAssistantFirstContactWelcomeLocal,
-} from './first-contact-welcome-delivery.js'
 
 async function persistUserTurn(
   input: AssistantMessageInput,

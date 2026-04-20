@@ -48,7 +48,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 import {
   activateHostedMemberForPositiveSourceTx,
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
-  buildHostedMemberActivationFirstContact,
+  buildHostedMemberActivationWelcomeRoute,
 } from "@/src/lib/hosted-onboarding/member-activation";
 
 describe("hosted onboarding member activation", () => {
@@ -60,8 +60,13 @@ describe("hosted onboarding member activation", () => {
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
-      firstContact: {
+      welcomeRoute: {
+        actorId: "+15550100001",
         channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
         identityId: "hbidx:phone:v1:lookup",
         threadId: "chat_home_123",
         threadIsDirect: true,
@@ -105,21 +110,40 @@ describe("hosted onboarding member activation", () => {
       member,
       prisma: expect.anything(),
     });
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(1, {
       wake: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        firstContact: {
-          channel: "linq",
-          identityId: "hbidx:phone:v1:lookup",
-          threadId: "chat_home_123",
-          threadIsDirect: true,
-        },
         kind: "member.activated",
         memberChannels: {
           email: true,
           linq: true,
           telegram: false,
         },
+      }),
+      tx: expect.anything(),
+    });
+    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(2, {
+      wake: expect.objectContaining({
+        kind: "assistant.notification.requested",
+        notification: expect.objectContaining({
+          deliveryDedupeToken: "signup-welcome:member_123",
+          deliveryDispatchMode: "queue-only",
+          deliveryIdempotencyKey: "signup-welcome:member_123",
+          firstContact: {
+            markSeenOnDeliveryAccepted: true,
+          },
+          route: {
+            actorId: "+15550100001",
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "chat_home_123",
+            },
+            identityId: "hbidx:phone:v1:lookup",
+            threadId: "chat_home_123",
+            threadIsDirect: true,
+          },
+        }),
       }),
       tx: expect.anything(),
     });
@@ -155,12 +179,20 @@ describe("hosted onboarding member activation", () => {
   it("passes through a Linq thread-materialization target when web only assigned the home line", async () => {
     const member = makeMemberSnapshot();
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValueOnce({
-      firstContact: {
+      welcomeRoute: {
+        actorId: "+15550100001",
         channel: "linq",
-        fromPhoneNumber: "+15550100099",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550100099",
+            kind: "linq",
+          },
+          target: "+15550100001",
+        },
         identityId: "hbidx:phone:v1:lookup",
-        kind: "linq-materialize-home-thread",
-        toPhoneNumber: "+15550100001",
+        threadId: null,
+        threadIsDirect: true,
       },
     });
 
@@ -181,15 +213,26 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(2, {
       wake: expect.objectContaining({
-        firstContact: {
-          channel: "linq",
-          fromPhoneNumber: "+15550100099",
-          identityId: "hbidx:phone:v1:lookup",
-          kind: "linq-materialize-home-thread",
-          toPhoneNumber: "+15550100001",
-        },
+        kind: "assistant.notification.requested",
+        notification: expect.objectContaining({
+          route: {
+            actorId: "+15550100001",
+            channel: "linq",
+            delivery: {
+              kind: "participant",
+              source: {
+                fromPhoneNumber: "+15550100099",
+                kind: "linq",
+              },
+              target: "+15550100001",
+            },
+            identityId: "hbidx:phone:v1:lookup",
+            threadId: null,
+            threadIsDirect: true,
+          },
+        }),
       }),
       tx: expect.anything(),
     });
@@ -231,52 +274,68 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(2, {
       wake: expect.objectContaining({
-        firstContact: {
-          channel: "telegram",
-          identityId: null,
-          threadId: "telegram_user_123",
-          threadIsDirect: true,
-        },
-        memberChannels: {
-          email: false,
-          linq: false,
-          telegram: true,
-        },
+        kind: "assistant.notification.requested",
+        notification: expect.objectContaining({
+          route: {
+            actorId: null,
+            channel: "telegram",
+            delivery: {
+              kind: "thread",
+              target: "telegram_user_123",
+            },
+            identityId: null,
+            threadId: "telegram_user_123",
+            threadIsDirect: true,
+          },
+        }),
       }),
       tx: expect.anything(),
     });
   });
 
-  it("builds Telegram first contact even when the member has no Linq thread yet", () => {
-    expect(buildHostedMemberActivationFirstContact({
+  it("builds a Telegram welcome route even when the member has no Linq thread yet", () => {
+    expect(buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: null,
       memberPhoneNumber: null,
       phoneLookupKey: null,
       telegramUserId: "telegram_user_456",
     })).toEqual({
+      actorId: null,
       channel: "telegram",
+      delivery: {
+        kind: "thread",
+        target: "telegram_user_456",
+      },
       identityId: null,
       threadId: "telegram_user_456",
       threadIsDirect: true,
     });
   });
 
-  it("builds a Linq first-contact materialization target when activation only knows the chosen home line", () => {
-    expect(buildHostedMemberActivationFirstContact({
+  it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {
+    expect(buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: "+15550100099",
       memberPhoneNumber: "+15550100001",
       phoneLookupKey: "hbidx:phone:v1:lookup",
       telegramUserId: null,
     })).toEqual({
+      actorId: "+15550100001",
       channel: "linq",
-      fromPhoneNumber: "+15550100099",
+      delivery: {
+        kind: "participant",
+        source: {
+          fromPhoneNumber: "+15550100099",
+          kind: "linq",
+        },
+        target: "+15550100001",
+      },
       identityId: "hbidx:phone:v1:lookup",
-      kind: "linq-materialize-home-thread",
-      toPhoneNumber: "+15550100001",
+      threadId: null,
+      threadIsDirect: true,
     });
   });
 

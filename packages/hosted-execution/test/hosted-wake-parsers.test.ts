@@ -23,6 +23,7 @@ import {
 } from "../src/parsers.ts";
 
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
@@ -578,7 +579,6 @@ describe("hosted wake parser contracts", () => {
 
     expect(parseHostedIngressEnvelope({
       eventId: "wake_member",
-      firstContact: null,
       kind: "member.activated",
       memberChannels: {
         email: false,
@@ -589,13 +589,79 @@ describe("hosted wake parser contracts", () => {
       userId: "member-1",
     })).toEqual(buildHostedExecutionMemberActivatedWake({
       eventId: "wake_member",
-      firstContact: null,
       memberChannels: {
         email: false,
         linq: true,
         telegram: false,
       },
       memberId: "member-1",
+      occurredAt,
+    }));
+
+    expect(parseHostedIngressEnvelope({
+      eventId: "wake_notification",
+      kind: "assistant.notification.requested",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:member-1",
+        deliveryIdempotencyKey: "signup-welcome:member-1",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            source: {
+              fromPhoneNumber: "+15550001111",
+              kind: "linq",
+            },
+            target: "+15550002222",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt,
+      userId: "member-1",
+    })).toEqual(buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "wake_notification",
+      memberId: "member-1",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:member-1",
+        deliveryIdempotencyKey: "signup-welcome:member-1",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "participant",
+            source: {
+              fromPhoneNumber: "+15550001111",
+              kind: "linq",
+            },
+            target: "+15550002222",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
       occurredAt,
     }));
 
@@ -801,7 +867,6 @@ describe("hosted wake parser contracts", () => {
   it("parses full wake payloads and rejects record metadata mismatches", () => {
     const memberWake = buildHostedExecutionMemberActivatedWake({
       eventId: "wake_member_system",
-      firstContact: null,
       memberChannels: {
         email: false,
         linq: true,

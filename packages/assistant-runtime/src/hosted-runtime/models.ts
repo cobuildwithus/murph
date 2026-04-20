@@ -149,6 +149,7 @@ export interface HostedConversationWakeMetrics {
 }
 
 export type HostedIngressLane =
+  | "assistant-notification"
   | "conversation-message"
   | "device-sync"
   | "member-activated"

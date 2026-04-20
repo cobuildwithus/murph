@@ -131,6 +131,7 @@ const TEST_OUTBOX_INTENT = {
   delivery: null,
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,
+  deliverySource: null,
   deliveryTransportIdempotent: false,
   lastError: null,
 }

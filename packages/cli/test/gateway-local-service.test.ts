@@ -255,6 +255,7 @@ test('local gateway projection derives route-backed conversations and transcript
         kind: 'thread',
         target: 'thread-labs',
       },
+      deliverySource: null,
       explicitTarget: null,
       delivery: {
         channel: 'email',
@@ -1529,6 +1530,7 @@ test('local gateway send resolves reply-to provider ids from sent outbox message
         kind: 'thread',
         target: 'chat-send-2',
       },
+      deliverySource: null,
       explicitTarget: null,
       delivery: {
         channel: 'linq',

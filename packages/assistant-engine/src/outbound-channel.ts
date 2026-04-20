@@ -2,6 +2,7 @@ import {
   assistantDeliverResultSchema,
   type AssistantChannelDelivery,
   type AssistantDeliverResult,
+  type AssistantDeliverySource,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -210,6 +211,19 @@ function resolvePersistedBinding(
 
   if (
     binding.delivery?.kind === 'participant' &&
+    delivery.targetKind === 'thread'
+  ) {
+    return mergeAssistantBinding(binding, {
+      channel: delivery.channel,
+      threadId: delivery.target,
+      deliveryKind: 'thread',
+      deliveryTarget: delivery.target,
+      threadIsDirect: binding.threadIsDirect ?? true,
+    })
+  }
+
+  if (
+    binding.delivery?.kind === 'participant' &&
     delivery.targetKind === 'participant' &&
     binding.delivery.target !== delivery.target
   ) {
@@ -229,6 +243,7 @@ export async function deliverAssistantMessageOverBinding(
   input: {
     actorId?: string | null
     channel?: string | null
+    deliverySource?: AssistantDeliverySource | null
     idempotencyKey?: string | null
     identityId?: string | null
     message: string
@@ -285,6 +300,7 @@ export async function deliverAssistantMessageOverBinding(
     {
       actorId: binding.actorId,
       bindingDelivery: binding.delivery,
+      deliverySource: input.deliverySource ?? null,
       explicitTarget,
       idempotencyKey: input.idempotencyKey ?? null,
       identityId: binding.identityId,
